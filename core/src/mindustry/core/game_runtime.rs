@@ -162,12 +162,12 @@ use crate::mindustry::{
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
         read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
-        reconstructor_accept_payload, reconstructor_update, unit_assembler_spawned,
-        unit_assembler_update_progress, unit_factory_configure_plan, unit_factory_update,
-        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
-        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
-        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        reconstructor_accept_payload, reconstructor_update, unit_assembler_accept_payload,
+        unit_assembler_spawned, unit_assembler_update_progress, unit_factory_configure_plan,
+        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
+        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
+        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
+        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -15362,6 +15362,7 @@ impl GameRuntime {
                 max_payload_size: f32,
             },
             Reconstructor,
+            Assembler,
         }
 
         if source_tile_pos == target_tile_pos {
@@ -15420,10 +15421,14 @@ impl GameRuntime {
                 }
             }
             Some(BlockDef::UnitReconstructor(_)) => TargetKind::Reconstructor,
+            Some(BlockDef::UnitAssembler(_)) => TargetKind::Assembler,
             _ => return false,
         };
 
-        if matches!(target_kind, TargetKind::Reconstructor) {
+        if matches!(
+            target_kind,
+            TargetKind::Reconstructor | TargetKind::Assembler
+        ) {
             let target_building = self.buildings[target_index].clone();
             if !self.ensure_unit_state_for_building(content, &target_building) {
                 return false;
@@ -15443,6 +15448,7 @@ impl GameRuntime {
                 Some(GameRuntimeUnitBlockState::Reconstructor { common, .. }) => {
                     common.payload.as_ref()
                 }
+                Some(GameRuntimeUnitBlockState::AssemblerModule(common)) => common.payload.as_ref(),
                 _ => None,
             },
         };
@@ -15533,6 +15539,64 @@ impl GameRuntime {
                     _ => false,
                 }
             }
+            (TargetKind::Assembler, _) => {
+                let Some(BlockDef::UnitAssembler(assembler_block)) =
+                    content.block(self.buildings[target_index].block.id)
+                else {
+                    return false;
+                };
+                let source_is_module = matches!(
+                    content.block(self.buildings[source_index].block.id),
+                    Some(BlockDef::UnitAssemblerModule(_))
+                );
+                let Some(source_key) =
+                    payload_ref_sort_key(source_payload).and_then(Self::payload_key_from_sort_key)
+                else {
+                    return false;
+                };
+                let unit_cost = self
+                    .state
+                    .rules
+                    .unit_cost(self.buildings[target_index].team.0 as usize);
+                match self.unit_runtime_states.get(&target_tile_pos) {
+                    Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) => {
+                        let current_tier = assembler.current_tier.max(0) as usize;
+                        let Some(plan) = assembler_block
+                            .plans
+                            .get(current_tier.min(assembler_block.plans.len().saturating_sub(1)))
+                        else {
+                            return false;
+                        };
+                        let Some(payload_requirements) =
+                            Self::assembler_payload_requirements(content, plan, unit_cost)
+                        else {
+                            return false;
+                        };
+                        let Some((_, required_amount)) = payload_requirements
+                            .iter()
+                            .find(|(key, _)| *key == source_key)
+                        else {
+                            return false;
+                        };
+                        let same_payload_already_held_from_module = source_is_module
+                            && common
+                                .payload
+                                .as_ref()
+                                .and_then(payload_ref_sort_key)
+                                .and_then(Self::payload_key_from_sort_key)
+                                == Some(source_key);
+                        unit_assembler_accept_payload(
+                            common.payload.is_none(),
+                            source_is_module,
+                            *required_amount,
+                            assembler.blocks.get(source_key),
+                            unit_cost,
+                            same_payload_already_held_from_module,
+                        )
+                    }
+                    _ => false,
+                }
+            }
             _ => false,
         };
         if !target_accepts {
@@ -15599,6 +15663,10 @@ impl GameRuntime {
                             let payload = common.payload.take()?;
                             reconstructor.base.has_payload = false;
                             reconstructor.constructing = false;
+                            Some((payload, common.pay_rotation))
+                        }
+                        GameRuntimeUnitBlockState::AssemblerModule(common) => {
+                            let payload = common.payload.take()?;
                             Some((payload, common.pay_rotation))
                         }
                         _ => None,
@@ -15845,6 +15913,27 @@ impl GameRuntime {
                     false
                 }
             }
+            (TargetKind::Assembler, _) => {
+                let Some(GameRuntimeUnitBlockState::Assembler { common, .. }) =
+                    self.unit_runtime_states.get_mut(&target_tile_pos)
+                else {
+                    return false;
+                };
+                if common.payload.is_none() {
+                    payload_block_handle_payload(
+                        common,
+                        payload.take().expect("payload should be present"),
+                        target_pos,
+                        source_pos,
+                        payload_rotation,
+                        target_size,
+                        TILE_SIZE as f32,
+                    );
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         };
 
@@ -15906,6 +15995,11 @@ impl GameRuntime {
                                     if common.payload.is_none() {
                                         common.payload = Some(payload);
                                         reconstructor.base.has_payload = true;
+                                    }
+                                }
+                                GameRuntimeUnitBlockState::AssemblerModule(common) => {
+                                    if common.payload.is_none() {
+                                        common.payload = Some(payload);
                                     }
                                 }
                                 _ => {}
@@ -19918,6 +20012,107 @@ mod tests {
         assert_eq!(report.unit.assembler.missing_requirements, 0);
         let Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) =
             runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit assembler sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(assembler.progress, 0.0);
+        assert_eq!(assembler.blocks.total(), 0);
+    }
+
+    #[test]
+    fn game_runtime_payload_source_feeds_unit_assembler_requirement_in_owned_runtime() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let source_def = content.block_by_name("payload-source").unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let stell = content.unit_by_name("stell").unwrap();
+        let large_wall = content.block_by_name("tungsten-wall-large").unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let plan = &assembler_block.plans[0];
+        let source_tile = point2_pack(5, 20);
+        let trns = source_def.base().size / 2 + 1;
+        let assembler_center_x = 5 + trns + (assembler_def.base().size - 1) / 2;
+        let assembler_tile = point2_pack(assembler_center_x, 20);
+        let mut source_building =
+            BuildingComp::new(source_tile, source_def.base().clone(), TeamId(4));
+        source_building.set_rotation(0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(source_building);
+        runtime.add_building(BuildingComp::new(
+            assembler_tile,
+            assembler_def.base().clone(),
+            TeamId(4),
+        ));
+        if let Some(power) = runtime.buildings[1].power.as_mut() {
+            power.status = 1.0;
+        }
+        runtime.payload_runtime_states.insert(
+            source_tile,
+            GameRuntimePayloadBlockState::Source {
+                common: PayloadBlockBuildState::default(),
+                source: PayloadSourceState {
+                    unit: Some(stell.id()),
+                    ..PayloadSourceState::default()
+                },
+            },
+        );
+        let mut blocks = PayloadSeq::new();
+        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 3);
+        blocks.add(
+            PayloadKey::new(ContentType::Block, large_wall.base().id),
+            10,
+        );
+        runtime.unit_runtime_states.insert(
+            assembler_tile,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: 1.0 - 1.0 / plan.time,
+                    blocks,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(report.payload.source.spawned_unit_payloads, 1);
+        assert_eq!(report.payload.source.transferred_payloads, 1);
+        assert_eq!(report.unit.assembler.moved_in_payloads, 1);
+        assert_eq!(report.unit.assembler.completed_units, 1);
+        let Some(GameRuntimePayloadBlockState::Source { common, source }) =
+            runtime.payload_runtime_states.get(&source_tile)
+        else {
+            panic!("payload source sidecar should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert!(!source.has_payload);
+        let Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) =
+            runtime.unit_runtime_states.get(&assembler_tile)
         else {
             panic!("unit assembler sidecar should remain present");
         };

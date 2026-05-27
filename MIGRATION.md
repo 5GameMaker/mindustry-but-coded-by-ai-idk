@@ -3654,3 +3654,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core unit_assembler`
   - `cargo check --workspace`
 - 仍未完成：真实 `AssemblerAI`/`BuildingTether` drone 创建与同步、`UnitAssemblerModule.findLink()`/module→assembler payload 转运、`checkSolid`/spawn rect 占位判定、最终 `UnitType.create(team)` 加入 world/目标 build payload、sound/Fx/Event/Call 联机广播、`shouldConsume()` 与 `team.activateUnitFactories()` 的精确语义仍待后续闭环。
+
+### 12.112 UnitAssembler payload 输入链路接入
+
+- 2026-05-27：对照 Java `UnitAssemblerBuild.acceptPayload(...)`，把 `UnitAssembler` 接入 `transfer_payload_output_to_front(...)` 的真实 payload 目标分支，使 payload source/conveyor 等 runtime 输出可以把需求 payload 送进 assembler common payload，再由 assembler tick 转入 `blocks`。
+- Java 依据：
+  - `acceptPayload(source, payload)` 要求当前 plan 的 `requirements` 包含该 payload content；
+  - 非 module source 要求 assembler 自身 payload slot 为空；module source 可按同类 payload 已占位的情况扣减 1 个 pending payload；
+  - stored 数量按 `Mathf.round(requirement.amount * state.rules.unitCost(team))` 判断。
+- Rust 新增/变化：
+  - `transfer_payload_output_to_front(...)` 新增 `TargetKind::Assembler`，目标为 `BlockDef::UnitAssembler` 时会懒创建 `GameRuntimeUnitBlockState::Assembler`；
+  - target accept 侧复用 `unit_assembler_accept_payload(...)`，并将 `PayloadRef` 解析为 `PayloadKey` 后按当前 tier plan requirement、`rules.unitCost(team)` 与 `assembler.blocks` 存量判断；
+  - source take/restore 侧补 `GameRuntimeUnitBlockState::AssemblerModule(common)`，为后续 module→assembler 真实转运留出同一条 transfer 路径；
+  - 成功转运后通过 `payload_block_handle_payload(...)` 写入 assembler `PayloadBlockBuildState.common`，随后同帧 assembler tick 可 `moveInPayload` 并计入 `blocks`。
+- 新增 core 回归测试：
+  - `game_runtime_payload_source_feeds_unit_assembler_requirement_in_owned_runtime`：验证 `payload-source` 生成 `stell` UnitPayload 后转入前方 `tank-assembler`，同帧进入 `blocks`、满足 plan payload requirements、完成 unit assembler tick 并消费 payload batch。
+- 验证：
+  - `cargo test -p mindustry-core unit_assembler`
+  - `cargo check --workspace`
+- 仍未完成：`UnitAssemblerModule.findLink()` 的空间搜索/链接维护、module 自身每帧 moveIn 后触发 `transfer_payload_output_to_front`、assembler payload slot 非空时 module 同类 payload 的覆盖/合并细节、最终 unit 实体落地与网络 `Call.assemblerUnitSpawned/assemblerDroneSpawned` 仍需补。
