@@ -3874,3 +3874,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server reconstructor_command_tile_config --lib`
   - `cargo test -p mindustry-desktop reconstructor_command_tile_config --lib`
 - 仍未完成：Reconstructor 的配置 UI 候选表/按钮布局仍未像 UnitFactory 那样完整暴露为 runtime plan；服务端权限 rollback、Java 客户端互通 smoke、升级完成后的完整 Unit 实体重建/effect/sound/event 仍需继续迁移。
+
+### 12.118 Reconstructor 配置候选计划与 config 感知
+
+- 2026-05-27：继续对照 Java `ReconstructorBuild.buildConfiguration(...)` / `canSetCommand()` / `unit()` / `senseObject(LAccess.config)`，把重构器命令按钮候选与当前升级目标单位暴露为 runtime plan，避免上一节的命令配置链路缺少可驱动的 UI 数据。
+- Java 依据：
+  - `unit()`：仅在已有 UnitPayload、存在 upgrade、且目标单位 `unlockedNowHost() || team.isAI()` 时返回目标单位，否则返回 `null`；
+  - `canSetCommand()`：要求 `unit() != null && unit.commands.size > 1 && unit.allowChangeCommands`；
+  - `buildConfiguration(...)`：按 `unit.commands` 原顺序生成按钮，固定 `columns = 4`，选中态为显式 `command == item` 或未显式配置时 `unit.defaultCommand == item`；
+  - `senseObject(LAccess.config)` 返回 `unit()`。
+- Rust 新增/变化：
+  - 新增 `GameRuntimeReconstructorConfigurationPlan` 与 `GameRuntimeReconstructorConfigCommandOption`，记录 `current_unit_id/name`、`can_set_command`、命令候选、默认/显式选中态与固定 4 列布局；
+  - 新增 `GameRuntime::reconstructor_can_set_command(...)` 与 `GameRuntime::reconstructor_configuration_plan(...)`，从真实 `GameRuntimeUnitBlockState::Reconstructor.common.payload` 推导当前升级目标，复用内容 registry 的 `UnitCommand` 解析与默认命令映射；
+  - `sense_owned_building_config_object(...)` 现在除 UnitFactory 外也支持 `BlockDef::UnitReconstructor`，按 Java 返回当前升级目标 `ContentType::Unit`，无 payload/无可用升级时返回 `Null`。
+- 新增验证：
+  - `cargo test -p mindustry-core reconstructor_configuration_plan --lib`
+  - `cargo test -p mindustry-core game_runtime_configures_reconstructor_command_and_clear_like_java --lib`
+  - `cargo fmt --check`
+  - `cargo check -p mindustry-core`
+- 仍未完成：该 plan 仍只是 runtime/UI 数据源，尚未接到真实桌面配置菜单渲染；Java `team.isAI()` 研究绕过、客户端权限 rollback、完整 Java↔Rust UI/联机 smoke 仍需继续迁移。

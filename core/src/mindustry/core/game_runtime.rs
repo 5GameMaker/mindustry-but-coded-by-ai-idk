@@ -2185,6 +2185,37 @@ impl GameRuntimeReconstructorConfigureResult {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameRuntimeReconstructorConfigCommandOption {
+    pub command_id: ContentId,
+    pub command_name: String,
+    pub selected: bool,
+    pub default_selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameRuntimeReconstructorConfigurationPlan {
+    pub tile_pos: i32,
+    pub configurable: bool,
+    pub current_unit_id: Option<ContentId>,
+    pub current_unit_name: Option<String>,
+    pub can_set_command: bool,
+    /// Java `ReconstructorBuild.buildConfiguration()` command buttons for `unit().commands`.
+    pub command_options: Vec<GameRuntimeReconstructorConfigCommandOption>,
+    /// Java uses a fixed local `columns = 4` for Reconstructor command buttons.
+    pub command_columns: i32,
+}
+
+impl GameRuntimeReconstructorConfigurationPlan {
+    pub fn has_current_unit(&self) -> bool {
+        self.current_unit_id.is_some()
+    }
+
+    pub fn has_command_options(&self) -> bool {
+        !self.command_options.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameRuntimeUnitCargoUnloadConfigureResult {
     Configured,
@@ -4170,6 +4201,97 @@ impl GameRuntime {
         Some(plan)
     }
 
+    pub fn reconstructor_can_set_command(unit: &UnitType) -> bool {
+        unit.allow_change_commands && unit.commands.len() > 1
+    }
+
+    pub fn reconstructor_configuration_plan(
+        &self,
+        content: &ContentLoader,
+        tile_pos: i32,
+    ) -> Option<GameRuntimeReconstructorConfigurationPlan> {
+        let building = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)?;
+        let BlockDef::UnitReconstructor(reconstructor_block) = content.block(building.block.id)?
+        else {
+            return None;
+        };
+
+        let (output_unit, explicit_command_id) = match self.unit_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeUnitBlockState::Reconstructor {
+                common,
+                reconstructor,
+            }) => {
+                let output = common
+                    .payload
+                    .as_ref()
+                    .and_then(|payload| {
+                        Self::reconstructor_upgrade_for_payload(
+                            content,
+                            reconstructor_block,
+                            payload,
+                        )
+                    })
+                    .map(|(_from, to)| to)
+                    .filter(|unit| {
+                        Self::reconstructor_upgrade_unlocked_now(&self.state.rules, unit)
+                    });
+                (
+                    output,
+                    reconstructor.command_id.map(|command| command as ContentId),
+                )
+            }
+            _ => (None, None),
+        };
+
+        let mut plan = GameRuntimeReconstructorConfigurationPlan {
+            tile_pos,
+            configurable: reconstructor_block.configurable,
+            current_unit_id: output_unit.map(Content::id),
+            current_unit_name: output_unit.map(|unit| unit.name().to_string()),
+            can_set_command: false,
+            command_options: Vec::new(),
+            command_columns: 0,
+        };
+
+        let Some(unit) = output_unit else {
+            return Some(plan);
+        };
+        if !reconstructor_block.configurable || !Self::reconstructor_can_set_command(unit) {
+            return Some(plan);
+        }
+
+        plan.can_set_command = true;
+        let default_command_id = Self::unit_default_command_id(content, unit);
+        for command_name in &unit.commands {
+            let command = content.unit_command_by_name(command_name).or_else(|| {
+                command_name
+                    .strip_suffix("Command")
+                    .and_then(|name| content.unit_command_by_name(name))
+            });
+            let Some(command) = command else {
+                continue;
+            };
+            let command_id = command.id();
+            let default_selected = default_command_id == Some(command_id);
+            plan.command_options
+                .push(GameRuntimeReconstructorConfigCommandOption {
+                    command_id,
+                    command_name: command.name().to_string(),
+                    selected: explicit_command_id == Some(command_id)
+                        || (explicit_command_id.is_none() && default_selected),
+                    default_selected,
+                });
+        }
+
+        if !plan.command_options.is_empty() {
+            plan.command_columns = 4;
+        }
+        Some(plan)
+    }
+
     pub fn configure_owned_unit_factory_plan(
         &mut self,
         content: &ContentLoader,
@@ -4639,35 +4761,68 @@ impl GameRuntime {
         content: &ContentLoader,
         building: &BuildingComp,
     ) -> Option<type_io::TypeValue> {
-        let BlockDef::UnitFactory(factory_block) = content.block(building.block.id)? else {
-            return None;
-        };
+        match content.block(building.block.id)? {
+            BlockDef::UnitFactory(factory_block) => {
+                let current_plan = self
+                    .unit_runtime_states
+                    .get(&building.tile_pos)
+                    .and_then(|state| match state {
+                        GameRuntimeUnitBlockState::Factory { factory, .. } => {
+                            Some(factory.current_plan)
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| match building.config_value() {
+                        type_io::TypeValue::Int(plan) => Some(plan),
+                        type_io::TypeValue::Null => Some(-1),
+                        _ => None,
+                    })?;
 
-        let current_plan = self
-            .unit_runtime_states
-            .get(&building.tile_pos)
-            .and_then(|state| match state {
-                GameRuntimeUnitBlockState::Factory { factory, .. } => Some(factory.current_plan),
-                _ => None,
-            })
-            .or_else(|| match building.config_value() {
-                type_io::TypeValue::Int(plan) => Some(plan),
-                type_io::TypeValue::Null => Some(-1),
-                _ => None,
-            })?;
+                if current_plan < 0 {
+                    return Some(type_io::TypeValue::Null);
+                }
 
-        if current_plan < 0 {
-            return Some(type_io::TypeValue::Null);
+                let unit = factory_block
+                    .plans
+                    .get(current_plan as usize)
+                    .and_then(|plan| content.unit_by_name(&plan.unit))?;
+                Some(type_io::TypeValue::Content(type_io::ContentRef::new(
+                    ContentType::Unit,
+                    unit.id(),
+                )))
+            }
+            BlockDef::UnitReconstructor(reconstructor_block) => {
+                let output = self
+                    .unit_runtime_states
+                    .get(&building.tile_pos)
+                    .and_then(|state| match state {
+                        GameRuntimeUnitBlockState::Reconstructor { common, .. } => {
+                            common.payload.as_ref()
+                        }
+                        _ => None,
+                    })
+                    .and_then(|payload| {
+                        Self::reconstructor_upgrade_for_payload(
+                            content,
+                            reconstructor_block,
+                            payload,
+                        )
+                    })
+                    .map(|(_from, to)| to)
+                    .filter(|unit| {
+                        Self::reconstructor_upgrade_unlocked_now(&self.state.rules, unit)
+                    });
+
+                Some(match output {
+                    Some(unit) => type_io::TypeValue::Content(type_io::ContentRef::new(
+                        ContentType::Unit,
+                        unit.id(),
+                    )),
+                    None => type_io::TypeValue::Null,
+                })
+            }
+            _ => None,
         }
-
-        let unit = factory_block
-            .plans
-            .get(current_plan as usize)
-            .and_then(|plan| content.unit_by_name(&plan.unit))?;
-        Some(type_io::TypeValue::Content(type_io::ContentRef::new(
-            ContentType::Unit,
-            unit.id(),
-        )))
     }
 
     fn type_value_to_logic_object(
@@ -22181,6 +22336,127 @@ mod tests {
         assert_eq!(
             runtime.configure_owned_reconstructor_command(&content, tile_pos, Some(32767)),
             GameRuntimeReconstructorConfigureResult::UnknownCommand
+        );
+    }
+
+    #[test]
+    fn game_runtime_reconstructor_configuration_plan_returns_no_commands_without_unit_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let tile_pos = point2_pack(16, 17);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            reconstructor_def.base().clone(),
+            TeamId(2),
+        ));
+
+        let plan = runtime
+            .reconstructor_configuration_plan(&content, tile_pos)
+            .expect("reconstructor should expose an empty configuration plan");
+        assert_eq!(plan.tile_pos, tile_pos);
+        assert!(plan.configurable);
+        assert!(!plan.has_current_unit());
+        assert!(!plan.can_set_command);
+        assert!(!plan.has_command_options());
+        assert_eq!(plan.command_columns, 0);
+        assert_eq!(
+            runtime.sense_owned_building_object(&content, tile_pos, LAccess::Config),
+            Some(TypeValue::Null)
+        );
+    }
+
+    #[test]
+    fn game_runtime_reconstructor_configuration_plan_lists_commands_like_java() {
+        let mut content = ContentLoader::create_base_content().unwrap();
+        for unit in &mut content.catalog_mut().units {
+            if unit.name() == "poly" {
+                unit.commands = vec![
+                    "move".into(),
+                    "enterPayload".into(),
+                    "rebuild".into(),
+                    "assist".into(),
+                ];
+                unit.default_command = Some("rebuild".into());
+                unit.allow_change_commands = true;
+            }
+        }
+        let mono = content.unit_by_name("mono").unwrap().clone();
+        let poly = content.unit_by_name("poly").unwrap();
+        let move_command = content.unit_command_by_name("move").unwrap();
+        let enter_payload = content.unit_command_by_name("enterPayload").unwrap();
+        let rebuild = content.unit_command_by_name("rebuild").unwrap();
+        let assist = content.unit_command_by_name("assist").unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let tile_pos = point2_pack(17, 17);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 24);
+        runtime.state.rules.researched.insert("poly".into());
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            reconstructor_def.base().clone(),
+            TeamId(2),
+        ));
+        let unit = UnitComp::new(8821, mono, TeamId(2));
+        assert!(runtime.attach_unit_payload_to_building(&content, tile_pos, &unit));
+
+        let plan = runtime
+            .reconstructor_configuration_plan(&content, tile_pos)
+            .expect("reconstructor should expose command configuration plan");
+        assert_eq!(plan.current_unit_id, Some(poly.id()));
+        assert_eq!(plan.current_unit_name.as_deref(), Some("poly"));
+        assert!(plan.can_set_command);
+        assert_eq!(plan.command_columns, 4);
+        assert_eq!(
+            plan.command_options
+                .iter()
+                .map(|option| (
+                    option.command_id,
+                    option.command_name.as_str(),
+                    option.selected,
+                    option.default_selected
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (move_command.id(), "move", false, false),
+                (enter_payload.id(), "enterPayload", false, false),
+                (rebuild.id(), "rebuild", true, true),
+                (assist.id(), "assist", false, false),
+            ]
+        );
+        assert_eq!(
+            runtime.sense_owned_building_object(&content, tile_pos, LAccess::Config),
+            Some(TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Unit,
+                poly.id()
+            )))
+        );
+
+        let Some(GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. }) =
+            runtime.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            panic!("reconstructor sidecar should remain present after payload attach");
+        };
+        reconstructor.command_id = Some(move_command.id() as u8);
+        let explicit_plan = runtime
+            .reconstructor_configuration_plan(&content, tile_pos)
+            .expect("reconstructor should expose explicit command selection");
+        assert_eq!(
+            explicit_plan
+                .command_options
+                .iter()
+                .map(|option| (
+                    option.command_name.as_str(),
+                    option.selected,
+                    option.default_selected
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("move", true, false),
+                ("enterPayload", false, false),
+                ("rebuild", false, true),
+                ("assist", false, false),
+            ]
         );
     }
 
