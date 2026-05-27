@@ -3679,3 +3679,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 可补一次 `cargo test -p mindustry-server --lib` 或全 workspace test 后提交；
   2. 中文提交并推送 `origin main`，建议标题：`收紧新生物液体更新顺序`；
   3. 后续欠账：`Puddles::update_all_with_passability_report(...)` 普通 overfilled spread 仍是整轮后统一落库，若继续 Java tick 顺序路线，可补 `puddle_update_spread_deposits_are_visible_to_later_puddles_same_tick`。
+
+---
+
+## 111. 最新闭环记录：PuddleComp.update 普通外溢即时 deposit 顺序
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补齐上一节留下的普通 `PuddleComp.update()` overfilled spread 顺序欠账，让同 tick 中更早 puddle 的外溢 deposit 对后续既有 puddle 可见。
+- Java 依据：
+  - `PuddleComp.update()` 在 `amount >= maxLiquid / 1.5f` 时遍历 `Geometry.d4`；
+  - 每个可通过邻格立即执行 `Puddles.deposit(other, tile, liquid, deposited, false)`；
+  - `EntityGroup.update()` 以 entity group 顺序执行，后续既有 puddle 会在同 tick 消费 earlier deposit 写入的 `accepting`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - `update_all_with_passability_report(...)` 先按 `(puddle.id, tile)` 排序 tick 开始时已有 puddle，避免 `HashMap` 顺序污染 Java-like entity update；
+    - 每个 puddle 的 spread deposit 在该 puddle update 后立即写入，不再等整轮结束；
+    - 新增 `puddle_update_spread_deposits_are_visible_to_later_puddles_same_tick`。
+- 已跑验证：
+  - `cargo test -p mindustry-core puddle_update_spread_deposits_are_visible_to_later_puddles_same_tick --lib`
+  - `cargo test -p mindustry-core update_all_spread --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_building_deposit_precedes_neighbor_absorb_like_java --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+- 当前仍需继续：
+  1. 跑收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo fmt --check`、`git diff --check`；
+  2. 中文提交并推送 `origin main`，建议标题：`收紧液体坑外溢更新顺序`；
+  3. 后续欠账：
+     - Java `EntityGroup.update()` 动态 `array.size` 可能让新创建 puddle 在同 tick 更新，Rust 当前仍只遍历 tick 开始快照；
+     - `puddle_on_building` 与 `particle_effect` 已有 event，但 server consumer 仍未完整接入；
+     - `CellLiquid.update` 仍是 report 后统一处理，不是每个 puddle inline 执行，后续要继续收紧 phase boundary。

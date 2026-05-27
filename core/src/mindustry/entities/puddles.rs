@@ -463,71 +463,78 @@ impl Puddles {
         mut build_present: impl FnMut(i32, i32) -> bool,
         mut fire_chance: impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
     ) -> PuddleUpdateReport {
-        let keys: Vec<_> = self.puddles.keys().copied().collect();
+        let mut keys: Vec<_> = self
+            .puddles
+            .iter()
+            .map(|(key, entry)| (entry.puddle.id, *key))
+            .collect();
+        keys.sort_by_key(|(id, key)| (*id, *key));
         let mut report = PuddleUpdateReport::default();
         let mut remove_keys = Vec::new();
-        let mut spread_deposits = Vec::new();
 
-        for key in keys {
+        for (_id, key) in keys {
             let spread_targets = self.d4_spread_targets(key.0, key.1, &mut passable);
-            let Some(entry) = self.puddles.get_mut(&key) else {
-                continue;
-            };
-            let source_tile = entry
-                .puddle
-                .tile
-                .map(|tile| PuddleTileView::new(tile.x, tile.y));
-            let liquid = entry.liquid.clone();
-            if let Some(tile) = entry.puddle.tile.as_mut() {
-                tile.build_present = build_present(tile.x, tile.y);
-            }
-            let plan = entry.puddle.update(PuddleUpdateContext {
-                delta,
-                nearby_spread_targets: spread_targets.len() as i32,
-                registry_matches_self: true,
-                headless,
-                fire_chance_passed: fire_chance(key.0, key.1, &liquid),
-            });
-            if let Some(event) = PuddleUpdateEvent::from_plan(&entry.puddle, &liquid, plan) {
-                report.events.push(event);
-            }
-            if plan.deposited_per_target > 0.0 {
-                for target in spread_targets
-                    .into_iter()
-                    .take(plan.spread_targets.max(0) as usize)
+            let mut entry_spread_deposits = Vec::new();
+            {
+                let Some(entry) = self.puddles.get_mut(&key) else {
+                    continue;
+                };
+                let source_tile = entry
+                    .puddle
+                    .tile
+                    .map(|tile| PuddleTileView::new(tile.x, tile.y));
+                let liquid = entry.liquid.clone();
+                if let Some(tile) = entry.puddle.tile.as_mut() {
+                    tile.build_present = build_present(tile.x, tile.y);
+                }
+                let plan = entry.puddle.update(PuddleUpdateContext {
+                    delta,
+                    nearby_spread_targets: spread_targets.len() as i32,
+                    registry_matches_self: true,
+                    headless,
+                    fire_chance_passed: fire_chance(key.0, key.1, &liquid),
+                });
+                if let Some(event) = PuddleUpdateEvent::from_plan(&entry.puddle, &liquid, plan) {
+                    report.events.push(event);
+                }
+                if plan.deposited_per_target > 0.0 {
+                    for target in spread_targets
+                        .into_iter()
+                        .take(plan.spread_targets.max(0) as usize)
+                    {
+                        entry_spread_deposits.push((
+                            target,
+                            source_tile.clone(),
+                            liquid.clone(),
+                            plan.deposited_per_target,
+                        ));
+                    }
+                }
+                if plan.removed
+                    || entry.puddle.removed
+                    || entry.puddle.amount <= 0.0
+                    || entry.puddle.liquid.is_none()
                 {
-                    spread_deposits.push((
-                        target,
-                        source_tile.clone(),
-                        liquid.clone(),
-                        plan.deposited_per_target,
-                    ));
+                    report.removed_ids.push(entry.puddle.id);
+                    remove_keys.push(key);
                 }
             }
-            if plan.removed
-                || entry.puddle.removed
-                || entry.puddle.amount <= 0.0
-                || entry.puddle.liquid.is_none()
-            {
-                report.removed_ids.push(entry.puddle.id);
-                remove_keys.push(key);
+            for ((x, y), source, liquid, amount) in entry_spread_deposits {
+                self.deposit(
+                    Some(PuddleTileView::new(x, y)),
+                    source,
+                    liquid,
+                    amount,
+                    PuddleDepositContext {
+                        initial: false,
+                        ..PuddleDepositContext::default()
+                    },
+                );
             }
         }
 
         for key in remove_keys {
             self.puddles.remove(&key);
-        }
-        for ((x, y), source, liquid, amount) in spread_deposits {
-            self.deposit(
-                Some(PuddleTileView::new(x, y)),
-                source,
-                liquid,
-                amount,
-                PuddleDepositContext {
-                    initial: false,
-                    ..PuddleDepositContext::default()
-                },
-            );
         }
         report
     }
@@ -980,6 +987,42 @@ mod tests {
         assert_eq!(result.accepting, 12.0);
         assert!(result.ripple);
         assert_eq!(puddles.get(1, 1).unwrap().last_ripple, 55.0);
+    }
+
+    #[test]
+    fn puddle_update_spread_deposits_are_visible_to_later_puddles_same_tick() {
+        let mut puddles = Puddles::new(5, 5);
+        puddles.deposit_at(
+            Some(PuddleTileView::new(1, 1)),
+            water(),
+            70.0,
+            PuddleDepositContext::default(),
+        );
+        puddles.deposit_at(
+            Some(PuddleTileView::new(2, 1)),
+            water(),
+            10.0,
+            PuddleDepositContext::default(),
+        );
+
+        let report = puddles.update_all_with_passability_report(
+            1.0,
+            true,
+            |_, _, _| true,
+            |_, _| false,
+            |_, _, _| false,
+        );
+
+        assert_eq!(report.removed_ids, Vec::<i32>::new());
+        let later = puddles.get(2, 1).unwrap();
+        assert_eq!(
+            later.accepting, 0.0,
+            "Java PuddleComp.update deposits overfilled spread immediately, so a later same-tick puddle consumes accepting during its own update"
+        );
+        assert!(
+            later.amount > 10.2,
+            "later puddle should include same-tick spread before its evaporation step finishes"
+        );
     }
 
     #[test]

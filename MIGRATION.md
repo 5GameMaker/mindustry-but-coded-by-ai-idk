@@ -5000,3 +5000,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：
   - `Puddles::update_all_with_passability_report(...)` 普通 overfilled spread 仍是先收集 `spread_deposits` 后统一落库，后续如要进一步贴近 Java `PuddleComp.update()`，应验证并收紧“同 tick later puddle 是否能看到 earlier puddle spread”的顺序。
+
+### 12.170 PuddleComp.update overfilled spread immediate deposit ordering
+
+- 2026-05-28：继续收紧 Java `PuddleComp.update()` 的普通 overfilled spread 顺序，补上上一节留下的欠账。
+- Java 依据：
+  - `amount >= maxLiquid / 1.5f` 时计算 `deposited`；
+  - 遍历 `Geometry.d4`，每个可通过目标立即执行 `Puddles.deposit(other, tile, liquid, deposited, false)`；
+  - 同一 `Groups.puddle.update()` tick 内，后续已经存在的 puddle 会看到前面 puddle 的 same-liquid deposit 写入 `accepting`，并在自己的 `update()` 开头消费；
+  - `EntityGroup.update()` 按 `array.items[index].update()` 与动态 `array.size` 顺序迭代，既有实体顺序不能由 `HashMap` 随机迭代决定。
+- Rust 新增/变化：
+  - `Puddles::update_all_with_passability_report(...)` 先按 `(puddle.id, tile)` 排序当前 tick 的既有 puddle，避免 `HashMap` 顺序影响 Java-like entity update 顺序；
+  - 每个 puddle 的 overfilled spread deposits 在该 puddle 更新结束后立即写入 `Puddles::deposit(...)`，不再等整轮 update 结束后统一落库；
+  - 这样同 tick 中 id 更靠后的既有 puddle 会在本轮 update 里消费 earlier puddle 写入的 `accepting`。
+- 新增验证：
+  - `puddle_update_spread_deposits_are_visible_to_later_puddles_same_tick`
+    - 构造 id 更小的 overfilled water puddle 与东侧 id 更大的 water puddle；
+    - 断言 update 后后者 `accepting == 0`，说明 same-tick spread deposit 已被后者自己的 `PuddleComp.update()` 消费；
+    - 断言后者 amount 增大，说明 earlier spread deposit 对 later puddle 可见。
+- 已跑验证：
+  - `cargo test -p mindustry-core puddle_update_spread_deposits_are_visible_to_later_puddles_same_tick --lib`
+  - `cargo test -p mindustry-core update_all_spread --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_building_deposit_precedes_neighbor_absorb_like_java --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+- 仍未完成：
+  - 新创建的 spread puddle 是否应在同一 Java `EntityGroup.update()` tick 内被动态 `array.size` 继续更新，Rust 当前仍只遍历 tick 开始时已有 puddle 快照；后续需用最小回归单独确认并收紧；
+  - `Puddles` remove/registry 与 Java entity group remove 的即时性仍有差异风险，后续应在继续迁移 puddle entity lifecycle 时补严格测试。
