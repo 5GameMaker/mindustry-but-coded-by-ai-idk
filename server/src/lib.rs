@@ -303,6 +303,7 @@ impl ServerLauncher {
                 self.network_error = Some(error.to_string());
             }
             self.tick_server_force_field_abilities(1.0);
+            self.tick_server_shield_arc_abilities(1.0);
             self.tick_server_shield_regen_field_abilities(1.0);
             self.tick_server_repair_field_abilities(1.0);
             self.tick_server_energy_field_abilities(1.0);
@@ -1712,6 +1713,20 @@ impl ServerLauncher {
                 parent.refresh_component_views();
             }
             updates += force_updates.len();
+        }
+
+        updates
+    }
+
+    fn tick_server_shield_arc_abilities(&mut self, delta_ticks: f32) -> usize {
+        let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
+        let mut updates = 0;
+
+        for parent_id in parent_ids {
+            let Some(parent) = self.server_units.get_mut(&parent_id) else {
+                continue;
+            };
+            updates += parent.update_shield_arc_abilities(delta_ticks).len();
         }
 
         updates
@@ -6078,6 +6093,27 @@ mod tests {
         let parent = launcher.server_units.get(&32).unwrap();
         assert!((parent.shield.shield - 400.4).abs() < 0.0001);
         assert!(parent.abilities[0].data > 0.0);
+    }
+
+    #[test]
+    fn server_update_ticks_tecta_shield_arc_regen() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let tecta = launcher
+            .content_loader
+            .unit_by_name("tecta")
+            .unwrap()
+            .clone();
+        let mut parent = UnitComp::new(33, tecta, TeamId(1));
+        assert_eq!(parent.abilities[0].data, 2500.0);
+        parent.abilities[0].data = 2000.0;
+
+        launcher.server_units.insert(parent.id(), parent);
+        launcher.update();
+
+        let parent = launcher.server_units.get(&33).unwrap();
+        assert!((parent.abilities[0].data - 2000.75).abs() < 0.0001);
     }
 
     #[test]

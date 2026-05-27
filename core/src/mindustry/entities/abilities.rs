@@ -1869,6 +1869,66 @@ impl ShieldArcAbility {
         self.data
     }
 
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("ShieldArcAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("ShieldArcAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let mut ability = Self::default();
+        ability.radius = parts.next()?.parse().ok()?;
+        ability.regen = parts.next()?.parse().ok()?;
+        ability.max = parts.next()?.parse().ok()?;
+        ability.cooldown = parts.next()?.parse().ok()?;
+        if let Some(angle) = parts.next() {
+            ability.angle = angle.parse().ok()?;
+        }
+        if let Some(angle_offset) = parts.next() {
+            ability.angle_offset = angle_offset.parse().ok()?;
+        }
+        if let Some(x) = parts.next() {
+            ability.x = x.parse().ok()?;
+        }
+        if let Some(y) = parts.next() {
+            ability.y = y.parse().ok()?;
+        }
+        if let Some(when_shooting) = parts.next() {
+            ability.when_shooting = match when_shooting {
+                "true" | "1" | "shoot" => true,
+                "false" | "0" | "always" => false,
+                _ => return None,
+            };
+        }
+        if let Some(width) = parts.next() {
+            ability.width = width.parse().ok()?;
+        }
+        if let Some(chance_deflect) = parts.next() {
+            ability.chance_deflect = chance_deflect.parse().ok()?;
+        }
+        if let Some(reflect_building_damage) = parts.next() {
+            ability.reflect_building_damage = reflect_building_damage.parse().ok()?;
+        }
+        if let Some(reflect_vel) = parts.next() {
+            ability.reflect_vel = reflect_vel.parse().ok()?;
+        }
+        if let Some(reflect_time) = parts.next() {
+            ability.reflect_time = reflect_time.parse().ok()?;
+        }
+        if let Some(missile_unit_multiplier) = parts.next() {
+            ability.missile_unit_multiplier = missile_unit_multiplier.parse().ok()?;
+        }
+        if let Some(push_units) = parts.next() {
+            ability.push_units = matches!(push_units, "true" | "1" | "push");
+        }
+        Some(ability)
+    }
+
     pub fn shield_position(&self, unit_x: f32, unit_y: f32, unit_rotation: f32) -> (f32, f32) {
         let (offset_x, offset_y) = rotate_offset(self.x, self.y, unit_rotation - 90.0);
         (unit_x + offset_x, unit_y + offset_y)
@@ -2739,6 +2799,24 @@ mod tests {
         assert!(inactive.width_scale < update.width_scale);
 
         assert_eq!(ability.created_shield(), ability.max);
+    }
+
+    #[test]
+    fn shield_arc_descriptor_parses_tecta_runtime_entry() {
+        let ability = ShieldArcAbility::from_descriptor(
+            "ShieldArcAbility:45:0.75:2500:480:82:0:0:-20:false:8:1",
+        )
+        .expect("tecta descriptor should parse");
+        assert_eq!(ability.radius, 45.0);
+        assert_eq!(ability.regen, 0.75);
+        assert_eq!(ability.max, 2500.0);
+        assert_eq!(ability.cooldown, 480.0);
+        assert_eq!(ability.angle, 82.0);
+        assert_eq!(ability.y, -20.0);
+        assert!(!ability.when_shooting);
+        assert_eq!(ability.width, 8.0);
+        assert_eq!(ability.chance_deflect, 1.0);
+        assert!(ShieldArcAbility::from_descriptor("ForceFieldAbility").is_none());
     }
 
     #[test]

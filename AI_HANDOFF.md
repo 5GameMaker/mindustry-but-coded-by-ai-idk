@@ -2933,3 +2933,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入力场护盾单位能力运行时`。
   3. 后续必须补真实 bullet runtime 的 absorb/扣盾闭环、shield break/absorb effects 与 sound、结构化 ability runtime state（替代 `AbilityWire.data` sentinel）。
+
+---
+
+## 88. 最新闭环记录：ShieldArcAbility / tecta server ability-state runtime
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `ShieldArcAbility.java` 与 `UnitTypes.tecta`，把 tecta 弧形护盾的 created data 与 per-tick regen/active 状态接入 `UnitType` content、`UnitComp` hook、server ability-state runtime。
+- Java 依据：
+  - `created(Unit unit)`：`data = max`；
+  - `update(Unit unit)`：`data < max` 时按 `Time.delta * regen` 回复；`active = data > 0 && (unit.isShooting || !whenShooting)`；active 时按 `x/y` 相对 `unit.rotation - 90f` 计算弧盾中心；
+  - active 时扫描敌方 bullets / units，处理 absorb/deflect、missile unit 安全死亡与普通 unit push；
+  - `tecta` 参数：`radius=45`、`angle=82`、`regen=0.75`、`cooldown=480`、`max=2500`、`y=-20`、`width=8`、`whenShooting=false`、`chanceDeflect=1`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - 新增 `ShieldArcAbility::from_descriptor(...)`；
+    - 新增 tecta descriptor 解析测试；既有 `apply_bullet_hit(...)` 纯算法测试仍保留。
+  - `core/src/mindustry/content/unit_types.rs`
+    - 为 `tecta` 挂载 `ShieldArcAbility:45:0.75:2500:480:82:0:0:-20:false:8:1`；
+    - 内容覆盖测试断言 descriptor 存在。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `UnitComp::new(...)` 调用 `apply_created_shield_arc_abilities()`，初始化对应 `AbilityWire.data = max`；
+    - 新增 `UnitComp::update_shield_arc_abilities(...)`，使用 `AbilityWire.data` 保存弧盾 data，tick 后写回。
+  - `server/src/lib.rs`
+    - `ServerLauncher::update()` 的 playing frame 内调用 `tick_server_shield_arc_abilities(1.0)`；
+    - 新增 `server_update_ticks_tecta_shield_arc_regen`，验证 tecta 创建时 data=2500，server tick 后按 0.75/tick 回复。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core shield_arc --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_shield_arc --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server shield_arc --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入弧形护盾单位能力运行时`。
+  3. 后续必须补真实 bullet absorb/deflect、missile unit kill、enemy unit push、region/effects/sounds、结构化 ability runtime state。

@@ -11,9 +11,10 @@ use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
     EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility, ForceFieldUpdate,
-    RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldRegenFieldAbility,
-    ShieldRegenFieldPulse, ShieldRegenFieldTarget, StatusFieldAbility, StatusFieldPulse,
-    SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
+    RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldArcAbility, ShieldArcUpdate,
+    ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget, StatusFieldAbility,
+    StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility,
+    UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -322,6 +323,7 @@ impl UnitComp {
         unit.health.health = unit.health.max_health;
         unit.shield.health = unit.health.health;
         unit.apply_created_force_field_abilities();
+        unit.apply_created_shield_arc_abilities();
         unit.refresh_component_views();
         unit
     }
@@ -350,6 +352,17 @@ impl UnitComp {
         for descriptor in &self.type_info.abilities {
             if let Some(ability) = ForceFieldAbility::from_descriptor(descriptor) {
                 self.shield.shield = self.shield.shield.max(ability.created_shield());
+            }
+        }
+    }
+
+    fn apply_created_shield_arc_abilities(&mut self) {
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = ShieldArcAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = wire.data.max(ability.created_shield());
             }
         }
     }
@@ -440,6 +453,34 @@ impl UnitComp {
                 } else {
                     -1.0
                 };
+            }
+            updates.push(update);
+        }
+
+        updates
+    }
+
+    pub fn update_shield_arc_abilities(&mut self, delta: f32) -> Vec<ShieldArcUpdate> {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let unit_x = self.x();
+        let unit_y = self.y();
+        let unit_rotation = self.rotation();
+        let is_shooting = self.weapons.is_shooting;
+        let mut updates = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = ShieldArcAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            ability.data = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+
+            let update = ability.update_state(delta, is_shooting, unit_x, unit_y, unit_rotation);
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = ability.data;
             }
             updates.push(update);
         }
@@ -1698,6 +1739,25 @@ mod tests {
         assert_eq!(updates.len(), 1);
         assert!((updates[0].shield - 400.4).abs() < 0.0001);
         assert!((unit.shield.shield - 400.4).abs() < 0.0001);
+    }
+
+    #[test]
+    fn unit_component_ticks_shield_arc_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["ShieldArcAbility:45:0.75:2500:480:82:0:0:-20:false:8:1".into()];
+        let mut unit = UnitComp::new(47, unit_type, TeamId(1));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(0.0);
+
+        assert_eq!(unit.abilities[0].data, 2500.0);
+        unit.abilities[0].data = 2000.0;
+        let updates = unit.update_shield_arc_abilities(1.0);
+        assert_eq!(updates.len(), 1);
+        assert!((updates[0].data - 2000.75).abs() < 0.0001);
+        assert!(updates[0].active);
+        assert!((updates[0].x - 80.0).abs() < 0.0001);
+        assert!((updates[0].y - 200.0).abs() < 0.0001);
+        assert!((unit.abilities[0].data - 2000.75).abs() < 0.0001);
     }
 
     #[test]

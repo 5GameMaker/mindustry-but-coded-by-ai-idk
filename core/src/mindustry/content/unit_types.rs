@@ -626,6 +626,8 @@ pub fn load() -> Vec<UnitType> {
             u.hovering = true;
             u.ground_layer = LAYER_LEG_UNIT;
             u.allow_leg_step = true;
+            u.abilities
+                .push("ShieldArcAbility:45:0.75:2500:480:82:0:0:-20:false:8:1".into());
         }),
         unit(&mut next_id, "collaris", UnitKind::Erekir, |u| {
             u.speed = 1.1;
@@ -1248,6 +1250,12 @@ mod tests {
             .abilities
             .iter()
             .any(|entry| entry == "ForceFieldAbility:60:0.4:500:360"));
+
+        let tecta = by_name(&units, "tecta");
+        assert!(tecta
+            .abilities
+            .iter()
+            .any(|entry| { entry == "ShieldArcAbility:45:0.75:2500:480:82:0:0:-20:false:8:1" }));
 
         let oxynoe = by_name(&units, "oxynoe");
         assert!(oxynoe

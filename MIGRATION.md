@@ -4463,3 +4463,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - server/global bullet list 尚未接入 ForceField 的 absorb/扣盾闭环；当前已保留纯算法 `absorb_bullet(...)` 测试，后续需要接到真实 bullet runtime；
   - `Fx.shieldBreak` / `Fx.absorb`、hit/break sound、shield draw polygon 与 bars 表现层尚未迁移；
   - `AbilityWire.data` 目前只暂存 `radius_scale`/sentinel，完整结构化 ability runtime state 后续需替代该过渡编码。
+
+### 12.146 ShieldArcAbility / tecta 弧形护盾状态 runtime 接入
+
+- 2026-05-27：继续对照 v158.1 `ShieldArcAbility.java` 与 `UnitTypes.tecta`，把弧形护盾从纯算法接入 `UnitType` content、`UnitComp` created/update hook 与 server ability-state tick。
+- Java 依据：
+  - `created(Unit unit)`：`data = max`；
+  - `update(Unit unit)`：`data < max` 时按 `Time.delta * regen` 回复；`active = data > 0 && (unit.isShooting || !whenShooting)`；`widthScale/alpha` 更新；active 时按 `x/y` 相对 `unit.rotation - 90f` 计算弧盾中心；
+  - 弧盾 active 时扫描敌方 bullets / units，处理 absorb/deflect、missile unit 安全死亡与普通 unit push；
+  - `tecta` 参数：`radius=45`、`angle=82`、`regen=45/60=0.75`、`cooldown=480`、`max=2500`、`y=-20`、`width=8`、`whenShooting=false`、`chanceDeflect=1`。
+- Rust 新增/变化：
+  - `ShieldArcAbility::from_descriptor(...)` 支持 `ShieldArcAbility:radius:regen:max:cooldown[:angle[:angleOffset[:x[:y[:whenShooting[:width[:chanceDeflect...]]]]]]]`；
+  - `content/unit_types.rs` 为 `tecta` 挂载 `ShieldArcAbility:45:0.75:2500:480:82:0:0:-20:false:8:1`；
+  - `UnitComp::new(...)` 调用 `apply_created_shield_arc_abilities()`，将对应 `AbilityWire.data` 初始化为 `max`；
+  - `UnitComp::update_shield_arc_abilities(...)` 使用 `AbilityWire.data` 存弧盾 data，按单位 transform tick `ShieldArcAbility::update_state(...)` 并写回；
+  - `ServerLauncher::tick_server_shield_arc_abilities(...)` 在 playing frame 内 tick `server_units` 的 ShieldArc 状态，使 tecta 在 server runtime 中持续回复弧盾 data。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core shield_arc --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_shield_arc --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+  - `cargo test -p mindustry-server shield_arc --lib`
+- 仍未完成：
+  - 真实 bullet absorb/deflect、missile unit kill、普通敌方 unit push 尚未接入 server runtime；当前只接状态 tick，纯算法 `apply_bullet_hit(...)` 仍保留；
+  - `region=tecta-shield`、arc draw、push/absorb/break effects、sounds 与 shield bar 表现层尚未迁移；
+  - `AbilityWire.data` 只能保存弧盾 data，`widthScale/alpha` 仍需结构化 ability runtime state。
