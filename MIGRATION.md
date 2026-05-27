@@ -3593,7 +3593,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core reconstructor`
   - `cargo test -p mindustry-core unit_core_properties_match_upstream_subset`
   - `cargo check --workspace`
-- 仍未完成：当前 controller 写回只覆盖 Reconstructor 升级时的 command/defaultCommand 最小分支；尚未完整实现 Java `isCommandable()`/`commands.contains(command)` 过滤、UnitType.init 自动 commands 列表、完整 `UnitType.create(team)` 重建 health/mount/weapon 默认值，以及 UnitCreateEvent/effect/sound 联机广播。
+- 仍未完成：当前 controller 写回只覆盖 Reconstructor 升级时的 command/defaultCommand 最小分支；Java `isCommandable()`/`commands.contains(command)` 过滤只具备基于当前已迁移 commands 列表的最小能力，尚未完整实现 Payloadc/Weapon 派生 commands、完整 `UnitType.create(team)` 重建 health/mount/weapon 默认值，以及 UnitCreateEvent/effect/sound 联机广播。
 
 ### 12.109 UnitFactory 最小 updateTile runtime tick
 
@@ -3628,6 +3628,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `GameRuntime::configure_owned_unit_factory_plan(...)`，按 tile 找 building，懒创建 `GameRuntimeUnitBlockState::Factory`，调用 `unit_factory_configure_plan(...)`，并把 `BuildingComp.config` 写成 `TypeValue::Int(current_plan)` 或清空；
   - 新增 `GameRuntime::configure_owned_unit_factory_unit(...)`，按 `ContentId` 映射到 factory plan；未命中当前 factory plans 时清空 plan，且先检查 block 是否为可配置 UnitFactory，贴近 Java `if(!configurable) return` 的顺序；
   - `configure_owned_unit_factory_plan(...)` 现在会在切换到无效 plan 或切换到已填充 `UnitType.commands` 且不包含当前 `UnitCommand` 的目标 unit 时清空 `command_id`；在当前 unit commands 列表仍未完整迁移/为空时保守保留命令，避免因为内容基线缺口提前清掉合法配置；
+  - `content/unit_types.rs` 的低耦合 init 现在按 Java `UnitType.init()` 的默认命令主体规则填充 `commands`：默认 `move`，允许载荷则加 `enterPayload`，可 boost/flying 且能建造则加 `rebuild/assist`，可采矿则加 `mine`，可治疗则加 `repair`；Java `example instanceof Payloadc` 已按 v158 `@EntityDef(... Payloadc.class)` 名单为 `mega/quad/oct/evoke/incite/emanate/quell/disrupt` 补 `loadUnits/loadBlocks/unloadPayload/loopPayload`；显式 `default_command` 会保证也出现在 commands 中，缺省 default 会回退到第一条命令；
   - 新增 `GameRuntime::configure_owned_unit_factory_command(...)`，实现 Java `config(UnitCommand.class, ...)` / `configClear(...)`：只写 `UnitFactoryState.command_id` 或清空命令，不修改 `current_plan`、`progress` 或 `BuildingComp.config`（Java `config()` 仍返回当前 plan）；
   - 新增 `GameRuntime::configure_owned_unit_factory_value(...)`，统一分发 `TypeValue::Int(plan)`、`Content(Unit)`、`Content(UnitCommand)` 与 `Null`，供网络入口直接复用；
   - `ServerLauncher::apply_server_tile_config_packet(...)` 现在会识别 `BlockDef::UnitFactory`，把客户端 `TileConfigCallPacket` 分派到 unit factory value 入口，并把成功变更以 server 形态 `TileConfigCallPacket` 可靠转发给已连接客户端；
@@ -3641,6 +3642,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `game_runtime_configures_unit_factory_value_for_plan_unit_command_and_clear`
   - `game_runtime_clears_incompatible_unit_factory_command_when_plan_changes_like_java`
   - `game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks`
+  - `unit_core_properties_match_upstream_subset` 现在断言 `mono/poly/mega` 的 commands/default command、Payloadc unit 的 payload command，以及普通 core unit 的 Java-style fallback default；
 - 新增 server 回归测试：
   - `server_update_applies_unit_factory_command_tile_config_and_forwards_to_clients`
 - 新增 desktop/input 回归测试：
@@ -3648,11 +3650,12 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `client_unit_factory_command_config_packets_use_unit_command_content_and_clear_null`
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
+  - `cargo test -p mindustry-core unit_types --lib`
   - `cargo test -p mindustry-server unit_factory --lib`
   - `cargo test -p mindustry-desktop unit_factory --lib`
   - `cargo test -p mindustry-core client_unit_factory --lib`
   - `cargo check --workspace`
-- 仍未完成：`UnitType.init()` 自动命令列表尚未完整填充，因此 command 合法性过滤目前只在目标 unit 的 `commands` 列表非空时严格执行；真实 desktop UI 选择表、logic `senseObject(LAccess.config)` 仍需后续闭环。
+- 仍未完成：`UnitType.init()` 中 weapons-derived `canHeal` 仍依赖后续完整 Weapon/Bullet 初始化；真实 desktop UI 选择表、logic `senseObject(LAccess.config)` 仍需后续闭环。
 
 ### 12.111 UnitAssembler 最小 owned runtime tick
 

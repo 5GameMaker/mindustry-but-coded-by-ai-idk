@@ -909,6 +909,65 @@ fn apply_low_coupling_init(unit: &mut UnitType) {
     if unit.flying {
         unit.env_enabled |= Env::SPACE;
     }
+    apply_default_commands(unit);
+}
+
+fn apply_default_commands(unit: &mut UnitType) {
+    if unit.commands.is_empty() {
+        push_command_once(&mut unit.commands, "move");
+
+        if unit.allowed_in_payloads {
+            push_command_once(&mut unit.commands, "enterPayload");
+        }
+
+        if unit.can_boost {
+            if unit.build_speed > 0.0 {
+                push_command_once(&mut unit.commands, "rebuild");
+                push_command_once(&mut unit.commands, "assist");
+            }
+            if unit.mine_tier > 0 {
+                push_command_once(&mut unit.commands, "mine");
+            }
+        }
+
+        if unit.flying {
+            if unit.can_heal {
+                push_command_once(&mut unit.commands, "repair");
+            }
+            if unit.build_speed > 0.0 {
+                push_command_once(&mut unit.commands, "rebuild");
+                push_command_once(&mut unit.commands, "assist");
+            }
+            if unit.mine_tier > 0 {
+                push_command_once(&mut unit.commands, "mine");
+            }
+            if unit_has_payload_command_trait(unit) {
+                push_command_once(&mut unit.commands, "loadUnits");
+                push_command_once(&mut unit.commands, "loadBlocks");
+                push_command_once(&mut unit.commands, "unloadPayload");
+                push_command_once(&mut unit.commands, "loopPayload");
+            }
+        }
+    }
+
+    if let Some(default_command) = unit.default_command.clone() {
+        push_command_once(&mut unit.commands, &default_command);
+    } else if let Some(first) = unit.commands.first() {
+        unit.default_command = Some(first.clone());
+    }
+}
+
+fn push_command_once(commands: &mut Vec<String>, command: &str) {
+    if !commands.iter().any(|existing| existing == command) {
+        commands.push(command.to_string());
+    }
+}
+
+fn unit_has_payload_command_trait(unit: &UnitType) -> bool {
+    matches!(
+        unit.name(),
+        "mega" | "quad" | "oct" | "evoke" | "incite" | "emanate" | "quell" | "disrupt"
+    )
 }
 
 const fn super_tile_payload() -> f32 {
@@ -1057,16 +1116,36 @@ mod tests {
         assert!(alpha.flying);
         assert_eq!(alpha.mine_speed, 6.5);
         assert_eq!(alpha.item_capacity, 30);
-        assert_eq!(alpha.default_command, None);
+        assert_eq!(alpha.default_command.as_deref(), Some("move"));
 
         let mono = by_name(&units, "mono");
         assert_eq!(mono.default_command.as_deref(), Some("mine"));
+        assert_eq!(
+            mono.commands.iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["move", "enterPayload", "mine"]
+        );
         let poly = by_name(&units, "poly");
         assert_eq!(poly.default_command.as_deref(), Some("rebuild"));
+        assert_eq!(
+            poly.commands.iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["move", "enterPayload", "rebuild", "assist", "mine"]
+        );
         let mega = by_name(&units, "mega");
         assert_eq!(mega.default_command.as_deref(), Some("repair"));
+        assert!(mega.commands.iter().any(|command| command == "repair"));
+        for name in [
+            "mega", "quad", "oct", "evoke", "incite", "emanate", "quell", "disrupt",
+        ] {
+            let unit = by_name(&units, name);
+            for command in ["loadUnits", "loadBlocks", "unloadPayload", "loopPayload"] {
+                assert!(
+                    unit.commands.iter().any(|candidate| candidate == command),
+                    "{name} should include Java Payloadc command {command}"
+                );
+            }
+        }
         let evoke = by_name(&units, "evoke");
-        assert_eq!(evoke.default_command, None);
+        assert_eq!(evoke.default_command.as_deref(), Some("move"));
     }
 
     #[test]

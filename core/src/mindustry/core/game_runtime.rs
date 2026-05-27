@@ -20386,7 +20386,7 @@ mod tests {
         };
         assert_eq!(factory.current_plan, 1);
         assert_eq!(factory.base.progress, 0.0);
-        assert_eq!(factory.command_id, Some(2));
+        assert_eq!(factory.command_id, None);
         assert_eq!(runtime.buildings[0].config, Some(TypeValue::Int(1)));
 
         assert_eq!(
