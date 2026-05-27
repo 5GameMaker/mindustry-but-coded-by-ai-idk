@@ -155,6 +155,8 @@ impl DesktopLauncher {
         self.sync_remote_preview_plan_packets(now_millis);
         self.rebuild_other_player_preview_overlays_at(now_millis, 1.0, None);
         self.runtime.tick_client_move_effect_abilities(1.0, false);
+        self.runtime
+            .tick_client_puddle_snapshot_particle_effects(1.0, |_| (0.0, 0.0));
     }
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
@@ -1511,11 +1513,11 @@ mod tests {
     use mindustry_core::mindustry::{
         entities::{
             comp::{
-                BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, UnitComp,
-                UnitControllerState,
+                BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, PuddleComp,
+                UnitComp, UnitControllerState,
             },
-            entity_class_id, standard_effect_id, PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID,
-            EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
+            entity_class_id, standard_effect_id, PlayerComp, PuddleLiquidInfo, BULLET_CLASS_ID,
+            DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
             WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
         game::{BlockPlan, Trigger, TEAM_CRUX, TEAM_SHARDED},
@@ -2426,6 +2428,37 @@ mod tests {
         );
         assert!((effect.effect.x - 93.0).abs() < 0.0001);
         assert!((effect.effect.y - 200.0).abs() < 0.0001);
+        assert_eq!(effect.data, TypeValue::Null);
+    }
+
+    #[test]
+    fn desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut liquid = PuddleLiquidInfo::new("particle-liquid");
+        liquid.has_particle_effect = true;
+        liquid.particle_effect = "ripple".to_string();
+        liquid.particle_spacing = 2.0;
+        launcher
+            .runtime
+            .client_puddle_snapshot_liquids
+            .insert(77, liquid);
+        let mut puddle = PuddleComp::new(77, 8.0, 16.0);
+        puddle.amount = PuddleComp::MAX_LIQUID / 2.0;
+        puddle.effect_time = 1.0;
+        launcher
+            .runtime
+            .client_puddle_snapshot_entities
+            .insert(77, puddle);
+
+        launcher.update();
+
+        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
+        let effect = &launcher.runtime.client_local_effect_events[0];
+        assert_eq!(
+            effect.effect.effect_id,
+            standard_effect_id("ripple").unwrap() as u16
+        );
+        assert_eq!((effect.effect.x, effect.effect.y), (8.0, 16.0));
         assert_eq!(effect.data, TypeValue::Null);
     }
 

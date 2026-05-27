@@ -2611,6 +2611,7 @@ pub struct GameRuntime {
     pub client_fire_snapshot_entities: BTreeMap<i32, FireComp>,
     pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
     pub client_puddle_snapshot_entities: BTreeMap<i32, PuddleComp>,
+    pub client_puddle_snapshot_liquids: BTreeMap<i32, PuddleLiquidInfo>,
     pub client_unit_snapshot_entities: BTreeMap<i32, UnitComp>,
     pub client_weather_snapshot_entities: BTreeMap<i32, WeatherState>,
     pub client_world_label_snapshot_entities: BTreeMap<i32, WorldLabelComp>,
@@ -2687,6 +2688,7 @@ impl GameRuntime {
             client_fire_snapshot_entities: BTreeMap::new(),
             client_player_snapshot_entities: BTreeMap::new(),
             client_puddle_snapshot_entities: BTreeMap::new(),
+            client_puddle_snapshot_liquids: BTreeMap::new(),
             client_unit_snapshot_entities: BTreeMap::new(),
             client_weather_snapshot_entities: BTreeMap::new(),
             client_world_label_snapshot_entities: BTreeMap::new(),
@@ -3312,15 +3314,18 @@ impl GameRuntime {
         entity_id: i32,
         sync: &type_io::PuddleSyncWire,
     ) -> bool {
-        let liquid = match sync.liquid_id {
+        let liquid_info = match sync.liquid_id {
             Some(liquid_id) => {
                 let Some(liquid) = content.liquid(liquid_id) else {
                     return false;
                 };
-                Some(PuddleLiquidInfo::from(liquid).to_component_liquid())
+                Some(PuddleLiquidInfo::from(liquid))
             }
             None => None,
         };
+        let liquid = liquid_info
+            .as_ref()
+            .map(PuddleLiquidInfo::to_component_liquid);
         let tile = sync.tile_pos.map(|tile_pos| PuddleTile {
             x: point2_x(tile_pos) as i32,
             y: point2_y(tile_pos) as i32,
@@ -3336,6 +3341,12 @@ impl GameRuntime {
             .entry(entity_id)
             .or_insert_with(|| PuddleComp::new(entity_id, sync.x, sync.y));
         puddle.apply_sync_wire(sync, liquid, tile);
+        if let Some(liquid_info) = liquid_info {
+            self.client_puddle_snapshot_liquids
+                .insert(entity_id, liquid_info);
+        } else {
+            self.client_puddle_snapshot_liquids.remove(&entity_id);
+        }
         true
     }
 
@@ -3823,6 +3834,63 @@ impl GameRuntime {
                 continue;
             };
             let (offset_x, offset_y) = random_offset(particle);
+            let range = particle.range.max(0.0);
+            self.client_local_effect_events.push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: effect_id as u16,
+                    x: particle.x + offset_x.clamp(-range, range),
+                    y: particle.y + offset_y.clamp(-range, range),
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+            queued += 1;
+        }
+        queued
+    }
+
+    pub fn tick_client_puddle_snapshot_particle_effects(
+        &mut self,
+        delta: f32,
+        mut random_offset: impl FnMut(&PuddleParticleEffectEvent) -> (f32, f32),
+    ) -> usize {
+        let entity_ids: Vec<_> = self
+            .client_puddle_snapshot_entities
+            .keys()
+            .copied()
+            .collect();
+        let mut particles = Vec::new();
+
+        for entity_id in entity_ids {
+            let Some(liquid) = self.client_puddle_snapshot_liquids.get(&entity_id) else {
+                continue;
+            };
+            if !liquid.has_particle_effect || liquid.particle_effect == "none" {
+                continue;
+            }
+            let Some(puddle) = self.client_puddle_snapshot_entities.get_mut(&entity_id) else {
+                continue;
+            };
+
+            puddle.effect_time += delta;
+            if puddle.effect_time >= liquid.particle_spacing {
+                particles.push(PuddleParticleEffectEvent {
+                    effect: liquid.particle_effect.clone(),
+                    x: puddle.x,
+                    y: puddle.y,
+                    range: (puddle.amount / (PuddleComp::MAX_LIQUID / 1.5)).clamp(0.0, 1.0) * 4.0,
+                });
+                puddle.effect_time = 0.0;
+            }
+        }
+
+        let mut queued = 0;
+        for particle in particles {
+            let Some(effect_id) = standard_effect_id(&particle.effect) else {
+                continue;
+            };
+            let (offset_x, offset_y) = random_offset(&particle);
             let range = particle.range.max(0.0);
             self.client_local_effect_events.push(EffectCallPacket2 {
                 effect: EffectCallPacket {
@@ -4534,6 +4602,7 @@ impl GameRuntime {
             if self.client_puddle_snapshot_entities.remove(id).is_some() {
                 existing = true;
             }
+            self.client_puddle_snapshot_liquids.remove(id);
             if self.client_weather_snapshot_entities.contains_key(id) {
                 existing = true;
             }
@@ -9804,6 +9873,7 @@ impl GameRuntime {
         self.client_fire_snapshot_entities.clear();
         self.client_player_snapshot_entities.clear();
         self.client_puddle_snapshot_entities.clear();
+        self.client_puddle_snapshot_liquids.clear();
         self.client_unit_snapshot_entities.clear();
         self.client_weather_snapshot_entities.clear();
         self.client_world_label_snapshot_entities.clear();
@@ -21568,10 +21638,19 @@ mod tests {
         assert_eq!(puddle.liquid.unwrap().flammability, oil.flammability);
         assert_eq!(puddle.liquid.unwrap().viscosity, oil.viscosity);
         assert!(puddle.registered);
+        assert_eq!(
+            runtime
+                .client_puddle_snapshot_liquids
+                .get(&7002)
+                .unwrap()
+                .name,
+            "oil"
+        );
 
         let hidden = runtime.apply_client_hidden_snapshot_ids(&[7002]);
         assert_eq!(hidden.hidden_existing_entities, 1);
         assert!(runtime.client_puddle_snapshot_entities.get(&7002).is_none());
+        assert!(runtime.client_puddle_snapshot_liquids.get(&7002).is_none());
     }
 
     #[test]
@@ -25633,6 +25712,40 @@ mod tests {
         assert_eq!(effect.effect.rotation, 0.0);
         assert_eq!(effect.effect.color, type_io::RgbaColor::new(-1));
         assert_eq!(effect.data, TypeValue::Null);
+    }
+
+    #[test]
+    fn game_runtime_ticks_client_puddle_snapshot_particle_effects() {
+        let mut runtime = GameRuntime::default();
+        let mut liquid = PuddleLiquidInfo::new("particle-liquid");
+        liquid.has_particle_effect = true;
+        liquid.particle_effect = "ripple".to_string();
+        liquid.particle_spacing = 2.0;
+        runtime.client_puddle_snapshot_liquids.insert(77, liquid);
+        let mut puddle = PuddleComp::new(77, 8.0, 16.0);
+        puddle.amount = PuddleComp::MAX_LIQUID / 2.0;
+        puddle.effect_time = 1.0;
+        runtime.client_puddle_snapshot_entities.insert(77, puddle);
+
+        assert_eq!(
+            runtime.tick_client_puddle_snapshot_particle_effects(1.0, |_| (99.0, -99.0)),
+            1
+        );
+
+        let effect = &runtime.client_local_effect_events[0];
+        assert_eq!(
+            effect.effect.effect_id,
+            standard_effect_id("ripple").unwrap() as u16
+        );
+        assert_eq!((effect.effect.x, effect.effect.y), (11.0, 13.0));
+        assert_eq!(
+            runtime
+                .client_puddle_snapshot_entities
+                .get(&77)
+                .unwrap()
+                .effect_time,
+            0.0
+        );
     }
 
     #[test]

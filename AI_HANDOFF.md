@@ -3929,3 +3929,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - 真正图形 renderer 仍未迁移；
      - `EffectRegistry`、完整 Fx id/name 映射、`EffectStateComp::draw_with(...)` 到实际绘制命令仍需后续接入；
      - 非 headless client puddle tick 主循环仍需自动调用 `queue_client_puddle_particle_effects(...)`。
+
+---
+
+## 119. 最新闭环记录：Client puddle snapshot 自动触发 particle tick
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：把 puddle particle 从“手动 queue payload”推进为 client snapshot puddle 的自动 tick 行为，并接入 desktop `update()`。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `client_puddle_snapshot_liquids: BTreeMap<i32, PuddleLiquidInfo>`；
+    - `apply_client_puddle_sync_wire(...)` 保存 liquid metadata sidecar；
+    - hidden snapshot/runtime clear 同步清理 sidecar；
+    - 新增 `tick_client_puddle_snapshot_particle_effects(...)`，按 `effect_time + delta >= particle_spacing` 触发本地 effect。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::update()` 自动调用 `tick_client_puddle_snapshot_particle_effects(1.0, |_| (0.0, 0.0))`；
+    - 暂用中心点 offset，后续需要替换为 Java `Mathf.range(size)` 等价 RNG。
+- 新增/更新测试：
+  - `game_runtime_ticks_client_puddle_snapshot_particle_effects`
+  - `game_runtime_applies_client_puddle_entity_snapshot_to_typed_runtime` 增加 liquid sidecar 和 hidden cleanup 断言
+  - `desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue`
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core game_runtime_ticks_client_puddle_snapshot_particle_effects --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_puddle_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`接入客户端液体坑粒子更新`；
+  2. 后续欠账：
+     - desktop puddle particle offset 仍是 `(0,0)`，需要接入 Java 等价 RNG；
+     - 完整 Fx registry 和真实 renderer 仍未完成；
+     - Puddle/CellLiquid 之外仍有大量 gameplay/block/client UI 文件待逐文件迁移。

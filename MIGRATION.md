@@ -5233,3 +5233,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - desktop 仍缺真正图形 renderer；当前 drain seam 只保证 effect packet 能从 runtime 队列进入渲染边界；
   - `EffectRegistry` / 完整 Fx id 映射与 `EffectStateComp::draw_with(...)` 的真实绘制链仍待迁移。
+
+### 12.178 Client puddle snapshot particle tick
+
+- 2026-05-28：把 12.176/12.177 的 particle dispatch 继续接入客户端快照 puddle 主循环，让 desktop `update()` 能从已同步的 client puddle snapshot 自动产生本地 particle effect。
+- Java 依据：
+  - Java 客户端同样会更新 `Groups.puddle`，非 headless 时按 `effectTime += Time.delta` 与 `liquid.particleSpacing` 触发 puddle particle effect；
+  - particle effect 依赖 liquid 的 `particleEffect/particleSpacing`，因此客户端快照侧不能只保存 `PuddleComp` 的数值字段，还需要保留 liquid metadata。
+- Rust 新增/变化：
+  - `GameRuntime` 新增 `client_puddle_snapshot_liquids: BTreeMap<i32, PuddleLiquidInfo>`：
+    - `apply_client_puddle_sync_wire(...)` 成功解析 liquid id 时同步写入；
+    - hidden snapshot 移除 puddle 时同步删除；
+    - runtime clear 时同步清空。
+  - 新增 `GameRuntime::tick_client_puddle_snapshot_particle_effects(...)`：
+    - 遍历 `client_puddle_snapshot_entities`；
+    - 使用 sidecar liquid metadata 判断 particle effect 与 spacing；
+    - 更新 `PuddleComp.effect_time`；
+    - 到达 spacing 后按 Java size 公式生成 `PuddleParticleEffectEvent` 并写入 `client_local_effect_events`。
+  - `desktop::DesktopLauncher::update()` 现在在 move effect ability tick 后调用 `tick_client_puddle_snapshot_particle_effects(1.0, |_| (0.0, 0.0))`：
+    - 暂用中心点 offset，后续 renderer/RNG 接入后再替换为 Java `Mathf.range(size)` 随机 offset。
+- 新增验证：
+  - `game_runtime_ticks_client_puddle_snapshot_particle_effects`
+  - `game_runtime_applies_client_puddle_entity_snapshot_to_typed_runtime` 增加 liquid sidecar/hidden cleanup 断言
+  - `desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue`
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core game_runtime_ticks_client_puddle_snapshot_particle_effects --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_puddle_entity_snapshot_to_typed_runtime --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - desktop puddle particle offset 暂为 `(0,0)`，仍需接入 Java 等价 RNG/range；
+  - `standard_effect_id(...)` 仍缺完整 Fx registry；
+  - 真正 renderer 仍未消费 drain 出来的 effect packet。
