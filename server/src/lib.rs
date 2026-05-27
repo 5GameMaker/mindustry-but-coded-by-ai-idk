@@ -26,8 +26,9 @@ use mindustry_core::mindustry::entities::{
         UnitControllerState,
     },
     entity_class_id, standard_effect_id, units_can_create, EnergyFieldAction, EnergyFieldTarget,
-    LiquidExplodeDepositPlan, PuddleDepositContext, PuddleLiquidInfo, PuddleTileView, Puddles,
-    UnitCapRules, UnitCapTeam, UnitCapType, UnitSpawnAbility, PUDDLE_CLASS_ID,
+    FireCreateResult, FireRules, FireTile, Fires, LiquidExplodeDepositPlan, PuddleDepositContext,
+    PuddleLiquidInfo, PuddleTileView, Puddles, UnitCapRules, UnitCapTeam, UnitCapType,
+    UnitSpawnAbility, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
 };
 use mindustry_core::mindustry::game::vanilla_teams;
 use mindustry_core::mindustry::input::{
@@ -81,6 +82,11 @@ const CARGO_AI_RETARGET_INTERVAL: f32 = 40.0;
 const CARGO_AI_TRANSFER_RANGE: f32 = 20.0;
 const CARGO_AI_MOVE_RANGE: f32 = 6.0;
 const CARGO_AI_MOVE_SMOOTHING: f32 = 20.0;
+const SERVER_FIRE_ENTITY_ID_BASE: i32 = -1_500_000_000;
+
+fn server_fire_entity_id(x: i32, y: i32) -> i32 {
+    SERVER_FIRE_ENTITY_ID_BASE.saturating_add(point2_pack(x, y))
+}
 
 #[derive(Debug, Clone)]
 pub struct ServerLauncher {
@@ -1803,19 +1809,62 @@ impl ServerLauncher {
     fn tick_server_puddles(&mut self, delta_ticks: f32) -> io::Result<usize> {
         let world = &self.runtime.state.world;
         let content = &self.content_loader;
-        let removed_ids = self.runtime.server_puddles.update_all_with_passability(
-            delta_ticks,
-            true,
-            |x, y, liquid| {
-                world.tile(x, y).is_some()
-                    && (liquid.move_through_blocks || !world.wall_solid_with_content(x, y, content))
-            },
-        );
-        if removed_ids.is_empty() {
-            return Ok(0);
+        let width = world.width() as i32;
+        let height = world.height() as i32;
+        if self.runtime.server_fires.width() != width
+            || self.runtime.server_fires.height() != height
+        {
+            self.runtime.server_fires = Fires::new(width, height);
         }
-        self.broadcast_server_hidden_snapshot(&removed_ids)?;
-        Ok(removed_ids.len())
+
+        let report = self
+            .runtime
+            .server_puddles
+            .update_all_with_passability_report(
+                delta_ticks,
+                true,
+                |x, y, liquid| {
+                    world.tile(x, y).is_some()
+                        && (liquid.move_through_blocks
+                            || !world.wall_solid_with_content(x, y, content))
+                },
+                |x, y| world.build(x, y).is_some(),
+                |x, y, liquid| {
+                    let hash = (x as i64)
+                        .wrapping_mul(734_287)
+                        .wrapping_add((y as i64).wrapping_mul(912_271))
+                        .wrapping_add(liquid.name.len() as i64);
+                    hash & 1 == 0
+                },
+            );
+        let mut updates = report.events.len();
+        for event in report.events {
+            if !event.create_fire {
+                continue;
+            }
+            let result = self.runtime.server_fires.create(
+                Some(FireTile {
+                    x: event.tile.x,
+                    y: event.tile.y,
+                    build_present: event.tile.build_present,
+                    flammability: 0.0,
+                }),
+                FireRules {
+                    net_client: false,
+                    fire_enabled: self.runtime.state.rules.fire,
+                    has_oxygen: true,
+                },
+            );
+            if result != FireCreateResult::Ignored {
+                updates += 1;
+            }
+        }
+
+        if !report.removed_ids.is_empty() {
+            self.broadcast_server_hidden_snapshot(&report.removed_ids)?;
+            updates += report.removed_ids.len();
+        }
+        Ok(updates)
     }
 
     fn tick_server_force_field_abilities(&mut self, delta_ticks: f32) -> usize {
@@ -2770,6 +2819,27 @@ impl ServerLauncher {
                     tile_pos,
                     x: entry.puddle.x,
                     y: entry.puddle.y,
+                },
+            )?;
+            amount += 1;
+        }
+        for ((x, y), fire) in self.runtime.server_fires.entries() {
+            if amount == i16::MAX {
+                break;
+            }
+            if fire.removed || fire.lifetime <= 0.0 || fire.time >= fire.lifetime {
+                continue;
+            }
+            data.extend_from_slice(&server_fire_entity_id(*x, *y).to_be_bytes());
+            data.push(FIRE_CLASS_ID);
+            type_io::write_fire_sync(
+                &mut data,
+                &type_io::FireSyncWire {
+                    lifetime: fire.lifetime,
+                    tile_pos: fire.tile.map(|tile| point2_pack(tile.x, tile.y)),
+                    time: fire.time,
+                    x: fire.x,
+                    y: fire.y,
                 },
             )?;
             amount += 1;
@@ -4084,7 +4154,8 @@ mod tests {
         CargoAiRuntimeState, PayloadComp, PayloadKind, PayloadState, UnitComp, UnitControllerState,
     };
     use mindustry_core::mindustry::entities::{
-        standard_effect_id, PuddleDepositContext, PuddleLiquidInfo, PuddleTileView, Puddles,
+        standard_effect_id, FireRules, FireTile, Fires, PuddleDepositContext, PuddleLiquidInfo,
+        PuddleTileView, Puddles,
     };
     use mindustry_core::mindustry::game::{BlockPlan, ExportStat, TEAM_SHARDED};
     use mindustry_core::mindustry::io::type_io::CommandWire;
@@ -8516,6 +8587,108 @@ mod tests {
                 .expect("client puddle should resolve neoplasm liquid")
                 .cap_puddles,
             server_puddle.liquid.unwrap().cap_puddles
+        );
+    }
+
+    #[test]
+    fn server_entity_snapshot_packet_includes_runtime_fires_for_client_sync() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.server_fires = Fires::new(8, 8);
+        assert_eq!(
+            launcher.runtime.server_fires.create(
+                Some(FireTile {
+                    x: 1,
+                    y: 2,
+                    build_present: true,
+                    flammability: 0.0,
+                }),
+                FireRules::default(),
+            ),
+            mindustry_core::mindustry::entities::FireCreateResult::Created
+        );
+
+        let packet = launcher
+            .server_unit_entity_snapshot_packet()
+            .expect("fire snapshot should encode");
+
+        assert_eq!(packet.amount, 1);
+        let mut client_runtime = GameRuntime::default();
+        let report = client_runtime.apply_client_entity_snapshot_packet_with_content(
+            &launcher.content_loader,
+            packet.amount,
+            &packet.data,
+        );
+        assert_eq!(report.entity_parse_errors, 0);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        let client_fire = client_runtime
+            .client_fire_snapshot_entities
+            .get(&super::server_fire_entity_id(1, 2))
+            .expect("client should materialize fire entity from server snapshot");
+        assert_eq!(client_fire.tile.unwrap().x, 1);
+        assert_eq!(client_fire.tile.unwrap().y, 2);
+        assert_eq!(
+            client_fire.lifetime,
+            mindustry_core::mindustry::entities::BASE_FIRE_LIFETIME
+        );
+    }
+
+    #[test]
+    fn server_update_creates_fire_when_hot_puddle_touches_building() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6596).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+        launcher.runtime.state.world.resize(4, 4);
+        let wall = launcher
+            .content_loader
+            .block_by_name("copper-wall")
+            .unwrap()
+            .base()
+            .clone();
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(point2_pack(1, 1), wall, TeamId(1)));
+        launcher.runtime.server_puddles = Puddles::new(4, 4);
+        let slag = launcher.content_loader.liquid_by_name("slag").unwrap();
+        launcher.runtime.server_puddles.deposit_at(
+            Some(PuddleTileView::new(1, 1)),
+            PuddleLiquidInfo::from(slag),
+            40.0,
+            PuddleDepositContext::default(),
+        );
+
+        launcher.update();
+
+        assert!(launcher.runtime.server_fires.has(1, 1));
+        let sent = sent.lock().unwrap();
+        let snapshot = sent
+            .iter()
+            .rev()
+            .find_map(|(_connection_id, packet, reliable)| {
+                if !*reliable {
+                    if let PacketKind::EntitySnapshotCallPacket(packet) = packet {
+                        return Some(packet.clone());
+                    }
+                }
+                None
+            })
+            .expect("puddle-created fire should be broadcast as entity snapshot");
+        let mut client_runtime = GameRuntime::default();
+        let report = client_runtime.apply_client_entity_snapshot_packet_with_content(
+            &launcher.content_loader,
+            snapshot.amount,
+            &snapshot.data,
+        );
+        assert_eq!(report.entity_parse_errors, 0);
+        assert!(
+            client_runtime
+                .client_fire_snapshot_entities
+                .contains_key(&super::server_fire_entity_id(1, 1)),
+            "client should receive the fire created from the hot puddle/building contact"
         );
     }
 

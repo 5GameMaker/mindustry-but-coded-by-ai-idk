@@ -3353,3 +3353,43 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - 如果要严格 Java parity，把 passability 从 solidity 改为 block id `air` 或 `moveThroughBlocks`；
      - server world floor/liquid context 注入 spread/deposit；
      - puddle ripple/particle/fire/building puddleOn/liquid.update hook。
+
+---
+
+## 101. 最新闭环记录：Puddle update event report → server Fires runtime/snapshot
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 Java `PuddleComp.update()` effects-only 分支，先闭合高温 puddle + building 的 `Fires.create(tile)` 链路，避免 `PuddleUpdatePlan::create_fire` 长期只停在 plan。
+- Java 依据：
+  - `amount >= maxLiquid / 2f && updateTime <= 0f`；
+  - `liquid.temperature > 0.7f && tile.build != null && Mathf.chance(0.5)` 时 `Fires.create(tile)`；
+  - 同一分支还会 `Units.nearby(...)` 与 `tile.build.puddleOn(self())`，本轮只把这些作为 report event 暴露，暂未消费。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - `PuddleLiquidInfo` 新增 `particle_effect` 字段；
+    - 新增 `PuddleUpdateEvent` / `PuddleUpdateReport`；
+    - 新增 `update_all_with_passability_report(...)`，在原 spread/remove 基础上额外注入 `build_present` 和 `fire_chance` callback，输出 `affect_units/create_fire/puddle_on_building/particle_effect` events；
+    - 旧 `update_all(...)` / `update_all_with_passability(...)` 仍返回 removed ids，保持兼容。
+  - `core/src/mindustry/entities/fires.rs`
+    - 新增 `width()` / `height()` / `entries()`，让 server 能维护尺寸并枚举快照。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `server_fires: Fires` runtime sidecar。
+  - `server/src/lib.rs`
+    - `tick_server_puddles(...)` 现在维护 `runtime.server_fires` 尺寸；
+    - 从 server world 刷新 puddle tile build presence；
+    - 用稳定 hash 暂时代替 Java `Mathf.chance(0.5)`，触发时调用 `Fires::create(...)`；
+    - `server_unit_entity_snapshot_packet()` 把 `server_fires.entries()` 写入 `FIRE_CLASS_ID + FireSyncWire`，entity id 使用 `SERVER_FIRE_ENTITY_ID_BASE + point2_pack(x,y)` 的稳定 tile-derived id。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core update_all_report_exposes_hot_puddle_fire_and_building_events --lib`
+  - `cargo test -p mindustry-core create_adds_fire_and_refreshes_existing_lifetime --lib`
+  - `cargo test -p mindustry-server server_entity_snapshot_packet_includes_runtime_fires_for_client_sync --lib`
+  - `cargo test -p mindustry-server server_update_creates_fire_when_hot_puddle_touches_building --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入液体坑起火运行时`。
+  3. 后续补：
+     - `Units.nearby`：grounded/非 hovering 单位应用 liquid status 120 tick，移动时发送 `Fx.ripple`；
+     - `standard_effect_id("ripple")`，已确认 v158.1 `Fx.ripple` id 为 `243`；
+     - `tile.build.puddleOn(self())` 的真实 building consumer；
+     - `CellLiquid.update(Puddle)`，尤其 neoplasm 从周边 building/puddle 吸收 spreadTarget、伤害 building、触发 neoplasmReact；
+     - 起火概率从稳定 hash 替换为 Java 等价 RNG/delta。

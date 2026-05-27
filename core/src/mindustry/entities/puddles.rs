@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::mindustry::entities::comp::{PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext};
+use crate::mindustry::entities::comp::{
+    PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext, PuddleUpdatePlan,
+};
 use crate::mindustry::r#type::{CellLiquid, Liquid};
 use crate::mindustry::vars::TILE_SIZE;
 
@@ -16,6 +18,7 @@ pub struct PuddleLiquidInfo {
     pub temperature: f32,
     pub particle_spacing: f32,
     pub has_particle_effect: bool,
+    pub particle_effect: String,
     pub boil_point: f32,
     pub color_rgba: u32,
     pub gas_color_rgba: u32,
@@ -38,6 +41,7 @@ impl PuddleLiquidInfo {
             temperature: 0.5,
             particle_spacing: 60.0,
             has_particle_effect: false,
+            particle_effect: "none".to_string(),
             boil_point: 2.0,
             color_rgba: 0xffffffff,
             gas_color_rgba: 0xffffffff,
@@ -92,6 +96,7 @@ impl From<&Liquid> for PuddleLiquidInfo {
             temperature: liquid.temperature,
             particle_spacing: liquid.particle_spacing,
             has_particle_effect: liquid.particle_effect != "none",
+            particle_effect: liquid.particle_effect.clone(),
             boil_point: liquid.boil_point,
             color_rgba: liquid.color_rgba,
             gas_color_rgba: liquid.gas_color_rgba,
@@ -292,6 +297,69 @@ pub struct PuddleEntry {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PuddleUpdateEvent {
+    pub puddle_id: i32,
+    pub tile: PuddleTileView,
+    pub liquid: PuddleLiquidInfo,
+    pub x: f32,
+    pub y: f32,
+    pub amount: f32,
+    pub affect_units: bool,
+    pub create_fire: bool,
+    pub puddle_on_building: bool,
+    pub particle_effect: Option<String>,
+    pub liquid_update: bool,
+}
+
+impl PuddleUpdateEvent {
+    fn from_plan(
+        puddle: &PuddleComp,
+        liquid: &PuddleLiquidInfo,
+        plan: PuddleUpdatePlan,
+    ) -> Option<Self> {
+        if !(plan.affect_units
+            || plan.create_fire
+            || plan.puddle_on_building
+            || plan.particle_effect)
+        {
+            return None;
+        }
+
+        let tile = puddle.tile?;
+        Some(Self {
+            puddle_id: puddle.id,
+            tile: PuddleTileView {
+                x: tile.x,
+                y: tile.y,
+                floor_solid: false,
+                floor_is_liquid: false,
+                floor_liquid: None,
+                build_present: tile.build_present,
+                team: 0,
+            },
+            liquid: liquid.clone(),
+            x: puddle.x,
+            y: puddle.y,
+            amount: puddle.amount,
+            affect_units: plan.affect_units,
+            create_fire: plan.create_fire,
+            puddle_on_building: plan.puddle_on_building,
+            particle_effect: plan
+                .particle_effect
+                .then(|| liquid.particle_effect.clone())
+                .filter(|effect| effect != "none"),
+            liquid_update: plan.liquid_update,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PuddleUpdateReport {
+    pub removed_ids: Vec<i32>,
+    pub events: Vec<PuddleUpdateEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Puddles {
     width: i32,
     height: i32,
@@ -355,8 +423,26 @@ impl Puddles {
         headless: bool,
         mut passable: impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
     ) -> Vec<i32> {
+        self.update_all_with_passability_report(
+            delta,
+            headless,
+            &mut passable,
+            |_, _| false,
+            |_, _, _| false,
+        )
+        .removed_ids
+    }
+
+    pub fn update_all_with_passability_report(
+        &mut self,
+        delta: f32,
+        headless: bool,
+        mut passable: impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
+        mut build_present: impl FnMut(i32, i32) -> bool,
+        mut fire_chance: impl FnMut(i32, i32, &PuddleLiquidInfo) -> bool,
+    ) -> PuddleUpdateReport {
         let keys: Vec<_> = self.puddles.keys().copied().collect();
-        let mut removed = Vec::new();
+        let mut report = PuddleUpdateReport::default();
         let mut remove_keys = Vec::new();
         let mut spread_deposits = Vec::new();
 
@@ -370,13 +456,19 @@ impl Puddles {
                 .tile
                 .map(|tile| PuddleTileView::new(tile.x, tile.y));
             let liquid = entry.liquid.clone();
+            if let Some(tile) = entry.puddle.tile.as_mut() {
+                tile.build_present = build_present(tile.x, tile.y);
+            }
             let plan = entry.puddle.update(PuddleUpdateContext {
                 delta,
                 nearby_spread_targets: spread_targets.len() as i32,
                 registry_matches_self: true,
                 headless,
-                fire_chance_passed: false,
+                fire_chance_passed: fire_chance(key.0, key.1, &liquid),
             });
+            if let Some(event) = PuddleUpdateEvent::from_plan(&entry.puddle, &liquid, plan) {
+                report.events.push(event);
+            }
             if plan.deposited_per_target > 0.0 {
                 for target in spread_targets
                     .into_iter()
@@ -395,7 +487,7 @@ impl Puddles {
                 || entry.puddle.amount <= 0.0
                 || entry.puddle.liquid.is_none()
             {
-                removed.push(entry.puddle.id);
+                report.removed_ids.push(entry.puddle.id);
                 remove_keys.push(key);
             }
         }
@@ -415,7 +507,7 @@ impl Puddles {
                 },
             );
         }
-        removed
+        report
     }
 
     fn d4_spread_targets(
@@ -824,6 +916,31 @@ mod tests {
         assert_eq!(puddles.len(), 4);
         assert!(puddles.get(3, 2).is_none());
         assert!((puddles.get(2, 2).unwrap().amount - 69.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn update_all_report_exposes_hot_puddle_fire_and_building_events() {
+        let tile = PuddleTileView::new(1, 1);
+        let mut puddles = Puddles::new(4, 4);
+        puddles.deposit_at(Some(tile), slag(), 40.0, PuddleDepositContext::default());
+
+        let report = puddles.update_all_with_passability_report(
+            1.0,
+            true,
+            |_, _, _| true,
+            |x, y| (x, y) == (1, 1),
+            |x, y, liquid| (x, y) == (1, 1) && liquid.name == "slag",
+        );
+
+        assert!(report.removed_ids.is_empty());
+        assert_eq!(report.events.len(), 1);
+        let event = &report.events[0];
+        assert!(event.affect_units);
+        assert!(event.create_fire);
+        assert!(event.puddle_on_building);
+        assert_eq!((event.tile.x, event.tile.y), (1, 1));
+        assert!(event.tile.build_present);
+        assert_eq!(event.liquid.name, "slag");
     }
 
     #[test]

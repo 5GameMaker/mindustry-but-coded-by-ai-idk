@@ -68,6 +68,14 @@ impl Fires {
         self.fires.len()
     }
 
+    pub fn width(&self) -> i32 {
+        self.width
+    }
+
+    pub fn height(&self) -> i32 {
+        self.height
+    }
+
     pub fn is_empty(&self) -> bool {
         self.fires.is_empty()
     }
@@ -120,6 +128,10 @@ impl Fires {
         } else {
             None
         }
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = (&(i32, i32), &FireComp)> {
+        self.fires.iter()
     }
 
     pub fn get_tile(&self, tile: Option<FireTile>) -> Option<&FireComp> {
@@ -205,12 +217,15 @@ mod tests {
     fn create_adds_fire_and_refreshes_existing_lifetime() {
         let mut fires = Fires::new(10, 10);
 
+        assert_eq!(fires.width(), 10);
+        assert_eq!(fires.height(), 10);
         assert_eq!(
             fires.create(Some(tile(2, 3)), FireRules::default()),
             FireCreateResult::Created
         );
         assert!(fires.has(2, 3));
         assert_eq!(fires.len(), 1);
+        assert_eq!(fires.entries().count(), 1);
         let fire = fires.get(2, 3).unwrap();
         assert_eq!(fire.lifetime, BASE_FIRE_LIFETIME);
         assert_eq!((fire.x, fire.y), (16.0, 24.0));

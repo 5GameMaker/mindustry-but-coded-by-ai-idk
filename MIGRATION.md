@@ -4753,3 +4753,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java 精确条件是 `block()==air || liquid.moveThroughBlocks`；Rust 当前用 content-backed solidity 允许 conveyor 等非 solid block，后续如需 byte-level parity 可改为直接检查 block id 是否 air；
   - floor solid/liquid floor compatibility 已在 deposit helper 中存在，但 spread target 的完整 tile/floor context 仍需从 server world 注入；
   - ripple/particle/fire/building puddleOn/liquid.update hook 仍待接入。
+
+### 12.159 Puddle update side-effect report and server fire snapshot
+
+- 2026-05-28：继续对照 Java `PuddleComp.update()` 的 effects-only 分支，把“高温液体坑接触建筑有概率 `Fires.create(tile)`”从孤立 plan 推进到 server runtime 与 EntitySnapshot。
+- Java 依据：
+  - `amount >= maxLiquid / 2f && updateTime <= 0f` 时执行 `Units.nearby(...)`、高温液体 + building + `Mathf.chance(0.5)` 起火、`tile.build.puddleOn(self())`；
+  - 本轮只闭合 fire 分支，单位 status/ripple 与 building `puddleOn` 继续作为事件报告暴露，后续再接真实 consumer。
+- Rust 新增/变化：
+  - `PuddleLiquidInfo` 保留 `particle_effect` 名称，避免 `has_particle_effect` 丢失后续 effect packet 所需 id 映射信息；
+  - 新增 `PuddleUpdateEvent` / `PuddleUpdateReport`；
+  - `Puddles::update_all_with_passability_report(...)` 在原 D4 spread/remove 基础上额外注入：
+    - `build_present(x,y)`：server 每 tick 从 world/building ref 刷新 `PuddleTile.build_present`；
+    - `fire_chance(x,y,liquid)`：目前 server 使用稳定 hash 近似 Java 0.5 概率，后续应替换为可复现 RNG；
+    - 输出 `affect_units/create_fire/puddle_on_building/particle_effect` side-effect event；
+  - `GameRuntime` 新增 `server_fires: Fires`，server tick 中按 world 尺寸维护；
+  - `ServerLauncher::tick_server_puddles(...)` 消费 `create_fire` event，调用 `Fires::create(...)`；
+  - `Fires` 增加 `width/height/entries`，便于 server runtime 维护与 snapshot；
+  - `ServerLauncher::server_unit_entity_snapshot_packet()` 将 `server_fires.entries()` 写入 `FIRE_CLASS_ID + FireSyncWire`，使用稳定 tile-derived runtime entity id，客户端既有 Fire typed snapshot 可直接 materialize。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core update_all_report_exposes_hot_puddle_fire_and_building_events --lib`
+  - `cargo test -p mindustry-core create_adds_fire_and_refreshes_existing_lifetime --lib`
+  - `cargo test -p mindustry-server server_entity_snapshot_packet_includes_runtime_fires_for_client_sync --lib`
+  - `cargo test -p mindustry-server server_update_creates_fire_when_hot_puddle_touches_building --lib`
+- 仍未完成：
+  - `Units.nearby` 对 grounded/非 hovering 单位施加 liquid status 120 tick，以及移动时 `Fx.ripple`，尚未接入；
+  - `tile.build.puddleOn(self())` 还没有对应 Rust building consumer；
+  - `liquid.update(self())` 只保留事件链入口，`CellLiquid.update()` 的 neoplasm 扩散/伤害逻辑仍待迁移；
+  - 起火概率当前为稳定 hash 近似，后续要接 Java `Mathf.chance(0.5)` 等价 RNG/delta 语义。
