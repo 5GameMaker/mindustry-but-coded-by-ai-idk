@@ -2628,3 +2628,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑 `cargo check -p mindustry-core`、`cargo fmt --check`、`git diff --check` 后中文提交并推送。
   2. 下一闭环优先做 `PayloadSource` 的 unit payload 分支：只在配置为 unit 时发 UnitCreateEvent，配置为 block 时不能发。
   3. `UnitSpawnAbility` 最后接，那里需要 `spawner_unit_id` 非空，并且不属于 block owned tick 路径。
+
+---
+
+## 80. 最新闭环记录：PayloadSource unit payload UnitCreateEvent
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（`v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：迁移 `PayloadSourceBuild.updateTile()` 中 unit payload 创建时的 `UnitCreateEvent`，同时保证 block payload 分支不误计数。
+- Java 依据：
+  - `unit != null`：`new UnitPayload(unit.create(team))`，可选 commandPos，然后 `Events.fire(new UnitCreateEvent(p, this))`；
+  - `configBlock != null`：只创建 `BuildPayload`，不发 UnitCreateEvent。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `advance_owned_payload_sources_ticks(...)` 在 `PayloadSourceSpawn::Unit` 成功创建 `PayloadRef::Unit` 后记录 unit 创建事件，并在 borrow 结束后调用 `note_unit_create_event(...)`；
+    - `PayloadSourceSpawn::Block` 不调用事件入口；
+    - `game_runtime_payload_source_spawns_configured_block_payload` 断言 block 分支无事件/无 `units_created`；
+    - `game_runtime_payload_source_spawns_common_unit_payload_with_command_pos` 断言 unit 分支记录 sidecar、`units_created`、campaign `units_produced`，且原有 commandPos payload 编码仍正确。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_payload_source_spawns_configured_block_payload --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_source_spawns_common_unit_payload_with_command_pos --lib`
+- 当前仍需继续：
+  1. 跑 `cargo check -p mindustry-core`、`cargo fmt --check`、`git diff --check` 后中文提交并推送。
+  2. 下一步处理 `UnitSpawnAbility`，这是 `spawner_unit_id` 非空的 UnitCreateEvent，不要硬塞进 block runtime helper。
+  3. 后续把 `unit_create_events` bridge 到正式 event bus / `DefaultGameService` / achievement backend。

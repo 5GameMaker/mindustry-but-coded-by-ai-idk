@@ -4277,3 +4277,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `PayloadSource` 的 unit 配置分支仍需接入 UnitCreateEvent；block 配置分支不应发 UnitCreateEvent；
   - `UnitSpawnAbility` 仍需接入 `spawner_unit_id` 非空的 UnitCreateEvent 路径；
   - `UnitFactory` / `Reconstructor` 的 createSound pitch、shake/effect、完整 service/achievement bridge 仍需后续继续补齐。
+
+### 12.138 PayloadSource unit payload UnitCreateEvent 接入
+
+- 2026-05-27：继续对照 v158.1 `PayloadSourceBuild.updateTile()`，把 sandbox `PayloadSource` 配置为 unit 时的 `UnitCreateEvent` 接入 Rust owned runtime；同时锁定配置为 block 时**不**发 UnitCreateEvent。
+- Java 依据：
+  - `payload == null && unit != null` 时创建 `new UnitPayload(unit.create(team))`，应用可选 `commandPos` 后 `Events.fire(new UnitCreateEvent(p, this))`；
+  - `configBlock != null` 分支只创建 `BuildPayload(configBlock, team)`，不触发 `UnitCreateEvent`。
+- Rust 新增/变化：
+  - `advance_owned_payload_sources_ticks(...)` 在 `PayloadSourceSpawn::Unit` 成功创建 `PayloadRef::Unit` 后记录 `(unit_name, team, tile)`，并在 payload source mutable borrow 结束后统一调用 `note_unit_create_event(...)`；
+  - `PayloadSourceSpawn::Block` 分支保持不调用事件入口；
+  - `game_runtime_payload_source_spawns_configured_block_payload` 增加断言：即使 default team + campaign，block payload 也不增加 `unit_create_events` / `units_created`；
+  - `game_runtime_payload_source_spawns_common_unit_payload_with_command_pos` 增加断言：unit payload 会记录 sidecar、增加 `units_created` 与 campaign `units_produced`，并保留既有 command position payload 编码验证。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core game_runtime_payload_source_spawns_configured_block_payload --lib`
+  - `cargo test -p mindustry-core game_runtime_payload_source_spawns_common_unit_payload_with_command_pos --lib`
+- 仍未完成：
+  - `UnitSpawnAbility` 的 `UnitCreateEvent(u, null, unit)` 尚未迁移；这条路径需要 `spawner_unit_id` 非空，落点应在 unit/entity ability runtime，而不是 block owned tick；
+  - `unit_create_events` 到正式 event bus / `DefaultGameService` / achievement backend 的 bridge 仍未完成；
+  - PayloadSource 的其他表现层细节与 Java 完整 sandbox UI 配置仍需后续继续对照。

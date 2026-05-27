@@ -10349,6 +10349,7 @@ impl GameRuntime {
     ) -> GameRuntimePayloadSourceFrameReport {
         let mut report = GameRuntimePayloadSourceFrameReport::default();
         let mut pending_payload_moves = Vec::new();
+        let mut created_unit_events = Vec::new();
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, team, enabled, rotdeg, rotation, time_scale, x, y) = {
@@ -10425,6 +10426,7 @@ impl GameRuntime {
                             common.pay_rotation = rotdeg;
                             source.has_payload = true;
                             report.spawned_unit_payloads += 1;
+                            created_unit_events.push((unit.name().to_string(), team, tile_pos));
                         }
                         Err(_) => {
                             source.has_payload = common.payload.is_some();
@@ -10479,6 +10481,10 @@ impl GameRuntime {
                     }
                 }
             }
+        }
+
+        for (unit_name, team, tile_pos) in created_unit_events {
+            self.note_unit_create_event(None, unit_name, team, Some(tile_pos), None);
         }
 
         for (source_tile_pos, target_tile_pos) in pending_payload_moves {
@@ -31165,6 +31171,8 @@ mod tests {
         building.set_rotation(1);
 
         let mut runtime = GameRuntime::default();
+        runtime.state.rules.default_team = 6;
+        runtime.state.set_sector(Some(Sector::new(25)));
         runtime.state.set(GameStateState::Playing);
         runtime.state.world.resize(8, 8);
         runtime.add_building(building);
@@ -31221,19 +31229,24 @@ mod tests {
         assert_eq!(*block, router_def.base().id);
         assert_eq!(*version, 0);
         assert!(!build_bytes.is_empty());
+        assert!(runtime.unit_create_events.is_empty());
+        assert_eq!(runtime.state.stats.units_created, 0);
     }
 
     #[test]
     fn game_runtime_payload_source_spawns_common_unit_payload_with_command_pos() {
         let content = ContentLoader::create_base_content().unwrap();
         let source_def = content.block_by_name("payload-source").unwrap();
-        let flare = content.unit_by_name("flare").unwrap().id();
+        let flare_unit = content.unit_by_name("flare").unwrap();
+        let flare = flare_unit.id();
         let tile_pos = point2_pack(0, 5);
         let mut building = BuildingComp::new(tile_pos, source_def.base().clone(), TeamId(6));
         building.set_rotation(2);
         building.set_pos(40.0, 48.0);
 
         let mut runtime = GameRuntime::default();
+        runtime.state.rules.default_team = 6;
+        runtime.state.set_sector(Some(Sector::new(26)));
         runtime.state.set(GameStateState::Playing);
         runtime.state.world.resize(8, 8);
         runtime.add_building(building);
@@ -31265,6 +31278,15 @@ mod tests {
         assert_eq!(report.moved_out_payloads, 1);
         assert_eq!(report.arrived_output_payloads, 0);
         assert_eq!(report.skipped_unit_payloads, 0);
+        assert_eq!(runtime.unit_create_events.len(), 1);
+        assert_eq!(runtime.unit_create_events[0].unit_name, flare_unit.name());
+        assert_eq!(runtime.unit_create_events[0].team, TeamId(6));
+        assert_eq!(runtime.unit_create_events[0].spawner_tile, Some(tile_pos));
+        assert_eq!(runtime.state.stats.units_created, 1);
+        assert_eq!(
+            runtime.campaign_stats.get_unit_produced(flare_unit.name()),
+            1
+        );
         let Some(GameRuntimePayloadBlockState::Source { common, source }) =
             runtime.payload_runtime_states.get(&tile_pos)
         else {
