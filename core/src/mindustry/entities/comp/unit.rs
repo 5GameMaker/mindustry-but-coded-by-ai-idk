@@ -27,6 +27,7 @@ use super::builder::{
     BuilderAiRuntimeInput, BuilderAiRuntimeState, BuilderAiRuntimeStep, BuilderComp,
     PrebuildAiRuntimeInput, PrebuildAiRuntimeState, PrebuildAiRuntimeStep,
 };
+use super::building_tether::BuildingTetherComp;
 use super::entity::EntityComp;
 use super::health::HealthComp;
 use super::hitbox::HitboxComp;
@@ -219,6 +220,7 @@ pub struct UnitComp {
     pub miner: MinerComp,
     pub builder_ai: BuilderAiRuntimeState,
     pub prebuild_ai: PrebuildAiRuntimeState,
+    pub building_tether: Option<BuildingTetherComp>,
     pub cargo_ai: Option<CargoAiRuntimeState>,
     pub payload: Option<PayloadComp>,
     pub type_info: UnitType,
@@ -283,6 +285,7 @@ impl UnitComp {
             miner: MinerComp::new(miner_type_from_unit_type(&type_info)),
             builder_ai: BuilderAiRuntimeState::default(),
             prebuild_ai: PrebuildAiRuntimeState::default(),
+            building_tether: None,
             cargo_ai: None,
             payload: None,
             type_info: type_info.clone(),

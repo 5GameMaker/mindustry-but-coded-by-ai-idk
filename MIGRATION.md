@@ -3759,12 +3759,17 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 2026-05-27：继续把 cargo transfer 的客户端接收端接入 runtime。`GameRuntime::apply_client_building_item_storage_mirror(...)` 会把 `NetClient.building_storage_mirrors` 中已知 item 数量写回对应 runtime building 的 `ItemModule`；`DesktopLauncher::update()` 新增 `sync_building_storage_mirrors_to_runtime()`，先于 unit item mirror 应用 building item mirror。新增真实 server→desktop cargo transfer smoke，验证 `unit-cargo-loader` 生成 `manifold` 后通过 `TakeItemsCallPacket` + `TransferItemToCallPacket` 把 copper 从 loader 搬到 unload point，desktop runtime 中的 materialized cargo unit 最终清空，unload point 库存同步为 12。
 - 2026-05-27：补齐 cargo tether unit 的最小消失同步。`ServerLauncher` 在 tether loader 缺失、失效或 team 不一致时会清理 `UnitCargoLoaderState`、移除 `server_units` 中的 cargo `manifold`，并在网络开启时广播 `UnitDespawnCallPacket(UnitRef::Unit { id })`；`GameRuntime::apply_client_unit_despawn_packet(...)` 会从 `client_unit_snapshot_entities` 移除物化 unit，`DesktopLauncher::sync_unit_lifecycle_to_runtime()` 消费 `NetClient` 的 unit lifecycle cursor，把 server despawn 接到客户端 runtime。这个闭环接入真实 server entity lifecycle、network packet 与 desktop runtime，而不是只删除测试 sidecar。
 - 2026-05-27：继续对照 Java `CargoAI.updateMovement()`，把 cargo unit 的 server-side 状态机从“每 tick 即时找点并转移”推进到带目标记忆、`dropSpacing`、`emptyWaitTime` 与重配置防护的最小等价实现。`CargoAiRuntimeState` 新增 `drop_timer`；`ServerLauncher::tick_runtime_unit_cargo_ai_for_loader(...)` 现在会保留当前 `unload_target_tile_pos`，目标被重新配置/拆除/换队时只清目标不清货物；目标满载时按 `dropSpacing = 90` 累计 `no_dest_timer`，超过 `emptyWaitTime = 120` 后用 `targetIndex` 轮转到下一个同物品 unload point。真实转移仍复用 `transfer_item_to(...)` 与 network packet，因此继续接在 server/runtime/entity/network 链路上。
+- 2026-05-27：把 Java `BuildingTetherComp.update()` 从独立 helper 推进到 cargo unit 的正式实体生命周期。`BuildingTetherRef` 现在携带 `tile_pos`，`UnitComp` 新增 `building_tether`；server 生成 cargo `manifold` 与 client materialize tether packet 时都会写入同队有效 building tether。`ServerLauncher::tick_runtime_unit_cargo_ai_for_loader(...)` 每 tick 用 loader live building 刷新 tether ref，并通过 `BuildingTetherComp::update()` 判断 despawn，因此 loader 被拆、失效或换队都会走统一 `UnitDespawnCallPacket` 链路，而不是只靠散落的 team 特判。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_despawn --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-desktop unit_despawn --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-server cargo_loader_is_missing --lib`（本轮通过 1/1）
+  - `cargo test -p mindustry-core building_tether --lib`（本轮通过 1/1）
+  - `cargo test -p mindustry-core unit_tether_block_spawned --lib`（本轮通过 2/2）
+  - `cargo test -p mindustry-server tethered_unit --lib`（本轮通过 2/2）
   - `cargo test -p mindustry-server unit_cargo --lib`（本轮通过 8/8）
+  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`（本轮通过）
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime -- --nocapture`（本轮通过）
   - `cargo test -p mindustry-core unit_tether_block_spawned --lib`（本轮通过 2/2）
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`（本轮通过 1/1）
@@ -3776,4 +3781,4 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime -- --nocapture`（本轮通过；首次遇到临时端口占用重试后通过）
   - `cargo fmt --check`
   - `cargo check --workspace`（本轮通过，仅保留既有 unused warning）
-- 仍未完成：server-side `BuildingTetherComp` 还未作为正式组件并入 `UnitComp`/Groups.unit 生命周期；当前 cargo AI 仍是 server launcher 驱动的最小 authoritative 闭环，尚未完整迁移 Java `CargoAI.retarget()/timer/dropSpacing/noDestTimer`、真实平滑移动与客户端单位实体 snapshot 可视化；loader 资源 consumer 的全局 shouldConsume/rollback 权限细节、unload config 的 UI 选择表/rollback 权限细节、Java 客户端/服务端更完整联机兼容仍待补。
+- 仍未完成：`BuildingTetherComp` 已并入 cargo `UnitComp` 与 server/client tether 物化链路，但还未接入通用 `Groups.unit` 生命周期；当前 cargo AI 仍是 server launcher 驱动的最小 authoritative 闭环，尚未完整迁移 Java `retarget()` 的全局计时、真实平滑移动/范围判断与客户端单位运动 snapshot 可视化；loader 资源 consumer 的全局 shouldConsume/rollback 权限细节、unload config 的 UI 选择表/rollback 权限细节、Java 客户端/服务端更完整联机兼容仍待补。

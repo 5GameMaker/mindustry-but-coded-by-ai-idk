@@ -5,6 +5,7 @@ use crate::mindustry::io::TeamId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildingTetherRef {
+    pub tile_pos: i32,
     pub team: TeamId,
     pub valid: bool,
 }
@@ -51,18 +52,21 @@ mod tests {
         assert_eq!(tether.update(), BuildingTetherAction::Despawn);
 
         tether.building = Some(BuildingTetherRef {
+            tile_pos: 10,
             team: TeamId(1),
             valid: true,
         });
         assert_eq!(tether.update(), BuildingTetherAction::Keep);
 
         tether.building = Some(BuildingTetherRef {
+            tile_pos: 10,
             team: TeamId(2),
             valid: true,
         });
         assert_eq!(tether.update(), BuildingTetherAction::Despawn);
 
         tether.building = Some(BuildingTetherRef {
+            tile_pos: 10,
             team: TeamId(1),
             valid: false,
         });

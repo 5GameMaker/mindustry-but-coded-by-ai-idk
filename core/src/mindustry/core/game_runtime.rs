@@ -25,9 +25,10 @@ use crate::mindustry::{
     entities::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
-            BuildingComp, BulletComp, CargoAiRuntimeState, DecalComp, DecalRegion, EffectStateComp,
-            FireComp, LaunchCoreBlock, LaunchCoreComp, PayloadComp, PayloadKind, PayloadState,
-            PuddleComp, PuddleTile, UnitComp, UnitControllerState, WorldLabelComp,
+            BuildingComp, BuildingTetherComp, BuildingTetherRef, BulletComp, CargoAiRuntimeState,
+            DecalComp, DecalRegion, EffectStateComp, FireComp, LaunchCoreBlock, LaunchCoreComp,
+            PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile, UnitComp,
+            UnitControllerState, WorldLabelComp,
         },
         entity_class_id, entity_class_kind, EntityClassKind, PuddleLiquidInfo,
     },
@@ -3361,6 +3362,14 @@ impl GameRuntime {
                 unit.set_pos(building_x, building_y);
                 unit.set_rotation(90.0);
                 unit.set_controller(UnitControllerState::Cargo);
+                unit.building_tether = Some(BuildingTetherComp {
+                    team: building_team,
+                    building: Some(BuildingTetherRef {
+                        tile_pos,
+                        team: building_team,
+                        valid: true,
+                    }),
+                });
                 unit.cargo_ai = Some(CargoAiRuntimeState::new(Some(tile_pos)));
                 unit.add();
             }
@@ -21503,6 +21512,23 @@ mod tests {
                 .as_ref()
                 .and_then(|cargo| cargo.tether_tile_pos),
             Some(tile_pos)
+        );
+        let tether = spawned
+            .building_tether
+            .as_ref()
+            .expect("client materialized cargo unit should keep a formal building tether");
+        assert_eq!(tether.team, TeamId(4));
+        assert_eq!(
+            tether.building,
+            Some(BuildingTetherRef {
+                tile_pos,
+                team: TeamId(4),
+                valid: true,
+            })
+        );
+        assert_eq!(
+            tether.update(),
+            crate::mindustry::entities::comp::BuildingTetherAction::Keep
         );
         assert_eq!(runtime.client_unit_tether_block_spawned_packets_applied, 1);
     }

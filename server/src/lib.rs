@@ -20,8 +20,9 @@ use mindustry_core::mindustry::ctype::{Content, ContentId};
 use mindustry_core::mindustry::entities::{
     bullet::BulletType,
     comp::{
-        BuildingComp, BulletComp, CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp,
-        PlayerUnitState, UnitComp, UnitControllerState,
+        BuildingComp, BuildingTetherAction, BuildingTetherComp, BuildingTetherRef, BulletComp,
+        CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
+        UnitControllerState,
     },
 };
 use mindustry_core::mindustry::input::{
@@ -1357,6 +1358,14 @@ impl ServerLauncher {
             unit.set_pos(building.x, building.y);
             unit.set_rotation(90.0);
             unit.set_controller(UnitControllerState::Cargo);
+            unit.building_tether = Some(BuildingTetherComp {
+                team: building.team,
+                building: Some(BuildingTetherRef {
+                    tile_pos,
+                    team: building.team,
+                    valid: building.is_valid(),
+                }),
+            });
             unit.cargo_ai = Some(CargoAiRuntimeState::new(Some(tile_pos)));
             self.server_units.insert(unit_id, unit);
 
@@ -1420,26 +1429,43 @@ impl ServerLauncher {
             return Ok(0);
         };
 
-        let (loader_x, loader_y, loader_team, loader_valid) = {
+        let (loader_x, loader_y, loader_team, loader_valid, loader_has_items) = {
             let building = &self.runtime.buildings[loader_index];
             (
                 building.x,
                 building.y,
                 building.team,
-                building.is_valid() && building.items.is_some(),
+                building.is_valid(),
+                building.items.is_some(),
             )
         };
-        if !loader_valid {
-            self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id)?;
+        if !self.server_units.contains_key(&unit_id) {
+            self.clear_runtime_unit_cargo_loader_state(loader_tile_pos);
             return Ok(0);
         }
-
+        if let Some(unit) = self.server_units.get_mut(&unit_id) {
+            unit.building_tether = Some(BuildingTetherComp {
+                team: unit.team_id(),
+                building: Some(BuildingTetherRef {
+                    tile_pos: loader_tile_pos,
+                    team: loader_team,
+                    valid: loader_valid,
+                }),
+            });
+        }
         let Some(unit_snapshot) = self.server_units.get(&unit_id).cloned() else {
             self.clear_runtime_unit_cargo_loader_state(loader_tile_pos);
             return Ok(0);
         };
-        if unit_snapshot.team_id() != loader_team {
+        if unit_snapshot
+            .building_tether
+            .as_ref()
+            .is_some_and(|tether| tether.update() == BuildingTetherAction::Despawn)
+        {
             self.remove_runtime_unit_cargo_loader_unit(loader_tile_pos, unit_id)?;
+            return Ok(0);
+        }
+        if !loader_has_items {
             return Ok(0);
         }
 
@@ -2575,8 +2601,8 @@ mod tests {
     };
     use mindustry_core::mindustry::ctype::{Content, ContentType};
     use mindustry_core::mindustry::entities::comp::{
-        BuildingComp, CargoAiRuntimeState, PayloadComp, PayloadKind, PayloadState, UnitComp,
-        UnitControllerState,
+        BuildingComp, BuildingTetherAction, BuildingTetherRef, CargoAiRuntimeState, PayloadComp,
+        PayloadKind, PayloadState, UnitComp, UnitControllerState,
     };
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
     use mindustry_core::mindustry::io::type_io::CommandWire;
@@ -5176,6 +5202,20 @@ mod tests {
                 .and_then(|cargo| cargo.tether_tile_pos),
             Some(loader_tile)
         );
+        let tether = spawned_unit
+            .building_tether
+            .as_ref()
+            .expect("spawned cargo unit should have a formal building tether");
+        assert_eq!(tether.team, TeamId(6));
+        assert_eq!(
+            tether.building,
+            Some(BuildingTetherRef {
+                tile_pos: loader_tile,
+                team: TeamId(6),
+                valid: true,
+            })
+        );
+        assert_eq!(tether.update(), BuildingTetherAction::Keep);
 
         let sent = sent.lock().unwrap();
         assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
@@ -5550,6 +5590,72 @@ mod tests {
             TeamId(6),
         );
         cargo_unit.set_controller(UnitControllerState::Cargo);
+        launcher.server_units.insert(7, cargo_unit);
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        assert!(!launcher.server_units.contains_key(&7));
+        let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) = launcher
+            .runtime
+            .distribution_runtime_states
+            .get(&loader_tile)
+        else {
+            panic!("loader runtime state should remain present");
+        };
+        assert!(!state.has_unit);
+        assert_eq!(state.read_unit_id, -1);
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            !*reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitDespawnCallPacket(packet)
+                        if packet.unit == UnitRef::Unit { id: 7 }
+                )
+        }));
+    }
+
+    #[test]
+    fn server_update_despawns_tethered_unit_when_cargo_loader_team_changes() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6584).unwrap();
+
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        let loader_tile = point2_pack(6, 6);
+        launcher.runtime.state.world.resize(12, 12);
+        launcher.runtime.add_building(BuildingComp::new(
+            loader_tile,
+            loader_def.base().clone(),
+            TeamId(7),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                read_unit_id: 7,
+                has_unit: true,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        let mut cargo_unit = UnitComp::new(
+            7,
+            launcher
+                .content_loader
+                .unit_by_name("manifold")
+                .unwrap()
+                .clone(),
+            TeamId(6),
+        );
+        cargo_unit.set_controller(UnitControllerState::Cargo);
+        cargo_unit.cargo_ai = Some(CargoAiRuntimeState::new(Some(loader_tile)));
         launcher.server_units.insert(7, cargo_unit);
         launcher.runtime.state.set(GameStateState::Playing);
 
