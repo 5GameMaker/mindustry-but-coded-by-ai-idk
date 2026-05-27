@@ -3739,10 +3739,12 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `game_runtime_applies_client_unit_tether_block_spawned_packet_to_unit_cargo_loader`
   - 新增 `update_records_unit_tether_block_spawned_packet_for_runtime_bridge`
   - 新增 `desktop_launcher_syncs_unit_tether_block_spawned_packet_to_runtime`
+- 2026-05-27：新增真实联机 smoke `real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime`，用真实 `ServerLauncher -> ArcNetProvider -> DesktopLauncher` 链路验证：server owned runtime 里的 `unit-cargo-loader` 完成构建后创建 server-side `manifold`，可靠发出 `UnitTetherBlockSpawnedCallPacket`，desktop `NetClient` 收到并由 `DesktopLauncher` 桥接到客户端 runtime，最终 `UnitCargoLoaderState.read_unit_id` 与 server 侧生成 id 对齐。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_tether_block_spawned`
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`
   - `cargo test -p mindustry-server unit_cargo --lib`
+  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`
   - `cargo check --workspace`
 - 仍未完成：真实 manifold unit 创建/加入 world/BuildingTether、`Call.unitTetherBlockSpawned` 联机同步、loader 液体/电力 consume 精确联动、unload `dumpAccumulate()` 真实向邻接方块输出、unload item config 的 `TileConfigCallPacket` 分发与 UI 行为仍待补。

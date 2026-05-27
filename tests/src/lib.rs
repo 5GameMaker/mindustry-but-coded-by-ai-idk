@@ -355,6 +355,150 @@ fn real_server_desktop_world_stream_materializes_payload_sidecar() {
 }
 
 #[test]
+fn real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime() {
+    use mindustry_core::mindustry::content::blocks::BlockDef;
+    use mindustry_core::mindustry::core::{
+        game_runtime::GameRuntimeDistributionBlockState, GameRuntimeNetworkContext,
+    };
+    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::io::TeamId;
+    use mindustry_core::mindustry::world::blocks::units::UnitCargoLoaderState;
+    use mindustry_core::mindustry::world::point2_pack;
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    let loader_tile = point2_pack(4, 4);
+    let loader_def = server
+        .content_loader
+        .block_by_name("unit-cargo-loader")
+        .expect("base content should include unit-cargo-loader");
+    let BlockDef::Distribution(loader_block) = loader_def else {
+        panic!("unit-cargo-loader should be a distribution block");
+    };
+    let loader_base = loader_def.base().clone();
+    let unit_build_time = loader_block.unit_build_time;
+
+    server.runtime.state.world.resize(12, 12);
+    server
+        .runtime
+        .add_building(BuildingComp::new(loader_tile, loader_base, TeamId(6)));
+    server.runtime.distribution_runtime_states.insert(
+        loader_tile,
+        GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState::default()),
+    );
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+            && matches!(
+                desktop
+                    .runtime
+                    .distribution_runtime_states
+                    .get(&loader_tile),
+                Some(GameRuntimeDistributionBlockState::UnitCargoLoader(_))
+            )
+    });
+
+    server
+        .runtime
+        .state
+        .set(mindustry_core::mindustry::core::GameStateState::Playing);
+    if let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) = server
+        .runtime
+        .distribution_runtime_states
+        .get_mut(&loader_tile)
+    {
+        state.build_progress = 1.0 - 1.0 / unit_build_time;
+        state.has_unit = false;
+        state.read_unit_id = -1;
+    }
+
+    let mut client_read_unit_id = -1;
+    let mut last_client_status = String::new();
+    for _ in 0..80 {
+        server.update();
+        desktop.update();
+        desktop.update();
+
+        if let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) = desktop
+            .runtime
+            .distribution_runtime_states
+            .get(&loader_tile)
+        {
+            client_read_unit_id = state.read_unit_id;
+        }
+        {
+            let state = desktop.net_client.state();
+            let state = state.lock().unwrap();
+            last_client_status = format!(
+                "unit_tether_seen={} last={:?} applied={}",
+                state.unit_tether_block_spawned_packets_seen,
+                state.last_unit_tether_block_spawned,
+                desktop
+                    .runtime
+                    .client_unit_tether_block_spawned_packets_applied,
+            );
+        }
+        if client_read_unit_id >= 0 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(
+        client_read_unit_id >= 0,
+        "desktop should apply real UnitTetherBlockSpawnedCallPacket to unit cargo loader; client: {last_client_status}"
+    );
+    let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(server_state)) =
+        server.runtime.distribution_runtime_states.get(&loader_tile)
+    else {
+        panic!("server unit cargo loader state should remain present");
+    };
+    assert_eq!(client_read_unit_id, server_state.read_unit_id);
+    assert!(server.server_units.contains_key(&server_state.read_unit_id));
+    assert_eq!(
+        server
+            .last_runtime_item_transport_report
+            .as_ref()
+            .map(|report| report.unit_cargo_loader_built_units),
+        Some(1)
+    );
+    assert_eq!(
+        desktop
+            .runtime
+            .client_unit_tether_block_spawned_packets_applied,
+        1
+    );
+    {
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.unit_tether_block_spawned_packets_seen, 1);
+        let packet = state
+            .last_unit_tether_block_spawned
+            .as_ref()
+            .expect("desktop should record real unit tether spawned packet");
+        assert_eq!(packet.tile, Some(loader_tile));
+        assert_eq!(packet.id, server_state.read_unit_id);
+    }
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}
+
+#[test]
 fn real_server_desktop_world_stream_materializes_multiple_payload_sidecars() {
     use mindustry_core::mindustry::core::{
         game_runtime::GameRuntimePayloadBlockState, GameRuntimeNetworkContext,
