@@ -660,6 +660,8 @@ pub fn load() -> Vec<UnitType> {
             u.engine_size = 2.0;
             u.item_capacity = 0;
             u.research_cost_multiplier = 0.0;
+            u.abilities
+                .push("MoveEffectAbility:0:-7:4:missileTrailShort:true".into());
         }),
         unit(&mut next_id, "avert", UnitKind::Erekir, |u| {
             u.low_altitude = false;
@@ -1263,6 +1265,12 @@ mod tests {
             .abilities
             .iter()
             .any(|entry| { entry == "ShieldArcAbility:45:0.75:2500:480:82:0:0:-20:false:8:1" }));
+
+        let elude = by_name(&units, "elude");
+        assert!(elude
+            .abilities
+            .iter()
+            .any(|entry| entry == "MoveEffectAbility:0:-7:4:missileTrailShort:true"));
 
         let oxynoe = by_name(&units, "oxynoe");
         assert!(oxynoe

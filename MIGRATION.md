@@ -4511,3 +4511,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java 随机 spread / randAmount 目前用确定性等角度计划替代，后续需要接入可复现 RNG；
   - 普通 unit death/removal 的全局事件总线、death effect、wreck/尸体等完整路径仍需继续迁移；
   - UnitCreateEvent 是否完全等价于 Java `UnitType.spawn(...)` 内部事件需后续对照确认。
+
+### 12.148 MoveEffectAbility / elude 移动特效 ability slot 接入
+
+- 2026-05-27：继续对照 v158.1 `MoveEffectAbility.java` 与 `UnitTypes.elude`，把 elude 的移动尾迹能力从裸内容缺口接入 `UnitType` content 与 `UnitComp` ability slot；本闭环先产出 runtime sidecar plan，避免只在内容表里孤立登记。
+- Java 依据：
+  - `MoveEffectAbility.update(Unit unit)`：headless 直接返回；否则累加 `counter += Time.delta`；
+  - 单位速度满足 `unit.vel.len2() >= minVelocity * minVelocity`，且 `counter >= interval` 或 chance 触发，并且不在玩家队伍雾中时，按 `unit.rotation - 90f` 旋转 `x/y` 偏移并播放 effect；
+  - 播放后 `counter %= interval`，按 `amount` 次调用 `effect.at(...)`，颜色使用 `teamColor ? unit.team.color : color`；
+  - `elude` 参数：`new MoveEffectAbility(0f, -7f, Pal.sapBulletBack, Fx.missileTrailShort, 4f){{ teamColor = true; }}`。
+- Rust 新增/变化：
+  - `MoveEffectPlan` 增加 `effect`、`team_color`、`parentize_effects`，从纯坐标计划扩展到能表达 Java effect 调用所需的最小表现层参数；
+  - `MoveEffectAbility` 增加 `effect` 字段与 `from_descriptor(...)`，支持 `MoveEffectAbility:x:y:interval:effect[:teamColor[:minVelocity[:amount]]]`；
+  - `content/unit_types.rs` 为 `elude` 挂载 `MoveEffectAbility:0:-7:4:missileTrailShort:true`，并在内容覆盖测试中锁定；
+  - `UnitComp::update_move_effect_abilities(delta, in_fog)` 使用 `AbilityWire.data` 保存 counter，按单位位置/旋转/速度生成 `MoveEffectPlan`，使该 ability 进入真实 unit runtime slot。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core move_effect --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_move_effect --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+- 仍未完成：
+  - Java headless 下不播放视觉；当前 Rust 已保留 plan 入口但尚未把 `MoveEffectPlan` 接入 desktop/client local effect event queue；
+  - chance/random offset、rangeLengthMin/Max 与 `inFogTo(Vars.player.team())` 仍是最小参数入口，后续需接入可复现 RNG 与客户端可见性判断；
+  - `Pal.sapBulletBack` 颜色、`Fx.missileTrailShort` 真实 effect backend、parentize effects 与本地渲染/音效 sidecar 仍需继续迁移；
+  - ability content 仍采用 descriptor 字符串，后续需结构化 ability spec/runtime state，避免复杂 ability 状态继续堆在 `AbilityWire.data`。

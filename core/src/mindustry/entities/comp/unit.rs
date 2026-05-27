@@ -11,10 +11,11 @@ use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::{Content, ContentId};
 use crate::mindustry::entities::abilities::{
     EnergyFieldAbility, EnergyFieldPulse, EnergyFieldTarget, ForceFieldAbility, ForceFieldUpdate,
-    RepairFieldAbility, RepairFieldPulse, RepairFieldTarget, ShieldArcAbility, ShieldArcUpdate,
-    ShieldRegenFieldAbility, ShieldRegenFieldPulse, ShieldRegenFieldTarget, SpawnDeathAbility,
-    SpawnDeathSpawnPlan, StatusFieldAbility, StatusFieldPulse, SuppressionFieldAbility,
-    SuppressionFieldPulse, UnitSpawnAbility, UnitSpawnPlan,
+    MoveEffectAbility, MoveEffectPlan, RepairFieldAbility, RepairFieldPulse, RepairFieldTarget,
+    ShieldArcAbility, ShieldArcUpdate, ShieldRegenFieldAbility, ShieldRegenFieldPulse,
+    ShieldRegenFieldTarget, SpawnDeathAbility, SpawnDeathSpawnPlan, StatusFieldAbility,
+    StatusFieldPulse, SuppressionFieldAbility, SuppressionFieldPulse, UnitSpawnAbility,
+    UnitSpawnPlan,
 };
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
@@ -486,6 +487,48 @@ impl UnitComp {
         }
 
         updates
+    }
+
+    pub fn update_move_effect_abilities(
+        &mut self,
+        delta: f32,
+        in_fog: bool,
+    ) -> Vec<MoveEffectPlan> {
+        if self.abilities.len() != self.type_info.abilities.len() {
+            self.abilities = vec![AbilityWire::default(); self.type_info.abilities.len()];
+        }
+
+        let unit_x = self.x();
+        let unit_y = self.y();
+        let unit_rotation = self.rotation();
+        let velocity_len2 = self.vel.vel.x * self.vel.vel.x + self.vel.vel.y * self.vel.vel.y;
+        let mut plans = Vec::new();
+
+        for (index, descriptor) in self.type_info.abilities.iter().enumerate() {
+            let Some(mut ability) = MoveEffectAbility::from_descriptor(descriptor) else {
+                continue;
+            };
+            ability.counter = self.abilities.get(index).map_or(0.0, |wire| wire.data);
+
+            if let Some(plan) = ability.update_plan(
+                delta,
+                velocity_len2,
+                in_fog,
+                false,
+                unit_x,
+                unit_y,
+                unit_rotation,
+                (0.0, 0.0),
+            ) {
+                plans.push(plan);
+            }
+
+            if let Some(wire) = self.abilities.get_mut(index) {
+                wire.data = ability.counter;
+            }
+        }
+
+        plans
     }
 
     pub fn update_unit_spawn_abilities<F>(
@@ -1796,6 +1839,28 @@ mod tests {
         assert!((plans[0].1.offset_x - 11.0).abs() < 0.0001);
         assert!(plans[0].1.offset_y.abs() < 0.0001);
         assert_eq!(plans[0].1.rotation, 0.0);
+    }
+
+    #[test]
+    fn unit_component_ticks_move_effect_ability_from_runtime_slot() {
+        let mut unit_type = unit_type();
+        unit_type.abilities = vec!["MoveEffectAbility:0:-7:4:missileTrailShort:true".into()];
+        let mut unit = UnitComp::new(49, unit_type, TeamId(1));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(0.0);
+        unit.vel.vel.x = 1.0;
+        unit.vel.vel.y = 0.0;
+
+        assert!(unit.update_move_effect_abilities(3.0, false).is_empty());
+        assert_eq!(unit.abilities[0].data, 3.0);
+
+        let plans = unit.update_move_effect_abilities(1.0, false);
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].effect, "missileTrailShort");
+        assert!((plans[0].x - 93.0).abs() < 0.0001);
+        assert!((plans[0].y - 200.0).abs() < 0.0001);
+        assert!(plans[0].team_color);
+        assert_eq!(unit.abilities[0].data, 0.0);
     }
 
     #[test]

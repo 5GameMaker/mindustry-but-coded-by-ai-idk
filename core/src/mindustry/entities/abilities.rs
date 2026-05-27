@@ -1114,18 +1114,22 @@ impl Ability for SuppressionFieldAbility {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MoveEffectPlan {
+    pub effect: String,
     pub x: f32,
     pub y: f32,
     pub rotation: f32,
     pub amount: i32,
+    pub team_color: bool,
+    pub parentize_effects: bool,
     pub timer: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveEffectAbility {
     pub base: BasicAbility,
+    pub effect: String,
     pub min_velocity: f32,
     pub interval: f32,
     pub chance: f32,
@@ -1151,6 +1155,7 @@ impl Default for MoveEffectAbility {
                 visible: false,
                 data: 0.0,
             },
+            effect: "missileTrail".into(),
             min_velocity: 0.08,
             interval: 3.0,
             chance: 0.0,
@@ -1179,6 +1184,36 @@ impl MoveEffectAbility {
             interval,
             ..Default::default()
         }
+    }
+
+    pub fn from_descriptor(descriptor: &str) -> Option<Self> {
+        let descriptor = descriptor.trim();
+        let args = descriptor.strip_prefix("MoveEffectAbility:").or_else(|| {
+            descriptor
+                .strip_prefix("MoveEffectAbility(")
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?;
+        let mut parts = args
+            .split([',', ':'])
+            .map(str::trim)
+            .filter(|part| !part.is_empty());
+
+        let x = parts.next()?.parse().ok()?;
+        let y = parts.next()?.parse().ok()?;
+        let interval = parts.next()?.parse().ok()?;
+        let effect = parts.next().unwrap_or("missileTrail").to_string();
+        let mut ability = Self::new(x, y, interval);
+        ability.effect = effect;
+        if let Some(team_color) = parts.next() {
+            ability.team_color = matches!(team_color, "true" | "1" | "team");
+        }
+        if let Some(min_velocity) = parts.next() {
+            ability.min_velocity = min_velocity.parse().ok()?;
+        }
+        if let Some(amount) = parts.next() {
+            ability.amount = amount.parse().ok()?;
+        }
+        Some(ability)
     }
 
     pub fn update_plan(
@@ -1213,6 +1248,7 @@ impl MoveEffectAbility {
         self.counter %= self.interval;
 
         Some(MoveEffectPlan {
+            effect: self.effect.clone(),
             x: unit_x + offset_x,
             y: unit_y + offset_y,
             rotation: (if self.rotate_effect {
@@ -1221,6 +1257,8 @@ impl MoveEffectAbility {
                 self.effect_param
             }) + self.rotation,
             amount: self.amount,
+            team_color: self.team_color,
+            parentize_effects: self.parentize_effects,
             timer: self.counter,
         })
     }
@@ -2575,7 +2613,22 @@ mod tests {
         assert!((plan.y - 210.0).abs() < 0.0001);
         assert_eq!(plan.rotation, 95.0);
         assert_eq!(plan.amount, 2);
+        assert_eq!(plan.effect, "missileTrail");
+        assert!(!plan.team_color);
         assert_eq!(plan.timer, 0.0);
+    }
+
+    #[test]
+    fn move_effect_descriptor_parses_elude_runtime_entry() {
+        let ability =
+            MoveEffectAbility::from_descriptor("MoveEffectAbility:0:-7:4:missileTrailShort:true")
+                .expect("elude descriptor should parse");
+        assert_eq!(ability.x, 0.0);
+        assert_eq!(ability.y, -7.0);
+        assert_eq!(ability.interval, 4.0);
+        assert_eq!(ability.effect, "missileTrailShort");
+        assert!(ability.team_color);
+        assert!(MoveEffectAbility::from_descriptor("MoveLightningAbility").is_none());
     }
 
     #[test]

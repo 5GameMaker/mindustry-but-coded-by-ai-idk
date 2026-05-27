@@ -3004,3 +3004,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入死亡产子单位能力运行时`。
   3. 后续补 Java 等价随机 spread/randAmount 的可复现 RNG、死亡事件总线、death effect/wreck 与更完整 unit removal lifecycle。
+
+---
+
+## 90. 最新闭环记录：MoveEffectAbility / elude movement trail ability slot
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：对照 `MoveEffectAbility.java` 与 `UnitTypes.elude`，把 elude 的移动特效 ability 接入 `UnitType` content 与 `UnitComp` ability slot；本轮只生成 runtime sidecar plan，后续再接 desktop/client effect queue。
+- Java 依据：
+  - `MoveEffectAbility.update(Unit unit)` 在 `Vars.headless` 时直接返回；
+  - 累加 `counter += Time.delta`，速度达到 `minVelocity`、interval/chance 满足且不在玩家雾中时，按 `unit.rotation - 90f` 计算 `x/y` 偏移；
+  - 触发后 `counter %= interval`，按 `amount` 次调用 `effect.at(...)`；
+  - `elude` 使用 `new MoveEffectAbility(0f, -7f, Pal.sapBulletBack, Fx.missileTrailShort, 4f){{ teamColor = true; }}`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/abilities.rs`
+    - `MoveEffectPlan` 增加 `effect`、`team_color`、`parentize_effects`；
+    - `MoveEffectAbility` 增加 `effect` 字段；
+    - 新增 `MoveEffectAbility::from_descriptor(...)`，支持 `MoveEffectAbility:x:y:interval:effect[:teamColor[:minVelocity[:amount]]]`；
+    - 新增 elude descriptor 解析测试。
+  - `core/src/mindustry/content/unit_types.rs`
+    - 为 `elude` 挂载 `MoveEffectAbility:0:-7:4:missileTrailShort:true`；
+    - 内容覆盖测试断言 descriptor 存在。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::update_move_effect_abilities(delta, in_fog)`；
+    - 使用 `AbilityWire.data` 保存 Java `counter`，按单位位置/旋转/速度生成 `MoveEffectPlan`。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core move_effect --lib`
+  - `cargo test -p mindustry-core unit_component_ticks_move_effect --lib`
+  - `cargo test -p mindustry-core unit_kind_defaults_cover_java_constructor_and_init_side_effects --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入移动特效单位能力槽`。
+  3. 后续接入 `MoveEffectPlan` → desktop/client local effect event queue；补可复现 RNG、chance/random offset、fog/player team 可见性、`Fx.missileTrailShort` 真实表现层、结构化 ability spec/runtime state。
