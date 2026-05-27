@@ -3705,6 +3705,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo fmt --check`、`git diff --check`；
   2. 中文提交并推送 `origin main`，建议标题：`收紧液体坑外溢更新顺序`；
   3. 后续欠账：
-     - Java `EntityGroup.update()` 动态 `array.size` 可能让新创建 puddle 在同 tick 更新，Rust 当前仍只遍历 tick 开始快照；
+     - Java `EntityGroup.update()` 动态 `array.size` 让新创建 puddle 同 tick 更新的欠账已在下一闭环继续处理；
      - `puddle_on_building` 与 `particle_effect` 已有 event，但 server consumer 仍未完整接入；
      - `CellLiquid.update` 仍是 report 后统一处理，不是每个 puddle inline 执行，后续要继续收紧 phase boundary。
+
+---
+
+## 112. 最新闭环记录：Puddles 同 tick 追加新建外溢 puddle
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：对照 Java `EntityGroup.update()` 动态 `array.size`，让 `Puddles.deposit(...)` 在外溢 spread 中新建的 puddle 能追加到同一 tick 的 update queue。
+- Java 依据：
+  - `EntityGroup.update()` 不是固定快照，而是 `index < array.size`；
+  - `Puddles.deposit(...)` 创建新 puddle 后 `puddle.add()` 追加到 group；
+  - 因此新建外溢 puddle 会在同一 tick 继续执行一次自己的 `PuddleComp.update()`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/puddles.rs`
+    - `update_all_with_passability_report(...)` 改为 index-based queue；
+    - tick 初始已有 puddle 按 `(id, tile)` 排序；
+    - immediate spread deposit 若创建新 puddle，则把新 `(id, tile)` append 到当前 queue；
+    - 用 `processed_ids` 避免同一 puddle id 重复更新；
+    - `update_all_spreads_overfilled_puddles_to_d4_neighbors` 中新建邻居 amount 从 `0.3` 收紧到 `0.2`，锁定同 tick 追加后的一次蒸发。
+- 已跑验证：
+  - `cargo test -p mindustry-core update_all_spread --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+- 当前仍需继续：
+  1. 跑收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo fmt --check`、`git diff --check`；
+  2. 中文提交并推送 `origin main`，建议标题：`追加新建液体坑同帧更新`；
+  3. 后续欠账：
+     - Java remove/swap 与 Rust `HashMap` 延迟 remove 的复杂顺序；
+     - `CellLiquid.update` 仍未 inline 到单 puddle update 末尾；
+     - `puddle_on_building`/`particle_effect` event consumer 仍需继续确认和接入。

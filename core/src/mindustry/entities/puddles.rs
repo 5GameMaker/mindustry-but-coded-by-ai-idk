@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::mindustry::entities::comp::{
     PuddleComp, PuddleLiquid, PuddleTile, PuddleUpdateContext, PuddleUpdatePlan,
@@ -472,7 +472,14 @@ impl Puddles {
         let mut report = PuddleUpdateReport::default();
         let mut remove_keys = Vec::new();
 
-        for (_id, key) in keys {
+        let mut processed_ids = HashSet::new();
+        let mut index = 0;
+        while index < keys.len() {
+            let (id, key) = keys[index];
+            index += 1;
+            if !processed_ids.insert(id) {
+                continue;
+            }
             let spread_targets = self.d4_spread_targets(key.0, key.1, &mut passable);
             let mut entry_spread_deposits = Vec::new();
             {
@@ -520,7 +527,7 @@ impl Puddles {
                 }
             }
             for ((x, y), source, liquid, amount) in entry_spread_deposits {
-                self.deposit(
+                let result = self.deposit(
                     Some(PuddleTileView::new(x, y)),
                     source,
                     liquid,
@@ -530,6 +537,15 @@ impl Puddles {
                         ..PuddleDepositContext::default()
                     },
                 );
+                if result.created {
+                    if let Some(tile_key) = result.tile {
+                        if let Some(entry) = self.puddles.get(&tile_key) {
+                            if !processed_ids.contains(&entry.puddle.id) {
+                                keys.push((entry.puddle.id, tile_key));
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1137,8 +1153,8 @@ mod tests {
         assert!((puddles.get(2, 2).unwrap().amount - 68.7).abs() < 0.0001);
         for (x, y) in [(2, 1), (3, 2), (2, 3), (1, 2)] {
             assert!(
-                (puddles.get(x, y).unwrap().amount - 0.3).abs() < 0.0001,
-                "neighbor ({x},{y}) should receive Java d4 spread deposit"
+                (puddles.get(x, y).unwrap().amount - 0.2).abs() < 0.0001,
+                "neighbor ({x},{y}) should receive Java d4 spread deposit and update in the same EntityGroup tick"
             );
         }
     }

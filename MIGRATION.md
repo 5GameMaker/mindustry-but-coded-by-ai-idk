@@ -5025,5 +5025,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_puddle_cell_liquid_building_deposit_precedes_neighbor_absorb_like_java --lib`
   - `cargo test -p mindustry-server puddle --lib`
 - 仍未完成：
-  - 新创建的 spread puddle 是否应在同一 Java `EntityGroup.update()` tick 内被动态 `array.size` 继续更新，Rust 当前仍只遍历 tick 开始时已有 puddle 快照；后续需用最小回归单独确认并收紧；
+  - 新创建的 spread puddle 同 tick 动态更新已在 12.171 继续收紧；
   - `Puddles` remove/registry 与 Java entity group remove 的即时性仍有差异风险，后续应在继续迁移 puddle entity lifecycle 时补严格测试。
+
+### 12.171 Puddles update follows EntityGroup dynamic append for created spread puddles
+
+- 2026-05-28：继续对照 Java `EntityGroup.update()` 的动态 `array.size` 迭代语义，修正上一节仍保留的“tick 开始快照”差异。
+- Java 依据：
+  - `EntityGroup.update()` 使用 `for(index = 0; index < array.size; index++) array.items[index].update();`；
+  - `Puddles.deposit(...)` 在可创建 puddle 时会 `Puddle.create()`、`register(puddle)`、`puddle.add()`，新实体追加到 group；
+  - 因为循环条件每轮读取当前 `array.size`，当前 tick 内新 append 的 puddle 也会继续更新。
+- Rust 新增/变化：
+  - `Puddles::update_all_with_passability_report(...)` 改为 index-based queue；
+  - 初始 queue 仍按 `(puddle.id, tile)` 排序，模拟既有 entity group 顺序；
+  - 每个 immediate spread deposit 若创建了新 puddle，则把新 puddle 的 `(id, tile)` append 到同一 queue；
+  - 用 `processed_ids` 防止重复处理同一 puddle id；
+  - `update_all_spreads_overfilled_puddles_to_d4_neighbors` 期望从 `0.3` 收紧为 `0.2`，表示新建邻居在同一 tick 里又执行了一次自身蒸发 update。
+- 已跑验证：
+  - `cargo test -p mindustry-core update_all_spread --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo test -p mindustry-server puddle --lib`
+- 仍未完成：
+  - Java remove/swap 与 Rust `HashMap` remove 延迟之间仍可能在复杂 replacement 场景产生顺序差异；
+  - `CellLiquid.update` 仍在 server report 后统一处理，尚未完全 inline 到每个 puddle update 末尾；
+  - `puddle_on_building`/`particle_effect` event 的真实 consumer 仍需后续迁移或确认 Java vanilla no-op/headless 条件。
