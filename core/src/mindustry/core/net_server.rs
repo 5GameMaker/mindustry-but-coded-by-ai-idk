@@ -7,14 +7,15 @@ use crate::mindustry::entities::comp::building::{BuildingComp, BuildingConfigCha
 use crate::mindustry::io::{BuildPlanWire, EntityRef, TeamId, TypeValue};
 use crate::mindustry::net::{
     packet_ids, ActionType, Administration, BlockSnapshotCallPacket, ClientPlanSnapshotCallPacket,
-    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, Connect, ConnectFilter,
-    ConnectPacket, DebugStatusClientCallPacket, DebugStatusClientUnreliableCallPacket, Disconnect,
-    EntitySnapshotCallPacket, HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2,
-    KickReason, Net, NetConnection, PacketKind, PlayerAction, ProviderEvent, RotateBlockCallPacket,
-    SendChatMessageCallPacket, SendMessageCallPacket2, SentPacket, ServerResponse,
-    StateSnapshotCallPacket, SteamAdminData, StreamBegin, StreamChunk, TileConfigCallPacket,
-    TileTapCallPacket, WorldDataBeginCallPacket, WorldReloadBeginAction, WorldReloadBeginPlan,
-    WorldReloadEndAction, WorldReloadEndPlan, WorldReloadPlayer, WorldReloader,
+    ClientPlanSnapshotReceivedCallPacket, ClientSnapshotCallPacket, CommandBuildingCallPacket,
+    Connect, ConnectFilter, ConnectPacket, DebugStatusClientCallPacket,
+    DebugStatusClientUnreliableCallPacket, Disconnect, EntitySnapshotCallPacket,
+    HiddenSnapshotCallPacket, KickCallPacket, KickCallPacket2, KickReason, Net, NetConnection,
+    PacketKind, PlayerAction, ProviderEvent, RotateBlockCallPacket, SendChatMessageCallPacket,
+    SendMessageCallPacket2, SentPacket, ServerResponse, StateSnapshotCallPacket, SteamAdminData,
+    StreamBegin, StreamChunk, TileConfigCallPacket, TileTapCallPacket, WorldDataBeginCallPacket,
+    WorldReloadBeginAction, WorldReloadBeginPlan, WorldReloadEndAction, WorldReloadEndPlan,
+    WorldReloadPlayer, WorldReloader,
 };
 use crate::mindustry::vars::{MAX_TCP_SIZE, MAX_TEXT_LENGTH};
 
@@ -1015,6 +1016,31 @@ impl NetServer {
         result
     }
 
+    pub fn send_command_building(
+        &self,
+        connection_id: i32,
+        packet: CommandBuildingCallPacket,
+    ) -> io::Result<()> {
+        let packet_kind = PacketKind::CommandBuildingCallPacket(packet);
+        let result = {
+            let mut net = self.net.lock().expect("Net mutex poisoned");
+            net.send_to(connection_id, &packet_kind, true)
+        };
+
+        let mut state = self.state.lock().expect("NetServerState mutex poisoned");
+        let now = Instant::now();
+        state.last_updated_at = Some(now);
+        if result.is_ok() {
+            Self::record_connection_sent(
+                &mut state,
+                connection_id,
+                "CommandBuildingCallPacket",
+                true,
+            );
+        }
+        result
+    }
+
     pub fn handle_tile_config_authority<F>(
         &self,
         connection_id: Option<i32>,
@@ -1937,6 +1963,24 @@ impl NetServer {
 
                         Self::dispatch_packet_handlers(&packet_handlers, &packet);
                     }
+                    PacketKind::CommandBuildingCallPacket(command_building) => {
+                        let packet =
+                            PacketKind::CommandBuildingCallPacket(command_building.clone());
+                        let accepted = {
+                            let mut state = state.lock().expect("NetServerState mutex poisoned");
+                            Self::record_command_building(
+                                &mut state,
+                                connection_id,
+                                command_building,
+                            )
+                        };
+
+                        if !accepted {
+                            return;
+                        }
+
+                        Self::dispatch_packet_handlers(&packet_handlers, &packet);
+                    }
                     PacketKind::RotateBlockCallPacket(rotate) => {
                         let packet = PacketKind::RotateBlockCallPacket(rotate.clone());
                         let accepted = {
@@ -2238,6 +2282,31 @@ impl NetServer {
         state.events.push(ProviderEvent::ServerPacket {
             connection_id: connection_id.unwrap_or(-1),
             packet: PacketKind::TileConfigCallPacket(packet.clone()),
+        });
+        true
+    }
+
+    fn record_command_building(
+        state: &mut NetServerState,
+        connection_id: Option<i32>,
+        packet: &CommandBuildingCallPacket,
+    ) -> bool {
+        let mut action =
+            Self::player_action_for_connection(state, connection_id, ActionType::CommandBuilding);
+        action.building_positions = Some(packet.buildings.clone());
+        action.ping_x = packet.target.x;
+        action.ping_y = packet.target.y;
+
+        if !state.administration.allow_action(&action) {
+            return false;
+        }
+
+        let now = Instant::now();
+        state.last_connection_id = connection_id;
+        state.last_updated_at = Some(now);
+        state.events.push(ProviderEvent::ServerPacket {
+            connection_id: connection_id.unwrap_or(-1),
+            packet: PacketKind::CommandBuildingCallPacket(packet.clone()),
         });
         true
     }

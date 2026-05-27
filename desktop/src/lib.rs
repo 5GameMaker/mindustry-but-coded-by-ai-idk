@@ -2,7 +2,8 @@ use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::content::blocks::{BlockDef, DistributionBlockKind};
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeClientSnapshotApplyReport, GameRuntimeClientUnitEnteredPayloadApplyReport,
-    GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
+    GameRuntimeCommandBuildingReport, GameRuntimeUnitCargoUnloadConfigureResult,
+    GameRuntimeUnitFactoryConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
@@ -65,9 +66,11 @@ pub struct DesktopLauncher {
     last_applied_unit_tether_block_spawned_packets_seen: u64,
     last_applied_unit_lifecycle_packets_seen: u64,
     last_applied_tile_config_packets_seen: u64,
+    last_applied_command_building_packets_seen: u64,
     last_unit_entered_payload_apply_report: Option<GameRuntimeClientUnitEnteredPayloadApplyReport>,
     last_tile_config_apply_result: Option<GameRuntimeUnitCargoUnloadConfigureResult>,
     last_unit_factory_tile_config_apply_result: Option<GameRuntimeUnitFactoryConfigureResult>,
+    last_command_building_apply_report: Option<GameRuntimeCommandBuildingReport>,
     last_runtime_map_load_report: Option<GameRuntimeMapLoadReport>,
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
     last_applied_client_plan_snapshot_received_count: usize,
@@ -100,9 +103,11 @@ impl DesktopLauncher {
             last_applied_unit_tether_block_spawned_packets_seen: 0,
             last_applied_unit_lifecycle_packets_seen: 0,
             last_applied_tile_config_packets_seen: 0,
+            last_applied_command_building_packets_seen: 0,
             last_unit_entered_payload_apply_report: None,
             last_tile_config_apply_result: None,
             last_unit_factory_tile_config_apply_result: None,
+            last_command_building_apply_report: None,
             last_runtime_map_load_report: None,
             last_client_snapshot_apply_report: None,
             last_applied_client_plan_snapshot_received_count: 0,
@@ -123,6 +128,7 @@ impl DesktopLauncher {
         self.sync_unit_tether_block_spawned_to_runtime();
         self.sync_unit_lifecycle_to_runtime();
         self.sync_tile_config_to_runtime();
+        self.sync_command_building_to_runtime();
         let now_millis = current_millis();
         self.sync_remote_player_snapshots_from_runtime();
         self.sync_remote_preview_plan_packets(now_millis);
@@ -550,6 +556,62 @@ impl DesktopLauncher {
         false
     }
 
+    fn sync_command_building_to_runtime(&mut self) -> bool {
+        if self.last_applied_world_data.is_none() {
+            return false;
+        }
+
+        let (seen, packet) = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            (
+                state.command_building_packets_seen,
+                state.last_command_building.clone(),
+            )
+        };
+        if seen == self.last_applied_command_building_packets_seen {
+            return false;
+        }
+        self.last_applied_command_building_packets_seen = seen;
+
+        let Some(packet) = packet else {
+            self.last_command_building_apply_report = None;
+            return false;
+        };
+
+        let player = packet.player.id.and_then(|id| {
+            if id == self.player.id {
+                Some(self.player.clone())
+            } else {
+                self.remote_players.get(&id).cloned()
+            }
+        });
+        let team = player.as_ref().map(|player| player.team).or_else(|| {
+            packet.buildings.iter().find_map(|tile_pos| {
+                self.runtime
+                    .buildings()
+                    .iter()
+                    .find(|building| building.tile_pos == *tile_pos)
+                    .map(|building| building.team)
+            })
+        });
+        let Some(team) = team else {
+            self.last_command_building_apply_report = None;
+            return false;
+        };
+        let last_accessed = player.as_ref().map(|player| player.colored_name());
+        let report = self.runtime.command_owned_unit_factory_positions(
+            &self.content_loader,
+            team,
+            &packet.buildings,
+            packet.target,
+            last_accessed,
+        );
+        let changed = report.changed();
+        self.last_command_building_apply_report = Some(report);
+        changed
+    }
+
     fn reset_snapshot_apply_cursors_to_current_net_state(&mut self) {
         let (
             block_mirror,
@@ -563,6 +625,7 @@ impl DesktopLauncher {
             unit_tether_block_spawned_packets_seen,
             unit_lifecycle_packets_seen,
             tile_config_packets_seen,
+            command_building_packets_seen,
         ) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
@@ -578,6 +641,7 @@ impl DesktopLauncher {
                 state.unit_tether_block_spawned_packets_seen,
                 state.unit_lifecycle_packets_seen,
                 state.tile_config_packets_seen,
+                state.command_building_packets_seen,
             )
         };
         self.last_applied_block_snapshot_mirror = block_mirror;
@@ -593,8 +657,10 @@ impl DesktopLauncher {
             unit_tether_block_spawned_packets_seen;
         self.last_applied_unit_lifecycle_packets_seen = unit_lifecycle_packets_seen;
         self.last_applied_tile_config_packets_seen = tile_config_packets_seen;
+        self.last_applied_command_building_packets_seen = command_building_packets_seen;
         self.last_unit_entered_payload_apply_report = None;
         self.last_tile_config_apply_result = None;
+        self.last_command_building_apply_report = None;
     }
 
     fn clear_snapshot_apply_cursors(&mut self) {
@@ -610,8 +676,10 @@ impl DesktopLauncher {
         self.last_applied_unit_tether_block_spawned_packets_seen = 0;
         self.last_applied_unit_lifecycle_packets_seen = 0;
         self.last_applied_tile_config_packets_seen = 0;
+        self.last_applied_command_building_packets_seen = 0;
         self.last_unit_entered_payload_apply_report = None;
         self.last_tile_config_apply_result = None;
+        self.last_command_building_apply_report = None;
         self.remote_players.clear();
         self.other_player_preview_overlays.clear();
     }
@@ -1205,9 +1273,9 @@ mod tests {
     };
     use mindustry_core::mindustry::net::{ArcNetProvider, NetProvider};
     use mindustry_core::mindustry::net::{
-        ClientPlanSnapshotReceivedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
-        NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket, UnitDespawnCallPacket,
-        UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
+        ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, NetworkPlayerData,
+        NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket,
+        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -2083,6 +2151,73 @@ mod tests {
             launcher.last_unit_factory_tile_config_apply_result,
             Some(GameRuntimeUnitFactoryConfigureResult::Cleared)
         );
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_command_building_packet_to_unit_factory_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(10, 7);
+        let factory_def = launcher
+            .content_loader
+            .block_by_name("air-factory")
+            .unwrap();
+        let mut factory_building =
+            BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(4));
+        factory_building.config = Some(TypeValue::Int(0));
+        launcher.runtime.add_building(factory_building);
+        launcher.runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+        let mut remote = PlayerComp::new(TeamId(4));
+        remote.id = 42;
+        remote.name = "remote".into();
+        remote.color = 0xAABB_CCDD;
+        launcher.remote_players.insert(42, remote);
+
+        let target = IoVec2::new(88.0, 104.0);
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::CommandBuildingCallPacket(
+                CommandBuildingCallPacket {
+                    player: mindustry_core::mindustry::io::EntityRef::new(42),
+                    buildings: vec![tile_pos],
+                    target,
+                },
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            launcher.runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory state should remain present after command building");
+        };
+        assert_eq!(factory.command_pos, Some(target));
+        assert_eq!(
+            launcher.runtime.buildings()[0].last_accessed,
+            "[#AABBCCDD]remote"
+        );
+        assert!(launcher
+            .last_command_building_apply_report
+            .as_ref()
+            .is_some_and(|report| report.commanded_positions == vec![tile_pos]));
     }
 
     #[test]

@@ -1956,6 +1956,22 @@ pub struct GameRuntimeUnitFactoryFrameReport {
     pub missing_runtime_states: usize,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameRuntimeCommandBuildingReport {
+    pub commanded_positions: Vec<i32>,
+    pub missing_buildings: usize,
+    pub team_mismatches: usize,
+    pub uncommandable_buildings: usize,
+    pub unsupported_blocks: usize,
+    pub missing_runtime_states: usize,
+}
+
+impl GameRuntimeCommandBuildingReport {
+    pub fn changed(&self) -> bool {
+        !self.commanded_positions.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GameRuntimeUnitReconstructorFrameReport {
     pub visited_buildings: usize,
@@ -4167,6 +4183,67 @@ impl GameRuntime {
             type_io::TypeValue::Content(_) => GameRuntimeUnitFactoryConfigureResult::UnknownUnit,
             _ => GameRuntimeUnitFactoryConfigureResult::UnsupportedValue,
         }
+    }
+
+    pub fn command_owned_unit_factory_positions(
+        &mut self,
+        content: &ContentLoader,
+        team: TeamId,
+        buildings: &[i32],
+        target: type_io::Vec2,
+        last_accessed: Option<String>,
+    ) -> GameRuntimeCommandBuildingReport {
+        let mut report = GameRuntimeCommandBuildingReport::default();
+
+        for &tile_pos in buildings {
+            let Some(index) = self
+                .buildings
+                .iter()
+                .position(|building| building.tile_pos == tile_pos)
+            else {
+                report.missing_buildings += 1;
+                continue;
+            };
+
+            if self.buildings[index].team != team {
+                report.team_mismatches += 1;
+                continue;
+            }
+
+            let Some(block) = content.block(self.buildings[index].block.id) else {
+                report.unsupported_blocks += 1;
+                continue;
+            };
+            let BlockDef::UnitFactory(factory_block) = block else {
+                report.unsupported_blocks += 1;
+                continue;
+            };
+            if !factory_block.commandable {
+                report.uncommandable_buildings += 1;
+                continue;
+            }
+
+            let building = self.buildings[index].clone();
+            if !self.ensure_unit_state_for_building(content, &building) {
+                report.missing_runtime_states += 1;
+                continue;
+            }
+
+            let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+                self.unit_runtime_states.get_mut(&tile_pos)
+            else {
+                report.missing_runtime_states += 1;
+                continue;
+            };
+
+            factory.command_pos = Some(target);
+            if let Some(last_accessed) = &last_accessed {
+                self.buildings[index].last_accessed = last_accessed.clone();
+            }
+            report.commanded_positions.push(tile_pos);
+        }
+
+        report
     }
 
     pub fn sense_owned_building_object(
@@ -21006,6 +21083,116 @@ mod tests {
             runtime.sense_owned_building_number(&content, tile_pos, LAccess::Progress),
             Some(0.0)
         );
+    }
+
+    #[test]
+    fn game_runtime_commands_unit_factory_position_and_payload_controller_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let BlockDef::UnitFactory(factory_block) = factory_def else {
+            panic!("air-factory should be a unit factory");
+        };
+        let plan = &factory_block.plans[0];
+        let factory_tile = point2_pack(21, 14);
+        let enemy_factory_tile = point2_pack(25, 14);
+        let router_tile = point2_pack(29, 14);
+        let target = IoVec2::new(64.0, 96.0);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(40, 24);
+        runtime.add_building(BuildingComp::new(
+            factory_tile,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.add_building(BuildingComp::new(
+            enemy_factory_tile,
+            factory_def.base().clone(),
+            TeamId(3),
+        ));
+        runtime.add_building(BuildingComp::new(
+            router_tile,
+            router_def.base().clone(),
+            TeamId(2),
+        ));
+        if let Some(items) = runtime.buildings[0].items.as_mut() {
+            for requirement in &plan.requirements {
+                items.set(requirement.item, requirement.amount);
+            }
+        }
+        runtime.unit_runtime_states.insert(
+            factory_tile,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: plan.time - 1.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        let report = runtime.command_owned_unit_factory_positions(
+            &content,
+            TeamId(2),
+            &[
+                factory_tile,
+                enemy_factory_tile,
+                router_tile,
+                point2_pack(31, 14),
+            ],
+            target,
+            Some("[#AABBCCDD]builder".into()),
+        );
+
+        assert_eq!(report.commanded_positions, vec![factory_tile]);
+        assert_eq!(report.team_mismatches, 1);
+        assert_eq!(report.unsupported_blocks, 1);
+        assert_eq!(report.missing_buildings, 1);
+        assert!(report.changed());
+        assert_eq!(runtime.buildings[0].last_accessed, "[#AABBCCDD]builder");
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("factory sidecar should remain present after command");
+        };
+        assert_eq!(factory.command_pos, Some(target));
+
+        let report = runtime.advance_owned_unit_factories(&content, 1.0).unwrap();
+
+        assert_eq!(report.produced_unit_payloads, 1);
+        let Some(GameRuntimeUnitBlockState::Factory { common, .. }) =
+            runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("factory sidecar should remain present after production");
+        };
+        assert_eq!(
+            payload_ref_sort_key(common.payload.as_ref().unwrap())
+                .unwrap()
+                .id,
+            flare.id()
+        );
+        let Some(PayloadRef::Unit {
+            class_id,
+            unit_bytes,
+        }) = common.payload.as_ref()
+        else {
+            panic!("factory output should be a unit payload");
+        };
+        let (start, end) =
+            GameRuntime::unit_payload_controller_bounds(*class_id, unit_bytes).unwrap();
+        let mut controller_bytes = &unit_bytes[start..end];
+        let controller = type_io::read_controller(&mut controller_bytes).unwrap();
+        assert_eq!(controller_bytes.len(), 0);
+        let type_io::ControllerWire::Command(command) = controller else {
+            panic!("commanded factory payload should get Command controller");
+        };
+        assert_eq!(command.target_pos, Some(target));
     }
 
     #[test]

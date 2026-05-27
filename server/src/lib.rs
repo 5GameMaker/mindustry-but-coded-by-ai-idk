@@ -40,12 +40,12 @@ use mindustry_core::mindustry::io::{
     type_io, BuildPlanWire, ContentPatchSet, EntityRef, TeamId, UnitRef,
 };
 use mindustry_core::mindustry::net::{
-    write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, DropItemCallPacket,
-    EntitySnapshotCallPacket, Net, NetConnection, NetworkPlayerData, NetworkWorldData, PacketKind,
-    PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket, ProviderEvent,
-    RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-    RequestUnitPayloadCallPacket, TileConfigCallPacket, TransferInventoryCallPacket,
-    UnitDespawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+    write_world_data, ArcNetProvider, ClientPlanSnapshotCallPacket, CommandBuildingCallPacket,
+    DropItemCallPacket, EntitySnapshotCallPacket, Net, NetConnection, NetworkPlayerData,
+    NetworkWorldData, PacketKind, PickedBuildPayloadCallPacket, PickedUnitPayloadCallPacket,
+    ProviderEvent, RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket,
+    RequestItemCallPacket, RequestUnitPayloadCallPacket, TileConfigCallPacket,
+    TransferInventoryCallPacket, UnitDespawnCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
 use mindustry_core::mindustry::r#type::UnitType;
 use mindustry_core::mindustry::vars::{
@@ -309,6 +309,16 @@ impl ServerLauncher {
                 },
                 ProviderEvent::ServerPacket {
                     connection_id,
+                    packet: PacketKind::CommandBuildingCallPacket(packet),
+                } => match self.apply_server_command_building_packet(connection_id, &packet) {
+                    Ok(true) => changed += 1,
+                    Ok(false) => {}
+                    Err(error) => {
+                        self.network_error = Some(error.to_string());
+                    }
+                },
+                ProviderEvent::ServerPacket {
+                    connection_id,
                     packet: PacketKind::RequestItemCallPacket(packet),
                 } => {
                     self.runtime_request_item_packets_seen += 1;
@@ -517,6 +527,87 @@ impl ServerLauncher {
         }
         self.last_runtime_power_node_config_result = Some(result);
         Ok(result.changed())
+    }
+
+    fn apply_server_command_building_packet(
+        &mut self,
+        connection_id: i32,
+        packet: &CommandBuildingCallPacket,
+    ) -> io::Result<bool> {
+        if connection_id < 0 || packet.buildings.is_empty() {
+            return Ok(false);
+        }
+
+        let source_connection = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            state.connection_states.get(&connection_id).cloned()
+        };
+        let Some(source_connection) = source_connection else {
+            return Ok(false);
+        };
+        if !Self::connection_can_receive_preview(&source_connection) {
+            return Ok(false);
+        }
+
+        let mut player = PlayerComp::new(source_connection.team);
+        player.id = connection_id;
+        player.name = source_connection.name.clone();
+        player.color = source_connection.color as u32;
+        player.locale = source_connection.locale.clone();
+        player.con = Some(source_connection.clone());
+        let report = self.runtime.command_owned_unit_factory_positions(
+            &self.content_loader,
+            source_connection.team,
+            &packet.buildings,
+            packet.target,
+            Some(player.colored_name()),
+        );
+
+        if report.changed() {
+            self.broadcast_runtime_command_building(connection_id, packet)?;
+        }
+        Ok(report.changed())
+    }
+
+    fn broadcast_runtime_command_building(
+        &mut self,
+        source_connection_id: i32,
+        packet: &CommandBuildingCallPacket,
+    ) -> io::Result<usize> {
+        let player = if source_connection_id >= 0 {
+            EntityRef::new(source_connection_id)
+        } else {
+            EntityRef::null()
+        };
+        let buildings = packet.buildings.clone();
+        let target = packet.target;
+        let targets = self.connected_runtime_tile_config_targets();
+        let mut sent = 0;
+        let mut first_error = None;
+        for target_connection in targets {
+            let server_packet = CommandBuildingCallPacket {
+                player,
+                buildings: buildings.clone(),
+                target,
+            };
+            match self
+                .net_server
+                .send_command_building(target_connection, server_packet)
+            {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(sent)
+        }
     }
 
     fn broadcast_runtime_tile_config(
@@ -2752,11 +2843,12 @@ mod tests {
         BuildPlanWire, BuildingRef, EntityRef, Point2, TeamId, TypeValue, UnitRef, Vec2,
     };
     use mindustry_core::mindustry::net::{
-        packet_ids, read_world_data, ClientPlanSnapshotCallPacket, Connect, ConnectFilter,
-        ConnectPacket, DoneCallback, DropItemCallPacket, Host, HostCallback, Net, NetConnection,
-        NetProvider, NetworkWorldData, PacketKind, PacketSerializer, ProviderEvent,
-        RequestBuildPayloadCallPacket, RequestDropPayloadCallPacket, RequestItemCallPacket,
-        RequestUnitPayloadCallPacket, TileConfigCallPacket, TransferInventoryCallPacket,
+        packet_ids, read_world_data, ClientPlanSnapshotCallPacket, CommandBuildingCallPacket,
+        Connect, ConnectFilter, ConnectPacket, DoneCallback, DropItemCallPacket, Host,
+        HostCallback, Net, NetConnection, NetProvider, NetworkWorldData, PacketKind,
+        PacketSerializer, ProviderEvent, RequestBuildPayloadCallPacket,
+        RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
+        TileConfigCallPacket, TransferInventoryCallPacket,
     };
     use mindustry_core::mindustry::r#type::Sector;
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, TILE_SIZE};
@@ -4385,6 +4477,93 @@ mod tests {
             launcher.runtime.buildings()[0].config,
             Some(TypeValue::Int(0))
         );
+    }
+
+    #[test]
+    fn server_update_applies_command_building_packet_to_unit_factory_and_forwards() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6583).unwrap();
+
+        let factory_def = launcher
+            .content_loader
+            .block_by_name("air-factory")
+            .unwrap();
+        let factory_tile = point2_pack(9, 6);
+        launcher.runtime.state.world.resize(16, 16);
+        let mut factory_building =
+            BuildingComp::new(factory_tile, factory_def.base().clone(), TeamId(6));
+        factory_building.config = Some(TypeValue::Int(0));
+        launcher.runtime.add_building(factory_building);
+        launcher.runtime.unit_runtime_states.insert(
+            factory_tile,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            for connection_id in [31, 32] {
+                let mut connection = NetConnection::new(format!("127.0.0.1:{connection_id}"));
+                connection.has_connected = true;
+                connection.player_added = true;
+                connection.team = TeamId(6);
+                connection.name = format!("player-{connection_id}");
+                connection.color = 0xAA_BB_CC_DD_u32 as i32;
+                state.connection_states.insert(connection_id, connection);
+            }
+        }
+
+        let target = Vec2::new(48.0, 80.0);
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(31),
+                true,
+                PacketKind::CommandBuildingCallPacket(CommandBuildingCallPacket {
+                    player: EntityRef::null(),
+                    buildings: vec![factory_tile],
+                    target,
+                }),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            launcher.runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("unit factory sidecar should stay present after command building");
+        };
+        assert_eq!(factory.command_pos, Some(target));
+        assert_eq!(
+            launcher.runtime.buildings()[0].last_accessed,
+            "[#AABBCCDD]player-31"
+        );
+
+        let sent = sent.lock().unwrap();
+        for connection_id in [31, 32] {
+            assert!(sent.iter().any(|(target_connection, packet, reliable)| {
+                *target_connection == connection_id
+                    && *reliable
+                    && matches!(
+                        packet,
+                        PacketKind::CommandBuildingCallPacket(packet)
+                            if packet.player == EntityRef::new(31)
+                                && packet.buildings == vec![factory_tile]
+                                && packet.target == target
+                    )
+            }));
+        }
     }
 
     #[test]
