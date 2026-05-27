@@ -3912,3 +3912,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt --check`
   - `cargo check -p mindustry-core`
 - 仍未完成：资源 consumer 的 `shouldConsume()` 仍只是 Reconstructor tick 的最小门控，尚未完整迁移 Java consume rollback/efficiency UI；真实 Java↔Rust 服务端物品传输 smoke 仍需补。
+
+### 12.120 UnitBlockSpawn 客户端生命周期回填
+
+- 2026-05-27：对照 Java `UnitBlock.unitBlockSpawn(Tile)` 与 `UnitBuild.spawned()`，把已存在的 `UnitBlockSpawnCallPacket` 从“NetClient 只记录生命周期包”推进到 desktop/runtime 回填，提升 Rust 客户端连接 Java 服务端时的 unit block 状态同步能力。
+- Java 依据：
+  - `UnitBuild.dumpPayload()` 在 `payload.dump()` 成功后调用 `Call.unitBlockSpawn(tile)`；
+  - `UnitBuild.spawned()` 只做 `progress = 0f; payload = null;`；
+  - 命令配置、当前 factory plan 等不是 `spawned()` 的清理对象。
+- Rust 新增/变化：
+  - `GameRuntime::apply_client_unit_block_spawn_packet(...)`：按 packet tile 定位 owned building，懒创建 unit sidecar 后处理 `UnitFactory` / `Reconstructor`，清空 `PayloadBlockBuildState.payload`，调用 `unit_block_spawned(...)` 复位 `progress/has_payload`，Reconstructor 同步清理 `constructing`，保留 `current_plan/command_id/command_pos`；
+  - `DesktopLauncher::sync_unit_lifecycle_to_runtime()` 现在除 `UnitDespawnCallPacket` 外也消费 `UnitBlockSpawnCallPacket`；
+  - 这让 Java 服务端广播 `UnitBlockSpawnCallPacket` 时，Rust desktop runtime 不再保留 stale unit payload/progress。
+- 新增验证：
+  - `cargo test -p mindustry-core unit_block_spawn_packet --lib`
+  - `cargo test -p mindustry-desktop unit_block_spawn_packet --lib`
+  - `cargo fmt --check`
+  - `cargo check -p mindustry-core`
+- 仍未完成：Rust 服务端在自身 `moveOutPayload()/dumpPayload()` 成功时还没有权威广播 `UnitBlockSpawnCallPacket`；后续需要把 owned runtime 的输出报告接到 server lifecycle broadcast，并补 Java↔Rust smoke。

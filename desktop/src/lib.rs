@@ -477,6 +477,9 @@ impl DesktopLauncher {
             return false;
         };
         match packet {
+            PacketKind::UnitBlockSpawnCallPacket(packet) => self
+                .runtime
+                .apply_client_unit_block_spawn_packet(&self.content_loader, &packet),
             PacketKind::UnitDespawnCallPacket(packet) => {
                 self.runtime.apply_client_unit_despawn_packet(&packet)
             }
@@ -1302,7 +1305,8 @@ mod tests {
     use mindustry_core::mindustry::net::{
         ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, NetworkPlayerData,
         NetworkPlayerSyncData, NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket,
-        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -1970,6 +1974,75 @@ mod tests {
                 .client_unit_tether_block_spawned_packets_applied,
             1
         );
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_unit_block_spawn_packet_to_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(8, 7);
+        let factory_def = launcher
+            .content_loader
+            .block_by_name("air-factory")
+            .unwrap();
+        let router_def = launcher.content_loader.block_by_name("router").unwrap();
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(4),
+        ));
+        launcher.runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState {
+                    payload: Some(PayloadRef::Block {
+                        block: router_def.base().id,
+                        version: 0,
+                        build_bytes: Vec::new(),
+                    }),
+                    ..PayloadBlockBuildState::default()
+                },
+                factory: UnitFactoryState {
+                    base: UnitBlockState {
+                        progress: 9.0,
+                        has_payload: true,
+                        ..UnitBlockState::default()
+                    },
+                    current_plan: 0,
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::UnitBlockSpawnCallPacket(
+                UnitBlockSpawnCallPacket {
+                    tile: Some(tile_pos),
+                },
+            ));
+        }
+        launcher.update();
+
+        let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+            launcher.runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory state should remain present");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(factory.base.progress, 0.0);
+        assert!(!factory.base.has_payload);
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
     }
 
     #[test]

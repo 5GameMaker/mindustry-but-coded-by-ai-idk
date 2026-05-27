@@ -41,8 +41,8 @@ use crate::mindustry::{
     },
     logic::{LAccess, LVarValue},
     net::{
-        NetworkPlayerSyncData, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
-        UnitTetherBlockSpawnedCallPacket,
+        NetworkPlayerSyncData, UnitBlockSpawnCallPacket, UnitDespawnCallPacket,
+        UnitEnteredPayloadCallPacket, UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -171,13 +171,14 @@ use crate::mindustry::{
         read_unit_factory_state, reconstructor_accept_item, reconstructor_accept_payload,
         reconstructor_fraction, reconstructor_maximum_accepted, reconstructor_update,
         unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_spawned,
-        unit_assembler_update_progress, unit_cargo_loader_accept_item, unit_cargo_loader_spawned,
-        unit_cargo_loader_update, unit_cargo_unload_update, unit_factory_accept_item,
-        unit_factory_configure_plan, unit_factory_fraction, unit_factory_maximum_accepted,
-        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
-        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
-        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
-        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+        unit_assembler_update_progress, unit_block_spawned, unit_cargo_loader_accept_item,
+        unit_cargo_loader_spawned, unit_cargo_loader_update, unit_cargo_unload_update,
+        unit_factory_accept_item, unit_factory_configure_plan, unit_factory_fraction,
+        unit_factory_maximum_accepted, unit_factory_update, write_reconstructor_state,
+        write_repair_turret_state, write_unit_assembler_state, write_unit_cargo_loader_state,
+        write_unit_cargo_unload_state, write_unit_factory_state, ReconstructorState,
+        RepairTurretState, UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState,
+        UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -3497,6 +3498,49 @@ impl GameRuntime {
         }
         self.client_unit_tether_block_spawned_packets_applied += 1;
         true
+    }
+
+    pub fn apply_client_unit_block_spawn_packet(
+        &mut self,
+        content: &ContentLoader,
+        packet: &UnitBlockSpawnCallPacket,
+    ) -> bool {
+        let Some(tile_pos) = packet.tile else {
+            return false;
+        };
+
+        let Some(building) = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)
+            .cloned()
+        else {
+            return false;
+        };
+        if !self.ensure_unit_state_for_building(content, &building) {
+            return false;
+        }
+
+        let Some(state) = self.unit_runtime_states.get_mut(&tile_pos) else {
+            return false;
+        };
+        match state {
+            GameRuntimeUnitBlockState::Factory { common, factory } => {
+                common.payload = None;
+                unit_block_spawned(&mut factory.base);
+                true
+            }
+            GameRuntimeUnitBlockState::Reconstructor {
+                common,
+                reconstructor,
+            } => {
+                common.payload = None;
+                unit_block_spawned(&mut reconstructor.base);
+                reconstructor.constructing = false;
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn apply_client_unit_despawn_packet(&mut self, packet: &UnitDespawnCallPacket) -> bool {
@@ -23905,6 +23949,116 @@ mod tests {
             crate::mindustry::entities::comp::BuildingTetherAction::Keep
         );
         assert_eq!(runtime.client_unit_tether_block_spawned_packets_applied, 1);
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_block_spawn_packet_to_unit_block_state_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let mono = content.unit_by_name("mono").unwrap().clone();
+        let factory_tile = point2_pack(19, 18);
+        let reconstructor_tile = point2_pack(24, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(32, 32);
+        runtime.add_building(BuildingComp::new(
+            factory_tile,
+            factory_def.base().clone(),
+            TeamId(4),
+        ));
+        runtime.add_building(BuildingComp::new(
+            reconstructor_tile,
+            reconstructor_def.base().clone(),
+            TeamId(4),
+        ));
+
+        let factory_payload = GameRuntime::unit_payload_ref_from_unit(
+            &content,
+            &UnitComp::new(901, flare, TeamId(4)),
+        )
+        .unwrap();
+        let reconstructor_payload =
+            GameRuntime::unit_payload_ref_from_unit(&content, &UnitComp::new(902, mono, TeamId(4)))
+                .unwrap();
+        runtime.unit_runtime_states.insert(
+            factory_tile,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState {
+                    payload: Some(factory_payload),
+                    ..PayloadBlockBuildState::default()
+                },
+                factory: UnitFactoryState {
+                    base: UnitBlockState {
+                        progress: 17.0,
+                        has_payload: true,
+                        ..UnitBlockState::default()
+                    },
+                    current_plan: 0,
+                    command_id: Some(1),
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+        runtime.unit_runtime_states.insert(
+            reconstructor_tile,
+            GameRuntimeUnitBlockState::Reconstructor {
+                common: PayloadBlockBuildState {
+                    payload: Some(reconstructor_payload),
+                    ..PayloadBlockBuildState::default()
+                },
+                reconstructor: ReconstructorState {
+                    base: UnitBlockState {
+                        progress: 23.0,
+                        has_payload: true,
+                        ..UnitBlockState::default()
+                    },
+                    command_id: Some(2),
+                    constructing: true,
+                    ..ReconstructorState::default()
+                },
+            },
+        );
+
+        assert!(runtime.apply_client_unit_block_spawn_packet(
+            &content,
+            &UnitBlockSpawnCallPacket {
+                tile: Some(factory_tile),
+            },
+        ));
+        let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+            runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("factory sidecar should remain present after unitBlockSpawn");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(factory.base.progress, 0.0);
+        assert!(!factory.base.has_payload);
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(factory.command_id, Some(1));
+
+        assert!(runtime.apply_client_unit_block_spawn_packet(
+            &content,
+            &UnitBlockSpawnCallPacket {
+                tile: Some(reconstructor_tile),
+            },
+        ));
+        let Some(GameRuntimeUnitBlockState::Reconstructor {
+            common,
+            reconstructor,
+        }) = runtime.unit_runtime_states.get(&reconstructor_tile)
+        else {
+            panic!("reconstructor sidecar should remain present after unitBlockSpawn");
+        };
+        assert!(common.payload.is_none());
+        assert_eq!(reconstructor.base.progress, 0.0);
+        assert!(!reconstructor.base.has_payload);
+        assert_eq!(reconstructor.command_id, Some(2));
+        assert!(!reconstructor.constructing);
+        assert!(!runtime.apply_client_unit_block_spawn_packet(
+            &content,
+            &UnitBlockSpawnCallPacket { tile: None },
+        ));
     }
 
     #[test]
