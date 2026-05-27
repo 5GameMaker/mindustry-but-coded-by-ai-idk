@@ -3573,3 +3573,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core payload_router_match_pick_control_and_serialization_follow_java_shell`
   - `cargo check --workspace`
 - 仍未完成：当前升级完成只 patch raw UnitType id，尚未完整重建 Java `UnitType.create(team)` 后的新 unit health/weapon/mount/controller 默认状态；`command_pos/command_id -> UnitCommand` 写回、`UnitCreateEvent`、create sound、shake、Fx.producesmoke、真实 entity materialize/dump 与 renderer/UI 仍需继续迁移。
+
+### 12.108 Reconstructor 升级后写回 Command controller
+
+- 2026-05-27：继续对照 Java `ReconstructorBuild.updateTile()` 完成升级后的命令继承逻辑：Rust 现在会在 UnitPayload 升级时定位 raw unit body 里的 `controller` 段，允许 `Vec::splice` 变长替换为 `ControllerWire::Command`，写入 `command_pos` 与配置命令；未配置命令时回退到升级目标 unit 的 `default_command`。
+- Java 依据：
+  - `payload.unit = upgrade(payload.unit.type).create(payload.unit.team())` 后，如果 `payload.unit.isCommandable()`，会先写 `commandPosition(commandPos)`，再写 `command == null && payload.unit.type.defaultCommand != null ? payload.unit.type.defaultCommand : command`；
+  - `ReconstructorBuild.write/read` 会保存 `commandPos` 和 `command`；
+  - `UnitType.init()` 中只有 `mono/poly/mega` 显式 defaultCommand，且内容名分别对应 `mine/rebuild/repair`。
+- Rust 新增/变化：
+  - `unit_default_command_id(...)` 支持把目标 `UnitType.default_command` 解析到 `UnitCommand` content id，并保留 `*Command` 后缀兼容映射；
+  - `unit_payload_controller_bounds(...)` 按当前 v158 UnitPayload schema 跳过 revision/abilities/schema 特化字段后定位 controller 起止范围；
+  - `payload_ref_patch_unit_controller(...)` 用 `type_io::write_controller(...)` 生成新 controller bytes 并替换原 controller 段，避免错误假设 controller 有固定 offset；
+  - 修正 `content/unit_types.rs` 的默认命令基线：`mono=mine`、`poly=rebuild`、`mega=repair`，移除 alpha/beta/gamma/evoke/incite/emanate 的误填 default_command。
+- 新增 core 回归测试：
+  - `game_runtime_reconstructor_applies_default_command_to_upgraded_payload`
+  - `unit_core_properties_match_upstream_subset` 增加默认命令断言。
+- 验证：
+  - `cargo test -p mindustry-core reconstructor`
+  - `cargo test -p mindustry-core unit_core_properties_match_upstream_subset`
+  - `cargo check --workspace`
+- 仍未完成：当前 controller 写回只覆盖 Reconstructor 升级时的 command/defaultCommand 最小分支；尚未完整实现 Java `isCommandable()`/`commands.contains(command)` 过滤、UnitType.init 自动 commands 列表、完整 `UnitType.create(team)` 重建 health/mount/weapon 默认值，以及 UnitCreateEvent/effect/sound 联机广播。

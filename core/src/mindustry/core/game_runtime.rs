@@ -14701,6 +14701,68 @@ impl GameRuntime {
             || rules.researched.is_empty()
     }
 
+    fn unit_default_command_id(
+        content: &ContentLoader,
+        unit: &crate::mindustry::r#type::UnitType,
+    ) -> Option<ContentId> {
+        let command = unit.default_command.as_deref()?;
+        content
+            .unit_command_by_name(command)
+            .or_else(|| {
+                command
+                    .strip_suffix("Command")
+                    .and_then(|name| content.unit_command_by_name(name))
+            })
+            .map(|command| command.base.base.id)
+    }
+
+    fn unit_payload_controller_bounds(class_id: u8, unit_bytes: &[u8]) -> Option<(usize, usize)> {
+        let mut read = unit_bytes;
+        let revision = type_io::read_i16(&mut read).ok()?;
+        let schema = Self::unit_payload_schema(class_id, revision)?;
+
+        type_io::skip_abilities(&mut read).ok()?;
+        if matches!(schema, GameRuntimeUnitPayloadSchema::Ammo) {
+            type_io::read_f32(&mut read).ok()?;
+        } else {
+            type_io::read_f32(&mut read).ok()?;
+            type_io::read_f32(&mut read).ok()?;
+        }
+        if matches!(schema, GameRuntimeUnitPayloadSchema::BaseRotation) {
+            type_io::read_f32(&mut read).ok()?;
+        }
+        if matches!(schema, GameRuntimeUnitPayloadSchema::BuildingPayloads) {
+            type_io::read_building_ref(&mut read).ok()?;
+        }
+
+        let start = unit_bytes.len().checked_sub(read.len())?;
+        type_io::read_controller(&mut read).ok()?;
+        let end = unit_bytes.len().checked_sub(read.len())?;
+        (start <= end).then_some((start, end))
+    }
+
+    fn payload_ref_patch_unit_controller(
+        payload: &mut PayloadRef,
+        controller: &type_io::ControllerWire,
+    ) -> bool {
+        let PayloadRef::Unit {
+            class_id,
+            unit_bytes,
+        } = payload
+        else {
+            return false;
+        };
+        let Some((start, end)) = Self::unit_payload_controller_bounds(*class_id, unit_bytes) else {
+            return false;
+        };
+        let mut controller_bytes = Vec::new();
+        if type_io::write_controller(&mut controller_bytes, controller).is_err() {
+            return false;
+        }
+        unit_bytes.splice(start..end, controller_bytes);
+        true
+    }
+
     fn reconstructor_accepts_payload_ref_with_rules(
         content: &ContentLoader,
         rules: &crate::mindustry::game::Rules,
@@ -16085,21 +16147,36 @@ impl GameRuntime {
             let has_required_items = building_has_items(&self.buildings[index], &item_requirements);
             let unit_build_speed = self.state.rules.unit_build_speed(team.0 as usize);
 
-            let target_unit_id = self
+            let target_upgrade = self
                 .unit_runtime_states
                 .get(&tile_pos)
                 .and_then(|state| match state {
-                    GameRuntimeUnitBlockState::Reconstructor { common, .. } => {
-                        common.payload.as_ref()
-                    }
+                    GameRuntimeUnitBlockState::Reconstructor {
+                        common,
+                        reconstructor,
+                    } => common
+                        .payload
+                        .as_ref()
+                        .map(|payload| (payload, reconstructor)),
                     _ => None,
                 })
-                .and_then(|payload| {
+                .and_then(|(payload, reconstructor)| {
                     Self::reconstructor_upgrade_for_payload(content, reconstructor_block, payload)
                         .and_then(|(_from, to)| {
-                            (Self::reconstructor_upgrade_unlocked_now(&self.state.rules, to)
-                                && !self.state.rules.is_unit_banned(to.name()))
-                            .then_some(to.base.mappable.base.id)
+                            if Self::reconstructor_upgrade_unlocked_now(&self.state.rules, to)
+                                && !self.state.rules.is_unit_banned(to.name())
+                            {
+                                Some((
+                                    to.base.mappable.base.id,
+                                    reconstructor
+                                        .command_id
+                                        .map(|id| id as ContentId)
+                                        .or_else(|| Self::unit_default_command_id(content, to)),
+                                    reconstructor.command_pos,
+                                ))
+                            } else {
+                                None
+                            }
                         })
                 });
 
@@ -16123,7 +16200,7 @@ impl GameRuntime {
                     continue;
                 }
 
-                if target_unit_id.is_none() {
+                if target_upgrade.is_none() {
                     reconstructor.constructing = false;
                     report.moved_out_payloads += 1;
                     let arrived = payload_block_move_out_step(
@@ -16175,8 +16252,24 @@ impl GameRuntime {
                     let patched = common
                         .payload
                         .as_mut()
-                        .zip(target_unit_id)
-                        .map(|(payload, unit_id)| payload_ref_patch_unit_type(payload, unit_id))
+                        .zip(target_upgrade)
+                        .map(|(payload, (unit_id, command_id, command_pos))| {
+                            let type_patched = payload_ref_patch_unit_type(payload, unit_id);
+                            let controller_patched =
+                                if command_id.is_some() || command_pos.is_some() {
+                                    Self::payload_ref_patch_unit_controller(
+                                        payload,
+                                        &type_io::ControllerWire::Command(type_io::CommandWire {
+                                            target_pos: command_pos,
+                                            command_id,
+                                            ..type_io::CommandWire::new()
+                                        }),
+                                    )
+                                } else {
+                                    true
+                                };
+                            type_patched && controller_patched
+                        })
                         .unwrap_or(false);
                     if patched {
                         report.upgraded_payloads += 1;
@@ -18664,6 +18757,83 @@ mod tests {
                 .id,
             horizon.id()
         );
+    }
+
+    #[test]
+    fn game_runtime_reconstructor_applies_default_command_to_upgraded_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mono = content.unit_by_name("mono").unwrap().clone();
+        let poly = content.unit_by_name("poly").unwrap();
+        let rebuild = content.unit_command_by_name("rebuild").unwrap();
+        let reconstructor_def = content.block_by_name("additive-reconstructor").unwrap();
+        let BlockDef::UnitReconstructor(reconstructor_block) = reconstructor_def else {
+            panic!("additive-reconstructor should be a unit reconstructor");
+        };
+        let tile_pos = point2_pack(22, 10);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(32, 24);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            reconstructor_def.base().clone(),
+            TeamId(3),
+        ));
+        if let Some(items) = runtime.buildings[0].items.as_mut() {
+            for requirement in &reconstructor_block.consume_items {
+                items.set(requirement.item, requirement.amount);
+            }
+        }
+        let mut unit = UnitComp::new(5599, mono, TeamId(3));
+        unit.set_pos(runtime.buildings[0].x, runtime.buildings[0].y);
+        assert!(runtime.attach_unit_payload_to_building(&content, tile_pos, &unit));
+        let command_pos = IoVec2::new(42.0, 24.0);
+        {
+            let Some(GameRuntimeUnitBlockState::Reconstructor {
+                common,
+                reconstructor,
+            }) = runtime.unit_runtime_states.get_mut(&tile_pos)
+            else {
+                panic!("reconstructor should have unit sidecar");
+            };
+            common.pay_vector = Vec2::ZERO;
+            reconstructor.base.progress = reconstructor_block.construct_time - 1.0;
+            reconstructor.command_pos = Some(command_pos);
+            reconstructor.command_id = None;
+        }
+
+        let report = runtime
+            .advance_owned_unit_reconstructors(&content, 1.0)
+            .unwrap();
+
+        assert_eq!(report.upgraded_payloads, 1);
+        let Some(GameRuntimeUnitBlockState::Reconstructor { common, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("reconstructor sidecar should remain present");
+        };
+        let Some(PayloadRef::Unit {
+            class_id,
+            unit_bytes,
+        }) = common.payload.as_ref()
+        else {
+            panic!("upgraded payload should remain a unit payload");
+        };
+        assert_eq!(
+            payload_ref_sort_key(common.payload.as_ref().unwrap())
+                .unwrap()
+                .id,
+            poly.id()
+        );
+        let (start, end) =
+            GameRuntime::unit_payload_controller_bounds(*class_id, unit_bytes).unwrap();
+        let mut controller_bytes = &unit_bytes[start..end];
+        let controller = type_io::read_controller(&mut controller_bytes).unwrap();
+        assert_eq!(controller_bytes.len(), 0);
+        let type_io::ControllerWire::Command(command) = controller else {
+            panic!("upgraded commandable payload should get Command controller");
+        };
+        assert_eq!(command.target_pos, Some(command_pos));
+        assert_eq!(command.command_id, Some(rebuild.id()));
     }
 
     #[test]

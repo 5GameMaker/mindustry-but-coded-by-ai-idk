@@ -321,7 +321,7 @@ pub fn load() -> Vec<UnitType> {
             u.is_enemy = false;
             u.mine_tier = 1;
             u.mine_speed = 2.5;
-            u.default_command = Some("mineCommand".into());
+            u.default_command = Some("mine".into());
         }),
         unit(&mut next_id, "poly", UnitKind::Standard, |u| {
             u.flying = true;
@@ -334,7 +334,7 @@ pub fn load() -> Vec<UnitType> {
             u.low_altitude = true;
             u.mine_tier = 2;
             u.mine_speed = 3.5;
-            u.default_command = Some("rebuildCommand".into());
+            u.default_command = Some("rebuild".into());
         }),
         unit(&mut next_id, "mega", UnitKind::Standard, |u| {
             u.mine_tier = 3;
@@ -350,7 +350,7 @@ pub fn load() -> Vec<UnitType> {
             u.payload_capacity = 4.0 * super_tile_payload();
             u.build_speed = 2.6;
             u.is_enemy = false;
-            u.default_command = Some("rebuildCommand".into());
+            u.default_command = Some("repair".into());
         }),
         unit(&mut next_id, "quad", UnitKind::Standard, |u| {
             u.armor = 8.0;
@@ -469,7 +469,6 @@ pub fn load() -> Vec<UnitType> {
             u.health = 150.0;
             u.engine_offset = 6.0;
             u.hit_size = 8.0;
-            u.default_command = Some("rebuildCommand".into());
         }),
         unit(&mut next_id, "beta", UnitKind::Standard, |u| {
             u.is_enemy = false;
@@ -484,7 +483,6 @@ pub fn load() -> Vec<UnitType> {
             u.engine_offset = 6.0;
             u.hit_size = 9.0;
             u.low_altitude = true;
-            u.default_command = Some("rebuildCommand".into());
         }),
         unit(&mut next_id, "gamma", UnitKind::Standard, |u| {
             u.is_enemy = false;
@@ -499,7 +497,6 @@ pub fn load() -> Vec<UnitType> {
             u.health = 220.0;
             u.engine_offset = 6.0;
             u.hit_size = 11.0;
-            u.default_command = Some("rebuildCommand".into());
         }),
         unit(&mut next_id, "stell", UnitKind::Tank, |u| {
             u.hit_size = 12.0;
@@ -734,7 +731,6 @@ pub fn load() -> Vec<UnitType> {
             u.payload_capacity = 4.0 * super_tile_payload();
             u.targetable = false;
             u.hittable = false;
-            u.default_command = Some("rebuildCommand".into());
         }),
         unit(&mut next_id, "incite", UnitKind::Erekir, |u| {
             u.is_enemy = false;
@@ -754,7 +750,6 @@ pub fn load() -> Vec<UnitType> {
             u.hittable = false;
             u.engine_offset = 7.2;
             u.engine_size = 3.1;
-            u.default_command = Some("rebuildCommand".into());
         }),
         unit(&mut next_id, "emanate", UnitKind::Erekir, |u| {
             u.is_enemy = false;
@@ -774,7 +769,6 @@ pub fn load() -> Vec<UnitType> {
             u.hittable = false;
             u.engine_offset = 7.5;
             u.engine_size = 3.4;
-            u.default_command = Some("rebuildCommand".into());
         }),
         unit(&mut next_id, "block", UnitKind::Standard, |u| {
             u.speed = 0.0;
@@ -1063,6 +1057,16 @@ mod tests {
         assert!(alpha.flying);
         assert_eq!(alpha.mine_speed, 6.5);
         assert_eq!(alpha.item_capacity, 30);
+        assert_eq!(alpha.default_command, None);
+
+        let mono = by_name(&units, "mono");
+        assert_eq!(mono.default_command.as_deref(), Some("mine"));
+        let poly = by_name(&units, "poly");
+        assert_eq!(poly.default_command.as_deref(), Some("rebuild"));
+        let mega = by_name(&units, "mega");
+        assert_eq!(mega.default_command.as_deref(), Some("repair"));
+        let evoke = by_name(&units, "evoke");
+        assert_eq!(evoke.default_command, None);
     }
 
     #[test]
