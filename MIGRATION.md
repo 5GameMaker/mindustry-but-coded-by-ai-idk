@@ -3634,12 +3634,15 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ServerLauncher::apply_server_tile_config_packet(...)` 现在会识别 `BlockDef::UnitFactory`，把客户端 `TileConfigCallPacket` 分派到 unit factory value 入口，并把成功变更以 server 形态 `TileConfigCallPacket` 可靠转发给已连接客户端；
   - `DesktopLauncher::sync_tile_config_to_runtime(...)` 现在也会按目标 block kind 分派 tile config：`UnitFactory` 的 `Content(UnitCommand)` / `Null` 会回填客户端 `GameRuntimeUnitBlockState::Factory.command_id`，不再只支持 `UnitCargoUnloadPoint`；
   - `mindustry::input` 新增 `client_unit_factory_command_config_packet(...)` 与 `client_unit_factory_clear_command_packet(...)`，分别生成 Java `UnitFactory.config(UnitCommand.class, ...)` 与 `configClear` 对应的客户端 `TileConfigCallPacket` 形态；
+  - 2026-05-27 继续补 Java `UnitFactoryBuild.senseObject(LAccess.config)`：`GameRuntime::sense_owned_building_object(...)` 在 `LAccess::Config` 且目标为 `UnitFactory` 时读取当前 `UnitFactoryState.current_plan`，返回对应 `TypeValue::Content(ContentType::Unit, unit_id)`；`current_plan == -1` 返回 `TypeValue::Null`；缺失 sidecar 时会从 `BuildingComp.config == Int(plan)` 恢复同等可感知结果；
+  - 同步新增 `GameRuntime::sense_owned_building_logic_object(...)`，把 `TypeValue::Content` 转为逻辑对象名（如 `@mono`），为后续真实 processor/link runtime 接入提供非孤立入口；
   - 该入口直接修改真实 runtime sidecar 与 building config，后续可继续接入 `TileConfigCallPacket`/输入处理，而不是独立 helper。
 - 新增 core 回归测试：
   - `game_runtime_configures_unit_factory_plan_and_clears_progress_like_java`
   - `game_runtime_configures_unit_factory_by_unit_id_like_java_unit_config`
   - `game_runtime_configures_unit_factory_command_and_clear_like_java`
   - `game_runtime_configures_unit_factory_value_for_plan_unit_command_and_clear`
+  - `game_runtime_senses_unit_factory_config_as_current_plan_unit_like_java`
   - `game_runtime_clears_incompatible_unit_factory_command_when_plan_changes_like_java`
   - `game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks`
   - `unit_core_properties_match_upstream_subset` 现在断言 `mono/poly/mega` 的 commands/default command、Payloadc unit 的 payload command，以及普通 core unit 的 Java-style fallback default；
@@ -3655,7 +3658,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop unit_factory --lib`
   - `cargo test -p mindustry-core client_unit_factory --lib`
   - `cargo check --workspace`
-- 仍未完成：`UnitType.init()` 中 weapons-derived `canHeal` 仍依赖后续完整 Weapon/Bullet 初始化；真实 desktop UI 选择表、logic `senseObject(LAccess.config)` 仍需后续闭环。
+- 仍未完成：`UnitType.init()` 中 weapons-derived `canHeal` 仍依赖后续完整 Weapon/Bullet 初始化；真实 desktop UI 选择表仍需后续闭环；logic processor 还需要把 `sense_owned_building_logic_object(...)` 接到真实 linked building 对象刷新/执行器生命周期里，避免只靠测试手工注册对象。
 
 ### 12.111 UnitAssembler 最小 owned runtime tick
 

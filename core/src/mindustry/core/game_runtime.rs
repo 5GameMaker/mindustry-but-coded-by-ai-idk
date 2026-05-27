@@ -22,7 +22,7 @@ use crate::mindustry::{
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
-    ctype::{ContentId, ContentType},
+    ctype::{Content, ContentId, ContentType},
     entities::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
@@ -39,6 +39,7 @@ use crate::mindustry::{
         type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
         LegacyShortChunkMap, TeamId, UnitRef,
     },
+    logic::{LAccess, LVarValue},
     net::{
         NetworkPlayerSyncData, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
         UnitTetherBlockSpawnedCallPacket,
@@ -4128,6 +4129,95 @@ impl GameRuntime {
             }
             type_io::TypeValue::Content(_) => GameRuntimeUnitFactoryConfigureResult::UnknownUnit,
             _ => GameRuntimeUnitFactoryConfigureResult::UnsupportedValue,
+        }
+    }
+
+    pub fn sense_owned_building_object(
+        &self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        sensor: LAccess,
+    ) -> Option<type_io::TypeValue> {
+        let building = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)?;
+
+        match sensor {
+            LAccess::Type => Some(type_io::TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Block,
+                building.block.id,
+            ))),
+            LAccess::Config => self.sense_owned_building_config_object(content, building),
+            _ => None,
+        }
+    }
+
+    pub fn sense_owned_building_logic_object(
+        &self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        sensor: LAccess,
+    ) -> Option<LVarValue> {
+        self.sense_owned_building_object(content, tile_pos, sensor)
+            .map(|value| Self::type_value_to_logic_object(content, &value))
+    }
+
+    fn sense_owned_building_config_object(
+        &self,
+        content: &ContentLoader,
+        building: &BuildingComp,
+    ) -> Option<type_io::TypeValue> {
+        let BlockDef::UnitFactory(factory_block) = content.block(building.block.id)? else {
+            return None;
+        };
+
+        let current_plan = self
+            .unit_runtime_states
+            .get(&building.tile_pos)
+            .and_then(|state| match state {
+                GameRuntimeUnitBlockState::Factory { factory, .. } => Some(factory.current_plan),
+                _ => None,
+            })
+            .or_else(|| match building.config_value() {
+                type_io::TypeValue::Int(plan) => Some(plan),
+                type_io::TypeValue::Null => Some(-1),
+                _ => None,
+            })?;
+
+        if current_plan < 0 {
+            return Some(type_io::TypeValue::Null);
+        }
+
+        let unit = factory_block
+            .plans
+            .get(current_plan as usize)
+            .and_then(|plan| content.unit_by_name(&plan.unit))?;
+        Some(type_io::TypeValue::Content(type_io::ContentRef::new(
+            ContentType::Unit,
+            unit.id(),
+        )))
+    }
+
+    fn type_value_to_logic_object(
+        content: &ContentLoader,
+        value: &type_io::TypeValue,
+    ) -> LVarValue {
+        match value {
+            type_io::TypeValue::Null => LVarValue::Object(None),
+            type_io::TypeValue::Content(content_ref) => LVarValue::Object(
+                content_ref
+                    .resolve(content)
+                    .and_then(|record| record.name())
+                    .map(|name| format!("@{name}")),
+            ),
+            type_io::TypeValue::String(value) => LVarValue::Object(Some(value.clone())),
+            type_io::TypeValue::Bool(value) => LVarValue::Number(*value as u8 as f64),
+            type_io::TypeValue::Int(value) => LVarValue::Number(*value as f64),
+            type_io::TypeValue::Long(value) => LVarValue::Number(*value as f64),
+            type_io::TypeValue::Float(value) => LVarValue::Number(*value as f64),
+            type_io::TypeValue::Double(value) => LVarValue::Number(*value),
+            _ => LVarValue::Object(None),
         }
     }
 
@@ -20589,6 +20679,79 @@ mod tests {
                 &TypeValue::String("x".into())
             ),
             GameRuntimeUnitFactoryConfigureResult::UnsupportedValue
+        );
+    }
+
+    #[test]
+    fn game_runtime_senses_unit_factory_config_as_current_plan_unit_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let mono = content.unit_by_name("mono").unwrap();
+        let flare = content.unit_by_name("flare").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let tile_pos = point2_pack(15, 14);
+        let router_tile = point2_pack(16, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.add_building(BuildingComp::new(
+            router_tile,
+            router_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 1,
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.sense_owned_building_object(&content, tile_pos, LAccess::Config),
+            Some(TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Unit,
+                mono.id()
+            )))
+        );
+        assert_eq!(
+            runtime.sense_owned_building_logic_object(&content, tile_pos, LAccess::Config),
+            Some(LVarValue::Object(Some("@mono".into())))
+        );
+
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present for sense config test");
+        };
+        factory.current_plan = -1;
+        assert_eq!(
+            runtime.sense_owned_building_object(&content, tile_pos, LAccess::Config),
+            Some(TypeValue::Null)
+        );
+        assert_eq!(
+            runtime.sense_owned_building_logic_object(&content, tile_pos, LAccess::Config),
+            Some(LVarValue::Object(None))
+        );
+
+        runtime.unit_runtime_states.remove(&tile_pos);
+        runtime.buildings[0].config = Some(TypeValue::Int(0));
+        assert_eq!(
+            runtime.sense_owned_building_object(&content, tile_pos, LAccess::Config),
+            Some(TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Unit,
+                flare.id()
+            )))
+        );
+        assert_eq!(
+            runtime.sense_owned_building_object(&content, router_tile, LAccess::Config),
+            None
         );
     }
 
