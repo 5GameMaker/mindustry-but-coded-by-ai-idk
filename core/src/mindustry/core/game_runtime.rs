@@ -171,11 +171,12 @@ use crate::mindustry::{
         read_unit_factory_state, reconstructor_accept_payload, reconstructor_update,
         unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_spawned,
         unit_assembler_update_progress, unit_cargo_loader_spawned, unit_cargo_loader_update,
-        unit_cargo_unload_update, unit_factory_configure_plan, unit_factory_fraction,
-        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
-        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
-        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
-        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
+        unit_cargo_unload_update, unit_factory_accept_item, unit_factory_configure_plan,
+        unit_factory_fraction, unit_factory_maximum_accepted, unit_factory_update,
+        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
+        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
+        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -15413,6 +15414,49 @@ impl GameRuntime {
                 )
                 .is_some()
             }
+            Some(BlockDef::UnitFactory(factory_block)) => {
+                let Some(items) = target.items.as_ref() else {
+                    return false;
+                };
+                let current_plan = self
+                    .unit_runtime_states
+                    .get(&target.tile_pos)
+                    .and_then(|state| match state {
+                        GameRuntimeUnitBlockState::Factory { factory, .. } => {
+                            Some(factory.current_plan)
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| match target.config_value() {
+                        type_io::TypeValue::Int(plan) => Some(plan),
+                        _ => None,
+                    })
+                    .unwrap_or(-1);
+                let plan_contains_item = (current_plan >= 0)
+                    .then(|| factory_block.plans.get(current_plan as usize))
+                    .flatten()
+                    .is_some_and(|plan| {
+                        plan.requirements
+                            .iter()
+                            .any(|requirement| requirement.item == item_id)
+                    });
+                let base_capacity = factory_block
+                    .capacities
+                    .iter()
+                    .find(|capacity| capacity.item == item_id)
+                    .map(|capacity| capacity.amount)
+                    .unwrap_or(0);
+                let maximum_accepted = unit_factory_maximum_accepted(
+                    base_capacity,
+                    self.state.rules.unit_cost(target.team.0 as usize),
+                );
+                unit_factory_accept_item(
+                    current_plan,
+                    items.get(item_id),
+                    maximum_accepted,
+                    plan_contains_item,
+                )
+            }
             Some(BlockDef::Storage(storage)) => {
                 let target_owner_index = self.item_module_owner_index(content, target_index);
                 let Some(items) = self
@@ -20954,6 +20998,73 @@ mod tests {
             panic!("unit factory sidecar should remain present after activation");
         };
         assert!(factory.base.progress > 0.0);
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_accepts_only_current_plan_items_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let source_def = content.block_by_name("router").unwrap();
+        let silicon = content.item_by_name("silicon").unwrap();
+        let lead = content.item_by_name("lead").unwrap();
+        let silicon_id = silicon.base.mappable.base.id;
+        let lead_id = lead.base.mappable.base.id;
+        let BlockDef::UnitFactory(factory_block) = factory_def else {
+            panic!("air-factory should be a unit factory");
+        };
+        let tile_pos = point2_pack(9, 14);
+        let source_pos = point2_pack(8, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.state.rules.unit_cost_multiplier = 1.5;
+        runtime.add_building(BuildingComp::new(
+            source_pos,
+            source_def.base().clone(),
+            TeamId(2),
+        ));
+        let mut factory_building =
+            BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(2));
+        factory_building.config = Some(TypeValue::Int(0));
+        runtime.add_building(factory_building);
+
+        let base_capacity = factory_block
+            .capacities
+            .iter()
+            .find(|capacity| capacity.item == silicon_id)
+            .map(|capacity| capacity.amount)
+            .expect("air factory should have silicon capacity");
+        let maximum_accepted = unit_factory_maximum_accepted(base_capacity, 1.5);
+        let factory_items = runtime.buildings[1]
+            .items
+            .as_mut()
+            .expect("unit factory should own item storage");
+        factory_items.set(silicon_id, maximum_accepted - 1);
+
+        assert!(runtime.dump_target_accepts_item(&content, 0, 1, silicon_id));
+        assert!(!runtime.dump_target_accepts_item(&content, 0, 1, lead_id));
+
+        runtime.buildings[1]
+            .items
+            .as_mut()
+            .unwrap()
+            .set(silicon_id, maximum_accepted);
+        assert!(!runtime.dump_target_accepts_item(&content, 0, 1, silicon_id));
+
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: -1,
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+        runtime.buildings[1]
+            .items
+            .as_mut()
+            .unwrap()
+            .set(silicon_id, 0);
+        assert!(!runtime.dump_target_accepts_item(&content, 0, 1, silicon_id));
     }
 
     #[test]
