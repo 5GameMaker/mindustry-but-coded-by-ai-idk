@@ -3609,16 +3609,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `GameRuntimeUnitFactoryFrameReport`，并把 `GameRuntimeOwnedUnitFrameReport` 拆为 `factory + reconstructor`；
   - 新增 `advance_owned_unit_factories(...)` / ticks：检查当前 plan requirements、调用 `unit_factory_update(...)` 推进进度，完成时用 `UnitComp::new(...).to_sync_wire()` 生成 Java-style `PayloadRef::Unit`，写入 factory command/defaultCommand controller，消耗 items；
   - 2026-05-27 继续补 Java `Team.activateUnitFactories()` 门控：`Rules::unit_factory_active(team_id, tick)` 现在读取 team rule 的 `unit_factory_activation_delay`，`advance_owned_unit_factories_ticks(...)` 在未到激活 tick 时保持 `moveOutPayload()` 类行为但把生产效率置 0，避免敌方/攻击图 factory 在延迟期提前推进进度或产出 payload；
+  - 2026-05-27 继续对齐 Java `updateTile()` 顺序：factory payload 到达输出侧后立即尝试转移到前方 payload 目标，若转移成功则同一 tick 继续检查 `progress >= plan.time` 并生产下一份 payload，不再把“moveOut 后再生产”延迟到下一帧；
   - `transfer_payload_output_to_front(...)` 现在也能把 `UnitFactory` 作为 payload source，允许 factory 输出到前方 payload conveyor/router/reconstructor 等真实目标。
 - 新增 core 回归测试：
   - `game_runtime_unit_factory_produces_configured_unit_payload`（通过 `advance_owned_runtime_blocks` 验证聚合入口）
   - `game_runtime_unit_factory_respects_team_activation_delay_like_java`
+  - `game_runtime_unit_factory_produces_same_tick_after_payload_moves_out_like_java`
   - `game_runtime_unit_factory_outputs_payload_to_front_conveyor`
   - `game_runtime_unit_factory_created_selects_first_unlocked_plan_like_java`
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
   - `cargo check --workspace`
-- 仍未完成：当前 UnitFactory runtime 尚未完整实现创建 sound/effect/event、同 tick moveOut 后立即再生产的 Java 顺序，以及真实客户端 UI 渲染按钮接入。
+- 仍未完成：当前 UnitFactory runtime 尚未完整实现创建 sound/effect/event 以及真实客户端 UI 渲染按钮接入。
 
 ### 12.110 UnitFactory 配置入口接入
 

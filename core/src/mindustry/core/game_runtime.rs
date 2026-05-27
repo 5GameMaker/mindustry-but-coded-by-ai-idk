@@ -17491,7 +17491,6 @@ impl GameRuntime {
         frame_delta: f32,
     ) -> GameRuntimeUnitFactoryFrameReport {
         let mut report = GameRuntimeUnitFactoryFrameReport::default();
-        let mut pending_payload_moves = Vec::new();
 
         for index in 0..self.buildings.len() {
             let (tile_pos, block_id, enabled, efficiency, time_scale, rotation, rotdeg, team, x, y) = {
@@ -17570,6 +17569,7 @@ impl GameRuntime {
                 .unwrap_or(false);
 
             let mut consume_items = false;
+            let mut arrived_output = false;
             {
                 let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
                     self.unit_runtime_states.get_mut(&tile_pos)
@@ -17592,11 +17592,28 @@ impl GameRuntime {
                     );
                     if arrived {
                         report.arrived_output_payloads += 1;
-                        if let Some(target_tile_pos) = target_tile_pos {
-                            pending_payload_moves.push((tile_pos, target_tile_pos));
-                        }
+                        arrived_output = true;
                     }
                 }
+            }
+
+            if arrived_output {
+                if let Some(target_tile_pos) = target_tile_pos {
+                    if self.transfer_payload_output_to_front(content, tile_pos, target_tile_pos) {
+                        report.transferred_payloads += 1;
+                    }
+                }
+            }
+
+            {
+                let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+                    self.unit_runtime_states.get_mut(&tile_pos)
+                else {
+                    report.missing_runtime_states += 1;
+                    continue;
+                };
+
+                factory.base.has_payload = common.payload.is_some();
 
                 if !team_activates_factories {
                     report.inactive_factories += 1;
@@ -17662,12 +17679,6 @@ impl GameRuntime {
             if consume_items {
                 consume_building_items(&mut self.buildings[index], &plan_requirements);
                 report.consumed_item_batches += 1;
-            }
-        }
-
-        for (source_tile_pos, target_tile_pos) in pending_payload_moves {
-            if self.transfer_payload_output_to_front(content, source_tile_pos, target_tile_pos) {
-                report.transferred_payloads += 1;
             }
         }
 
@@ -22002,6 +22013,93 @@ mod tests {
                 .id,
             flare.id()
         );
+    }
+
+    #[test]
+    fn game_runtime_unit_factory_produces_same_tick_after_payload_moves_out_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let conveyor_def = content.block_by_name("payload-conveyor").unwrap();
+        let flare = content.unit_by_name("flare").unwrap().clone();
+        let BlockDef::UnitFactory(factory_block) = factory_def else {
+            panic!("air-factory should be a unit factory");
+        };
+        let BlockDef::Payload(conveyor_block) = conveyor_def else {
+            panic!("payload-conveyor should be a payload block");
+        };
+        let plan = &factory_block.plans[0];
+        let factory_tile = point2_pack(7, 16);
+        let conveyor_tile = point2_pack(
+            7 + factory_block.base.size / 2 + 1 + (conveyor_block.base.size - 1) / 2,
+            16,
+        );
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(24, 24);
+        let mut factory_building =
+            BuildingComp::new(factory_tile, factory_def.base().clone(), TeamId(2));
+        factory_building.set_rotation(0);
+        runtime.add_building(factory_building);
+        runtime.add_building(BuildingComp::new(
+            conveyor_tile,
+            conveyor_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.payload_runtime_states.insert(
+            conveyor_tile,
+            GameRuntimePayloadBlockState::Conveyor(PayloadConveyorState::default()),
+        );
+        if let Some(items) = runtime.buildings[0].items.as_mut() {
+            for requirement in &plan.requirements {
+                items.set(requirement.item, requirement.amount);
+            }
+        }
+
+        let mut old_unit = UnitComp::new(7070, flare, TeamId(2));
+        old_unit.set_pos(runtime.buildings[0].x, runtime.buildings[0].y);
+        old_unit.set_rotation(0.0);
+        let old_payload = GameRuntime::unit_payload_ref_from_unit(&content, &old_unit)
+            .expect("test unit should encode as payload");
+        runtime.unit_runtime_states.insert(
+            factory_tile,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState {
+                    payload: Some(old_payload),
+                    pay_vector: Vec2 { x: 12.0, y: 0.0 },
+                    pay_rotation: 0.0,
+                    carried: false,
+                },
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: plan.time,
+                        has_payload: true,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        let report = runtime.advance_owned_unit_factories(&content, 1.0).unwrap();
+        assert_eq!(report.arrived_output_payloads, 1);
+        assert_eq!(report.transferred_payloads, 1);
+        assert_eq!(report.produced_unit_payloads, 1);
+        assert_eq!(report.consumed_item_batches, 1);
+
+        let Some(GameRuntimeUnitBlockState::Factory { common, factory }) =
+            runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("unit factory sidecar should remain present after same-tick production");
+        };
+        assert!(common.payload.is_some());
+        assert!(factory.base.has_payload);
+        let Some(GameRuntimePayloadBlockState::Conveyor(conveyor)) =
+            runtime.payload_runtime_states.get(&conveyor_tile)
+        else {
+            panic!("front payload conveyor should keep sidecar");
+        };
+        assert!(conveyor.item.is_some());
     }
 
     #[test]
