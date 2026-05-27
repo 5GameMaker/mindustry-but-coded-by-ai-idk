@@ -3713,3 +3713,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core unit_assembler`
   - `cargo check --workspace`
 - 仍未完成：module 集合本身还未作为 Java `modules` 列表持久保存在 assembler state；当前每 tick 扫描 world building。后续仍需补拆除/旋转/世界 tileChanges cache、严格 offset 几何与多 tier/gap 组合测试。
+
+### 12.115 UnitCargoLoader / UnitCargoUnloadPoint 最小 owned runtime tick
+
+- 2026-05-27：对照 Java `UnitCargoLoader.UnitTransportSourceBuild.updateTile()` 与 `UnitCargoUnloadPointBuild.updateTile()`，把 unit cargo 两个 distribution block 从读写/helper 推进到 `advance_owned_runtime_blocks(...).item_transport` 主链路。
+- Java 依据：
+  - `UnitCargoLoader`：`warmup/readyness` approach，`unit == null && Units.canCreate(team, unitType)` 时 `buildProgress += edelta()/unitBuildTime`，满 1 后 server 创建 `manifold` tether unit 并 `Call.unitTetherBlockSpawned`；
+  - `UnitCargoUnloadPoint`：未满容量或 `dumpAccumulate()` 成功时清 `staleTimer/stale`；满容量且持续 `staleTimeDuration` 后 `stale = true`；
+  - loader `write/read` 只同步 tether unit id，unload `write/read` 同步 configured item 与 stale bool。
+- Rust 新增/变化：
+  - `GameRuntimeOwnedItemTransportFrameReport` 新增 `unit_cargo_loader_built_units` 与 `unit_cargo_unload_stale_points`；
+  - `advance_owned_item_transport_blocks_ticks(...)` 末尾调用 `advance_owned_unit_cargo_blocks_ticks(...)`，因此 unit cargo 由 `advance_owned_runtime_blocks` 和服务端 owned runtime 同一路径驱动，不是孤立 helper；
+  - loader 分支懒创建/修正 `GameRuntimeDistributionBlockState::UnitCargoLoader`，调用 `unit_cargo_loader_update(...)`，到点后调用 `unit_cargo_loader_spawned(...)` 并把 `has_unit` 置 true（真实 `UnitType.create(team)`/BuildingTether 实体仍待补）；
+  - unload 分支懒创建/修正 `GameRuntimeDistributionBlockState::UnitCargoUnload`，按 building item total、capacity 和 `stale_time_duration` 调用 `unit_cargo_unload_update(...)`，当前 `dumpAccumulate()` 仍以 false 占位。
+- 新增 core 回归测试：
+  - `game_runtime_owned_runtime_blocks_advances_unit_cargo_loader_build`
+  - `game_runtime_owned_runtime_blocks_marks_unit_cargo_unload_stale`
+- 验证：
+  - `cargo test -p mindustry-core unit_cargo`
+  - `cargo check --workspace`
+- 仍未完成：真实 manifold unit 创建/加入 world/BuildingTether、`Call.unitTetherBlockSpawned` 联机同步、loader 液体/电力 consume 精确联动、unload `dumpAccumulate()` 真实向邻接方块输出、unload item config 的 `TileConfigCallPacket` 分发与 UI 行为仍待补。
