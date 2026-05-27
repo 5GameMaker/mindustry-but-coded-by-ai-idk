@@ -3613,7 +3613,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
   - `cargo check --workspace`
-- 仍未完成：当前 UnitFactory runtime 尚未完整实现 Java `config(UnitCommand)`/`configClear` 的命令配置入口、`canSetCommand()`/命令合法性过滤、`team.activateUnitFactories()` 的精确 team rule、创建 sound/effect/event、同 tick moveOut 后立即再生产的 Java 顺序，以及完整 UI/config/logic sense 行为。
+- 仍未完成：当前 UnitFactory runtime 尚未完整实现 Java `canSetCommand()`/命令合法性过滤、`team.activateUnitFactories()` 的精确 team rule、创建 sound/effect/event、同 tick moveOut 后立即再生产的 Java 顺序，以及完整 UI/config/logic sense 行为。
 
 ### 12.110 UnitFactory 配置入口接入
 
@@ -3623,17 +3623,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `config(UnitType)` 会按 `plans.indexOf(p -> p.unit == val)` 映射 plan，未命中时等价清空当前 plan；
   - `config()` 返回当前 plan integer，联机/回滚侧需要保存为 Java-like tile config。
 - Rust 新增/变化：
-  - 新增 `GameRuntimeUnitFactoryConfigureResult`，区分 `Configured / Cleared / MissingBuilding / MissingRuntimeState / NotUnitFactory / NotConfigurable / UnknownUnit`；
+  - 新增 `GameRuntimeUnitFactoryConfigureResult`，区分 `Configured / Cleared / MissingBuilding / MissingRuntimeState / NotUnitFactory / NotConfigurable / UnknownUnit / UnknownCommand / UnsupportedValue`，并提供 `changed()` 供 server 分发判断；
   - 新增 `GameRuntime::configure_owned_unit_factory_plan(...)`，按 tile 找 building，懒创建 `GameRuntimeUnitBlockState::Factory`，调用 `unit_factory_configure_plan(...)`，并把 `BuildingComp.config` 写成 `TypeValue::Int(current_plan)` 或清空；
   - 新增 `GameRuntime::configure_owned_unit_factory_unit(...)`，按 `ContentId` 映射到 factory plan；未命中当前 factory plans 时清空 plan，且先检查 block 是否为可配置 UnitFactory，贴近 Java `if(!configurable) return` 的顺序；
+  - 新增 `GameRuntime::configure_owned_unit_factory_command(...)`，实现 Java `config(UnitCommand.class, ...)` / `configClear(...)`：只写 `UnitFactoryState.command_id` 或清空命令，不修改 `current_plan`、`progress` 或 `BuildingComp.config`（Java `config()` 仍返回当前 plan）；
+  - 新增 `GameRuntime::configure_owned_unit_factory_value(...)`，统一分发 `TypeValue::Int(plan)`、`Content(Unit)`、`Content(UnitCommand)` 与 `Null`，供网络入口直接复用；
+  - `ServerLauncher::apply_server_tile_config_packet(...)` 现在会识别 `BlockDef::UnitFactory`，把客户端 `TileConfigCallPacket` 分派到 unit factory value 入口，并把成功变更以 server 形态 `TileConfigCallPacket` 可靠转发给已连接客户端；
   - 该入口直接修改真实 runtime sidecar 与 building config，后续可继续接入 `TileConfigCallPacket`/输入处理，而不是独立 helper。
 - 新增 core 回归测试：
   - `game_runtime_configures_unit_factory_plan_and_clears_progress_like_java`
   - `game_runtime_configures_unit_factory_by_unit_id_like_java_unit_config`
+  - `game_runtime_configures_unit_factory_command_and_clear_like_java`
+  - `game_runtime_configures_unit_factory_value_for_plan_unit_command_and_clear`
   - `game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks`
+- 新增 server 回归测试：
+  - `server_update_applies_unit_factory_command_tile_config_and_forwards_to_clients`
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
-- 仍未完成：`UnitCommand` 配置/清空、`command` 是否属于目标 unit `commands` 的过滤、`UnitType.init()` 自动命令列表、UI 选择表、logic `senseObject(LAccess.config)`/网络 `TileConfigCallPacket` 分发仍需后续闭环。
+  - `cargo test -p mindustry-server unit_factory --lib`
+  - `cargo check --workspace`
+- 仍未完成：`command` 是否属于目标 unit `commands` 的过滤、`UnitType.init()` 自动命令列表、UI 选择表、logic `senseObject(LAccess.config)` 与客户端 UI 发包入口仍需后续闭环。
 
 ### 12.111 UnitAssembler 最小 owned runtime tick
 

@@ -2094,6 +2094,14 @@ pub enum GameRuntimeUnitFactoryConfigureResult {
     NotUnitFactory,
     NotConfigurable,
     UnknownUnit,
+    UnknownCommand,
+    UnsupportedValue,
+}
+
+impl GameRuntimeUnitFactoryConfigureResult {
+    pub fn changed(self) -> bool {
+        matches!(self, Self::Configured | Self::Cleared)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4003,6 +4011,85 @@ impl GameRuntime {
             return self.configure_owned_unit_factory_plan(content, tile_pos, None);
         }
         self.configure_owned_unit_factory_plan(content, tile_pos, Some(plan))
+    }
+
+    pub fn configure_owned_unit_factory_command(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        command: Option<ContentId>,
+    ) -> GameRuntimeUnitFactoryConfigureResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimeUnitFactoryConfigureResult::MissingBuilding;
+        };
+        let factory_block = match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::UnitFactory(factory)) => factory,
+            Some(_) | None => return GameRuntimeUnitFactoryConfigureResult::NotUnitFactory,
+        };
+        if !factory_block.configurable {
+            return GameRuntimeUnitFactoryConfigureResult::NotConfigurable;
+        }
+        let command_id = match command {
+            Some(command_id) => {
+                if content.unit_command(command_id).is_none()
+                    || command_id < 0
+                    || command_id > u8::MAX as ContentId - 1
+                {
+                    return GameRuntimeUnitFactoryConfigureResult::UnknownCommand;
+                }
+                Some(command_id as u8)
+            }
+            None => None,
+        };
+
+        let building = self.buildings[index].clone();
+        if !self.ensure_unit_state_for_building(content, &building) {
+            return GameRuntimeUnitFactoryConfigureResult::MissingRuntimeState;
+        }
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            self.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimeUnitFactoryConfigureResult::MissingRuntimeState;
+        };
+
+        factory.command_id = command_id;
+        if command_id.is_some() {
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        } else {
+            GameRuntimeUnitFactoryConfigureResult::Cleared
+        }
+    }
+
+    pub fn configure_owned_unit_factory_value(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        value: &type_io::TypeValue,
+    ) -> GameRuntimeUnitFactoryConfigureResult {
+        match value {
+            type_io::TypeValue::Int(plan) => {
+                self.configure_owned_unit_factory_plan(content, tile_pos, Some(*plan))
+            }
+            type_io::TypeValue::Null => {
+                self.configure_owned_unit_factory_command(content, tile_pos, None)
+            }
+            type_io::TypeValue::Content(content_ref)
+                if content_ref.content_type == ContentType::Unit =>
+            {
+                self.configure_owned_unit_factory_unit(content, tile_pos, Some(content_ref.id))
+            }
+            type_io::TypeValue::Content(content_ref)
+                if content_ref.content_type == ContentType::UnitCommand =>
+            {
+                self.configure_owned_unit_factory_command(content, tile_pos, Some(content_ref.id))
+            }
+            type_io::TypeValue::Content(_) => GameRuntimeUnitFactoryConfigureResult::UnknownUnit,
+            _ => GameRuntimeUnitFactoryConfigureResult::UnsupportedValue,
+        }
     }
 
     pub fn configure_owned_unit_cargo_unload_item(
@@ -20323,6 +20410,147 @@ mod tests {
         assert_eq!(factory.current_plan, -1);
         assert_eq!(factory.base.progress, 0.0);
         assert_eq!(runtime.buildings[0].config, None);
+    }
+
+    #[test]
+    fn game_runtime_configures_unit_factory_command_and_clear_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let rebuild = content.unit_command_by_name("rebuild").unwrap();
+        let tile_pos = point2_pack(11, 14);
+        let mut runtime = GameRuntime::default();
+        let mut building = BuildingComp::new(tile_pos, factory_def.base().clone(), TeamId(2));
+        building.config = Some(TypeValue::Int(0));
+        runtime.add_building(building);
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: 19.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_command(&content, tile_pos, Some(rebuild.id())),
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after command config");
+        };
+        assert_eq!(factory.command_id, Some(rebuild.id() as u8));
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(factory.base.progress, 19.0);
+        assert_eq!(runtime.buildings[0].config, Some(TypeValue::Int(0)));
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_command(&content, tile_pos, None),
+            GameRuntimeUnitFactoryConfigureResult::Cleared
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after command clear");
+        };
+        assert_eq!(factory.command_id, None);
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(runtime.buildings[0].config, Some(TypeValue::Int(0)));
+        assert_eq!(
+            runtime.configure_owned_unit_factory_command(&content, tile_pos, Some(32767)),
+            GameRuntimeUnitFactoryConfigureResult::UnknownCommand
+        );
+    }
+
+    #[test]
+    fn game_runtime_configures_unit_factory_value_for_plan_unit_command_and_clear() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let mono = content.unit_by_name("mono").unwrap();
+        let rebuild = content.unit_command_by_name("rebuild").unwrap();
+        let tile_pos = point2_pack(13, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_value(&content, tile_pos, &TypeValue::Int(0)),
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            panic!("unit factory sidecar should be created by plan config");
+        };
+        assert_eq!(factory.current_plan, 0);
+        factory.base.progress = 17.0;
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_value(
+                &content,
+                tile_pos,
+                &TypeValue::Content(type_io::ContentRef::new(ContentType::Unit, mono.id()))
+            ),
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after unit value config");
+        };
+        assert_eq!(factory.current_plan, 1);
+        assert_eq!(runtime.buildings[0].config, Some(TypeValue::Int(1)));
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_value(
+                &content,
+                tile_pos,
+                &TypeValue::Content(type_io::ContentRef::new(
+                    ContentType::UnitCommand,
+                    rebuild.id()
+                ))
+            ),
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after command value config");
+        };
+        assert_eq!(factory.command_id, Some(rebuild.id() as u8));
+        assert_eq!(factory.current_plan, 1);
+        assert_eq!(runtime.buildings[0].config, Some(TypeValue::Int(1)));
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_value(&content, tile_pos, &TypeValue::Null),
+            GameRuntimeUnitFactoryConfigureResult::Cleared
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after command clear");
+        };
+        assert_eq!(factory.command_id, None);
+        assert_eq!(factory.current_plan, 1);
+        assert_eq!(runtime.buildings[0].config, Some(TypeValue::Int(1)));
+        assert_eq!(
+            runtime.configure_owned_unit_factory_value(
+                &content,
+                tile_pos,
+                &TypeValue::String("x".into())
+            ),
+            GameRuntimeUnitFactoryConfigureResult::UnsupportedValue
+        );
     }
 
     #[test]

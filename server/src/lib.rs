@@ -462,19 +462,19 @@ impl ServerLauncher {
             return Ok(false);
         };
 
-        let is_unit_cargo_unload = self
+        let source_block = self
             .runtime
             .buildings()
             .iter()
             .find(|building| building.tile_pos == source_tile_pos)
-            .and_then(|building| self.content_loader.block(building.block.id))
-            .is_some_and(|block| {
-                matches!(
-                    block,
-                    BlockDef::Distribution(distribution)
-                        if distribution.kind == DistributionBlockKind::UnitCargoUnloadPoint
-                )
-            });
+            .and_then(|building| self.content_loader.block(building.block.id));
+        let is_unit_cargo_unload = source_block.is_some_and(|block| {
+            matches!(
+                block,
+                BlockDef::Distribution(distribution)
+                    if distribution.kind == DistributionBlockKind::UnitCargoUnloadPoint
+            )
+        });
 
         if is_unit_cargo_unload {
             let result = self.runtime.configure_owned_unit_cargo_unload_value(
@@ -487,7 +487,21 @@ impl ServerLauncher {
             if result.changed() {
                 self.runtime_unit_cargo_unload_config_packets_changed += 1;
                 self.runtime_unit_cargo_unload_config_packets_forwarded +=
-                    self.broadcast_runtime_unit_cargo_unload_config(connection_id, packet)?;
+                    self.broadcast_runtime_tile_config(connection_id, packet)?;
+            }
+            return Ok(result.changed());
+        }
+
+        let is_unit_factory =
+            source_block.is_some_and(|block| matches!(block, BlockDef::UnitFactory(_)));
+        if is_unit_factory {
+            let result = self.runtime.configure_owned_unit_factory_value(
+                &self.content_loader,
+                source_tile_pos,
+                &packet.value,
+            );
+            if result.changed() {
+                self.broadcast_runtime_tile_config(connection_id, packet)?;
             }
             return Ok(result.changed());
         }
@@ -505,7 +519,7 @@ impl ServerLauncher {
         Ok(result.changed())
     }
 
-    fn broadcast_runtime_unit_cargo_unload_config(
+    fn broadcast_runtime_tile_config(
         &mut self,
         source_connection_id: i32,
         packet: &TileConfigCallPacket,
@@ -2720,7 +2734,8 @@ mod tests {
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
         GameRuntimePowerNodeBatchLinkReport, GameRuntimePowerNodeConfigResult,
-        GameRuntimePowerNodeLinkResult, GameRuntimeUnitCargoUnloadConfigureResult,
+        GameRuntimePowerNodeLinkResult, GameRuntimeUnitBlockState,
+        GameRuntimeUnitCargoUnloadConfigureResult,
     };
     use mindustry_core::mindustry::core::{
         content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
@@ -2751,7 +2766,7 @@ mod tests {
         PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
     };
     use mindustry_core::mindustry::world::blocks::units::{
-        UnitCargoLoaderState, UnitCargoUnloadPointState,
+        UnitBlockState, UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::collections::BTreeMap;
@@ -4244,6 +4259,132 @@ mod tests {
                     )
             }));
         }
+    }
+
+    #[test]
+    fn server_update_applies_unit_factory_command_tile_config_and_forwards_to_clients() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6582).unwrap();
+
+        let factory_def = launcher
+            .content_loader
+            .block_by_name("air-factory")
+            .unwrap();
+        let rebuild_id = launcher
+            .content_loader
+            .unit_command_by_name("rebuild")
+            .unwrap()
+            .id();
+        let factory_tile = point2_pack(8, 6);
+        launcher.runtime.state.world.resize(16, 16);
+        let mut factory_building =
+            BuildingComp::new(factory_tile, factory_def.base().clone(), TeamId(6));
+        factory_building.config = Some(TypeValue::Int(0));
+        launcher.runtime.add_building(factory_building);
+        launcher.runtime.unit_runtime_states.insert(
+            factory_tile,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: 11.0,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        {
+            let state = launcher.net_server.state();
+            let mut state = state.lock().unwrap();
+            for connection_id in [21, 22] {
+                let mut connection = NetConnection::new(format!("127.0.0.1:{connection_id}"));
+                connection.has_connected = true;
+                connection.player_added = true;
+                connection.team = TeamId(6);
+                state.connection_states.insert(connection_id, connection);
+            }
+        }
+
+        let command_value =
+            TypeValue::Content(mindustry_core::mindustry::io::type_io::ContentRef::new(
+                ContentType::UnitCommand,
+                rebuild_id,
+            ));
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(21),
+                true,
+                PacketKind::TileConfigCallPacket(TileConfigCallPacket::client(
+                    BuildingRef::new(factory_tile),
+                    command_value.clone(),
+                )),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            launcher.runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("unit factory sidecar should stay present after command config");
+        };
+        assert_eq!(factory.command_id, Some(rebuild_id as u8));
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(factory.base.progress, 11.0);
+        assert_eq!(
+            launcher.runtime.buildings()[0].config,
+            Some(TypeValue::Int(0))
+        );
+
+        {
+            let sent = sent.lock().unwrap();
+            for connection_id in [21, 22] {
+                assert!(sent.iter().any(|(target, packet, reliable)| {
+                    *target == connection_id
+                        && *reliable
+                        && matches!(
+                            packet,
+                            PacketKind::TileConfigCallPacket(packet)
+                                if packet.player == EntityRef::new(21)
+                                    && packet.build == BuildingRef::new(factory_tile)
+                                    && packet.value == command_value
+                        )
+                }));
+            }
+        }
+
+        {
+            let mut net = launcher.net_server.net_mut();
+            net.handle_server_received_from_connection(
+                Some(22),
+                true,
+                PacketKind::TileConfigCallPacket(TileConfigCallPacket::client(
+                    BuildingRef::new(factory_tile),
+                    TypeValue::Null,
+                )),
+            );
+        }
+
+        assert_eq!(launcher.apply_new_network_server_events(), 1);
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            launcher.runtime.unit_runtime_states.get(&factory_tile)
+        else {
+            panic!("unit factory sidecar should stay present after command clear");
+        };
+        assert_eq!(factory.command_id, None);
+        assert_eq!(factory.current_plan, 0);
+        assert_eq!(
+            launcher.runtime.buildings()[0].config,
+            Some(TypeValue::Int(0))
+        );
     }
 
     #[test]
