@@ -3439,7 +3439,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
   - `cargo test -p mindustry-core game_runtime_applies_client_unit_entered_payload_packet_to_payload_building`
   - `cargo check --workspace`
-- 仍未完成：该入口目前由测试/后续 AI 直接调用，尚未接到真实 `CommandAI` tick、unit `buildOn()` 检测和 `allowedInPayloads` 行为链；payload unit bytes 仍只是 `UnitSyncWire` subset，不是完整 Java `UnitPayload` full serialization。
+- 仍未完成：该入口已作为手动执行点，后续 12.102 已把它接入 server update 的最小 `enterPayload` tick；payload unit bytes 仍只是 `UnitSyncWire` subset，不是完整 Java `UnitPayload` full serialization。
 
 ### 12.101 UnitEnteredPayload 写入 UnitSyncWire payload bytes
 
@@ -3457,3 +3457,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
   - `cargo check --workspace`
 - 仍未完成：需要继续迁移 Java `Payload`/`UnitPayload` 的完整 write/read 与 TypeIO payload 读写路径，后续才能把 payload 内 unit 从 `UnitSyncWire` subset 升级为 Java 兼容 full unit body，并接入真实实体恢复、渲染和 save/load。
+
+### 12.102 Server update 自动触发 enterPayload 单位进入载荷
+
+- 2026-05-27：把 12.100 的 `ServerLauncher::apply_server_unit_entered_payload(...)` 从手动入口接入真实 `ServerLauncher::update()` tick，形成 `server_units Command(enterPayload) + unit buildOn -> runtime payload building -> UnitEnteredPayloadCallPacket` 的最小自动触发链。
+- Java 依据：
+  - `CommandAI.updateUnit()` 在非 client 侧检查 `command == UnitCommand.enterPayloadCommand`、`unit.type.allowedInPayloads`、`unit.buildOn() != null`，并在 `targetPos == null || targetPos 对应 building == unit.buildOn()` 时调用 `Call.unitEnteredPayload(unit, build)`；
+  - `InputHandler.unitEnteredPayload(...)` 再做同队校验、`unit.remove()`、`UnitPayload` 构造和 `build.handlePayload(...)`。
+- Rust 新增/变化：
+  - `ServerLauncher::update()` 在网络事件和 world data flush 后调用 `tick_server_unit_entered_payloads()`；
+  - `tick_server_unit_entered_payloads()` 扫描 `server_units`，只接受 `UnitControllerState::Command(CommandWire)` 且 `command_id == enterPayload`、`allowed_in_payloads == true`、当前 `build_world/buildOn` 可解析的单位；
+  - `target_pos` 非空时要求其指向的 building 与 unit 当前站立 building 一致；命中后复用既有 `apply_server_unit_entered_payload(...)`，因此仍由同一个落点负责 runtime payload 挂载、移除 unit 和 reliable 广播。
+- 验证：
+  - `cargo test -p mindustry-server server_launcher_update_applies_enter_payload_command_to_payload_building_and_broadcasts_packet`
+  - `cargo test -p mindustry-server server_launcher_update_skips_enter_payload_when_target_building_mismatch`
+  - `cargo test -p mindustry-server server_launcher_broadcasts_unit_entered_payload_from_runtime_unit_and_building`
+  - `cargo check --workspace`
+- 仍未完成：当前 tick 仍是 server launcher sidecar 上的最小 `CommandAI` 等价判定，还没有完整迁移 Java `CommandAI` path/finishPath/commandQueue 行为，也没有完整 block-level `acceptUnitPayload/acceptPayload` 精度；后续需要把单位命令、路径与 payload building 接入更完整的 AI/entity lifecycle。

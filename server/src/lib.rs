@@ -10,14 +10,15 @@ use mindustry_core::mindustry::core::net_server::{
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext,
     GameRuntimeOwnedEffectResources, GameRuntimeOwnedFrameReport,
-    GameRuntimeOwnedItemTransportFrameReport, GameRuntimeOwnedPayloadFrameReport, NetServer,
+    GameRuntimeOwnedItemTransportFrameReport, GameRuntimeOwnedPayloadFrameReport, NetServer, World,
 };
-use mindustry_core::mindustry::ctype::ContentId;
 use mindustry_core::mindustry::ctype::ContentType;
+use mindustry_core::mindustry::ctype::{Content, ContentId};
 use mindustry_core::mindustry::entities::{
     bullet::BulletType,
     comp::{
         BuildingComp, BulletComp, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
+        UnitControllerState,
     },
 };
 use mindustry_core::mindustry::input::{
@@ -45,6 +46,7 @@ use mindustry_core::mindustry::vars::{
 use mindustry_core::mindustry::world::blocks::defense::EffectBlockFrameBatchReport;
 use mindustry_core::mindustry::world::blocks::payloads::{payload_ref_sort_key, PayloadRef};
 use mindustry_core::mindustry::world::meta::BuildVisibility;
+use mindustry_core::mindustry::world::point2_pack;
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
 use std::{
@@ -218,6 +220,9 @@ impl ServerLauncher {
             self.network_error = Some(error.to_string());
         }
         let _ = self.flush_pending_world_data();
+        if let Err(error) = self.tick_server_unit_entered_payloads() {
+            self.network_error = Some(error.to_string());
+        }
         if let Some(report) = self.update_runtime_owned_blocks(1.0 / 60.0) {
             self.last_runtime_item_transport_report = Some(report.item_transport);
             self.last_runtime_payload_report = Some(report.payload);
@@ -1121,6 +1126,82 @@ impl ServerLauncher {
         Ok(true)
     }
 
+    fn tick_server_unit_entered_payloads(&mut self) -> io::Result<usize> {
+        let candidates: Vec<_> = self
+            .server_units
+            .iter()
+            .filter_map(|(&unit_id, unit)| {
+                self.server_unit_enter_payload_build_tile_pos(unit)
+                    .map(|build_tile_pos| (unit_id, build_tile_pos))
+            })
+            .collect();
+
+        let mut applied = 0;
+        for (unit_id, build_tile_pos) in candidates {
+            if self.apply_server_unit_entered_payload(unit_id, build_tile_pos)? {
+                applied += 1;
+            }
+        }
+        Ok(applied)
+    }
+
+    fn server_unit_enter_payload_build_tile_pos(&self, unit: &UnitComp) -> Option<i32> {
+        if !unit.type_info.allowed_in_payloads {
+            return None;
+        }
+        let UnitControllerState::Command(command) = &unit.controller else {
+            return None;
+        };
+        let enter_payload_id = self
+            .content_loader
+            .unit_command_by_name("enterPayload")?
+            .id();
+        if command.command_id != Some(enter_payload_id) {
+            return None;
+        }
+
+        let build_tile_pos = self.server_unit_build_on_tile_pos(unit)?;
+        if !self.server_enter_payload_target_matches_build(command.target_pos, build_tile_pos) {
+            return None;
+        }
+        Some(build_tile_pos)
+    }
+
+    fn server_unit_build_on_tile_pos(&self, unit: &UnitComp) -> Option<i32> {
+        self.runtime
+            .state
+            .world
+            .build_world(unit.x(), unit.y())
+            .map(|build| build.tile_pos)
+            .or_else(|| {
+                let tile_pos = point2_pack(World::to_tile(unit.x()), World::to_tile(unit.y()));
+                self.runtime
+                    .buildings
+                    .iter()
+                    .find(|building| building.tile_pos == tile_pos)
+                    .map(|building| building.tile_pos)
+            })
+    }
+
+    fn server_enter_payload_target_matches_build(
+        &self,
+        target_pos: Option<mindustry_core::mindustry::io::Vec2>,
+        build_tile_pos: i32,
+    ) -> bool {
+        let Some(target_pos) = target_pos else {
+            return true;
+        };
+        self.runtime
+            .state
+            .world
+            .build_world(target_pos.x, target_pos.y)
+            .map(|build| build.tile_pos == build_tile_pos)
+            .unwrap_or_else(|| {
+                point2_pack(World::to_tile(target_pos.x), World::to_tile(target_pos.y))
+                    == build_tile_pos
+            })
+    }
+
     fn default_server_unit_type(&self) -> Option<UnitType> {
         self.content_loader
             .unit_by_name("alpha")
@@ -1708,13 +1789,14 @@ mod tests {
         content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
         NetServer,
     };
-    use mindustry_core::mindustry::ctype::ContentType;
+    use mindustry_core::mindustry::ctype::{Content, ContentType};
     use mindustry_core::mindustry::entities::comp::{
-        BuildingComp, PayloadComp, PayloadKind, PayloadState, UnitComp,
+        BuildingComp, PayloadComp, PayloadKind, PayloadState, UnitComp, UnitControllerState,
     };
     use mindustry_core::mindustry::game::{BlockPlan, TEAM_SHARDED};
+    use mindustry_core::mindustry::io::type_io::CommandWire;
     use mindustry_core::mindustry::io::{
-        BuildPlanWire, BuildingRef, EntityRef, Point2, TeamId, TypeValue, UnitRef,
+        BuildPlanWire, BuildingRef, EntityRef, Point2, TeamId, TypeValue, UnitRef, Vec2,
     };
     use mindustry_core::mindustry::net::{
         packet_ids, read_world_data, ClientPlanSnapshotCallPacket, Connect, ConnectFilter,
@@ -2469,6 +2551,148 @@ mod tests {
                         if packet.unit == UnitRef::Unit { id: 5151 }
                             && packet.build == BuildingRef::new(tile_pos)
                 )
+        }));
+    }
+
+    #[test]
+    fn server_launcher_update_applies_enter_payload_command_to_payload_building_and_broadcasts_packet(
+    ) {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6579).unwrap();
+
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let loader_block = launcher
+            .content_loader
+            .block_by_name("payload-loader")
+            .unwrap()
+            .base()
+            .clone();
+        let tile_x = 13;
+        let tile_y = 14;
+        let tile_pos = point2_pack(tile_x, tile_y);
+        launcher
+            .runtime
+            .buildings
+            .push(BuildingComp::new(tile_pos, loader_block, default_team));
+        launcher.runtime.sync_world_footprint_refs(0);
+
+        let enter_payload_id = launcher
+            .content_loader
+            .unit_command_by_name("enterPayload")
+            .unwrap()
+            .id();
+        let mut unit_type = launcher
+            .content_loader
+            .unit_by_name("flare")
+            .unwrap()
+            .clone();
+        unit_type.allowed_in_payloads = true;
+        let mut unit = UnitComp::new(6161, unit_type, default_team);
+        unit.set_pos(
+            tile_x as f32 * TILE_SIZE as f32,
+            tile_y as f32 * TILE_SIZE as f32,
+        );
+        unit.set_controller(UnitControllerState::Command(CommandWire {
+            command_id: Some(enter_payload_id),
+            target_pos: Some(Vec2::new(
+                tile_x as f32 * TILE_SIZE as f32,
+                tile_y as f32 * TILE_SIZE as f32,
+            )),
+            ..CommandWire::default()
+        }));
+        launcher.server_units.insert(6161, unit);
+
+        launcher.update();
+
+        assert!(!launcher.server_units.contains_key(&6161));
+        let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            launcher.runtime.payload_runtime_states.get(&tile_pos)
+        else {
+            panic!("payload-loader should receive entered unit payload from server update");
+        };
+        assert!(loader.has_payload);
+        assert!(matches!(
+            common.payload,
+            Some(PayloadRef::Unit {
+                class_id: 3,
+                ref unit_bytes
+            }) if !unit_bytes.is_empty()
+        ));
+
+        let sent = sent.lock().unwrap();
+        assert!(sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable
+                && matches!(
+                    packet,
+                    PacketKind::UnitEnteredPayloadCallPacket(packet)
+                        if packet.unit == UnitRef::Unit { id: 6161 }
+                            && packet.build == BuildingRef::new(tile_pos)
+                )
+        }));
+    }
+
+    #[test]
+    fn server_launcher_update_skips_enter_payload_when_target_building_mismatch() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6580).unwrap();
+
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let loader_block = launcher
+            .content_loader
+            .block_by_name("payload-loader")
+            .unwrap()
+            .base()
+            .clone();
+        let tile_pos = point2_pack(15, 16);
+        launcher
+            .runtime
+            .buildings
+            .push(BuildingComp::new(tile_pos, loader_block, default_team));
+        launcher.runtime.sync_world_footprint_refs(0);
+
+        let enter_payload_id = launcher
+            .content_loader
+            .unit_command_by_name("enterPayload")
+            .unwrap()
+            .id();
+        let mut unit_type = launcher
+            .content_loader
+            .unit_by_name("flare")
+            .unwrap()
+            .clone();
+        unit_type.allowed_in_payloads = true;
+        let mut unit = UnitComp::new(6262, unit_type, default_team);
+        unit.set_pos(15.0 * TILE_SIZE as f32, 16.0 * TILE_SIZE as f32);
+        unit.set_controller(UnitControllerState::Command(CommandWire {
+            command_id: Some(enter_payload_id),
+            target_pos: Some(Vec2::new(1.0 * TILE_SIZE as f32, 1.0 * TILE_SIZE as f32)),
+            ..CommandWire::default()
+        }));
+        launcher.server_units.insert(6262, unit);
+
+        launcher.update();
+
+        assert!(launcher.server_units.contains_key(&6262));
+        if let Some(GameRuntimePayloadBlockState::Loader { common, loader }) =
+            launcher.runtime.payload_runtime_states.get(&tile_pos)
+        {
+            assert!(!loader.has_payload);
+            assert!(common.payload.is_none());
+        }
+
+        let sent = sent.lock().unwrap();
+        assert!(!sent.iter().any(|(_connection_id, packet, reliable)| {
+            *reliable && matches!(packet, PacketKind::UnitEnteredPayloadCallPacket(_))
         }));
     }
 
