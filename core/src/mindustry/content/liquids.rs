@@ -54,11 +54,18 @@ pub fn load() -> Vec<Liquid> {
     neoplasm.move_through_blocks = true;
     neoplasm.incinerable = false;
     neoplasm.block_reactive = false;
+    neoplasm.cell_spread_target = Some("water".to_string());
+    neoplasm.can_stay_on.extend([
+        "water".to_string(),
+        "oil".to_string(),
+        "cryofluid".to_string(),
+    ]);
 
     let mut arkycite = make("arkycite");
     arkycite.color_rgba = 0x84a94bff;
     arkycite.flammability = 0.4;
     arkycite.viscosity = 0.7;
+    neoplasm.can_stay_on.push("arkycite".to_string());
 
     let mut gallium = make("gallium");
     gallium.color_rgba = 0x9a9dbfff;
@@ -143,6 +150,16 @@ mod tests {
         assert!(neoplasm.move_through_blocks);
         assert!(!neoplasm.incinerable);
         assert!(!neoplasm.block_reactive);
+        assert_eq!(neoplasm.cell_spread_target.as_deref(), Some("water"));
+        assert_eq!(
+            neoplasm.can_stay_on,
+            vec![
+                "water".to_string(),
+                "oil".to_string(),
+                "cryofluid".to_string(),
+                "arkycite".to_string()
+            ]
+        );
 
         let cyanogen = &liquids[10];
         assert!(cyanogen.gas);

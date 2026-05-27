@@ -3452,3 +3452,44 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - `CellLiquid.update(Puddle)` / neoplasm 周边液体吸收、建筑伤害、neoplasmReact；
      - Java `Units.nearby` 空间索引与 Groups 语义的更严格替代；
      - desktop renderer/audio 对 ripple effect sidecar 的真实表现层。
+
+---
+
+## 104. 最新闭环记录：CellLiquid.update 邻接建筑吸液转换
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：确认 `Building.puddleOn(Puddle)` 在 Java v158.1 是空钩子后，继续推进更有实际行为的 `CellLiquid.update(Puddle)`：neoplasm 从邻接 building 的 water 模块吸收并转换为 neoplasm puddle。
+- Java 依据：
+  - `CellLiquid` 默认 `maxSpread=0.75`、`spreadConversion=1.2`、`spreadDamage=0.11`、`removeScaling=0.25`；
+  - `Liquids.neoplasm.spreadTarget = Liquids.water`；
+  - 周边 `Geometry.d4c` building 若有 target liquid，则 remove `amount*removeScaling` 并 deposit `amount*spreadConversion` 的 cell liquid。
+- Rust 主改动：
+  - `core/src/mindustry/type/liquid.rs`
+    - 新增 CellLiquid 字段：`cell_spread_target`、`cell_max_spread`、`cell_spread_conversion`、`cell_spread_damage`、`cell_remove_scaling`；
+  - `core/src/mindustry/content/liquids.rs`
+    - neoplasm 设置 `cell_spread_target=water`；
+    - 补 `can_stay_on=[water, oil, cryofluid, arkycite]`；
+  - `core/src/mindustry/entities/puddles.rs`
+    - `PuddleLiquidInfo` 保留 CellLiquid 字段；
+    - `PuddleUpdateEvent::from_plan` 现在也为 `liquid_update` 输出 event；
+  - `server/src/lib.rs`
+    - `tick_server_puddles(...)` 对带 `reaction_target` 的 `liquid_update` event 扫描邻接 building；
+    - 从真实 `BuildingComp.liquids` 移除 water；
+    - 按 `spreadConversion` 把 neoplasm 沉积到目标 tile 的 `server_puddles`；
+    - 新增 `server_puddle_cell_liquid_update_absorbs_spread_target_from_neighbor_building`。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_absorbs_spread_target_from_neighbor_building --lib`
+  - `cargo test -p mindustry-core liquid_defaults_match_java_constructor_shape --lib`
+  - `cargo test -p mindustry-core liquid_core_properties_match_upstream_subset --lib`
+  - `cargo test -p mindustry-core update_all_report_exposes_hot_puddle_fire_and_building_events --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`接入新生物液体邻接吸收`。
+  2. 后续补：
+     - `CellLiquid.update` 的 nearby puddle 吸收/替换分支；
+     - current-building water damage/spread 的严格测试；
+     - `Events.fire(Trigger.neoplasmReact)` 等价事件；
+     - 统一迁移 `Geometry.d4c` 常量，替代当前显式方向数组。

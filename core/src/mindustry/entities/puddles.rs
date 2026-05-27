@@ -28,6 +28,10 @@ pub struct PuddleLiquidInfo {
     /// Mirrors `CellLiquid.react`: if this liquid reacts with the named
     /// incoming liquid, the incoming amount is added to the existing puddle.
     pub reaction_target: Option<String>,
+    pub cell_max_spread: f32,
+    pub cell_spread_conversion: f32,
+    pub cell_spread_damage: f32,
+    pub cell_remove_scaling: f32,
 }
 
 impl PuddleLiquidInfo {
@@ -49,6 +53,10 @@ impl PuddleLiquidInfo {
             effect: Some("none".to_string()),
             can_stay_on: Vec::new(),
             reaction_target: None,
+            cell_max_spread: 0.75,
+            cell_spread_conversion: 1.2,
+            cell_spread_damage: 0.11,
+            cell_remove_scaling: 0.25,
         }
     }
 
@@ -103,7 +111,11 @@ impl From<&Liquid> for PuddleLiquidInfo {
             vapor_effect: liquid.vapor_effect.clone(),
             effect: liquid.effect.clone(),
             can_stay_on: liquid.can_stay_on.clone(),
-            reaction_target: None,
+            reaction_target: liquid.cell_spread_target.clone(),
+            cell_max_spread: liquid.cell_max_spread,
+            cell_spread_conversion: liquid.cell_spread_conversion,
+            cell_spread_damage: liquid.cell_spread_damage,
+            cell_remove_scaling: liquid.cell_remove_scaling,
         }
     }
 }
@@ -320,7 +332,8 @@ impl PuddleUpdateEvent {
         if !(plan.affect_units
             || plan.create_fire
             || plan.puddle_on_building
-            || plan.particle_effect)
+            || plan.particle_effect
+            || plan.liquid_update)
         {
             return None;
         }

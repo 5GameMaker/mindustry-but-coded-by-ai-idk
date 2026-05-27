@@ -25,6 +25,11 @@ pub struct Liquid {
     pub cap_puddles: bool,
     pub hidden: bool,
     pub can_stay_on: Vec<String>,
+    pub cell_spread_target: Option<String>,
+    pub cell_max_spread: f32,
+    pub cell_spread_conversion: f32,
+    pub cell_spread_damage: f32,
+    pub cell_remove_scaling: f32,
 }
 
 impl Liquid {
@@ -57,6 +62,11 @@ impl Liquid {
             cap_puddles: true,
             hidden: false,
             can_stay_on: Vec::new(),
+            cell_spread_target: None,
+            cell_max_spread: 0.75,
+            cell_spread_conversion: 1.2,
+            cell_spread_damage: 0.11,
+            cell_remove_scaling: 0.25,
         }
     }
 
@@ -168,6 +178,11 @@ mod tests {
         assert!(liquid.cap_puddles);
         assert!(!liquid.hidden);
         assert!(liquid.can_stay_on.is_empty());
+        assert_eq!(liquid.cell_spread_target, None);
+        assert_eq!(liquid.cell_max_spread, 0.75);
+        assert_eq!(liquid.cell_spread_conversion, 1.2);
+        assert_eq!(liquid.cell_spread_damage, 0.11);
+        assert_eq!(liquid.cell_remove_scaling, 0.25);
         assert_eq!(liquid.base.mappable.base.content_type, ContentType::Liquid);
     }
 

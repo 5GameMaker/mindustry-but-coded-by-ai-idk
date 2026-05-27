@@ -4825,3 +4825,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `tile.build.puddleOn(self())` 还未接入；
   - `CellLiquid.update(Puddle)` / neoplasm reaction 仍待迁移；
   - ripple 已发送网络 effect，但 desktop renderer/backend 仍只是进入现有本地 effect sidecar。
+
+### 12.162 CellLiquid.update neighbor building target-liquid absorption
+
+- 2026-05-28：对照 Java `CellLiquid.update(Puddle)`，先把 neoplasm 从周边 building 液体模块吸收 `spreadTarget=water` 并转换沉积 neoplasm 的分支接入 server runtime。
+- Java 依据：
+  - `CellLiquid` 默认 `maxSpread=0.75f`、`spreadConversion=1.2f`、`spreadDamage=0.11f`、`removeScaling=0.25f`；
+  - `Liquids.neoplasm` 设置 `spreadTarget = Liquids.water`，`capPuddles=false`，`moveThroughBlocks=true`，`blockReactive=false`，并可停留在 water/oil/cryofluid/arkycite 上；
+  - `update(Puddle)` 对 `Geometry.d4c` 周边 building：若 `build.liquids.get(spreadTarget)>0.0001`，移除 `amount * removeScaling`，并 `Puddles.deposit(tile, this, amount * spreadConversion)`。
+- Rust 新增/变化：
+  - `type/liquid.rs` 增加 CellLiquid 运行时字段：`cell_spread_target`、`cell_max_spread`、`cell_spread_conversion`、`cell_spread_damage`、`cell_remove_scaling`；
+  - `content/liquids.rs` 给 neoplasm 接入 `cell_spread_target=water` 与 `can_stay_on=[water, oil, cryofluid, arkycite]`；
+  - `PuddleLiquidInfo::from(&Liquid)` 现在保留 CellLiquid 字段，`reaction_target` 来自 `Liquid.cell_spread_target`；
+  - `PuddleUpdateEvent::from_plan(...)` 现在也会为 `liquid_update` 生成事件，保证 Java `liquid.update(self())` 不是只在 effects-only 分支出现；
+  - `ServerLauncher::tick_server_puddles(...)` 消费带 `reaction_target` 的 `liquid_update` event：
+    - 按 d4+d4 diagonal 扫描邻接 building；
+    - 从真实 `BuildingComp.liquids` 中移除目标液体；
+    - 将吸收量按 `spreadConversion` 转换为当前 cell liquid 并沉积到目标 tile 的 `server_puddles`；
+    - 同步保留 current-building damage/spread 的初步逻辑入口。
+- 新增/更新验证：
+  - `cargo test -p mindustry-server server_puddle_cell_liquid_update_absorbs_spread_target_from_neighbor_building --lib`
+  - `cargo test -p mindustry-core liquid_defaults_match_java_constructor_shape --lib`
+  - `cargo test -p mindustry-core liquid_core_properties_match_upstream_subset --lib`
+  - `cargo test -p mindustry-core update_all_report_exposes_hot_puddle_fire_and_building_events --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - nearby puddle 吸收/替换分支仍未完整迁移；
+  - `Events.fire(Trigger.neoplasmReact)` 还没有 Rust event bus 等价物；
+  - current-building damage/spread 已有入口但仍缺更细的 Java parity 测试；
+  - d4c 顺序/集合当前按 d4 + diagonal 显式数组近似，后续应迁移统一 Geometry 常量。
