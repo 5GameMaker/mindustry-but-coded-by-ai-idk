@@ -171,11 +171,11 @@ use crate::mindustry::{
         read_unit_factory_state, reconstructor_accept_payload, reconstructor_update,
         unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_spawned,
         unit_assembler_update_progress, unit_cargo_loader_spawned, unit_cargo_loader_update,
-        unit_cargo_unload_update, unit_factory_configure_plan, unit_factory_update,
-        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
-        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
-        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        unit_cargo_unload_update, unit_factory_configure_plan, unit_factory_fraction,
+        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
+        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
+        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
+        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -4200,6 +4200,25 @@ impl GameRuntime {
             .map(|value| Self::type_value_to_logic_object(content, &value))
     }
 
+    pub fn sense_owned_building_number(
+        &self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        sensor: LAccess,
+    ) -> Option<f64> {
+        let building = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)?;
+
+        match content.block(building.block.id)? {
+            BlockDef::UnitFactory(factory_block) => {
+                self.sense_owned_unit_factory_number(factory_block, building, sensor)
+            }
+            _ => None,
+        }
+    }
+
     fn sense_owned_building_config_object(
         &self,
         content: &ContentLoader,
@@ -4255,6 +4274,48 @@ impl GameRuntime {
             type_io::TypeValue::Float(value) => LVarValue::Number(*value as f64),
             type_io::TypeValue::Double(value) => LVarValue::Number(*value),
             _ => LVarValue::Object(None),
+        }
+    }
+
+    fn sense_owned_unit_factory_number(
+        &self,
+        factory_block: &UnitFactoryBlockData,
+        building: &BuildingComp,
+        sensor: LAccess,
+    ) -> Option<f64> {
+        match sensor {
+            LAccess::Progress => {
+                let (current_plan, progress) = self
+                    .unit_runtime_states
+                    .get(&building.tile_pos)
+                    .and_then(|state| match state {
+                        GameRuntimeUnitBlockState::Factory { factory, .. } => {
+                            Some((factory.current_plan, factory.base.progress))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| {
+                        let current_plan = match building.config_value() {
+                            type_io::TypeValue::Int(plan) => plan,
+                            _ => -1,
+                        };
+                        (current_plan, 0.0)
+                    });
+                let plan_time = (current_plan >= 0)
+                    .then(|| factory_block.plans.get(current_plan as usize))
+                    .flatten()
+                    .map(|plan| plan.time)
+                    .unwrap_or(0.0);
+                Some(
+                    unit_factory_fraction(current_plan, progress, plan_time).clamp(0.0, 1.0) as f64,
+                )
+            }
+            LAccess::ItemCapacity => Some(
+                (factory_block.base.item_capacity as f32
+                    * self.state.rules.unit_cost(building.team.0 as usize))
+                .round() as f64,
+            ),
+            _ => None,
         }
     }
 
@@ -20876,6 +20937,75 @@ mod tests {
             panic!("preconfigured unit factory should initialize its sidecar");
         };
         assert_eq!(factory.current_plan, 0);
+    }
+
+    #[test]
+    fn game_runtime_senses_unit_factory_progress_and_item_capacity_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let BlockDef::UnitFactory(factory_block) = factory_def else {
+            panic!("air-factory should be a unit factory");
+        };
+        let plan = &factory_block.plans[0];
+        let tile_pos = point2_pack(20, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.state.rules.unit_cost_multiplier = 1.5;
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: plan.time * 0.25,
+                        ..UnitBlockState::default()
+                    },
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.sense_owned_building_number(&content, tile_pos, LAccess::Progress),
+            Some(0.25)
+        );
+        assert_eq!(
+            runtime.sense_owned_building_number(&content, tile_pos, LAccess::ItemCapacity),
+            Some(
+                (factory_block.base.item_capacity as f32 * runtime.state.rules.unit_cost(2)).round()
+                    as f64
+            )
+        );
+
+        {
+            let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+                runtime.unit_runtime_states.get_mut(&tile_pos)
+            else {
+                panic!("unit factory sidecar should stay present for sense numeric test");
+            };
+            factory.base.progress = plan.time * 2.0;
+        }
+        assert_eq!(
+            runtime.sense_owned_building_number(&content, tile_pos, LAccess::Progress),
+            Some(1.0)
+        );
+        {
+            let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+                runtime.unit_runtime_states.get_mut(&tile_pos)
+            else {
+                panic!("unit factory sidecar should stay present for sense numeric clear test");
+            };
+            factory.current_plan = -1;
+        }
+        assert_eq!(
+            runtime.sense_owned_building_number(&content, tile_pos, LAccess::Progress),
+            Some(0.0)
+        );
     }
 
     #[test]
