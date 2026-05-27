@@ -4197,6 +4197,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-server server_update_broadcasts_assembler_unit_spawn_packet_when_assembler_completes --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned --lib`
 - 仍未完成：
-  - `createSound.at(...)` 与 `Fx.unitAssemble.at(...)` 的 sound/effect packet 仍需继续接入；
+  - `createSound.at(...)` 与 `Fx.unitAssemble.at(...)` 的客户端本地 aftereffect 已在下一节接入 runtime sidecar；实际 renderer/audio backend 播放仍需继续补齐；
   - `Events.fire(new UnitCreateEvent(unit, this))` 目前仍未映射到 Rust campaign stats/event bus；
   - unit spawn 只完成即时 sync container 回放，后续仍需继续检查 Java 客户端 `UnitSyncContainer` 读取时的完整 `add()` 副作用。
+
+### 12.135 UnitAssembler.spawned 客户端本地 sound/effect 副作用
+
+- 2026-05-27：继续对照 Java `UnitAssemblerBuild.spawned()` 最后的 `createSound.at(...)` 与 `Fx.unitAssemble.at(...)`，将 Rust desktop/client 回放 `AssemblerUnitSpawnedCallPacket` 时的本地可见副作用接入 runtime sidecar。
+- Java 依据：
+  - `Call.assemblerUnitSpawned(tile)` 是 remote call；Java 客户端收到后执行 `build.spawned()`，因此 `createSound.at(...)` 与 `Fx.unitAssemble.at(...)` 是**客户端本地副作用**，不是 server 额外广播 `soundAt/effect` packet；
+  - `createSound` 默认 `Sounds.unitCreateBig`，`AssetsProcess.processSounds(...)` 按 `core/assets/sounds` 文件名排序生成 sound id，v158.1 中 `unitCreateBig == 191`；
+  - `Fx.unitAssemble` 在 `Fx.java` 的 `Effect.all` 顺序中 id 为 `35`，调用形态为 `Fx.unitAssemble.at(spawn.x, spawn.y, rotdeg() - 90f, plan.unit)`，data 是 output `UnitType`。
+- Rust 新增/变化：
+  - `audio::standard_sound_id(...)` 先接入 `unitCreate`/`unitCreateBig` 的 Java generated sound id 映射；
+  - `entities::FX_UNIT_ASSEMBLE_ID` 记录 v158.1 `Fx.unitAssemble` effect id；
+  - `GameRuntime` 新增：
+    - `client_local_sound_at_events: Vec<SoundAtCallPacket>`；
+    - `client_local_effect_events: Vec<EffectCallPacket2>`；
+  - `GameRuntime::apply_client_assembler_unit_spawned_packet(...)` 在重置 assembler state 前，根据 building rotation/area size 计算 Java spawn 点，并排队：
+    - `SoundAtCallPacket { sound_id: 191, x, y, volume: create_sound_volume, pitch: 1.0 }`；
+    - `EffectCallPacket2 { effect_id: 35, rotation: rotdeg - 90, color: white, data: Content(UnitType) }`；
+  - 没有让 Rust server 额外发送 sound/effect packet，避免 Java 客户端在收到 `AssemblerUnitSpawnedCallPacket` 后本地播放一次、又收到额外 packet 再播放一次。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core standard_sound_ids_follow_upstream_assets_process_order --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_assembler_unit_spawned_packet_like_java --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_assembler_unit_spawned_packet_to_runtime --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned --lib`
+- 仍未完成：
+  - `createSound.at(...)` 的 `Mathf.range(0.06f)` pitch 随机目前以确定性 `1.0` 记录，后续接入客户端 RNG/audio backend 时应恢复 Java pitch range；
+  - runtime sidecar 已记录 sound/effect 数据，但最终 renderer/audio backend 播放还需继续接 desktop 实际表现层；
+  - `Events.fire(new UnitCreateEvent(unit, this))` 仍待迁移到 Rust campaign stats/event bus。

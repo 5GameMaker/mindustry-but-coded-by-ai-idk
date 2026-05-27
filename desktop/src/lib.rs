@@ -2191,6 +2191,8 @@ mod tests {
         };
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
+        assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
+        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
     }
 
@@ -2264,6 +2266,8 @@ mod tests {
             panic!("unit assembler state should remain present");
         };
         assert_eq!(assembler.progress, 0.0);
+        assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
+        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
         let spawned = launcher
             .runtime
             .client_unit_snapshot_entities

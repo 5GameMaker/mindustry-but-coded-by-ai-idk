@@ -13,12 +13,13 @@ use std::{
 };
 
 use crate::mindustry::{
+    audio::standard_sound_id,
     content::blocks::{
         BlockDef, CampaignBlockKind, CraftingBlockKind, DefenseWallKind, DistributionBlockKind,
         EffectBlockKind, LegacyBlockKind, LiquidBlockKind, LogicBlockKind, PayloadBlockKind,
         PayloadLoaderBlockData, PayloadLoaderBlockKind, PayloadMassDriverBlockData, PowerBlockKind,
         ProductionBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
-        UnitFactoryBlockData,
+        UnitAssemblerBlockData, UnitFactoryBlockData,
     },
     core::content_loader::ContentLoader,
     core::game_state::GameState,
@@ -31,7 +32,7 @@ use crate::mindustry::{
             PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile, UnitComp,
             UnitControllerState, WorldLabelComp,
         },
-        entity_class_id, entity_class_kind, EntityClassKind, PuddleLiquidInfo,
+        entity_class_id, entity_class_kind, EntityClassKind, PuddleLiquidInfo, FX_UNIT_ASSEMBLE_ID,
     },
     game::{CoreInfo, SectorInfo},
     input::input_handler::ItemRemoveStackPlan,
@@ -41,10 +42,10 @@ use crate::mindustry::{
     },
     logic::{LAccess, LVarValue},
     net::{
-        AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket,
-        LandingPadLandedCallPacket, NetworkPlayerSyncData, UnitBlockSpawnCallPacket,
-        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
-        UnitTetherBlockSpawnedCallPacket,
+        AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket, EffectCallPacket,
+        EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerSyncData, SoundAtCallPacket,
+        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
+        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -2591,6 +2592,8 @@ pub struct GameRuntime {
     pub client_unit_snapshot_entities: BTreeMap<i32, UnitComp>,
     pub client_weather_snapshot_entities: BTreeMap<i32, WeatherState>,
     pub client_world_label_snapshot_entities: BTreeMap<i32, WorldLabelComp>,
+    pub client_local_sound_at_events: Vec<SoundAtCallPacket>,
+    pub client_local_effect_events: Vec<EffectCallPacket2>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
     pub client_unit_entered_payload_packets_applied: usize,
     pub client_unit_tether_block_spawned_packets_applied: usize,
@@ -2660,6 +2663,8 @@ impl GameRuntime {
             client_unit_snapshot_entities: BTreeMap::new(),
             client_weather_snapshot_entities: BTreeMap::new(),
             client_world_label_snapshot_entities: BTreeMap::new(),
+            client_local_sound_at_events: Vec::new(),
+            client_local_effect_events: Vec::new(),
             client_hidden_entity_ids: BTreeSet::new(),
             client_unit_entered_payload_packets_applied: 0,
             client_unit_tether_block_spawned_packets_applied: 0,
@@ -3597,12 +3602,79 @@ impl GameRuntime {
             return false;
         }
 
+        let Some(BlockDef::UnitAssembler(assembler_block)) = content.block(building.block.id)
+        else {
+            return false;
+        };
+        let current_tier = self
+            .unit_runtime_states
+            .get(&tile_pos)
+            .and_then(|state| match state {
+                GameRuntimeUnitBlockState::Assembler { assembler, .. } => {
+                    Some(assembler.current_tier.max(0) as usize)
+                }
+                _ => None,
+            })
+            .unwrap_or(0);
+        self.queue_client_assembler_unit_spawn_aftereffects(
+            content,
+            &building,
+            assembler_block,
+            current_tier,
+        );
+
         let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
             self.unit_runtime_states.get_mut(&tile_pos)
         else {
             return false;
         };
         unit_assembler_spawned(assembler);
+        true
+    }
+
+    fn queue_client_assembler_unit_spawn_aftereffects(
+        &mut self,
+        content: &ContentLoader,
+        building: &BuildingComp,
+        assembler_block: &UnitAssemblerBlockData,
+        current_tier: usize,
+    ) -> bool {
+        let Some(plan) = assembler_block
+            .plans
+            .get(current_tier.min(assembler_block.plans.len().saturating_sub(1)))
+        else {
+            return false;
+        };
+        let Some(unit_type) = content.unit_by_name(&plan.unit) else {
+            return false;
+        };
+
+        let (dx, dy) = autotiler_direction(building.rotation);
+        let len =
+            TILE_SIZE as f32 * (assembler_block.area_size + assembler_block.base.size) as f32 / 2.0;
+        let spawn_x = building.x + dx as f32 * len;
+        let spawn_y = building.y + dy as f32 * len;
+
+        if let Some(sound_id) = standard_sound_id(&assembler_block.create_sound) {
+            self.client_local_sound_at_events.push(SoundAtCallPacket {
+                sound_id,
+                x: spawn_x,
+                y: spawn_y,
+                volume: assembler_block.create_sound_volume,
+                pitch: 1.0,
+            });
+        }
+
+        self.client_local_effect_events.push(EffectCallPacket2 {
+            effect: EffectCallPacket {
+                effect_id: FX_UNIT_ASSEMBLE_ID as u16,
+                x: spawn_x,
+                y: spawn_y,
+                rotation: building.rotdeg() - 90.0,
+                color: type_io::RgbaColor::new(-1),
+            },
+            data: TypeValue::Content(type_io::ContentRef::new(ContentType::Unit, unit_type.id())),
+        });
         true
     }
 
@@ -9572,6 +9644,8 @@ impl GameRuntime {
         self.client_unit_snapshot_entities.clear();
         self.client_weather_snapshot_entities.clear();
         self.client_world_label_snapshot_entities.clear();
+        self.client_local_sound_at_events.clear();
+        self.client_local_effect_events.clear();
         self.client_hidden_entity_ids.clear();
     }
 
@@ -25083,6 +25157,9 @@ mod tests {
     fn game_runtime_applies_client_assembler_unit_spawned_packet_like_java() {
         let content = ContentLoader::create_base_content().unwrap();
         let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
         let stell = content.unit_by_name("stell").unwrap();
         let large_wall = content.block_by_name("tungsten-wall-large").unwrap();
         let router = content.block_by_name("router").unwrap();
@@ -25129,6 +25206,33 @@ mod tests {
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
         assert_eq!(assembler.command_pos, Some(IoVec2::new(14.0, 15.0)));
+        let expected_spawn_x = runtime.buildings()[0].x
+            + TILE_SIZE as f32 * (assembler_block.area_size + assembler_block.base.size) as f32
+                / 2.0;
+        let expected_spawn_y = runtime.buildings()[0].y;
+        assert_eq!(runtime.client_local_sound_at_events.len(), 1);
+        let sound = &runtime.client_local_sound_at_events[0];
+        assert_eq!(sound.sound_id, 191);
+        assert_eq!(sound.x, expected_spawn_x);
+        assert_eq!(sound.y, expected_spawn_y);
+        assert_eq!(sound.volume, assembler_block.create_sound_volume);
+        assert_eq!(sound.pitch, 1.0);
+        assert_eq!(runtime.client_local_effect_events.len(), 1);
+        let effect = &runtime.client_local_effect_events[0];
+        assert_eq!(effect.effect.effect_id, FX_UNIT_ASSEMBLE_ID as u16);
+        assert_eq!(effect.effect.x, expected_spawn_x);
+        assert_eq!(effect.effect.y, expected_spawn_y);
+        assert_eq!(effect.effect.rotation, -90.0);
+        assert_eq!(
+            effect.data,
+            TypeValue::Content(type_io::ContentRef::new(
+                ContentType::Unit,
+                content
+                    .unit_by_name(&assembler_block.plans[0].unit)
+                    .unwrap()
+                    .id()
+            ))
+        );
         assert!(!runtime.apply_client_assembler_unit_spawned_packet(
             &content,
             &AssemblerUnitSpawnedCallPacket { tile: None },

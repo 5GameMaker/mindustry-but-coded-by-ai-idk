@@ -2535,6 +2535,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-server server_update_broadcasts_assembler_unit_spawn_packet_when_assembler_completes --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned --lib`
 - 下一步建议：
-  1. 继续 `createSound.at(spawn.x, spawn.y, 1f + Mathf.range(0.06f), createSoundVolume)`：查 Rust `SoundAtCallPacket`/sound id registry，接 server broadcast 与 net client/desktop mirror；
-  2. 继续 `Fx.unitAssemble.at(spawn.x, spawn.y, rotdeg() - 90f, plan.unit)`：优先确认是否应走 `EffectCallPacket2`（effect + unit type data）或已有 effect runtime；
-  3. 继续 `Events.fire(new UnitCreateEvent(unit, this))`：先找 Rust campaign stats/event 侧可接入口，不要只写孤立计数 helper。
+  1. `createSound.at(...)` 与 `Fx.unitAssemble.at(...)` 的客户端本地 sidecar 已由第 77 节接入；下一步把这些 sidecar 接到 desktop 实际 audio/renderer backend；
+  2. 继续 `Events.fire(new UnitCreateEvent(unit, this))`：先找 Rust campaign stats/event 侧可接入口，不要只写孤立计数 helper。
+
+---
+
+## 77. 最新闭环记录：UnitAssembler.spawned 客户端本地 sound/effect 副作用
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：迁移 `UnitAssemblerBuild.spawned()` 中 `createSound.at(...)` 与 `Fx.unitAssemble.at(...)`，但保持 Java remote call 语义，不让 Rust server 给 Java client 额外重复发 sound/effect packet。
+- Java 依据：
+  - `Call.assemblerUnitSpawned(tile)` 到客户端后执行 `build.spawned()`，sound/effect 是客户端本地副作用；
+  - `createSound = Sounds.unitCreateBig`，v158.1 `AssetsProcess.processSounds(...)` 生成 id：`unitCreateBig == 191`；
+  - `Fx.unitAssemble` 在 `Effect.all` 中 id 为 `35`，data 是 output `UnitType`。
+- Rust 主改动：
+  - `core/src/mindustry/audio/mod.rs`
+    - `standard_sound_id("unitCreate") == 190`
+    - `standard_sound_id("unitCreateBig") == 191`
+  - `core/src/mindustry/entities/effect.rs`
+    - `FX_UNIT_ASSEMBLE_ID = 35`
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `GameRuntime.client_local_sound_at_events: Vec<SoundAtCallPacket>`
+    - `GameRuntime.client_local_effect_events: Vec<EffectCallPacket2>`
+    - `apply_client_assembler_unit_spawned_packet(...)` 在 reset assembler 前，根据 building rotation/assembler area size 计算 spawn 点并排队本地 sound/effect；
+    - sound 使用 `create_sound_volume` 和确定性 pitch `1.0`；effect 使用 `rotdeg - 90`、white color、`TypeValue::Content(UnitType)` data。
+  - `desktop/src/lib.rs`
+    - 既有 `AssemblerUnitSpawnedCallPacket` 回放路径现在会让 runtime 记录上述本地 aftereffects。
+- 已跑：
+  - `cargo test -p mindustry-core standard_sound_ids_follow_upstream_assets_process_order --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_assembler_unit_spawned_packet_like_java --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_assembler_unit_spawned_packet_to_runtime --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned --lib`
+- 下一步建议：
+  1. 把 `client_local_sound_at_events` / `client_local_effect_events` 接到 desktop 实际播放/渲染层，当前只是 runtime sidecar；
+  2. 恢复 Java `1f + Mathf.range(0.06f)` 的客户端 pitch 随机；
+  3. 继续迁移 `Events.fire(new UnitCreateEvent(unit, this))` 到 Rust campaign stats/event bus。

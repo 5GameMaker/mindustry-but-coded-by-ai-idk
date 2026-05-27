@@ -376,7 +376,7 @@ pub use effect::{
     ParticleDrawItem, ParticleDrawKind, ParticleDrawPlan, ParticleEffect, ParticleVectorInput,
     RadialEffect, SeqEffect, SeqRenderPlan, SoundEffect, SoundEffectCreatePlan, SoundPlaybackPlan,
     WaveDrawPlan, WaveEffect, WrapEffect, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LAYER,
-    DEFAULT_EFFECT_LIFETIME, SHAKE_FALLOFF,
+    DEFAULT_EFFECT_LIFETIME, FX_UNIT_ASSEMBLE_ID, SHAKE_FALLOFF,
 };
 pub use entity_collisions::{
     collide, legs_solid, move_check_hitbox, move_delta_rect, move_hitbox, move_rect, overlaps_tile,

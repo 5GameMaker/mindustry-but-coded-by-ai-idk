@@ -4,6 +4,8 @@ pub const SHAKE_FALLOFF: f32 = 10000.0;
 pub const DEFAULT_EFFECT_LIFETIME: f32 = 50.0;
 pub const DEFAULT_EFFECT_CLIP: f32 = 50.0;
 pub const DEFAULT_EFFECT_LAYER: f32 = 110.0;
+/// Upstream `Fx.unitAssemble` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UNIT_ASSEMBLE_ID: i32 = 35;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
