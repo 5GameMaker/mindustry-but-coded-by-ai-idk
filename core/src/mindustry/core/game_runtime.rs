@@ -1920,6 +1920,7 @@ pub struct GameRuntimeOwnedItemTransportFrameReport {
     pub bridge_forwarded_items: usize,
     pub junction_forwarded_items: usize,
     pub unit_cargo_loader_built_units: usize,
+    pub unit_cargo_unload_dumped_items: usize,
     pub unit_cargo_unload_stale_points: usize,
 }
 
@@ -9457,6 +9458,29 @@ impl GameRuntime {
             return 0;
         }
 
+        self.dump_accumulated_items_from_building(content, source_index, repetitions, delta)
+    }
+
+    fn dump_accumulated_items_from_unit_cargo_unload_point(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        delta: f32,
+    ) -> usize {
+        self.dump_accumulated_items_from_building(content, source_index, 1, delta)
+    }
+
+    fn dump_accumulated_items_from_building(
+        &mut self,
+        content: &ContentLoader,
+        source_index: usize,
+        repetitions: usize,
+        delta: f32,
+    ) -> usize {
+        if source_index >= self.buildings.len() || repetitions == 0 {
+            return 0;
+        }
+
         let mut dumped = 0;
         for _ in 0..repetitions {
             let attempts = {
@@ -10116,7 +10140,8 @@ impl GameRuntime {
             .moved_items;
         let cargo_report = self.advance_owned_unit_cargo_blocks_ticks(content, frame_delta);
         report.unit_cargo_loader_built_units += cargo_report.0;
-        report.unit_cargo_unload_stale_points += cargo_report.1;
+        report.unit_cargo_unload_dumped_items += cargo_report.1;
+        report.unit_cargo_unload_stale_points += cargo_report.2;
         report
     }
 
@@ -10124,8 +10149,9 @@ impl GameRuntime {
         &mut self,
         content: &ContentLoader,
         frame_delta: f32,
-    ) -> (usize, usize) {
+    ) -> (usize, usize, usize) {
         let mut built_units = 0;
+        let mut dumped_items = 0;
         let mut stale_points = 0;
 
         for index in 0..self.buildings.len() {
@@ -10184,6 +10210,22 @@ impl GameRuntime {
                     }
                 }
                 DistributionBlockKind::UnitCargoUnloadPoint => {
+                    let before_stale = matches!(
+                        self.distribution_runtime_states.get(&tile_pos),
+                        Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state))
+                            if state.stale
+                    );
+                    let dumped = self.dump_accumulated_items_from_unit_cargo_unload_point(
+                        content,
+                        index,
+                        frame_delta * time_scale,
+                    );
+                    dumped_items += dumped;
+                    let items_total = self.buildings[index]
+                        .items
+                        .as_ref()
+                        .map(|items| items.total())
+                        .unwrap_or(0);
                     let entry = self
                         .distribution_runtime_states
                         .entry(tile_pos)
@@ -10212,17 +10254,11 @@ impl GameRuntime {
                             }
                         }
                     };
-                    let before_stale = state.stale;
-                    let items_total = self.buildings[index]
-                        .items
-                        .as_ref()
-                        .map(|items| items.total())
-                        .unwrap_or(0);
                     unit_cargo_unload_update(
                         state,
                         items_total,
                         self.buildings[index].block.item_capacity,
-                        false,
+                        dumped > 0,
                         frame_delta * time_scale,
                         distribution.stale_time_duration,
                     );
@@ -10234,7 +10270,7 @@ impl GameRuntime {
             }
         }
 
-        (built_units, stale_points)
+        (built_units, dumped_items, stale_points)
     }
 
     pub fn advance_owned_item_routers(
@@ -20869,6 +20905,107 @@ mod tests {
             panic!("unit cargo unload state should remain present");
         };
         assert!(state.stale);
+    }
+
+    #[test]
+    fn game_runtime_unit_cargo_unload_point_dumps_item_to_adjacent_router() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unload_def = content.block_by_name("unit-cargo-unload-point").unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let copper = content.item_by_name("copper").unwrap();
+        let BlockDef::Distribution(unload_block) = unload_def else {
+            panic!("unit-cargo-unload-point should be a distribution block");
+        };
+        let unload_tile = point2_pack(20, 18);
+        let router_tile = point2_pack(22, 18);
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(32, 32);
+        let mut unload = BuildingComp::new(unload_tile, unload_def.base().clone(), TeamId(4));
+        if let Some(items) = unload.items.as_mut() {
+            items.set(
+                copper.base.mappable.base.id,
+                unload_def.base().item_capacity,
+            );
+        }
+        runtime.add_building(unload);
+        runtime.add_building(BuildingComp::new(
+            router_tile,
+            router_def.base().clone(),
+            TeamId(4),
+        ));
+        assert!(
+            runtime.buildings[0]
+                .proximity
+                .iter()
+                .any(|reference| reference.tile_pos == router_tile),
+            "unit cargo unload point should see the adjacent router"
+        );
+        runtime.distribution_runtime_states.insert(
+            unload_tile,
+            GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                item_id: Some(copper.base.mappable.base.id as i32),
+                stale_timer: unload_block.stale_time_duration - 1.0,
+                stale: false,
+            }),
+        );
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(report.item_transport.unit_cargo_unload_dumped_items, 1);
+        assert_eq!(report.item_transport.unit_cargo_unload_stale_points, 0);
+        let unload = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == unload_tile)
+            .unwrap();
+        let router = runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == router_tile)
+            .unwrap();
+        assert_eq!(
+            unload
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper.base.mappable.base.id),
+            unload_def.base().item_capacity - 1
+        );
+        assert_eq!(
+            router
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper.base.mappable.base.id),
+            1
+        );
+        let Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)) =
+            runtime.distribution_runtime_states.get(&unload_tile)
+        else {
+            panic!("unit cargo unload state should remain present");
+        };
+        assert!(!state.stale);
+        assert_eq!(state.stale_timer, 0.0);
     }
 
     #[test]

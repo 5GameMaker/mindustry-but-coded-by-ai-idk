@@ -3722,16 +3722,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `UnitCargoUnloadPoint`：未满容量或 `dumpAccumulate()` 成功时清 `staleTimer/stale`；满容量且持续 `staleTimeDuration` 后 `stale = true`；
   - loader `write/read` 只同步 tether unit id，unload `write/read` 同步 configured item 与 stale bool。
 - Rust 新增/变化：
-  - `GameRuntimeOwnedItemTransportFrameReport` 新增 `unit_cargo_loader_built_units` 与 `unit_cargo_unload_stale_points`；
+  - `GameRuntimeOwnedItemTransportFrameReport` 新增 `unit_cargo_loader_built_units`、`unit_cargo_unload_dumped_items` 与 `unit_cargo_unload_stale_points`；
   - `advance_owned_item_transport_blocks_ticks(...)` 末尾调用 `advance_owned_unit_cargo_blocks_ticks(...)`，因此 unit cargo 由 `advance_owned_runtime_blocks` 和服务端 owned runtime 同一路径驱动，不是孤立 helper；
   - loader 分支懒创建/修正 `GameRuntimeDistributionBlockState::UnitCargoLoader`，调用 `unit_cargo_loader_update(...)`，到点后调用 `unit_cargo_loader_spawned(...)` 并把 `has_unit` 置 true（真实 `UnitType.create(team)`/BuildingTether 实体仍待补）；
-  - unload 分支懒创建/修正 `GameRuntimeDistributionBlockState::UnitCargoUnload`，按 building item total、capacity 和 `stale_time_duration` 调用 `unit_cargo_unload_update(...)`，当前 `dumpAccumulate()` 仍以 false 占位。
+  - unload 分支懒创建/修正 `GameRuntimeDistributionBlockState::UnitCargoUnload`，复用 runtime 通用 `dump_accumulated_items_from_building(...) -> dump_one_item_from_building(...) -> dump_item_to_target(...)` 链路执行 Java `dumpAccumulate()` 等价邻接输出，再按 dump 后 item total、capacity、真实 `dumped` 与 `stale_time_duration` 调用 `unit_cargo_unload_update(...)`。
 - 新增 core 回归测试：
   - `game_runtime_owned_runtime_blocks_advances_unit_cargo_loader_build`
   - `game_runtime_owned_runtime_blocks_marks_unit_cargo_unload_stale`
+  - `game_runtime_unit_cargo_unload_point_dumps_item_to_adjacent_router`
 - 新增 server-level smoke，证明 unit cargo 不是孤立 helper，而是由真实 `ServerLauncher::update()` 经 `advance_owned_runtime_blocks(...).item_transport` 驱动并缓存到 `last_runtime_item_transport_report`：
   - `server_update_drives_owned_unit_cargo_loader_from_launcher_runtime`
   - `server_update_drives_owned_unit_cargo_unload_stale_from_launcher_runtime`
+  - `server_update_drives_owned_unit_cargo_unload_dump_from_launcher_runtime`
 - 2026-05-27：继续把 loader spawn 从纯计数推进到最小 server 物化/同步链路。`ServerLauncher::update()` 会在 owned runtime tick 前记录尚未持有 unit 的 `unit-cargo-loader` tile，tick 后按新完成的 loader 创建 server-side `manifold` `UnitComp`，写回 `UnitCargoLoaderState.read_unit_id`，并在网络已开启时可靠广播 `UnitTetherBlockSpawnedCallPacket { tile, id }`：
   - 新增 `server_update_broadcasts_unit_tether_block_spawned_for_owned_unit_cargo_loader`
   - 这仍是最小 server sidecar，尚未把 `BuildingTetherComp` 正式并入 `UnitComp`，也未补客户端 apply packet 后回填 loader state。
@@ -3740,11 +3742,13 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 `update_records_unit_tether_block_spawned_packet_for_runtime_bridge`
   - 新增 `desktop_launcher_syncs_unit_tether_block_spawned_packet_to_runtime`
 - 2026-05-27：新增真实联机 smoke `real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime`，用真实 `ServerLauncher -> ArcNetProvider -> DesktopLauncher` 链路验证：server owned runtime 里的 `unit-cargo-loader` 完成构建后创建 server-side `manifold`，可靠发出 `UnitTetherBlockSpawnedCallPacket`，desktop `NetClient` 收到并由 `DesktopLauncher` 桥接到客户端 runtime，最终 `UnitCargoLoaderState.read_unit_id` 与 server 侧生成 id 对齐。
+- 2026-05-27：补齐 `UnitCargoUnloadPoint.dumpAccumulate()` 的真实运行链路。owned runtime 中 unload point 现在会按 Java `BuildingComp.dumpAccumulate()` 语义累积 `dump_accum`，通过既有邻接输出/acceptItem 路径把物品倒入相邻 router/storage/distribution 等目标；只要成功 dump 就清 `staleTimer/stale`，并通过 `unit_cargo_unload_dumped_items` 上报。server smoke 已验证该行为可由 `ServerLauncher::update()` 驱动，不是孤立 helper。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_tether_block_spawned`
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`
   - `cargo test -p mindustry-server unit_cargo --lib`
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`
+  - `cargo fmt --check`
   - `cargo check --workspace`
-- 仍未完成：真实 manifold unit 创建/加入 world/BuildingTether、`Call.unitTetherBlockSpawned` 联机同步、loader 液体/电力 consume 精确联动、unload `dumpAccumulate()` 真实向邻接方块输出、unload item config 的 `TileConfigCallPacket` 分发与 UI 行为仍待补。
+- 仍未完成：server-side `BuildingTetherComp` 正式并入 `UnitComp`/Groups.unit 生命周期、loader 液体/电力 consume 精确联动、unload item config 的 `TileConfigCallPacket` 分发与 UI 行为、真实 cargo unit AI 往返装卸与 Java 客户端/服务端更完整联机兼容仍待补。
