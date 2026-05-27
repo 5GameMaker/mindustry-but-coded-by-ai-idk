@@ -4030,3 +4030,57 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - 这仍不是完整 Fx registry；
      - `Fx.ripple` 当前沿用既有常量 `243`，后续完整 Fx id 审计时要统一确认；
      - 真实 renderer 与完整 effect registry 仍未完成。
+
+---
+
+## 122. 最新闭环记录：标准 Fx 本地渲染 primitive 链路
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：把 `EffectCallPacket2` / 本地 `EffectStateComp` 从“只保留 effect state”推进到桌面端每帧可消费的标准 Fx draw/circle/light primitive 缓存。
+- 已推送提交链路：
+  - `5b98a71 完善标准特效帧缓存清理测试`
+  - `58d8453 扩展标准特效粒子绘制计划`
+  - `bcc0832 展开标准特效粒子圆图元`
+  - `5d7960a 复刻标准特效随机粒子向量`
+  - `79a4583 统一标准特效圆形渲染图元`
+  - `fe74e73 缓存桌面标准特效圆图元`
+  - `b581d06 缓存标准特效光照图元`
+  - `f02df0a 解析标准特效颜色符号`
+- Java/Arc 依据：
+  - `Fx.java` 中 `smoke/missileTrail/missileTrailShort/ripple/fire/fireSmoke/steam/vapor/fireballsmoke/smokeCloud` 的 renderer 公式；
+  - Arc `Rand` / `Angles.randLenVectors(...)` / `Mathf.sin/cos` 通过本地 Gradle cache 的 `arc-core-4d9760e264.jar` + `javap` 对照；
+  - `Pal.java` 中 `darkishGray/lightFlame/darkFlame`，Arc `Color.gray/lightGray/darkGray`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - `StandardEffectDrawKind` 增加 `SeededCircleParticles`；
+    - 新增 `StandardEffectParticleSpec`、`StandardEffectParticleVector`、`StandardEffectCirclePrimitive`；
+    - 复刻 Arc `Rand` / `Angles.randLenVectors` 当前所需 overload；
+    - 新增 `StandardEffectCircleRenderPrimitive` 与 `StandardEffectLightRenderPrimitive`；
+    - 新增 `standard_effect_color_symbol(...)` 与 `StandardEffectDrawPlan::resolved_draw_color()`；
+    - `standard_effect_draw_plan(...)` 覆盖当前高频 Fx：`smoke/missileTrail/missileTrailShort/ripple/fire/fireSmoke/steam/vapor/fireballsmoke/smokeCloud`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 现在每帧维护：
+      - `standard_local_effect_draw_plans`
+      - `standard_local_effect_circle_primitives`
+      - `standard_local_effect_light_primitives`
+    - `update()` 会从本地 effect state 自动生成上述缓存；
+    - 世界卸载 / snapshot cursor 清理同步清空这些缓存。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出新增 standard effect primitive/color 类型与 helper。
+- 最近已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo test -p mindustry-core standard_effect_plan_resolves --lib`
+  - `cargo test -p mindustry-desktop standard_effect_draw --lib`
+  - `cargo test -p mindustry-desktop ticks_elude --lib`
+  - `cargo test -p mindustry-desktop fire_light --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 真实桌面窗口/2D/GPU backend 仍未接入；当前是内存帧缓存和 primitive 数据；
+  2. `standard_effect_color_symbol(...)` 只覆盖当前已迁移 Fx 所需颜色，不是完整 `Pal.java`/Arc `Color` registry；
+  3. 完整 `Fx.java` renderer 仍待继续逐项迁移；
+  4. 如果要引入 `winit/wgpu/pixels/sdl2` 等新外部后端依赖，需要按当前开发规则先确认；未确认前优先继续做无依赖 primitive/runtime 接入。
