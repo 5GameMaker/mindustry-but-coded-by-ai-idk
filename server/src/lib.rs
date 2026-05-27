@@ -1782,8 +1782,9 @@ mod tests {
     use super::ServerLauncher;
     use mindustry_core::mindustry::content::blocks::BlockDef;
     use mindustry_core::mindustry::core::game_runtime::{
-        GameRuntimePayloadBlockState, GameRuntimePowerNodeBatchLinkReport,
-        GameRuntimePowerNodeConfigResult, GameRuntimePowerNodeLinkResult,
+        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
+        GameRuntimePowerNodeBatchLinkReport, GameRuntimePowerNodeConfigResult,
+        GameRuntimePowerNodeLinkResult,
     };
     use mindustry_core::mindustry::core::{
         content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
@@ -1811,6 +1812,9 @@ mod tests {
         payload_mass_driver_loaded_pay_length, BlockProducerState, PayloadBlockBuildState,
         PayloadConveyorState, PayloadDeconstructorState, PayloadDriverState, PayloadLoaderState,
         PayloadMassDriverState, PayloadRef, PayloadSortKey, PayloadSourceState,
+    };
+    use mindustry_core::mindustry::world::blocks::units::{
+        UnitCargoLoaderState, UnitCargoUnloadPointState,
     };
     use mindustry_core::mindustry::world::point2_pack;
     use std::collections::BTreeMap;
@@ -4107,6 +4111,106 @@ mod tests {
                 .get(copper),
             0
         );
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_unit_cargo_loader_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let loader_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-loader")
+            .unwrap();
+        let BlockDef::Distribution(loader_block) = loader_def else {
+            panic!("unit-cargo-loader should be a distribution block");
+        };
+        let loader_tile = point2_pack(6, 6);
+
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.runtime.add_building(BuildingComp::new(
+            loader_tile,
+            loader_def.base().clone(),
+            TeamId(6),
+        ));
+        launcher.runtime.distribution_runtime_states.insert(
+            loader_tile,
+            GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+                build_progress: 1.0 - 1.0 / loader_block.unit_build_time,
+                ..UnitCargoLoaderState::default()
+            }),
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_item_transport_report
+            .expect("server update should cache the latest item transport batch");
+        assert_eq!(report.unit_cargo_loader_built_units, 1);
+        let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(state)) = launcher
+            .runtime
+            .distribution_runtime_states
+            .get(&loader_tile)
+        else {
+            panic!("unit cargo loader state should remain present");
+        };
+        assert!(state.has_unit);
+        assert_eq!(state.build_progress, 0.0);
+        assert_eq!(launcher.runtime.state.update_id, 1);
+    }
+
+    #[test]
+    fn server_update_drives_owned_unit_cargo_unload_stale_from_launcher_runtime() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let unload_def = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let BlockDef::Distribution(unload_block) = unload_def else {
+            panic!("unit-cargo-unload-point should be a distribution block");
+        };
+        let unload_tile = point2_pack(7, 6);
+        let mut unload = BuildingComp::new(unload_tile, unload_def.base().clone(), TeamId(6));
+        unload
+            .items
+            .as_mut()
+            .unwrap()
+            .set(copper, unload_def.base().item_capacity);
+
+        launcher.runtime.state.world.resize(16, 16);
+        launcher.runtime.add_building(unload);
+        launcher.runtime.distribution_runtime_states.insert(
+            unload_tile,
+            GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+                item_id: Some(copper as i32),
+                stale_timer: unload_block.stale_time_duration - 1.0,
+                stale: false,
+            }),
+        );
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        launcher.update();
+
+        let report = launcher
+            .last_runtime_item_transport_report
+            .expect("server update should cache the latest item transport batch");
+        assert_eq!(report.unit_cargo_unload_stale_points, 1);
+        let Some(GameRuntimeDistributionBlockState::UnitCargoUnload(state)) = launcher
+            .runtime
+            .distribution_runtime_states
+            .get(&unload_tile)
+        else {
+            panic!("unit cargo unload state should remain present");
+        };
+        assert!(state.stale);
         assert_eq!(launcher.runtime.state.update_id, 1);
     }
 

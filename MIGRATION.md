@@ -3729,7 +3729,11 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 新增 core 回归测试：
   - `game_runtime_owned_runtime_blocks_advances_unit_cargo_loader_build`
   - `game_runtime_owned_runtime_blocks_marks_unit_cargo_unload_stale`
+- 新增 server-level smoke，证明 unit cargo 不是孤立 helper，而是由真实 `ServerLauncher::update()` 经 `advance_owned_runtime_blocks(...).item_transport` 驱动并缓存到 `last_runtime_item_transport_report`：
+  - `server_update_drives_owned_unit_cargo_loader_from_launcher_runtime`
+  - `server_update_drives_owned_unit_cargo_unload_stale_from_launcher_runtime`
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
+  - `cargo test -p mindustry-server unit_cargo --lib`
   - `cargo check --workspace`
 - 仍未完成：真实 manifold unit 创建/加入 world/BuildingTether、`Call.unitTetherBlockSpawned` 联机同步、loader 液体/电力 consume 精确联动、unload `dumpAccumulate()` 真实向邻接方块输出、unload item config 的 `TileConfigCallPacket` 分发与 UI 行为仍待补。
