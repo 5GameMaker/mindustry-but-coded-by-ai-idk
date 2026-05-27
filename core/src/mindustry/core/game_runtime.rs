@@ -3217,6 +3217,37 @@ impl GameRuntime {
         true
     }
 
+    pub fn apply_client_building_item_storage_mirror(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        items: &BTreeMap<String, i32>,
+    ) -> bool {
+        let Some(building) = self
+            .buildings
+            .iter_mut()
+            .find(|building| building.tile_pos == tile_pos)
+        else {
+            return false;
+        };
+        let Some(storage) = building.items.as_mut() else {
+            return false;
+        };
+
+        let mut applied = false;
+        for (item_name, amount) in items {
+            let Some(item) = content.item_by_name(item_name) else {
+                continue;
+            };
+            storage.set(
+                item.base.mappable.base.id as ContentId,
+                (*amount).clamp(0, building.block.item_capacity.max(0)),
+            );
+            applied = true;
+        }
+        applied || items.is_empty()
+    }
+
     pub fn apply_client_unit_payload_mirror(
         &mut self,
         entity_id: i32,
@@ -19804,6 +19835,47 @@ mod tests {
         assert_eq!(unit.items.stack.amount, 0);
 
         assert!(!runtime.apply_client_unit_item_mirror(9999, Some("copper"), 1));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_building_item_storage_mirror_to_runtime_building() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let storage_block = content.block_by_name("unit-cargo-unload-point").unwrap();
+        let copper = content
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let lead = content.item_by_name("lead").unwrap().base.mappable.base.id;
+        let tile_pos = point2_pack(5, 5);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            storage_block.base().clone(),
+            TeamId(3),
+        ));
+
+        let mut mirror = BTreeMap::new();
+        mirror.insert("copper".to_string(), 3);
+        mirror.insert("lead".to_string(), i32::MAX);
+        mirror.insert("unknown-item".to_string(), 9);
+
+        assert!(runtime.apply_client_building_item_storage_mirror(&content, tile_pos, &mirror));
+        let items = runtime.buildings()[0].items.as_ref().unwrap();
+        assert_eq!(items.get(copper), 3);
+        assert_eq!(items.get(lead), storage_block.base().item_capacity);
+        assert_eq!(
+            items.total(),
+            3 + storage_block.base().item_capacity,
+            "known mirrored item amounts should be applied without inventing unknown content"
+        );
+        assert!(!runtime.apply_client_building_item_storage_mirror(
+            &content,
+            point2_pack(9, 9),
+            &mirror
+        ));
     }
 
     #[test]

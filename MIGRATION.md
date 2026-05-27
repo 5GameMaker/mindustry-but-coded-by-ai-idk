@@ -3756,13 +3756,17 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 载货 cargo unit 复用 `transfer_item_to(...)` 向匹配 unload point 入库，并广播 `TransferItemToCallPacket`，因此链路接入 server runtime/entity/network，而不是新增孤立 helper；
   - 新增 `server_update_drives_spawned_unit_cargo_ai_between_loader_and_unload_point`，覆盖 loader 库存 -> `manifold` -> unload point 库存的两 tick 闭环，以及对应 packet 发送。
 - 2026-05-27：补上客户端 cargo unit 最小物化。`GameRuntime::apply_client_unit_tether_block_spawned_packet(...)` 不再只写 `UnitCargoLoaderState.read_unit_id`，还会用同一 loader building 的 team/坐标在 `client_unit_snapshot_entities` 中创建或更新 `manifold` `UnitComp`，并写入 `UnitControllerState::Cargo` 与 `CargoAiRuntimeState { tether_tile_pos }`；`DesktopLauncher` 的 tether packet 同步测试与真实 server→desktop smoke 均断言该客户端 unit snapshot 存在。这样后续 `TakeItemsCallPacket` / `TransferItemToCallPacket` 经 `NetClient` item mirror 后有真实客户端单位落点，而不是只停在 packet cursor。
+- 2026-05-27：继续把 cargo transfer 的客户端接收端接入 runtime。`GameRuntime::apply_client_building_item_storage_mirror(...)` 会把 `NetClient.building_storage_mirrors` 中已知 item 数量写回对应 runtime building 的 `ItemModule`；`DesktopLauncher::update()` 新增 `sync_building_storage_mirrors_to_runtime()`，先于 unit item mirror 应用 building item mirror。新增真实 server→desktop cargo transfer smoke，验证 `unit-cargo-loader` 生成 `manifold` 后通过 `TakeItemsCallPacket` + `TransferItemToCallPacket` 把 copper 从 loader 搬到 unload point，desktop runtime 中的 materialized cargo unit 最终清空，unload point 库存同步为 12。
 - 验证：
   - `cargo test -p mindustry-core unit_cargo`
   - `cargo test -p mindustry-core unit_tether_block_spawned --lib`（本轮通过 2/2）
   - `cargo test -p mindustry-desktop unit_tether_block_spawned --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-desktop unit_cargo --lib`（本轮通过 1/1）
+  - `cargo test -p mindustry-core client_building_item_storage_mirror --lib`（本轮通过 1/1）
+  - `cargo test -p mindustry-desktop building_storage_mirror --lib`（本轮通过 1/1）
   - `cargo test -p mindustry-server unit_cargo --lib`（本轮通过 6/6）
   - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime -- --nocapture`（本轮通过）
+  - `cargo test -p mindustry-tests real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime -- --nocapture`（本轮通过；首次遇到临时端口占用重试后通过）
   - `cargo fmt --check`
   - `cargo check --workspace`（本轮通过，仅保留既有 unused warning）
 - 仍未完成：server-side `BuildingTetherComp` 还未作为正式组件并入 `UnitComp`/Groups.unit 生命周期；当前 cargo AI 仍是 server launcher 驱动的最小 authoritative 闭环，尚未完整迁移 Java `CargoAI.retarget()/timer/dropSpacing/noDestTimer`、真实平滑移动与客户端单位实体 snapshot 可视化；loader 资源 consumer 的全局 shouldConsume/rollback 权限细节、unload config 的 UI 选择表/rollback 权限细节、Java 客户端/服务端更完整联机兼容仍待补。

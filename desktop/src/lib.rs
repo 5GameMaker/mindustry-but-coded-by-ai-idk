@@ -4,8 +4,8 @@ use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeUnitCargoUnloadConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
-    ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientUnitItemMirror,
-    ClientUnitPayloadMirror,
+    ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
+    ClientUnitItemMirror, ClientUnitPayloadMirror,
 };
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameRuntimeMapLoadReport,
@@ -57,6 +57,7 @@ pub struct DesktopLauncher {
     last_applied_block_snapshot_mirror: Option<ClientBlockSnapshotMirror>,
     last_applied_entity_snapshot_mirror_count: usize,
     last_applied_hidden_snapshot_mirror: Option<ClientHiddenSnapshotMirror>,
+    last_applied_building_storage_mirrors: BTreeMap<i32, ClientTileStorageMirror>,
     last_applied_unit_item_mirrors: BTreeMap<i32, ClientUnitItemMirror>,
     last_applied_unit_payload_mirrors: BTreeMap<i32, ClientUnitPayloadMirror>,
     last_applied_unit_entered_payload_packets_seen: u64,
@@ -89,6 +90,7 @@ impl DesktopLauncher {
             last_applied_block_snapshot_mirror: None,
             last_applied_entity_snapshot_mirror_count: 0,
             last_applied_hidden_snapshot_mirror: None,
+            last_applied_building_storage_mirrors: BTreeMap::new(),
             last_applied_unit_item_mirrors: BTreeMap::new(),
             last_applied_unit_payload_mirrors: BTreeMap::new(),
             last_applied_unit_entered_payload_packets_seen: 0,
@@ -109,6 +111,7 @@ impl DesktopLauncher {
         self.sync_client_loaded_state();
         self.sync_state_snapshot();
         self.sync_snapshot_mirrors();
+        self.sync_building_storage_mirrors_to_runtime();
         self.sync_unit_item_mirrors_to_runtime();
         self.sync_unit_payload_mirrors_to_runtime();
         self.sync_unit_entered_payload_to_runtime();
@@ -290,6 +293,37 @@ impl DesktopLauncher {
         }
     }
 
+    fn sync_building_storage_mirrors_to_runtime(&mut self) -> usize {
+        if self.last_applied_world_data.is_none() {
+            return 0;
+        }
+
+        let mirrors = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.building_storage_mirrors.clone()
+        };
+        self.last_applied_building_storage_mirrors
+            .retain(|tile_pos, _| mirrors.contains_key(tile_pos));
+
+        let mut applied = 0;
+        for (tile_pos, mirror) in mirrors {
+            if self.last_applied_building_storage_mirrors.get(&tile_pos) == Some(&mirror) {
+                continue;
+            }
+            if self.runtime.apply_client_building_item_storage_mirror(
+                &self.content_loader,
+                tile_pos,
+                &mirror.items,
+            ) {
+                self.last_applied_building_storage_mirrors
+                    .insert(tile_pos, mirror);
+                applied += 1;
+            }
+        }
+        applied
+    }
+
     fn sync_unit_item_mirrors_to_runtime(&mut self) -> usize {
         if self.last_applied_world_data.is_none() {
             return 0;
@@ -449,6 +483,7 @@ impl DesktopLauncher {
             block_mirror,
             entity_count,
             hidden_mirror,
+            building_storage_mirrors,
             preview_plan_count,
             unit_item_mirrors,
             unit_payload_mirrors,
@@ -462,6 +497,7 @@ impl DesktopLauncher {
                 state.last_block_snapshot_mirror.clone(),
                 state.entity_snapshot_mirrors.len(),
                 state.last_hidden_snapshot_mirror.clone(),
+                state.building_storage_mirrors.clone(),
                 state.client_plan_snapshot_received_packets.len(),
                 state.unit_item_mirrors.clone(),
                 state.unit_payload_mirrors.clone(),
@@ -475,6 +511,7 @@ impl DesktopLauncher {
         self.last_applied_hidden_snapshot_mirror = hidden_mirror;
         self.last_client_snapshot_apply_report = None;
         self.last_applied_client_plan_snapshot_received_count = preview_plan_count;
+        self.last_applied_building_storage_mirrors = building_storage_mirrors;
         self.last_applied_unit_item_mirrors = unit_item_mirrors;
         self.last_applied_unit_payload_mirrors = unit_payload_mirrors;
         self.last_applied_unit_entered_payload_packets_seen = unit_entered_payload_packets_seen;
@@ -491,6 +528,7 @@ impl DesktopLauncher {
         self.last_applied_hidden_snapshot_mirror = None;
         self.last_client_snapshot_apply_report = None;
         self.last_applied_client_plan_snapshot_received_count = 0;
+        self.last_applied_building_storage_mirrors.clear();
         self.last_applied_unit_item_mirrors.clear();
         self.last_applied_unit_payload_mirrors.clear();
         self.last_applied_unit_entered_payload_packets_seen = 0;
@@ -1074,8 +1112,8 @@ mod tests {
     };
     use mindustry_core::mindustry::core::net_client::{
         ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
-        ClientEntitySnapshotRecordMirror, ClientHiddenSnapshotMirror, ClientUnitItemMirror,
-        ClientUnitPayloadMirror,
+        ClientEntitySnapshotRecordMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
+        ClientUnitItemMirror, ClientUnitPayloadMirror,
     };
     use mindustry_core::mindustry::core::{
         GameRuntime, GameRuntimeNetworkContext, WorldLoadEventKind,
@@ -1449,6 +1487,91 @@ mod tests {
             .unwrap();
         assert_eq!(unit.items.stack.item.as_deref(), Some("lead"));
         assert_eq!(unit.items.stack.amount, 5);
+    }
+
+    #[test]
+    fn desktop_launcher_applies_building_storage_mirror_to_runtime_building() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let storage_block = launcher
+            .content_loader
+            .block_by_name("unit-cargo-unload-point")
+            .unwrap();
+        let copper = launcher
+            .content_loader
+            .item_by_name("copper")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_pos = mindustry_core::mindustry::world::point2_pack(9, 9);
+        launcher.runtime.add_building(BuildingComp::new(
+            tile_pos,
+            storage_block.base().clone(),
+            TeamId(4),
+        ));
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            let mut items = BTreeMap::new();
+            items.insert("copper".into(), 4);
+            state.building_storage_mirrors.insert(
+                tile_pos,
+                ClientTileStorageMirror {
+                    items,
+                    ..ClientTileStorageMirror::default()
+                },
+            );
+        }
+        launcher.update();
+        assert_eq!(
+            launcher
+                .runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == tile_pos)
+                .unwrap()
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            4
+        );
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state
+                .building_storage_mirrors
+                .get_mut(&tile_pos)
+                .unwrap()
+                .items
+                .insert("copper".into(), 7);
+        }
+        launcher.update();
+        assert_eq!(
+            launcher
+                .runtime
+                .buildings()
+                .iter()
+                .find(|building| building.tile_pos == tile_pos)
+                .unwrap()
+                .items
+                .as_ref()
+                .unwrap()
+                .get(copper),
+            7
+        );
     }
 
     #[test]

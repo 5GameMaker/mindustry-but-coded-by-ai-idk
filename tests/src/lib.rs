@@ -538,6 +538,196 @@ fn real_server_desktop_unit_cargo_loader_tether_spawn_syncs_to_client_runtime() 
 }
 
 #[test]
+fn real_server_desktop_unit_cargo_transfer_syncs_item_mirrors_to_client_runtime() {
+    use mindustry_core::mindustry::content::blocks::BlockDef;
+    use mindustry_core::mindustry::core::{
+        game_runtime::GameRuntimeDistributionBlockState, GameRuntimeNetworkContext,
+    };
+    use mindustry_core::mindustry::entities::comp::BuildingComp;
+    use mindustry_core::mindustry::io::TeamId;
+    use mindustry_core::mindustry::world::blocks::units::{
+        UnitCargoLoaderState, UnitCargoUnloadPointState,
+    };
+    use mindustry_core::mindustry::world::point2_pack;
+    use mindustry_server::ServerLauncher;
+    use std::thread;
+    use std::time::Duration;
+
+    let port = free_local_port();
+    let mut server = ServerLauncher::new(vec![
+        "mindustry-server".into(),
+        "--port".into(),
+        port.to_string(),
+    ]);
+    let loader_tile = point2_pack(4, 4);
+    let unload_tile = point2_pack(9, 4);
+    let power_source_tile = point2_pack(6, 4);
+    let loader_def = server
+        .content_loader
+        .block_by_name("unit-cargo-loader")
+        .expect("base content should include unit-cargo-loader");
+    let unload_def = server
+        .content_loader
+        .block_by_name("unit-cargo-unload-point")
+        .expect("base content should include unit-cargo-unload-point");
+    let power_source_def = server
+        .content_loader
+        .block_by_name("power-source")
+        .expect("base content should include power-source");
+    let BlockDef::Distribution(loader_block) = loader_def else {
+        panic!("unit-cargo-loader should be a distribution block");
+    };
+    let unit_build_time = loader_block.unit_build_time;
+    let copper = server
+        .content_loader
+        .item_by_name("copper")
+        .unwrap()
+        .base
+        .mappable
+        .base
+        .id;
+    let nitrogen = server
+        .content_loader
+        .liquid_by_name("nitrogen")
+        .unwrap()
+        .base
+        .mappable
+        .base
+        .id;
+
+    server.runtime.state.world.resize(16, 12);
+    let mut loader = BuildingComp::new(loader_tile, loader_def.base().clone(), TeamId(6));
+    loader.items.as_mut().unwrap().add(copper, 12);
+    if let Some(power) = loader.power.as_mut() {
+        power.status = 1.0;
+    }
+    if let Some(liquids) = loader.liquids.as_mut() {
+        liquids.set(nitrogen, 20.0);
+    }
+    server.runtime.add_building(loader);
+    server.runtime.add_building(BuildingComp::new(
+        unload_tile,
+        unload_def.base().clone(),
+        TeamId(6),
+    ));
+    server.runtime.add_building(BuildingComp::new(
+        power_source_tile,
+        power_source_def.base().clone(),
+        TeamId(6),
+    ));
+    server.runtime.distribution_runtime_states.insert(
+        loader_tile,
+        GameRuntimeDistributionBlockState::UnitCargoLoader(UnitCargoLoaderState {
+            build_progress: 1.0 - 1.0 / unit_build_time,
+            ..UnitCargoLoaderState::default()
+        }),
+    );
+    server.runtime.distribution_runtime_states.insert(
+        unload_tile,
+        GameRuntimeDistributionBlockState::UnitCargoUnload(UnitCargoUnloadPointState {
+            item_id: Some(copper as i32),
+            stale_timer: 0.0,
+            stale: false,
+        }),
+    );
+    server.init();
+
+    let mut desktop = mindustry_desktop::run(vec![
+        "mindustry-desktop".into(),
+        "--connect".into(),
+        format!("127.0.0.1:{port}"),
+    ]);
+    pump_real_server_desktop_until(&mut server, &mut desktop, |desktop| {
+        desktop.runtime.network_context == GameRuntimeNetworkContext::client()
+            && matches!(
+                desktop
+                    .runtime
+                    .distribution_runtime_states
+                    .get(&unload_tile),
+                Some(GameRuntimeDistributionBlockState::UnitCargoUnload(_))
+            )
+    });
+
+    server
+        .runtime
+        .state
+        .set(mindustry_core::mindustry::core::GameStateState::Playing);
+
+    let mut last_status = String::new();
+    for _ in 0..120 {
+        server.update();
+        desktop.update();
+        desktop.update();
+
+        let server_unload_amount = server
+            .runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == unload_tile)
+            .and_then(|building| building.items.as_ref())
+            .map(|items| items.get(copper))
+            .unwrap_or(0);
+        let desktop_unload_amount = desktop
+            .runtime
+            .buildings()
+            .iter()
+            .find(|building| building.tile_pos == unload_tile)
+            .and_then(|building| building.items.as_ref())
+            .map(|items| items.get(copper))
+            .unwrap_or(0);
+        let state = desktop.net_client.state();
+        let state = state.lock().unwrap();
+        last_status = format!(
+            "take_seen={} transfer_seen={} server_unload={} desktop_unload={} unit_mirrors={:?}",
+            state.take_items_packets_seen,
+            state.transfer_item_to_packets_seen,
+            server_unload_amount,
+            desktop_unload_amount,
+            state.unit_item_mirrors
+        );
+        if state.take_items_packets_seen > 0
+            && state.transfer_item_to_packets_seen > 0
+            && server_unload_amount == 12
+            && desktop_unload_amount == 12
+        {
+            break;
+        }
+        drop(state);
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let Some(GameRuntimeDistributionBlockState::UnitCargoLoader(server_loader_state)) =
+        server.runtime.distribution_runtime_states.get(&loader_tile)
+    else {
+        panic!("server loader state should remain present");
+    };
+    let desktop_unit = desktop
+        .runtime
+        .client_unit_snapshot_entities
+        .get(&server_loader_state.read_unit_id)
+        .expect("desktop should keep materialized cargo unit");
+    assert_eq!(
+        desktop_unit.items.stack.amount, 0,
+        "cargo unit should have unloaded all mirrored copper; {last_status}"
+    );
+    let desktop_unload_amount = desktop
+        .runtime
+        .buildings()
+        .iter()
+        .find(|building| building.tile_pos == unload_tile)
+        .and_then(|building| building.items.as_ref())
+        .map(|items| items.get(copper))
+        .unwrap_or(0);
+    assert_eq!(
+        desktop_unload_amount, 12,
+        "desktop unload point should mirror server cargo deposit; {last_status}"
+    );
+
+    desktop.net_client.net_mut().disconnect();
+    server.close_network();
+}
+
+#[test]
 fn real_server_desktop_world_stream_materializes_multiple_payload_sidecars() {
     use mindustry_core::mindustry::core::{
         game_runtime::GameRuntimePayloadBlockState, GameRuntimeNetworkContext,
