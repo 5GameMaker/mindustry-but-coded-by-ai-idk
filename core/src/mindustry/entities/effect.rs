@@ -8,14 +8,26 @@ pub const DEFAULT_EFFECT_LAYER: f32 = 110.0;
 pub const FX_UNIT_ASSEMBLE_ID: i32 = 35;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_ID: i32 = 28;
+/// Upstream `Fx.fallSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FALL_SMOKE_ID: i32 = 29;
+/// Upstream `Fx.rocketSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_ROCKET_SMOKE_ID: i32 = 31;
+/// Upstream `Fx.rocketSmokeLarge` id in `mindustry.content.Fx` for v158.1.
+pub const FX_ROCKET_SMOKE_LARGE_ID: i32 = 32;
+/// Upstream `Fx.magmasmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MAGMA_SMOKE_ID: i32 = 33;
 /// Upstream `Fx.hitLiquid` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_LIQUID_ID: i32 = 85;
 /// Upstream `Fx.missileTrail` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MISSILE_TRAIL_ID: i32 = 110;
 /// Upstream `Fx.missileTrailShort` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MISSILE_TRAIL_SHORT_ID: i32 = 111;
+/// Upstream `Fx.burning` id in `mindustry.content.Fx` for v158.1.
+pub const FX_BURNING_ID: i32 = 117;
 /// Upstream `Fx.fire` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FIRE_ID: i32 = 119;
+/// Upstream `Fx.fireHit` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FIRE_HIT_ID: i32 = 120;
 /// Upstream `Fx.fireSmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FIRE_SMOKE_ID: i32 = 121;
 /// Upstream `Fx.neoplasmHeal` id in `mindustry.content.Fx` for v158.1.
@@ -28,23 +40,32 @@ pub const FX_VAPOR_ID: i32 = 128;
 pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
+/// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_BLAST_SMOKE_ID: i32 = 226;
 /// Upstream `Fx.ripple` id in `mindustry.content.Fx` for v158.1.
 pub const FX_RIPPLE_ID: i32 = 243;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
         "smoke" => Some(FX_SMOKE_ID),
+        "fallSmoke" => Some(FX_FALL_SMOKE_ID),
+        "rocketSmoke" => Some(FX_ROCKET_SMOKE_ID),
+        "rocketSmokeLarge" => Some(FX_ROCKET_SMOKE_LARGE_ID),
+        "magmasmoke" => Some(FX_MAGMA_SMOKE_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
         "missileTrailShort" => Some(FX_MISSILE_TRAIL_SHORT_ID),
+        "burning" => Some(FX_BURNING_ID),
         "fire" => Some(FX_FIRE_ID),
+        "fireHit" => Some(FX_FIRE_HIT_ID),
         "fireSmoke" => Some(FX_FIRE_SMOKE_ID),
         "neoplasmHeal" => Some(FX_NEOPLASM_HEAL_ID),
         "steam" => Some(FX_STEAM_ID),
         "vapor" => Some(FX_VAPOR_ID),
         "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
+        "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
         _ => None,
     }
@@ -53,6 +74,12 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
 pub fn standard_effect(effect_id: i32) -> Option<Effect> {
     let effect = match effect_id {
         FX_SMOKE_ID => Effect::with_lifetime(FX_SMOKE_ID, 100.0, DEFAULT_EFFECT_CLIP),
+        FX_FALL_SMOKE_ID => Effect::with_lifetime(FX_FALL_SMOKE_ID, 110.0, DEFAULT_EFFECT_CLIP),
+        FX_ROCKET_SMOKE_ID => Effect::with_lifetime(FX_ROCKET_SMOKE_ID, 120.0, DEFAULT_EFFECT_CLIP),
+        FX_ROCKET_SMOKE_LARGE_ID => {
+            Effect::with_lifetime(FX_ROCKET_SMOKE_LARGE_ID, 220.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_MAGMA_SMOKE_ID => Effect::with_lifetime(FX_MAGMA_SMOKE_ID, 110.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
             Effect::with_lifetime(FX_UNIT_ASSEMBLE_ID, 70.0, DEFAULT_EFFECT_CLIP)
@@ -66,7 +93,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_MISSILE_TRAIL_SHORT_ID, 22.0, DEFAULT_EFFECT_CLIP)
                 .layer(Layer::BULLET - 0.001)
         }
+        FX_BURNING_ID => Effect::with_lifetime(FX_BURNING_ID, 35.0, DEFAULT_EFFECT_CLIP),
         FX_FIRE_ID => Effect::with_lifetime(FX_FIRE_ID, 50.0, DEFAULT_EFFECT_CLIP),
+        FX_FIRE_HIT_ID => Effect::with_lifetime(FX_FIRE_HIT_ID, 35.0, DEFAULT_EFFECT_CLIP),
         FX_FIRE_SMOKE_ID => Effect::with_lifetime(FX_FIRE_SMOKE_ID, 35.0, DEFAULT_EFFECT_CLIP),
         FX_NEOPLASM_HEAL_ID => {
             Effect::with_lifetime(FX_NEOPLASM_HEAL_ID, 120.0, DEFAULT_EFFECT_CLIP)
@@ -80,6 +109,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_FIREBALL_SMOKE_ID, 25.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
+        FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
             Effect::with_lifetime(FX_RIPPLE_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
         }
@@ -341,6 +371,7 @@ pub fn standard_effect_draw_plan(
     let fout = 1.0 - fin;
     let finpow = fin * fin;
     let fslope = effect_fslope_from_fin(fin);
+    let rocket_smoke_alpha = (fout * 1.6 - rotation.powi(3) * 1.2).clamp(0.0, 1.0);
 
     let plan = match effect_id {
         FX_SMOKE_ID => StandardEffectDrawPlan {
@@ -361,6 +392,64 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_FALL_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledCircle,
+            center: (x, y),
+            color_from: Some("Color.gray"),
+            color_to: Some("Color.darkGray"),
+            color_mix: rotation,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fout * 3.5,
+            stroke: 0.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_ROCKET_SMOKE_ID | FX_ROCKET_SMOKE_LARGE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledCircle,
+            center: (x, y),
+            color_from: Some("Color.gray"),
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: rocket_smoke_alpha,
+            radius: if effect_id == FX_ROCKET_SMOKE_LARGE_ID {
+                1.0 + 6.0 * rotation * 1.3 - fin * 2.0
+            } else {
+                1.0 + 6.0 * rotation - fin * 2.0
+            },
+            stroke: 0.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_MAGMA_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledCircle,
+            center: (x, y),
+            color_from: Some("Color.gray"),
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fslope * 6.0,
+            stroke: 0.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_MISSILE_TRAIL_ID | FX_MISSILE_TRAIL_SHORT_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -375,6 +464,49 @@ pub fn standard_effect_draw_plan(
             radius: rotation * fout,
             stroke: 0.0,
             particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_BURNING_ID | FX_FIRE_HIT_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Pal.lightFlame"),
+            color_to: Some("Pal.darkFlame"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 3,
+                progress: None,
+                length: if effect_id == FX_FIRE_HIT_ID {
+                    2.0 + fin * 10.0
+                } else {
+                    2.0 + fin * 7.0
+                },
+                fin,
+                fout,
+                fslope,
+                radius_base: if effect_id == FX_FIRE_HIT_ID {
+                    0.2
+                } else {
+                    0.1
+                },
+                radius_fin_scale: 0.0,
+                radius_fout_scale: if effect_id == FX_FIRE_HIT_ID {
+                    1.6
+                } else {
+                    1.4
+                },
+                radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
             light_color: None,
             light_radius: 0.0,
             light_opacity: 0.0,
@@ -533,6 +665,37 @@ pub fn standard_effect_draw_plan(
                 radius_fout_scale: 4.0,
                 radius_fslope_scale: 0.0,
                 alpha_midpoint: true,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_BLAST_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Color.lightGray"),
+            color_to: Some("Color.darkGray"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 12,
+                progress: None,
+                length: 1.0 + fin * 23.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 1.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 3.0,
+                radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
             }),
             light_color: None,
             light_radius: 0.0,
@@ -1808,6 +1971,13 @@ mod tests {
     #[test]
     fn standard_effect_ids_include_puddle_ripple_dependencies() {
         assert_eq!(standard_effect_id("smoke"), Some(FX_SMOKE_ID));
+        assert_eq!(standard_effect_id("fallSmoke"), Some(FX_FALL_SMOKE_ID));
+        assert_eq!(standard_effect_id("rocketSmoke"), Some(FX_ROCKET_SMOKE_ID));
+        assert_eq!(
+            standard_effect_id("rocketSmokeLarge"),
+            Some(FX_ROCKET_SMOKE_LARGE_ID)
+        );
+        assert_eq!(standard_effect_id("magmasmoke"), Some(FX_MAGMA_SMOKE_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("unitAssemble"),
@@ -1821,7 +1991,9 @@ mod tests {
             standard_effect_id("missileTrailShort"),
             Some(FX_MISSILE_TRAIL_SHORT_ID)
         );
+        assert_eq!(standard_effect_id("burning"), Some(FX_BURNING_ID));
         assert_eq!(standard_effect_id("fire"), Some(FX_FIRE_ID));
+        assert_eq!(standard_effect_id("fireHit"), Some(FX_FIRE_HIT_ID));
         assert_eq!(standard_effect_id("fireSmoke"), Some(FX_FIRE_SMOKE_ID));
         assert_eq!(
             standard_effect_id("neoplasmHeal"),
@@ -1834,6 +2006,7 @@ mod tests {
             Some(FX_FIREBALL_SMOKE_ID)
         );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
+        assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
         assert_eq!(standard_effect_id("none"), None);
     }
@@ -1846,6 +2019,17 @@ mod tests {
         assert_eq!(smoke.clip, 50.0);
         assert!(smoke.follow_parent);
         assert!(!smoke.rot_with_parent);
+
+        assert_eq!(standard_effect(FX_FALL_SMOKE_ID).unwrap().lifetime, 110.0);
+        assert_eq!(standard_effect(FX_ROCKET_SMOKE_ID).unwrap().lifetime, 120.0);
+        assert_eq!(
+            standard_effect(FX_ROCKET_SMOKE_LARGE_ID).unwrap().lifetime,
+            220.0
+        );
+        assert_eq!(standard_effect(FX_MAGMA_SMOKE_ID).unwrap().lifetime, 110.0);
+        assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
+        assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
+        assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
         assert_eq!(assemble.lifetime, 70.0);
@@ -2059,6 +2243,124 @@ mod tests {
         assert_eq!(cloud_particles.radius_base, 0.5);
         assert_eq!(cloud_particles.radius_fout_scale, 4.0);
         assert!(cloud_particles.alpha_midpoint);
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_simple_smoke_and_fire_variants() {
+        let fall = standard_effect_draw_plan(
+            Some(FX_FALL_SMOKE_ID as u16),
+            50,
+            10.0,
+            20.0,
+            0.25,
+            55.0,
+            110.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(fall.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(fall.color_from, Some("Color.gray"));
+        assert_eq!(fall.color_to, Some("Color.darkGray"));
+        assert_eq!(fall.color_mix, 0.25);
+        assert_eq!(fall.radius, 1.75);
+
+        let rocket = standard_effect_draw_plan(
+            Some(FX_ROCKET_SMOKE_ID as u16),
+            51,
+            0.0,
+            0.0,
+            0.5,
+            60.0,
+            120.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(rocket.kind, StandardEffectDrawKind::FilledCircle);
+        assert!((rocket.alpha - 0.65).abs() < 0.0001);
+        assert_eq!(rocket.radius, 3.0);
+
+        let rocket_large = standard_effect_draw_plan(
+            Some(FX_ROCKET_SMOKE_LARGE_ID as u16),
+            52,
+            0.0,
+            0.0,
+            0.5,
+            110.0,
+            220.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(rocket_large.kind, StandardEffectDrawKind::FilledCircle);
+        assert!((rocket_large.radius - 3.9).abs() < 0.0001);
+
+        let magma = standard_effect_draw_plan(
+            Some(FX_MAGMA_SMOKE_ID as u16),
+            53,
+            0.0,
+            0.0,
+            0.0,
+            55.0,
+            110.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(magma.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(magma.radius, 6.0);
+
+        let burning = standard_effect_draw_plan(
+            Some(FX_BURNING_ID as u16),
+            54,
+            0.0,
+            0.0,
+            0.0,
+            17.5,
+            35.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let burning_particles = burning.particles.unwrap();
+        assert_eq!(burning.kind, StandardEffectDrawKind::SeededCircleParticles);
+        assert_eq!(burning_particles.count, 3);
+        assert_eq!(burning_particles.length, 5.5);
+        assert_eq!(burning_particles.radius_base, 0.1);
+        assert_eq!(burning_particles.radius_fout_scale, 1.4);
+
+        let fire_hit = standard_effect_draw_plan(
+            Some(FX_FIRE_HIT_ID as u16),
+            55,
+            0.0,
+            0.0,
+            0.0,
+            17.5,
+            35.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let fire_hit_particles = fire_hit.particles.unwrap();
+        assert_eq!(fire_hit_particles.count, 3);
+        assert_eq!(fire_hit_particles.length, 7.0);
+        assert_eq!(fire_hit_particles.radius_base, 0.2);
+        assert_eq!(fire_hit_particles.radius_fout_scale, 1.6);
+
+        let blast = standard_effect_draw_plan(
+            Some(FX_BLAST_SMOKE_ID as u16),
+            56,
+            0.0,
+            0.0,
+            0.0,
+            13.0,
+            26.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        let blast_particles = blast.particles.unwrap();
+        assert_eq!(blast_particles.count, 12);
+        assert_eq!(blast_particles.length, 12.5);
+        assert_eq!(blast_particles.radius_base, 1.0);
+        assert_eq!(blast_particles.radius_fout_scale, 3.0);
+        let blast_primitives = blast.circle_render_primitives_from_seed();
+        assert_eq!(blast_primitives.len(), 12);
+        assert_eq!(blast_primitives[0].radius, 2.5);
     }
 
     #[test]

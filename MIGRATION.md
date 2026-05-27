@@ -5759,3 +5759,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `desktop/src/main.rs` 仍未把 frame data 提交给真实窗口/2D backend；
   - 真实 backend 需要用户确认外部依赖后再接入，或继续先迁移无依赖 software primitive/backend trait。
+
+### 12.196 More simple standard Fx draw plans
+
+- 2026-05-28：继续对照 `Fx.java`，扩展一批不需要新增 draw kind 的简单标准 Fx，使它们直接复用现有 `FilledCircle` / `SeededCircleParticles` / circle primitive 链路。
+- Java 依据：
+  - `fallSmoke = new Effect(110, ...)`：`color(Color.gray, Color.darkGray, e.rotation)`，`Fill.circle(..., e.fout() * 3.5f)`；
+  - `rocketSmoke = new Effect(120, ...)`：`Color.gray`，`alpha(clamp(e.fout()*1.6f - pow3In(e.rotation)*1.2f))`，半径 `(1f + 6f * e.rotation) - e.fin()*2f`；
+  - `rocketSmokeLarge = new Effect(220, ...)`：同 `rocketSmoke`，半径 `(1f + 6f * e.rotation * 1.3f) - e.fin()*2f`；
+  - `magmasmoke = new Effect(110, ...)`：`Color.gray`，半径 `e.fslope() * 6f`；
+  - `burning = new Effect(35f, ...)`：`Pal.lightFlame -> Pal.darkFlame`，`randLenVectors(e.id, 3, 2f + e.fin()*7f, ...)`，半径 `0.1f + e.fout()*1.4f`；
+  - `fireHit = new Effect(35f, ...)`：`Pal.lightFlame -> Pal.darkFlame`，`randLenVectors(e.id, 3, 2f + e.fin()*10f, ...)`，半径 `0.2f + e.fout()*1.6f`；
+  - `blastsmoke = new Effect(26, ...)`：`Color.lightGray -> Color.darkGray`，`randLenVectors(e.id, 12, 1f + e.fin()*23f, ...)`，半径 `1f + e.fout()*3f`。
+- Rust 新增/变化：
+  - 新增标准 Fx id 常量并接入 `standard_effect_id(...)`：
+    - `fallSmoke=29`
+    - `rocketSmoke=31`
+    - `rocketSmokeLarge=32`
+    - `magmasmoke=33`
+    - `burning=117`
+    - `fireHit=120`
+    - `blastsmoke=226`
+  - `standard_effect(...)` 增加上述 lifetime/clip 默认值；
+  - `standard_effect_draw_plan(...)` 增加上述 7 个 Fx 的 `FilledCircle` 或 `SeededCircleParticles` plan；
+  - `blastsmoke` 现在可通过 seeded vector 展开为 12 个 circle primitives。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies`
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers`
+  - `standard_effect_draw_plan_covers_simple_smoke_and_fire_variants`
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - 这仍不是完整 `Fx.java` registry；
+  - `rocketSmoke` 的 `Interp.pow3In` 当前按 `rotation.powi(3)` 等价处理，后续如抽象完整 Interp registry 可统一替换；
+  - `Fx.ripple` id 仍沿用既有 `243`，完整 Fx id 审计时需要与 content registry 初始化顺序统一确认。
