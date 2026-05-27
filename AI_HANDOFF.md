@@ -4272,3 +4272,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步建议：
   1. 迁移 `steamCoolSmoke` 时可以直接复用已纠正的 `finpow`，还需补 `Interp.pow2Out` 和 `fout(Interp.pow3Out)`；
   2. 后续审计其它 `Scaled` 默认方法，避免类似 `finpow/foutpow` 曲线偏差。
+
+---
+
+## 128. 最新闭环记录：Fx.steamCoolSmoke 方向冷却烟迁移
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `Fx.steamCoolSmoke`，补齐该效果所需的 `pow2Out` 颜色插值、`fout(pow3Out)` alpha 和方向扇区粒子。
+- Java 依据：
+  - `Fx.java:1804` 附近；
+  - id `153`；
+  - lifetime `35f`；
+  - `Pal.water -> Color.lightGray`，mix 为 `e.fin(Interp.pow2Out)`；
+  - alpha 为 `e.fout(Interp.pow3Out)`；
+  - `randLenVectors(e.id, 4, e.finpow() * 7f, e.rotation, 30f, ...)`；
+  - 半径 `max(fout, min(1, fin * 8)) * 2.8`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_STEAM_COOL_SMOKE_ID = 153`；
+    - 接入 `standard_effect_id("steamCoolSmoke")` 与 `standard_effect(...)`；
+    - 新增 `interp_pow2_out(...)` / `interp_pow3_out(...)` helper；
+    - `standard_effect_color_symbol(...)` 新增 `Pal.water`；
+    - `standard_effect_draw_plan(...)` 新增 `steamCoolSmoke`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 `missileTrailSmokeSmall/missileTrailSmoke`，需要多 pass 粒子和 per-particle light；
+  2. 或先补 triangle primitive，再做 `shootSmall/shootBig` 系列。

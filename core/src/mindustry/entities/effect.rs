@@ -40,6 +40,8 @@ pub const FX_STEAM_ID: i32 = 123;
 pub const FX_VAPOR_ID: i32 = 128;
 /// Upstream `Fx.fireballsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
+/// Upstream `Fx.steamCoolSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_STEAM_COOL_SMOKE_ID: i32 = 153;
 /// Upstream `Fx.smokePuff` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_PUFF_ID: i32 = 154;
 /// Upstream `Fx.shootSmallSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -71,6 +73,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "steam" => Some(FX_STEAM_ID),
         "vapor" => Some(FX_VAPOR_ID),
         "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
+        "steamCoolSmoke" => Some(FX_STEAM_COOL_SMOKE_ID),
         "smokePuff" => Some(FX_SMOKE_PUFF_ID),
         "shootSmallSmoke" => Some(FX_SHOOT_SMALL_SMOKE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
@@ -117,6 +120,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_VAPOR_ID => Effect::with_lifetime(FX_VAPOR_ID, 110.0, DEFAULT_EFFECT_CLIP),
         FX_FIREBALL_SMOKE_ID => {
             Effect::with_lifetime(FX_FIREBALL_SMOKE_ID, 25.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_STEAM_COOL_SMOKE_ID => {
+            Effect::with_lifetime(FX_STEAM_COOL_SMOKE_ID, 35.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SMOKE_PUFF_ID => Effect::with_lifetime(FX_SMOKE_PUFF_ID, 30.0, DEFAULT_EFFECT_CLIP),
         FX_SHOOT_SMALL_SMOKE_ID => {
@@ -786,6 +792,45 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_STEAM_COOL_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Pal.water"),
+            color_mid: None,
+            color_to: Some("Color.lightGray"),
+            color_mix: interp_pow2_out(fin),
+            input_color: None,
+            color_mul: 1.0,
+            alpha: interp_pow3_out(fout),
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 4,
+                progress: None,
+                angle: Some(rotation),
+                angle_range: 30.0,
+                length: finpow * 7.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: fout.max((fin * 8.0).min(1.0)) * 2.8,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_SMOKE_PUFF_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -971,7 +1016,15 @@ fn effect_fslope_from_fin(fin: f32) -> f32 {
 }
 
 fn effect_finpow_from_fin(fin: f32) -> f32 {
-    1.0 - (1.0 - fin.clamp(0.0, 1.0)).powi(3)
+    interp_pow3_out(fin)
+}
+
+fn interp_pow2_out(value: f32) -> f32 {
+    1.0 - (1.0 - value.clamp(0.0, 1.0)).powi(2)
+}
+
+fn interp_pow3_out(value: f32) -> f32 {
+    1.0 - (1.0 - value.clamp(0.0, 1.0)).powi(3)
 }
 
 pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
@@ -980,6 +1033,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Color.gray" => Some(DecalColor::from_rgba(0x7f7f7fff)),
         "Color.lightGray" => Some(DecalColor::from_rgba(0xbfbfbfff)),
         "Color.darkGray" => Some(DecalColor::from_rgba(0x3f3f3fff)),
+        "Pal.water" => Some(DecalColor::from_rgba(0x596ab8ff)),
         "Pal.darkishGray" => Some(DecalColor {
             r: 0.3,
             g: 0.3,
@@ -2269,6 +2323,10 @@ mod tests {
             standard_effect_id("fireballsmoke"),
             Some(FX_FIREBALL_SMOKE_ID)
         );
+        assert_eq!(
+            standard_effect_id("steamCoolSmoke"),
+            Some(FX_STEAM_COOL_SMOKE_ID)
+        );
         assert_eq!(standard_effect_id("smokePuff"), Some(FX_SMOKE_PUFF_ID));
         assert_eq!(
             standard_effect_id("shootSmallSmoke"),
@@ -2301,6 +2359,10 @@ mod tests {
         assert_eq!(smoke_aoe.clip, 250.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
+        assert_eq!(
+            standard_effect(FX_STEAM_COOL_SMOKE_ID).unwrap().lifetime,
+            35.0
+        );
         assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
         assert_eq!(
             standard_effect(FX_SHOOT_SMALL_SMOKE_ID).unwrap().lifetime,
@@ -2500,6 +2562,29 @@ mod tests {
         assert_eq!(fireball_particles.length, 5.5);
         assert_eq!(fireball_particles.radius_base, 0.2);
         assert_eq!(fireball_particles.radius_fout_scale, 1.5);
+
+        let steam_cool = standard_effect_draw_plan(
+            Some(FX_STEAM_COOL_SMOKE_ID as u16),
+            153,
+            0.0,
+            0.0,
+            45.0,
+            17.5,
+            35.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(steam_cool.color_from, Some("Pal.water"));
+        assert_eq!(steam_cool.color_to, Some("Color.lightGray"));
+        assert_eq!(steam_cool.color_mix, 0.75);
+        assert_eq!(steam_cool.alpha, 0.875);
+        let steam_cool_particles = steam_cool.particles.unwrap();
+        assert_eq!(steam_cool_particles.count, 4);
+        assert_eq!(steam_cool_particles.length, 6.125);
+        assert_eq!(steam_cool_particles.angle, Some(45.0));
+        assert_eq!(steam_cool_particles.angle_range, 30.0);
+        assert!((steam_cool_particles.radius_base - 2.8).abs() < 0.0001);
+        assert_eq!(steam_cool.circle_render_primitives_from_seed().len(), 4);
 
         let smoke_puff = standard_effect_draw_plan(
             Some(FX_SMOKE_PUFF_ID as u16),

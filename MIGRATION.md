@@ -5989,3 +5989,52 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 其它 Arc `Interp` helper 仍需按使用点逐步补齐；
   - 历史已迁移 Fx 中如还有 `finpow` 派生常量，需要以后继续结合 Java probe 抽样回归。
+
+### 12.202 Fx.steamCoolSmoke 方向冷却烟迁移
+
+- 2026-05-28：继续对照 `Fx.java`，迁移 `steamCoolSmoke`；该效果复用方向扇区粒子能力，并补齐当前所需的 `Interp.pow2Out` 与 `fout(Interp.pow3Out)` 公式。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1804` 附近：
+    - `steamCoolSmoke = new Effect(35f, e -> { ... })`；
+    - `color(Pal.water, Color.lightGray, e.fin(Interp.pow2Out))`；
+    - `alpha(e.fout(Interp.pow3Out))`；
+    - `randLenVectors(e.id, 4, e.finpow() * 7f, e.rotation, 30f, ...)`；
+    - 半径 `Math.max(e.fout(), Math.min(1f, e.fin() * 8f)) * 2.8f`。
+  - 本地按 `new Effect` 声明顺序计数，`steamCoolSmoke` 为 `id=153`。
+  - `Pal.water` 来自 `Pal.java`：`596ab8`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_STEAM_COOL_SMOKE_ID = 153`；
+    - `standard_effect_id("steamCoolSmoke")`、`standard_effect(FX_STEAM_COOL_SMOKE_ID)` 接入，lifetime 为 `35.0`；
+    - 新增/复用插值 helper：
+      - `interp_pow2_out(...)`
+      - `interp_pow3_out(...)`
+      - `effect_finpow_from_fin(...)` 继续复用 pow3Out；
+    - `standard_effect_color_symbol(...)` 新增 `Pal.water = 0x596ab8ff`；
+    - `standard_effect_draw_plan(...)` 新增 `steamCoolSmoke`：
+      - `color_from = Pal.water`
+      - `color_to = Color.lightGray`
+      - `color_mix = pow2Out(fin)`
+      - `alpha = pow3Out(fout)`
+      - `count = 4`
+      - `length = finpow * 7.0`
+      - `angle = Some(rotation)`
+      - `angle_range = 30.0`
+      - `radius_base = max(fout, min(1, fin * 8)) * 2.8`
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖颜色插值、alpha、方向粒子字段、半径和 primitive 数量。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan --lib`
+  - `cargo test -p mindustry-core standard_effect_particle --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 desktop renderer 仍未消费这些 primitive；
+  - `missileTrailSmokeSmall/missileTrailSmoke` 的多 pass 烟轨和 per-particle light 仍未迁移。
