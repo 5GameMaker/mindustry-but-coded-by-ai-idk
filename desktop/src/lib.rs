@@ -141,6 +141,7 @@ impl DesktopLauncher {
         self.sync_remote_player_snapshots_from_runtime();
         self.sync_remote_preview_plan_packets(now_millis);
         self.rebuild_other_player_preview_overlays_at(now_millis, 1.0, None);
+        self.runtime.tick_client_move_effect_abilities(1.0, false);
     }
 
     pub fn connect_from_args(&mut self) {
@@ -1390,9 +1391,9 @@ mod tests {
                 BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, UnitComp,
                 UnitControllerState,
             },
-            entity_class_id, PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
-            FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
-            WORLD_LABEL_CLASS_ID,
+            entity_class_id, standard_effect_id, PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID,
+            EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
+            WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
         game::{BlockPlan, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -2194,6 +2195,37 @@ mod tests {
         assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
         assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+    }
+
+    #[test]
+    fn desktop_launcher_ticks_elude_move_effect_to_local_effect_queue() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let elude = launcher
+            .content_loader
+            .unit_by_name("elude")
+            .unwrap()
+            .clone();
+        let mut unit = UnitComp::new(4501, elude, TeamId(TEAM_SHARDED));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(0.0);
+        unit.vel.vel.x = 1.0;
+        unit.abilities[0].data = 3.0;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(unit.id(), unit);
+
+        launcher.update();
+
+        assert_eq!(launcher.runtime.client_local_effect_events.len(), 1);
+        let effect = &launcher.runtime.client_local_effect_events[0];
+        assert_eq!(
+            effect.effect.effect_id,
+            standard_effect_id("missileTrailShort").unwrap() as u16
+        );
+        assert!((effect.effect.x - 93.0).abs() < 0.0001);
+        assert!((effect.effect.y - 200.0).abs() < 0.0001);
+        assert_eq!(effect.data, TypeValue::Null);
     }
 
     #[test]

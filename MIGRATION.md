@@ -4558,3 +4558,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `LiquidExplodeAbility` 死亡洒落 neoplasm puddle 尚未接入 death/world/puddle runtime；
   - `LiquidRegenAbility` 从 neoplasm puddle slurp 回血、`Fx.neoplasmHeal` 与 puddle 消耗尚未接入；
   - RegenAbility 的 UI stat 文案（每秒 flat/percent 展示）与结构化 ability spec 仍需后续迁移。
+
+### 12.150 MoveEffectAbility / elude 客户端本地 effect queue 接入
+
+- 2026-05-27：在 12.148 的 `MoveEffectPlan` 基础上继续补真实客户端表现层入口，把 elude 移动尾迹从 `UnitComp` sidecar plan 推进到 `GameRuntime.client_local_effect_events` 与 `DesktopLauncher::update()`。
+- Java 依据：
+  - `MoveEffectAbility.update(Unit unit)` 非 headless 时在本地客户端按 interval/chance/速度/雾判断播放 `effect.at(...)`；
+  - `elude` 使用 `Fx.missileTrailShort` 与 `teamColor=true`；对照 v158.1 `Fx.java` 静态创建顺序，`Fx.missileTrail = 110`，`Fx.missileTrailShort = 111`（同一计数方式已验证 `Fx.unitAssemble = 35`）。
+- Rust 新增/变化：
+  - `entities/effect.rs` 增加 `FX_MISSILE_TRAIL_ID=110`、`FX_MISSILE_TRAIL_SHORT_ID=111` 与 `standard_effect_id(...)` 最小映射；
+  - `GameRuntime::tick_client_move_effect_abilities(delta, in_fog)` 遍历 `client_unit_snapshot_entities`，调用 `UnitComp::update_move_effect_abilities(...)`，把已知 effect 映射成 `EffectCallPacket2` 写入 `client_local_effect_events`；
+  - `DesktopLauncher::update()` 每帧调用该 runtime 入口，使客户端 snapshot 中的 elude 能在真实 desktop update 链路上排队本地 effect；
+  - teamColor 通过 `vanilla_teams()` 写入 `EffectCallPacket.color`，普通颜色当前使用白色占位。
+- 新增/更新验证：
+  - `cargo test -p mindustry-core client_move_effect --lib`
+  - `cargo test -p mindustry-desktop elude_move_effect --lib`
+- 仍未完成：
+  - `chance > 0`、随机 range offset、`rangeLengthMin/Max` 与 fog/player team 判断仍是最小入口，尚未接可复现 RNG 与真实客户端可见性；
+  - `parentizeEffects` 的 parent entity 语义尚未通过 effect packet/data 表达；
+  - 仅登记 `missileTrail` / `missileTrailShort` 最小 effect id 映射，后续需要系统化迁移 `Fx` registry 与表现参数。

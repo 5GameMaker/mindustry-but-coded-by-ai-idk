@@ -6,6 +6,18 @@ pub const DEFAULT_EFFECT_CLIP: f32 = 50.0;
 pub const DEFAULT_EFFECT_LAYER: f32 = 110.0;
 /// Upstream `Fx.unitAssemble` id in `mindustry.content.Fx` for v158.1.
 pub const FX_UNIT_ASSEMBLE_ID: i32 = 35;
+/// Upstream `Fx.missileTrail` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MISSILE_TRAIL_ID: i32 = 110;
+/// Upstream `Fx.missileTrailShort` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MISSILE_TRAIL_SHORT_ID: i32 = 111;
+
+pub fn standard_effect_id(name: &str) -> Option<i32> {
+    match name {
+        "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
+        "missileTrailShort" => Some(FX_MISSILE_TRAIL_SHORT_ID),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Effect {

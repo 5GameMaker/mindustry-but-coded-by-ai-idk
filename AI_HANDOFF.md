@@ -3070,3 +3070,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
   2. 中文提交并推送 `origin main`，建议标题：`接入新生物单位自愈运行时`。
   3. 后续优先接 `LiquidExplodeAbility` 死亡洒落 neoplasm puddle，再接 `LiquidRegenAbility` slurp puddle 回血与 `Fx.neoplasmHeal` 表现层。
+
+---
+
+## 92. 最新闭环记录：MoveEffectAbility / elude client local effect queue
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（已确认 `v158.1` / `05b2ecd4eb578ac38cace8118dbecc1bd548ff4a`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8。
+- 本轮目标：在前一轮 `MoveEffectPlan` 基础上，把 elude 移动尾迹接入客户端 runtime/local effect queue，不再只停在 sidecar plan。
+- Java 依据：
+  - `MoveEffectAbility.update(Unit unit)` 非 headless 时本地播放 `effect.at(...)`；
+  - `UnitTypes.elude` 使用 `Fx.missileTrailShort` 与 `teamColor=true`；
+  - v158.1 `Fx.java` 静态创建顺序对应 `Fx.missileTrailShort` id 111。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_MISSILE_TRAIL_ID=110`、`FX_MISSILE_TRAIL_SHORT_ID=111`；
+    - 新增 `standard_effect_id(...)`，当前覆盖 `missileTrail` / `missileTrailShort`。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntime::tick_client_move_effect_abilities(delta, in_fog)`；
+    - 遍历 `client_unit_snapshot_entities`，把 `UnitComp::update_move_effect_abilities(...)` 生成的 plan 转成 `EffectCallPacket2`，写入 `client_local_effect_events`；
+    - 新增 `game_runtime_ticks_client_move_effect_ability_into_local_effect_event`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::update()` 末尾调用 `runtime.tick_client_move_effect_abilities(1.0, false)`；
+    - 新增 `desktop_launcher_ticks_elude_move_effect_to_local_effect_queue`。
+- 已跑局部验证：
+  - `cargo test -p mindustry-core client_move_effect --lib`
+  - `cargo test -p mindustry-desktop elude_move_effect --lib`
+- 当前仍需继续：
+  1. 跑完整收尾验证：`cargo check -p mindustry-core`、`cargo check -p mindustry-server`、`cargo check -p mindustry-desktop`、`cargo fmt --check`、`git diff --check`。
+  2. 中文提交并推送 `origin main`，建议标题：`接入移动特效客户端队列`。
+  3. 后续补可复现 RNG、chance/random offset、fog/player team 可见性、`parentizeEffects` parent 语义与完整 `Fx` registry。

@@ -32,9 +32,10 @@ use crate::mindustry::{
             PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile, UnitComp,
             UnitControllerState, WorldLabelComp,
         },
-        entity_class_id, entity_class_kind, EntityClassKind, PuddleLiquidInfo, FX_UNIT_ASSEMBLE_ID,
+        entity_class_id, entity_class_kind, standard_effect_id, EntityClassKind, PuddleLiquidInfo,
+        FX_UNIT_ASSEMBLE_ID,
     },
-    game::{CampaignStats, CoreInfo, SectorInfo},
+    game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo},
     input::input_handler::ItemRemoveStackPlan,
     io::{
         type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
@@ -3725,6 +3726,46 @@ impl GameRuntime {
             data: TypeValue::Content(type_io::ContentRef::new(ContentType::Unit, unit_type.id())),
         });
         true
+    }
+
+    pub fn tick_client_move_effect_abilities(&mut self, delta: f32, in_fog: bool) -> usize {
+        let unit_ids: Vec<i32> = self.client_unit_snapshot_entities.keys().copied().collect();
+        let teams = vanilla_teams();
+        let mut emitted = 0;
+
+        for unit_id in unit_ids {
+            let Some(unit) = self.client_unit_snapshot_entities.get_mut(&unit_id) else {
+                continue;
+            };
+            let team_color = teams.get(unit.team_id().0 as i32).color_rgba as i32;
+            let plans = unit.update_move_effect_abilities(delta, in_fog);
+
+            for plan in plans {
+                let Some(effect_id) = standard_effect_id(&plan.effect) else {
+                    continue;
+                };
+                let color = if plan.team_color {
+                    team_color
+                } else {
+                    0xffff_ffffu32 as i32
+                };
+                for _ in 0..plan.amount.max(0) as usize {
+                    self.client_local_effect_events.push(EffectCallPacket2 {
+                        effect: EffectCallPacket {
+                            effect_id: effect_id as u16,
+                            x: plan.x,
+                            y: plan.y,
+                            rotation: plan.rotation,
+                            color: type_io::RgbaColor::new(color),
+                        },
+                        data: TypeValue::Null,
+                    });
+                    emitted += 1;
+                }
+            }
+        }
+
+        emitted
     }
 
     pub fn apply_client_assembler_drone_spawned_packet(
@@ -25353,6 +25394,46 @@ mod tests {
             &content,
             &AssemblerUnitSpawnedCallPacket { tile: None },
         ));
+    }
+
+    #[test]
+    fn game_runtime_ticks_client_move_effect_ability_into_local_effect_event() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mut runtime = GameRuntime::default();
+        let elude = content.unit_by_name("elude").unwrap().clone();
+        let mut unit = UnitComp::new(4401, elude, TeamId(1));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(0.0);
+        unit.vel.vel.x = 1.0;
+        unit.abilities[0].data = 3.0;
+        runtime
+            .client_unit_snapshot_entities
+            .insert(unit.id(), unit);
+
+        assert_eq!(runtime.tick_client_move_effect_abilities(1.0, false), 1);
+        assert_eq!(runtime.client_local_effect_events.len(), 1);
+        let effect = &runtime.client_local_effect_events[0];
+        assert_eq!(
+            effect.effect.effect_id,
+            standard_effect_id("missileTrailShort").unwrap() as u16
+        );
+        assert!((effect.effect.x - 93.0).abs() < 0.0001);
+        assert!((effect.effect.y - 200.0).abs() < 0.0001);
+        assert_eq!(effect.effect.rotation, 3.0);
+        assert_eq!(
+            effect.effect.color,
+            type_io::RgbaColor::new(0xffd37fffu32 as i32)
+        );
+        assert_eq!(effect.data, TypeValue::Null);
+        assert_eq!(
+            runtime
+                .client_unit_snapshot_entities
+                .get(&4401)
+                .unwrap()
+                .abilities[0]
+                .data,
+            0.0
+        );
     }
 
     #[test]
