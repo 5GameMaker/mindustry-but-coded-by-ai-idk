@@ -1317,7 +1317,10 @@ mod tests {
     };
     use mindustry_core::mindustry::{
         entities::{
-            comp::{BuildingComp, PayloadKind, UnitComp},
+            comp::{
+                BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, UnitComp,
+                UnitControllerState,
+            },
             PlayerComp, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID,
             PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
@@ -2173,6 +2176,30 @@ mod tests {
         };
         assert_eq!(assembler.drone_progress, 0.0);
         assert_eq!(assembler.read_unit_ids, vec![33, 88]);
+        let spawned = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&88)
+            .expect("desktop should materialize assembler drone snapshot");
+        assert_eq!(spawned.type_info.name(), "assembly-drone");
+        assert_eq!(spawned.team_id(), TeamId(4));
+        assert_eq!(spawned.x(), launcher.runtime.buildings()[0].x);
+        assert_eq!(spawned.y(), launcher.runtime.buildings()[0].y);
+        assert_eq!(spawned.rotation(), 90.0);
+        assert!(matches!(spawned.controller, UnitControllerState::Assembler));
+        let tether = spawned
+            .building_tether
+            .as_ref()
+            .expect("desktop materialized assembler drone should keep a tether");
+        assert_eq!(
+            tether.building,
+            Some(BuildingTetherRef {
+                tile_pos,
+                team: TeamId(4),
+                valid: true,
+            })
+        );
+        assert_eq!(tether.update(), BuildingTetherAction::Keep);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
     }
 

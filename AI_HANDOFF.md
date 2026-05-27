@@ -30,7 +30,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 - `D:/MDT/rust-mindustry`
 
-最终交付目标是一个尽可能接近原版 Mindustry v157.4 行为的 Rust 版 MDT/Mindustry：
+最终交付目标是一个尽可能接近原版 Mindustry v158.1 行为的 Rust 版 MDT/Mindustry：
 
 1. 尽量保持原 Java 项目的模块结构、命名语义、运行生命周期与数据流。
 2. 尽量实现 Rust 客户端与原版 Java 服务端/客户端在联机层面的互通。

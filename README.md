@@ -1,10 +1,10 @@
 ﻿# Rust Mindustry
 
-Rust rewrite workspace for `D:\MDT\mindustry-upstream-v157.4`, currently overwritten with upstream `v158`.
+Rust rewrite workspace for `D:\MDT\mindustry-upstream-v157.4`, currently overwritten with upstream `v158.1`.
 
 Rules:
 
-- Source-of-truth baseline: `D:\MDT\mindustry-upstream-v157.4` only; this path now contains upstream `v158`.
+- Source-of-truth baseline: `D:\MDT\mindustry-upstream-v157.4` only; this path now contains upstream `v158.1`.
 - `D:\MDT\mindustry-rust` is not used as a reference.
 - Directory names intentionally mirror the Java upstream modules: `core`, `desktop`, `server`, `android`, `ios`, `annotations`, `tools`, `tests`.
 

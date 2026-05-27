@@ -2,7 +2,7 @@
 fn workspace_smoke() {
     assert_eq!(
         mindustry_core::mindustry::UPSTREAM_BASELINE,
-        "mindustry-upstream-v158"
+        "mindustry-upstream-v158.1"
     );
 }
 

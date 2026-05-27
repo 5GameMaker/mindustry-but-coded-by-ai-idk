@@ -63,11 +63,11 @@ D:/MDT/mindustry-upstream-v157.4
 当前参考基线：
 
 ```text
-tag: v158
-commit: ed54566
+tag: v158.1
+commit: 05b2ecd
 ```
 
-如果用户再次要求“更新至 158 / 拉取覆盖本地参考基线”，必须先确认该目录当前 tag/commit，再继续迁移。
+如果用户再次要求“更新至 158.x / 拉取覆盖本地参考基线”，必须先确认该目录当前 tag/commit，再继续迁移。
 
 ### 2.2 唯一工作目录
 
@@ -4050,3 +4050,19 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core assembler_geometry_tiers_acceptance --lib`
   - `cargo test -p mindustry-server assembler_drone_spawn_packet --lib`
 - 仍未完成：`AssemblerAI` 目标点/角度与真实 `inPosition()` 尚未参与进度倍率；当前 UnitAssembler 生产进度仍保留“drone 视为到位”的过渡口径以避免破坏既有可玩闭环。
+
+### 12.128 v158.1 基线确认与 assembler drone 客户端实体化
+
+- 2026-05-27：确认上游官方 `Anuken/Mindustry` 已存在 `v158.1` tag，并将本地 Java 参考目录 `D:/MDT/mindustry-upstream-v157.4` 从 `v158` 更新到 `v158.1`（`05b2ecd`）。目录名保持不变，避免上下文压缩后路径漂移。
+- 同步更新：
+  - `README.md`、`AI_HANDOFF.md`、`core::mindustry::UPSTREAM_BASELINE` 与本节顶部“当前参考基线”均已改为 `v158.1`；
+  - 参考目录验证命令：`git -C "D:/MDT/mindustry-upstream-v157.4" describe --tags --always --dirty` 应返回 `v158.1`。
+- 继续对照 Java `UnitAssemblerBuild.droneSpawned(id)` / 客户端 `whenSyncedUnits` 行为，`GameRuntime::apply_client_assembler_drone_spawned_packet(...)` 现在除复位 sidecar 外，还会在 `client_unit_snapshot_entities` 中 materialize `assembly-drone` 快照：
+  - team/position 来自 assembler building；
+  - rotation 为 `90.0`；
+  - controller 为 `UnitControllerState::Assembler`；
+  - `BuildingTetherComp` 指向来源 assembler tile。
+- 新增验证：
+  - `cargo test -p mindustry-core assembler_drone_spawned_packet --lib`
+  - `cargo test -p mindustry-desktop syncs_assembler_drone_spawned --lib`
+- 仍未完成：需要继续对照 v158.1 与 v158 的差异，逐项检查新增/变更 Java 文件；assembler drone 的真实 `AssemblerAI.targetPos/targetAngle/inPosition()` 仍待接入。

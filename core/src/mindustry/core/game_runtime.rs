@@ -3589,14 +3589,22 @@ impl GameRuntime {
             return false;
         };
 
-        let Some(building) = self
+        let Some(building_index) = self
             .buildings
             .iter()
-            .find(|building| building.tile_pos == tile_pos)
-            .cloned()
+            .position(|building| building.tile_pos == tile_pos)
         else {
             return false;
         };
+        let (building_block_id, building_x, building_y, building_team) = {
+            let building = &self.buildings[building_index];
+            (building.block.id, building.x, building.y, building.team)
+        };
+        let Some(BlockDef::UnitAssembler(assembler_block)) = content.block(building_block_id)
+        else {
+            return false;
+        };
+        let building = self.buildings[building_index].clone();
         if !self.ensure_unit_state_for_building(content, &building) {
             return false;
         }
@@ -3606,7 +3614,38 @@ impl GameRuntime {
         else {
             return false;
         };
-        unit_assembler_drone_spawned(assembler, packet.id, true)
+        if !unit_assembler_drone_spawned(assembler, packet.id, true) {
+            return false;
+        }
+
+        if let Some(unit_type) = content.unit_by_name(&assembler_block.drone_type).cloned() {
+            let recreate = self
+                .client_unit_snapshot_entities
+                .get(&packet.id)
+                .map(|unit| unit.type_info.name() != unit_type.name())
+                .unwrap_or(true);
+            if recreate {
+                self.client_unit_snapshot_entities.insert(
+                    packet.id,
+                    UnitComp::new(packet.id, unit_type, building_team),
+                );
+            }
+            if let Some(unit) = self.client_unit_snapshot_entities.get_mut(&packet.id) {
+                unit.set_pos(building_x, building_y);
+                unit.set_rotation(90.0);
+                unit.set_controller(UnitControllerState::Assembler);
+                unit.building_tether = Some(BuildingTetherComp {
+                    team: building_team,
+                    building: Some(BuildingTetherRef {
+                        tile_pos,
+                        team: building_team,
+                        valid: true,
+                    }),
+                });
+                unit.add();
+            }
+        }
+        true
     }
 
     pub fn apply_client_unit_despawn_packet(&mut self, packet: &UnitDespawnCallPacket) -> bool {
@@ -24418,6 +24457,32 @@ mod tests {
         };
         assert_eq!(assembler.drone_progress, 0.0);
         assert_eq!(assembler.read_unit_ids, vec![11, 77]);
+        let spawned = runtime
+            .client_unit_snapshot_entities
+            .get(&77)
+            .expect("client assembler drone packet should materialize drone snapshot");
+        assert_eq!(spawned.type_info.name(), "assembly-drone");
+        assert_eq!(spawned.team_id(), TeamId(4));
+        assert_eq!(spawned.x(), runtime.buildings()[0].x);
+        assert_eq!(spawned.y(), runtime.buildings()[0].y);
+        assert_eq!(spawned.rotation(), 90.0);
+        assert!(matches!(spawned.controller, UnitControllerState::Assembler));
+        let tether = spawned
+            .building_tether
+            .as_ref()
+            .expect("client materialized assembler drone should keep a tether");
+        assert_eq!(
+            tether.building,
+            Some(BuildingTetherRef {
+                tile_pos,
+                team: TeamId(4),
+                valid: true,
+            })
+        );
+        assert_eq!(
+            tether.update(),
+            crate::mindustry::entities::comp::BuildingTetherAction::Keep
+        );
 
         assert!(runtime.apply_client_assembler_drone_spawned_packet(
             &content,
