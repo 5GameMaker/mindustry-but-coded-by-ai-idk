@@ -163,12 +163,12 @@ use crate::mindustry::{
         assembler_module_transfer_payload, read_reconstructor_state, read_repair_turret_state,
         read_unit_assembler_state, read_unit_cargo_loader_state, read_unit_cargo_unload_state,
         read_unit_factory_state, reconstructor_accept_payload, reconstructor_update,
-        unit_assembler_accept_payload, unit_assembler_spawned, unit_assembler_update_progress,
-        unit_factory_configure_plan, unit_factory_update, write_reconstructor_state,
-        write_repair_turret_state, write_unit_assembler_state, write_unit_cargo_loader_state,
-        write_unit_cargo_unload_state, write_unit_factory_state, ReconstructorState,
-        RepairTurretState, UnitAssemblerState, UnitCargoLoaderState, UnitCargoUnloadPointState,
-        UnitFactoryState,
+        unit_assembler_accept_payload, unit_assembler_current_tier, unit_assembler_spawned,
+        unit_assembler_update_progress, unit_factory_configure_plan, unit_factory_update,
+        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
+        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
+        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
+        UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -1965,6 +1965,7 @@ pub struct GameRuntimeUnitAssemblerFrameReport {
     pub visited_buildings: usize,
     pub assembler_candidates: usize,
     pub updated_assemblers: usize,
+    pub tier_updates: usize,
     pub moved_in_payloads: usize,
     pub completed_units: usize,
     pub consumed_payload_batches: usize,
@@ -15573,7 +15574,16 @@ impl GameRuntime {
                     .unit_cost(self.buildings[target_index].team.0 as usize);
                 match self.unit_runtime_states.get(&target_tile_pos) {
                     Some(GameRuntimeUnitBlockState::Assembler { common, assembler }) => {
-                        let current_tier = assembler.current_tier.max(0) as usize;
+                        let current_tier = if source_is_module {
+                            unit_assembler_current_tier(self.linked_module_tiers_for_assembler(
+                                content,
+                                target_index,
+                                assembler_block,
+                            ))
+                        } else {
+                            assembler.current_tier
+                        }
+                        .max(0) as usize;
                         let Some(plan) = assembler_block
                             .plans
                             .get(current_tier.min(assembler_block.plans.len().saturating_sub(1)))
@@ -16702,6 +16712,31 @@ impl GameRuntime {
             })
     }
 
+    fn linked_module_tiers_for_assembler(
+        &self,
+        content: &ContentLoader,
+        assembler_index: usize,
+        assembler_block: &crate::mindustry::content::blocks::UnitAssemblerBlockData,
+    ) -> Vec<i32> {
+        let assembler = &self.buildings[assembler_index];
+        self.buildings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, building)| {
+                if index == assembler_index || building.team != assembler.team {
+                    return None;
+                }
+                let Some(BlockDef::UnitAssemblerModule(module_block)) =
+                    content.block(building.block.id)
+                else {
+                    return None;
+                };
+                Self::assembler_module_fits(assembler, assembler_block, building)
+                    .then_some(module_block.tier)
+            })
+            .collect()
+    }
+
     fn advance_owned_unit_assembler_modules_ticks(
         &mut self,
         content: &ContentLoader,
@@ -16833,6 +16868,20 @@ impl GameRuntime {
                 if !self.ensure_unit_state_for_building(content, &building) {
                     report.missing_runtime_states += 1;
                     continue;
+                }
+            }
+
+            let linked_tier = unit_assembler_current_tier(self.linked_module_tiers_for_assembler(
+                content,
+                index,
+                assembler_block,
+            ));
+            if let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+                self.unit_runtime_states.get_mut(&tile_pos)
+            {
+                if assembler.current_tier != linked_tier {
+                    assembler.current_tier = linked_tier;
+                    report.tier_updates += 1;
                 }
             }
 
@@ -20312,12 +20361,12 @@ mod tests {
         let content = ContentLoader::create_base_content().unwrap();
         let assembler_def = content.block_by_name("tank-assembler").unwrap();
         let module_def = content.block_by_name("basic-assembler-module").unwrap();
-        let stell = content.unit_by_name("stell").unwrap().clone();
-        let large_wall = content.block_by_name("tungsten-wall-large").unwrap();
+        let locus = content.unit_by_name("locus").unwrap();
+        let carbide_wall = content.block_by_name("carbide-wall-large").unwrap();
         let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
             panic!("tank-assembler should be a unit assembler");
         };
-        let plan = &assembler_block.plans[0];
+        let plan = &assembler_block.plans[1];
         let assembler_tile = point2_pack(10, 10);
         let mut assembler_building =
             BuildingComp::new(assembler_tile, assembler_def.base().clone(), TeamId(4));
@@ -20360,15 +20409,17 @@ mod tests {
         runtime.add_building(assembler_building);
         runtime.add_building(module_building);
 
-        let mut stell_unit = UnitComp::new(6602, stell.clone(), TeamId(4));
-        stell_unit.set_pos(runtime.buildings[1].x, runtime.buildings[1].y);
-        let stell_payload = GameRuntime::unit_payload_ref_from_unit(&content, &stell_unit)
-            .expect("stell should serialize as a unit payload");
+        let payload_building =
+            BuildingComp::new(point2_pack(0, 0), carbide_wall.base().clone(), TeamId(4));
+        let mut build_bytes = Vec::new();
+        payload_building
+            .write_base(&mut build_bytes, false)
+            .expect("block payload building should serialize");
         let mut blocks = PayloadSeq::new();
-        blocks.add(PayloadKey::new(ContentType::Unit, stell.id()), 3);
+        blocks.add(PayloadKey::new(ContentType::Unit, locus.id()), 6);
         blocks.add(
-            PayloadKey::new(ContentType::Block, large_wall.base().id),
-            10,
+            PayloadKey::new(ContentType::Block, carbide_wall.base().id),
+            19,
         );
         runtime.unit_runtime_states.insert(
             assembler_tile,
@@ -20384,7 +20435,11 @@ mod tests {
         runtime.unit_runtime_states.insert(
             module_tile,
             GameRuntimeUnitBlockState::AssemblerModule(PayloadBlockBuildState {
-                payload: Some(stell_payload),
+                payload: Some(PayloadRef::Block {
+                    block: carbide_wall.base().id,
+                    version: 0,
+                    build_bytes,
+                }),
                 pay_vector: Vec2::ZERO,
                 pay_rotation: runtime.buildings[1].rotdeg(),
                 carried: false,
@@ -20432,6 +20487,93 @@ mod tests {
         assert!(common.payload.is_none());
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
+    }
+
+    #[test]
+    fn game_runtime_linked_assembler_module_updates_assembler_tier() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let assembler_def = content.block_by_name("tank-assembler").unwrap();
+        let module_def = content.block_by_name("basic-assembler-module").unwrap();
+        let BlockDef::UnitAssembler(assembler_block) = assembler_def else {
+            panic!("tank-assembler should be a unit assembler");
+        };
+        let assembler_tile = point2_pack(10, 10);
+        let mut assembler_building =
+            BuildingComp::new(assembler_tile, assembler_def.base().clone(), TeamId(4));
+        assembler_building.set_rotation(0);
+        if let Some(power) = assembler_building.power.as_mut() {
+            power.status = 1.0;
+        }
+        let mut module_building = None;
+        'search: for x in 0..32 {
+            for y in 0..32 {
+                let tile = point2_pack(x, y);
+                if tile == assembler_tile {
+                    continue;
+                }
+                for rotation in 0..4 {
+                    let mut candidate =
+                        BuildingComp::new(tile, module_def.base().clone(), TeamId(4));
+                    candidate.set_rotation(rotation);
+                    if GameRuntime::assembler_module_fits(
+                        &assembler_building,
+                        assembler_block,
+                        &candidate,
+                    ) {
+                        module_building = Some(candidate);
+                        break 'search;
+                    }
+                }
+            }
+        }
+        let mut module_building =
+            module_building.expect("test map should contain a fitting assembler module position");
+        if let Some(power) = module_building.power.as_mut() {
+            power.status = 1.0;
+        }
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.set(GameStateState::Playing);
+        runtime.state.world.resize(40, 40);
+        runtime.add_building(assembler_building);
+        runtime.add_building(module_building);
+        runtime.unit_runtime_states.insert(
+            assembler_tile,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState::default(),
+            },
+        );
+
+        let mut bullets = Vec::new();
+        let mut units = Vec::new();
+        let mut bullet_type = |_: ContentId| -> Option<&BulletType> { None };
+        let mut suppressed = |_: &BuildingComp| false;
+        let mut force_coolant = |_: &BuildingComp| (0.0, 0.0);
+        let mut spark_random = |_: &UnitComp| 1.0;
+        let report = runtime
+            .advance_owned_runtime_blocks(
+                &content,
+                1.0,
+                owned_noop_resources(
+                    &mut bullets,
+                    &mut units,
+                    &mut bullet_type,
+                    &mut suppressed,
+                    &mut force_coolant,
+                    &mut spark_random,
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(report.unit.assembler_module.linked_modules, 1);
+        assert_eq!(report.unit.assembler.tier_updates, 1);
+        let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) =
+            runtime.unit_runtime_states.get(&assembler_tile)
+        else {
+            panic!("unit assembler sidecar should remain present");
+        };
+        assert_eq!(assembler.current_tier, 1);
     }
 
     #[test]

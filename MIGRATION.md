@@ -3693,3 +3693,23 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core unit_assembler`
   - `cargo check --workspace`
 - 仍未完成：`UnitAssemblerBuild.modules` 持久列表、tier 连续性由 module 集合自动驱动 `currentTier`、严格 Java 坐标/offset 级 `moduleFits`、module link 的 world.tileChanges cache、被拆除时 removeModule、assembler payload slot 非空且同类 module payload 的精确合并行为仍需补。
+
+### 12.114 UnitAssembler currentTier 由 linked modules 驱动
+
+- 2026-05-27：继续对照 Java `UnitAssemblerBuild.updateModules/removeModule/checkTier()`，在 owned runtime 中让 linked `UnitAssemblerModule` 的 tier 自动驱动 assembler `current_tier`，避免高阶 plan 只能靠测试或存档手写状态。
+- Java 依据：
+  - `updateModules(build)` 会 `modules.addUnique(build)` 后 `checkTier()`；
+  - `checkTier()` 按 module tier 排序，只有连续 tier（`max` 或 `max+1`）会推进 `currentTier`，有 gap 时停止；
+  - `plan()` 使用 `plans.get(Math.min(currentTier, plans.size - 1))`。
+- Rust 新增/变化：
+  - 新增 `linked_module_tiers_for_assembler(...)`，扫描同队且 `assembler_module_fits(...)` 的 module，收集 `UnitAssemblerModuleBlockData.tier`；
+  - `advance_owned_unit_assemblers_ticks(...)` 在选择 plan 前调用 `unit_assembler_current_tier(...)`，同步写回 `assembler.current_tier` 并通过 `GameRuntimeUnitAssemblerFrameReport.tier_updates` 上报变化；
+  - `transfer_payload_output_to_front(... TargetKind::Assembler ...)` 在 module source 转运时会按实时 linked modules 计算 effective tier，确保 module payload 能按即将生效的高阶 plan requirement 被接受。
+- 新增 core 回归测试：
+  - `game_runtime_linked_assembler_module_updates_assembler_tier`
+  - 已调整 `game_runtime_assembler_module_transfers_payload_into_linked_assembler` 覆盖 basic module 驱动 `tank-assembler` 使用 tier 1 plan（`conquer` 的 `locus + carbide-wall-large` requirements）。
+- 验证：
+  - `cargo test -p mindustry-core assembler_module`
+  - `cargo test -p mindustry-core unit_assembler`
+  - `cargo check --workspace`
+- 仍未完成：module 集合本身还未作为 Java `modules` 列表持久保存在 assembler state；当前每 tick 扫描 world building。后续仍需补拆除/旋转/世界 tileChanges cache、严格 offset 几何与多 tier/gap 组合测试。
