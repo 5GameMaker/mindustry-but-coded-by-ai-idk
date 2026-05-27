@@ -162,11 +162,11 @@ use crate::mindustry::{
     world::blocks::units::{
         read_reconstructor_state, read_repair_turret_state, read_unit_assembler_state,
         read_unit_cargo_loader_state, read_unit_cargo_unload_state, read_unit_factory_state,
-        reconstructor_accept_payload, reconstructor_update, unit_factory_update,
-        write_reconstructor_state, write_repair_turret_state, write_unit_assembler_state,
-        write_unit_cargo_loader_state, write_unit_cargo_unload_state, write_unit_factory_state,
-        ReconstructorState, RepairTurretState, UnitAssemblerState, UnitCargoLoaderState,
-        UnitCargoUnloadPointState, UnitFactoryState,
+        reconstructor_accept_payload, reconstructor_update, unit_factory_configure_plan,
+        unit_factory_update, write_reconstructor_state, write_repair_turret_state,
+        write_unit_assembler_state, write_unit_cargo_loader_state, write_unit_cargo_unload_state,
+        write_unit_factory_state, ReconstructorState, RepairTurretState, UnitAssemblerState,
+        UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     },
     world::blocks::{
         autotiler_direction, is_construct_block_name, read_construct_block_state,
@@ -2007,6 +2007,17 @@ pub enum GameRuntimePayloadConstructorConfigureResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRuntimeUnitFactoryConfigureResult {
+    Configured,
+    Cleared,
+    MissingBuilding,
+    MissingRuntimeState,
+    NotUnitFactory,
+    NotConfigurable,
+    UnknownUnit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameRuntimePayloadSourceConfig {
     Block(ContentId),
     Unit(ContentId),
@@ -3685,6 +3696,88 @@ impl GameRuntime {
 
     pub fn export_network_map_snapshot(&self, content: &ContentLoader) -> LegacyShortChunkMap {
         export_network_map_snapshot_from_parts(self, content)
+    }
+
+    pub fn configure_owned_unit_factory_plan(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        plan: Option<i32>,
+    ) -> GameRuntimeUnitFactoryConfigureResult {
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimeUnitFactoryConfigureResult::MissingBuilding;
+        };
+
+        let factory_block = match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::UnitFactory(factory)) => factory,
+            Some(_) | None => return GameRuntimeUnitFactoryConfigureResult::NotUnitFactory,
+        };
+        if !factory_block.configurable {
+            return GameRuntimeUnitFactoryConfigureResult::NotConfigurable;
+        }
+
+        let building = self.buildings[index].clone();
+        if !self.ensure_unit_state_for_building(content, &building) {
+            return GameRuntimeUnitFactoryConfigureResult::MissingRuntimeState;
+        }
+
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            self.unit_runtime_states.get_mut(&tile_pos)
+        else {
+            return GameRuntimeUnitFactoryConfigureResult::MissingRuntimeState;
+        };
+
+        let requested = plan.unwrap_or(-1);
+        unit_factory_configure_plan(factory, requested, factory_block.plans.len(), true);
+        self.buildings[index].config = (factory.current_plan != -1)
+            .then_some(crate::mindustry::io::TypeValue::Int(factory.current_plan));
+        if factory.current_plan == -1 {
+            GameRuntimeUnitFactoryConfigureResult::Cleared
+        } else {
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        }
+    }
+
+    pub fn configure_owned_unit_factory_unit(
+        &mut self,
+        content: &ContentLoader,
+        tile_pos: i32,
+        unit: Option<ContentId>,
+    ) -> GameRuntimeUnitFactoryConfigureResult {
+        let Some(unit_id) = unit else {
+            return self.configure_owned_unit_factory_plan(content, tile_pos, None);
+        };
+        let Some(index) = self
+            .buildings
+            .iter()
+            .position(|building| building.tile_pos == tile_pos)
+        else {
+            return GameRuntimeUnitFactoryConfigureResult::MissingBuilding;
+        };
+        let factory_block = match content.block(self.buildings[index].block.id) {
+            Some(BlockDef::UnitFactory(factory)) => factory,
+            Some(_) | None => return GameRuntimeUnitFactoryConfigureResult::NotUnitFactory,
+        };
+        if !factory_block.configurable {
+            return GameRuntimeUnitFactoryConfigureResult::NotConfigurable;
+        }
+        let Some(unit_def) = content.unit(unit_id) else {
+            return GameRuntimeUnitFactoryConfigureResult::UnknownUnit;
+        };
+        let plan = factory_block
+            .plans
+            .iter()
+            .position(|plan| plan.unit == unit_def.name())
+            .map(|plan| plan as i32)
+            .unwrap_or(-1);
+        if plan == -1 {
+            return self.configure_owned_unit_factory_plan(content, tile_pos, None);
+        }
+        self.configure_owned_unit_factory_plan(content, tile_pos, Some(plan))
     }
 
     pub fn configure_owned_payload_constructor(
@@ -19014,6 +19107,142 @@ mod tests {
                 .unwrap()
                 .id,
             flare.id()
+        );
+    }
+
+    #[test]
+    fn game_runtime_configures_unit_factory_plan_and_clears_progress_like_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let tile_pos = point2_pack(8, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Factory {
+                common: PayloadBlockBuildState::default(),
+                factory: UnitFactoryState {
+                    current_plan: 0,
+                    base: UnitBlockState {
+                        progress: 42.0,
+                        ..UnitBlockState::default()
+                    },
+                    command_id: Some(2),
+                    ..UnitFactoryState::default()
+                },
+            },
+        );
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_plan(&content, tile_pos, Some(1)),
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after config");
+        };
+        assert_eq!(factory.current_plan, 1);
+        assert_eq!(factory.base.progress, 0.0);
+        assert_eq!(factory.command_id, Some(2));
+        assert_eq!(runtime.buildings[0].config, Some(TypeValue::Int(1)));
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_plan(&content, tile_pos, None),
+            GameRuntimeUnitFactoryConfigureResult::Cleared
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after clear");
+        };
+        assert_eq!(factory.current_plan, -1);
+        assert_eq!(factory.base.progress, 0.0);
+        assert_eq!(runtime.buildings[0].config, None);
+    }
+
+    #[test]
+    fn game_runtime_configures_unit_factory_by_unit_id_like_java_unit_config() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let factory_def = content.block_by_name("air-factory").unwrap();
+        let mono = content.unit_by_name("mono").unwrap();
+        let dagger = content.unit_by_name("dagger").unwrap();
+        let tile_pos = point2_pack(10, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            factory_def.base().clone(),
+            TeamId(2),
+        ));
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_unit(&content, tile_pos, Some(mono.id())),
+            GameRuntimeUnitFactoryConfigureResult::Configured
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should be created by unit config");
+        };
+        assert_eq!(factory.current_plan, 1);
+        assert_eq!(runtime.buildings[0].config, Some(TypeValue::Int(1)));
+
+        {
+            let GameRuntimeUnitBlockState::Factory { factory, .. } =
+                runtime.unit_runtime_states.get_mut(&tile_pos).unwrap()
+            else {
+                panic!("unit factory sidecar should remain a factory");
+            };
+            factory.base.progress = 21.0;
+        }
+        assert_eq!(
+            runtime.configure_owned_unit_factory_unit(&content, tile_pos, Some(dagger.id())),
+            GameRuntimeUnitFactoryConfigureResult::Cleared
+        );
+        let Some(GameRuntimeUnitBlockState::Factory { factory, .. }) =
+            runtime.unit_runtime_states.get(&tile_pos)
+        else {
+            panic!("unit factory sidecar should stay present after unmatched unit config");
+        };
+        assert_eq!(factory.current_plan, -1);
+        assert_eq!(factory.base.progress, 0.0);
+        assert_eq!(runtime.buildings[0].config, None);
+    }
+
+    #[test]
+    fn game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let router_def = content.block_by_name("router").unwrap();
+        let fabricator_def = content.block_by_name("tank-fabricator").unwrap();
+        let router_tile = point2_pack(12, 14);
+        let fabricator_tile = point2_pack(14, 14);
+        let mut runtime = GameRuntime::default();
+        runtime.add_building(BuildingComp::new(
+            router_tile,
+            router_def.base().clone(),
+            TeamId(2),
+        ));
+        runtime.add_building(BuildingComp::new(
+            fabricator_tile,
+            fabricator_def.base().clone(),
+            TeamId(2),
+        ));
+
+        assert_eq!(
+            runtime.configure_owned_unit_factory_plan(&content, router_tile, Some(0)),
+            GameRuntimeUnitFactoryConfigureResult::NotUnitFactory
+        );
+        assert_eq!(
+            runtime.configure_owned_unit_factory_plan(&content, fabricator_tile, Some(0)),
+            GameRuntimeUnitFactoryConfigureResult::NotConfigurable
+        );
+        assert_eq!(
+            runtime.configure_owned_unit_factory_unit(&content, fabricator_tile, Some(32767)),
+            GameRuntimeUnitFactoryConfigureResult::NotConfigurable
         );
     }
 

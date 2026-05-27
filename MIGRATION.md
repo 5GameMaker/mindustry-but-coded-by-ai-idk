@@ -3613,4 +3613,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 验证：
   - `cargo test -p mindustry-core unit_factory`
   - `cargo check --workspace`
-- 仍未完成：当前 UnitFactory runtime 尚未完整实现 Java `config(Integer/UnitType/UnitCommand)` 的外部入口、`canSetCommand()`/命令合法性过滤、`team.activateUnitFactories()` 的精确 team rule、创建 sound/effect/event、同 tick moveOut 后立即再生产的 Java 顺序，以及完整 UI/config/logic sense 行为。
+- 仍未完成：当前 UnitFactory runtime 尚未完整实现 Java `config(UnitCommand)`/`configClear` 的命令配置入口、`canSetCommand()`/命令合法性过滤、`team.activateUnitFactories()` 的精确 team rule、创建 sound/effect/event、同 tick moveOut 后立即再生产的 Java 顺序，以及完整 UI/config/logic sense 行为。
+
+### 12.110 UnitFactory 配置入口接入
+
+- 2026-05-27：对照 Java `UnitFactory` 构造器中的 `config(Integer.class, ...)` 与 `config(UnitType.class, ...)`，在 `GameRuntime` 接入 owned building 的 unit factory 计划配置入口，避免 UnitFactory 只能靠测试手写 `current_plan` 才能运行。
+- Java 依据：
+  - `config(Integer)` 在 `!configurable` 时直接返回；plan 越界或负数会把 `currentPlan` 置为 `-1`，plan 变化时清零 `progress`；
+  - `config(UnitType)` 会按 `plans.indexOf(p -> p.unit == val)` 映射 plan，未命中时等价清空当前 plan；
+  - `config()` 返回当前 plan integer，联机/回滚侧需要保存为 Java-like tile config。
+- Rust 新增/变化：
+  - 新增 `GameRuntimeUnitFactoryConfigureResult`，区分 `Configured / Cleared / MissingBuilding / MissingRuntimeState / NotUnitFactory / NotConfigurable / UnknownUnit`；
+  - 新增 `GameRuntime::configure_owned_unit_factory_plan(...)`，按 tile 找 building，懒创建 `GameRuntimeUnitBlockState::Factory`，调用 `unit_factory_configure_plan(...)`，并把 `BuildingComp.config` 写成 `TypeValue::Int(current_plan)` 或清空；
+  - 新增 `GameRuntime::configure_owned_unit_factory_unit(...)`，按 `ContentId` 映射到 factory plan；未命中当前 factory plans 时清空 plan，且先检查 block 是否为可配置 UnitFactory，贴近 Java `if(!configurable) return` 的顺序；
+  - 该入口直接修改真实 runtime sidecar 与 building config，后续可继续接入 `TileConfigCallPacket`/输入处理，而不是独立 helper。
+- 新增 core 回归测试：
+  - `game_runtime_configures_unit_factory_plan_and_clears_progress_like_java`
+  - `game_runtime_configures_unit_factory_by_unit_id_like_java_unit_config`
+  - `game_runtime_rejects_unit_factory_config_for_wrong_or_unconfigurable_blocks`
+- 验证：
+  - `cargo test -p mindustry-core unit_factory`
+- 仍未完成：`UnitCommand` 配置/清空、`command` 是否属于目标 unit `commands` 的过滤、`UnitType.init()` 自动命令列表、UI 选择表、logic `senseObject(LAccess.config)`/网络 `TileConfigCallPacket` 分发仍需后续闭环。
