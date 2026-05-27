@@ -6471,3 +6471,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `dynamicSpikes/greenBomb/greenLaserCharge` 等同区域效果包含 triangle/light 或多粒子 light，需后续扩展 primitive；
   - `disperseTrail/hitBullet*` 包含 lineAngle/scaled/light，不能用单圆环近似；
   - 这些 primitive 数据后续仍需接入真实 renderer backend。
+
+### 12.213 Square primitive + status/overdrive square Fx batch
+
+- 2026-05-28：为 `Fill.square(...)` 类标准 Fx 增加最小 square primitive 表达，并迁移此前因缺少 square 而跳过的 status/overdrive 方块效果。
+- 本轮迁移：
+  - `sapped=136`
+  - `electrified=137`
+  - `overdriven=140`
+  - `overclocked=141`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1572` 附近：
+    - `sapped = new Effect(40f, ...)`，`Pal.sap`，`randLenVectors(id, 2, 1 + fin*2)`，`Fill.square(..., fslope*1.1, 45)`；
+    - `electrified = new Effect(40f, ...)`，`Pal.heal`，同 sapped 参数；
+    - `overdriven = new Effect(20f, ...)`，输入色，`randLenVectors(id, 2, 1 + fin*2)`，`Fill.square(..., fout*2.3 + 0.5)`；
+    - `overclocked = new Effect(50f, ...)`，输入色，中心 `Fill.square(..., fslope*2, 45)`。
+  - `Pal.sap` 来自 `Pal.java`：`Color.valueOf("665c9f")`，Rust RGBA 为 `0x665c9fff`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - `StandardEffectDrawKind` 新增 `FilledSquare` 与 `SeededSquareParticles`；
+    - 新增 `StandardEffectSquareRenderPrimitive` 与 `square_render_primitives_from_seed()`；
+    - 新增 4 个 `FX_*` 常量并接入 metadata/name lookup；
+    - 新增颜色符号 `Pal.sap`；
+    - `sapped/electrified/overdriven` 输出 seeded square particles；
+    - `overclocked` 输出中心 filled square。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 4 个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖 square kind、颜色、输入色、粒子数量、半径公式与 square primitive 展开。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles --lib`
+- 仍未完成：
+  - square primitive 目前是计划/测试层表达，真实 renderer backend 仍需按 `StandardEffectSquareRenderPrimitive` 接入；
+  - `healBlock` 等 `Lines.square` 需要 stroked square 支持，不等同于本轮 `Fill.square`；
+  - `bubble` 仍需 seeded stroked-circle particles。

@@ -4663,3 +4663,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 若继续 Fx，可优先设计 square primitive，解锁 `sapped/electrified/overdriven/overclocked/healBlock`；
   2. 若做 `bubble`，先扩展 seeded stroked circle particles；
   3. 避免把 `dynamicSpikes/greenBomb/hitBullet*` 这类含 triangle/light/line 的效果近似硬塞到单圆环。
+
+---
+
+## 139. 最新闭环记录：Square primitive 与 status/overdrive 方块 Fx
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补最小 `Fill.square` 表达，迁移之前被 square primitive 阻塞的 4 个 Fx。
+- 本轮迁移：
+  - `sapped=136`
+  - `electrified=137`
+  - `overdriven=140`
+  - `overclocked=141`
+- Java 依据：
+  - `Fx.java:1572-1614`；
+  - `sapped/electrified`：2 个随机 45° 方块，半径 `fslope*1.1`；
+  - `overdriven`：2 个随机无旋转方块，半径 `fout*2.3+0.5`；
+  - `overclocked`：中心 45° 方块，半径 `fslope*2`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FilledSquare` / `SeededSquareParticles`；
+    - 新增 `StandardEffectSquareRenderPrimitive` 与 `square_render_primitives_from_seed()`；
+    - 新增 `FX_SAPPED_ID` / `FX_ELECTRIFIED_ID` / `FX_OVERDRIVEN_ID` / `FX_OVERCLOCKED_ID`；
+    - 新增 `Pal.sap = 0x665c9fff`；
+    - 接入标准 metadata 与 draw plan。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles --lib`
+- 下一步建议：
+  1. 若继续方形类，补 `StrokedSquare` 后做 `healBlock` 等 `Lines.square`；
+  2. 若继续圆环粒子，补 seeded stroked-circle particles 后做 `bubble=245`；
+  3. 真实 renderer backend 仍需消费 `StandardEffectSquareRenderPrimitive`。

@@ -78,10 +78,18 @@ pub const FX_MELTING_ID: i32 = 133;
 pub const FX_WET_ID: i32 = 134;
 /// Upstream `Fx.muddy` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MUDDY_ID: i32 = 135;
+/// Upstream `Fx.sapped` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SAPPED_ID: i32 = 136;
+/// Upstream `Fx.electrified` id in `mindustry.content.Fx` for v158.1.
+pub const FX_ELECTRIFIED_ID: i32 = 137;
 /// Upstream `Fx.sporeSlowed` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SPORE_SLOWED_ID: i32 = 138;
 /// Upstream `Fx.oily` id in `mindustry.content.Fx` for v158.1.
 pub const FX_OILY_ID: i32 = 139;
+/// Upstream `Fx.overdriven` id in `mindustry.content.Fx` for v158.1.
+pub const FX_OVERDRIVEN_ID: i32 = 140;
+/// Upstream `Fx.overclocked` id in `mindustry.content.Fx` for v158.1.
+pub const FX_OVERCLOCKED_ID: i32 = 141;
 /// Upstream `Fx.shockwave` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOCKWAVE_ID: i32 = 143;
 /// Upstream `Fx.shockwaveSmaller` id in `mindustry.content.Fx` for v158.1.
@@ -160,8 +168,12 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "melting" => Some(FX_MELTING_ID),
         "wet" => Some(FX_WET_ID),
         "muddy" => Some(FX_MUDDY_ID),
+        "sapped" => Some(FX_SAPPED_ID),
+        "electrified" => Some(FX_ELECTRIFIED_ID),
         "sporeSlowed" => Some(FX_SPORE_SLOWED_ID),
         "oily" => Some(FX_OILY_ID),
+        "overdriven" => Some(FX_OVERDRIVEN_ID),
+        "overclocked" => Some(FX_OVERCLOCKED_ID),
         "shockwave" => Some(FX_SHOCKWAVE_ID),
         "shockwaveSmaller" => Some(FX_SHOCKWAVE_SMALLER_ID),
         "bigShockwave" => Some(FX_BIG_SHOCKWAVE_ID),
@@ -259,8 +271,12 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_MELTING_ID => Effect::with_lifetime(FX_MELTING_ID, 40.0, DEFAULT_EFFECT_CLIP),
         FX_WET_ID => Effect::with_lifetime(FX_WET_ID, 80.0, DEFAULT_EFFECT_CLIP),
         FX_MUDDY_ID => Effect::with_lifetime(FX_MUDDY_ID, 80.0, DEFAULT_EFFECT_CLIP),
+        FX_SAPPED_ID => Effect::with_lifetime(FX_SAPPED_ID, 40.0, DEFAULT_EFFECT_CLIP),
+        FX_ELECTRIFIED_ID => Effect::with_lifetime(FX_ELECTRIFIED_ID, 40.0, DEFAULT_EFFECT_CLIP),
         FX_SPORE_SLOWED_ID => Effect::with_lifetime(FX_SPORE_SLOWED_ID, 40.0, DEFAULT_EFFECT_CLIP),
         FX_OILY_ID => Effect::with_lifetime(FX_OILY_ID, 42.0, DEFAULT_EFFECT_CLIP),
+        FX_OVERDRIVEN_ID => Effect::with_lifetime(FX_OVERDRIVEN_ID, 20.0, DEFAULT_EFFECT_CLIP),
+        FX_OVERCLOCKED_ID => Effect::with_lifetime(FX_OVERCLOCKED_ID, 50.0, DEFAULT_EFFECT_CLIP),
         FX_SHOCKWAVE_ID => Effect::with_lifetime(FX_SHOCKWAVE_ID, 10.0, 80.0),
         FX_SHOCKWAVE_SMALLER_ID => Effect::with_lifetime(FX_SHOCKWAVE_SMALLER_ID, 9.0, 80.0),
         FX_BIG_SHOCKWAVE_ID => Effect::with_lifetime(FX_BIG_SHOCKWAVE_ID, 10.0, 80.0),
@@ -324,6 +340,8 @@ pub enum StandardEffectDrawKind {
     FilledCircle,
     StrokedCircle,
     SeededCircleParticles,
+    FilledSquare,
+    SeededSquareParticles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -370,6 +388,15 @@ pub struct StandardEffectCircleRenderPrimitive {
     pub center: (f32, f32),
     pub radius: f32,
     pub stroke: f32,
+    pub alpha: f32,
+    pub color: Option<DecalColor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectSquareRenderPrimitive {
+    pub center: (f32, f32),
+    pub radius: f32,
+    pub rotation: f32,
     pub alpha: f32,
     pub color: Option<DecalColor>,
 }
@@ -507,6 +534,37 @@ impl StandardEffectDrawPlan {
                     color,
                 })
                 .collect(),
+            StandardEffectDrawKind::FilledSquare
+            | StandardEffectDrawKind::SeededSquareParticles => Vec::new(),
+        }
+    }
+
+    pub fn square_render_primitives_from_seed(&self) -> Vec<StandardEffectSquareRenderPrimitive> {
+        let color = self.resolved_draw_color();
+        match self.kind {
+            StandardEffectDrawKind::FilledSquare => {
+                vec![StandardEffectSquareRenderPrimitive {
+                    center: self.center,
+                    radius: self.radius,
+                    rotation: self.stroke,
+                    alpha: self.alpha,
+                    color,
+                }]
+            }
+            StandardEffectDrawKind::SeededSquareParticles => self
+                .expand_seeded_particle_circles_from_seed()
+                .into_iter()
+                .map(|square| StandardEffectSquareRenderPrimitive {
+                    center: square.center,
+                    radius: square.radius,
+                    rotation: self.stroke,
+                    alpha: square.alpha,
+                    color,
+                })
+                .collect(),
+            StandardEffectDrawKind::FilledCircle
+            | StandardEffectDrawKind::StrokedCircle
+            | StandardEffectDrawKind::SeededCircleParticles => Vec::new(),
         }
     }
 
@@ -1406,6 +1464,80 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_SAPPED_ID | FX_ELECTRIFIED_ID | FX_OVERDRIVEN_ID => {
+            let (
+                color_from,
+                input_color,
+                radius_base,
+                radius_fout_scale,
+                radius_fslope_scale,
+                rotation,
+            ) = match effect_id {
+                FX_SAPPED_ID => (Some("Pal.sap"), None, 0.0, 0.0, 1.1, 45.0),
+                FX_ELECTRIFIED_ID => (Some("Pal.heal"), None, 0.0, 0.0, 1.1, 45.0),
+                FX_OVERDRIVEN_ID => (None, Some(color), 0.5, 2.3, 0.0, 0.0),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededSquareParticles,
+                center: (x, y),
+                color_from,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: rotation,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: None,
+                    angle_range: 0.0,
+                    length: 1.0 + fin * 2.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale,
+                    radius_fslope_scale,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
+        FX_OVERCLOCKED_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledSquare,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fslope * 2.0,
+            stroke: 45.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_SHOCKWAVE_ID
         | FX_SHOCKWAVE_SMALLER_ID
         | FX_BIG_SHOCKWAVE_ID
@@ -1861,6 +1993,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.accent" => Some(DecalColor::from_rgba(0xffd37fff)),
         "Pal.command" => Some(DecalColor::from_rgba(0xeab678ff)),
         "Pal.heal" => Some(DecalColor::from_rgba(0x98ffa9ff)),
+        "Pal.sap" => Some(DecalColor::from_rgba(0x665c9fff)),
         "Pal.darkishGray" => Some(DecalColor {
             r: 0.3,
             g: 0.3,
@@ -3182,8 +3315,12 @@ mod tests {
         assert_eq!(standard_effect_id("melting"), Some(FX_MELTING_ID));
         assert_eq!(standard_effect_id("wet"), Some(FX_WET_ID));
         assert_eq!(standard_effect_id("muddy"), Some(FX_MUDDY_ID));
+        assert_eq!(standard_effect_id("sapped"), Some(FX_SAPPED_ID));
+        assert_eq!(standard_effect_id("electrified"), Some(FX_ELECTRIFIED_ID));
         assert_eq!(standard_effect_id("sporeSlowed"), Some(FX_SPORE_SLOWED_ID));
         assert_eq!(standard_effect_id("oily"), Some(FX_OILY_ID));
+        assert_eq!(standard_effect_id("overdriven"), Some(FX_OVERDRIVEN_ID));
+        assert_eq!(standard_effect_id("overclocked"), Some(FX_OVERCLOCKED_ID));
         assert_eq!(standard_effect_id("shockwave"), Some(FX_SHOCKWAVE_ID));
         assert_eq!(
             standard_effect_id("shockwaveSmaller"),
@@ -3321,8 +3458,12 @@ mod tests {
         assert_eq!(standard_effect(FX_MELTING_ID).unwrap().lifetime, 40.0);
         assert_eq!(standard_effect(FX_WET_ID).unwrap().lifetime, 80.0);
         assert_eq!(standard_effect(FX_MUDDY_ID).unwrap().lifetime, 80.0);
+        assert_eq!(standard_effect(FX_SAPPED_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_ELECTRIFIED_ID).unwrap().lifetime, 40.0);
         assert_eq!(standard_effect(FX_SPORE_SLOWED_ID).unwrap().lifetime, 40.0);
         assert_eq!(standard_effect(FX_OILY_ID).unwrap().lifetime, 42.0);
+        assert_eq!(standard_effect(FX_OVERDRIVEN_ID).unwrap().lifetime, 20.0);
+        assert_eq!(standard_effect(FX_OVERCLOCKED_ID).unwrap().lifetime, 50.0);
         assert_eq!(standard_effect(FX_SHOCKWAVE_ID).unwrap().lifetime, 10.0);
         assert_eq!(standard_effect(FX_SHOCKWAVE_ID).unwrap().clip, 80.0);
         assert_eq!(
@@ -3949,6 +4090,80 @@ mod tests {
         assert_eq!(oily_particles.count, 2);
         assert_eq!(oily_particles.length, 2.0);
         assert_eq!(oily_particles.radius_fout_scale, 1.0);
+
+        let sapped = standard_effect_draw_plan(
+            Some(FX_SAPPED_ID as u16),
+            136,
+            0.0,
+            0.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(sapped.kind, StandardEffectDrawKind::SeededSquareParticles);
+        assert_eq!(sapped.color_from, Some("Pal.sap"));
+        assert_eq!(sapped.stroke, 45.0);
+        let sapped_particles = sapped.particles.unwrap();
+        assert_eq!(sapped_particles.count, 2);
+        assert_eq!(sapped_particles.length, 2.0);
+        assert_eq!(sapped_particles.radius_fslope_scale, 1.1);
+        assert_eq!(sapped.square_render_primitives_from_seed().len(), 2);
+
+        let electrified = standard_effect_draw_plan(
+            Some(FX_ELECTRIFIED_ID as u16),
+            137,
+            0.0,
+            0.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(electrified.color_from, Some("Pal.heal"));
+        assert_eq!(electrified.square_render_primitives_from_seed().len(), 2);
+
+        let overdriven_color = DecalColor::from_rgba(0xfedcbaff);
+        let overdriven = standard_effect_draw_plan(
+            Some(FX_OVERDRIVEN_ID as u16),
+            140,
+            0.0,
+            0.0,
+            0.0,
+            10.0,
+            20.0,
+            overdriven_color,
+        )
+        .unwrap();
+        assert_eq!(
+            overdriven.kind,
+            StandardEffectDrawKind::SeededSquareParticles
+        );
+        assert_eq!(overdriven.input_color, Some(overdriven_color));
+        let overdriven_particles = overdriven.particles.unwrap();
+        assert_eq!(overdriven_particles.radius_base, 0.5);
+        assert_eq!(overdriven_particles.radius_fout_scale, 2.3);
+
+        let overclocked = standard_effect_draw_plan(
+            Some(FX_OVERCLOCKED_ID as u16),
+            141,
+            0.0,
+            0.0,
+            0.0,
+            25.0,
+            50.0,
+            overdriven_color,
+        )
+        .unwrap();
+        assert_eq!(overclocked.kind, StandardEffectDrawKind::FilledSquare);
+        assert_eq!(overclocked.input_color, Some(overdriven_color));
+        assert_eq!(overclocked.radius, 2.0);
+        assert_eq!(overclocked.stroke, 45.0);
+        let overclocked_squares = overclocked.square_render_primitives_from_seed();
+        assert_eq!(overclocked_squares.len(), 1);
+        assert_eq!(overclocked_squares[0].rotation, 45.0);
 
         let wet = standard_effect_draw_plan(
             Some(FX_WET_ID as u16),
