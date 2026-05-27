@@ -6,21 +6,45 @@ pub const DEFAULT_EFFECT_CLIP: f32 = 50.0;
 pub const DEFAULT_EFFECT_LAYER: f32 = 110.0;
 /// Upstream `Fx.unitAssemble` id in `mindustry.content.Fx` for v158.1.
 pub const FX_UNIT_ASSEMBLE_ID: i32 = 35;
+/// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SMOKE_ID: i32 = 28;
+/// Upstream `Fx.hitLiquid` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_LIQUID_ID: i32 = 85;
 /// Upstream `Fx.missileTrail` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MISSILE_TRAIL_ID: i32 = 110;
 /// Upstream `Fx.missileTrailShort` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MISSILE_TRAIL_SHORT_ID: i32 = 111;
+/// Upstream `Fx.fire` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FIRE_ID: i32 = 119;
+/// Upstream `Fx.fireSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FIRE_SMOKE_ID: i32 = 121;
 /// Upstream `Fx.neoplasmHeal` id in `mindustry.content.Fx` for v158.1.
 pub const FX_NEOPLASM_HEAL_ID: i32 = 122;
+/// Upstream `Fx.steam` id in `mindustry.content.Fx` for v158.1.
+pub const FX_STEAM_ID: i32 = 123;
+/// Upstream `Fx.vapor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_VAPOR_ID: i32 = 128;
+/// Upstream `Fx.fireballsmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FIREBALL_SMOKE_ID: i32 = 130;
+/// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.ripple` id in `mindustry.content.Fx` for v158.1.
 pub const FX_RIPPLE_ID: i32 = 243;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
+        "smoke" => Some(FX_SMOKE_ID),
+        "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
         "missileTrailShort" => Some(FX_MISSILE_TRAIL_SHORT_ID),
+        "fire" => Some(FX_FIRE_ID),
+        "fireSmoke" => Some(FX_FIRE_SMOKE_ID),
         "neoplasmHeal" => Some(FX_NEOPLASM_HEAL_ID),
+        "steam" => Some(FX_STEAM_ID),
+        "vapor" => Some(FX_VAPOR_ID),
+        "fireballsmoke" => Some(FX_FIREBALL_SMOKE_ID),
+        "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "ripple" => Some(FX_RIPPLE_ID),
         _ => None,
     }
@@ -1160,6 +1184,8 @@ mod tests {
 
     #[test]
     fn standard_effect_ids_include_puddle_ripple_dependencies() {
+        assert_eq!(standard_effect_id("smoke"), Some(FX_SMOKE_ID));
+        assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("unitAssemble"),
             Some(FX_UNIT_ASSEMBLE_ID)
@@ -1172,10 +1198,19 @@ mod tests {
             standard_effect_id("missileTrailShort"),
             Some(FX_MISSILE_TRAIL_SHORT_ID)
         );
+        assert_eq!(standard_effect_id("fire"), Some(FX_FIRE_ID));
+        assert_eq!(standard_effect_id("fireSmoke"), Some(FX_FIRE_SMOKE_ID));
         assert_eq!(
             standard_effect_id("neoplasmHeal"),
             Some(FX_NEOPLASM_HEAL_ID)
         );
+        assert_eq!(standard_effect_id("steam"), Some(FX_STEAM_ID));
+        assert_eq!(standard_effect_id("vapor"), Some(FX_VAPOR_ID));
+        assert_eq!(
+            standard_effect_id("fireballsmoke"),
+            Some(FX_FIREBALL_SMOKE_ID)
+        );
+        assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
         assert_eq!(standard_effect_id("none"), None);
     }

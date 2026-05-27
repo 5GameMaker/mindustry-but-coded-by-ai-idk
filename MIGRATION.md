@@ -5295,3 +5295,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 RNG 是 Rust 侧可复现 LCG，并非 Arc `Rand` 位级同构；
   - `standard_effect_id(...)` 仍缺完整 Fx registry；
   - 真正 renderer 仍未消费 drain 出来的 effect packet。
+
+### 12.180 Standard Fx id mapping expansion
+
+- 2026-05-28：扩展 `standard_effect_id(...)`，补齐当前已迁移内容/运行时直接引用的高频 Fx 名称，减少 Java effect packet 和本地 effect 队列因为无法解析 effect name 而被跳过的情况。
+- Java 依据：
+  - `core/src/mindustry/content/Fx.java`
+    - `none`：line 30，继续保持 Rust `standard_effect_id("none") == None`，避免无效 effect 入队；
+    - `smoke`：line 317；
+    - `hitLiquid`：line 964；
+    - `fire`：line 1414；
+    - `fireSmoke`：line 1436；
+    - `steam`：line 1453；
+    - `vapor`：line 1508；
+    - `fireballsmoke`：line 1526；
+    - `smokeCloud`：line 2549。
+- Rust 新增/变化：
+  - `core::entities::effect` 新增常量：
+    - `FX_SMOKE_ID = 28`
+    - `FX_HIT_LIQUID_ID = 85`
+    - `FX_FIRE_ID = 119`
+    - `FX_FIRE_SMOKE_ID = 121`
+    - `FX_STEAM_ID = 123`
+    - `FX_VAPOR_ID = 128`
+    - `FX_FIREBALL_SMOKE_ID = 130`
+    - `FX_SMOKE_CLOUD_ID = 222`
+  - `standard_effect_id(...)` 新增上述名称映射；
+  - 保持既有 `unitAssemble/missileTrail/missileTrailShort/neoplasmHeal/ripple` 行为不变。
+- 更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 增加高频 Fx 断言。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include_puddle_ripple_dependencies --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - 这仍不是完整 Fx registry，只是补齐当前迁移链路会直接用到的高频内置 Fx；
+  - `Fx.ripple` 继续沿用既有常量 `243`，完整 id 审计后续应统一校验全部 Fx 顺序；
+  - 真正 renderer 仍未消费 drain 出来的 effect packet。

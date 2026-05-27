@@ -3994,3 +3994,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
      - RNG 目前不是 Arc `Rand` 位级同构；
      - 完整 Fx registry 和真实 renderer 仍未完成；
      - 继续向 Puddles/CellLiquid 外的大量 Java 文件迁移。
+
+---
+
+## 121. 最新闭环记录：扩展 standard Fx id 映射
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补齐当前已迁移 runtime/content 直接用到的一批高频 Fx name -> id 映射，降低本地 effect 队列/Java effect packet 因 `standard_effect_id(...)` 返回 `None` 而丢效果的概率。
+- Java 依据：
+  - `core/src/mindustry/content/Fx.java`
+  - 本轮使用源码声明顺序/既有常量对照补充：
+    - `smoke=28`
+    - `hitLiquid=85`
+    - `fire=119`
+    - `fireSmoke=121`
+    - `steam=123`
+    - `vapor=128`
+    - `fireballsmoke=130`
+    - `smokeCloud=222`
+  - `none` 仍保持 `None`，不入队无效 effect。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增上述 `FX_*_ID` 常量；
+    - 扩展 `standard_effect_id(...)`；
+    - 扩展 `standard_effect_ids_include_puddle_ripple_dependencies` 测试。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include_puddle_ripple_dependencies --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`扩展标准特效映射`；
+  2. 后续欠账：
+     - 这仍不是完整 Fx registry；
+     - `Fx.ripple` 当前沿用既有常量 `243`，后续完整 Fx id 审计时要统一确认；
+     - 真实 renderer 与完整 effect registry 仍未完成。
