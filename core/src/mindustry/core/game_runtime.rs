@@ -33,7 +33,8 @@ use crate::mindustry::{
             UnitControllerState, WorldLabelComp,
         },
         entity_class_id, entity_class_kind, standard_effect_id, EntityClassKind, Fires,
-        PuddleLiquidInfo, Puddles, FX_UNIT_ASSEMBLE_ID,
+        PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent, Puddles,
+        FX_UNIT_ASSEMBLE_ID,
     },
     game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo, Trigger},
     input::input_handler::ItemRemoveStackPlan,
@@ -3806,6 +3807,36 @@ impl GameRuntime {
         }
 
         emitted
+    }
+
+    pub fn queue_client_puddle_particle_effects<'a>(
+        &mut self,
+        events: impl IntoIterator<Item = &'a PuddleUpdateEvent>,
+        mut random_offset: impl FnMut(&PuddleParticleEffectEvent) -> (f32, f32),
+    ) -> usize {
+        let mut queued = 0;
+        for event in events {
+            let Some(particle) = event.particle_effect.as_ref() else {
+                continue;
+            };
+            let Some(effect_id) = standard_effect_id(&particle.effect) else {
+                continue;
+            };
+            let (offset_x, offset_y) = random_offset(particle);
+            let range = particle.range.max(0.0);
+            self.client_local_effect_events.push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: effect_id as u16,
+                    x: particle.x + offset_x.clamp(-range, range),
+                    y: particle.y + offset_y.clamp(-range, range),
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+            queued += 1;
+        }
+        queued
     }
 
     pub fn apply_client_assembler_drone_spawned_packet(
@@ -25560,6 +25591,48 @@ mod tests {
                 .data,
             0.0
         );
+    }
+
+    #[test]
+    fn game_runtime_queues_puddle_particle_payloads_into_client_local_effects() {
+        use crate::mindustry::entities::{PuddleDepositContext, PuddleTileView};
+
+        let mut liquid = PuddleLiquidInfo::new("particle-liquid");
+        liquid.viscosity = 1.0;
+        liquid.has_particle_effect = true;
+        liquid.particle_effect = "ripple".to_string();
+        liquid.particle_spacing = 1.0;
+        let mut puddles = Puddles::new(4, 4);
+        puddles.deposit_at(
+            Some(PuddleTileView::new(1, 2)),
+            liquid,
+            PuddleComp::MAX_LIQUID / 2.0,
+            PuddleDepositContext::default(),
+        );
+
+        let report = puddles.update_all_with_passability_report(
+            1.0,
+            false,
+            |_, _, _| true,
+            |_, _| false,
+            |_, _, _| false,
+        );
+        let mut runtime = GameRuntime::default();
+
+        assert_eq!(
+            runtime.queue_client_puddle_particle_effects(&report.events, |_| (99.0, -99.0)),
+            1
+        );
+
+        let effect = &runtime.client_local_effect_events[0];
+        assert_eq!(
+            effect.effect.effect_id,
+            standard_effect_id("ripple").unwrap() as u16
+        );
+        assert_eq!((effect.effect.x, effect.effect.y), (11.0, 13.0));
+        assert_eq!(effect.effect.rotation, 0.0);
+        assert_eq!(effect.effect.color, type_io::RgbaColor::new(-1));
+        assert_eq!(effect.data, TypeValue::Null);
     }
 
     #[test]

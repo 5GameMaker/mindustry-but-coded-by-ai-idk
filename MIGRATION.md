@@ -5180,3 +5180,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `particle_effect` 现在已有 renderer/client 所需 payload，但 desktop/client 非 headless effect runtime 尚未把它真正绘制/播放；
   - ripple effect 仍在 tick 后统一广播，尚未完全保持 Java effect packet 的逐 puddle 发送时机。
+
+### 12.176 Client local dispatch for puddle particle payloads
+
+- 2026-05-28：继续推进 12.175 的 `PuddleParticleEffectEvent`，把非 headless puddle particle payload 接入 `GameRuntime` 的客户端本地 effect 队列，避免事件只停留在 `PuddleUpdateReport` 中。
+- Java 依据：
+  - `PuddleComp.update()` 在非 headless 下直接调用 `liquid.particleEffect.at(...)`；
+  - 这类本地视觉 effect 不需要 server/headless 参与，应进入客户端本地 effect dispatch。
+- Rust 新增/变化：
+  - `core::core::GameRuntime::queue_client_puddle_particle_effects(...)`：
+    - 接收 `PuddleUpdateEvent` 列表；
+    - 过滤无 particle payload 或当前标准 effect id 表尚不可解析的 effect；
+    - 使用调用方提供的随机 offset，并按 `PuddleParticleEffectEvent::range` clamp 到 Java `Mathf.range(size)` 范围；
+    - 将结果写入既有 `client_local_effect_events: Vec<EffectCallPacket2>`，`rotation=0`、`color=-1`、`data=Null` 对齐 Java `Effect.at(x, y)` 的默认调用形态。
+- 新增验证：
+  - `game_runtime_queues_puddle_particle_payloads_into_client_local_effects`
+    - 构造非 headless puddle particle update；
+    - 通过 `queue_client_puddle_particle_effects(...)` 写入本地 effect 队列；
+    - 验证 effect id、clamped x/y、rotation/color/data。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core game_runtime_queues_puddle_particle_payloads_into_client_local_effects --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 仍未完成：
+  - `standard_effect_id(...)` 当前只覆盖已迁移的少量内置 Fx；完整 vanilla/mod effect registry 仍需后续迁移，否则部分 particle effect payload 会被安全跳过；
+  - desktop 侧仍缺真正绘制/消费 `client_local_effect_events` 的 renderer pass；
+  - 仍需把未来的非 headless client puddle tick 主循环接到 `queue_client_puddle_particle_effects(...)`。

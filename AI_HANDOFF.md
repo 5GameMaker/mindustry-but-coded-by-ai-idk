@@ -3874,3 +3874,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 后续欠账：
      - desktop/client 非 headless renderer/effect runtime 仍未真正消费 `PuddleParticleEffectEvent`；
      - ripple effect 仍是 callback 收集、tick 后统一广播，后续如追求 packet 顺序可继续内联发送。
+
+---
+
+## 117. 最新闭环记录：Puddle particle payload 进入客户端本地 effect 队列
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：继续推进 `PuddleUpdateEvent::particle_effect`，把 116 中新增的 `PuddleParticleEffectEvent` 从 payload 接入 `GameRuntime` 现有 `client_local_effect_events`。
+- Java 依据：
+  - `PuddleComp.update()` 非 headless 分支调用 `liquid.particleEffect.at(x + Mathf.range(size), y + Mathf.range(size))`；
+  - 该效果是客户端本地视觉 effect，不应走 server/headless。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `queue_client_puddle_particle_effects(...)`；
+    - 输入为 `PuddleUpdateEvent` 列表和随机 offset provider；
+    - 对 offset 按 `PuddleParticleEffectEvent::range` clamp，保持 Java `Mathf.range(size)` 范围；
+    - 成功解析 `standard_effect_id(...)` 时写入 `client_local_effect_events`，默认 `rotation=0`、`color=-1`、`data=Null`。
+- 新增测试：
+  - `game_runtime_queues_puddle_particle_payloads_into_client_local_effects`
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core game_runtime_queues_puddle_particle_payloads_into_client_local_effects --lib`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `cargo check -p mindustry-core`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 中文提交并推送 `origin main`，建议标题：`接入液体坑粒子队列`；
+  2. 后续欠账：
+     - `standard_effect_id(...)` 仍只覆盖少量已迁移内置 Fx，需要继续迁移完整 Fx registry；
+     - desktop/client 仍缺真正 drain/render `client_local_effect_events` 的 renderer pass；
+     - 非 headless client puddle tick 主循环仍需接入 `queue_client_puddle_particle_effects(...)`。
