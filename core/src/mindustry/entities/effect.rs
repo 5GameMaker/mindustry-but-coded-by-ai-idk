@@ -22,6 +22,12 @@ pub const FX_SHIELD_WAVE_ID: i32 = 74;
 pub const FX_SHIELD_APPLY_ID: i32 = 75;
 /// Upstream `Fx.disperseTrail` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DISPERSE_TRAIL_ID: i32 = 76;
+/// Upstream `Fx.hitBulletBig` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_BULLET_BIG_ID: i32 = 82;
+/// Upstream `Fx.hitFlameSmall` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_FLAME_SMALL_ID: i32 = 83;
+/// Upstream `Fx.hitFlamePlasma` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_FLAME_PLASMA_ID: i32 = 84;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_ID: i32 = 28;
 /// Upstream `Fx.fallSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -162,6 +168,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shieldWave" => Some(FX_SHIELD_WAVE_ID),
         "shieldApply" => Some(FX_SHIELD_APPLY_ID),
         "disperseTrail" => Some(FX_DISPERSE_TRAIL_ID),
+        "hitBulletBig" => Some(FX_HIT_BULLET_BIG_ID),
+        "hitFlameSmall" => Some(FX_HIT_FLAME_SMALL_ID),
+        "hitFlamePlasma" => Some(FX_HIT_FLAME_PLASMA_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
@@ -254,6 +263,15 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_SHIELD_APPLY_ID => Effect::with_lifetime(FX_SHIELD_APPLY_ID, 11.0, DEFAULT_EFFECT_CLIP),
         FX_DISPERSE_TRAIL_ID => {
             Effect::with_lifetime(FX_DISPERSE_TRAIL_ID, 13.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_BULLET_BIG_ID => {
+            Effect::with_lifetime(FX_HIT_BULLET_BIG_ID, 13.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_FLAME_SMALL_ID => {
+            Effect::with_lifetime(FX_HIT_FLAME_SMALL_ID, 14.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_FLAME_PLASMA_ID => {
+            Effect::with_lifetime(FX_HIT_FLAME_PLASMA_ID, 14.0, DEFAULT_EFFECT_CLIP)
         }
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
@@ -370,6 +388,7 @@ pub enum StandardEffectDrawKind {
     SeededCircleParticles,
     SeededStrokedCircleParticles,
     SeededLineParticles,
+    SeededRadialLineParticles,
     FilledSquare,
     StrokedSquare,
     SeededSquareParticles,
@@ -588,7 +607,8 @@ impl StandardEffectDrawPlan {
                     color,
                 })
                 .collect(),
-            StandardEffectDrawKind::SeededLineParticles => Vec::new(),
+            StandardEffectDrawKind::SeededLineParticles
+            | StandardEffectDrawKind::SeededRadialLineParticles => Vec::new(),
             StandardEffectDrawKind::FilledSquare
             | StandardEffectDrawKind::StrokedSquare
             | StandardEffectDrawKind::SeededSquareParticles => Vec::new(),
@@ -634,7 +654,8 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::StrokedCircle
             | StandardEffectDrawKind::SeededCircleParticles
             | StandardEffectDrawKind::SeededStrokedCircleParticles
-            | StandardEffectDrawKind::SeededLineParticles => Vec::new(),
+            | StandardEffectDrawKind::SeededLineParticles
+            | StandardEffectDrawKind::SeededRadialLineParticles => Vec::new(),
         }
     }
 
@@ -662,6 +683,22 @@ impl StandardEffectDrawPlan {
                 }
                 lines
             }
+            StandardEffectDrawKind::SeededRadialLineParticles => self
+                .seeded_particle_vectors()
+                .into_iter()
+                .map(|vector| StandardEffectLineRenderPrimitive {
+                    start: (self.center.0 + vector.x, self.center.1 + vector.y),
+                    angle: vector.y.atan2(vector.x).to_degrees(),
+                    length: self.radius
+                        + particles.radius_base
+                        + particles.radius_fin_scale * vector.fin
+                        + particles.radius_fout_scale * vector.fout
+                        + particles.radius_fslope_scale * particles.fslope,
+                    stroke: self.stroke,
+                    alpha: self.alpha,
+                    color,
+                })
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -1101,6 +1138,79 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_HIT_BULLET_BIG_ID | FX_HIT_FLAME_SMALL_ID | FX_HIT_FLAME_PLASMA_ID => {
+            let (color_from, color_to, count, length, stroke, line_base, line_fout_scale) =
+                match effect_id {
+                    FX_HIT_BULLET_BIG_ID => (
+                        "Color.white",
+                        "Pal.lightOrange",
+                        8,
+                        finpow * 30.0,
+                        0.5 + fout * 1.5,
+                        1.5,
+                        4.0,
+                    ),
+                    FX_HIT_FLAME_SMALL_ID => (
+                        "Pal.lightFlame",
+                        "Pal.darkFlame",
+                        2,
+                        1.0 + fin * 15.0,
+                        0.5 + fout,
+                        1.0,
+                        3.0,
+                    ),
+                    FX_HIT_FLAME_PLASMA_ID => (
+                        "Color.white",
+                        "Pal.heal",
+                        2,
+                        1.0 + fin * 15.0,
+                        0.5 + fout,
+                        1.0,
+                        3.0,
+                    ),
+                    _ => unreachable!(),
+                };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededRadialLineParticles,
+                center: (x, y),
+                color_from: Some(color_from),
+                color_mid: None,
+                color_to: Some(color_to),
+                color_mix: fin,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: line_base,
+                stroke,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count,
+                    progress: None,
+                    angle: Some(rotation),
+                    angle_range: 50.0,
+                    length,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: line_fout_scale,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_MISSILE_TRAIL_ID | FX_MISSILE_TRAIL_SHORT_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -3558,6 +3668,18 @@ mod tests {
             standard_effect_id("disperseTrail"),
             Some(FX_DISPERSE_TRAIL_ID)
         );
+        assert_eq!(
+            standard_effect_id("hitBulletBig"),
+            Some(FX_HIT_BULLET_BIG_ID)
+        );
+        assert_eq!(
+            standard_effect_id("hitFlameSmall"),
+            Some(FX_HIT_FLAME_SMALL_ID)
+        );
+        assert_eq!(
+            standard_effect_id("hitFlamePlasma"),
+            Some(FX_HIT_FLAME_PLASMA_ID)
+        );
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("unitAssemble"),
@@ -3726,6 +3848,18 @@ mod tests {
         assert_eq!(
             standard_effect(FX_DISPERSE_TRAIL_ID).unwrap().lifetime,
             13.0
+        );
+        assert_eq!(
+            standard_effect(FX_HIT_BULLET_BIG_ID).unwrap().lifetime,
+            13.0
+        );
+        assert_eq!(
+            standard_effect(FX_HIT_FLAME_SMALL_ID).unwrap().lifetime,
+            14.0
+        );
+        assert_eq!(
+            standard_effect(FX_HIT_FLAME_PLASMA_ID).unwrap().lifetime,
+            14.0
         );
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
@@ -4018,6 +4152,84 @@ mod tests {
         assert!((disperse_lines[1].start.0 + 0.282_225).abs() < 0.0001);
         assert!((disperse_lines[1].start.1 - 1.208_219).abs() < 0.0001);
         assert!((disperse_lines[1].length - 4.923_983).abs() < 0.0001);
+
+        let hit_bullet_big = standard_effect_draw_plan(
+            Some(FX_HIT_BULLET_BIG_ID as u16),
+            82,
+            1.0,
+            2.0,
+            30.0,
+            6.5,
+            13.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            hit_bullet_big.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(hit_bullet_big.color_from, Some("Color.white"));
+        assert_eq!(hit_bullet_big.color_to, Some("Pal.lightOrange"));
+        assert_eq!(hit_bullet_big.color_mix, 0.5);
+        assert_eq!(hit_bullet_big.stroke, 1.25);
+        assert_eq!(hit_bullet_big.radius, 1.5);
+        let hit_bullet_big_particles = hit_bullet_big.particles.unwrap();
+        assert_eq!(hit_bullet_big_particles.count, 8);
+        assert_eq!(hit_bullet_big_particles.angle, Some(30.0));
+        assert_eq!(hit_bullet_big_particles.angle_range, 50.0);
+        assert_eq!(hit_bullet_big_particles.length, 26.25);
+        assert_eq!(hit_bullet_big_particles.radius_fout_scale, 4.0);
+        let hit_bullet_big_lines = hit_bullet_big.line_render_primitives_from_seed();
+        assert_eq!(hit_bullet_big_lines.len(), 8);
+        assert_eq!(hit_bullet_big_lines[0].stroke, 1.25);
+        assert!((hit_bullet_big_lines[0].length - 3.5).abs() < 0.0001);
+
+        let hit_flame_small = standard_effect_draw_plan(
+            Some(FX_HIT_FLAME_SMALL_ID as u16),
+            83,
+            1.0,
+            2.0,
+            45.0,
+            7.0,
+            14.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            hit_flame_small.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(hit_flame_small.color_from, Some("Pal.lightFlame"));
+        assert_eq!(hit_flame_small.color_to, Some("Pal.darkFlame"));
+        assert_eq!(hit_flame_small.stroke, 1.0);
+        let hit_flame_small_particles = hit_flame_small.particles.unwrap();
+        assert_eq!(hit_flame_small_particles.count, 2);
+        assert_eq!(hit_flame_small_particles.length, 8.5);
+        assert_eq!(hit_flame_small_particles.angle, Some(45.0));
+        assert_eq!(hit_flame_small_particles.angle_range, 50.0);
+        assert_eq!(hit_flame_small_particles.radius_fout_scale, 3.0);
+        let hit_flame_small_lines = hit_flame_small.line_render_primitives_from_seed();
+        assert_eq!(hit_flame_small_lines.len(), 2);
+        assert!((hit_flame_small_lines[0].length - 2.5).abs() < 0.0001);
+
+        let hit_flame_plasma = standard_effect_draw_plan(
+            Some(FX_HIT_FLAME_PLASMA_ID as u16),
+            84,
+            1.0,
+            2.0,
+            45.0,
+            7.0,
+            14.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(hit_flame_plasma.color_from, Some("Color.white"));
+        assert_eq!(hit_flame_plasma.color_to, Some("Pal.heal"));
+        assert_eq!(
+            hit_flame_plasma.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(hit_flame_plasma.line_render_primitives_from_seed().len(), 2);
 
         let hit_liquid = standard_effect_draw_plan(
             Some(FX_HIT_LIQUID_ID as u16),

@@ -4789,3 +4789,44 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 可继续向 `hitBulletSmall/hitBulletColor` 推进，但需要 scaled + line + light；
   2. `launchPod=248` 现在已有 line primitive，但还缺 scaled 子时间片组合表达；
   3. `shieldBreak` 仍需 poly/arc primitive。
+
+---
+
+## 143. 最新闭环记录：Radial line primitive、hitBulletBig/hitFlame 与 desktop line/square cache
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补 `randLenVectors(id, count, len, rotation, cone)` + `lineAngle` 的径向线段表达，并把已有 line/square primitive 接入 desktop frame cache，不再只停留在 core 测试 helper。
+- 本轮迁移：
+  - `hitBulletBig=82`
+  - `hitFlameSmall=83`
+  - `hitFlamePlasma=84`
+- Java 依据：
+  - `Fx.java:934-942`：`hitBulletBig`，lifetime `13`，颜色 `Color.white -> Pal.lightOrange`，stroke `0.5 + fout*1.5`，8 条 cone line，line length `fout*4+1.5`。
+  - `Fx.java:944-952`：`hitFlameSmall`，lifetime `14`，颜色 `Pal.lightFlame -> Pal.darkFlame`，2 条 cone line，line length `fout*3+1`。
+  - `Fx.java:954-962`：`hitFlamePlasma`，lifetime `14`，颜色 `Color.white -> Pal.heal`，其余 line 参数同 `hitFlameSmall`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `SeededRadialLineParticles`；
+    - `line_render_primitives_from_seed()` 对该 kind 使用 seeded vector 展开，line angle 由 `atan2(y,x)` 对齐 Java `Mathf.angle(x,y)`；
+    - 新增并接入 `FX_HIT_BULLET_BIG_ID`、`FX_HIT_FLAME_SMALL_ID`、`FX_HIT_FLAME_PLASMA_ID`；
+    - 测试覆盖 radial line kind、颜色、stroke、粒子数、cone、长度与 primitive 展开。
+  - `core/src/mindustry/entities/mod.rs`
+    - re-export `StandardEffectSquareRenderPrimitive` / `StandardEffectLineRenderPrimitive`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 增加 square/line primitive cache；
+    - `DesktopStandardEffectRenderFrame` 增加 `square_primitives` / `line_primitives`；
+    - `update()` 同时展开 circle/square/line/light；
+    - 新增 square/line collect 函数；
+    - snapshot cursor 清理同步清空 square/line。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_square_and_line_primitives_for_render --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_fire_light_primitives_for_render --lib`
+- 下一步建议：
+  1. 先补 `hitBulletSmall=77` / `hitBulletColor=78` / `hitFuse=81` 的 multi-pass 表达：需要 scaled circle + radial line + light，不能只迁移线段。
+  2. 把 `desktop` frame 的 circle/square/line/light primitives 继续接到真实 renderer/backend；当前 `desktop/src/main.rs` 仍只是 launcher loop。
+  3. `launchPod=248` 可在 multi-pass 表达完成后迁移，避免只做 line 部分。
+  4. 每次上下文压缩后先检查：`git -C "D:/MDT/rust-mindustry" status --short`，再读本节和 `MIGRATION.md` 的最新 12.217。

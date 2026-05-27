@@ -18,7 +18,8 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, standard_effect, standard_effect_draw_plan, standard_effect_render_lifetime,
     EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
     StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
-    StandardEffectLightRenderPrimitive, PLAYER_CLASS_ID,
+    StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
+    StandardEffectSquareRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -51,6 +52,8 @@ pub struct DesktopConnectTarget {
 pub struct DesktopStandardEffectRenderFrame {
     pub draw_plans: Vec<StandardEffectDrawPlan>,
     pub circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
+    pub square_primitives: Vec<StandardEffectSquareRenderPrimitive>,
+    pub line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
 }
 
@@ -65,6 +68,8 @@ pub struct DesktopLauncher {
     pub other_player_preview_overlays: Vec<OtherPlayerPreviewOverlayPlan>,
     pub standard_local_effect_draw_plans: Vec<StandardEffectDrawPlan>,
     pub standard_local_effect_circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
+    pub standard_local_effect_square_primitives: Vec<StandardEffectSquareRenderPrimitive>,
+    pub standard_local_effect_line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub standard_local_effect_light_primitives: Vec<StandardEffectLightRenderPrimitive>,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
@@ -113,6 +118,8 @@ impl DesktopLauncher {
             other_player_preview_overlays: Vec::new(),
             standard_local_effect_draw_plans: Vec::new(),
             standard_local_effect_circle_primitives: Vec::new(),
+            standard_local_effect_square_primitives: Vec::new(),
+            standard_local_effect_line_primitives: Vec::new(),
             standard_local_effect_light_primitives: Vec::new(),
             connect_target,
             connect_error: None,
@@ -192,6 +199,14 @@ impl DesktopLauncher {
             .iter()
             .flat_map(StandardEffectDrawPlan::circle_render_primitives_from_seed)
             .collect();
+        self.standard_local_effect_square_primitives = standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::square_render_primitives_from_seed)
+            .collect();
+        self.standard_local_effect_line_primitives = standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::line_render_primitives_from_seed)
+            .collect();
         self.standard_local_effect_light_primitives = standard_local_effect_draw_plans
             .iter()
             .flat_map(StandardEffectDrawPlan::light_render_primitives)
@@ -262,10 +277,30 @@ impl DesktopLauncher {
             .collect()
     }
 
+    pub fn collect_standard_local_effect_square_primitives_for_render(
+        &self,
+    ) -> Vec<StandardEffectSquareRenderPrimitive> {
+        self.standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::square_render_primitives_from_seed)
+            .collect()
+    }
+
+    pub fn collect_standard_local_effect_line_primitives_for_render(
+        &self,
+    ) -> Vec<StandardEffectLineRenderPrimitive> {
+        self.standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::line_render_primitives_from_seed)
+            .collect()
+    }
+
     pub fn standard_effect_render_frame(&self) -> DesktopStandardEffectRenderFrame {
         DesktopStandardEffectRenderFrame {
             draw_plans: self.standard_local_effect_draw_plans.clone(),
             circle_primitives: self.standard_local_effect_circle_primitives.clone(),
+            square_primitives: self.standard_local_effect_square_primitives.clone(),
+            line_primitives: self.standard_local_effect_line_primitives.clone(),
             light_primitives: self.standard_local_effect_light_primitives.clone(),
         }
     }
@@ -327,6 +362,8 @@ impl DesktopLauncher {
                     self.other_player_preview_overlays.clear();
                     self.standard_local_effect_draw_plans.clear();
                     self.standard_local_effect_circle_primitives.clear();
+                    self.standard_local_effect_square_primitives.clear();
+                    self.standard_local_effect_line_primitives.clear();
                     self.standard_local_effect_light_primitives.clear();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
@@ -1026,6 +1063,8 @@ impl DesktopLauncher {
         self.other_player_preview_overlays.clear();
         self.standard_local_effect_draw_plans.clear();
         self.standard_local_effect_circle_primitives.clear();
+        self.standard_local_effect_square_primitives.clear();
+        self.standard_local_effect_line_primitives.clear();
         self.standard_local_effect_light_primitives.clear();
     }
 
@@ -2571,12 +2610,20 @@ mod tests {
         launcher.standard_local_effect_circle_primitives =
             launcher.collect_standard_local_effect_circle_primitives_for_render();
         assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 1);
+        launcher.standard_local_effect_square_primitives =
+            launcher.collect_standard_local_effect_square_primitives_for_render();
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        launcher.standard_local_effect_line_primitives =
+            launcher.collect_standard_local_effect_line_primitives_for_render();
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
         launcher.standard_local_effect_light_primitives =
             launcher.collect_standard_local_effect_light_primitives_for_render();
         assert!(launcher.standard_local_effect_light_primitives.is_empty());
         launcher.clear_snapshot_apply_cursors();
         assert!(launcher.standard_local_effect_draw_plans.is_empty());
         assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
         assert!(launcher.standard_local_effect_light_primitives.is_empty());
     }
 
@@ -2605,10 +2652,14 @@ mod tests {
             StandardEffectDrawKind::SeededCircleParticles
         );
         assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 2);
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
         assert_eq!(launcher.standard_local_effect_light_primitives.len(), 1);
         let frame = launcher.standard_effect_render_frame();
         assert_eq!(frame.draw_plans.len(), 1);
         assert_eq!(frame.circle_primitives.len(), 2);
+        assert!(frame.square_primitives.is_empty());
+        assert!(frame.line_primitives.is_empty());
         assert_eq!(frame.light_primitives.len(), 1);
         assert_eq!(
             frame.draw_plans[0],
@@ -2618,11 +2669,76 @@ mod tests {
             frame.circle_primitives,
             launcher.standard_local_effect_circle_primitives
         );
+        assert_eq!(
+            frame.square_primitives,
+            launcher.standard_local_effect_square_primitives
+        );
+        assert_eq!(
+            frame.line_primitives,
+            launcher.standard_local_effect_line_primitives
+        );
         let light = &launcher.standard_local_effect_light_primitives[0];
         assert_eq!(light.center, (32.0, 48.0));
         assert!((light.radius - 0.8).abs() < 0.0001);
         assert_eq!(light.color, "Pal.lightFlame");
         assert_eq!(light.opacity, 0.5);
+    }
+
+    #[test]
+    fn desktop_launcher_caches_square_and_line_primitives_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("healBlock").unwrap() as u16,
+                    x: 16.0,
+                    y: 24.0,
+                    rotation: 2.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("hitBulletBig").unwrap() as u16,
+                    x: 32.0,
+                    y: 48.0,
+                    rotation: 30.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 2);
+        assert_eq!(launcher.standard_local_effect_square_primitives.len(), 1);
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 8);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let square = &launcher.standard_local_effect_square_primitives[0];
+        assert_eq!(square.center, (16.0, 24.0));
+        assert!(square.stroke > 0.0);
+
+        let line = &launcher.standard_local_effect_line_primitives[0];
+        assert!(line.length > 0.0);
+        assert!(line.stroke > 0.0);
+
+        let frame = launcher.standard_effect_render_frame();
+        assert_eq!(
+            frame.square_primitives,
+            launcher.standard_local_effect_square_primitives
+        );
+        assert_eq!(
+            frame.line_primitives,
+            launcher.standard_local_effect_line_primitives
+        );
     }
 
     #[test]

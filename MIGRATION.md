@@ -6616,3 +6616,60 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - line primitive 仍需真实 renderer backend 消费；
   - `hitBullet*` 等后续 line/light/scaled 组合效果仍需更通用的 multi-pass 表达；
   - `launchPod=248` 仍需 scaled circle + seeded line 组合。
+
+### 12.217 Radial line primitive + hitBulletBig/hitFlame line Fx + desktop primitive cache
+
+- 2026-05-28：在 `SeededLineParticles` 之外新增更通用的径向 `randLenVectors(..., rotation, cone)` → `lineAngle(...)` 表达，并把 line/square primitive 从 core plan/test 层推进到 desktop frame cache。
+- 本轮迁移：
+  - `hitBulletBig=82`
+  - `hitFlameSmall=83`
+  - `hitFlamePlasma=84`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:934` 附近：
+    - `hitBulletBig = new Effect(13, ...)`
+    - `color(Color.white, Pal.lightOrange, e.fin())`
+    - `stroke(0.5f + e.fout() * 1.5f)`
+    - `randLenVectors(e.id, 8, e.finpow() * 30f, e.rotation, 50f, ...)`
+    - `lineAngle(..., e.fout() * 4 + 1.5f)`
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:944` 附近：
+    - `hitFlameSmall = new Effect(14, ...)`
+    - `color(Pal.lightFlame, Pal.darkFlame, e.fin())`
+    - `stroke(0.5f + e.fout())`
+    - `randLenVectors(e.id, 2, 1f + e.fin() * 15f, e.rotation, 50f, ...)`
+    - `lineAngle(..., e.fout() * 3 + 1f)`
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:954` 附近：
+    - `hitFlamePlasma = new Effect(14, ...)`
+    - `color(Color.white, Pal.heal, e.fin())`
+    - 其余 line 参数与 `hitFlameSmall` 同形。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - `StandardEffectDrawKind` 新增 `SeededRadialLineParticles`；
+    - `line_render_primitives_from_seed()` 支持通过 seeded vector 的 `atan2(y,x)` 还原 Java `Mathf.angle(x,y)`；
+    - 新增 `FX_HIT_BULLET_BIG_ID=82`、`FX_HIT_FLAME_SMALL_ID=83`、`FX_HIT_FLAME_PLASMA_ID=84`，接入 name/metadata/draw plan；
+    - radial line 长度用 `plan.radius + particle.radius_*_scale` 表达，当前对齐 `fout*4+1.5` 与 `fout*3+1`。
+  - `core/src/mindustry/entities/mod.rs`
+    - re-export `StandardEffectSquareRenderPrimitive` 与 `StandardEffectLineRenderPrimitive`，供 desktop runtime frame 使用。
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame` 新增 `square_primitives` / `line_primitives`；
+    - `DesktopLauncher` 新增 `standard_local_effect_square_primitives` / `standard_local_effect_line_primitives`；
+    - `update()` 现在同时展开 circle/square/line/light primitives；
+    - 新增 `collect_standard_local_effect_square_primitives_for_render()` 与 `collect_standard_local_effect_line_primitives_for_render()`；
+    - 清理 snapshot cursor 时同步清空 square/line cache。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 3 个新 Fx name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖 radial line kind、颜色、stroke、数量、长度、cone 与 primitive 展开；
+  - `desktop_launcher_caches_square_and_line_primitives_for_render` 覆盖 desktop update/frame 能缓存 square + line primitives；
+  - `desktop_launcher_caches_fire_light_primitives_for_render` 更新为确认新增 square/line frame 字段为空但已参与快照。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_square_and_line_primitives_for_render --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_fire_light_primitives_for_render --lib`
+- 仍未完成：
+  - `hitBulletSmall=77` / `hitBulletColor=78` / `hitFuse=81` 需要 scaled circle + radial line + light/multi-pass 表达，不能只迁移线段部分；
+  - desktop 已缓存 line/square primitive，但 `desktop/src/main.rs` 仍未接真实 renderer/backend；
+  - `launchPod=248` 仍需 scaled circle + seeded line 组合；
+  - 后续需继续把 frame cache 下沉到真实绘制后端，避免 primitive 长期停留在快照层。
