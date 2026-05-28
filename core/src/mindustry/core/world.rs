@@ -9,7 +9,7 @@
 use crate::mindustry::{
     core::content_loader::ContentLoader,
     io::LegacyShortChunkMap,
-    vars::TILE_SIZE,
+    vars::{DARK_RADIUS, TILE_SIZE},
     world::{point2_x, point2_y, BlockId, BuildingRef, Tile, Tiles},
 };
 
@@ -145,6 +145,30 @@ impl World {
 
     pub fn passable_with_content(&self, x: i32, y: i32, content: &ContentLoader) -> bool {
         self.tile(x, y).is_some() && !self.wall_solid_with_content(x, y, content)
+    }
+
+    pub fn get_wall_darkness_with<F>(&self, tile: &Tile, mut is_darkened: F) -> u8
+    where
+        F: FnMut(&Tile) -> bool,
+    {
+        if !is_darkened(tile) {
+            return 0;
+        }
+
+        let mut min_dst = DARK_RADIUS + 1;
+        for cx in (tile.x as i32 - DARK_RADIUS)..=(tile.x as i32 + DARK_RADIUS) {
+            for cy in (tile.y as i32 - DARK_RADIUS)..=(tile.y as i32 + DARK_RADIUS) {
+                let Some(other) = self.tile(cx, cy) else {
+                    continue;
+                };
+                if !is_darkened(other) {
+                    let dst = (cx - tile.x as i32).abs() + (cy - tile.y as i32).abs();
+                    min_dst = min_dst.min(dst);
+                }
+            }
+        }
+
+        (min_dst - 1).max(0) as u8
     }
 
     pub fn is_accessible(&self, x: i32, y: i32) -> bool {
@@ -426,6 +450,28 @@ mod tests {
         assert!(world.wall_solid_with_content(1, 0, &content));
         assert!(world.wall_solid_full_with_content(1, 0, &content));
         assert!(world.wall_solid_with_content(-1, 0, &content));
+    }
+
+    #[test]
+    fn wall_darkness_with_resolver_matches_java_distance_search() {
+        let mut world = World::new();
+        world.resize(5, 5);
+        for tile in world.tiles.iter_mut() {
+            tile.block = 1;
+        }
+        world.tile_mut(0, 2).unwrap().block = Tile::AIR;
+
+        let center = world.tile(2, 2).unwrap();
+        assert_eq!(
+            world.get_wall_darkness_with(center, |tile| tile.block == 1),
+            1
+        );
+
+        let edge_clear = world.tile(0, 2).unwrap();
+        assert_eq!(
+            world.get_wall_darkness_with(edge_clear, |tile| tile.block == 1),
+            0
+        );
     }
 
     #[test]

@@ -324,6 +324,12 @@ impl<R, B, F, G, O, M> Default for GraphicsFrameBundle<R, B, F, G, O, M> {
     }
 }
 
+impl<R, B, F, G, O, M> GraphicsFrameBundle<R, B, F, G, O, M> {
+    pub fn into_stats(self) -> GraphicsFrameStats {
+        self.stats
+    }
+}
+
 impl<R, B, F, G, O, M> GraphicsFrameBundle<R, B, F, G, O, M>
 where
     R: GraphicsFrameStatsSource,
@@ -643,12 +649,11 @@ mod tests {
     #[test]
     fn empty_bridge_starts_with_zeroed_stats() {
         let bridge: RenderBridge = RenderBridge::new();
+        let stats = bridge.finish().into_stats();
 
-        assert!(bridge.bundle().render_frame.is_none());
-        assert!(bridge.bundle().block_renderer.is_none());
-        assert!(bridge.stats().is_empty());
-        assert_eq!(bridge.stats().present_plans, 0);
-        assert_eq!(bridge.stats().total_units, 0);
+        assert!(stats.is_empty());
+        assert_eq!(stats.present_plans, 0);
+        assert_eq!(stats.total_units, 0);
     }
 
     #[test]
@@ -694,6 +699,30 @@ mod tests {
         assert_eq!(bundle.stats.overlay_commands, 15);
         assert_eq!(bundle.stats.minimap_commands, 16);
         assert_eq!(bundle.stats.total_units, total_units(&bundle.stats));
+
+        let stats = bundle.into_stats();
+        assert_eq!(stats.present_plans, 6);
+        assert_eq!(stats.render_passes, 2);
+        assert_eq!(stats.render_commands, 3);
+        assert_eq!(stats.block_tile_passes, 2);
+        assert_eq!(stats.block_building_passes, 1);
+        assert_eq!(stats.block_cracks, 3);
+        assert_eq!(stats.block_build_previews, 4);
+        assert_eq!(stats.block_darkness_tiles, 5);
+        assert_eq!(stats.block_overlays, 6);
+        assert_eq!(stats.floor_visible_chunks, 7);
+        assert_eq!(stats.floor_stage_plans, 8);
+        assert_eq!(stats.floor_cache_dirty_chunks, 9);
+        assert_eq!(stats.floor_pending_invalidations, 10);
+        assert_eq!(stats.fog_stages, 11);
+        assert_eq!(stats.fog_consumed_events, 12);
+        assert_eq!(stats.fog_team_changed_frames, 1);
+        assert_eq!(stats.fog_static_fog_enabled_frames, 0);
+        assert_eq!(stats.overlay_core_edges, 13);
+        assert_eq!(stats.overlay_build_placements, 14);
+        assert_eq!(stats.overlay_commands, 15);
+        assert_eq!(stats.minimap_commands, 16);
+        assert_eq!(stats.total_units, total_units(&stats));
     }
 
     #[test]

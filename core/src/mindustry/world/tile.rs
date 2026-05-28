@@ -181,6 +181,10 @@ impl Tile {
         block.synthetic()
     }
 
+    pub fn is_darkened(&self, block: &Block) -> bool {
+        block.is_darkened()
+    }
+
     pub fn breakable(&self, block: &Block) -> bool {
         block.destructible || block.breakable || block.update
     }
@@ -203,6 +207,13 @@ impl Tile {
 
     pub fn leg_solid(&self, floor: &Block, block: &Block) -> bool {
         self.static_darkness(block) >= 2 || (floor.solid && block.id == Self::AIR)
+    }
+
+    pub fn floor_color_rgba_with<F>(&self, mut floor_color: F) -> u32
+    where
+        F: FnMut(BlockId, &Tile) -> u32,
+    {
+        floor_color(self.floor_id(), self)
     }
 
     pub fn set_block_ref(&mut self, block: &Block, team: i32, rotation: i32) {
@@ -403,5 +414,32 @@ mod tests {
             })
         );
         assert!(BuildingBaseWire::from_save_payload(&payload[..6]).is_none());
+    }
+
+    #[test]
+    fn tile_floor_color_resolver_matches_java_get_floor_color_call_shape() {
+        let tile = Tile::with_blocks(3, 4, 42, Tile::AIR, Tile::AIR);
+        let color = tile.floor_color_rgba_with(|floor_id, tile_arg| {
+            assert_eq!(floor_id, 42);
+            assert_eq!(tile_arg.pos(), tile.pos());
+            0xaabbccdd
+        });
+
+        assert_eq!(color, 0xaabbccdd);
+    }
+
+    #[test]
+    fn tile_is_darkened_uses_block_darkening_rules() {
+        let tile = Tile::new(0, 0);
+        let mut wall = Block::new(7, "wall");
+        wall.solid = true;
+        wall.fills_tile = true;
+        assert!(tile.is_darkened(&wall));
+
+        wall.destructible = true;
+        assert!(!tile.is_darkened(&wall));
+
+        wall.force_dark = true;
+        assert!(tile.is_darkened(&wall));
     }
 }

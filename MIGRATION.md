@@ -10621,3 +10621,47 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - graphics bundle 目前只在 desktop headless 通道可观测，真实 GPU backend、texture atlas、block/floor/fog/light pass 填充、HUD/minimap live texture、renderer event dispatcher、主循环 draw backend 仍需继续接入。
   - minimap world adapter 仍是 tile-like 归一化层，后续要从真实 `GameState.world + content registry + Block/Tile/Building` 解析最终 minimap/floor/block color 与 wall darkness。
   - 当前总体迁移约 16.7%，仍未达到完整可玩。
+
+### 12.334 World render color and wall darkness helper bridge
+
+- 2026-05-29：继续沿 graphics/minimap 接入路径补齐 world/content 到渲染 snapshot 的关键 helper，避免 minimap/world adapter 只能依赖手写颜色数据。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/Block.java:574-580`
+    - `Block.minimapColor(Tile)` 默认返回 `0`
+    - `Block.getColor(Tile)` 使用 minimap override，否则 fallback 到 `mapColor`
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/Tile.java:179-180,344-345`
+    - `Tile.isDarkened()`
+    - `Tile.getFloorColor()`
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/World.java:450-464`
+    - `World.getWallDarkness(Tile)` 按 `darkRadius=4` 搜索最近非暗 tile 的曼哈顿距离。
+- Rust 新增/接入：
+  - `core/src/mindustry/vars.rs`
+    - 新增 `DARK_RADIUS = 4`，对应 Java `Vars.darkRadius`。
+  - `core/src/mindustry/world/block.rs`
+    - 新增 `Block::minimap_color_rgba()` 与 `Block::color_rgba()`，先覆盖 Java base block 默认 fallback 语义。
+  - `core/src/mindustry/world/tile.rs`
+    - 新增 `Tile::is_darkened(&Block)`；
+    - 新增 `Tile::floor_color_rgba_with(...)`，为后续 `ContentLoader/BlockDef` tile-aware floor color 分派提供不耦合 content 层的入口。
+  - `core/src/mindustry/core/world.rs`
+    - 新增 `World::get_wall_darkness_with(...)`，采用 closure resolver 复用当前 Rust world 不直接持有 content registry 的结构。
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - 新增 `GraphicsFrameBundle::into_stats()`，方便 desktop/headless 或后续 backend 消费 bundle 后直接取得统计。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo check -p mindustry-core --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core render_bridge --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+  - `cargo test -p mindustry-core block_color_helpers_match_java_minimap_and_mapcolor_fallback --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+  - `cargo test -p mindustry-core tile_floor_color_resolver_matches_java_get_floor_color_call_shape --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+  - `cargo test -p mindustry-core tile_is_darkened_uses_block_darkening_rules --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+  - `cargo test -p mindustry-core wall_darkness_with_resolver_matches_java_distance_search --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+  - `cargo test -p mindustry-core graphics --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - 当前 graphics 定向测试：`94 passed`
+  - `cargo test -p mindustry-core --lib --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1 --skip arc_net_provider`
+    - `2433 passed`
+- 验证备注：
+  - 未跳过的 `cargo test -p mindustry-core --lib` 当前有 5 个 `arc_net_provider` 网络端口占用/保留失败：`could not reserve a local TCP/UDP port pair`。本轮新增的 world/graphics/helper 测试已通过，非网络用例在 `--skip arc_net_provider` 下全通过。
+- 仍未完成：
+  - `BlockDef` 对 `ColoredWall / ColoredFloor / Cliff / LightBlock` 等 Java tile-aware `minimapColor(Tile)` 覆写尚未分派；
+  - `Tile::floor_color_rgba_with(...)` 下一步需要接 `ContentLoader + BlockDef::color_rgba(tile)`；
+  - `World::get_wall_darkness_with(...)` 已有 closure 入口，后续需要在 minimap/world snapshot adapter 中用真实 block registry 判定 darkened；
+  - 当前总体迁移约 16.8%，仍未达到完整可玩。

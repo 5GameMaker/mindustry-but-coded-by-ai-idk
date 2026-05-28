@@ -280,6 +280,22 @@ impl Block {
         self.solid && ((!self.synthetic() && self.fills_tile) || self.force_dark)
     }
 
+    /// Java `Block.minimapColor(Tile)` default: return 0 so callers fall back
+    /// to `mapColor` unless a concrete content definition overrides it.
+    pub const fn minimap_color_rgba(&self) -> u32 {
+        0
+    }
+
+    /// Java `Block.getColor(Tile)` default fallback encoded as packed RGBA.
+    pub fn color_rgba(&self) -> u32 {
+        let minimap = self.minimap_color_rgba();
+        if minimap == 0 {
+            self.map_color_rgba
+        } else {
+            minimap
+        }
+    }
+
     pub fn update_clip_radius(&mut self, radius_in_world_units: f32) {
         self.clip_size = self
             .clip_size
@@ -489,5 +505,14 @@ mod tests {
         assert!(block.can_overdrive);
         assert!(!block.suppressable);
         assert!(block.force_team.is_none());
+    }
+
+    #[test]
+    fn block_color_helpers_match_java_minimap_and_mapcolor_fallback() {
+        let mut block = Block::new(21, "colored");
+        block.map_color_rgba = 0x11223344;
+
+        assert_eq!(block.minimap_color_rgba(), 0);
+        assert_eq!(block.color_rgba(), 0x11223344);
     }
 }

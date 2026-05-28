@@ -12,6 +12,7 @@ pub const MAX_PING_TEXT_LENGTH: usize = 40;
 pub const MAX_NAME_LENGTH: usize = 40;
 pub const MAX_PLAYER_PREVIEW_PLANS: usize = 1000;
 pub const TILE_SIZE: i32 = 8;
+pub const DARK_RADIUS: i32 = 4;
 pub const BUILDING_RANGE: f32 = 220.0;
 pub const MINE_TRANSFER_RANGE: f32 = 220.0;
 pub const ITEM_TRANSFER_RANGE: f32 = 220.0;
