@@ -761,14 +761,41 @@ impl ShaderApplyPlan {
 
 /// Side-channel frame that batches shader apply plans without folding them into
 /// the ordinary render-pass stream.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ShaderDispatchFrame {
     pub applies: Vec<ShaderApplyPlan>,
+}
+
+impl Default for ShaderDispatchFrame {
+    fn default() -> Self {
+        Self {
+            applies: Vec::new(),
+        }
+    }
 }
 
 impl ShaderDispatchFrame {
     pub fn new(applies: Vec<ShaderApplyPlan>) -> Self {
         Self { applies }
+    }
+
+    pub fn from_applies(applies: impl IntoIterator<Item = ShaderApplyPlan>) -> Self {
+        Self {
+            applies: applies.into_iter().collect(),
+        }
+    }
+
+    pub fn with_apply(mut self, apply: ShaderApplyPlan) -> Self {
+        self.applies.push(apply);
+        self
+    }
+
+    pub fn push(&mut self, apply: ShaderApplyPlan) {
+        self.applies.push(apply);
+    }
+
+    pub fn extend(&mut self, applies: impl IntoIterator<Item = ShaderApplyPlan>) {
+        self.applies.extend(applies);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1301,6 +1328,46 @@ mod tests {
         plan.uniforms()
             .find(|binding| binding.name == name)
             .unwrap_or_else(|| panic!("missing uniform {name}"))
+    }
+
+    fn apply_plan(shader: ShaderId) -> ShaderApplyPlan {
+        ShaderApplyPlan::new(shader)
+    }
+
+    #[test]
+    fn shader_dispatch_frame_defaults_to_empty_and_keeps_order() {
+        let empty = ShaderDispatchFrame::default();
+        assert!(empty.is_empty());
+        assert!(empty.applies.is_empty());
+
+        let first = apply_plan(ShaderId::Mesh);
+        let second = apply_plan(ShaderId::Shield);
+        let third = apply_plan(ShaderId::Water);
+
+        let frame = ShaderDispatchFrame::from_applies([first.clone()])
+            .with_apply(second.clone())
+            .with_apply(third.clone());
+        assert!(!frame.is_empty());
+        assert_eq!(
+            frame
+                .applies
+                .iter()
+                .map(|plan| plan.shader)
+                .collect::<Vec<_>>(),
+            vec![ShaderId::Mesh, ShaderId::Shield, ShaderId::Water]
+        );
+
+        let mut extended = ShaderDispatchFrame::default();
+        extended.push(first);
+        extended.extend([second, third]);
+        assert_eq!(
+            extended
+                .applies
+                .iter()
+                .map(|plan| plan.shader)
+                .collect::<Vec<_>>(),
+            vec![ShaderId::Mesh, ShaderId::Shield, ShaderId::Water]
+        );
     }
 
     #[test]
