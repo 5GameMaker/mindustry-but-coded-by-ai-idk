@@ -9971,3 +9971,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `RepairBeamWeapon` 目前记录字段并进入 unit weapon registry，但 HealBeamMount/repair targeting runtime 仍未实现；
   - 下一步可继续 `corvus`（大激光）或转向后续地面 leg 单位；
   - 当前总体迁移约 13.05%，远未可玩。
+
+### 12.314 UnitTypes corvus charged LaserBulletType content seam
+
+- 2026-05-28：继续回填 `corvus` 的大激光武器 `corvus-weapon` 与 `LaserBulletType`，复用前面 `laser_bullet(...)` helper，并补出 LaserBulletType 的 lightning spacing/delay/angle random 字段记录位。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:575-645`
+  - weapon：`new Weapon("corvus-weapon")`，`shootSound = Sounds.shootCorvus`、`chargeSound = Sounds.chargeCorvus`、`soundPitchMin = 1f`、`top = false`、`mirror = false`、`shake = 14f`、`shootY = 5f`、`x = y = 0`、`reload = 350f`、`recoil = 0f`、`cooldownTime = 350f`、`shootStatusDuration = 60f * 2f`、`shootStatus = StatusEffects.unmoving`、`shoot.firstShotDelay = Fx.greenLaserCharge.lifetime`、`parentizeEffects = true`
+  - bullet：`new LaserBulletType()`，`length = 460f`、`damage = 560f`、`width = 75f`、`lifetime = 65f`、`lightningSpacing = 35f`、`lightningLength = 5`、`lightningDelay = 1.1f`、`lightningLengthRand = 15`、`lightningDamage = 50`、`lightningAngleRand = 40f`、`largeHit = true`、`lightColor = lightningColor = Pal.heal`、`chargeEffect = Fx.greenLaserCharge`、`healPercent = 25f`、`collidesTeam = true`、`sideAngle = 15f`、`sideWidth = 0f`、`sideLength = 0f`、`colors = {Pal.heal.a(0.4), Pal.heal, Color.white}`
+  - `Fx.greenLaserCharge.lifetime = 80f`。
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `lightning_spacing` / `lightning_delay` / `lightning_angle_rand`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增具名 bullet preset `corvus_laser`；
+    - 更新 bullet registry 顺序测试，新增 `corvus_laser_matches_java_laser_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `corvus` 现在注册 `Weapon::new("corvus-weapon")`；
+    - weapon 引用 `bullet = "corvus_laser"`，并设置 Java weapon 字段、`shoot_first_shot_delay = 80.0`；
+    - 新增 `corvus_weapon_uses_charged_laser_profile`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core corvus_laser_matches_java_laser_profile --lib`
+  - `cargo test -p mindustry-core corvus_weapon_uses_charged_laser_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `LaserBulletType` 的真实大激光碰撞、heal、lightningSpacing delayed lightning runtime 和 charge/effect/sound path 尚未完整实现；
+  - `shoot_status = unmoving` 已记录，但真实状态应用时序还需接 weapon runtime；
+  - 下一步建议按子代理推荐做 `crawler`，验证 `shoot_on_death` / `kill_shooter` / 爆炸弹；
+  - 当前总体迁移约 13.1%，远未可玩。

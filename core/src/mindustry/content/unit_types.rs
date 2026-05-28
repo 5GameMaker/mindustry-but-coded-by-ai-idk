@@ -338,6 +338,25 @@ pub fn load() -> Vec<UnitType> {
             u.speed = 0.3;
             u.draw_shields = false;
             u.allow_leg_step = true;
+            let mut weapon = Weapon::new("corvus-weapon");
+            weapon.shoot_sound = "shootCorvus".into();
+            weapon.charge_sound = "chargeCorvus".into();
+            weapon.sound_pitch_min = 1.0;
+            weapon.top = false;
+            weapon.mirror = false;
+            weapon.shake = 14.0;
+            weapon.shoot_y = 5.0;
+            weapon.x = 0.0;
+            weapon.y = 0.0;
+            weapon.reload = 350.0;
+            weapon.recoil = 0.0;
+            weapon.cooldown_time = 350.0;
+            weapon.shoot_status_duration = 60.0 * 2.0;
+            weapon.shoot_status = "unmoving".into();
+            weapon.shoot_first_shot_delay = 80.0;
+            weapon.parentize_effects = true;
+            weapon.bullet = "corvus_laser".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "crawler", UnitKind::Standard, |u| {
             u.research_cost_multiplier = 0.5;
@@ -1730,6 +1749,44 @@ mod tests {
             .find(|bullet| bullet.name() == repair.bullet)
             .unwrap_or_else(|| panic!("missing vela repair bullet {}", repair.bullet));
         assert_eq!(repair_bullet.spec.max_range, 120.0);
+    }
+
+    #[test]
+    fn corvus_weapon_uses_charged_laser_profile() {
+        let units = load();
+        let corvus = by_name(&units, "corvus");
+        assert_eq!(corvus.weapons.len(), 1);
+
+        let weapon = &corvus.weapons[0];
+        assert_eq!(weapon.name, "corvus-weapon");
+        assert_eq!(weapon.shoot_sound, "shootCorvus");
+        assert_eq!(weapon.charge_sound, "chargeCorvus");
+        assert_eq!(weapon.sound_pitch_min, 1.0);
+        assert!(!weapon.top);
+        assert!(!weapon.mirror);
+        assert_eq!(weapon.shake, 14.0);
+        assert_eq!(weapon.shoot_y, 5.0);
+        assert_eq!(weapon.x, 0.0);
+        assert_eq!(weapon.y, 0.0);
+        assert_eq!(weapon.reload, 350.0);
+        assert_eq!(weapon.recoil, 0.0);
+        assert_eq!(weapon.cooldown_time, 350.0);
+        assert_eq!(weapon.shoot_status_duration, 120.0);
+        assert_eq!(weapon.shoot_status, "unmoving");
+        assert_eq!(weapon.shoot_first_shot_delay, 80.0);
+        assert!(weapon.parentize_effects);
+        assert_eq!(weapon.bullet, "corvus_laser");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing corvus bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Laser);
+        assert_eq!(bullet.spec.damage, 560.0);
+        assert_eq!(bullet.spec.length, 460.0);
+        assert_eq!(bullet.spec.heal_percent, 25.0);
+        assert!(bullet.spec.collides_team);
     }
 
     #[test]

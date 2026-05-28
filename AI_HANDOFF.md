@@ -8153,3 +8153,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 下一步可继续 `corvus` 的大激光武器，或等待子代理对 `corvus/crawler/atrax/spiroct` 的只读梳理；
   2. `ContinuousLaserBulletType` 和 `RepairBeamWeapon` 目前是 content/registry 层，真实连续伤害、治疗、beam targeting、绘制/音效 runtime 未实现；
   3. 当前总迁移约 13.05%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 240. 最新闭环记录：UnitTypes corvus charged LaserBulletType content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `corvus` 的 `corvus-weapon` 和 charged `LaserBulletType` 回填进 Rust content registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:575-645`
+  - weapon：`corvus-weapon`，`shootSound=Sounds.shootCorvus`、`chargeSound=Sounds.chargeCorvus`、`soundPitchMin=1`、`top=false`、`mirror=false`、`shake=14`、`shootY=5`、`reload=350`、`recoil=0`、`cooldownTime=350`、`shootStatusDuration=120`、`shootStatus=unmoving`、`shoot.firstShotDelay=80`、`parentizeEffects=true`
+  - bullet：`LaserBulletType`，`length=460`、`damage=560`、`width=75`、`lifetime=65`、`lightningSpacing=35`、`lightningLength=5`、`lightningDelay=1.1`、`lightningLengthRand=15`、`lightningDamage=50`、`lightningAngleRand=40`、`largeHit=true`、`lightColor=lightningColor=Pal.heal`、`chargeEffect=Fx.greenLaserCharge`、`healPercent=25`、`collidesTeam=true`、`sideAngle=15`、`sideWidth=0`、`sideLength=0`
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `lightning_spacing` / `lightning_delay` / `lightning_angle_rand`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `corvus_laser`；
+    - 更新 bullet load order 测试；
+    - 新增 `corvus_laser_matches_java_laser_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `corvus` 追加 `Weapon::new("corvus-weapon")`；
+    - weapon 引用 `bullet = "corvus_laser"`，并设置 Java weapon 字段；
+    - 新增 `corvus_weapon_uses_charged_laser_profile`。
+  - `MIGRATION.md`
+    - 新增 `12.314`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core corvus_laser_matches_java_laser_profile --lib`
+  - `cargo test -p mindustry-core corvus_weapon_uses_charged_laser_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一闭环建议 `crawler`，验证 `shoot_on_death` / `kill_shooter` / 爆炸弹；
+  2. 之后 `atrax` 需要补 liquid 绑定；`spiroct` 需要 SapBulletType content schema；
+  3. `corvus_laser` 的 charged laser/lightning runtime 仍未实现；
+  4. 当前总迁移约 13.1%，远未可玩，goal 绝不能标记 complete。

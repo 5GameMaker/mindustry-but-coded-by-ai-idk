@@ -225,6 +225,27 @@ pub fn load() -> Vec<BulletContent> {
     let mut vela_repair_range = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
     vela_repair_range.max_range = 120.0;
 
+    let mut corvus_laser = laser_bullet(560.0);
+    corvus_laser.length = 460.0;
+    corvus_laser.width = 75.0;
+    corvus_laser.lifetime = 65.0;
+    corvus_laser.lightning_spacing = 35.0;
+    corvus_laser.lightning_length = 5;
+    corvus_laser.lightning_delay = 1.1;
+    corvus_laser.lightning_length_rand = 15;
+    corvus_laser.lightning_damage = 50.0;
+    corvus_laser.lightning_angle_rand = 40.0;
+    corvus_laser.hit_large = true;
+    corvus_laser.light_color = "heal".into();
+    corvus_laser.lightning_color = "heal".into();
+    corvus_laser.charge_effect = "greenLaserCharge".into();
+    corvus_laser.heal_percent = 25.0;
+    corvus_laser.collides_team = true;
+    corvus_laser.side_angle = 15.0;
+    corvus_laser.side_width = 0.0;
+    corvus_laser.side_length = 0.0;
+    corvus_laser.colors = vec!["heal@0.4".into(), "heal".into(), "white".into()];
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -277,6 +298,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "scepter_bullet", scepter_bullet),
         make_bullet(&mut next_id, "vela_continuous_laser", vela_continuous_laser),
         make_bullet(&mut next_id, "vela_repair_range", vela_repair_range),
+        make_bullet(&mut next_id, "corvus_laser", corvus_laser),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -451,6 +473,7 @@ mod tests {
                 "scepter_bullet",
                 "vela_continuous_laser",
                 "vela_repair_range",
+                "corvus_laser",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -823,6 +846,41 @@ mod tests {
         assert_eq!(bullet.speed, 0.0);
         assert_eq!(bullet.damage, 0.0);
         assert_eq!(bullet.max_range, 120.0);
+    }
+
+    #[test]
+    fn corvus_laser_matches_java_laser_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "corvus_laser").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Laser);
+        assert_eq!(bullet.damage, 560.0);
+        assert_eq!(bullet.length, 460.0);
+        assert_eq!(bullet.width, 75.0);
+        assert_eq!(bullet.lifetime, 65.0);
+        assert_eq!(bullet.lightning_spacing, 35.0);
+        assert_eq!(bullet.lightning_length, 5);
+        assert_eq!(bullet.lightning_delay, 1.1);
+        assert_eq!(bullet.lightning_length_rand, 15);
+        assert_eq!(bullet.lightning_damage, 50.0);
+        assert_eq!(bullet.lightning_angle_rand, 40.0);
+        assert!(bullet.hit_large);
+        assert_eq!(bullet.light_color, "heal");
+        assert_eq!(bullet.lightning_color, "heal");
+        assert_eq!(bullet.charge_effect, "greenLaserCharge");
+        assert_eq!(bullet.heal_percent, 25.0);
+        assert!(bullet.collides_team);
+        assert_eq!(bullet.side_angle, 15.0);
+        assert_eq!(bullet.side_width, 0.0);
+        assert_eq!(bullet.side_length, 0.0);
+        assert_eq!(
+            bullet.colors,
+            vec![
+                "heal@0.4".to_string(),
+                "heal".to_string(),
+                "white".to_string(),
+            ]
+        );
     }
 
     #[test]
