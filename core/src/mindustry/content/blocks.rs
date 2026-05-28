@@ -726,6 +726,12 @@ pub struct BulletSpec {
     pub sap_strength: f32,
     pub status: String,
     pub status_duration: f32,
+    pub time_increase: f32,
+    pub time_duration: f32,
+    pub power_damage_scl: f32,
+    pub power_scl_decrease: f32,
+    pub unit_damage_scl: f32,
+    pub hit_units: bool,
     pub make_fire: bool,
     pub trail_effect: String,
     pub trail_interval: f32,
@@ -903,6 +909,12 @@ impl BulletSpec {
             sap_strength: 0.0,
             status: "none".into(),
             status_duration: 60.0 * 8.0,
+            time_increase: 2.5,
+            time_duration: 60.0 * 10.0,
+            power_damage_scl: 2.0,
+            power_scl_decrease: 0.2,
+            unit_damage_scl: 0.7,
+            hit_units: true,
             make_fire: false,
             trail_effect: "missileTrail".into(),
             trail_interval: 0.0,
@@ -13727,6 +13739,39 @@ mod tests {
 
         assert!(!spec.collides_floor);
         assert!(!spec.underwater);
+    }
+
+    #[test]
+    fn bullet_spec_defaults_cover_emp_fields() {
+        let spec = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+
+        assert_eq!(spec.time_increase, 2.5);
+        assert_eq!(spec.time_duration, 60.0 * 10.0);
+        assert_eq!(spec.power_damage_scl, 2.0);
+        assert_eq!(spec.power_scl_decrease, 0.2);
+        assert_eq!(spec.unit_damage_scl, 0.7);
+        assert!(spec.hit_units);
+    }
+
+    #[test]
+    fn bullet_spec_emp_fields_can_be_set_and_cloned() {
+        let mut spec = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+
+        spec.time_increase = 3.0;
+        spec.time_duration = 60.0 * 20.0;
+        spec.power_damage_scl = 3.0;
+        spec.power_scl_decrease = 0.35;
+        spec.unit_damage_scl = 0.8;
+        spec.hit_units = false;
+
+        let cloned = spec.clone();
+
+        assert_eq!(cloned.time_increase, 3.0);
+        assert_eq!(cloned.time_duration, 60.0 * 20.0);
+        assert_eq!(cloned.power_damage_scl, 3.0);
+        assert_eq!(cloned.power_scl_decrease, 0.35);
+        assert_eq!(cloned.unit_damage_scl, 0.8);
+        assert!(!cloned.hit_units);
     }
 
     #[test]
