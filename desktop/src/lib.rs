@@ -3863,6 +3863,60 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_debug_line_vec2_array_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("debugLine").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(0x336699ff_i32),
+                },
+                data: TypeValue::Vec2Array(vec![
+                    IoVec2::new(24.0, 32.0),
+                    IoVec2::new(54.0, 32.0),
+                    IoVec2::new(54.0, 72.0),
+                ]),
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 2);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_rect_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 2);
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let first = &launcher.standard_local_effect_line_primitives[0];
+        assert_eq!(first.start, (24.0, 32.0));
+        assert_eq!(first.length, 30.0);
+        assert_eq!(first.stroke, 2.0);
+        assert_eq!(
+            first.color,
+            Some(mindustry_core::mindustry::entities::comp::DecalColor::from_rgba(0x336699ff))
+        );
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 2);
+        assert_eq!(stats.circle_primitives, 0);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.rect_primitives, 0);
+        assert_eq!(stats.line_primitives, 2);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_flattens_shoot_flame_circle_particles_for_render() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         for (name, x) in [

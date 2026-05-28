@@ -8236,3 +8236,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 当前使用 `TypeValue::Vec2` 覆盖 Java `Position` 的网络/运行时等价路径；其他 `Position` 实现若进入 effect data，后续仍需 resolver；
   - 当前以多段 `LineAngle` plans 表达 polyline，真实 renderer/backend 尚未接入专用 polyline primitive。
+
+### 12.259 Fx.debugLine
+
+- 2026-05-28：对照 `Fx.java:2960-2976`，迁移调试折线效果 `debugLine=264`，复用上一轮已经打通的完整 `TypeValue` data seam。
+- 本轮迁移：
+  - `debugLine=264`
+- Java 依据：
+  - `debugLine = new Effect(90f, 1000000000000f, ...)`；
+  - 要求 `e.data instanceof Vec2[]`，否则直接 return；
+  - `Draw.color(e.color)`，`Lines.stroke(2f)`；
+  - 当数组长度为 2 时绘制单条 `Lines.line(a, b)`，否则按 `Lines.beginLine()/linePoint()/endLine()` 连接所有点。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_DEBUG_LINE_ID=264`、lookup 与 metadata，clip `1_000_000_000_000.0`；
+    - 使用 `TypeValue::Vec2Array(Vec<Vec2>)` 作为 Java `Vec2[]` 的当前 wire-level 等价输入；
+    - 将任意长度 `Vec2Array` 按相邻点拆成多段 `LineAngle` plans，stroke 固定 `2.0`，颜色使用 `Input.color`；
+    - 新增 core 断言覆盖 metadata、lookup、错误 data 返回空，以及 3 点折线展开为 2 条 line plans。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_debug_line_vec2_array_for_render`，验证 `EffectCallPacket2.data = TypeValue::Vec2Array` 通过 desktop collect/render seam 展开为 2 条 line primitives。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_debug_line_vec2_array_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前仍以多段 `LineAngle` plans 表达 Java polyline/debug line，真实 renderer/backend 尚未接入专用 polyline primitive；
+  - `debugRect=265` 仍需 `Rect` data seam 或等价 typed data；
+  - 本轮仍是 headless primitive seam，后续必须继续接入真实 renderer/runtime，不能把 helper/plan 当成最终可玩实现。

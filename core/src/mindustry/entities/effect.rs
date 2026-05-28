@@ -392,6 +392,8 @@ pub const FX_POD_LAND_DUST_ID: i32 = 259;
 pub const FX_CHAIN_LIGHTNING_ID: i32 = 261;
 /// Upstream `Fx.chainEmp` id in `mindustry.content.Fx` for v158.1.
 pub const FX_CHAIN_EMP_ID: i32 = 262;
+/// Upstream `Fx.debugLine` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DEBUG_LINE_ID: i32 = 264;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
@@ -588,6 +590,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "podLandDust" => Some(FX_POD_LAND_DUST_ID),
         "chainLightning" => Some(FX_CHAIN_LIGHTNING_ID),
         "chainEmp" => Some(FX_CHAIN_EMP_ID),
+        "debugLine" => Some(FX_DEBUG_LINE_ID),
         _ => None,
     }
 }
@@ -1002,6 +1005,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_CHAIN_EMP_ID => Effect::with_lifetime(FX_CHAIN_EMP_ID, 30.0, 300.0)
             .follow_parent(false)
             .rot_with_parent(false),
+        FX_DEBUG_LINE_ID => Effect::with_lifetime(FX_DEBUG_LINE_ID, 90.0, 1_000_000_000_000.0),
         _ => return None,
     };
     Some(effect)
@@ -1145,6 +1149,7 @@ fn standard_effect_draw_plans_with_data(
             | FX_POD_LAND_DUST_ID
             | FX_CHAIN_LIGHTNING_ID
             | FX_CHAIN_EMP_ID
+            | FX_DEBUG_LINE_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1669,6 +1674,58 @@ fn standard_effect_draw_plans_with_data(
                 light_opacity: 0.0,
             });
             last = next;
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_DEBUG_LINE_ID {
+        let Some(TypeValue::Vec2Array(points)) = data_value else {
+            return Vec::new();
+        };
+        if points.len() < 2 {
+            return Vec::new();
+        }
+
+        let mut plans = Vec::with_capacity(points.len() - 1);
+        for segment in points.windows(2) {
+            let start = segment[0];
+            let end = segment[1];
+            let dx = end.x - start.x;
+            let dy = end.y - start.y;
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= f32::EPSILON {
+                continue;
+            }
+
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::LineAngle,
+                center: (start.x, start.y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: length,
+                stroke: 2.0,
+                particles: Some(standard_effect_particle_spec(
+                    state_id,
+                    1,
+                    Some(dy.atan2(dx).to_degrees()),
+                    0.0,
+                    0.0,
+                    fin,
+                    fout,
+                    fslope,
+                )),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
         }
 
         return plans;
@@ -8682,6 +8739,7 @@ mod tests {
             Some(FX_CHAIN_LIGHTNING_ID)
         );
         assert_eq!(standard_effect_id("chainEmp"), Some(FX_CHAIN_EMP_ID));
+        assert_eq!(standard_effect_id("debugLine"), Some(FX_DEBUG_LINE_ID));
         assert_eq!(standard_effect_id("none"), None);
     }
 
@@ -9202,6 +9260,9 @@ mod tests {
         assert_eq!(chain_emp.clip, 300.0);
         assert!(!chain_emp.follow_parent);
         assert!(!chain_emp.rot_with_parent);
+        let debug_line = standard_effect(FX_DEBUG_LINE_ID).unwrap();
+        assert_eq!(debug_line.lifetime, 90.0);
+        assert_eq!(debug_line.clip, 1_000_000_000_000.0);
         assert!(standard_effect_by_name("none").is_none());
         assert!(standard_effect(-1).is_none());
     }
@@ -10196,6 +10257,46 @@ mod tests {
             20.0,
             input_color,
             None,
+        )
+        .is_empty());
+
+        let debug_line_points = TypeValue::Vec2Array(vec![
+            crate::mindustry::io::Vec2::new(10.0, 20.0),
+            crate::mindustry::io::Vec2::new(40.0, 20.0),
+            crate::mindustry::io::Vec2::new(40.0, 60.0),
+        ]);
+        let debug_line = standard_effect_draw_plans_with_data_value(
+            Some(FX_DEBUG_LINE_ID as u16),
+            264,
+            3.0,
+            4.0,
+            0.0,
+            10.0,
+            90.0,
+            input_color,
+            Some(&debug_line_points),
+        );
+        assert_eq!(debug_line.len(), 2);
+        assert!(debug_line
+            .iter()
+            .all(|plan| plan.kind == StandardEffectDrawKind::LineAngle));
+        assert_eq!(debug_line[0].center, (10.0, 20.0));
+        assert_eq!(debug_line[0].radius, 30.0);
+        assert_eq!(debug_line[0].stroke, 2.0);
+        assert_eq!(debug_line[0].input_color, Some(input_color));
+        assert_eq!(debug_line[0].resolved_draw_color(), Some(input_color));
+        assert_eq!(debug_line[1].center, (40.0, 20.0));
+        assert_eq!(debug_line[1].radius, 40.0);
+        assert!(standard_effect_draw_plans_with_data_value(
+            Some(FX_DEBUG_LINE_ID as u16),
+            264,
+            3.0,
+            4.0,
+            0.0,
+            10.0,
+            90.0,
+            input_color,
+            Some(&TypeValue::Null),
         )
         .is_empty());
 

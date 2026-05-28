@@ -6229,3 +6229,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续用 `TypeValue` seam 攻克 `debugLine=264`（`Vec2Array`）和 `debugRect=265`（当前可能需要新增 Rect TypeValue）；
   2. `unitShieldBreak=260` 需要从 Unit id resolve hitSize，适合下一步补 typed resolver；
   3. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。
+
+---
+
+## 185. 最新闭环记录：Fx.debugLine
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `debugLine=264`，利用已接入的完整 `TypeValue` data seam 支持 Java `Vec2[]` 数据驱动折线。
+- 本轮迁移：
+  - `debugLine=264`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_DEBUG_LINE_ID=264`、lookup、metadata；
+    - `TypeValue::Vec2Array` 对应 Java `Vec2[]`，不足 2 点或 data 类型不符时返回空；
+    - 2 点/多点统一按相邻点展开成 `LineAngle` plans，stroke `2.0`，颜色走 `Input.color`；
+    - core 测试覆盖 ID、metadata、Vec2Array 折线展开和错误 data 空输出。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_debug_line_vec2_array_for_render`，验证 desktop 本地 effect event 的 `TypeValue::Vec2Array` 能展开为 2 条 line primitives 并进入 headless renderer stats。
+  - `MIGRATION.md`
+    - 新增 `12.259` 节，注明当前仍是 headless primitive seam。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_debug_line_vec2_array_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 `debugRect=265`：需要新增 `Rect` typed data（或先定义等价 `TypeValue::Rect` / `RectValue`），再用现有 rect primitive 表达 `Lines.rect(rect)`；
+  2. `legDestroy=263` 需要 textured line/region seam，建议等 texture-region 抽象更明确后推进；
+  3. `unitShieldBreak=260` / `arcShieldBreak=257` 需要 Unit/Ability typed resolver，不要只做孤立 helper；
+  4. 当前总迁移仍约 9% 左右，距离完整可玩 Rust MDT/Mindustry 很远，不能宣称可玩。
