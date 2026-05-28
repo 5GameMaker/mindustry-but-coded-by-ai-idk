@@ -7801,3 +7801,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. `beta` / `nova` 需要补 `LaserBolt`、`scale_keep_velocity`、`heal_percent`、`collides_team` 等 schema；
   4. README 当前有未提交改动，除非用户明确要求，否则迁移提交时继续排除它；
   5. 当前总迁移约 12.6%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 231. 最新闭环记录：UnitTypes mace flamethrower content registry seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 用户额外要求：`README.md` 已完善工程说明，并保留空的 `## 作者的话` 栏目；但**README 仍不提交不推送**，等用户明确要求“推送 README”时再包含它。
+- 本轮目标：把 Java `UnitTypes.java` 中 `mace` 的 `flamethrower` 和匿名 `BulletType(4.2f, 37f*2f)` 回填进 Rust content registry，并确认 unit weapon 通过 bullet 名称接到真实 flame bullet preset。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:120-149`
+  - weapon：`flamethrower`，`top=false`、`shootSound=Sounds.shootFlame`、`shootY=2`、`reload=22`、`recoil=1`、`ejectEffect=Fx.none`
+  - bullet：`BulletType(4.2f, 74)`，`ammoMultiplier=3`、`hitSize=7`、`lifetime=13`、`pierce=true`、`pierceBuilding=true`、`pierceCap=2`、`statusDuration=300`、`shootEffect=Fx.shootSmallFlame`、`hitEffect=Fx.hitFlameSmall`、`despawnEffect=Fx.none`、`status=burning`、`keepVelocity=false`、`hittable=false`
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `mace_flame`；
+    - 更新 bullet load order 测试；
+    - 新增 `mace_flame_bullet_matches_java_flamethrower_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `mace` 追加 `Weapon::new("flamethrower")`；
+    - weapon 引用 `bullet = "mace_flame"`，并设置 `top/shoot_sound/shoot_y/reload/recoil/eject_effect`；
+    - 新增 `mace_flamethrower_uses_flame_bullet_profile`，同时验证 unit weapon 与 bullet registry 引用链。
+  - `MIGRATION.md`
+    - 新增 `12.305`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core mace_flame_bullet_matches_java_flamethrower_profile --lib`
+  - `cargo test -p mindustry-core mace_flamethrower_uses_flame_bullet_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一闭环建议优先 `quasar`，其 `LaserBulletType` 大多已有 `BulletSpec::Laser` 字段可承载；
+  2. `beta` / `nova` 需要补 `LaserBolt`、`scale_keep_velocity`、`heal_percent`、`collides_team` 等 schema；
+  3. README 当前有未提交改动，除非用户明确要求，否则迁移提交时继续排除它；
+  4. 当前总迁移约 12.65%，远未可玩，goal 绝不能标记 complete。

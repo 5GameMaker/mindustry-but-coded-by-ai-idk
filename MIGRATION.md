@@ -9669,3 +9669,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `beta` / `nova` 后续需要补 `LaserBolt`、`scale_keep_velocity`、`heal_percent`、`collides_team` 等 content bullet schema；
   - 当前只是接入 dagger 的 content registry seam，完整可玩性、客户端表现、Java 联机兼容仍远未完成；
   - 当前总体迁移约 12.6%，远未可玩。
+
+### 12.305 UnitTypes mace flamethrower content registry seam
+
+- 2026-05-28：继续沿 `UnitTypes.java` 地面单位链回填 `mace` 的 `flamethrower` 与匿名 flame bullet；这一步复用现有 `BulletSpec` 的 Generic/pierce/status 字段，把燃烧、穿透、命中/发射效果和 `UnitType.weapons -> bullet registry` 引用链接起来。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:120-149`
+  - `mace`：`speed = 0.5f`、`hitSize = 10f`、`health = 550`、`armor = 4f`、`immunities.add(StatusEffects.burning)`
+  - weapon：`new Weapon("flamethrower")`，`top = false`、`shootSound = Sounds.shootFlame`、`shootY = 2f`、`reload = 22f`、`recoil = 1f`、`ejectEffect = Fx.none`
+  - bullet：`new BulletType(4.2f, 37f*2f)`，`ammoMultiplier = 3f`、`hitSize = 7f`、`lifetime = 13f`、`pierce = true`、`pierceBuilding = true`、`pierceCap = 2`、`statusDuration = 60f * 5`、`shootEffect = Fx.shootSmallFlame`、`hitEffect = Fx.hitFlameSmall`、`despawnEffect = Fx.none`、`status = StatusEffects.burning`、`keepVelocity = false`、`hittable = false`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增具名 bullet preset `mace_flame`；
+    - 使用 `BulletKind::Generic`，填入 Java speed/damage/status/pierce/effect/lifetime/ammoMultiplier 等字段；
+    - 更新 bullet registry 顺序测试，新增 `mace_flame_bullet_matches_java_flamethrower_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `mace` 现在注册 `Weapon::new("flamethrower")`；
+    - weapon 填入 `top/shoot_sound/shoot_y/reload/recoil/eject_effect/bullet`，其中 `bullet = "mace_flame"`；
+    - 新增 `mace_flamethrower_uses_flame_bullet_profile`，确认 weapon 与 bullet registry 能互相解析。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core mace_flame_bullet_matches_java_flamethrower_profile --lib`
+  - `cargo test -p mindustry-core mace_flamethrower_uses_flame_bullet_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `beta` / `nova` / `quasar` 等 UnitTypes weapon/bullet 仍待继续回填；
+  - `quasar` 的 `LaserBulletType` 可优先作为下一组现有 schema 闭环；
+  - `beta` / `nova` 仍需要补 `LaserBolt`、`scale_keep_velocity`、`heal_percent`、`collides_team` 等字段或等价替代；
+  - 当前总体迁移约 12.65%，远未可玩。

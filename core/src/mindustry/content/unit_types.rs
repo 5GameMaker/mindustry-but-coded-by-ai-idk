@@ -49,6 +49,15 @@ pub fn load() -> Vec<UnitType> {
             u.armor = 4.0;
             u.ammo_type = "item:coal".into();
             u.immunities.push("burning".into());
+            let mut weapon = Weapon::new("flamethrower");
+            weapon.top = false;
+            weapon.shoot_sound = "shootFlame".into();
+            weapon.shoot_y = 2.0;
+            weapon.reload = 22.0;
+            weapon.recoil = 1.0;
+            weapon.eject_effect = "none".into();
+            weapon.bullet = "mace_flame".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "fortress", UnitKind::Standard, |u| {
             u.speed = 0.43;
@@ -1230,6 +1239,38 @@ mod tests {
         assert_eq!(bullet.spec.width, 7.0);
         assert_eq!(bullet.spec.height, 9.0);
         assert_eq!(bullet.spec.lifetime, 60.0);
+    }
+
+    #[test]
+    fn mace_flamethrower_uses_flame_bullet_profile() {
+        let units = load();
+        let mace = by_name(&units, "mace");
+        assert_eq!(mace.weapons.len(), 1);
+
+        let weapon = &mace.weapons[0];
+        assert_eq!(weapon.name, "flamethrower");
+        assert!(!weapon.top);
+        assert_eq!(weapon.shoot_sound, "shootFlame");
+        assert_eq!(weapon.shoot_y, 2.0);
+        assert_eq!(weapon.reload, 22.0);
+        assert_eq!(weapon.recoil, 1.0);
+        assert_eq!(weapon.eject_effect, "none");
+        assert_eq!(weapon.bullet, "mace_flame");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing mace weapon bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Generic);
+        assert_eq!(bullet.spec.speed, 4.2);
+        assert_eq!(bullet.spec.damage, 74.0);
+        assert_eq!(bullet.spec.status, "burning");
+        assert!(bullet.spec.pierce);
+        assert!(bullet.spec.pierce_building);
+        assert_eq!(bullet.spec.pierce_cap, 2);
+        assert!(!bullet.spec.keep_velocity);
+        assert!(!bullet.spec.hittable);
     }
 
     #[test]

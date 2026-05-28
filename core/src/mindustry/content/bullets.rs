@@ -50,6 +50,21 @@ pub fn load() -> Vec<BulletContent> {
     dagger_basic.lifetime = 60.0;
     dagger_basic.ammo_multiplier = 2.0;
 
+    let mut mace_flame = BulletSpec::new(BulletKind::Generic, 4.2, 37.0 * 2.0);
+    mace_flame.ammo_multiplier = 3.0;
+    mace_flame.hit_size = 7.0;
+    mace_flame.lifetime = 13.0;
+    mace_flame.pierce = true;
+    mace_flame.pierce_building = true;
+    mace_flame.pierce_cap = 2;
+    mace_flame.status_duration = 60.0 * 5.0;
+    mace_flame.shoot_effect = "shootSmallFlame".into();
+    mace_flame.hit_effect = "hitFlameSmall".into();
+    mace_flame.despawn_effect = "none".into();
+    mace_flame.status = "burning".into();
+    mace_flame.keep_velocity = false;
+    mace_flame.hittable = false;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -91,6 +106,7 @@ pub fn load() -> Vec<BulletContent> {
     vec![
         make_bullet(&mut next_id, "placeholder", placeholder),
         make_bullet(&mut next_id, "dagger_basic", dagger_basic),
+        make_bullet(&mut next_id, "mace_flame", mace_flame),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -142,6 +158,7 @@ mod tests {
             vec![
                 "placeholder",
                 "dagger_basic",
+                "mace_flame",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -191,6 +208,29 @@ mod tests {
         assert_eq!(bullet.front_color, "bulletYellow");
         assert_eq!(bullet.hit_effect, "hitBulletSmall");
         assert_eq!(bullet.despawn_effect, "hitBulletSmall");
+    }
+
+    #[test]
+    fn mace_flame_bullet_matches_java_flamethrower_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "mace_flame").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Generic);
+        assert_eq!(bullet.speed, 4.2);
+        assert_eq!(bullet.damage, 74.0);
+        assert_eq!(bullet.ammo_multiplier, 3.0);
+        assert_eq!(bullet.hit_size, 7.0);
+        assert_eq!(bullet.lifetime, 13.0);
+        assert!(bullet.pierce);
+        assert!(bullet.pierce_building);
+        assert_eq!(bullet.pierce_cap, 2);
+        assert_eq!(bullet.status_duration, 300.0);
+        assert_eq!(bullet.shoot_effect, "shootSmallFlame");
+        assert_eq!(bullet.hit_effect, "hitFlameSmall");
+        assert_eq!(bullet.despawn_effect, "none");
+        assert_eq!(bullet.status, "burning");
+        assert!(!bullet.keep_velocity);
+        assert!(!bullet.hittable);
     }
 
     #[test]
