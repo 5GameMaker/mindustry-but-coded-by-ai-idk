@@ -1,6 +1,6 @@
 //! Legs component shell mirroring upstream `mindustry.entities.comp.LegsComp`.
 
-use crate::mindustry::entities::Leg;
+use crate::mindustry::entities::{Leg, LegDestroyData, TextureRegionRef};
 use crate::mindustry::io::Vec2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +26,7 @@ pub struct LegsType {
     pub leg_forward_scl: f32,
     pub leg_pair_offset: f32,
     pub leg_length_scl: f32,
+    pub leg_extension: f32,
     pub leg_min_length: f32,
     pub leg_max_length: f32,
     pub flip_back_legs: bool,
@@ -40,6 +41,39 @@ pub struct LegsUpdateInput {
     pub delta_y: f32,
     pub deep_feet: i32,
     pub floor_on_deep: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegsDestroyRegions {
+    pub leg: TextureRegionRef,
+    pub leg_base: TextureRegionRef,
+}
+
+impl LegsDestroyRegions {
+    pub fn new(leg: TextureRegionRef, leg_base: TextureRegionRef) -> Self {
+        Self { leg, leg_base }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegsDestroyEffectEvent {
+    pub x: f32,
+    pub y: f32,
+    pub data: LegDestroyData,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegsDynamicExplosionEvent {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub effect: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LegsDestroyPlan {
+    pub effects: Vec<LegsDestroyEffectEvent>,
+    pub explosions: Vec<LegsDynamicExplosionEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +130,55 @@ impl LegsComp {
 
     pub fn unloaded(&mut self) {
         self.reset_legs(1.0);
+    }
+
+    pub fn destroy_plan(
+        &self,
+        regions: &LegsDestroyRegions,
+        death_explosion_effect: &str,
+        is_added: bool,
+        headless: bool,
+    ) -> LegsDestroyPlan {
+        if !is_added || headless {
+            return LegsDestroyPlan::default();
+        }
+
+        let mut plan = LegsDestroyPlan {
+            effects: Vec::with_capacity(self.legs.len() * 2),
+            explosions: Vec::with_capacity(self.legs.len() * 3),
+        };
+        let leg_explode_rad = regions.leg.height.max(0) as f32 / 4.0 / 1.45;
+
+        for (index, leg) in self.legs.iter().enumerate() {
+            let base = add(self.leg_offset(index), Vec2::new(self.x, self.y));
+            let extension = set_length(
+                Vec2::new(leg.joint.x - leg.base.x, leg.joint.y - leg.base.y),
+                self.type_info.leg_extension,
+            );
+            let extended_joint = add(leg.joint, extension);
+
+            for point in [base, leg.joint, leg.base] {
+                plan.explosions.push(LegsDynamicExplosionEvent {
+                    x: point.x,
+                    y: point.y,
+                    radius: leg_explode_rad,
+                    effect: death_explosion_effect.to_string(),
+                });
+            }
+
+            plan.effects.push(LegsDestroyEffectEvent {
+                x: base.x,
+                y: base.y,
+                data: LegDestroyData::new(base, leg.joint, regions.leg.clone()),
+            });
+            plan.effects.push(LegsDestroyEffectEvent {
+                x: leg.joint.x,
+                y: leg.joint.y,
+                data: LegDestroyData::new(extended_joint, leg.base, regions.leg_base.clone()),
+            });
+        }
+
+        plan
     }
 
     pub fn reset_legs(&mut self, leg_length: f32) {
@@ -267,6 +350,15 @@ fn len_vec(v: Vec2) -> f32 {
     len(v.x, v.y)
 }
 
+fn set_length(v: Vec2, target: f32) -> Vec2 {
+    let length = len_vec(v);
+    if length <= f32::EPSILON || target.abs() <= f32::EPSILON {
+        Vec2::new(0.0, 0.0)
+    } else {
+        Vec2::new(v.x / length * target, v.y / length * target)
+    }
+}
+
 fn angle(x: f32, y: f32) -> f32 {
     y.atan2(x).to_degrees().rem_euclid(360.0)
 }
@@ -327,6 +419,7 @@ mod tests {
             leg_forward_scl: 1.0,
             leg_pair_offset: 0.0,
             leg_length_scl: 1.0,
+            leg_extension: 3.0,
             leg_min_length: 0.0,
             leg_max_length: 1.75,
             flip_back_legs: true,
@@ -376,5 +469,52 @@ mod tests {
         assert!((legs.legs[0].stage - 0.8).abs() < 0.0001);
         assert_eq!(legs.legs[1].group, 0);
         assert!(!legs.legs[1].moving);
+    }
+
+    #[test]
+    fn legs_component_destroy_plan_matches_java_leg_destroy_payload_shape() {
+        let mut legs = LegsComp::new(legs_type());
+        legs.x = 10.0;
+        legs.y = 20.0;
+        legs.add();
+
+        let regions = LegsDestroyRegions::new(
+            TextureRegionRef::with_size("crawler-leg", 16, 8),
+            TextureRegionRef::with_size("crawler-leg-base", 12, 6),
+        );
+        let plan = legs.destroy_plan(&regions, "dynamicExplosion", true, false);
+
+        assert_eq!(plan.effects.len(), 8);
+        assert_eq!(plan.explosions.len(), 12);
+        assert_eq!(plan.explosions[0].effect, "dynamicExplosion");
+        assert!((plan.explosions[0].radius - (8.0 / 4.0 / 1.45)).abs() < 0.0001);
+
+        let base = legs.leg_offset(0);
+        let base = Vec2::new(base.x + legs.x, base.y + legs.y);
+        let leg = &legs.legs[0];
+        assert_eq!(plan.effects[0].x, base.x);
+        assert_eq!(plan.effects[0].y, base.y);
+        assert_eq!(plan.effects[0].data.a, base);
+        assert_eq!(plan.effects[0].data.b, leg.joint);
+        assert_eq!(plan.effects[0].data.region, regions.leg.clone());
+
+        assert_eq!(plan.effects[1].x, leg.joint.x);
+        assert_eq!(plan.effects[1].y, leg.joint.y);
+        assert_eq!(plan.effects[1].data.b, leg.base);
+        assert_eq!(plan.effects[1].data.region, regions.leg_base.clone());
+        let joint_offset = Vec2::new(
+            plan.effects[1].data.a.x - leg.joint.x,
+            plan.effects[1].data.a.y - leg.joint.y,
+        );
+        assert!((len_vec(joint_offset) - legs.type_info.leg_extension).abs() < 0.0001);
+
+        assert!(legs
+            .destroy_plan(&regions, "dynamicExplosion", false, false)
+            .effects
+            .is_empty());
+        assert!(legs
+            .destroy_plan(&regions, "dynamicExplosion", true, true)
+            .effects
+            .is_empty());
     }
 }

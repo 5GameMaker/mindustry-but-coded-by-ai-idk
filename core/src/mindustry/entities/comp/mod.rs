@@ -73,7 +73,10 @@ pub use health::HealthComp;
 pub use hitbox::{HitboxComp, HitboxRect};
 pub use items::{ItemStackSlot, ItemsComp};
 pub use launch_core::{LaunchCoreBlock, LaunchCoreComp, LaunchCoreDrawPlan, LaunchCoreSmoke};
-pub use legs::{LegsComp, LegsSolidPred, LegsType, LegsUpdateInput};
+pub use legs::{
+    LegsComp, LegsDestroyEffectEvent, LegsDestroyPlan, LegsDestroyRegions,
+    LegsDynamicExplosionEvent, LegsSolidPred, LegsType, LegsUpdateInput,
+};
 pub use mech::{MechComp, MechStepPlan, MechType};
 pub use miner::{
     apply_prebuild_mining_tick, MineItem, MineTile, MinerComp, MinerType, MinerUpdateContext,

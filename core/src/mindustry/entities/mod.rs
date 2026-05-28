@@ -347,7 +347,10 @@ pub use comp::{FireComp, FireTile, FireUpdateContext, FireUpdatePlan};
 pub use comp::{HealthComp, ItemStackSlot, ItemsComp};
 pub use comp::{HitboxComp, HitboxRect};
 pub use comp::{LaunchCoreBlock, LaunchCoreComp, LaunchCoreDrawPlan, LaunchCoreSmoke};
-pub use comp::{LegsComp, LegsSolidPred, LegsType, LegsUpdateInput};
+pub use comp::{
+    LegsComp, LegsDestroyEffectEvent, LegsDestroyPlan, LegsDestroyRegions,
+    LegsDynamicExplosionEvent, LegsSolidPred, LegsType, LegsUpdateInput,
+};
 pub use comp::{MechComp, MechStepPlan, MechType};
 pub use comp::{MineItem, MineTile, MinerComp, MinerType, MinerUpdateContext, MinerUpdatePlan};
 pub use comp::{PayloadComp, PayloadKind, PayloadState};

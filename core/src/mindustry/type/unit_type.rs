@@ -1,5 +1,6 @@
 use crate::mindustry::{
     ctype::{Content, ContentId, ContentType, UnlockableContentBase},
+    entities::TextureRegionRef,
     logic::LAccess,
     r#type::Weapon,
     world::meta::Env,
@@ -207,6 +208,8 @@ pub struct UnitType {
     pub leg_min_length: f32,
     pub leg_splash_damage: f32,
     pub leg_splash_range: f32,
+    pub leg_region: TextureRegionRef,
+    pub leg_base_region: TextureRegionRef,
     pub base_leg_straightness: f32,
     pub leg_straightness: f32,
     pub leg_base_under: bool,
@@ -253,6 +256,7 @@ impl UnitType {
     pub fn new(id: ContentId, name: impl Into<String>) -> Self {
         let mut base = UnlockableContentBase::new(id, ContentType::Unit, name);
         base.selection_size = 30.0;
+        let atlas_name = base.mappable.name.clone();
 
         Self {
             base,
@@ -441,6 +445,8 @@ impl UnitType {
             leg_min_length: 0.0,
             leg_splash_damage: 0.0,
             leg_splash_range: 5.0,
+            leg_region: TextureRegionRef::new(format!("{atlas_name}-leg")),
+            leg_base_region: TextureRegionRef::new(format!("{atlas_name}-leg-base")),
             base_leg_straightness: 0.0,
             leg_straightness: 0.0,
             leg_base_under: false,
@@ -1012,6 +1018,11 @@ mod tests {
         assert_eq!(unit.leg_min_length, 0.0);
         assert_eq!(unit.leg_splash_damage, 0.0);
         assert_eq!(unit.leg_splash_range, 5.0);
+        assert_eq!(unit.leg_region, TextureRegionRef::new("toxopid-leg"));
+        assert_eq!(
+            unit.leg_base_region,
+            TextureRegionRef::new("toxopid-leg-base")
+        );
         assert!(!unit.leg_base_under);
         assert!(!unit.lock_leg_base);
         assert!(!unit.leg_continuous_move);

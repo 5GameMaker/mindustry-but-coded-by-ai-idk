@@ -6454,7 +6454,49 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
 - 下一步建议：
-  1. 继续腿部系统真实接入：迁移 `UnitType.legRegion/legBaseRegion`、atlas region resolve，以及 `LegsComp.destroy()` 死亡时两段 `Fx.legDestroy.at(...)` 触发链；
+  1. `UnitType.legRegion/legBaseRegion` 字段表达与 `LegsComp.destroy()` 到本地 effect 队列的最小链路已在后续 `191` 节补齐；下一步继续 UnitComp 持久腿状态、atlas fallback/尺寸 resolve 与真实 renderer；
   2. 把 `TexturedLine.region` 从 headless primitive seam 接到真实 renderer/backend，支持沿线段绘制 atlas region；
   3. 将 `StandardEffectDrawPlan` 的 region/颜色字段从临时 `&'static str` 约束升级为 `String`/`Cow` 或专用 region 字段，移除 interning seam；
   4. 当前总迁移约 9%～10%，仍远未可玩；继续保持所有 helper/plan 最终接入 runtime/content registry/world/entity/network/client-server 调用链。
+
+---
+
+## 191. 最新闭环记录：LegsComp.destroy → Fx.legDestroy 本地队列链路
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：在 `Fx.legDestroy` 已能渲染 textured line primitive 的基础上，继续把 Java `LegsComp.destroy()` 的腿部碎裂事件接到 Rust 的 `UnitType` region 字段和 `GameRuntime.client_local_effect_events` 本地 effect 队列。
+- 本轮迁移：
+  - `UnitType.legRegion / legBaseRegion` 字段表达；
+  - `LegsComp.destroy()` 语义的 destroy plan；
+  - `GameRuntime` 本地 `legDestroy` event queue 接入。
+- Rust 主改动：
+  - `core/src/mindustry/type/unit_type.rs`
+    - 新增 `leg_region: TextureRegionRef`、`leg_base_region: TextureRegionRef`；
+    - `UnitType::new(...)` 默认生成 `<name>-leg` 与 `<name>-leg-base` 名称；
+    - 单测在 `unit_type_leg_mech_tank_segment_and_missile_defaults_match_java` 锁定默认值。
+  - `core/src/mindustry/entities/comp/legs.rs`
+    - `LegsType` 新增 `leg_extension`；
+    - 新增 `LegsDestroyRegions`、`LegsDestroyEffectEvent`、`LegsDynamicExplosionEvent`、`LegsDestroyPlan`；
+    - `LegsComp::destroy_plan(...)` 按 Java guard 跳过未加入/headless，并对每条腿生成两段 `LegDestroyData` 和三个 dynamic explosion plan；
+    - 单测覆盖 base→joint、joint+extension→base、region、explosion radius 与 headless/is_added guard。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `queue_client_legs_destroy_effects(...)`，将 `LegsComp::destroy_plan` 的 effect 事件写入现有 `client_local_effect_events`；
+    - 队列事件为 `EffectCallPacket2` + `TypeValue::LegDestroyData`，随后可由现有 `drain_client_local_effect_events_to_states(...)` materialize；
+    - 单测 `game_runtime_queues_legs_destroy_into_local_effect_events` 覆盖 component → runtime queue → effect state materialize。
+  - `core/src/mindustry/entities/comp/mod.rs`、`core/src/mindustry/entities/mod.rs`
+    - 导出新 destroy plan 类型。
+  - `MIGRATION.md`
+    - 新增 `12.265` 节，并更新 `12.264` 的遗留说明。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core legs --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core game_runtime_queues_legs_destroy_into_local_effect_events --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core unit_type_leg_mech_tank_segment_and_missile_defaults_match_java --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+- 下一步建议：
+  1. 把 `LegsComp` 作为 `UnitComp`/typed unit snapshot 的真实持久子组件接入，不再只由测试手工构造；
+  2. 为 `TextureRegionRef` 接入真实 atlas/content registry 尺寸与 Java `legBaseRegion` fallback：`name + "-leg-base"` fallback 到 `name + "-leg"`；
+  3. 将 `LegsDynamicExplosionEvent` 接到 damage/explosion runtime，补齐 Java `Damage.dynamicExplosion(...)` 的实际副作用；
+  4. 把 `TexturedLine.region` 接入真实图形 renderer，移除 `StandardEffectDrawPlan` region interning 过渡 seam；
+  5. 当前总迁移约 10% 左右，仍远未可玩，继续避免 helper/plan 停留为孤立模块。

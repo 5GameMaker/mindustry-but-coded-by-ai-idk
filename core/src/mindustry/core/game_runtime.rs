@@ -29,8 +29,9 @@ use crate::mindustry::{
         comp::{
             BuildingComp, BuildingTetherComp, BuildingTetherRef, BulletComp, CargoAiRuntimeState,
             ChildParent, DecalComp, DecalRegion, EffectRenderInput, EffectStateComp, FireComp,
-            LaunchCoreBlock, LaunchCoreComp, PayloadComp, PayloadKind, PayloadState, PuddleComp,
-            PuddleTile, UnitComp, UnitControllerState, WorldLabelComp,
+            LaunchCoreBlock, LaunchCoreComp, LegsComp, LegsDestroyRegions, PayloadComp,
+            PayloadKind, PayloadState, PuddleComp, PuddleTile, UnitComp, UnitControllerState,
+            WorldLabelComp,
         },
         entity_class_id, entity_class_kind, standard_effect, standard_effect_id, Effect,
         EntityClassKind, Fires, PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent,
@@ -3857,6 +3858,35 @@ impl GameRuntime {
             }
         }
 
+        emitted
+    }
+
+    pub fn queue_client_legs_destroy_effects(
+        &mut self,
+        legs: &LegsComp,
+        regions: &LegsDestroyRegions,
+        death_explosion_effect: &str,
+        is_added: bool,
+        headless: bool,
+    ) -> usize {
+        let Some(effect_id) = standard_effect_id("legDestroy") else {
+            return 0;
+        };
+        let plan = legs.destroy_plan(regions, death_explosion_effect, is_added, headless);
+        let mut emitted = 0;
+        for event in plan.effects {
+            self.client_local_effect_events.push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: effect_id as u16,
+                    x: event.x,
+                    y: event.y,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::LegDestroyData(event.data),
+            });
+            emitted += 1;
+        }
         emitted
     }
 
@@ -20176,8 +20206,9 @@ mod tests {
         core::GameStateState,
         ctype::{Content, ContentType},
         entities::{
-            units::BuildPlan, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
-            FIRE_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
+            units::BuildPlan, LegsComp, LegsDestroyRegions, LegsType, TextureRegionRef,
+            BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
+            WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
         game::ExportStat,
         io::{
@@ -25825,6 +25856,90 @@ mod tests {
                 .abilities[0]
                 .data,
             0.0
+        );
+    }
+
+    #[test]
+    fn game_runtime_queues_legs_destroy_into_local_effect_events() {
+        let mut runtime = GameRuntime::default();
+        let mut legs = LegsComp::new(LegsType {
+            leg_count: 2,
+            leg_length: 10.0,
+            rotate_speed: 20.0,
+            lock_leg_base: false,
+            allow_leg_step: true,
+            leg_base_offset: 2.0,
+            leg_straightness: 0.0,
+            leg_straight_length: 1.0,
+            base_leg_straightness: 0.0,
+            leg_group_size: 2,
+            leg_move_space: 1.0,
+            leg_continuous_move: false,
+            leg_forward_scl: 1.0,
+            leg_pair_offset: 0.0,
+            leg_length_scl: 1.0,
+            leg_extension: 3.0,
+            leg_min_length: 0.0,
+            leg_max_length: 1.75,
+            flip_back_legs: true,
+            flip_leg_side: false,
+            speed: 1.0,
+        });
+        legs.x = 10.0;
+        legs.y = 20.0;
+        legs.add();
+        let regions = LegsDestroyRegions::new(
+            TextureRegionRef::with_size("crawler-leg", 16, 8),
+            TextureRegionRef::with_size("crawler-leg-base", 12, 6),
+        );
+
+        assert_eq!(
+            runtime.queue_client_legs_destroy_effects(
+                &legs,
+                &regions,
+                "dynamicExplosion",
+                true,
+                false
+            ),
+            4
+        );
+        assert_eq!(runtime.client_local_effect_events.len(), 4);
+        let first = &runtime.client_local_effect_events[0];
+        assert_eq!(
+            first.effect.effect_id,
+            standard_effect_id("legDestroy").unwrap() as u16
+        );
+        assert_eq!(first.effect.rotation, 0.0);
+        assert_eq!(first.effect.color, type_io::RgbaColor::new(-1));
+        let TypeValue::LegDestroyData(first_data) = &first.data else {
+            panic!("leg destroy queue should carry local LegDestroyData");
+        };
+        assert_eq!(first_data.region.name, "crawler-leg");
+        assert_eq!(first_data.region.width, 16);
+        assert_eq!(first_data.region.height, 8);
+
+        let materialized = runtime.drain_client_local_effect_events_to_states(|effect_id| {
+            standard_effect(effect_id as i32)
+        });
+        assert_eq!(materialized, 4);
+        assert!(runtime.client_local_effect_events.is_empty());
+        assert_eq!(runtime.client_local_effect_entities.len(), 4);
+        let state = runtime.client_local_effect_entities.get(&-1).unwrap();
+        assert_eq!(
+            state.effect_id,
+            Some(standard_effect_id("legDestroy").unwrap() as u16)
+        );
+        assert!(matches!(state.data, TypeValue::LegDestroyData(_)));
+
+        assert_eq!(
+            runtime.queue_client_legs_destroy_effects(
+                &legs,
+                &regions,
+                "dynamicExplosion",
+                true,
+                true
+            ),
+            0
         );
     }
 
