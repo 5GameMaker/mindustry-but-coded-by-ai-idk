@@ -1549,6 +1549,10 @@ impl DesktopLauncher {
                 self.remote_players.remove(&entity_id);
                 continue;
             }
+            if self.runtime.client_hidden_entity_ids.contains(&entity_id) {
+                self.remote_players.remove(&entity_id);
+                continue;
+            }
 
             let player = self.remote_players.entry(entity_id).or_insert_with(|| {
                 let mut player = PlayerComp::new(sync.team);

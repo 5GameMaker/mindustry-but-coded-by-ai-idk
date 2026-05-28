@@ -1251,6 +1251,17 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     };
     let mut player_bytes = Vec::new();
     player_sync.write_to(&mut player_bytes).unwrap();
+    let hidden_remote_player_id: i32 = 1013;
+    let mut hidden_remote_player_sync = player_sync.clone();
+    hidden_remote_player_sync.name = Some("hidden-ally".into());
+    hidden_remote_player_sync.team = TeamId(7);
+    hidden_remote_player_sync.unit = UnitRef::Null;
+    hidden_remote_player_sync.x = 222.0;
+    hidden_remote_player_sync.y = 333.0;
+    let mut hidden_remote_player_bytes = Vec::new();
+    hidden_remote_player_sync
+        .write_to(&mut hidden_remote_player_bytes)
+        .unwrap();
     let effect_sync = type_io::EffectStateSyncWire {
         color: type_io::RgbaColor::new(0x336699cc),
         data: type_io::TypeValue::String("spark".into()),
@@ -1368,6 +1379,9 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.extend_from_slice(&connection_id.to_be_bytes());
     multi_entity_data.push(PLAYER_CLASS_ID);
     multi_entity_data.extend_from_slice(&player_bytes);
+    multi_entity_data.extend_from_slice(&hidden_remote_player_id.to_be_bytes());
+    multi_entity_data.push(PLAYER_CLASS_ID);
+    multi_entity_data.extend_from_slice(&hidden_remote_player_bytes);
     multi_entity_data.extend_from_slice(&1009i32.to_be_bytes());
     multi_entity_data.push(EFFECT_STATE_CLASS_ID);
     multi_entity_data.extend_from_slice(&effect_bytes);
@@ -1396,10 +1410,12 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
     multi_entity_data.push(WORLD_LABEL_CLASS_ID);
     multi_entity_data.extend_from_slice(&label_bytes);
     let multi_entity = EntitySnapshotCallPacket {
-        amount: 10,
+        amount: 11,
         data: multi_entity_data,
     };
-    let hidden = HiddenSnapshotCallPacket { ids: vec![4, 5] };
+    let hidden = HiddenSnapshotCallPacket {
+        ids: vec![4, 5, hidden_remote_player_id],
+    };
 
     server
         .net_server
@@ -1531,7 +1547,7 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
                 .last_hidden_snapshot_mirror
                 .as_ref()
                 .map(|mirror| mirror.ids.as_slice()),
-            Some(&[4, 5][..])
+            Some(&[4, 5, hidden_remote_player_id][..])
         );
         assert!(state.last_server_snapshot_at.is_some());
     }
@@ -1589,6 +1605,19 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
             .client_player_snapshot_entities
             .get(&connection_id),
         Some(&player_sync)
+    );
+    assert_eq!(
+        desktop
+            .runtime
+            .client_player_snapshot_entities
+            .get(&hidden_remote_player_id),
+        Some(&hidden_remote_player_sync)
+    );
+    assert!(
+        !desktop
+            .remote_players
+            .contains_key(&hidden_remote_player_id),
+        "hidden remote player snapshot should not be materialized into remote_players"
     );
     assert_eq!(desktop.player.name, "real-snapshot-player");
     assert!(desktop.player.admin);
