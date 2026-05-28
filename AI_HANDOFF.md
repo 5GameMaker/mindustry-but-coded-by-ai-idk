@@ -5102,3 +5102,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `breakBlock=25` / `coreLaunchConstruct=23` 需要 shape + seeded square/line 的组合表达，可能要先扩展 multi-pass 或确认当前 plan 不能只表达一个 kind；
   2. 可继续找单 kind 的早期 wave/shockwave 类效果补迁移；
   3. 中期应回到 renderer/backend，把这些 primitives 从测试数据真正绘制出来。
+
+---
+
+## 152. 最新闭环记录：Early point/command stroked circles
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补齐早期点命中/指令反馈中可由单个 `StrokedCircle` 完整表达的效果。
+- 本轮迁移：
+  - `pointHit=11`
+  - `moveCommand=17`
+  - `commandSend=19`
+- Java 依据：
+  - `Fx.java:161-165`：`pointHit`
+  - `Fx.java:231-235`：`moveCommand`
+  - `Fx.java:243-247`：`commandSend`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 3 个 `FX_*` id 常量；
+    - 接入 `standard_effect_id(...)` / `standard_effect(...)`；
+    - `pointHit` 使用 `Color.white -> Input.color` 插值；
+    - `moveCommand` 使用 `Layer::OVERLAY_UI`；
+    - 新增 draw-plan 测试 `standard_effect_draw_plan_covers_early_command_and_point_shapes`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_early_command_and_point_shapes --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `pointBeam=10` 需要 line segment + line light primitive，不要半迁移；
+  2. `attackCommand=18` 需要 polygon primitive；
+  3. 可继续补单 kind circle/square wave，或转去 renderer/backend 消费 primitives。

@@ -6976,3 +6976,51 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `breakBlock=25` 和 `coreLaunchConstruct=23` 需要组合描边 shape + seeded square/line particles；
   - `coreBuildShockwave=14` / `pointShockwave=16` 等早期 circle/square wave 还需继续逐个对照；
   - renderer/backend 仍需真正消费这些 primitive。
+
+### 12.226 Early point/command stroked circles
+
+- 2026-05-28：补齐早期点命中与指令反馈中的单 pass 描边圆环效果。
+- 本轮迁移：
+  - `pointHit=11`
+  - `moveCommand=17`
+  - `commandSend=19`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:161` 附近：
+    - `pointHit = new Effect(8f, ...)`
+    - `color(Color.white, e.color, e.fin())`
+    - `stroke(e.fout() + 0.2f)`
+    - `Lines.circle(e.x, e.y, e.fin() * 6f)`
+  - `Fx.java:231` 附近：
+    - `moveCommand = new Effect(20, ...)`
+    - `color(Pal.command)`
+    - `stroke(e.fout() * 5f)`
+    - `Lines.circle(e.x, e.y, 6f + e.fin() * 2f)`
+    - `.layer(Layer.overlayUI)`
+  - `Fx.java:243` 附近：
+    - `commandSend = new Effect(28, ...)`
+    - `stroke(e.fout() * 2f)`
+    - `Lines.circle(e.x, e.y, 4f + e.finpow() * e.rotation)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_POINT_HIT_ID=11`、`FX_MOVE_COMMAND_ID=17`、`FX_COMMAND_SEND_ID=19`；
+    - 接入 name lookup 与 metadata；
+    - `pointHit` 使用 `StrokedCircle`，并复用 `Input.color` 动态色语义；
+    - `moveCommand` / `commandSend` 使用 `StrokedCircle` 与 `Pal.command`；
+    - `moveCommand` metadata layer 对齐 `Layer::OVERLAY_UI`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 3 个 id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime 与 overlay layer；
+  - 新增 `standard_effect_draw_plan_covers_early_command_and_point_shapes` 覆盖颜色、半径、stroke 和 layer。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_early_command_and_point_shapes --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `pointBeam=10` 需要 line-to-data-position 与 light line primitive；
+  - `attackCommand=18` 需要 polygon primitive；
+  - `pointShockwave=16` 需要 circle + seeded radial line 的 multi-pass 表达。

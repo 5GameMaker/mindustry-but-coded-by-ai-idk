@@ -50,6 +50,12 @@ pub const FX_HIT_LASER_ID: i32 = 98;
 pub const FX_HIT_LASER_COLOR_ID: i32 = 99;
 /// Upstream `Fx.despawn` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DESPAWN_ID: i32 = 100;
+/// Upstream `Fx.pointHit` id in `mindustry.content.Fx` for v158.1.
+pub const FX_POINT_HIT_ID: i32 = 11;
+/// Upstream `Fx.moveCommand` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MOVE_COMMAND_ID: i32 = 17;
+/// Upstream `Fx.commandSend` id in `mindustry.content.Fx` for v158.1.
+pub const FX_COMMAND_SEND_ID: i32 = 19;
 /// Upstream `Fx.upgradeCoreBloom` id in `mindustry.content.Fx` for v158.1.
 pub const FX_UPGRADE_CORE_BLOOM_ID: i32 = 21;
 /// Upstream `Fx.placeBlock` id in `mindustry.content.Fx` for v158.1.
@@ -189,6 +195,9 @@ pub const FX_OVERDRIVE_BLOCK_FULL_ID: i32 = 255;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
+        "pointHit" => Some(FX_POINT_HIT_ID),
+        "moveCommand" => Some(FX_MOVE_COMMAND_ID),
+        "commandSend" => Some(FX_COMMAND_SEND_ID),
         "upgradeCoreBloom" => Some(FX_UPGRADE_CORE_BLOOM_ID),
         "placeBlock" => Some(FX_PLACE_BLOCK_ID),
         "tapBlock" => Some(FX_TAP_BLOCK_ID),
@@ -286,6 +295,10 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
 
 pub fn standard_effect(effect_id: i32) -> Option<Effect> {
     let effect = match effect_id {
+        FX_POINT_HIT_ID => Effect::with_lifetime(FX_POINT_HIT_ID, 8.0, DEFAULT_EFFECT_CLIP),
+        FX_MOVE_COMMAND_ID => Effect::with_lifetime(FX_MOVE_COMMAND_ID, 20.0, DEFAULT_EFFECT_CLIP)
+            .layer(Layer::OVERLAY_UI),
+        FX_COMMAND_SEND_ID => Effect::with_lifetime(FX_COMMAND_SEND_ID, 28.0, DEFAULT_EFFECT_CLIP),
         FX_UPGRADE_CORE_BLOOM_ID => {
             Effect::with_lifetime(FX_UPGRADE_CORE_BLOOM_ID, 80.0, DEFAULT_EFFECT_CLIP)
         }
@@ -908,6 +921,51 @@ pub fn standard_effect_draw_plan(
     let rocket_smoke_alpha = (fout * 1.6 - rotation.powi(3) * 1.2).clamp(0.0, 1.0);
 
     let plan = match effect_id {
+        FX_POINT_HIT_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: Some("Color.white"),
+            color_mid: None,
+            color_to: Some("Input.color"),
+            color_mix: fin,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fin * 6.0,
+            stroke: fout + 0.2,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_MOVE_COMMAND_ID | FX_COMMAND_SEND_ID => {
+            let (radius, stroke) = if effect_id == FX_MOVE_COMMAND_ID {
+                (6.0 + fin * 2.0, fout * 5.0)
+            } else {
+                (4.0 + finpow * rotation, fout * 2.0)
+            };
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some("Pal.command"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius,
+                stroke,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_UPGRADE_CORE_BLOOM_ID | FX_PLACE_BLOCK_ID => {
             let tile_size = TILE_SIZE as f32;
             let (radius, stroke) = if effect_id == FX_UPGRADE_CORE_BLOOM_ID {
@@ -4120,6 +4178,9 @@ mod tests {
 
     #[test]
     fn standard_effect_ids_include_puddle_ripple_dependencies() {
+        assert_eq!(standard_effect_id("pointHit"), Some(FX_POINT_HIT_ID));
+        assert_eq!(standard_effect_id("moveCommand"), Some(FX_MOVE_COMMAND_ID));
+        assert_eq!(standard_effect_id("commandSend"), Some(FX_COMMAND_SEND_ID));
         assert_eq!(
             standard_effect_id("upgradeCoreBloom"),
             Some(FX_UPGRADE_CORE_BLOOM_ID)
@@ -4324,6 +4385,12 @@ mod tests {
 
     #[test]
     fn standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers() {
+        assert_eq!(standard_effect(FX_POINT_HIT_ID).unwrap().lifetime, 8.0);
+        let move_command = standard_effect(FX_MOVE_COMMAND_ID).unwrap();
+        assert_eq!(move_command.lifetime, 20.0);
+        assert_eq!(move_command.layer, Layer::OVERLAY_UI);
+        assert_eq!(standard_effect(FX_COMMAND_SEND_ID).unwrap().lifetime, 28.0);
+
         assert_eq!(
             standard_effect(FX_UPGRADE_CORE_BLOOM_ID).unwrap().lifetime,
             80.0
@@ -4557,6 +4624,61 @@ mod tests {
             100.0
         );
         assert_eq!(standard_effect_render_lifetime(None, 2.5, 10.0), 10.0);
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_early_command_and_point_shapes() {
+        let input_color = DecalColor::from_rgba(0x66ccffff);
+        let point_hit = standard_effect_draw_plan(
+            Some(FX_POINT_HIT_ID as u16),
+            11,
+            10.0,
+            20.0,
+            0.0,
+            4.0,
+            8.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(point_hit.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(point_hit.color_from, Some("Color.white"));
+        assert_eq!(point_hit.color_to, Some("Input.color"));
+        assert_eq!(point_hit.input_color, Some(input_color));
+        assert_eq!(point_hit.radius, 3.0);
+        assert!((point_hit.stroke - 0.7).abs() < 0.0001);
+
+        let move_command = standard_effect_draw_plan(
+            Some(FX_MOVE_COMMAND_ID as u16),
+            17,
+            10.0,
+            20.0,
+            0.0,
+            10.0,
+            20.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(move_command.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(move_command.color_from, Some("Pal.command"));
+        assert_eq!(move_command.layer, Layer::OVERLAY_UI);
+        assert_eq!(move_command.radius, 7.0);
+        assert_eq!(move_command.stroke, 2.5);
+
+        let command_send = standard_effect_draw_plan(
+            Some(FX_COMMAND_SEND_ID as u16),
+            19,
+            10.0,
+            20.0,
+            12.0,
+            14.0,
+            28.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(command_send.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(command_send.color_from, Some("Pal.command"));
+        assert_eq!(command_send.radius, 14.5);
+        assert_eq!(command_send.stroke, 1.0);
     }
 
     #[test]
