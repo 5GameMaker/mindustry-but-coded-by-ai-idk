@@ -8629,5 +8629,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - Java `UnitComp.destroy()` 的完整 explosion、death sound、weapon shoot-on-death、ability death、wreck/scorch、event bus 仍未迁移；
   - flying wreck 分支目前只保留 dead/added 状态，尚未接 wreck sound、坠毁后续 update 与残骸 renderer；
-  - `UnitSafeDeathCallPacket`、`UnitCapDeathCallPacket`、`UnitEnvDeathCallPacket` 仍需按 Java `Units.java` 各自语义接入；
+  - `UnitSafeDeathCallPacket` 已在 `12.270` 接入最小 remove/effect 语义；`UnitCapDeathCallPacket`、`UnitEnvDeathCallPacket` 仍需按 Java `Units.java` 各自语义接入；
   - Rust server 侧死亡 packet 选择仍需继续对照 Java，不应长期用 despawn 掩盖 destroy/death 差异。
+
+### 12.270 UnitSafeDeathCallPacket → remove + deathExplosionEffect 最小语义
+
+- 2026-05-28：对照 Java `Units.unitSafeDeath(Unit unit)`，把 `UnitSafeDeathCallPacket` 从 lifecycle 队列记录推进到客户端 runtime apply。
+- 本轮迁移：
+  - `GameRuntime.apply_client_unit_safe_death_packet(...)`；
+  - `DesktopLauncher.sync_unit_lifecycle_to_runtime(...)` 分发 `UnitSafeDeathCallPacket`；
+  - safe death 的 remove/effect 回归。
+- Java 依据：
+  - `unitSafeDeath(unit)`：若 unit 为 null 直接 return；
+  - 触发 `unit.type.deathExplosionEffect.at(unit.x, unit.y, unit.hitSize / 8f)`；
+  - `Effect.shake(...)` 与 `unit.type.deathSound.at(...)`；
+  - 最后 `unit.remove()`；
+  - 该路径不是 `unit.destroy()`，因此不应触发 `LegsComp.destroy()` 的腿部碎裂。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `apply_client_unit_safe_death_packet(&UnitSafeDeathCallPacket)`；
+    - 从 `UnitRef` 取 unit id，找到本地 snapshot 后先按 `death_explosion_effect` 尝试排入 `client_local_effect_events`，rotation 使用 `hit_size / 8.0`；
+    - 若 `death_sound` 已在当前窄表中可解析，则排入 `client_local_sound_at_events`；当前 sound table 仍很窄，默认 `unitExplode*` 尚未覆盖；
+    - 执行 `UnitComp::remove(true)` 并从 `client_unit_snapshot_entities` 删除；
+    - 新增 `game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`，锁定 safe death 只产生 death effect，不产生 `legDestroy`。
+  - `desktop/src/lib.rs`
+    - lifecycle 分发新增 `PacketKind::UnitSafeDeathCallPacket`；
+    - 新增 `desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `standard_effect_id("dynamicExplosion")` 尚未覆盖，因此默认 `UnitType.death_explosion_effect = "dynamicExplosion"` 目前只在已知 effect 名称可解析时排队；后续应迁移 `Fx.dynamicExplosion` id/metadata/renderer；
+  - `standard_sound_id` 仍只覆盖极少数声音，`unitExplode1/2/3` 等死亡音效需要继续迁移；
+  - `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
+  - `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 仍需接入。

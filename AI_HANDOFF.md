@@ -6647,6 +6647,47 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. `UnitComp.destroy()` 的完整 explosion、death sound、weapon shoot-on-death、ability death、wreck/scorch 与 event bus 仍待迁移；
   2. flying wreck 分支目前只是 dead/added 状态，后续要接 wreck sound、坠毁 update、残骸/renderer；
-  3. `UnitSafeDeathCallPacket`、`UnitCapDeathCallPacket`、`UnitEnvDeathCallPacket` 仍需按 Java `Units.java` 对应分支接入；
+  3. `UnitSafeDeathCallPacket` 已在 `196` 节接入最小 remove/effect 语义；`UnitCapDeathCallPacket`、`UnitEnvDeathCallPacket` 仍需按 Java `Units.java` 对应分支接入；
   4. server 侧死亡路径仍需对照 Java packet 选择，不能长期用 despawn 代替 death/destroy；
   5. 当前总迁移仍约 10% 左右，远未可玩，继续保证所有模块不是孤立 helper，而是逐步接到真实 runtime/content/world/entity/network/client-server 链路。
+
+---
+
+## 196. 最新闭环记录：UnitSafeDeathCallPacket 接入 remove + deathExplosionEffect 最小语义
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 `UnitSafeDeathCallPacket` 从 lifecycle 队列记录推进到客户端 runtime apply，对齐 Java `Units.unitSafeDeath(Unit unit)` 的最小 remove/effect 语义。
+- Java 对照：
+  - `core/src/mindustry/entities/Units.java::unitSafeDeath(Unit unit)`：
+    - null 直接 return；
+    - `unit.type.deathExplosionEffect.at(unit.x, unit.y, unit.hitSize / 8f)`；
+    - `Effect.shake(...)`；
+    - `unit.type.deathSound.at(...)`；
+    - `unit.remove()`。
+  - 该路径不是 `unit.destroy()`，因此不应触发 `LegsComp.destroy()` / `Fx.legDestroy`。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `apply_client_unit_safe_death_packet(&UnitSafeDeathCallPacket)`；
+    - 从 `UnitRef::Unit { id }` 找到本地 unit 后，按 `death_explosion_effect` 尝试排入 `client_local_effect_events`，rotation = `hit_size / 8.0`；
+    - 若 `death_sound` 在当前 `standard_sound_id` 窄表可解析，则排入 `client_local_sound_at_events`；
+    - 从 `client_unit_snapshot_entities` 移除并调用 `UnitComp::remove(true)`；
+    - 新增 `game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`，验证 safe death 只产生 death effect，不触发 `legDestroy`。
+  - `desktop/src/lib.rs`
+    - lifecycle 分发新增 `PacketKind::UnitSafeDeathCallPacket`；
+    - 新增 `desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`。
+  - `MIGRATION.md`
+    - 新增 `12.270`，并更新 `12.269` 的剩余项。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `Fx.dynamicExplosion` 尚未进入 `standard_effect_id`/metadata/renderer，默认 `UnitType.death_explosion_effect` 还不能完整显示；
+  2. `standard_sound_id` 仍未覆盖 `unitExplode1/2/3` 等死亡音效；
+  3. `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
+  4. `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 仍需接入；
+  5. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。

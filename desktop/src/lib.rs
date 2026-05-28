@@ -825,6 +825,9 @@ impl DesktopLauncher {
                 PacketKind::UnitDeathCallPacket(packet) => {
                     self.runtime.apply_client_unit_death_packet(&packet)
                 }
+                PacketKind::UnitSafeDeathCallPacket(packet) => {
+                    self.runtime.apply_client_unit_safe_death_packet(&packet)
+                }
                 _ => false,
             };
         }
@@ -1854,7 +1857,8 @@ mod tests {
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
         NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
         UnitDeathCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
-        UnitEnteredPayloadCallPacket, UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UnitEnteredPayloadCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -5282,6 +5286,48 @@ mod tests {
             .count();
         assert_eq!(leg_primitives, 4);
         assert_eq!(leg_base_primitives, 4);
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let mut unit_type = UnitType::new(9921, "crawler");
+        unit_type.death_explosion_effect = "despawn".into();
+        unit_type.hit_size = 16.0;
+        let mut unit = UnitComp::new(9921, unit_type, TeamId(4));
+        unit.add();
+        unit.set_pos(30.0, 40.0);
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(9921, unit);
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::UnitSafeDeathCallPacket(
+                UnitSafeDeathCallPacket {
+                    unit: UnitRef::Unit { id: 9921 },
+                },
+            ));
+        }
+        launcher.update();
+
+        assert!(!launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .contains_key(&9921));
+        assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
     }
 
     #[test]

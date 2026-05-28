@@ -48,8 +48,8 @@ use crate::mindustry::{
         AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket, EffectCallPacket,
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerSyncData, SoundAtCallPacket,
         UnitBlockSpawnCallPacket, UnitDeathCallPacket, UnitDespawnCallPacket,
-        UnitDestroyCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
-        UnitTetherBlockSpawnedCallPacket,
+        UnitDestroyCallPacket, UnitEnteredPayloadCallPacket, UnitSafeDeathCallPacket,
+        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -4214,6 +4214,42 @@ impl GameRuntime {
         } else {
             true
         }
+    }
+
+    pub fn apply_client_unit_safe_death_packet(
+        &mut self,
+        packet: &UnitSafeDeathCallPacket,
+    ) -> bool {
+        let UnitRef::Unit { id } = packet.unit else {
+            return false;
+        };
+        let Some(mut unit) = self.client_unit_snapshot_entities.remove(&id) else {
+            return false;
+        };
+
+        if let Some(effect_id) = standard_effect_id(&unit.type_info.death_explosion_effect) {
+            self.client_local_effect_events.push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: effect_id as u16,
+                    x: unit.x(),
+                    y: unit.y(),
+                    rotation: unit.type_info.hit_size / 8.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+        }
+        if let Some(sound_id) = standard_sound_id(&unit.type_info.death_sound) {
+            self.client_local_sound_at_events.push(SoundAtCallPacket {
+                sound_id,
+                x: unit.x(),
+                y: unit.y(),
+                volume: unit.type_info.death_sound_volume,
+                pitch: 1.0,
+            });
+        }
+        unit.remove(true);
+        true
     }
 
     pub fn apply_client_unit_entered_payload_packet(
@@ -26414,6 +26450,46 @@ mod tests {
         assert!(flying.health.dead);
         assert!(flying.entity.is_added());
         assert!(!runtime.apply_client_unit_death_packet(&UnitDeathCallPacket { uid: -1 }));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect() {
+        let mut unit_type = UnitType::new(80, "crawler");
+        unit_type.allow_leg_step = true;
+        unit_type.leg_count = 2;
+        unit_type.death_explosion_effect = "despawn".into();
+        unit_type.hit_size = 16.0;
+        let mut unit = UnitComp::new(80, unit_type, TeamId(4));
+        unit.add();
+        unit.set_pos(30.0, 40.0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(80, unit);
+
+        assert!(
+            runtime.apply_client_unit_safe_death_packet(&UnitSafeDeathCallPacket {
+                unit: UnitRef::Unit { id: 80 },
+            })
+        );
+        assert!(!runtime.client_unit_snapshot_entities.contains_key(&80));
+        assert_eq!(runtime.client_local_effect_events.len(), 1);
+        let event = &runtime.client_local_effect_events[0];
+        assert_eq!(
+            event.effect.effect_id,
+            standard_effect_id("despawn").unwrap() as u16
+        );
+        assert_eq!(event.effect.x, 30.0);
+        assert_eq!(event.effect.y, 40.0);
+        assert_eq!(event.effect.rotation, 2.0);
+        assert!(matches!(&event.data, TypeValue::Null));
+        assert!(!runtime.client_local_effect_events.iter().any(
+            |event| event.effect.effect_id == standard_effect_id("legDestroy").unwrap() as u16
+        ));
+        assert!(
+            !runtime.apply_client_unit_safe_death_packet(&UnitSafeDeathCallPacket {
+                unit: UnitRef::Null,
+            })
+        );
     }
 
     #[test]
