@@ -185,7 +185,7 @@ rust core/src .rs:      353
 | world | 258 | 59 | 最大缺口，方块/建筑/世界行为需要长期推进 |
 | entities | 135 | 71 | 已有一定迁移，但实体运行态仍需闭环 |
 | ui | 71 | 6 | 客户端可游玩前的大缺口 |
-| graphics | 38 | 5 | 渲染与图形资源缺口大 |
+| graphics | 38 | 24 | 渲染计划层已明显扩展，真实 GPU/客户端接线仍缺 |
 | maps | 34 | 5 | 地图加载/编辑/规则仍需推进 |
 | type | 33 | 30 | 类型结构较接近，但行为仍需核查 |
 | logic | 33 | 50 | Rust 拆分较细，需对照行为而非数量 |
@@ -10530,3 +10530,58 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ShootAlternate` 的多 barrel 射击、missile homing/weave/splash 与 naval wake/trail runtime 仍需整体接入验证；
   - 下一步建议继续 `omura`，子代理已确认需要 Rail bullet content 与 unit weapon；
   - 当前总体迁移约 14.6%，远未可玩。
+
+### 12.332 Graphics render plan first integration batch
+
+- 2026-05-29：按用户要求优先推进渲染引擎部分；本轮把 Java `core/src/mindustry/graphics` 的一批核心渲染类先迁移成 Rust 后端无关数据层/计划层，并统一接入 `core/src/mindustry/graphics/mod.rs`，避免继续停留在孤立文件。
+- Java 对照范围：
+  - `BlockRenderer.java`
+  - `FloorRenderer.java`
+  - `FogRenderer.java`
+  - `OverlayRenderer.java`
+  - `Pixelator.java`
+  - `ParticleRenderer.java`
+  - `Shaders.java`
+  - `MenuRenderer.java`
+  - `LoadRenderer.java`
+  - `EnvRenderers.java`
+  - `InverseKinematics.java`
+  - `Voronoi.java`
+  - `MultiPacker.java`
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderEngineState / RenderFramePlan / RenderPass / RenderCommand / RenderViewport / RenderCamera`，作为后续 block/floor/overlay/minimap 等模块复用的统一 render plan 词汇。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `BlockRendererState / BlockRendererPlan / BlockDrawStage / TilePassPlan / BuildingPassPlan / CrackPlan / DarknessPlan / BuildPlanPreview / OverlayPlan`，覆盖缓存层、可见 tile/building 绘制阶段、裂纹、darkness、build preview 与 overlay 计划。
+  - `core/src/mindustry/graphics/floor_renderer.rs`
+    - 新增 `FloorRendererState / FloorRenderPlan / FloorRenderStage / ViewportTileRange / ChunkRange / CacheInvalidationState`，覆盖 floor/cache/ore/shadow/scorch/decals 阶段、viewport tile range 与 chunk dirty 标记。
+  - `core/src/mindustry/graphics/fog_renderer.rs`
+    - 新增 `FogRendererState / FogFramePlan`，覆盖静态/动态 fog texture invalidation、CPU copy、drawFog/drawLight/clear 阶段和静态 fog 事件队列。
+  - `core/src/mindustry/graphics/overlay_renderer.rs`
+    - 新增 `OverlayRendererState / OverlayRendererPlan` 与 build placement、selection、power/liquid/item、spawn/core/target/logic/indicator/label 指令。
+  - `core/src/mindustry/graphics/pixelator.rs`
+    - 新增 `PixelatorState / PixelatorFramePlan`，按 Java `Pixelator.drawPixelate()` 保留整数 scale、相机像素中心对齐、cutscene framebuffer 尺寸和 `Layer::END` restore plan。
+  - `core/src/mindustry/graphics/particle_renderer.rs`
+    - 新增 `ParticleRendererState / Particle / ParticleVertex / ParticleRenderPlan`，保留 Java `maxParticles=100000`、`maxParticlesPerFrame=25000`、`particleSize=9`、`particleVertexSize=4`、`globalDrag=0.05`、`cullPadding=24` 和视口裁剪/生命周期/点精灵 vertex 生成逻辑。
+  - `core/src/mindustry/graphics/shaders.rs`
+    - 新增 shader registry 与 uniform plan 数据层，覆盖 upstream 常用 shader 初始化顺序、texture request、reload/apply plan 与错误收集。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增菜单预览 world recipe、cache/flyer/darkness render command plan，保留桌面 `100x50`、移动端 `60x40`、`darkness=0.3`、`flyerRot=45` 等默认语义。
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - 新增加载界面 stage/theme/frame plan，覆盖 clear/background/logo/planet/progress/prompt/error/completion command。
+  - `core/src/mindustry/graphics/env_renderers.rs`
+    - 新增 environment renderer registry/recipe/context/plan，初步覆盖 `underwater` 与 `scorching` recipe。
+  - `core/src/mindustry/graphics/inverse_kinematics.rs`
+    - 新增 two-bone IK 数学层，覆盖 side/attractor 选边、过远/过近/零目标稳定处理。
+  - `core/src/mindustry/graphics/voronoi.rs`
+    - 新增站点、边、裁剪矩形和 `generate(...)` 计划入口，为 `OverlayRenderer` core edge 后续接线准备数据层。
+  - `core/src/mindustry/graphics/multi_packer.rs`
+    - 新增 atlas page/request/pack plan，覆盖同名 insert/replace/remove 和稳定 page 输出顺序。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core graphics --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - 当前 graphics 定向测试：`77 passed`
+- 仍未完成：
+  - 这些模块仍主要是数据化计划层；真实 GPU backend、texture atlas、world tile renderer adapter、desktop draw loop、UI/input/minimap live texture、renderer event dispatcher 仍需继续接入。
+  - `MinimapRenderer.java` 的 Rust 迁移仍在子代理后台推进；未落地前不能标记 minimap 完成。
+  - 当前总体迁移约 16.4%，仍未达到完整可玩。
