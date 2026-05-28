@@ -94,6 +94,13 @@ pub fn load() -> Vec<BulletContent> {
     beta_laser_bolt.building_damage_multiplier = 0.01;
     beta_laser_bolt.homing_power = 0.03;
 
+    let mut nova_heal_bolt = laser_bolt_bullet(5.2, 13.0);
+    nova_heal_bolt.lifetime = 30.0;
+    nova_heal_bolt.heal_percent = 5.0;
+    nova_heal_bolt.collides_team = true;
+    nova_heal_bolt.back_color = "heal".into();
+    nova_heal_bolt.front_color = "white".into();
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -138,6 +145,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "mace_flame", mace_flame),
         make_bullet(&mut next_id, "quasar_beam", quasar_beam),
         make_bullet(&mut next_id, "beta_laser_bolt", beta_laser_bolt),
+        make_bullet(&mut next_id, "nova_heal_bolt", nova_heal_bolt),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -238,6 +246,7 @@ mod tests {
                 "mace_flame",
                 "quasar_beam",
                 "beta_laser_bolt",
+                "nova_heal_bolt",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -374,6 +383,25 @@ mod tests {
         assert_eq!(bullet.lifetime, 60.0);
         assert_eq!(bullet.building_damage_multiplier, 0.01);
         assert_eq!(bullet.homing_power, 0.03);
+        assert!(!bullet.hittable);
+        assert!(!bullet.reflectable);
+        assert_eq!(bullet.light_opacity, 0.6);
+    }
+
+    #[test]
+    fn nova_heal_bolt_matches_java_laser_bolt_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "nova_heal_bolt").spec;
+
+        assert_eq!(bullet.kind, BulletKind::LaserBolt);
+        assert_eq!(bullet.speed, 5.2);
+        assert_eq!(bullet.damage, 13.0);
+        assert_eq!(bullet.lifetime, 30.0);
+        assert_eq!(bullet.heal_percent, 5.0);
+        assert!(bullet.collides_team);
+        assert_eq!(bullet.back_color, "heal");
+        assert_eq!(bullet.front_color, "white");
+        assert_eq!(bullet.light_color, "heal");
         assert!(!bullet.hittable);
         assert!(!bullet.reflectable);
         assert_eq!(bullet.light_opacity, 0.6);

@@ -7921,3 +7921,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `scale_keep_velocity` 已进入 content schema，但运行时寿命缩放仍未接入；
   3. `LaserBolt` 的绘制、trail、homing、颜色特效和治疗行为仍需接入 runtime/client；
   4. 当前总迁移约 12.75%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 234. 最新闭环记录：UnitTypes nova heal-weapon LaserBolt heal content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- README 状态：已按用户要求完善工程说明并保留空的 `## 作者的话` 栏目，已单独提交推送 `9ba2966 完善 README 工程说明`。
+- 本轮目标：把 Java `UnitTypes.java` 中 `nova` 的 `heal-weapon` 和 `LaserBoltBulletType(5.2f, 13)` 回填进 Rust content registry，复用 `LaserBolt` schema 并覆盖治疗相关字段。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:356-384`
+  - weapon：`heal-weapon`，`top=false`、`shootY=2`、`reload=24`、`x=4.5`、`alternate=false`、`ejectEffect=Fx.none`、`recoil=2`、`shootSound=Sounds.shootLaser`
+  - bullet：`LaserBoltBulletType(5.2, 13)`，`lifetime=30`、`healPercent=5`、`collidesTeam=true`、`backColor=Pal.heal`、`frontColor=Color.white`
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `nova_heal_bolt`；
+    - 更新 bullet load order 测试；
+    - 新增 `nova_heal_bolt_matches_java_laser_bolt_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `nova` 追加 `Weapon::new("heal-weapon")`；
+    - weapon 引用 `bullet = "nova_heal_bolt"`，并设置 Java weapon 字段；
+    - 新增 `nova_heal_weapon_uses_healing_laser_bolt_profile`。
+  - `MIGRATION.md`
+    - 新增 `12.308`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core nova_heal_bolt_matches_java_laser_bolt_profile --lib`
+  - `cargo test -p mindustry-core nova_heal_weapon_uses_healing_laser_bolt_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `dagger/mace/nova/quasar/beta` 的首批 UnitTypes weapon content 已回填；下一步可转向 `fortress/scepter/reign/pulsar/vela` 或补 LaserBolt/Laser runtime；
+  2. `heal_percent/collides_team` 仍只是 content/schema/registry 层，友方治疗 collision runtime 未实现；
+  3. `LaserBolt` 绘制、trail、homing、颜色特效和 `scale_keep_velocity` runtime 仍待接入；
+  4. 当前总迁移约 12.8%，远未可玩，goal 绝不能标记 complete。

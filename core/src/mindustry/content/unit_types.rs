@@ -116,6 +116,17 @@ pub fn load() -> Vec<UnitType> {
             u.armor = 1.0;
             u.ammo_type = "power:1000".into();
             u.abilities.push("RepairFieldAbility:10:240:60".into());
+            let mut weapon = Weapon::new("heal-weapon");
+            weapon.top = false;
+            weapon.shoot_y = 2.0;
+            weapon.reload = 24.0;
+            weapon.x = 4.5;
+            weapon.alternate = false;
+            weapon.eject_effect = "none".into();
+            weapon.recoil = 2.0;
+            weapon.shoot_sound = "shootLaser".into();
+            weapon.bullet = "nova_heal_bolt".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "pulsar", UnitKind::Standard, |u| {
             u.can_boost = true;
@@ -1360,6 +1371,38 @@ mod tests {
         assert!(bullet.spec.scale_keep_velocity);
         assert_eq!(bullet.spec.homing_power, 0.03);
         assert_eq!(bullet.spec.building_damage_multiplier, 0.01);
+    }
+
+    #[test]
+    fn nova_heal_weapon_uses_healing_laser_bolt_profile() {
+        let units = load();
+        let nova = by_name(&units, "nova");
+        assert_eq!(nova.weapons.len(), 1);
+
+        let weapon = &nova.weapons[0];
+        assert_eq!(weapon.name, "heal-weapon");
+        assert!(!weapon.top);
+        assert_eq!(weapon.shoot_y, 2.0);
+        assert_eq!(weapon.reload, 24.0);
+        assert_eq!(weapon.x, 4.5);
+        assert!(!weapon.alternate);
+        assert_eq!(weapon.eject_effect, "none");
+        assert_eq!(weapon.recoil, 2.0);
+        assert_eq!(weapon.shoot_sound, "shootLaser");
+        assert_eq!(weapon.bullet, "nova_heal_bolt");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing nova weapon bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::LaserBolt);
+        assert_eq!(bullet.spec.speed, 5.2);
+        assert_eq!(bullet.spec.damage, 13.0);
+        assert_eq!(bullet.spec.heal_percent, 5.0);
+        assert!(bullet.spec.collides_team);
+        assert_eq!(bullet.spec.back_color, "heal");
+        assert_eq!(bullet.spec.front_color, "white");
     }
 
     #[test]

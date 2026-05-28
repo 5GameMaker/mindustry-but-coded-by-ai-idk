@@ -9772,3 +9772,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `LaserBolt` 的绘制、trail、homing 与颜色特效仍是 content 层记录，客户端显示和完整 bullet 行为还需继续接 runtime；
   - 下一步建议回填 `nova` 的 `heal-weapon`，复用本闭环的 `LaserBolt` schema 并补 `heal_percent/collides_team`；
   - 当前总体迁移约 12.75%，远未可玩。
+
+### 12.308 UnitTypes nova heal-weapon LaserBolt heal content seam
+
+- 2026-05-28：继续回填 `nova` 的 `heal-weapon` 与治疗 `LaserBoltBulletType`，复用上一闭环新增的 `BulletKind::LaserBolt` 与 `laser_bolt_bullet(...)` helper，把 `healPercent` / `collidesTeam` 的 content 数据接到 `UnitType.weapons -> bullet registry` 引用链。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:356-384`
+  - weapon：`new Weapon("heal-weapon")`，`top = false`、`shootY = 2f`、`reload = 24f`、`x = 4.5f`、`alternate = false`、`ejectEffect = Fx.none`、`recoil = 2f`、`shootSound = Sounds.shootLaser`
+  - bullet：`new LaserBoltBulletType(5.2f, 13)`，`lifetime = 30f`、`healPercent = 5f`、`collidesTeam = true`、`backColor = Pal.heal`、`frontColor = Color.white`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增具名 bullet preset `nova_heal_bolt`；
+    - 复用 `laser_bolt_bullet(5.2, 13.0)`，并覆盖 `lifetime/heal_percent/collides_team/back_color/front_color`；
+    - 更新 bullet registry 顺序测试，新增 `nova_heal_bolt_matches_java_laser_bolt_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `nova` 现在注册 `Weapon::new("heal-weapon")`；
+    - weapon 引用 `bullet = "nova_heal_bolt"`，并设置 `top/shoot_y/reload/x/alternate/eject_effect/recoil/shoot_sound`；
+    - 新增 `nova_heal_weapon_uses_healing_laser_bolt_profile`，确认 unit weapon 与 healing LaserBolt bullet registry 引用链。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core nova_heal_bolt_matches_java_laser_bolt_profile --lib`
+  - `cargo test -p mindustry-core nova_heal_weapon_uses_healing_laser_bolt_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `heal_percent` / `collides_team` 已在 content 层和 registry 引用链中存在，但 LaserBolt 对友方建筑治疗的 world collision runtime 尚未实现；
+  - `shootLaser` 目前作为 content 字符串记录，完整 sound/event 发射路径仍待接入；
+  - `LaserBolt` 的绘制、trail、homing、颜色特效和速度继承寿命缩放仍待 runtime/client 补全；
+  - 当前总体迁移约 12.8%，远未可玩。
