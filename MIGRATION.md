@@ -11194,3 +11194,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `UnlockableContentIconCandidates` 目前是候选名计划，尚未把 `fullIcon/uiIcon` 持久字段与实际 atlas 查找接入内容加载生命周期；
   - desktop atlas trace 目前只做命中/miss 诊断，还不是 GPU sprite batch 或真实纹理绑定；
   - 当前总体迁移约 19.1%，仍未达到完整可玩。
+
+### 12.349 Texture atlas carried by desktop graphics frame
+
+- 2026-05-29：继续推进 atlas 从测试/plan 层进入 desktop render 主链。本轮把 `TextureAtlasPlan<bool>` 作为 `DesktopLauncher` 和 `DesktopGraphicsFrame` 的伴随数据，`HeadlessDesktopGraphicsRenderer` 现在通过 `DesktopGraphicsExecutionTrace::from_frame(...)` 默认消费 frame 自带 atlas，不再只依赖测试外部手动调用 `from_frame_with_atlas(...)`。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ClientLauncher.java`
+    - Java 客户端启动期会维护全局 `Core.atlas`，后续渲染命令按 atlas region 名称解析；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - `Draw.rect`/sprite draw 阶段默认依赖已装载 atlas；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - block/building sprite 名称最终应在渲染执行侧解析到 atlas region。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsFrame` 新增 `texture_atlas: TextureAtlasPlan<bool>`；
+    - `DesktopLauncher` 新增 `texture_atlas: TextureAtlasPlan<bool>`；
+    - `graphics_frame_for_render(...)` 会把 launcher 当前 atlas 克隆进 frame；
+    - `DesktopGraphicsExecutionTrace::from_frame(...)` 默认读取 `frame.texture_atlas` 并解析 `DrawSprite`；
+    - 保留 `from_frame_with_atlas(...)` 作为显式覆盖/兼容入口，但主路径已经改为 frame 自带 atlas；
+    - 新增/增强测试，证明 launcher 生成的 frame 携带 atlas，headless renderer 默认能统计 atlas resolved/missing sprite。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `8 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop desktop_launcher_copies_texture_atlas_into_graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - `TextureAtlasPlan<bool>` 当前仍需由调用方/测试注入，尚未接真实 content/mod scan、PNG decode、bleed、atlas flush/rebind；
+  - desktop atlas 解析仍是 headless trace 诊断，不是真实 GPU region bind/sprite batch；
+  - 下一步可继续把 `ModResourcePlan -> SpritePacker -> TextureAtlasPlan` 接入 desktop/content 启动流程，或按 Java crack atlas 规则推进 `BlockRenderer` 裂纹 region 数据链；
+  - 当前总体迁移约 19.2%，仍未达到完整可玩。

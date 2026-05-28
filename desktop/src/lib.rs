@@ -315,6 +315,7 @@ pub struct DesktopGraphicsFrame {
     pub bundle: GraphicsFrameBundle,
     pub floor_chunk_batches: Vec<FloorChunkDrawBatch>,
     pub minimap_texture_frame: Option<MinimapTextureFramePlan>,
+    pub texture_atlas: TextureAtlasPlan<bool>,
 }
 
 impl DesktopGraphicsFrame {
@@ -364,7 +365,7 @@ pub struct DesktopGraphicsExecutionTrace {
 
 impl DesktopGraphicsExecutionTrace {
     pub fn from_frame(frame: &DesktopGraphicsFrame) -> Self {
-        Self::from_frame_and_atlas::<()>(frame, None)
+        Self::from_frame_and_atlas(frame, Some(&frame.texture_atlas))
     }
 
     pub fn from_frame_with_atlas<T>(
@@ -633,6 +634,7 @@ pub struct DesktopLauncher {
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
+    pub texture_atlas: TextureAtlasPlan<bool>,
     content_loader: ContentLoader,
     last_applied_world_data: Option<mindustry_core::mindustry::net::NetworkWorldData>,
     last_applied_state_snapshot: Option<StateSnapshotCallPacket>,
@@ -832,6 +834,7 @@ impl DesktopLauncher {
             connect_target,
             connect_error: None,
             args,
+            texture_atlas: TextureAtlasPlan::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_applied_world_data: None,
             last_applied_state_snapshot: None,
@@ -1539,6 +1542,7 @@ impl DesktopLauncher {
             bundle: bridge.finish(),
             floor_chunk_batches,
             minimap_texture_frame,
+            texture_atlas: self.texture_atlas.clone(),
         }
     }
 
@@ -2988,9 +2992,10 @@ mod tests {
     use super::{
         run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopFrameKind,
         DesktopFramePayload, DesktopGraphicsExecutionSummary, DesktopGraphicsExecutionTrace,
-        DesktopGraphicsFrame, DesktopGraphicsRenderer, DesktopGraphicsShaderApplyExecutionTrace,
-        DesktopLauncher, HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
-        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
+        DesktopGraphicsFrame, DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
+        DesktopGraphicsShaderApplyExecutionTrace, DesktopLauncher, HeadlessDesktopAudioRenderer,
+        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
+        HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -4466,10 +4471,15 @@ mod tests {
                 ShaderApplyPlan::new(ShaderId::Shield),
             ]),
         );
+        let atlas = TextureAtlasPlan::from_virtual_source_paths([
+            "sprites/router.png",
+            "sprites/lighting-glow.png",
+        ]);
         let frame = DesktopGraphicsFrame {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            texture_atlas: atlas.clone(),
         };
 
         let summary = DesktopGraphicsExecutionSummary::from_frame(&frame);
@@ -4513,6 +4523,17 @@ mod tests {
             vec!["router".to_string()]
         );
         assert_eq!(
+            renderer.last_trace.render_passes[0].resolved_sprites[0],
+            DesktopGraphicsResolvedSpriteTrace {
+                symbol: "router".to_string(),
+                page_type: Some(mindustry_core::mindustry::graphics::PageType::Main),
+                page_source_path: Some("sprites.png".to_string()),
+                region_width: Some(1),
+                region_height: Some(1),
+                missing: false,
+            }
+        );
+        assert_eq!(
             renderer.last_trace.render_passes[0].draw_texts,
             vec!["backend-ready".to_string()]
         );
@@ -4529,11 +4550,11 @@ mod tests {
             RenderTarget::Screen
         );
 
-        let atlas = TextureAtlasPlan::from_virtual_source_paths([
-            "sprites/router.png",
-            "sprites/lighting-glow.png",
-        ]);
         let resolved_trace = DesktopGraphicsExecutionTrace::from_frame_with_atlas(&frame, &atlas);
+        assert_eq!(
+            resolved_trace,
+            DesktopGraphicsExecutionTrace::from_frame(&frame)
+        );
         let resolved = &resolved_trace.render_passes[0].resolved_sprites[0];
         assert_eq!(resolved.symbol, "router");
         assert_eq!(
@@ -4550,6 +4571,30 @@ mod tests {
         let resolved_summary = DesktopGraphicsExecutionSummary::from_trace(&frame, &resolved_trace);
         assert_eq!(resolved_summary.atlas_resolved_sprites, 2);
         assert_eq!(resolved_summary.atlas_missing_sprites, 1);
+    }
+
+    #[test]
+    fn desktop_launcher_copies_texture_atlas_into_graphics_frame() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let atlas = TextureAtlasPlan::from_virtual_source_paths([
+            "sprites/router.png",
+            "sprites/lighting-glow.png",
+        ]);
+        launcher.texture_atlas = atlas.clone();
+
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 32.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let minimap_camera = MinimapCamera::new(16.0, 16.0, 32.0, 32.0);
+
+        let frame = launcher.graphics_frame_for_render(
+            1,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        assert_eq!(frame.texture_atlas, atlas);
     }
 
     #[test]
