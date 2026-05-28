@@ -276,6 +276,45 @@ pub fn load() -> Vec<UnitType> {
             u.step_sound = "mechStep".into();
             u.step_sound_pitch = 0.9;
             u.step_sound_volume = 0.25;
+            let mut laser = Weapon::new("vela-weapon");
+            laser.mirror = false;
+            laser.top = false;
+            laser.shake = 4.0;
+            laser.shoot_y = 14.0;
+            laser.x = 0.0;
+            laser.y = 0.0;
+            laser.shoot_first_shot_delay = 40.0 - 1.0;
+            laser.parentize_effects = true;
+            laser.reload = 155.0;
+            laser.recoil = 0.0;
+            laser.charge_sound = "chargeVela".into();
+            laser.shoot_sound = "beamPlasma".into();
+            laser.initial_shoot_sound = "shootBeamPlasma".into();
+            laser.continuous = true;
+            laser.cooldown_time = 200.0;
+            laser.shoot_status = "slow".into();
+            laser.shoot_status_duration = 160.0 + laser.shoot_first_shot_delay;
+            laser.bullet = "vela_continuous_laser".into();
+            u.weapons.push(laser);
+
+            let mut repair = Weapon::new("repair-beam-weapon-center-large");
+            repair.x = 44.0 / 4.0;
+            repair.y = -30.0 / 4.0;
+            repair.shoot_y = 6.0;
+            repair.beam_width = 0.8;
+            repair.repair_speed = 1.4;
+            repair.reload = 1.0;
+            repair.predict_target = false;
+            repair.auto_target = true;
+            repair.controllable = false;
+            repair.rotate = true;
+            repair.mount_type = "HealBeamMount".into();
+            repair.recoil = 0.0;
+            repair.no_attack = true;
+            repair.use_attack_range = false;
+            repair.active_sound = "beamHeal".into();
+            repair.bullet = "vela_repair_range".into();
+            u.weapons.push(repair);
         }),
         unit(&mut next_id, "corvus", UnitKind::Standard, |u| {
             u.hit_size = 29.0;
@@ -1629,6 +1668,68 @@ mod tests {
         assert_eq!(small_bullet.spec.speed, 12.0);
         assert_eq!(small_bullet.spec.damage, 20.0);
         assert_eq!(small_bullet.spec.shrink_interp, "slope");
+    }
+
+    #[test]
+    fn vela_weapons_use_continuous_laser_and_repair_beam_profiles() {
+        let units = load();
+        let vela = by_name(&units, "vela");
+        assert_eq!(vela.weapons.len(), 2);
+
+        let laser = &vela.weapons[0];
+        assert_eq!(laser.name, "vela-weapon");
+        assert!(!laser.mirror);
+        assert!(!laser.top);
+        assert_eq!(laser.shake, 4.0);
+        assert_eq!(laser.shoot_y, 14.0);
+        assert_eq!(laser.x, 0.0);
+        assert_eq!(laser.y, 0.0);
+        assert_eq!(laser.shoot_first_shot_delay, 39.0);
+        assert!(laser.parentize_effects);
+        assert_eq!(laser.reload, 155.0);
+        assert_eq!(laser.recoil, 0.0);
+        assert_eq!(laser.charge_sound, "chargeVela");
+        assert_eq!(laser.shoot_sound, "beamPlasma");
+        assert_eq!(laser.initial_shoot_sound, "shootBeamPlasma");
+        assert!(laser.continuous);
+        assert_eq!(laser.cooldown_time, 200.0);
+        assert_eq!(laser.shoot_status, "slow");
+        assert_eq!(laser.shoot_status_duration, 199.0);
+        assert_eq!(laser.bullet, "vela_continuous_laser");
+
+        let repair = &vela.weapons[1];
+        assert_eq!(repair.name, "repair-beam-weapon-center-large");
+        assert_eq!(repair.x, 44.0 / 4.0);
+        assert_eq!(repair.y, -30.0 / 4.0);
+        assert_eq!(repair.shoot_y, 6.0);
+        assert_eq!(repair.beam_width, 0.8);
+        assert_eq!(repair.repair_speed, 1.4);
+        assert_eq!(repair.reload, 1.0);
+        assert!(!repair.predict_target);
+        assert!(repair.auto_target);
+        assert!(!repair.controllable);
+        assert!(repair.rotate);
+        assert_eq!(repair.mount_type, "HealBeamMount");
+        assert_eq!(repair.recoil, 0.0);
+        assert!(repair.no_attack);
+        assert!(!repair.use_attack_range);
+        assert_eq!(repair.active_sound, "beamHeal");
+        assert_eq!(repair.bullet, "vela_repair_range");
+
+        let bullets = bullets::load();
+        let laser_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == laser.bullet)
+            .unwrap_or_else(|| panic!("missing vela laser bullet {}", laser.bullet));
+        assert_eq!(laser_bullet.spec.kind, BulletKind::ContinuousLaser);
+        assert_eq!(laser_bullet.spec.heal_percent, 1.0);
+        assert!(laser_bullet.spec.collides_team);
+
+        let repair_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == repair.bullet)
+            .unwrap_or_else(|| panic!("missing vela repair bullet {}", repair.bullet));
+        assert_eq!(repair_bullet.spec.max_range, 120.0);
     }
 
     #[test]

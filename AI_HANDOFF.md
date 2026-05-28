@@ -8112,3 +8112,44 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步可继续 Java UnitTypes 后续单位（`vela/corvus/crawler/atrax/...`）或转向补 `fragBullet/intervalBullet/Lightning/LaserBolt` runtime；
   3. `interval_bullet` / shared bullet / trail/shrink 字段仍未进入真实 client draw/runtime；
   4. 当前总迁移约 13.0%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 239. 最新闭环记录：UnitTypes vela continuous laser and repair beam content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `vela` 的主连续激光武器和 `RepairBeamWeapon` 回填进 Rust content registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:488-573`
+  - main weapon：`vela-weapon`，`mirror=false`、`top=false`、`shake=4`、`shootY=14`、`shoot.firstShotDelay=Fx.greenLaserChargeSmall.lifetime-1=39`、`parentizeEffects=true`、`reload=155`、`recoil=0`、`chargeSound=Sounds.chargeVela`、`shootSound=Sounds.beamPlasma`、`initialShootSound=Sounds.shootBeamPlasma`、`continuous=true`、`cooldownTime=200`、`shootStatus=slow`、`shootStatusDuration=199`
+  - main bullet：`ContinuousLaserBulletType`，`damage=35`、`length=180`、`hitEffect=Fx.hitMeltHeal`、`drawSize=420`、`lifetime=160`、`despawnEffect=Fx.smokeCloud`、`smokeEffect=Fx.none`、`chargeEffect=Fx.greenLaserChargeSmall`、`incendChance=0.1`、`healPercent=1`、`collidesTeam=true`、`colors={heal@0.2, heal@0.5, heal*1.2, white}`
+  - repair weapon：`repair-beam-weapon-center-large`，`x=11`、`y=-7.5`、`shootY=6`、`beamWidth=0.8`、`repairSpeed=1.4`，bullet `maxRange=120`
+- Rust 主改动：
+  - `core/src/mindustry/type/weapon.rs`
+    - `Weapon` 新增 `beam_width` / `repair_speed`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `continuous_laser_bullet(...)` helper；
+    - 新增 `vela_continuous_laser`；
+    - 新增 `vela_repair_range`；
+    - 更新 bullet load order 测试；
+    - 新增 `vela_continuous_laser_matches_java_heal_beam_profile`；
+    - 新增 `vela_repair_range_records_repair_beam_max_range`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `vela` 追加 `Weapon::new("vela-weapon")`；
+    - `vela` 追加 `Weapon::new("repair-beam-weapon-center-large")`，手动记录 RepairBeamWeapon 默认字段；
+    - 新增 `vela_weapons_use_continuous_laser_and_repair_beam_profiles`。
+  - `MIGRATION.md`
+    - 新增 `12.313`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core vela_continuous_laser_matches_java_heal_beam_profile --lib`
+  - `cargo test -p mindustry-core vela_repair_range_records_repair_beam_max_range --lib`
+  - `cargo test -p mindustry-core vela_weapons_use_continuous_laser_and_repair_beam_profiles --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一步可继续 `corvus` 的大激光武器，或等待子代理对 `corvus/crawler/atrax/spiroct` 的只读梳理；
+  2. `ContinuousLaserBulletType` 和 `RepairBeamWeapon` 目前是 content/registry 层，真实连续伤害、治疗、beam targeting、绘制/音效 runtime 未实现；
+  3. 当前总迁移约 13.05%，远未可玩，goal 绝不能标记 complete。

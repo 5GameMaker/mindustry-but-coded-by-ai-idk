@@ -201,6 +201,30 @@ pub fn load() -> Vec<BulletContent> {
     scepter_bullet.bullet_interval = 4.0;
     scepter_bullet.interval_bullet = Some(Box::new(scepter_interval));
 
+    let mut vela_continuous_laser = continuous_laser_bullet(35.0);
+    vela_continuous_laser.length = 180.0;
+    vela_continuous_laser.hit_effect = "hitMeltHeal".into();
+    vela_continuous_laser.draw_size = 420.0;
+    vela_continuous_laser.lifetime = 160.0;
+    vela_continuous_laser.shake = 1.0;
+    vela_continuous_laser.despawn_effect = "smokeCloud".into();
+    vela_continuous_laser.smoke_effect = "none".into();
+    vela_continuous_laser.charge_effect = "greenLaserChargeSmall".into();
+    vela_continuous_laser.incend_chance = 0.1;
+    vela_continuous_laser.incend_spread = 5.0;
+    vela_continuous_laser.incend_amount = 1;
+    vela_continuous_laser.heal_percent = 1.0;
+    vela_continuous_laser.collides_team = true;
+    vela_continuous_laser.colors = vec![
+        "heal@0.2".into(),
+        "heal@0.5".into(),
+        "heal*1.2".into(),
+        "white".into(),
+    ];
+
+    let mut vela_repair_range = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+    vela_repair_range.max_range = 120.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -251,6 +275,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "reign_shell", reign_shell),
         make_bullet(&mut next_id, "scepter_small_bullet", scepter_small_bullet),
         make_bullet(&mut next_id, "scepter_bullet", scepter_bullet),
+        make_bullet(&mut next_id, "vela_continuous_laser", vela_continuous_laser),
+        make_bullet(&mut next_id, "vela_repair_range", vela_repair_range),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -361,6 +387,39 @@ fn lightning_bullet() -> BulletSpec {
     bullet
 }
 
+fn continuous_laser_bullet(damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
+    bullet.length = 220.0;
+    bullet.shake = 1.0;
+    bullet.damage_interval = 5.0;
+    bullet.hit_large = true;
+    bullet.continuous = true;
+    bullet.timescale_damage = false;
+    bullet.remove_after_pierce = false;
+    bullet.pierce_cap = -1;
+    bullet.speed = 0.0;
+    bullet.despawn_effect = "none".into();
+    bullet.shoot_effect = "none".into();
+    bullet.lifetime = 16.0;
+    bullet.impact = true;
+    bullet.keep_velocity = false;
+    bullet.collides = false;
+    bullet.pierce = true;
+    bullet.hittable = false;
+    bullet.absorbable = false;
+    bullet.hit_effect = "hitBeam".into();
+    bullet.hit_size = 4.0;
+    bullet.draw_size = 420.0;
+    bullet.hit_color = "ff9c5a".into();
+    bullet.incend_amount = 1;
+    bullet.incend_spread = 5.0;
+    bullet.incend_chance = 0.4;
+    bullet.light_color = "orange".into();
+    bullet.light_opacity = 0.7;
+    bullet.width = 9.0;
+    bullet
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,6 +449,8 @@ mod tests {
                 "reign_shell",
                 "scepter_small_bullet",
                 "scepter_bullet",
+                "vela_continuous_laser",
+                "vela_repair_range",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -715,6 +776,53 @@ mod tests {
         assert_eq!(interval.lightning_length_rand, 4);
         assert_eq!(interval.lightning_color, "surge");
         assert_eq!(interval.hit_effect, "hitLancerLow");
+    }
+
+    #[test]
+    fn vela_continuous_laser_matches_java_heal_beam_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "vela_continuous_laser").spec;
+
+        assert_eq!(bullet.kind, BulletKind::ContinuousLaser);
+        assert_eq!(bullet.speed, 0.0);
+        assert_eq!(bullet.damage, 35.0);
+        assert_eq!(bullet.length, 180.0);
+        assert_eq!(bullet.hit_effect, "hitMeltHeal");
+        assert_eq!(bullet.draw_size, 420.0);
+        assert_eq!(bullet.lifetime, 160.0);
+        assert_eq!(bullet.shake, 1.0);
+        assert_eq!(bullet.despawn_effect, "smokeCloud");
+        assert_eq!(bullet.smoke_effect, "none");
+        assert_eq!(bullet.charge_effect, "greenLaserChargeSmall");
+        assert_eq!(bullet.incend_chance, 0.1);
+        assert_eq!(bullet.incend_spread, 5.0);
+        assert_eq!(bullet.incend_amount, 1);
+        assert_eq!(bullet.heal_percent, 1.0);
+        assert!(bullet.collides_team);
+        assert_eq!(
+            bullet.colors,
+            vec![
+                "heal@0.2".to_string(),
+                "heal@0.5".to_string(),
+                "heal*1.2".to_string(),
+                "white".to_string(),
+            ]
+        );
+        assert!(bullet.continuous);
+        assert!(!bullet.keep_velocity);
+        assert!(!bullet.collides);
+        assert!(bullet.pierce);
+    }
+
+    #[test]
+    fn vela_repair_range_records_repair_beam_max_range() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "vela_repair_range").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Generic);
+        assert_eq!(bullet.speed, 0.0);
+        assert_eq!(bullet.damage, 0.0);
+        assert_eq!(bullet.max_range, 120.0);
     }
 
     #[test]
