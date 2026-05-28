@@ -10782,3 +10782,47 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Fog plan 当前仍未绑定真实 GPU texture/framebuffer、动态 fog light source 采样、shader composite backend；
   - block renderer plan 仍未接入 desktop dispatcher；
   - 当前总体迁移约 17.2%，仍未达到完整可玩。
+
+### 12.339 BlockRenderer/minimap/pixelator/color chain renderer integration
+
+- 2026-05-29：继续优先推进渲染引擎接入；本轮把 block renderer 从孤立 plan/state 推进到 desktop 图形帧 bundle，同时补齐 minimap 像素更新链、tile-aware minimap/getColor 分发，以及 Pixelator 作为 frame wrapper 的桥接槽位。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - `blocks.processBlocks()` / `blocks.drawBlocks()` 依赖 camera/world 可见 tile；
+    - Pixelator 是整帧相机/scale wrapper，而不是普通 draw pass；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - `tileview/lightview/shadowEvents/darkEvents/updateFloors` 是一帧 block renderer 的关键输入；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/MinimapRenderer.java`
+    - `updates` 两帧批处理、pixmap Y 翻转、region crop 与 overlay 绘制拆分；
+  - `ColoredWall.java` / `ColoredFloor.java` / `Cliff.java` / `LightBlock.java`
+    - 特殊 block 的 `minimapColor(Tile)` 需要 tile/build/floor 上下文。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererState::build_plan()` 现在把 `tile_view/light_view/shadow_events/dark_events/update_floors/draw_quadtree_debug/broken_fade` 转成 `BlockRendererPlan`；
+    - `DarknessPlan` 新增 `dirty_tiles`，避免把 dirty event 伪造成真实 darkness 数值；
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `block_renderer_state`；
+    - 新增 `block_render_plan(...)`，从当前 world size + camera/viewport 生成可见 tile plan，并调用 `RenderBridge::set_block_renderer(...)`；
+    - `clear_snapshot_apply_cursors()` 会重置 block renderer state；
+  - `core/src/mindustry/graphics/minimap_renderer.rs`
+    - `update_all` 明确产出整图 pixmap/texture 更新计划；
+    - `update_tick` 保持两帧一批与 pixmap Y 翻转；
+    - `region/visible_world_rect/overlay_plan` 增加 Java 风格 clamp/无效 world 防护；
+  - `core/src/mindustry/world/block.rs`、`world/tile.rs`、`content/blocks.rs`、`world/blocks/environment/mod.rs`、`world/blocks/power/mod.rs`
+    - 新增 tile-aware block/floor 颜色 helper；
+    - `BlockDef::minimap_color_rgba_with(...)` / `color_rgba_with(...)` 分发 ColoredFloor、ColoredWall、Cliff、LightBlock 的 Java 子集语义；
+  - `core/src/mindustry/graphics/render_bridge.rs`、`pixelator.rs`
+    - Pixelator 保持 frame-scoped wrapper，不再伪装为普通 `RenderPass`；
+    - `GraphicsFrameBundle / FrameComposer / RenderBridge` 新增 `pixelator` 槽位与统计。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `2474 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `5 passed`
+  - `cargo check -p mindustry-desktop --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+- 仍未完成：
+  - BlockRenderer 仍是 visible tile / stage plan，尚未接真实 block sprite atlas、Building draw、crack atlas、team/status overlay、power-node link 扩展和 GPU backend；
+  - Pixelator 仅进入 bundle side-channel，desktop 尚未按该槽位真实包裹 renderer scale/camera/framebuffer；
+  - Minimap 像素更新链仍需接真实 `GameState.world + content registry` 增量事件、live texture 上传和 UI HUD；
+  - 当前总体迁移约 17.7%，仍未达到完整可玩。
