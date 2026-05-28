@@ -8577,3 +8577,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议 `quad`，需要大炸弹 bullet 与 bomb/drop 字段；
   3. LaserBolt heal/team collision 与 payload/repair command runtime 仍未完整 content-driven；
   4. 当前总迁移约 14.0%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 252. 最新闭环记录：UnitTypes quad payload bomber and large bomb
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：回填 Java `quad` 的 payload bomber 字段、匿名 bomb weapon 与 `BasicBulletType` 大炸弹，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1453-1517`
+  - `quad`：`accel=0.05`、`drag=0.017`、`autoDropBombs=true`、`circleTarget=true`、`faceTarget=false`、`payloadCapacity=9*tilePayload`、`buildBeamOffset=23`、`range=140`、`targetFlags={battery,factory,null}`、`loopSound=loopHover`；
+  - weapon：anonymous，`mirror=false`、`reload=55`、`minShootVelocity=0.01`、`shootSound=shootQuad`；
+  - `quad_bomb`：`sprite=large-bomb`、`width=height=30`、`maxRange=30`、`ignoreRotation=true`、`hitSoundVolume=0.9`、`shootCone=180`、`spin=2`、`healPercent=15`、`splashDamage=220`、`damage=154`。
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - 新增 `BulletSpec.hit_sound_volume`、`mix_color_to`、`ignore_rotation`、`shoot_cone`、`eject_effect`、`spin`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `quad_bomb`；
+    - 更新 bullet load order；
+    - 新增 `quad_bomb_matches_java_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `quad` 补齐 Java 字段并注册匿名 weapon；
+    - 新增 `quad_bomber_profile_matches_java`。
+  - `README.md`
+    - 当前总体完成度更新为约 `14.1%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.326`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core quad_bomb_matches_java_profile --lib`
+  - `cargo test -p mindustry-core quad_bomber_profile_matches_java --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议 `oct`，需要 shield/repair ability 与 defender payload 支援字段；
+  3. autoDropBombs/payload bomber AI、bomb heal/splash runtime 和新增 bullet 记录位消费仍未完整 content-driven；
+  4. 当前总迁移约 14.1%，远未可玩，goal 绝不能标记 complete。

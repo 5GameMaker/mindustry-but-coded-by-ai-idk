@@ -10354,3 +10354,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - payload command、repair command 与 build AI 还需整体 runtime smoke test；
   - 下一步建议继续 `quad`，需要 BasicBulletType 大炸弹、status/frag/lightning/fire 效果与 payload bomb 行为记录位；
   - 当前总体迁移约 14.0%，远未可玩。
+
+### 12.326 UnitTypes quad payload bomber and large bomb
+
+- 2026-05-28：继续回填 Java `quad` 载荷轰炸支援单位。该闭环为 `BulletSpec` 增补 `ignore_rotation`、`shoot_cone`、`eject_effect`、`spin`、`mix_color_to`、`hit_sound_volume` 等 bullet 记录位，并新增 `quad_bomb` 大炸弹 content。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1453-1517`
+  - `quad`：`armor=8`、`health=6000`、`speed=1.2`、`rotateSpeed=2`、`accel=0.05`、`drag=0.017`、`lowAltitude=false`、`flying=true`、`autoDropBombs=true`、`circleTarget=true`、`engineOffset=13`、`engineSize=7`、`faceTarget=false`、`hitSize=36`、`payloadCapacity=(3*3)*tilePayload`、`buildSpeed=2.5`、`buildBeamOffset=23`、`range=140`、`targetAir=false`、`targetFlags={battery,factory,null}`、`loopSound=loopHover`
+  - anonymous weapon：`x=y=0`、`mirror=false`、`reload=55`、`minShootVelocity=0.01`、`soundPitchMin=1`、`shootSound=shootQuad`
+  - bomb bullet：`BasicBulletType()`，`sprite=large-bomb`、`width=height=30`、`maxRange=30`、`ignoreRotation=true`、`backColor=heal`、`frontColor=white`、`mixColorTo=white`、`hitSound=explosionQuad`、`hitSoundVolume=0.9`、`shootCone=180`、`ejectEffect=none`、`hitShake=4`、`collidesAir=false`、`lifetime=70`、`despawnEffect=greenBomb`、`hitEffect=massiveExplosion`、`keepVelocity=false`、`spin=2`、`shrinkX=shrinkY=0.7`、`speed=0`、`collides=false`、`healPercent=15`、`splashDamage=220`、`splashDamageRadius=80`、`damage=154`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `hit_sound_volume`、`mix_color_to`、`ignore_rotation`、`shoot_cone`、`eject_effect`、`spin` 字段与 Java-like 默认值。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `quad_bomb`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `quad_bomb_matches_java_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `quad` 补齐 Java movement/payload/target/sound 字段；
+    - 注册匿名轰炸 weapon；
+    - 新增 `quad_bomber_profile_matches_java`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `14.1%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core quad_bomb_matches_java_profile --lib`
+  - `cargo test -p mindustry-core quad_bomber_profile_matches_java --lib`
+- 仍未完成：
+  - `quad_bomb` 的真实 autoDropBombs、payload bomber AI、heal/splash 爆炸 runtime 仍需接入；
+  - 新增 bullet 记录位目前主要用于 content parity，渲染/音量/旋转/发射锥仍需 runtime 消费；
+  - 下一步建议继续 `oct`，需要 shield/repair ability 和 payload command/defender AI 字段；
+  - 当前总体迁移约 14.1%，远未可玩。

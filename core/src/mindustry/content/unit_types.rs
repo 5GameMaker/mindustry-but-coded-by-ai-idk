@@ -879,14 +879,34 @@ pub fn load() -> Vec<UnitType> {
             u.health = 6000.0;
             u.speed = 1.2;
             u.rotate_speed = 2.0;
+            u.accel = 0.05;
+            u.drag = 0.017;
             u.low_altitude = false;
             u.flying = true;
+            u.auto_drop_bombs = true;
+            u.circle_target = true;
             u.engine_offset = 13.0;
             u.engine_size = 7.0;
+            u.face_target = false;
             u.hit_size = 36.0;
             u.payload_capacity = 9.0 * super_tile_payload();
             u.build_speed = 2.5;
+            u.build_beam_offset = 23.0;
+            u.range = 140.0;
             u.target_air = false;
+            u.target_flags = vec![Some("battery".into()), Some("factory".into()), None];
+            u.loop_sound = "loopHover".into();
+
+            let mut bomb = Weapon::new("");
+            bomb.x = 0.0;
+            bomb.y = 0.0;
+            bomb.mirror = false;
+            bomb.reload = 55.0;
+            bomb.min_shoot_velocity = 0.01;
+            bomb.sound_pitch_min = 1.0;
+            bomb.shoot_sound = "shootQuad".into();
+            bomb.bullet = "quad_bomb".into();
+            u.weapons.push(bomb);
         }),
         unit(&mut next_id, "oct", UnitKind::Standard, |u| {
             u.armor = 16.0;
@@ -2805,6 +2825,64 @@ mod tests {
         assert_eq!(small_bullet.spec.kind, BulletKind::LaserBolt);
         assert_eq!(small_bullet.spec.damage, 8.0);
         assert_eq!(small_bullet.spec.heal_percent, 3.0);
+    }
+
+    #[test]
+    fn quad_bomber_profile_matches_java() {
+        let units = load();
+        let quad = by_name(&units, "quad");
+
+        assert_eq!(quad.armor, 8.0);
+        assert_eq!(quad.health, 6000.0);
+        assert_eq!(quad.speed, 1.2);
+        assert_eq!(quad.rotate_speed, 2.0);
+        assert_eq!(quad.accel, 0.05);
+        assert_eq!(quad.drag, 0.017);
+        assert!(!quad.low_altitude);
+        assert!(quad.flying);
+        assert!(quad.auto_drop_bombs);
+        assert!(quad.circle_target);
+        assert_eq!(quad.engine_offset, 13.0);
+        assert_eq!(quad.engine_size, 7.0);
+        assert!(!quad.face_target);
+        assert_eq!(quad.hit_size, 36.0);
+        assert_eq!(quad.payload_capacity, 9.0 * super_tile_payload());
+        assert_eq!(quad.build_speed, 2.5);
+        assert_eq!(quad.build_beam_offset, 23.0);
+        assert_eq!(quad.range, 140.0);
+        assert!(!quad.target_air);
+        assert_eq!(
+            quad.target_flags,
+            vec![
+                Some("battery".to_string()),
+                Some("factory".to_string()),
+                None
+            ]
+        );
+        assert_eq!(quad.loop_sound, "loopHover");
+        assert_eq!(quad.weapons.len(), 1);
+
+        let weapon = &quad.weapons[0];
+        assert_eq!(weapon.name, "");
+        assert_eq!(weapon.x, 0.0);
+        assert_eq!(weapon.y, 0.0);
+        assert!(!weapon.mirror);
+        assert_eq!(weapon.reload, 55.0);
+        assert_eq!(weapon.min_shoot_velocity, 0.01);
+        assert_eq!(weapon.sound_pitch_min, 1.0);
+        assert_eq!(weapon.shoot_sound, "shootQuad");
+        assert_eq!(weapon.bullet, "quad_bomb");
+
+        let bullets = bullets::load();
+        let bomb = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .expect("missing quad_bomb");
+        assert_eq!(bomb.spec.kind, BulletKind::Basic);
+        assert_eq!(bomb.spec.sprite, "large-bomb");
+        assert_eq!(bomb.spec.splash_damage, 220.0);
+        assert_eq!(bomb.spec.damage, 154.0);
+        assert_eq!(bomb.spec.heal_percent, 15.0);
     }
 
     #[test]

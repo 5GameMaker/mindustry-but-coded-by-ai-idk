@@ -490,6 +490,34 @@ pub fn load() -> Vec<BulletContent> {
     mega_heal_bolt_small.back_color = "heal".into();
     mega_heal_bolt_small.front_color = "white".into();
 
+    let mut quad_bomb = BulletSpec::new(BulletKind::Basic, 0.0, 0.0);
+    quad_bomb.sprite = "large-bomb".into();
+    quad_bomb.width = 120.0 / 4.0;
+    quad_bomb.height = 120.0 / 4.0;
+    quad_bomb.max_range = 30.0;
+    quad_bomb.ignore_rotation = true;
+    quad_bomb.back_color = "heal".into();
+    quad_bomb.front_color = "white".into();
+    quad_bomb.mix_color_to = "white".into();
+    quad_bomb.hit_sound = "explosionQuad".into();
+    quad_bomb.hit_sound_volume = 0.9;
+    quad_bomb.shoot_cone = 180.0;
+    quad_bomb.eject_effect = "none".into();
+    quad_bomb.hit_shake = 4.0;
+    quad_bomb.collides_air = false;
+    quad_bomb.lifetime = 70.0;
+    quad_bomb.despawn_effect = "greenBomb".into();
+    quad_bomb.hit_effect = "massiveExplosion".into();
+    quad_bomb.keep_velocity = false;
+    quad_bomb.spin = 2.0;
+    quad_bomb.shrink_x = 0.7;
+    quad_bomb.shrink_y = 0.7;
+    quad_bomb.collides = false;
+    quad_bomb.heal_percent = 15.0;
+    quad_bomb.splash_damage = 220.0;
+    quad_bomb.splash_damage_radius = 80.0;
+    quad_bomb.damage = quad_bomb.splash_damage * 0.7;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -561,6 +589,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "poly_missile", poly_missile),
         make_bullet(&mut next_id, "mega_heal_bolt_large", mega_heal_bolt_large),
         make_bullet(&mut next_id, "mega_heal_bolt_small", mega_heal_bolt_small),
+        make_bullet(&mut next_id, "quad_bomb", quad_bomb),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -871,6 +900,7 @@ mod tests {
                 "poly_missile",
                 "mega_heal_bolt_large",
                 "mega_heal_bolt_small",
+                "quad_bomb",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1691,6 +1721,41 @@ mod tests {
         assert_eq!(small.light_color, "heal");
         assert!(!small.hittable);
         assert!(!small.reflectable);
+    }
+
+    #[test]
+    fn quad_bomb_matches_java_profile() {
+        let bullets = load();
+        let bomb = &by_name(&bullets, "quad_bomb").spec;
+
+        assert_eq!(bomb.kind, BulletKind::Basic);
+        assert_eq!(bomb.sprite, "large-bomb");
+        assert_eq!(bomb.width, 30.0);
+        assert_eq!(bomb.height, 30.0);
+        assert_eq!(bomb.max_range, 30.0);
+        assert!(bomb.ignore_rotation);
+        assert_eq!(bomb.back_color, "heal");
+        assert_eq!(bomb.front_color, "white");
+        assert_eq!(bomb.mix_color_to, "white");
+        assert_eq!(bomb.hit_sound, "explosionQuad");
+        assert_eq!(bomb.hit_sound_volume, 0.9);
+        assert_eq!(bomb.shoot_cone, 180.0);
+        assert_eq!(bomb.eject_effect, "none");
+        assert_eq!(bomb.hit_shake, 4.0);
+        assert!(!bomb.collides_air);
+        assert_eq!(bomb.lifetime, 70.0);
+        assert_eq!(bomb.despawn_effect, "greenBomb");
+        assert_eq!(bomb.hit_effect, "massiveExplosion");
+        assert!(!bomb.keep_velocity);
+        assert_eq!(bomb.spin, 2.0);
+        assert_eq!(bomb.shrink_x, 0.7);
+        assert_eq!(bomb.shrink_y, 0.7);
+        assert_eq!(bomb.speed, 0.0);
+        assert!(!bomb.collides);
+        assert_eq!(bomb.heal_percent, 15.0);
+        assert_eq!(bomb.splash_damage, 220.0);
+        assert_eq!(bomb.splash_damage_radius, 80.0);
+        assert_eq!(bomb.damage, 154.0);
     }
 
     #[test]
