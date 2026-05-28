@@ -10724,3 +10724,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - desktop 目前只把 light plan 放进 headless/backend-neutral `RenderFramePlan`；真实 GPU 后端、light framebuffer resize、blend equation、`Shaders.light` ambient blit 仍未实现；
   - block/floor/fog plan 仍未从真实 world runtime 喂入 `DesktopGraphicsFrame`；
   - 当前总体迁移约 17.0%，仍未达到完整可玩。
+
+### 12.337 Desktop graphics frame feeds FloorRendererPlan
+
+- 2026-05-29：继续补 renderer dispatcher 接线；本轮把已有 `FloorRendererState/FloorRenderPlan` 接入 `DesktopLauncher::graphics_frame_for_render(...)`，让 desktop 图形帧在已加载 world 时同时携带 floor plan。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - `blocks.floor.drawFloor()` 是主渲染管线早期阶段；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/FloorRenderer.java`
+    - 基于 camera/viewport 计算可见 tile/chunk；
+    - 按固定 stage/cache layer 顺序生成 floor/cache/ore/shadow/scorch/decals 绘制批次。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `floor_renderer_state: FloorRendererState`；
+    - 新增 `DesktopLauncher::floor_render_plan(...)`，从当前 `GameState.world` 尺寸和 `RenderCamera.world_rect()` 生成 `FloorRenderPlan`；
+    - `graphics_frame_for_render(...)` 在 world 尺寸有效时调用 `RenderBridge::set_floor_renderer(...)`；
+    - `clear_snapshot_apply_cursors()` 重置 `floor_renderer_state`；
+    - desktop graphics frame 测试现在断言已加载 world 会产出 floor plan、可见 chunk 和 stage plans，空 world 不误报 floor plan。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `3 passed`
+  - `cargo test -p mindustry-core floor_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `3 passed`
+  - `cargo check -p mindustry-desktop --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+- 仍未完成：
+  - Floor plan 当前仍是 viewport/chunk/stage/dirty-cache 计划，还没有接真实 tile sprite atlas、chunk mesh、wall cache layer 与 underwater draw backend；
+  - block/fog plan 仍未接入 desktop dispatcher；
+  - 当前总体迁移约 17.1%，仍未达到完整可玩。

@@ -25,10 +25,11 @@ use mindustry_core::mindustry::entities::{
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::{
-    GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState, MinimapCamera,
-    MinimapOverlayInput, MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapWorldSize,
-    OverlayRendererPlan, OverlayRendererState, RenderBridge, RenderCamera, RenderEngineState,
-    RenderFramePlan, RenderPoint, RenderSize, RenderViewport,
+    FloorRenderPlan, FloorRendererState, GraphicsFrameBundle, GraphicsFrameStats,
+    LightRendererPlan, LightRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
+    MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan, OverlayRendererState,
+    RenderBridge, RenderCamera, RenderEngineState, RenderFramePlan, RenderPoint, RenderSize,
+    RenderViewport, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -351,6 +352,7 @@ pub struct DesktopLauncher {
     pub last_camera_shake_frame: DesktopCameraShakeFrame,
     pub overlay_renderer_state: OverlayRendererState,
     pub light_renderer_state: LightRendererState,
+    pub floor_renderer_state: FloorRendererState,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -409,6 +411,7 @@ impl DesktopLauncher {
             last_camera_shake_frame: DesktopCameraShakeFrame::default(),
             overlay_renderer_state: OverlayRendererState::default(),
             light_renderer_state: LightRendererState::default(),
+            floor_renderer_state: FloorRendererState::default(),
             connect_target,
             connect_error: None,
             args,
@@ -837,6 +840,28 @@ impl DesktopLauncher {
         self.light_renderer_state.drain_plan()
     }
 
+    pub fn floor_render_plan(
+        &mut self,
+        mut camera: RenderCamera,
+        viewport: RenderViewport,
+    ) -> Option<FloorRenderPlan> {
+        let world = self.current_minimap_world_size();
+        if world.width <= 0 || world.height <= 0 {
+            return None;
+        }
+
+        self.floor_renderer_state
+            .set_world_tiles(world.width, world.height);
+        camera.viewport = viewport;
+        let world_rect = camera.world_rect();
+        Some(self.floor_renderer_state.build_plan(FloorViewport::new(
+            world_rect.center().x,
+            world_rect.center().y,
+            world_rect.width,
+            world_rect.height,
+        )))
+    }
+
     pub fn graphics_frame_for_render(
         &mut self,
         frame_index: u64,
@@ -850,6 +875,7 @@ impl DesktopLauncher {
             render_frame.push_pass(light_pass);
             render_frame.sort_passes();
         }
+        let floor_renderer = self.floor_render_plan(camera, viewport);
         let overlay_renderer = self.drain_overlay_renderer_plan();
         let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
 
@@ -858,6 +884,9 @@ impl DesktopLauncher {
             .set_render_frame(render_frame)
             .set_overlay_renderer(overlay_renderer)
             .set_minimap_overlay(minimap_overlay);
+        if let Some(floor_renderer) = floor_renderer {
+            bridge.set_floor_renderer(floor_renderer);
+        }
 
         DesktopGraphicsFrame {
             bundle: bridge.finish(),
@@ -1702,6 +1731,7 @@ impl DesktopLauncher {
         self.last_camera_shake_frame = DesktopCameraShakeFrame::default();
         self.overlay_renderer_state = OverlayRendererState::default();
         self.light_renderer_state = LightRendererState::default();
+        self.floor_renderer_state = FloorRendererState::default();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -3369,8 +3399,11 @@ mod tests {
             sample_minimap_overlay_input(true),
         );
 
-        assert_eq!(frame.bundle.stats.present_plans, 3);
+        assert_eq!(frame.bundle.stats.present_plans, 4);
         assert_eq!(frame.bundle.stats.render_passes, 0);
+        assert!(frame.bundle.floor_renderer.is_some());
+        assert_eq!(frame.bundle.stats.floor_visible_chunks, 1);
+        assert!(frame.bundle.stats.floor_stage_plans > 0);
         assert_eq!(frame.bundle.stats.minimap_commands, 1);
         assert!(launcher.standard_local_effect_draw_plans.is_empty());
         assert!(launcher.standard_local_effect_light_primitives.is_empty());
@@ -3387,6 +3420,13 @@ mod tests {
         let minimap_plan = frame.bundle.minimap_overlay.as_ref().unwrap();
         assert_eq!(minimap_plan.world_rect.width, 24.0);
         assert_eq!(minimap_plan.world_rect.height, 16.0);
+
+        let floor_plan = frame.bundle.floor_renderer.as_ref().unwrap();
+        assert_eq!(floor_plan.visible_chunks.len(), 1);
+        assert_eq!(
+            floor_plan.stage_plans.len(),
+            frame.bundle.stats.floor_stage_plans
+        );
     }
 
     #[test]
@@ -3419,6 +3459,7 @@ mod tests {
         assert_eq!(frame.bundle.stats.present_plans, 3);
         assert_eq!(frame.bundle.stats.render_passes, 1);
         assert_eq!(frame.bundle.stats.render_commands, 1);
+        assert!(frame.bundle.floor_renderer.is_none());
         assert!(launcher.light_renderer_state.circle_lights.is_empty());
         assert!(launcher.light_renderer_state.commands.is_empty());
 
@@ -3470,6 +3511,7 @@ mod tests {
         );
 
         assert_eq!(stats.present_plans, 3);
+        assert_eq!(stats.floor_stage_plans, 0);
         assert_eq!(renderer.frames_rendered, 1);
         assert_eq!(renderer.last_stats, stats);
 
