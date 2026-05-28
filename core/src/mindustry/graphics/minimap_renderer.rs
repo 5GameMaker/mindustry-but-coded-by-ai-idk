@@ -171,6 +171,51 @@ pub struct MinimapFullUpdatePlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MinimapTextureSize {
+    pub width: i32,
+    pub height: i32,
+}
+
+impl MinimapTextureSize {
+    pub const fn new(width: i32, height: i32) -> Self {
+        Self { width, height }
+    }
+}
+
+impl From<MinimapWorldSize> for MinimapTextureSize {
+    fn from(value: MinimapWorldSize) -> Self {
+        Self::new(value.width, value.height)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MinimapTexturePixelUpdate {
+    pub pos: MinimapTilePos,
+    pub texture_x: i32,
+    pub texture_y: i32,
+    pub rgba: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinimapTextureFramePlan {
+    pub texture_size: MinimapTextureSize,
+    pub recreate_texture: bool,
+    pub full_upload: Option<MinimapFullUpdatePlan>,
+    pub dirty_pixels: Vec<MinimapTexturePixelUpdate>,
+}
+
+impl MinimapTextureFramePlan {
+    pub fn new(texture_size: MinimapTextureSize) -> Self {
+        Self {
+            texture_size,
+            recreate_texture: false,
+            full_upload: None,
+            dirty_pixels: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MinimapFogLayer {
     Dynamic,
     Static,
@@ -365,6 +410,10 @@ impl MinimapRendererState {
         })
     }
 
+    pub fn texture_size(&self) -> MinimapTextureSize {
+        self.world.into()
+    }
+
     pub fn zoom_by(&mut self, amount: f32) {
         self.set_zoom(self.zoom + amount);
     }
@@ -426,6 +475,11 @@ impl MinimapRendererState {
         self.updates.clear();
 
         Some(MinimapTileUpdatePlan { updates })
+    }
+
+    pub fn texture_frame_plan(&self) -> Option<MinimapTextureFramePlan> {
+        self.update_all()
+            .map(MinimapFullUpdatePlan::texture_frame_plan)
     }
 
     pub fn region(&self, camera: MinimapCamera) -> Option<MinimapRegion> {
@@ -661,6 +715,66 @@ fn arc_clamp(value: f32, min: f32, max: f32) -> f32 {
     min.max(value.min(max))
 }
 
+impl MinimapResetPlan {
+    pub fn texture_frame_plan(self) -> MinimapTextureFramePlan {
+        let texture_size = MinimapTextureSize::new(self.width, self.height);
+        MinimapTextureFramePlan {
+            texture_size,
+            recreate_texture: self.recreate_texture,
+            full_upload: Some(MinimapFullUpdatePlan {
+                width: self.width,
+                height: self.height,
+            }),
+            dirty_pixels: Vec::new(),
+        }
+    }
+}
+
+impl MinimapFullUpdatePlan {
+    pub const fn texture_size(self) -> MinimapTextureSize {
+        MinimapTextureSize::new(self.width, self.height)
+    }
+
+    pub fn texture_frame_plan(self) -> MinimapTextureFramePlan {
+        MinimapTextureFramePlan {
+            texture_size: self.texture_size(),
+            recreate_texture: false,
+            full_upload: Some(self),
+            dirty_pixels: Vec::new(),
+        }
+    }
+}
+
+impl MinimapPixelUpdate {
+    pub const fn texture_update(
+        self,
+        texture_size: MinimapTextureSize,
+    ) -> MinimapTexturePixelUpdate {
+        MinimapTexturePixelUpdate {
+            pos: self.pos,
+            texture_x: self.pixmap_x,
+            texture_y: texture_size.height - 1 - self.pos.y,
+            rgba: self.rgba,
+        }
+    }
+}
+
+impl MinimapTileUpdatePlan {
+    pub fn texture_frame_plan(&self, texture_size: MinimapTextureSize) -> MinimapTextureFramePlan {
+        MinimapTextureFramePlan {
+            texture_size,
+            recreate_texture: false,
+            full_upload: None,
+            dirty_pixels: self
+                .updates
+                .iter()
+                .copied()
+                .map(|update| update.texture_update(texture_size))
+                .collect(),
+        }
+    }
+}
+
 fn mul_rgb(color: u32, r_mul: f32, g_mul: f32, b_mul: f32) -> u32 {
     let r = (((color >> 24) & 0xff) as f32 * r_mul).clamp(0.0, 255.0) as u32;
     let g = (((color >> 16) & 0xff) as f32 * g_mul).clamp(0.0, 255.0) as u32;
@@ -695,7 +809,7 @@ mod tests {
         state.set_zoom(0.25);
         assert_eq!(state.get_zoom(), 1.0);
 
-        state.set_zoom(999.0);
+        state.zoom_by(999.0);
         assert_eq!(state.get_zoom(), 3.125);
     }
 
@@ -734,6 +848,73 @@ mod tests {
                 width: 32,
                 height: 18,
             })
+        );
+    }
+
+    #[test]
+    fn texture_frame_plan_from_full_update_carries_texture_size_and_upload() {
+        let state = MinimapRendererState::new(MinimapWorldSize::new(32, 18));
+        assert_eq!(state.texture_size(), MinimapTextureSize::new(32, 18));
+
+        assert_eq!(
+            state.texture_frame_plan(),
+            Some(MinimapTextureFramePlan {
+                texture_size: MinimapTextureSize::new(32, 18),
+                recreate_texture: false,
+                full_upload: Some(MinimapFullUpdatePlan {
+                    width: 32,
+                    height: 18,
+                }),
+                dirty_pixels: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn reset_plan_texture_frame_plan_requests_recreate_and_full_upload() {
+        let mut state = MinimapRendererState::new(MinimapWorldSize::new(8, 8));
+        let plan = state.reset(MinimapWorldSize::new(64, 48));
+
+        assert_eq!(state.texture_size(), MinimapTextureSize::new(64, 48));
+        assert_eq!(
+            plan.texture_frame_plan(),
+            MinimapTextureFramePlan {
+                texture_size: MinimapTextureSize::new(64, 48),
+                recreate_texture: true,
+                full_upload: Some(MinimapFullUpdatePlan {
+                    width: 64,
+                    height: 48,
+                }),
+                dirty_pixels: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn tile_update_plan_texture_frame_plan_keeps_y_flipped_texture_coords() {
+        let pos = MinimapTilePos::new(4, 3);
+        let update_plan = MinimapTileUpdatePlan {
+            updates: vec![MinimapPixelUpdate {
+                pos,
+                pixmap_x: 4,
+                pixmap_y: 6,
+                rgba: 0x123456ff,
+            }],
+        };
+
+        assert_eq!(
+            update_plan.texture_frame_plan(MinimapTextureSize::new(20, 10)),
+            MinimapTextureFramePlan {
+                texture_size: MinimapTextureSize::new(20, 10),
+                recreate_texture: false,
+                full_upload: None,
+                dirty_pixels: vec![MinimapTexturePixelUpdate {
+                    pos,
+                    texture_x: 4,
+                    texture_y: 6,
+                    rgba: 0x123456ff,
+                }],
+            }
         );
     }
 
