@@ -11329,3 +11329,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `DrawBlock` 子类多 region、variant、team overlay、liquid/power/turret 特殊 region 仍未完整接入；
   - mod sprites 与 icon candidates 仍需继续接入同一个默认 atlas/content 加载生命周期；
   - 当前总体迁移约 19.5%，仍未达到完整可玩。
+
+### 12.353 Content icon candidates seeded into default desktop atlas
+
+- 2026-05-29：继续把 Java `UnlockableContent.loadIcon()` 的候选名从纯数据计划接入 desktop 默认 atlas。本轮默认 atlas 会从 `ContentLoader` 遍历 block/item/liquid/unit/status content，将 full/ui icon candidate 名称转成虚拟 source path，并与 block base sprites、crack regions 一起进入 `TextureAtlasPlan<bool>`。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ctype/UnlockableContent.java`
+    - `loadIcon()` full icon fallback：`fullOverride -> type-name-full -> name-full -> name -> type-name -> name1`；
+    - UI icon 先尝试 `type-name-ui`，失败时回退 full icon；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/ContentLoader.java`
+    - 内容遍历按 content type/bucket 生命周期统一触发加载与图标解析。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `default_desktop_texture_atlas(...)` 现在先加入 `content_icon_candidate_virtual_source_paths(content_loader)`；
+    - `push_icon_candidate_virtual_source_paths(...)` 会保留 `generate_icons` gate：
+      - full candidates -> `sprites/{candidate}.png`；
+      - ui candidates -> `sprites/ui/{candidate}.png`；
+    - 覆盖 block/item/liquid/unit/status 的 `UnlockableContentBase`，其中 block 通过 `BlockDef::base()` 临时构造同名 `UnlockableContentBase`，直到 Block 完整迁移为 UnlockableContent 结构；
+    - 默认 atlas 测试新增 `block-router-ui`、`item-copper-full`、`liquid-water-ui` 的命中断言。
+  - `core/src/mindustry/ctype/unlockable_content.rs`
+    - 新增 block/item/liquid table test，锁定 Java fallback 顺序。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-core icon_candidates --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `3 passed`
+  - `cargo test -p mindustry-desktop default_texture_atlas --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `9 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - icon candidate source path 当前仍是虚拟 registry，尚未真实扫描文件、decode PNG、生成 `fullIcon/uiIcon` 持久字段或绑定 GPU texture region；
+  - `fullOverride`、mod override、真实 `generateIcons/createIcons` 输出和 Block 完整 UnlockableContent 继承关系仍需继续迁移；
+  - 当前总体迁移约 19.6%，仍未达到完整可玩。

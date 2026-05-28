@@ -14,7 +14,7 @@ use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameRuntimeMapLoadReport,
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
-use mindustry_core::mindustry::ctype::{ContentId, ContentType};
+use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
 use mindustry_core::mindustry::entities::comp::BuildingComp;
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect,
@@ -778,15 +778,70 @@ fn default_desktop_texture_atlas(
     content_loader: &ContentLoader,
 ) -> TextureAtlasPlan<bool> {
     TextureAtlasPlan::from_virtual_source_paths(
-        block_renderer_state
-            .crack_atlas
-            .virtual_source_paths()
+        content_icon_candidate_virtual_source_paths(content_loader)
             .into_iter()
+            .chain(
+                block_renderer_state
+                    .crack_atlas
+                    .virtual_source_paths()
+                    .into_iter(),
+            )
             .chain(content_loader.blocks().map(|block| {
                 let name = &block.base().name;
                 format!("sprites/blocks/{}.png", name)
             })),
     )
+}
+
+fn content_icon_candidate_virtual_source_paths(content_loader: &ContentLoader) -> Vec<String> {
+    let mut paths = Vec::new();
+
+    for block in content_loader.blocks() {
+        let block = block.base();
+        let icon_content = UnlockableContentBase::new(block.id, ContentType::Block, &block.name);
+        push_icon_candidate_virtual_source_paths(&mut paths, &icon_content);
+    }
+
+    for item in content_loader.items() {
+        push_icon_candidate_virtual_source_paths(&mut paths, &item.base);
+    }
+
+    for liquid in content_loader.liquids() {
+        push_icon_candidate_virtual_source_paths(&mut paths, &liquid.base);
+    }
+
+    for unit in content_loader.units() {
+        push_icon_candidate_virtual_source_paths(&mut paths, &unit.base);
+    }
+
+    for status in content_loader.status_effects() {
+        push_icon_candidate_virtual_source_paths(&mut paths, &status.base);
+    }
+
+    paths
+}
+
+fn push_icon_candidate_virtual_source_paths(
+    paths: &mut Vec<String>,
+    content: &UnlockableContentBase,
+) {
+    let candidates = content.icon_candidates(None);
+    if !candidates.generate_icons {
+        return;
+    }
+
+    paths.extend(
+        candidates
+            .full_candidates
+            .into_iter()
+            .map(|name| format!("sprites/{}.png", name)),
+    );
+    paths.extend(
+        candidates
+            .ui_candidates
+            .into_iter()
+            .map(|name| format!("sprites/ui/{}.png", name)),
+    );
 }
 
 fn block_renderer_tile_snapshot_from_world(
@@ -4271,6 +4326,33 @@ mod tests {
         assert_eq!(router.region.source_path, "sprites/blocks/router.png");
         assert_eq!(router.region.width, 1);
         assert_eq!(router.region.height, 1);
+
+        let block_ui = launcher
+            .texture_atlas
+            .lookup("block-router-ui")
+            .expect("default desktop atlas should expose block UI icon candidates");
+        assert_eq!(block_ui.page_type, PageType::Ui);
+        assert_eq!(
+            block_ui.region.source_path,
+            "sprites/ui/block-router-ui.png"
+        );
+
+        let item_full = launcher
+            .texture_atlas
+            .lookup("item-copper-full")
+            .expect("default desktop atlas should expose item full icon candidates");
+        assert_eq!(item_full.page_type, PageType::Main);
+        assert_eq!(item_full.region.source_path, "sprites/item-copper-full.png");
+
+        let liquid_ui = launcher
+            .texture_atlas
+            .lookup("liquid-water-ui")
+            .expect("default desktop atlas should expose liquid UI icon candidates");
+        assert_eq!(liquid_ui.page_type, PageType::Ui);
+        assert_eq!(
+            liquid_ui.region.source_path,
+            "sprites/ui/liquid-water-ui.png"
+        );
 
         let first = launcher
             .texture_atlas

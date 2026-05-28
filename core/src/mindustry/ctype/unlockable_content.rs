@@ -126,4 +126,53 @@ mod tests {
         );
         assert_eq!(candidates.ui_candidates, vec!["item-copper-ui"]);
     }
+
+    #[test]
+    fn icon_candidates_match_java_fallback_order_for_block_item_liquid() {
+        for (content_type, name, full, ui) in [
+            (
+                ContentType::Block,
+                "router",
+                vec![
+                    "block-router-full",
+                    "router-full",
+                    "router",
+                    "block-router",
+                    "router1",
+                ],
+                vec!["block-router-ui"],
+            ),
+            (
+                ContentType::Item,
+                "copper",
+                vec![
+                    "item-copper-full",
+                    "copper-full",
+                    "copper",
+                    "item-copper",
+                    "copper1",
+                ],
+                vec!["item-copper-ui"],
+            ),
+            (
+                ContentType::Liquid,
+                "water",
+                vec![
+                    "liquid-water-full",
+                    "water-full",
+                    "water",
+                    "liquid-water",
+                    "water1",
+                ],
+                vec!["liquid-water-ui"],
+            ),
+        ] {
+            let content = UnlockableContentBase::new(1, content_type, name);
+            let candidates = content.icon_candidates(None);
+
+            assert!(candidates.generate_icons);
+            assert_eq!(candidates.full_candidates, full);
+            assert_eq!(candidates.ui_candidates, ui);
+        }
+    }
 }
