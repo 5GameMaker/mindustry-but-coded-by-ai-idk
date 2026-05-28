@@ -461,6 +461,24 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
                 .trim();
             vec![draw_region_name(block_name, suffix, None)]
         }
+        Some(("DrawPistons", args)) => {
+            let suffix = split_drawer_args(args)
+                .first()
+                .copied()
+                .unwrap_or("-piston")
+                .trim();
+            let suffix = if suffix.is_empty() { "-piston" } else { suffix };
+            vec![draw_piston_region_names(block_name, suffix)[3].clone()]
+        }
+        Some(("DrawWeave", _)) => vec![draw_weave_name(block_name)],
+        Some(("DrawMultiWeave", _)) => {
+            let (weave, _) = draw_multi_weave_region_names(block_name);
+            draw_multi_weave_icons(false, &weave)
+        }
+        Some(("DrawSideRegion", _)) => {
+            let (top1, _) = draw_side_region_names(block_name);
+            vec![top1]
+        }
         Some(("DrawTurret", _)) => {
             let names = draw_turret_region_names(block_name, 0, "", None);
             draw_turret_icons(&names.base, &names.preview, Some(&names.top))
@@ -485,6 +503,16 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
         None => match drawer {
             "DrawDefault" => draw_default_icons(block_name),
             "DrawRegion" => draw_region_icons(block_name),
+            "DrawPistons" => vec![draw_piston_region_names(block_name, "-piston")[3].clone()],
+            "DrawWeave" => vec![draw_weave_name(block_name)],
+            "DrawMultiWeave" => {
+                let (weave, _) = draw_multi_weave_region_names(block_name);
+                draw_multi_weave_icons(false, &weave)
+            }
+            "DrawSideRegion" => {
+                let (top1, _) = draw_side_region_names(block_name);
+                vec![top1]
+            }
             "DrawTurret" => {
                 let names = draw_turret_region_names(block_name, 0, "", None);
                 draw_turret_icons(&names.base, &names.preview, Some(&names.top))
@@ -1419,6 +1447,18 @@ mod tests {
             vec!["router-bottom", "router", "router-top"]
         );
         assert_eq!(
+            draw_block_dispatch_icons(
+                "press",
+                "DrawMulti(DrawPistons, DrawWeave, DrawMultiWeave, DrawSideRegion)"
+            ),
+            vec![
+                "press-piston-icon",
+                "press-weave",
+                "press-weave",
+                "press-top1"
+            ]
+        );
+        assert_eq!(
             draw_block_dispatch_icons("router", "DrawMulti(DrawDefault, DrawPumpLiquid)"),
             vec!["router"]
         );
@@ -1454,6 +1494,22 @@ mod tests {
         assert_eq!(draw_side_region_index(1), 0);
         assert_eq!(draw_side_region_index(2), 1);
         assert_eq!(draw_side_region_plan_rotation(3), 270.0);
+        assert_eq!(
+            draw_block_dispatch_icons("separator", "DrawSideRegion"),
+            vec!["separator-top1"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("kiln", "DrawWeave"),
+            vec!["kiln-weave"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("phase-weaver", "DrawMultiWeave"),
+            vec!["phase-weaver-weave"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("press", "DrawPistons"),
+            vec!["press-piston-icon"]
+        );
 
         assert_eq!(
             draw_liquid_tile_padding(2.0, -1.0, 3.0, -0.5, 4.0),

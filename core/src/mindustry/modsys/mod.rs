@@ -7,6 +7,7 @@
 use crate::mindustry::core::{AssetFile, FileTree};
 use crate::mindustry::graphics::{
     png_dimensions_from_path, MultiPackerPlan, PageType, RegionRequest, TextureAtlasRegionSource,
+    TextureScale,
 };
 use std::{
     fs, io,
@@ -82,6 +83,7 @@ pub struct SpritePackRequest {
     pub atlas_name: String,
     pub page_hint: String,
     pub r#override: bool,
+    pub texture_scale: TextureScale,
 }
 
 impl SpritePackRequest {
@@ -91,6 +93,7 @@ impl SpritePackRequest {
             atlas_name: atlas_name.into(),
             page_hint: String::new(),
             r#override: false,
+            texture_scale: TextureScale::default(),
         }
     }
 
@@ -102,6 +105,15 @@ impl SpritePackRequest {
     pub fn with_override(mut self, r#override: bool) -> Self {
         self.r#override = r#override;
         self
+    }
+
+    pub fn with_texture_scale(mut self, texture_scale: f32) -> Self {
+        self.texture_scale = TextureScale::new(texture_scale);
+        self
+    }
+
+    pub fn texture_scale(&self) -> f32 {
+        self.texture_scale.value()
     }
 
     /// 解析该请求应该进入哪个 atlas page。
@@ -131,7 +143,8 @@ impl SpritePackRequest {
             self.atlas_name.clone(),
             width.max(1),
             height.max(1),
-            TextureAtlasRegionSource::new(self.source_path.clone(), self.r#override),
+            TextureAtlasRegionSource::new(self.source_path.clone(), self.r#override)
+                .with_texture_scale(self.texture_scale()),
         )
     }
 }
@@ -877,12 +890,14 @@ mod tests {
                     atlas_name: "block".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "sprites-override/ui/icon.png".into(),
                     atlas_name: "icon".into(),
                     page_hint: "sprites-override".into(),
                     r#override: true,
+                    texture_scale: TextureScale::default(),
                 },
             ]
         );
@@ -930,18 +945,21 @@ mod tests {
                     atlas_name: "example-router".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites/blocks/environment/ore.png".into(),
                     atlas_name: "example-ore".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites-override/ui/icon.png".into(),
                     atlas_name: "icon".into(),
                     page_hint: "sprites-override".into(),
                     r#override: true,
+                    texture_scale: TextureScale::default(),
                 },
             ]
         );
@@ -987,12 +1005,14 @@ mod tests {
                     atlas_name: "example-router".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites-override/ui/icon.png".into(),
                     atlas_name: "icon".into(),
                     page_hint: "sprites-override".into(),
                     r#override: true,
+                    texture_scale: TextureScale::default(),
                 },
             ]
         );
@@ -1027,30 +1047,35 @@ mod tests {
                     atlas_name: "example-ore".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites/router.png".into(),
                     atlas_name: "example-router".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites/ui/badge.png".into(),
                     atlas_name: "example-badge".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites-override/router.png".into(),
                     atlas_name: "router".into(),
                     page_hint: "sprites-override".into(),
                     r#override: true,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "mods/example/sprites-override/rubble/crack.png".into(),
                     atlas_name: "crack".into(),
                     page_hint: "sprites-override".into(),
                     r#override: true,
+                    texture_scale: TextureScale::default(),
                 },
             ]
         );
@@ -1189,18 +1214,21 @@ mod tests {
                     atlas_name: "example-ore".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "sprites/router.png".into(),
                     atlas_name: "example-router".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
+                    texture_scale: TextureScale::default(),
                 },
                 SpritePackRequest {
                     source_path: "sprites-override/ui/icon.png".into(),
                     atlas_name: "icon".into(),
                     page_hint: "sprites-override".into(),
                     r#override: true,
+                    texture_scale: TextureScale::default(),
                 },
             ]
         );
@@ -1323,6 +1351,30 @@ mod tests {
         assert_eq!(rubble.height, 16);
         assert_eq!(rubble.payload.source_path, "sprites/rubble/crack.png");
         assert!(rubble.payload.payload);
+    }
+
+    #[test]
+    fn sprite_pack_request_with_texture_scale_round_trips_through_packer_and_atlas() {
+        let mut packer = SpritePacker::new();
+        packer.add_request(
+            SpritePackRequest::new("sprites/scaled.png", "scaled")
+                .with_page_hint("sprites")
+                .with_texture_scale(2.0),
+        );
+
+        let plan = packer.to_multi_packer_plan_with_size(8, 16);
+        let request = plan.page(PageType::Main).get("scaled").unwrap();
+        assert_eq!(request.width, 8);
+        assert_eq!(request.height, 16);
+        assert_eq!(request.payload.source_path, "sprites/scaled.png");
+        assert_eq!(request.payload.texture_scale, TextureScale::new(2.0));
+
+        let atlas = TextureAtlasPlan::from_pack_plan(plan.into_pack_plan());
+        let region = atlas.lookup("scaled").unwrap().region;
+        assert_eq!(region.source_path, "sprites/scaled.png");
+        assert_eq!(region.width, 8);
+        assert_eq!(region.height, 16);
+        assert_eq!(region.scale, 2.0);
     }
 
     #[test]

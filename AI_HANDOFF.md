@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **20.9%**。
+- 当前总体迁移完成度：约 **21.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9056,3 +9056,63 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. Power/HeatOutput 仍无 runtime status；
   3. DrawLiquid/Pistons/Weave 等仍待接入；
   4. 当前总迁移约 20.9%，仍未达到完整可玩。
+
+---
+
+## 270. 最新闭环记录：Texture scale / linear filter 元数据
+
+- 本轮目标：对照 Java `Mods.textureResize` 与 `linear` filter，先把 scale/filter 信息带进 atlas 纯数据链路。
+- Rust 主改动：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `TextureScale`；
+    - `TextureAtlasRegionSource` / `TextureAtlasSpriteSourceDescriptor` / `TextureAtlasRegion` 增加 scale；
+    - `TextureAtlasPlan` 增加 `linear_filter`；
+    - 新增 `texture_atlas_region_preserves_scale_and_linear_filter_metadata`。
+  - `core/src/mindustry/modsys/mod.rs`
+    - `SpritePackRequest` 增加 `texture_scale`；
+    - 新增 `with_texture_scale(...)`；
+    - 新增 `sprite_pack_request_with_texture_scale_round_trips_through_packer_and_atlas`。
+- 已跑验证：
+  - `cargo test -p mindustry-core texture_atlas_region_preserves_scale --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core sprite_pack_request_with_texture_scale --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. Java `textureResize` 真实入口尚未解析到 request；
+  2. `linear_filter` 尚未接 sampler/backend；
+  3. 当前总迁移约 21.0%，仍未达到完整可玩。
+
+---
+
+## 271. 最新闭环记录：Desktop live-backend DrawSprite sink seam
+
+- 本轮目标：把 desktop graphics trace 推进为可被 live backend 消费的 seam。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsLiveBackendDrawSpriteTrace`；
+    - 新增 `DesktopGraphicsLiveBackendExecutionState`；
+    - 新增 `DesktopGraphicsLiveBackendDrawSpriteSink`；
+    - 新增 `DesktopGraphicsExecutionTrace::drive_draw_sprite_sink(...)`；
+    - `HeadlessDesktopGraphicsRenderer` 记录 `last_live_backend_state`；
+    - 新增 `desktop_graphics_execution_trace_drives_draw_sprite_sink_with_pass_and_command_order`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_execution_trace_drives_draw_sprite_sink --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. 仍无真实 GPU/surface；
+  2. 下一步应把 sink 与 texture page/sampler/filter 绑定；
+  3. 当前总迁移约 21.05%，仍未达到完整可玩。
+
+---
+
+## 272. 最新闭环记录：DrawBlock Pistons/Weave/MultiWeave/SideRegion
+
+- 本轮目标：继续扩大 DrawBlock dispatcher 静态覆盖面。
+- Rust 主改动：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - dispatcher 支持 `DrawPistons`、`DrawWeave`、`DrawMultiWeave`、`DrawSideRegion`。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `drawer_dispatch_bridge_covers_static_pistons_weave_and_side_region`。
+- 已跑验证：
+  - `cargo test -p mindustry-core drawer_dispatch_bridge_covers_static_pistons_weave_and_side_region --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. 下一批高频 drawer：`DrawLiquidTile/DrawHeatInput/DrawGlowRegion/DrawLiquidRegion/DrawWarmupRegion`；
+  2. 当前总迁移约 21.1%，仍未达到完整可玩。

@@ -2072,6 +2072,44 @@ mod tests {
     }
 
     #[test]
+    fn drawer_dispatch_bridge_covers_static_pistons_weave_and_side_region() {
+        assert_eq!(
+            crate::mindustry::world::draw::draw_block_dispatch_icons("press", "DrawPistons(-arm)"),
+            vec!["press-arm-icon"]
+        );
+        assert_eq!(
+            crate::mindustry::world::draw::draw_block_dispatch_icons("separator", "DrawSideRegion"),
+            vec!["separator-top1"]
+        );
+
+        let ops = drawer_to_block_sprite_ops(
+            "phase-weaver",
+            "DrawMulti(DrawPistons, DrawWeave, DrawMultiWeave, DrawSideRegion)",
+            RenderRect::new(2.0, 4.0, 6.0, 8.0),
+            [0.5, 0.6, 0.7, 0.8],
+            15.0,
+            Layer::BLOCK + 0.75,
+            50,
+        );
+        assert_eq!(
+            ops.iter().map(|op| op.symbol()).collect::<Vec<_>>(),
+            vec![
+                "phase-weaver-piston-icon",
+                "phase-weaver-weave",
+                "phase-weaver-weave",
+                "phase-weaver-top1",
+            ]
+        );
+        assert_eq!(
+            ops.iter().map(|op| op.order).collect::<Vec<_>>(),
+            vec![50, 51, 52, 53]
+        );
+        assert!(ops
+            .iter()
+            .all(|op| op.rect == RenderRect::new(2.0, 4.0, 6.0, 8.0)));
+    }
+
+    #[test]
     fn block_renderer_plan_converts_sprite_passes_with_stable_symbols_and_rotation() {
         let mut plan = BlockRendererPlan::default();
 

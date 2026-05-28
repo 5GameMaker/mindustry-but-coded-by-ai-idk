@@ -11735,3 +11735,68 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Turret 的 parts/ammoParts/heat overlay、Power 的动态 power status、HeatOutput 的 heat/glow runtime 仍未接；
   - `DrawLiquid*`、`DrawPistons`、`DrawWeave` 等仍待进入 dispatcher；
   - 当前总体迁移约 20.9%，仍未达到完整可玩。
+
+### 12.368 Texture scale 与 linear filter 纯数据元数据链路
+
+- 2026-05-29：对照 Java `Mods.textureResize` 与 `linear` filter，本轮先把 region 级 scale 与 atlas 级 linear filter 保留在纯数据层，不提前引入像素 decode/GPU flush。`SpritePackRequest` / `TextureAtlasSpriteSourceDescriptor` / `TextureAtlasRegionSource` 均可携带 texture scale，`TextureAtlasRegion::from_request(...)` 会把 scale 写入 region；`TextureAtlasPlan` 新增 `linear_filter` 元数据。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `TextureScale` bit-pattern wrapper，保留 `Eq/Hash` 派生能力；
+    - `TextureAtlasRegionSource` 新增 `texture_scale`；
+    - `TextureAtlasSpriteSourceDescriptor` 新增 `texture_scale`、`with_texture_scale(...)`；
+    - `TextureAtlasRegion` 新增 `scale`、`with_scale(...)`；
+    - `TextureAtlasPlan` 新增 `linear_filter`、`with_linear_filter(...)`、`linear_filter(...)`；
+    - 新增 `texture_atlas_region_preserves_scale_and_linear_filter_metadata`。
+  - `core/src/mindustry/modsys/mod.rs`
+    - `SpritePackRequest` 新增 `texture_scale`、`with_texture_scale(...)`；
+    - `to_region_request_with_size(...)` 将 scale 传入 `TextureAtlasRegionSource`；
+    - 新增 `sprite_pack_request_with_texture_scale_round_trips_through_packer_and_atlas`。
+- 已跑验证：
+  - `cargo test -p mindustry-core texture_atlas_region_preserves_scale --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-core sprite_pack_request_with_texture_scale --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - 尚未把 Java `textureResize` 真实入口解析到 `with_texture_scale(...)`；
+  - `linear_filter` 仍是纯数据 metadata，未接 sampler/filter/backend；
+  - 当前总体迁移约 21.0%，仍未达到完整可玩。
+
+### 12.369 Desktop graphics live-backend DrawSprite sink seam
+
+- 2026-05-29：继续把 headless trace 推向 live backend seam。本轮新增 `DesktopGraphicsLiveBackendDrawSpriteSink` 与 `DesktopGraphicsExecutionTrace::drive_draw_sprite_sink(...)`，使 `DrawSprite` trace 能按 pass/command 顺序交给后端 sink 消费，同时携带 pass index、command index、pass kind/order/target、symbol 与已解析 atlas trace。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsLiveBackendDrawSpriteTrace`；
+    - 新增 `DesktopGraphicsLiveBackendExecutionState`；
+    - 新增 `DesktopGraphicsLiveBackendDrawSpriteSink`；
+    - `HeadlessDesktopGraphicsRenderer` 新增 `last_live_backend_state`；
+    - 新增 `desktop_graphics_execution_trace_drives_draw_sprite_sink_with_pass_and_command_order`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_execution_trace_drives_draw_sprite_sink --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `5 passed`
+- 仍未完成：
+  - sink 仍是 no-GPU seam，还未绑定真实 texture/surface；
+  - 非 sprite command 仍只作为 trace/no-op；
+  - 当前总体迁移约 21.05%，仍未达到完整可玩。
+
+### 12.370 DrawBlock dispatcher 支持 Pistons / Weave / MultiWeave / SideRegion 静态层
+
+- 2026-05-29：继续扩展 DrawBlock 静态 dispatcher。本轮新增 `DrawPistons`、`DrawWeave`、`DrawMultiWeave`、`DrawSideRegion` 的最小静态降级输出，并保持 drawer → `BlockSpriteOp` 桥接可消费。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - `DrawPistons` 输出 icon region；
+    - `DrawWeave` 输出 weave region；
+    - `DrawMultiWeave` 输出静态 weave region；
+    - `DrawSideRegion` 输出 `top1`；
+    - 扩展 dispatcher 测试覆盖这批 drawer。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `drawer_dispatch_bridge_covers_static_pistons_weave_and_side_region`。
+- 已跑验证：
+  - `cargo test -p mindustry-core drawer_dispatch_bridge_covers_static_pistons_weave_and_side_region --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - 这批 drawer 仍未接真实 runtime 动态状态；
+  - `DrawLiquidTile/DrawLiquidRegion/DrawHeatInput/DrawGlowRegion/DrawWarmupRegion` 是下一批高频缺口；
+  - 当前总体迁移约 21.1%，仍未达到完整可玩。

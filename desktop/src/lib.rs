@@ -385,6 +385,35 @@ pub struct DesktopGraphicsResolvedSpriteTrace {
     pub missing: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsLiveBackendDrawSpriteTrace {
+    pub pass_index: usize,
+    pub command_index: usize,
+    pub pass_kind: RenderPassKind,
+    pub pass_order: i32,
+    pub target: RenderTarget,
+    pub symbol: String,
+    pub resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsLiveBackendExecutionState {
+    pub render_passes_visited: usize,
+    pub render_commands_visited: usize,
+    pub draw_sprite_traces_emitted: usize,
+}
+
+pub trait DesktopGraphicsLiveBackendDrawSpriteSink {
+    fn consume_draw_sprite_trace(&mut self, trace: DesktopGraphicsLiveBackendDrawSpriteTrace);
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DesktopGraphicsNullLiveBackendDrawSpriteSink;
+
+impl DesktopGraphicsLiveBackendDrawSpriteSink for DesktopGraphicsNullLiveBackendDrawSpriteSink {
+    fn consume_draw_sprite_trace(&mut self, _trace: DesktopGraphicsLiveBackendDrawSpriteTrace) {}
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsExecutionTrace {
     pub shader_dispatch: DesktopGraphicsShaderDispatchExecutionTrace,
@@ -402,6 +431,38 @@ impl DesktopGraphicsExecutionTrace {
         atlas: &TextureAtlasPlan<T>,
     ) -> Self {
         Self::from_frame_and_atlas(frame, Some(atlas))
+    }
+
+    pub fn drive_draw_sprite_sink<S: DesktopGraphicsLiveBackendDrawSpriteSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsLiveBackendExecutionState {
+        let mut state = DesktopGraphicsLiveBackendExecutionState::default();
+
+        for (pass_index, pass) in self.render_passes.iter().enumerate() {
+            state.render_passes_visited += 1;
+            let mut draw_sprite_index = 0usize;
+
+            for (command_index, command) in pass.command_trace.iter().enumerate() {
+                state.render_commands_visited += 1;
+
+                if let DesktopGraphicsCommandExecutionTrace::DrawSprite { symbol } = command {
+                    sink.consume_draw_sprite_trace(DesktopGraphicsLiveBackendDrawSpriteTrace {
+                        pass_index,
+                        command_index,
+                        pass_kind: pass.kind.clone(),
+                        pass_order: pass.order,
+                        target: pass.target.clone(),
+                        symbol: symbol.clone(),
+                        resolved_sprite: pass.resolved_sprites.get(draw_sprite_index).cloned(),
+                    });
+                    state.draw_sprite_traces_emitted += 1;
+                    draw_sprite_index += 1;
+                }
+            }
+        }
+
+        state
     }
 
     fn from_frame_and_atlas<T>(
@@ -671,6 +732,7 @@ pub struct HeadlessDesktopGraphicsRenderer {
     pub last_stats: GraphicsFrameStats,
     pub last_execution: DesktopGraphicsExecutionSummary,
     pub last_trace: DesktopGraphicsExecutionTrace,
+    pub last_live_backend_state: DesktopGraphicsLiveBackendExecutionState,
 }
 
 impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
@@ -678,10 +740,13 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
         let stats = frame.stats().clone();
         let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
         let execution = DesktopGraphicsExecutionSummary::from_trace(frame, &trace);
+        let mut live_backend_sink = DesktopGraphicsNullLiveBackendDrawSpriteSink;
+        let live_backend_state = trace.drive_draw_sprite_sink(&mut live_backend_sink);
         self.frames_rendered += 1;
         self.last_stats = stats.clone();
         self.last_execution = execution;
         self.last_trace = trace;
+        self.last_live_backend_state = live_backend_state;
         stats
     }
 }
@@ -3250,10 +3315,12 @@ mod tests {
         run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopFrameKind,
         DesktopFramePayload, DesktopGraphicsCommandExecutionTrace,
         DesktopGraphicsExecutionStepTrace, DesktopGraphicsExecutionSummary,
-        DesktopGraphicsExecutionTrace, DesktopGraphicsFrame, DesktopGraphicsRenderer,
-        DesktopGraphicsResolvedSpriteTrace, DesktopGraphicsShaderApplyExecutionTrace,
-        DesktopLauncher, HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
-        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
+        DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
+        DesktopGraphicsLiveBackendDrawSpriteSink, DesktopGraphicsLiveBackendDrawSpriteTrace,
+        DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
+        DesktopGraphicsShaderApplyExecutionTrace, DesktopLauncher, HeadlessDesktopAudioRenderer,
+        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
+        HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -5034,6 +5101,12 @@ mod tests {
             renderer.last_trace.render_passes[2].target,
             RenderTarget::Screen
         );
+        assert_eq!(renderer.last_live_backend_state.render_passes_visited, 3);
+        assert_eq!(renderer.last_live_backend_state.render_commands_visited, 6);
+        assert_eq!(
+            renderer.last_live_backend_state.draw_sprite_traces_emitted,
+            3
+        );
 
         let resolved_trace = DesktopGraphicsExecutionTrace::from_frame_with_atlas(&frame, &atlas);
         assert_eq!(
@@ -5312,6 +5385,155 @@ mod tests {
             vec!["alpha".to_string(), "beta".to_string()]
         );
         assert_eq!(pass_trace.draw_texts, vec!["status".to_string()]);
+    }
+
+    #[test]
+    fn desktop_graphics_execution_trace_drives_draw_sprite_sink_with_pass_and_command_order() {
+        #[derive(Default)]
+        struct RecordingLiveBackendDrawSpriteSink {
+            traces: Vec<DesktopGraphicsLiveBackendDrawSpriteTrace>,
+        }
+
+        impl DesktopGraphicsLiveBackendDrawSpriteSink for RecordingLiveBackendDrawSpriteSink {
+            fn consume_draw_sprite_trace(
+                &mut self,
+                trace: DesktopGraphicsLiveBackendDrawSpriteTrace,
+            ) {
+                self.traces.push(trace);
+            }
+        }
+
+        let viewport = RenderViewport::new(0.0, 0.0, 40.0, 40.0);
+        let camera = RenderCamera::new(RenderPoint::new(20.0, 20.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(14, RenderSize::new(40.0, 40.0), camera, viewport);
+
+        let mut first_pass = RenderPass::new(RenderPassKind::Block)
+            .with_order(17)
+            .with_target(RenderTarget::Buffer("backend-buffer".into()));
+        first_pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        first_pass.push(RenderCommand::draw_sprite(
+            "alpha",
+            RenderRect::new(1.0, 1.0, 4.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            10.0,
+        ));
+        first_pass.push(RenderCommand::draw_text(
+            "status",
+            RenderPoint::new(2.0, 3.0),
+            [1.0, 1.0, 1.0, 1.0],
+            8.0,
+            0.0,
+            RenderTextAlign::Start,
+            11.0,
+        ));
+        first_pass.push(RenderCommand::custom(
+            "noop",
+            vec![mindustry_core::mindustry::graphics::RenderProperty::new(
+                "kind", "debug",
+            )],
+        ));
+        first_pass.push(RenderCommand::draw_sprite(
+            "beta",
+            RenderRect::new(5.0, 5.0, 4.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            12.0,
+        ));
+        first_pass.push(RenderCommand::fill_rect(
+            RenderRect::new(0.0, 0.0, 2.0, 2.0),
+            [0.0, 0.0, 0.0, 1.0],
+            13.0,
+        ));
+        render_frame.push_pass(first_pass);
+
+        let mut second_pass = RenderPass::new(RenderPassKind::Ui).with_order(33);
+        second_pass.push(RenderCommand::draw_text(
+            "info",
+            RenderPoint::new(6.0, 7.0),
+            [1.0, 1.0, 1.0, 1.0],
+            10.0,
+            0.0,
+            RenderTextAlign::Center,
+            60.0,
+        ));
+        second_pass.push(RenderCommand::draw_sprite(
+            "gamma",
+            RenderRect::new(8.0, 8.0, 4.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            61.0,
+        ));
+        second_pass.push(RenderCommand::fill_rect(
+            RenderRect::new(1.0, 1.0, 2.0, 2.0),
+            [0.0, 0.0, 0.0, 1.0],
+            62.0,
+        ));
+        render_frame.push_pass(second_pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
+                "sprites/alpha.png",
+                "sprites/beta.png",
+                "sprites/gamma.png",
+            ]),
+        };
+        let original_frame = frame.clone();
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        let mut sink = RecordingLiveBackendDrawSpriteSink::default();
+        let state = trace.drive_draw_sprite_sink(&mut sink);
+
+        assert_eq!(state.render_passes_visited, 2);
+        assert_eq!(state.render_commands_visited, 9);
+        assert_eq!(state.draw_sprite_traces_emitted, 3);
+        assert_eq!(sink.traces.len(), 3);
+        assert_eq!(frame, original_frame);
+        assert_eq!(
+            sink.traces[0],
+            DesktopGraphicsLiveBackendDrawSpriteTrace {
+                pass_index: 0,
+                command_index: 1,
+                pass_kind: RenderPassKind::Block,
+                pass_order: 17,
+                target: RenderTarget::Buffer("backend-buffer".into()),
+                symbol: "alpha".to_string(),
+                resolved_sprite: Some(DesktopGraphicsResolvedSpriteTrace {
+                    symbol: "alpha".to_string(),
+                    page_type: Some(PageType::Main),
+                    page_source_path: Some("sprites.png".to_string()),
+                    x: Some(0),
+                    y: Some(0),
+                    u: Some(0.0),
+                    v: Some(0.0),
+                    u2: Some(1.0 / 4096.0),
+                    v2: Some(1.0 / 4096.0),
+                    region_width: Some(1),
+                    region_height: Some(1),
+                    missing: false,
+                }),
+            }
+        );
+        assert_eq!(sink.traces[1].pass_index, 0);
+        assert_eq!(sink.traces[1].command_index, 4);
+        assert_eq!(sink.traces[1].symbol, "beta".to_string());
+        assert_eq!(sink.traces[1].pass_order, 17);
+        assert_eq!(
+            sink.traces[1].target,
+            RenderTarget::Buffer("backend-buffer".into())
+        );
+        assert_eq!(sink.traces[2].pass_index, 1);
+        assert_eq!(sink.traces[2].command_index, 1);
+        assert_eq!(sink.traces[2].symbol, "gamma".to_string());
+        assert_eq!(sink.traces[2].pass_kind, RenderPassKind::Ui);
+        assert_eq!(sink.traces[2].pass_order, 33);
+        assert_eq!(sink.traces[2].target, RenderTarget::Screen);
     }
 
     #[test]

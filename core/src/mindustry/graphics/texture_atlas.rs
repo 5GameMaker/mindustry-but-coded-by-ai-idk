@@ -4,6 +4,38 @@ use std::{fs::File, io::Read, path::Path};
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
 const PNG_HEADER_LEN: usize = 24;
 
+/// Java `Mods.textureResize` 写回到 atlas region 的缩放元数据。
+///
+/// 使用 bit pattern 存储以便继续保留 request/source 结构的 `Eq`/`Hash`
+/// 派生；非法或非正数缩放会回退到 Java 默认的 `1.0`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextureScale {
+    bits: u32,
+}
+
+impl TextureScale {
+    pub fn new(scale: f32) -> Self {
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        Self {
+            bits: scale.to_bits(),
+        }
+    }
+
+    pub fn value(self) -> f32 {
+        f32::from_bits(self.bits)
+    }
+}
+
+impl Default for TextureScale {
+    fn default() -> Self {
+        Self::new(1.0)
+    }
+}
+
 impl PageType {
     /// 上游 `sprites*.png` 的默认页资源路径。
     pub const fn atlas_source_path(self) -> &'static str {
@@ -20,6 +52,7 @@ impl PageType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextureAtlasRegionSource<T = ()> {
     pub source_path: String,
+    pub texture_scale: TextureScale,
     pub payload: T,
 }
 
@@ -27,13 +60,24 @@ impl<T> TextureAtlasRegionSource<T> {
     pub fn new(source_path: impl Into<String>, payload: T) -> Self {
         Self {
             source_path: source_path.into(),
+            texture_scale: TextureScale::default(),
             payload,
         }
+    }
+
+    pub fn with_texture_scale(mut self, scale: f32) -> Self {
+        self.texture_scale = TextureScale::new(scale);
+        self
+    }
+
+    pub fn texture_scale(&self) -> f32 {
+        self.texture_scale.value()
     }
 
     pub fn map_payload<U>(self, payload: U) -> TextureAtlasRegionSource<U> {
         TextureAtlasRegionSource {
             source_path: self.source_path,
+            texture_scale: self.texture_scale,
             payload,
         }
     }
@@ -51,6 +95,7 @@ pub struct TextureAtlasSpriteSourceDescriptor {
     pub atlas_name: String,
     pub page_hint: String,
     pub r#override: bool,
+    pub texture_scale: TextureScale,
 }
 
 impl TextureAtlasSpriteSourceDescriptor {
@@ -60,6 +105,7 @@ impl TextureAtlasSpriteSourceDescriptor {
             atlas_name: atlas_name.into(),
             page_hint: String::new(),
             r#override: false,
+            texture_scale: TextureScale::default(),
         }
     }
 
@@ -86,6 +132,7 @@ impl TextureAtlasSpriteSourceDescriptor {
             atlas_name,
             page_hint,
             r#override,
+            texture_scale: TextureScale::default(),
         }
     }
 
@@ -97,6 +144,15 @@ impl TextureAtlasSpriteSourceDescriptor {
     pub fn with_override(mut self, r#override: bool) -> Self {
         self.r#override = r#override;
         self
+    }
+
+    pub fn with_texture_scale(mut self, texture_scale: f32) -> Self {
+        self.texture_scale = TextureScale::new(texture_scale);
+        self
+    }
+
+    pub fn texture_scale(&self) -> f32 {
+        self.texture_scale.value()
     }
 
     pub fn page_type(&self) -> PageType {
@@ -117,7 +173,8 @@ impl TextureAtlasSpriteSourceDescriptor {
             self.atlas_name.clone(),
             width.max(1),
             height.max(1),
-            TextureAtlasRegionSource::new(self.source_path.clone(), self.r#override),
+            TextureAtlasRegionSource::new(self.source_path.clone(), self.r#override)
+                .with_texture_scale(self.texture_scale()),
         )
     }
 }
@@ -246,6 +303,7 @@ pub struct TextureAtlasRegion<T = ()> {
     pub y: u32,
     pub width: u32,
     pub height: u32,
+    pub scale: f32,
     pub splits: Option<[i32; 4]>,
     pub pads: Option<[i32; 4]>,
     pub u: f32,
@@ -274,6 +332,7 @@ impl<T> TextureAtlasRegion<T> {
             y,
             width,
             height,
+            scale: 1.0,
             splits: None,
             pads: None,
             u: 0.0,
@@ -296,22 +355,28 @@ impl<T> TextureAtlasRegion<T> {
             pads,
             payload,
         } = request;
+        let TextureAtlasRegionSource {
+            source_path,
+            texture_scale,
+            payload,
+        } = payload;
 
         Self {
             page_type,
             name,
-            source_path: payload.source_path,
+            source_path,
             x: 0,
             y: 0,
             width,
             height,
+            scale: texture_scale.value(),
             splits,
             pads,
             u: 0.0,
             v: 0.0,
             u2: 0.0,
             v2: 0.0,
-            payload: payload.payload,
+            payload,
         }
     }
 
@@ -324,6 +389,11 @@ impl<T> TextureAtlasRegion<T> {
     pub fn with_size(mut self, width: u32, height: u32) -> Self {
         self.width = width;
         self.height = height;
+        self
+    }
+
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.scale = TextureScale::new(scale).value();
         self
     }
 
@@ -563,6 +633,7 @@ impl TextureAtlasLookupMiss {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextureAtlasPlan<T = ()> {
     pub pages: [TextureAtlasPage<T>; 4],
+    linear_filter: bool,
     lookup_order: Vec<(String, PageType)>,
 }
 
@@ -575,8 +646,18 @@ impl<T> TextureAtlasPlan<T> {
                 TextureAtlasPage::new(PageType::Ui),
                 TextureAtlasPage::new(PageType::Rubble),
             ],
+            linear_filter: true,
             lookup_order: Vec::new(),
         }
+    }
+
+    pub fn with_linear_filter(mut self, linear_filter: bool) -> Self {
+        self.linear_filter = linear_filter;
+        self
+    }
+
+    pub fn linear_filter(&self) -> bool {
+        self.linear_filter
     }
 
     pub fn page(&self, page_type: PageType) -> &TextureAtlasPage<T> {
@@ -1181,6 +1262,35 @@ mod tests {
                 name: "missing".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn texture_atlas_region_preserves_scale_and_linear_filter_metadata() {
+        let request = RegionRequest::new(
+            "scaled",
+            12,
+            24,
+            TextureAtlasRegionSource::new("sprites/scaled.png", "payload").with_texture_scale(2.5),
+        );
+        let region = TextureAtlasRegion::from_request(PageType::Main, request);
+        assert_f32_close(region.scale, 2.5);
+
+        let mut main = PagePlan::new(PageType::Main);
+        main.insert_request(RegionRequest::new(
+            "half",
+            16,
+            16,
+            TextureAtlasRegionSource::new("sprites/half.png", "half").with_texture_scale(0.5),
+        ))
+        .unwrap();
+
+        let plan = TextureAtlasPlan::from_pack_plan(PackPlan::new(vec![main]));
+        assert!(plan.linear_filter());
+        assert_f32_close(plan.lookup("half").unwrap().region.scale, 0.5);
+
+        let nearest = plan.clone().with_linear_filter(false);
+        assert!(!nearest.linear_filter());
+        assert_f32_close(nearest.lookup("half").unwrap().region.scale, 0.5);
     }
 
     #[test]
