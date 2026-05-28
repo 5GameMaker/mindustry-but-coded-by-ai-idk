@@ -6124,3 +6124,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续从 `ripple=244` / `bubble=245` 附近向后扫描；其中部分已有 Rust 支持，要优先补缺口而不是重复迁移；
   2. `generate` 当前是 `LineAngle` seam，不是独立 GPU `Lines.spikes` backend，后续真实 renderer 接入时需要合并到 renderer 的 spike/line 绘制层；
   3. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。
+
+---
+
+## 182. 最新闭环记录：Fx.launchPod/coreLandDust/podLandDust
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：按子代理扫描结果，先迁移 246–265 段里无需新增复杂 primitive 的 `launchPod=248`、`coreLandDust=258`、`podLandDust=259`。
+- 本轮迁移：
+  - `launchPod=248`
+  - `coreLandDust=258`
+  - `podLandDust=259`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 3 个 Fx ID、lookup、metadata；
+    - 新增颜色符号 `Pal.engine=0xffbb64ff`；
+    - `launchPod` 使用 `StrokedCircle` + `SeededRadialLineParticles` 多 plan 表达 Java scaled circle + 24 条 radial line；
+    - `coreLandDust` / `podLandDust` 用 concrete `FilledCircle` plans，保留 seeded random offset/radius、`e.fout(0.1/0.2)` 与 `Layer::GROUND_UNIT + 1.0`。
+  - `desktop/src/lib.rs`
+    - 新增/扩展 `desktop_launcher_flattens_launch_pod_circle_and_lines_for_render`，验证 4 个 draw plans、3 个 circle primitives、24 条 line primitives。
+  - `MIGRATION.md`
+    - 新增 `12.256` 节。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_launch_pod_circle_and_lines_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 246–265 段剩余缺口：`healBlockFull=252`、`shieldBreak=256`、`arcShieldBreak=257`、`unitShieldBreak=260`、`chainLightning=261`、`chainEmp=262`、`legDestroy=263`、`debugLine=264`、`debugRect=265`；
+  2. 最值得新增的通用 seam 是 `Polyline/Path` primitive，可覆盖 shield/chain/debug line 类效果；
+  3. 纹理相关的 `healBlockFull` / `legDestroy` 需要 texture region / textured line seam，建议在 polyline 后处理；
+  4. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。

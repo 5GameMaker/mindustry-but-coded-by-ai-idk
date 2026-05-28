@@ -366,6 +366,8 @@ pub const FX_BUBBLE_ID: i32 = 245;
 pub const FX_LAUNCH_ACCELERATOR_ID: i32 = 246;
 /// Upstream `Fx.launch` id in `mindustry.content.Fx` for v158.1.
 pub const FX_LAUNCH_ID: i32 = 247;
+/// Upstream `Fx.launchPod` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LAUNCH_POD_ID: i32 = 248;
 /// Upstream `Fx.healWaveMend` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HEAL_WAVE_MEND_ID: i32 = 249;
 /// Upstream `Fx.overdriveWave` id in `mindustry.content.Fx` for v158.1.
@@ -378,6 +380,10 @@ pub const FX_ROTATE_BLOCK_ID: i32 = 253;
 pub const FX_LIGHT_BLOCK_ID: i32 = 254;
 /// Upstream `Fx.overdriveBlockFull` id in `mindustry.content.Fx` for v158.1.
 pub const FX_OVERDRIVE_BLOCK_FULL_ID: i32 = 255;
+/// Upstream `Fx.coreLandDust` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CORE_LAND_DUST_ID: i32 = 258;
+/// Upstream `Fx.podLandDust` id in `mindustry.content.Fx` for v158.1.
+pub const FX_POD_LAND_DUST_ID: i32 = 259;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
@@ -562,12 +568,15 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "bubble" => Some(FX_BUBBLE_ID),
         "launchAccelerator" => Some(FX_LAUNCH_ACCELERATOR_ID),
         "launch" => Some(FX_LAUNCH_ID),
+        "launchPod" => Some(FX_LAUNCH_POD_ID),
         "healWaveMend" => Some(FX_HEAL_WAVE_MEND_ID),
         "overdriveWave" => Some(FX_OVERDRIVE_WAVE_ID),
         "healBlock" => Some(FX_HEAL_BLOCK_ID),
         "rotateBlock" => Some(FX_ROTATE_BLOCK_ID),
         "lightBlock" => Some(FX_LIGHT_BLOCK_ID),
         "overdriveBlockFull" => Some(FX_OVERDRIVE_BLOCK_FULL_ID),
+        "coreLandDust" => Some(FX_CORE_LAND_DUST_ID),
+        "podLandDust" => Some(FX_POD_LAND_DUST_ID),
         _ => None,
     }
 }
@@ -954,6 +963,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_LAUNCH_ACCELERATOR_ID, 22.0, DEFAULT_EFFECT_CLIP)
         }
         FX_LAUNCH_ID => Effect::with_lifetime(FX_LAUNCH_ID, 28.0, DEFAULT_EFFECT_CLIP),
+        FX_LAUNCH_POD_ID => Effect::with_lifetime(FX_LAUNCH_POD_ID, 50.0, DEFAULT_EFFECT_CLIP),
         FX_HEAL_WAVE_MEND_ID => {
             Effect::with_lifetime(FX_HEAL_WAVE_MEND_ID, 40.0, DEFAULT_EFFECT_CLIP)
         }
@@ -965,6 +975,14 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_LIGHT_BLOCK_ID => Effect::with_lifetime(FX_LIGHT_BLOCK_ID, 60.0, DEFAULT_EFFECT_CLIP),
         FX_OVERDRIVE_BLOCK_FULL_ID => {
             Effect::with_lifetime(FX_OVERDRIVE_BLOCK_FULL_ID, 60.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_CORE_LAND_DUST_ID => {
+            Effect::with_lifetime(FX_CORE_LAND_DUST_ID, 100.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::GROUND_UNIT + 1.0)
+        }
+        FX_POD_LAND_DUST_ID => {
+            Effect::with_lifetime(FX_POD_LAND_DUST_ID, 70.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::GROUND_UNIT + 1.0)
         }
         _ => return None,
     };
@@ -1066,6 +1084,9 @@ pub fn standard_effect_draw_plans_with_data_float(
             | FX_TELEPORT_ACTIVATE_ID
             | FX_TELEPORT_ID
             | FX_TELEPORT_OUT_ID
+            | FX_LAUNCH_POD_ID
+            | FX_CORE_LAND_DUST_ID
+            | FX_POD_LAND_DUST_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1389,6 +1410,96 @@ pub fn standard_effect_draw_plans_with_data_float(
                 light_opacity: 0.0,
             },
         ];
+    }
+
+    if effect_id_i32 == FX_LAUNCH_POD_ID {
+        let mut plans = Vec::with_capacity(if time <= 25.0 { 2 } else { 1 });
+        if time <= 25.0 {
+            let scaled_fin = (time / 25.0).clamp(0.0, 1.0);
+            let scaled_fout = 1.0 - scaled_fin;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some("Pal.engine"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 4.0 + effect_finpow_from_fin(scaled_fin) * 30.0,
+                stroke: scaled_fout * 2.0,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: Some("Pal.engine"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fout * 4.0 + 1.0,
+            stroke: fout * 2.0,
+            particles: Some(standard_effect_particle_spec(
+                state_id,
+                24,
+                None,
+                0.0,
+                finpow * 50.0,
+                fin,
+                fout,
+                fslope,
+            )),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        });
+
+        return plans;
+    }
+
+    if matches!(effect_id_i32, FX_CORE_LAND_DUST_ID | FX_POD_LAND_DUST_ID) {
+        let (length_scale, radius_scale) = if effect_id_i32 == FX_CORE_LAND_DUST_ID {
+            (90.0, 8.0)
+        } else {
+            (35.0, 5.0)
+        };
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let length = finpow * length_scale * rand.random_between(0.2, 1.0);
+        let radius =
+            radius_scale * rand.random_between(0.6, 1.0) * effect_fout_margin_from_fin(fin, 0.2);
+        let (offset_x, offset_y) = trns(rotation, length);
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledCircle,
+            center: (x + offset_x, y + offset_y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: effect_fout_margin_from_fin(fin, 0.1),
+            radius,
+            stroke: 0.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        }];
     }
 
     if effect_id_i32 == FX_RAND_LIFE_SPARK_ID {
@@ -6657,6 +6768,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.plasticSmoke" => Some(DecalColor::from_rgba(0xf1e479ff)),
         "Pal.plasticBurn" => Some(DecalColor::from_rgba(0xe9ead3ff)),
         "Pal.coalBlack" => Some(DecalColor::from_rgba(0x272727ff)),
+        "Pal.engine" => Some(DecalColor::from_rgba(0xffbb64ff)),
         "Pal.vent" => Some(DecalColor::from_rgba(0x6b4e4eff)),
         "Pal.regen" => Some(DecalColor::from_rgba(0xd1efffff)),
         "Pal.slagOrange" => Some(DecalColor::from_rgba(0xffa166ff)),
@@ -8371,6 +8483,7 @@ mod tests {
             Some(FX_LAUNCH_ACCELERATOR_ID)
         );
         assert_eq!(standard_effect_id("launch"), Some(FX_LAUNCH_ID));
+        assert_eq!(standard_effect_id("launchPod"), Some(FX_LAUNCH_POD_ID));
         assert_eq!(
             standard_effect_id("healWaveMend"),
             Some(FX_HEAL_WAVE_MEND_ID)
@@ -8386,6 +8499,11 @@ mod tests {
             standard_effect_id("overdriveBlockFull"),
             Some(FX_OVERDRIVE_BLOCK_FULL_ID)
         );
+        assert_eq!(
+            standard_effect_id("coreLandDust"),
+            Some(FX_CORE_LAND_DUST_ID)
+        );
+        assert_eq!(standard_effect_id("podLandDust"), Some(FX_POD_LAND_DUST_ID));
         assert_eq!(standard_effect_id("none"), None);
     }
 
@@ -8871,6 +8989,7 @@ mod tests {
             22.0
         );
         assert_eq!(standard_effect(FX_LAUNCH_ID).unwrap().lifetime, 28.0);
+        assert_eq!(standard_effect(FX_LAUNCH_POD_ID).unwrap().lifetime, 50.0);
         assert_eq!(
             standard_effect(FX_HEAL_WAVE_MEND_ID).unwrap().lifetime,
             40.0
@@ -8888,6 +9007,12 @@ mod tests {
                 .lifetime,
             60.0
         );
+        let core_land_dust = standard_effect(FX_CORE_LAND_DUST_ID).unwrap();
+        assert_eq!(core_land_dust.lifetime, 100.0);
+        assert_eq!(core_land_dust.layer, Layer::GROUND_UNIT + 1.0);
+        let pod_land_dust = standard_effect(FX_POD_LAND_DUST_ID).unwrap();
+        assert_eq!(pod_land_dust.lifetime, 70.0);
+        assert_eq!(pod_land_dust.layer, Layer::GROUND_UNIT + 1.0);
         assert!(standard_effect_by_name("none").is_none());
         assert!(standard_effect(-1).is_none());
     }
@@ -9758,7 +9883,65 @@ mod tests {
         assert_eq!(launch.radius, 109.0);
         assert_eq!(launch.stroke, 1.0);
 
+        let launch_pod = standard_effect_draw_plans(
+            Some(FX_LAUNCH_POD_ID as u16),
+            248,
+            3.0,
+            4.0,
+            0.0,
+            12.5,
+            50.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(launch_pod.len(), 2);
+        assert_eq!(launch_pod[0].kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(launch_pod[0].color_from, Some("Pal.engine"));
+        assert_eq!(
+            launch_pod[1].kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(launch_pod[1].particles.unwrap().count, 24);
+        assert_eq!(launch_pod[1].radius, 4.0);
+        assert_eq!(launch_pod[1].stroke, 1.5);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.engine"),
+            Some(DecalColor::from_rgba(0xffbb64ff))
+        );
+
         let input_color = DecalColor::from_rgba(0x123456ff);
+        let core_land_dust = standard_effect_draw_plans(
+            Some(FX_CORE_LAND_DUST_ID as u16),
+            258,
+            3.0,
+            4.0,
+            30.0,
+            50.0,
+            100.0,
+            input_color,
+        );
+        assert_eq!(core_land_dust.len(), 1);
+        assert_eq!(core_land_dust[0].kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(core_land_dust[0].layer, Layer::GROUND_UNIT + 1.0);
+        assert_eq!(core_land_dust[0].input_color, Some(input_color));
+        assert_eq!(core_land_dust[0].alpha, 1.0);
+        assert!(core_land_dust[0].radius > 0.0);
+
+        let pod_land_dust = standard_effect_draw_plans(
+            Some(FX_POD_LAND_DUST_ID as u16),
+            259,
+            3.0,
+            4.0,
+            30.0,
+            35.0,
+            70.0,
+            input_color,
+        );
+        assert_eq!(pod_land_dust.len(), 1);
+        assert_eq!(pod_land_dust[0].kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(pod_land_dust[0].layer, Layer::GROUND_UNIT + 1.0);
+        assert_eq!(pod_land_dust[0].input_color, Some(input_color));
+        assert!(pod_land_dust[0].radius > 0.0);
+
         let heal_wave_mend = standard_effect_draw_plan(
             Some(FX_HEAL_WAVE_MEND_ID as u16),
             249,

@@ -8135,3 +8135,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `generate` 当前用 8 条 `LineAngle` 表达 `Lines.spikes`，几何语义已保留但尚未接入真实 GPU `Lines.spikes` backend；
   - 本轮仍是 headless primitive seam，真实 renderer/backend 与整体游戏 runtime 接入仍需继续推进。
+
+### 12.256 Fx.launchPod/coreLandDust/podLandDust
+
+- 2026-05-28：继续对照 `Fx.java:2747-2761` 与 `Fx.java:2838-2850`，迁移 `launchPod=248` 以及两个登陆尘土效果 `coreLandDust=258` / `podLandDust=259`。
+- 本轮迁移：
+  - `launchPod=248`
+  - `coreLandDust=258`
+  - `podLandDust=259`
+- Java 依据：
+  - `launchPod = new Effect(50, ...)`：颜色 `Pal.engine`；前 25 帧 `scaled` 圆环，半径 `4 + f.finpow()*30`，stroke `f.fout()*2`；随后 24 条 `randLenVectors(e.id, 24, e.finpow()*50)` radial `lineAngle`，line length `e.fout()*4+1`，stroke `e.fout()*2`。
+  - `coreLandDust = new Effect(100f, ...)`：`Layer.groundUnit + 1f`；固定 seed 后沿 `e.rotation` 偏移一个随机距离 `e.finpow()*90*rand(0.2,1)`，绘制半径 `8*rand(0.6,1)*e.fout(0.2)` 的 input-color filled circle，alpha `e.fout(0.1)`。
+  - `podLandDust = new Effect(70f, ...)`：同 `coreLandDust`，但距离系数 `35`、半径系数 `5`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_LAUNCH_POD_ID=248`、`FX_CORE_LAND_DUST_ID=258`、`FX_POD_LAND_DUST_ID=259`、lookup 与 metadata；
+    - 新增颜色符号 `Pal.engine=0xffbb64ff`；
+    - `launchPod` 复用 `StrokedCircle` + `SeededRadialLineParticles` 多 plan seam；
+    - `coreLandDust` / `podLandDust` 用 concrete `FilledCircle` plans 保留 Java 的 seeded random offset/radius 与 `Layer::GROUND_UNIT + 1.0`。
+  - `desktop/src/lib.rs`
+    - 新增/扩展 `desktop_launcher_flattens_launch_pod_circle_and_lines_for_render`，验证 3 个 event 展开为 4 个 draw plans、3 个 circle primitives、24 条 line primitives。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_launch_pod_circle_and_lines_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `shieldBreak=256` / `arcShieldBreak=257` 需要 polygon/arc/data seam；
+  - `healBlockFull=252` / `legDestroy=263` 需要纹理 region / textured line seam；
+  - `unitShieldBreak=260`、`chainLightning=261`、`chainEmp=262`、debug effects 仍待继续迁移；
+  - 本轮仍是 headless primitive seam，真实 renderer/backend 与整体游戏 runtime 接入仍需继续推进。
