@@ -6160,3 +6160,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 最值得新增的通用 seam 是 `Polyline/Path` primitive，可覆盖 shield/chain/debug line 类效果；
   3. 纹理相关的 `healBlockFull` / `legDestroy` 需要 texture region / textured line seam，建议在 polyline 后处理；
   4. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。
+
+---
+
+## 183. 最新闭环记录：Fx.shieldBreak
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `shieldBreak=256` 的默认 fallback 六边形 polygon，先补齐无 `ForceFieldAbility` typed data 时的 Java 行为。
+- 本轮迁移：
+  - `shieldBreak=256`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHIELD_BREAK_ID`、lookup、metadata；
+    - 用 6 个 deterministic `LineAngle` plans 表达 Java `Lines.poly(e.x, e.y, 6, e.rotation + e.fin())`；
+    - 颜色走 `Input.color`，stroke `3*fout`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shield_break_polygon_lines_for_render`，验证 6 个 draw plans / 6 条 line primitives。
+  - `MIGRATION.md`
+    - 新增 `12.257` 节。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_shield_break_polygon_lines_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `shieldBreak` 还缺 `ForceFieldAbility` data 分支，后续应新增 typed data resolver；
+  2. 继续 246–265 段剩余缺口时，优先考虑 `Polyline/Path` primitive 覆盖 chain/debug line；
+  3. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。

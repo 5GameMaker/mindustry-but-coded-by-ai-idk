@@ -8170,3 +8170,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `healBlockFull=252` / `legDestroy=263` 需要纹理 region / textured line seam；
   - `unitShieldBreak=260`、`chainLightning=261`、`chainEmp=262`、debug effects 仍待继续迁移；
   - 本轮仍是 headless primitive seam，真实 renderer/backend 与整体游戏 runtime 接入仍需继续推进。
+
+### 12.257 Fx.shieldBreak
+
+- 2026-05-28：对照 `Fx.java:2807-2816`，迁移 `shieldBreak=256` 的默认六边形破盾线框效果。
+- 本轮迁移：
+  - `shieldBreak=256`
+- Java 依据：
+  - `shieldBreak = new Effect(40, ...)`，`color(e.color)`，stroke `3f * e.fout()`；
+  - 若 `e.data instanceof ForceFieldAbility`，Java 会使用能力侧 `sides/rotation`；
+  - 否则绘制 `Lines.poly(e.x, e.y, 6, e.rotation + e.fin())`，并 `.followParent(true)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHIELD_BREAK_ID=256`、lookup、metadata；
+    - 默认路径以 6 个 deterministic `LineAngle` plans 表达 Java fallback 六边形 polygon，半径 `rotation + fin`，stroke `3*fout`，颜色使用 `Input.color`；
+    - 当前还没有 `ForceFieldAbility` typed data resolver，因此 ability 自定义边数/旋转路径暂未接入。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shield_break_polygon_lines_for_render`，验证 1 个 event 展开为 6 个 draw plans / 6 条 line primitives。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_shield_break_polygon_lines_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `shieldBreak` 的 `ForceFieldAbility` data 分支仍需 typed data resolver；
+  - 真实 renderer/backend 仍未接入，当前仍是 headless line primitive seam。

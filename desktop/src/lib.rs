@@ -3775,6 +3775,51 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_shield_break_polygon_lines_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("shieldBreak").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 12.0,
+                    color: type_io::RgbaColor::new(0x336699ff_i32),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 6);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_rect_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 6);
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let line = &launcher.standard_local_effect_line_primitives[0];
+        assert!(line.length > 0.0);
+        assert!(line.stroke > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 6);
+        assert_eq!(stats.circle_primitives, 0);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.rect_primitives, 0);
+        assert_eq!(stats.line_primitives, 6);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_flattens_shoot_flame_circle_particles_for_render() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         for (name, x) in [

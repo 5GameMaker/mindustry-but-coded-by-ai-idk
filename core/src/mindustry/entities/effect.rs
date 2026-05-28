@@ -380,6 +380,8 @@ pub const FX_ROTATE_BLOCK_ID: i32 = 253;
 pub const FX_LIGHT_BLOCK_ID: i32 = 254;
 /// Upstream `Fx.overdriveBlockFull` id in `mindustry.content.Fx` for v158.1.
 pub const FX_OVERDRIVE_BLOCK_FULL_ID: i32 = 255;
+/// Upstream `Fx.shieldBreak` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHIELD_BREAK_ID: i32 = 256;
 /// Upstream `Fx.coreLandDust` id in `mindustry.content.Fx` for v158.1.
 pub const FX_CORE_LAND_DUST_ID: i32 = 258;
 /// Upstream `Fx.podLandDust` id in `mindustry.content.Fx` for v158.1.
@@ -575,6 +577,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "rotateBlock" => Some(FX_ROTATE_BLOCK_ID),
         "lightBlock" => Some(FX_LIGHT_BLOCK_ID),
         "overdriveBlockFull" => Some(FX_OVERDRIVE_BLOCK_FULL_ID),
+        "shieldBreak" => Some(FX_SHIELD_BREAK_ID),
         "coreLandDust" => Some(FX_CORE_LAND_DUST_ID),
         "podLandDust" => Some(FX_POD_LAND_DUST_ID),
         _ => None,
@@ -976,6 +979,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_OVERDRIVE_BLOCK_FULL_ID => {
             Effect::with_lifetime(FX_OVERDRIVE_BLOCK_FULL_ID, 60.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SHIELD_BREAK_ID => Effect::with_lifetime(FX_SHIELD_BREAK_ID, 40.0, DEFAULT_EFFECT_CLIP),
         FX_CORE_LAND_DUST_ID => {
             Effect::with_lifetime(FX_CORE_LAND_DUST_ID, 100.0, DEFAULT_EFFECT_CLIP)
                 .layer(Layer::GROUND_UNIT + 1.0)
@@ -1085,6 +1089,7 @@ pub fn standard_effect_draw_plans_with_data_float(
             | FX_TELEPORT_ID
             | FX_TELEPORT_OUT_ID
             | FX_LAUNCH_POD_ID
+            | FX_SHIELD_BREAK_ID
             | FX_CORE_LAND_DUST_ID
             | FX_POD_LAND_DUST_ID
     ) {
@@ -1466,6 +1471,51 @@ pub fn standard_effect_draw_plans_with_data_float(
             light_radius: 0.0,
             light_opacity: 0.0,
         });
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_SHIELD_BREAK_ID {
+        let sides = 6;
+        let radius = rotation + fin;
+        let stroke = 3.0 * fout;
+        let mut plans = Vec::with_capacity(sides);
+        for i in 0..sides {
+            let angle_a = i as f32 * 360.0 / sides as f32;
+            let angle_b = (i + 1) as f32 * 360.0 / sides as f32;
+            let (ax, ay) = trns(angle_a, radius);
+            let (bx, by) = trns(angle_b, radius);
+            let dx = bx - ax;
+            let dy = by - ay;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::LineAngle,
+                center: (x + ax, y + ay),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: (dx * dx + dy * dy).sqrt(),
+                stroke,
+                particles: Some(standard_effect_particle_spec(
+                    state_id,
+                    1,
+                    Some(dy.atan2(dx).to_degrees()),
+                    0.0,
+                    0.0,
+                    fin,
+                    fout,
+                    fslope,
+                )),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
 
         return plans;
     }
@@ -8499,6 +8549,7 @@ mod tests {
             standard_effect_id("overdriveBlockFull"),
             Some(FX_OVERDRIVE_BLOCK_FULL_ID)
         );
+        assert_eq!(standard_effect_id("shieldBreak"), Some(FX_SHIELD_BREAK_ID));
         assert_eq!(
             standard_effect_id("coreLandDust"),
             Some(FX_CORE_LAND_DUST_ID)
@@ -9007,6 +9058,7 @@ mod tests {
                 .lifetime,
             60.0
         );
+        assert_eq!(standard_effect(FX_SHIELD_BREAK_ID).unwrap().lifetime, 40.0);
         let core_land_dust = standard_effect(FX_CORE_LAND_DUST_ID).unwrap();
         assert_eq!(core_land_dust.lifetime, 100.0);
         assert_eq!(core_land_dust.layer, Layer::GROUND_UNIT + 1.0);
@@ -9941,6 +9993,26 @@ mod tests {
         assert_eq!(pod_land_dust[0].layer, Layer::GROUND_UNIT + 1.0);
         assert_eq!(pod_land_dust[0].input_color, Some(input_color));
         assert!(pod_land_dust[0].radius > 0.0);
+
+        let shield_break = standard_effect_draw_plans(
+            Some(FX_SHIELD_BREAK_ID as u16),
+            256,
+            3.0,
+            4.0,
+            12.0,
+            20.0,
+            40.0,
+            input_color,
+        );
+        assert_eq!(shield_break.len(), 6);
+        assert!(shield_break
+            .iter()
+            .all(|plan| plan.kind == StandardEffectDrawKind::LineAngle));
+        assert!(shield_break
+            .iter()
+            .all(|plan| plan.input_color == Some(input_color)));
+        assert_eq!(shield_break[0].stroke, 1.5);
+        assert!(shield_break[0].radius > 0.0);
 
         let heal_wave_mend = standard_effect_draw_plan(
             Some(FX_HEAL_WAVE_MEND_ID as u16),
