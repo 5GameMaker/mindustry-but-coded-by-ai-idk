@@ -135,6 +135,34 @@ pub fn load() -> Vec<BulletContent> {
     pulsar_heal_lightning.heal_percent = 2.0;
     pulsar_heal_lightning.lightning_type = Some(Box::new(pulsar_heal_lightning_type));
 
+    let mut reign_frag = basic_bullet(9.0, 20.0);
+    reign_frag.width = 10.0;
+    reign_frag.height = 10.0;
+    reign_frag.pierce = true;
+    reign_frag.pierce_building = true;
+    reign_frag.pierce_cap = 3;
+    reign_frag.lifetime = 20.0;
+    reign_frag.hit_effect = "flakExplosion".into();
+    reign_frag.splash_damage = 15.0;
+    reign_frag.splash_damage_radius = 10.0;
+
+    let mut reign_shell = basic_bullet(13.0, 80.0);
+    reign_shell.pierce = true;
+    reign_shell.pierce_cap = 10;
+    reign_shell.width = 14.0;
+    reign_shell.height = 33.0;
+    reign_shell.lifetime = 15.0;
+    reign_shell.shoot_effect = "shootBig".into();
+    reign_shell.frag_velocity_min = 0.4;
+    reign_shell.hit_effect = "blastExplosion".into();
+    reign_shell.splash_damage = 18.0;
+    reign_shell.splash_damage_radius = 13.0;
+    reign_shell.frag_bullets = 3;
+    reign_shell.frag_life_min = 0.0;
+    reign_shell.frag_random_spread = 30.0;
+    reign_shell.despawn_sound = "explosion".into();
+    reign_shell.frag_bullet = Some(Box::new(reign_frag));
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -182,6 +210,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "nova_heal_bolt", nova_heal_bolt),
         make_bullet(&mut next_id, "fortress_artillery", fortress_artillery),
         make_bullet(&mut next_id, "pulsar_heal_lightning", pulsar_heal_lightning),
+        make_bullet(&mut next_id, "reign_shell", reign_shell),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -318,6 +347,7 @@ mod tests {
                 "nova_heal_bolt",
                 "fortress_artillery",
                 "pulsar_heal_lightning",
+                "reign_shell",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -545,6 +575,47 @@ mod tests {
         assert!(!nested.hittable);
         assert_eq!(nested.heal_percent, 1.6);
         assert!(nested.collides_team);
+    }
+
+    #[test]
+    fn reign_shell_matches_java_basic_frag_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "reign_shell").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Basic);
+        assert_eq!(bullet.speed, 13.0);
+        assert_eq!(bullet.damage, 80.0);
+        assert!(bullet.pierce);
+        assert_eq!(bullet.pierce_cap, 10);
+        assert_eq!(bullet.width, 14.0);
+        assert_eq!(bullet.height, 33.0);
+        assert_eq!(bullet.lifetime, 15.0);
+        assert_eq!(bullet.shoot_effect, "shootBig");
+        assert_eq!(bullet.frag_velocity_min, 0.4);
+        assert_eq!(bullet.hit_effect, "blastExplosion");
+        assert_eq!(bullet.splash_damage, 18.0);
+        assert_eq!(bullet.splash_damage_radius, 13.0);
+        assert_eq!(bullet.frag_bullets, 3);
+        assert_eq!(bullet.frag_life_min, 0.0);
+        assert_eq!(bullet.frag_random_spread, 30.0);
+        assert_eq!(bullet.despawn_sound, "explosion");
+
+        let frag = bullet
+            .frag_bullet
+            .as_deref()
+            .expect("reign shell should have fragBullet");
+        assert_eq!(frag.kind, BulletKind::Basic);
+        assert_eq!(frag.speed, 9.0);
+        assert_eq!(frag.damage, 20.0);
+        assert_eq!(frag.width, 10.0);
+        assert_eq!(frag.height, 10.0);
+        assert!(frag.pierce);
+        assert!(frag.pierce_building);
+        assert_eq!(frag.pierce_cap, 3);
+        assert_eq!(frag.lifetime, 20.0);
+        assert_eq!(frag.hit_effect, "flakExplosion");
+        assert_eq!(frag.splash_damage, 15.0);
+        assert_eq!(frag.splash_damage_radius, 10.0);
     }
 
     #[test]

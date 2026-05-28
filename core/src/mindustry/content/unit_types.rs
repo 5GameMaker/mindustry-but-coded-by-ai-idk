@@ -116,6 +116,18 @@ pub fn load() -> Vec<UnitType> {
             u.step_sound = "mechStepHeavy".into();
             u.step_sound_pitch = 0.9;
             u.step_sound_volume = 0.45;
+            let mut weapon = Weapon::new("reign-weapon");
+            weapon.top = false;
+            weapon.y = 1.0;
+            weapon.x = 21.5;
+            weapon.shoot_y = 11.0;
+            weapon.reload = 9.0;
+            weapon.recoil = 5.0;
+            weapon.shake = 2.0;
+            weapon.eject_effect = "casing4".into();
+            weapon.shoot_sound = "shootReign".into();
+            weapon.bullet = "reign_shell".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "nova", UnitKind::Standard, |u| {
             u.can_boost = true;
@@ -1493,6 +1505,36 @@ mod tests {
         assert_eq!(bullet.spec.damage, 15.0);
         assert_eq!(bullet.spec.heal_percent, 2.0);
         assert!(bullet.spec.lightning_type.is_some());
+    }
+
+    #[test]
+    fn reign_weapon_uses_frag_shell_profile() {
+        let units = load();
+        let reign = by_name(&units, "reign");
+        assert_eq!(reign.weapons.len(), 1);
+
+        let weapon = &reign.weapons[0];
+        assert_eq!(weapon.name, "reign-weapon");
+        assert!(!weapon.top);
+        assert_eq!(weapon.y, 1.0);
+        assert_eq!(weapon.x, 21.5);
+        assert_eq!(weapon.shoot_y, 11.0);
+        assert_eq!(weapon.reload, 9.0);
+        assert_eq!(weapon.recoil, 5.0);
+        assert_eq!(weapon.shake, 2.0);
+        assert_eq!(weapon.eject_effect, "casing4");
+        assert_eq!(weapon.shoot_sound, "shootReign");
+        assert_eq!(weapon.bullet, "reign_shell");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing reign weapon bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Basic);
+        assert_eq!(bullet.spec.damage, 80.0);
+        assert_eq!(bullet.spec.frag_bullets, 3);
+        assert!(bullet.spec.frag_bullet.is_some());
     }
 
     #[test]

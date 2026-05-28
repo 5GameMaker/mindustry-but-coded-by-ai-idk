@@ -8033,3 +8033,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 然后 `scepter`，处理主武器 + 两个 mount + intervalBullet + 共享 smallBullet；
   3. `LightningBulletType` 的真实 `Lightning.create`、治疗、显示/音效 runtime 尚未接入；
   4. 当前总迁移约 12.9%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 237. 最新闭环记录：UnitTypes reign fragBullet content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `reign` 的 `reign-weapon` 和带 `fragBullet` 的 `BasicBulletType` 回填进 Rust content registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:290-350`
+  - weapon：`reign-weapon`，`top=false`、`y=1`、`x=21.5`、`shootY=11`、`reload=9`、`recoil=5`、`shake=2`、`ejectEffect=Fx.casing4`、`shootSound=Sounds.shootReign`
+  - main bullet：`BasicBulletType(13, 80)`，`pierce=true`、`pierceCap=10`、`width=14`、`height=33`、`lifetime=15`、`shootEffect=Fx.shootBig`、`fragVelocityMin=0.4`、`hitEffect=Fx.blastExplosion`、`splashDamage=18`、`splashDamageRadius=13`、`fragBullets=3`、`fragLifeMin=0`、`fragRandomSpread=30`、`despawnSound=Sounds.explosion`
+  - frag bullet：`BasicBulletType(9, 20)`，`width=10`、`height=10`、`pierce=true`、`pierceBuilding=true`、`pierceCap=3`、`lifetime=20`、`hitEffect=Fx.flakExplosion`、`splashDamage=15`、`splashDamageRadius=10`
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `reign_shell`；
+    - `reign_shell.frag_bullet` 保存嵌套 `BulletSpec`；
+    - 更新 bullet load order 测试；
+    - 新增 `reign_shell_matches_java_basic_frag_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `reign` 追加 `Weapon::new("reign-weapon")`；
+    - weapon 引用 `bullet = "reign_shell"`，并设置 Java weapon 字段；
+    - 新增 `reign_weapon_uses_frag_shell_profile`。
+  - `MIGRATION.md`
+    - 新增 `12.311`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core reign_shell_matches_java_basic_frag_profile --lib`
+  - `cargo test -p mindustry-core reign_weapon_uses_frag_shell_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一闭环建议 `scepter`，它是这批里最复杂的：主武器 + 两个 mount + intervalBullet + 共享 smallBullet；
+  2. `frag_bullet` 还只是 content tree，真实 frag spawn runtime 尚未接入；
+  3. `splashDamage` / `pierce` / `pierceBuilding` runtime 仍待 world collision 系统补全；
+  4. 当前总迁移约 12.95%，远未可玩，goal 绝不能标记 complete。

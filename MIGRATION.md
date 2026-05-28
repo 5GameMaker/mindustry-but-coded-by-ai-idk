@@ -9868,3 +9868,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `heal_percent/collides_team` 已进入 content 和 nested bullet，但 world collision healing 仍待接入；
   - 下一步建议 `reign`，验证 `fragBullet` 递归分裂树；
   - 当前总体迁移约 12.9%，远未可玩。
+
+### 12.311 UnitTypes reign fragBullet content seam
+
+- 2026-05-28：继续回填 `reign` 的 `reign-weapon` 与主弹/分裂弹树；本闭环使用 `frag_bullet: Option<Box<BulletSpec>>` 表达 Java `fragBullet = new BasicBulletType(...)`，验证 content bullet schema 的递归分裂路径。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:290-350`
+  - weapon：`new Weapon("reign-weapon")`，`top = false`、`y = 1f`、`x = 21.5f`、`shootY = 11f`、`reload = 9f`、`recoil = 5f`、`shake = 2f`、`ejectEffect = Fx.casing4`、`shootSound = Sounds.shootReign`
+  - main bullet：`new BasicBulletType(13f, 80)`，`pierce = true`、`pierceCap = 10`、`width = 14f`、`height = 33f`、`lifetime = 15f`、`shootEffect = Fx.shootBig`、`fragVelocityMin = 0.4f`、`hitEffect = Fx.blastExplosion`、`splashDamage = 18f`、`splashDamageRadius = 13f`、`fragBullets = 3`、`fragLifeMin = 0f`、`fragRandomSpread = 30f`、`despawnSound = Sounds.explosion`
+  - frag bullet：`new BasicBulletType(9f, 20)`，`width = 10f`、`height = 10f`、`pierce = true`、`pierceBuilding = true`、`pierceCap = 3`、`lifetime = 20f`、`hitEffect = Fx.flakExplosion`、`splashDamage = 15f`、`splashDamageRadius = 10f`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增具名 bullet preset `reign_shell`；
+    - `reign_shell.frag_bullet` 保存嵌套 Basic `BulletSpec`；
+    - 更新 bullet registry 顺序测试，新增 `reign_shell_matches_java_basic_frag_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `reign` 现在注册 `Weapon::new("reign-weapon")`；
+    - weapon 引用 `bullet = "reign_shell"`，并设置 Java weapon 字段；
+    - 新增 `reign_weapon_uses_frag_shell_profile`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core reign_shell_matches_java_basic_frag_profile --lib`
+  - `cargo test -p mindustry-core reign_weapon_uses_frag_shell_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `frag_bullet` 已进入 content tree，但真实 despawn/frag spawn runtime 仍未接入；
+  - `splashDamage` / `pierce` / `pierceBuilding` runtime 仍待 world collision 系统补全；
+  - 下一步建议 `scepter`，处理主武器、两个 mount、`intervalBullet` 与共享 `smallBullet`；
+  - 当前总体迁移约 12.95%，远未可玩。
