@@ -9022,5 +9022,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：
   - 事件目前是 runtime sidecar，尚未接真实全局 event bus / service trigger；
-  - suicide trigger、weapon `shootOnDeath`、ability `death(...)`、`type.killed(...)` 仍未迁移；
+  - weapon `shootOnDeath` 已在 `12.283` 记录 runtime sidecar 并触发 override effect；suicide trigger、ability `death(...)`、`type.killed(...)` 仍未迁移；
+  - 当前总体迁移仍约 10%~11%，远未可玩。
+
+### 12.283 UnitDestroy weapon shootOnDeath runtime sidecar
+
+- 2026-05-28：继续对照 Java `UnitComp.destroy()` 中 weapon `shootOnDeath` 分支，先在 Rust runtime 记录死亡射击 sidecar，并在 `shootOnDeathEffect` 存在且 unit 无目标时排入 override effect。
+- Java 依据：
+  - `if(mount.weapon.shootOnDeath && !(mount.weapon.bullet.killShooter && mount.totalShots > 0))`
+  - `if(mount.weapon.shootOnDeathEffect != null && !hasTarget) { mount.allowShootEffects = false; mount.weapon.shootOnDeathEffect.at(x, y, rotation); }`
+  - `mount.reload = 0f; mount.shoot = true; mount.weapon.update(self(), mount);`
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitShootOnDeathEvent { unit_id, weapon_index, weapon_name, bullet, x, y, rotation, override_effect, allow_shoot_effects }`；
+    - `GameRuntime` 新增 `unit_shoot_on_death_events`；
+    - reset/clear 路径清空该队列；
+    - 新增 `drain_unit_shoot_on_death_events()`；
+    - `queue_client_unit_destroy_side_effects(...)` 遍历 `unit.weapons.mounts`，对 `shoot_on_death` weapon 记录 sidecar；
+    - 若 `shoot_on_death_effect` 存在且 unit `has_target == false`，排入对应本地 effect seam，并将 `allow_shoot_effects=false` 记录到事件；
+    - core destroy 测试覆盖事件字段、override `smoke` effect、drain。
+  - `desktop/src/lib.rs`
+    - unit destroy desktop 测试增加 shoot-on-death weapon，验证 lifecycle -> runtime 后事件存在，并且本地 effect entity 数增加。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 尚未真正执行 `mount.weapon.update(...)` / bullet spawn；
+  - 尚未处理 `bullet.killShooter && totalShots > 0`，因为当前 Rust weapon 仍以 bullet 名称存储，未在该路径解析完整 BulletType；
+  - ability `death(...)`、`type.killed(...)`、suicide trigger、完整 event bus 仍未迁移；
   - 当前总体迁移仍约 10%~11%，远未可玩。

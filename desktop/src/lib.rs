@@ -2137,7 +2137,7 @@ mod tests {
             type_io, BuildingRef, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks,
             TeamId, TypeValue, UnitRef, Vec2 as IoVec2,
         },
-        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector, UnitType},
+        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector, UnitType, Weapon},
         world::blocks::campaign::LandingPadState,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
         world::blocks::units::{
@@ -5498,6 +5498,11 @@ mod tests {
         unit_type.leg_extension = 3.0;
         unit_type.leg_region = TextureRegionRef::with_size("crawler-leg", 16, 8);
         unit_type.leg_base_region = TextureRegionRef::with_size("crawler-leg-base", 12, 6);
+        let mut death_weapon = Weapon::new("death-cannon");
+        death_weapon.shoot_on_death = true;
+        death_weapon.shoot_on_death_effect = Some("smoke".into());
+        death_weapon.bullet = "death-blast".into();
+        unit_type.weapons.push(death_weapon);
         let mut unit = UnitComp::new(9903, unit_type, TeamId(4));
         unit.add();
         unit.set_pos(10.0, 20.0);
@@ -5520,7 +5525,7 @@ mod tests {
             .client_unit_snapshot_entities
             .contains_key(&9903));
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
-        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 5);
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 6);
         assert_eq!(launcher.pending_sound_at_events.len(), 1);
         assert_eq!(
             launcher.pending_sound_at_events[0].sound_id,
@@ -5539,6 +5544,11 @@ mod tests {
         assert_eq!(scorch.y, 20.0);
         assert_eq!(launcher.runtime.unit_destroy_events.len(), 1);
         assert_eq!(launcher.runtime.unit_destroy_events[0].unit_id, 9903);
+        assert_eq!(launcher.runtime.unit_shoot_on_death_events.len(), 1);
+        assert_eq!(
+            launcher.runtime.unit_shoot_on_death_events[0].weapon_name,
+            "death-cannon"
+        );
         let leg_primitives = launcher
             .standard_local_effect_line_primitives
             .iter()

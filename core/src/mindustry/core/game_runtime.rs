@@ -1545,6 +1545,19 @@ pub struct GameRuntimeUnitDestroyEvent {
     pub y: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeUnitShootOnDeathEvent {
+    pub unit_id: i32,
+    pub weapon_index: usize,
+    pub weapon_name: String,
+    pub bullet: String,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: f32,
+    pub override_effect: Option<String>,
+    pub allow_shoot_effects: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GameRuntimeTriggerEvent {
     pub trigger: Trigger,
@@ -2610,6 +2623,7 @@ pub struct GameRuntime {
     pub item_taken_events: Vec<GameRuntimeItemTakenEvent>,
     pub unit_create_events: Vec<GameRuntimeUnitCreateEvent>,
     pub unit_destroy_events: Vec<GameRuntimeUnitDestroyEvent>,
+    pub unit_shoot_on_death_events: Vec<GameRuntimeUnitShootOnDeathEvent>,
     pub trigger_events: Vec<GameRuntimeTriggerEvent>,
     pub server_puddles: Puddles,
     pub server_fires: Fires,
@@ -2692,6 +2706,7 @@ impl GameRuntime {
             item_taken_events: Vec::new(),
             unit_create_events: Vec::new(),
             unit_destroy_events: Vec::new(),
+            unit_shoot_on_death_events: Vec::new(),
             trigger_events: Vec::new(),
             server_puddles: Puddles::default(),
             server_fires: Fires::default(),
@@ -2787,6 +2802,10 @@ impl GameRuntime {
 
     pub fn drain_unit_destroy_events(&mut self) -> Vec<GameRuntimeUnitDestroyEvent> {
         std::mem::take(&mut self.unit_destroy_events)
+    }
+
+    pub fn drain_unit_shoot_on_death_events(&mut self) -> Vec<GameRuntimeUnitShootOnDeathEvent> {
+        std::mem::take(&mut self.unit_shoot_on_death_events)
     }
 
     pub fn note_client_block_snapshot_parse_error(
@@ -3992,6 +4011,45 @@ impl GameRuntime {
             x,
             y,
         });
+
+        for (weapon_index, mount) in unit.weapons.mounts.iter().enumerate() {
+            if !mount.weapon.shoot_on_death {
+                continue;
+            }
+
+            let override_effect = if !unit.has_target {
+                mount.weapon.shoot_on_death_effect.clone()
+            } else {
+                None
+            };
+            if let Some(effect_name) = &override_effect {
+                if let Some(effect_id) = standard_effect_id(effect_name) {
+                    self.client_local_effect_events.push(EffectCallPacket2 {
+                        effect: EffectCallPacket {
+                            effect_id: effect_id as u16,
+                            x,
+                            y,
+                            rotation: unit.rotation(),
+                            color: type_io::RgbaColor::new(-1),
+                        },
+                        data: TypeValue::Null,
+                    });
+                }
+            }
+
+            self.unit_shoot_on_death_events
+                .push(GameRuntimeUnitShootOnDeathEvent {
+                    unit_id: unit.id(),
+                    weapon_index,
+                    weapon_name: mount.weapon.name.clone(),
+                    bullet: mount.weapon.bullet.clone(),
+                    x,
+                    y,
+                    rotation: unit.rotation(),
+                    override_effect: override_effect.clone(),
+                    allow_shoot_effects: override_effect.is_none(),
+                });
+        }
 
         if unit.type_info.create_scorch {
             let size = (hit_size / 5.0).floor().clamp(0.0, 9.0) as i32;
@@ -10274,6 +10332,7 @@ impl GameRuntime {
         self.item_taken_events.clear();
         self.unit_create_events.clear();
         self.unit_destroy_events.clear();
+        self.unit_shoot_on_death_events.clear();
         self.trigger_events.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -20485,7 +20544,7 @@ mod tests {
             BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, TeamId,
             TypeValue, Vec2 as IoVec2,
         },
-        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector},
+        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector, Weapon},
         world::{
             blocks::campaign::{
                 write_accelerator_state, write_landing_pad_state, write_launch_pad_state,
@@ -26567,6 +26626,11 @@ mod tests {
         unit_type.leg_extension = 3.0;
         unit_type.leg_region = TextureRegionRef::with_size("crawler-leg", 16, 8);
         unit_type.leg_base_region = TextureRegionRef::with_size("crawler-leg-base", 12, 6);
+        let mut death_weapon = Weapon::new("death-cannon");
+        death_weapon.shoot_on_death = true;
+        death_weapon.shoot_on_death_effect = Some("smoke".into());
+        death_weapon.bullet = "death-blast".into();
+        unit_type.weapons.push(death_weapon);
         let mut unit = UnitComp::new(77, unit_type, TeamId(4));
         unit.add();
         unit.set_pos(10.0, 20.0);
@@ -26630,6 +26694,19 @@ mod tests {
         assert_eq!(destroy_event.y, 20.0);
         assert_eq!(runtime.drain_unit_destroy_events().len(), 1);
         assert!(runtime.unit_destroy_events.is_empty());
+        assert_eq!(runtime.unit_shoot_on_death_events.len(), 1);
+        let shoot_event = &runtime.unit_shoot_on_death_events[0];
+        assert_eq!(shoot_event.unit_id, 77);
+        assert_eq!(shoot_event.weapon_index, 0);
+        assert_eq!(shoot_event.weapon_name, "death-cannon");
+        assert_eq!(shoot_event.bullet, "death-blast");
+        assert_eq!(shoot_event.override_effect.as_deref(), Some("smoke"));
+        assert!(!shoot_event.allow_shoot_effects);
+        assert!(runtime.client_local_effect_events.iter().any(|event| {
+            event.effect.effect_id == standard_effect_id("smoke").unwrap() as u16
+                && (event.effect.rotation - 45.0).abs() < 0.0001
+        }));
+        assert_eq!(runtime.drain_unit_shoot_on_death_events().len(), 1);
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));

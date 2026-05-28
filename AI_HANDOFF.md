@@ -7100,7 +7100,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `git diff --check`
 - 当前仍需继续：
   1. `UnitDestroyEvent` 还只是 runtime sidecar，未接全局 event bus；
-  2. suicide trigger、weapon `shootOnDeath`、ability `death(...)`、`type.killed(...)` 未迁移；
+  2. weapon `shootOnDeath` 已在 `209` 节记录 runtime sidecar 并触发 override effect；suicide trigger、ability `death(...)`、`type.killed(...)` 未迁移；
   3. `Damage.dynamicExplosion` lightning/fire/wave damage 未完整；
+  4. 真实 audio/camera backend 仍需继续；
+  5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 209. 最新闭环记录：UnitDestroy weapon shootOnDeath runtime sidecar
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：对照 Java `UnitComp.destroy()` 的 weapon `shootOnDeath` 分支，先记录死亡射击 sidecar，并在存在 override effect 时写入本地 effect seam。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitShootOnDeathEvent`；
+    - `GameRuntime` 新增 `unit_shoot_on_death_events`；
+    - reset/clear 路径清空该队列；
+    - 新增 `drain_unit_shoot_on_death_events()`；
+    - `queue_client_unit_destroy_side_effects(...)` 遍历 `unit.weapons.mounts`，对 `shoot_on_death` weapon 记录事件；
+    - 若 `shoot_on_death_effect` 存在且 unit 无目标，排入对应标准 effect，并记录 `allow_shoot_effects=false`；
+    - core destroy 测试覆盖 sidecar、override `smoke` effect、drain。
+  - `desktop/src/lib.rs`
+    - unit destroy desktop 测试增加 death weapon，验证 lifecycle 后事件存在且 local effect entity 数增加。
+  - `MIGRATION.md`
+    - 新增 `12.283`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 还没有真正执行 `mount.weapon.update(...)` / bullet spawn；
+  2. `bullet.killShooter && totalShots > 0` 条件尚未完整，因为该路径还未解析 BulletType；
+  3. ability `death(...)`、`type.killed(...)`、suicide trigger、完整 event bus 仍未迁移；
   4. 真实 audio/camera backend 仍需继续；
   5. 当前总迁移仍约 10%~11%，远未可玩。
