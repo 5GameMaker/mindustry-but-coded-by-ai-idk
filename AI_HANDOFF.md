@@ -6993,5 +6993,44 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 真实 camera backend 仍需按 Java `Renderer` 随机方向 offset 应用/回退 camera position；
   2. `screenshake` setting、真实 camera 坐标、真实 delta 仍需接；
   3. audio backend 仍需真实播放；
-  4. flying wreck update/renderer、完整 `UnitComp.destroy()` 仍是后续主线；
+  4. `UnitDestroyCallPacket` 已在 `206` 节接入 `UnitComp.destroy()` 的 dynamicExplosion/deathSound/deathShake 主副作用；scorch/weapon/ability/event bus/flying wreck update 仍是后续主线；
+  5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 206. 最新闭环记录：UnitDestroy 主死亡副作用 dynamicExplosion / deathSound / deathShake
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：继续补 Java `UnitComp.destroy()`，让 `UnitDestroyCallPacket` 不再只是 legDestroy + remove，而是接入动态爆炸、死亡音效、死亡镜头震动这些主副作用。
+- Java 对照：
+  - `Damage.dynamicExplosion(..., type.deathExplosionEffect, 0f)`；
+  - `type.deathExplosionEffect.at(...)` for `spawnedByCore`；
+  - `deathShake < 0 ? 3f + hitSize / 3f : deathShake`；
+  - `Effect.shake(shake, shake, this)`；
+  - `type.deathSound.at(this, 1f, type.deathSoundVolume)`；
+  - `remove()`。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `queue_client_unit_destroy_side_effects(...)`；
+    - `apply_client_unit_destroy_packet(...)` 移除 unit 前写入 `death_explosion_effect`、death shake event、death sound event，并保留 legDestroy；
+    - 更新 `game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`；
+    - 更新 `game_runtime_applies_client_unit_death_packet_like_java_killed`。
+  - `desktop/src/lib.rs`
+    - 更新 `desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`；
+    - 更新 `desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`；
+    - 覆盖 NetClient lifecycle -> GameRuntime -> local effect/materialize + pending sound/camera seam。
+  - `MIGRATION.md`
+    - 新增 `12.280`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_death_packet_like_java_killed`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. `Damage.dynamicExplosion(...)` 的 lightning/fire/wave damage/shockwave 仍未完整；
+  2. `createScorch`、wreck decal、weapon `shootOnDeath`、ability `death(...)`、`type.killed(...)`、event bus、suicide trigger 仍未接；
+  3. 真实 audio/camera backend 仍需继续；
+  4. flying wreck update/renderer/坠毁伤害仍需继续；
   5. 当前总迁移仍约 10%~11%，远未可玩。

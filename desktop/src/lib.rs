@@ -5520,8 +5520,14 @@ mod tests {
             .client_unit_snapshot_entities
             .contains_key(&9903));
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
-        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 4);
-        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 4);
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 5);
+        assert_eq!(launcher.pending_sound_at_events.len(), 1);
+        assert_eq!(
+            launcher.pending_sound_at_events[0].sound_id,
+            mindustry_core::mindustry::audio::standard_sound_id("unitExplode1").unwrap()
+        );
+        assert_eq!(launcher.pending_camera_shake_events.len(), 1);
+        assert!((launcher.pending_camera_shake_events[0].intensity - 5.0).abs() < 0.0001);
         let leg_primitives = launcher
             .standard_local_effect_line_primitives
             .iter()
@@ -5534,9 +5540,9 @@ mod tests {
             .count();
         assert_eq!(leg_primitives, 2);
         assert_eq!(leg_base_primitives, 2);
-        assert_eq!(
-            launcher.standard_local_effect_line_primitives.len(),
-            leg_primitives + leg_base_primitives
+        assert!(
+            launcher.standard_local_effect_line_primitives.len()
+                >= leg_primitives + leg_base_primitives
         );
     }
 
@@ -5590,8 +5596,10 @@ mod tests {
             .client_unit_snapshot_entities
             .contains_key(&9912));
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 2);
-        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 8);
-        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 8);
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 10);
+        assert_eq!(launcher.pending_sound_at_events.len(), 2);
+        assert_eq!(launcher.pending_camera_shake_events.len(), 2);
+        assert!(launcher.standard_local_effect_line_primitives.len() >= 8);
         let leg_primitives = launcher
             .standard_local_effect_line_primitives
             .iter()

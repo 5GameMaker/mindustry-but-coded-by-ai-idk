@@ -3921,6 +3921,54 @@ impl GameRuntime {
         self.queue_client_leg_destroy_plan(plan)
     }
 
+    fn queue_client_unit_destroy_side_effects(&mut self, unit: &UnitComp) {
+        let x = unit.x();
+        let y = unit.y();
+        let hit_size = unit.type_info.hit_size;
+
+        if let Some(effect_id) = standard_effect_id(&unit.type_info.death_explosion_effect) {
+            let radius = if unit.spawned_by_core {
+                hit_size / 2.0
+            } else {
+                (hit_size + unit.type_info.leg_length / 1.7) / 2.0
+            };
+            self.client_local_effect_events.push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: effect_id as u16,
+                    x,
+                    y,
+                    rotation: radius / 8.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+        }
+
+        let shake = if unit.type_info.death_shake < 0.0 {
+            3.0 + hit_size / 3.0
+        } else {
+            unit.type_info.death_shake
+        };
+        self.client_local_camera_shake_events
+            .push(GameRuntimeClientCameraShakeEvent {
+                x,
+                y,
+                intensity: shake,
+                duration: shake,
+            });
+
+        let death_sound = unit.type_info.pure_init_plan().death_sound;
+        if let Some(sound_id) = standard_sound_id(&death_sound) {
+            self.client_local_sound_at_events.push(SoundAtCallPacket {
+                sound_id,
+                x,
+                y,
+                volume: unit.type_info.death_sound_volume,
+                pitch: 1.0,
+            });
+        }
+    }
+
     fn alloc_client_local_effect_id(&mut self) -> i32 {
         let id = self.next_client_local_effect_id;
         self.next_client_local_effect_id = self.next_client_local_effect_id.saturating_sub(1);
@@ -4198,8 +4246,11 @@ impl GameRuntime {
         if packet.uid < 0 || !self.client_unit_snapshot_entities.contains_key(&packet.uid) {
             return false;
         }
-        self.queue_client_unit_legs_destroy_effects(packet.uid, false);
         if let Some(mut unit) = self.client_unit_snapshot_entities.remove(&packet.uid) {
+            self.queue_client_unit_destroy_side_effects(&unit);
+            if let Some(plan) = unit.legs_destroy_plan(false) {
+                self.queue_client_leg_destroy_plan(plan);
+            }
             unit.remove(true);
             true
         } else {
@@ -26475,16 +26526,42 @@ mod tests {
 
         assert!(runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.client_unit_snapshot_entities.contains_key(&77));
-        assert_eq!(runtime.client_local_effect_events.len(), 4);
-        let first = &runtime.client_local_effect_events[0];
         assert_eq!(
-            first.effect.effect_id,
-            standard_effect_id("legDestroy").unwrap() as u16
+            runtime
+                .client_local_effect_events
+                .iter()
+                .filter(|event| event.effect.effect_id
+                    == standard_effect_id("dynamicExplosion").unwrap() as u16)
+                .count(),
+            1
         );
-        let TypeValue::LegDestroyData(data) = &first.data else {
+        assert_eq!(
+            runtime
+                .client_local_effect_events
+                .iter()
+                .filter(|event| event.effect.effect_id
+                    == standard_effect_id("legDestroy").unwrap() as u16)
+                .count(),
+            4
+        );
+        let leg_event = runtime
+            .client_local_effect_events
+            .iter()
+            .find(|event| {
+                event.effect.effect_id == standard_effect_id("legDestroy").unwrap() as u16
+            })
+            .unwrap();
+        let TypeValue::LegDestroyData(data) = &leg_event.data else {
             panic!("destroyed legged unit should queue LegDestroyData");
         };
         assert_eq!(data.region.name, "crawler-leg");
+        assert_eq!(runtime.client_local_sound_at_events.len(), 1);
+        assert_eq!(
+            runtime.client_local_sound_at_events[0].sound_id,
+            standard_sound_id("unitExplode1").unwrap()
+        );
+        assert_eq!(runtime.client_local_camera_shake_events.len(), 1);
+        assert_eq!(runtime.client_local_camera_shake_events[0].intensity, 5.0);
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));
@@ -26516,6 +26593,14 @@ mod tests {
                 .count(),
             4
         );
+        assert_eq!(runtime.client_local_sound_at_events.len(), 1);
+        assert_eq!(
+            runtime.client_local_sound_at_events[0].sound_id,
+            standard_sound_id("unitExplode1").unwrap()
+        );
+        assert_eq!(runtime.client_local_camera_shake_events.len(), 1);
+        runtime.client_local_sound_at_events.clear();
+        runtime.client_local_camera_shake_events.clear();
 
         let mut flying_type = UnitType::new(79, "flare");
         flying_type.flying = true;
