@@ -7837,3 +7837,47 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `beta` / `nova` 需要补 `LaserBolt`、`scale_keep_velocity`、`heal_percent`、`collides_team` 等 schema；
   3. README 当前有未提交改动，除非用户明确要求，否则迁移提交时继续排除它；
   4. 当前总迁移约 12.65%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 232. 最新闭环记录：UnitTypes quasar beam-weapon LaserBulletType content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 用户额外要求：`README.md` 已完善工程说明，并保留空的 `## 作者的话` 栏目；但**README 仍不提交不推送**，等用户明确要求“推送 README”时再包含它。
+- 本轮目标：把 Java `UnitTypes.java` 中 `quasar` 的 `beam-weapon` 和 `LaserBulletType` 回填进 Rust content registry，并补齐 `heal_percent/collides_team/scale_keep_velocity/recoil` 等后续 bullet schema 缺口。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:442-485`
+  - weapon：`beam-weapon`，`top=false`、`shake=2`、`shootY=4`、`x=6.5`、`reload=55`、`recoil=4`、`shootSound=Sounds.shootLancer`
+  - bullet：`LaserBulletType`，`damage=45`、`recoil=0`、`sideAngle=45`、`sideWidth=1`、`sideLength=70`、`healPercent=10`、`collidesTeam=true`、`length=150`、`colors={Pal.heal.cpy().a(0.4), Pal.heal, Color.white}`
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `recoil` / `collides_team` / `scale_keep_velocity` / `heal_percent`。
+  - `core/src/mindustry/entities/comp/bullet.rs`
+    - `BulletSpec::from_content_spec(...)` 映射 `collides_team`；
+    - 扩展 `bullet_runtime_spec_maps_content_motion_fields`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `laser_bullet(...)` helper；
+    - 新增 `quasar_beam`；
+    - 更新 bullet load order 测试；
+    - 新增 `quasar_beam_bullet_matches_java_laser_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `quasar` 追加 `Weapon::new("beam-weapon")`；
+    - weapon 引用 `bullet = "quasar_beam"`，并设置 Java weapon 字段；
+    - 新增 `quasar_beam_weapon_uses_laser_bullet_profile`。
+  - `MIGRATION.md`
+    - 新增 `12.306`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core quasar_beam_bullet_matches_java_laser_profile --lib`
+  - `cargo test -p mindustry-core quasar_beam_weapon_uses_laser_bullet_profile --lib`
+  - `cargo test -p mindustry-core bullet_runtime_spec_maps_content_motion_fields --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一闭环建议处理 `beta` 或 `nova` 的 `LaserBoltBulletType`，需要决定新增 `BulletKind::LaserBolt` 还是先用等价 marker；
+  2. `quasar_beam` 的真实激光碰撞、治疗建筑、绘制/特效 runtime 仍未完整实现；
+  3. `scale_keep_velocity` 已进入 content schema，但运行时寿命缩放仍未接入；
+  4. README 当前有未提交改动，除非用户明确要求，否则迁移提交时继续排除它；
+  5. 当前总迁移约 12.7%，远未可玩，goal 绝不能标记 complete。

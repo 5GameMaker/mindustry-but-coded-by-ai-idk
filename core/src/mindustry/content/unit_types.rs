@@ -153,6 +153,16 @@ pub fn load() -> Vec<UnitType> {
             u.mine_speed = 4.0;
             u.draw_shields = false;
             u.abilities.push("ForceFieldAbility:60:0.4:500:360".into());
+            let mut weapon = Weapon::new("beam-weapon");
+            weapon.top = false;
+            weapon.shake = 2.0;
+            weapon.shoot_y = 4.0;
+            weapon.x = 6.5;
+            weapon.reload = 55.0;
+            weapon.recoil = 4.0;
+            weapon.shoot_sound = "shootLancer".into();
+            weapon.bullet = "quasar_beam".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "vela", UnitKind::Standard, |u| {
             u.hit_size = 24.0;
@@ -1271,6 +1281,35 @@ mod tests {
         assert_eq!(bullet.spec.pierce_cap, 2);
         assert!(!bullet.spec.keep_velocity);
         assert!(!bullet.spec.hittable);
+    }
+
+    #[test]
+    fn quasar_beam_weapon_uses_laser_bullet_profile() {
+        let units = load();
+        let quasar = by_name(&units, "quasar");
+        assert_eq!(quasar.weapons.len(), 1);
+
+        let weapon = &quasar.weapons[0];
+        assert_eq!(weapon.name, "beam-weapon");
+        assert!(!weapon.top);
+        assert_eq!(weapon.shake, 2.0);
+        assert_eq!(weapon.shoot_y, 4.0);
+        assert_eq!(weapon.x, 6.5);
+        assert_eq!(weapon.reload, 55.0);
+        assert_eq!(weapon.recoil, 4.0);
+        assert_eq!(weapon.shoot_sound, "shootLancer");
+        assert_eq!(weapon.bullet, "quasar_beam");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing quasar weapon bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Laser);
+        assert_eq!(bullet.spec.damage, 45.0);
+        assert_eq!(bullet.spec.heal_percent, 10.0);
+        assert!(bullet.spec.collides_team);
+        assert_eq!(bullet.spec.length, 150.0);
     }
 
     #[test]

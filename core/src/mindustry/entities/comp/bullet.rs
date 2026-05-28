@@ -83,6 +83,7 @@ impl BulletSpec {
             collides_air: spec.collides_air,
             collides_ground: spec.collides_ground,
             collides_tiles: spec.collides_tiles,
+            collides_team: spec.collides_team,
             ..Self::default()
         }
     }
@@ -626,6 +627,7 @@ mod tests {
         content_spec.collides_air = false;
         content_spec.collides_ground = true;
         content_spec.collides_tiles = false;
+        content_spec.collides_team = true;
 
         let runtime_spec = BulletSpec::from_content_spec(&content_spec);
 
@@ -638,6 +640,7 @@ mod tests {
         assert!(!runtime_spec.collides_air);
         assert!(runtime_spec.collides_ground);
         assert!(!runtime_spec.collides_tiles);
+        assert!(runtime_spec.collides_team);
     }
 
     #[test]

@@ -9700,3 +9700,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `quasar` 的 `LaserBulletType` 可优先作为下一组现有 schema 闭环；
   - `beta` / `nova` 仍需要补 `LaserBolt`、`scale_keep_velocity`、`heal_percent`、`collides_team` 等字段或等价替代；
   - 当前总体迁移约 12.65%，远未可玩。
+
+### 12.306 UnitTypes quasar beam-weapon LaserBulletType content seam
+
+- 2026-05-28：继续回填 `quasar` 的 `beam-weapon` 与 `LaserBulletType`，同时补齐 content bullet schema 中后续 `beta/nova/quasar` 都会依赖的 `recoil` / `collides_team` / `scale_keep_velocity` / `heal_percent` 字段；`collides_team` 已从 content spec 映射到 runtime bullet spec seam。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:442-485`
+  - weapon：`new Weapon("beam-weapon")`，`top = false`、`shake = 2f`、`shootY = 4f`、`x = 6.5f`、`reload = 55f`、`recoil = 4f`、`shootSound = Sounds.shootLancer`
+  - bullet：`new LaserBulletType()`，`damage = 45f`、`recoil = 0f`、`sideAngle = 45f`、`sideWidth = 1f`、`sideLength = 70f`、`healPercent = 10f`、`collidesTeam = true`、`length = 150f`、`colors = {Pal.heal.cpy().a(0.4f), Pal.heal, Color.white}`
+  - `LaserBulletType.java` 默认：`hitEffect = Fx.hitLaserBlast`、`despawnEffect = Fx.none`、`shootEffect = Fx.hitLancer`、`smokeEffect = Fx.none`、`lifetime = 16f`、`impact = true`、`keepVelocity = false`、`collides = false`、`pierce = true`、`hittable = false`、`absorbable = false`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `recoil` / `collides_team` / `scale_keep_velocity` / `heal_percent`，默认分别为 `0.0/false/false/0.0`。
+  - `core/src/mindustry/entities/comp/bullet.rs`
+    - `BulletSpec::from_content_spec(...)` 现在映射 `collides_team`；
+    - 扩展 `bullet_runtime_spec_maps_content_motion_fields` 覆盖该字段。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增本地 `laser_bullet(...)` helper，复刻 Java `LaserBulletType` 关键默认值；
+    - 新增具名 bullet preset `quasar_beam`，颜色按现有字符串惯例记录为 `heal@0.4/heal/white`；
+    - 更新 bullet registry 顺序测试，新增 `quasar_beam_bullet_matches_java_laser_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `quasar` 现在注册 `Weapon::new("beam-weapon")`；
+    - weapon 引用 `bullet = "quasar_beam"`，并设置 `top/shake/shoot_y/x/reload/recoil/shoot_sound`；
+    - 新增 `quasar_beam_weapon_uses_laser_bullet_profile`，确认 unit weapon 与 laser bullet registry 引用链。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core quasar_beam_bullet_matches_java_laser_profile --lib`
+  - `cargo test -p mindustry-core quasar_beam_weapon_uses_laser_bullet_profile --lib`
+  - `cargo test -p mindustry-core bullet_runtime_spec_maps_content_motion_fields --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `quasar_beam` 已完成 content/schema/weapon registry 回填，但 LaserBulletType 的真实激光碰撞、治疗建筑、绘制和击中特效 runtime 仍未完整实现；
+  - `beta` / `nova` 的 `LaserBoltBulletType` 仍待补 `BulletKind::LaserBolt` 或等价 schema；
+  - `scale_keep_velocity` 已进入 content schema，但真实速度继承寿命缩放 runtime 仍待后续接入；
+  - 当前总体迁移约 12.7%，远未可玩。

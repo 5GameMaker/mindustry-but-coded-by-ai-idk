@@ -65,6 +65,16 @@ pub fn load() -> Vec<BulletContent> {
     mace_flame.keep_velocity = false;
     mace_flame.hittable = false;
 
+    let mut quasar_beam = laser_bullet(45.0);
+    quasar_beam.recoil = 0.0;
+    quasar_beam.side_angle = 45.0;
+    quasar_beam.side_width = 1.0;
+    quasar_beam.side_length = 70.0;
+    quasar_beam.heal_percent = 10.0;
+    quasar_beam.collides_team = true;
+    quasar_beam.length = 150.0;
+    quasar_beam.colors = vec!["heal@0.4".into(), "heal".into(), "white".into()];
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -107,6 +117,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "placeholder", placeholder),
         make_bullet(&mut next_id, "dagger_basic", dagger_basic),
         make_bullet(&mut next_id, "mace_flame", mace_flame),
+        make_bullet(&mut next_id, "quasar_beam", quasar_beam),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -138,6 +149,34 @@ fn basic_bullet(speed: f32, damage: f32) -> BulletSpec {
     bullet
 }
 
+fn laser_bullet(damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Laser, 0.0, damage);
+    bullet.colors = vec![
+        "lancerLaser@0.4".into(),
+        "lancerLaser".into(),
+        "white".into(),
+    ];
+    bullet.hit_effect = "hitLaserBlast".into();
+    bullet.hit_color = "white".into();
+    bullet.despawn_effect = "none".into();
+    bullet.shoot_effect = "hitLancer".into();
+    bullet.smoke_effect = "none".into();
+    bullet.hit_size = 4.0;
+    bullet.lifetime = 16.0;
+    bullet.impact = true;
+    bullet.keep_velocity = false;
+    bullet.collides = false;
+    bullet.pierce = true;
+    bullet.hittable = false;
+    bullet.absorbable = false;
+    bullet.length = 160.0;
+    bullet.width = 15.0;
+    bullet.side_length = 29.0;
+    bullet.side_width = 0.7;
+    bullet.side_angle = 90.0;
+    bullet
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +198,7 @@ mod tests {
                 "placeholder",
                 "dagger_basic",
                 "mace_flame",
+                "quasar_beam",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -231,6 +271,43 @@ mod tests {
         assert_eq!(bullet.status, "burning");
         assert!(!bullet.keep_velocity);
         assert!(!bullet.hittable);
+    }
+
+    #[test]
+    fn quasar_beam_bullet_matches_java_laser_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "quasar_beam").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Laser);
+        assert_eq!(bullet.speed, 0.0);
+        assert_eq!(bullet.damage, 45.0);
+        assert_eq!(bullet.recoil, 0.0);
+        assert_eq!(bullet.side_angle, 45.0);
+        assert_eq!(bullet.side_width, 1.0);
+        assert_eq!(bullet.side_length, 70.0);
+        assert_eq!(bullet.heal_percent, 10.0);
+        assert!(bullet.collides_team);
+        assert_eq!(bullet.length, 150.0);
+        assert_eq!(
+            bullet.colors,
+            vec![
+                "heal@0.4".to_string(),
+                "heal".to_string(),
+                "white".to_string(),
+            ]
+        );
+        assert_eq!(bullet.hit_effect, "hitLaserBlast");
+        assert_eq!(bullet.hit_color, "white");
+        assert_eq!(bullet.despawn_effect, "none");
+        assert_eq!(bullet.shoot_effect, "hitLancer");
+        assert_eq!(bullet.smoke_effect, "none");
+        assert_eq!(bullet.lifetime, 16.0);
+        assert!(bullet.impact);
+        assert!(!bullet.keep_velocity);
+        assert!(!bullet.collides);
+        assert!(bullet.pierce);
+        assert!(!bullet.hittable);
+        assert!(!bullet.absorbable);
     }
 
     #[test]
