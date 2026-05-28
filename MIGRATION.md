@@ -7841,3 +7841,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `shootPayloadDriver=186` 需要 line start jitter 与 per-line random length/stroke seam；
   - 后续 casing/shoot smoke/flame 仍需继续逐项迁移；
   - 真实 renderer/backend 仍未接入，当前仍是局部 Fx primitive 迁移。
+
+### 12.248 Fx.randLifeSpark/shootPayloadDriver
+
+- 2026-05-28：继续对照 `Fx.java`，迁移 `randLifeSpark=185` 与 `shootPayloadDriver=186`。两者虽然含 per-particle 随机项，但可直接在 `standard_effect_draw_plans(...)` 中按 Java 随机顺序展开为 concrete `LineAngle` plans，不必先新增泛化字段。
+- 本轮迁移：
+  - `randLifeSpark=185`
+  - `shootPayloadDriver=186`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2175` 附近：
+    - `randLifeSpark = new Effect(24f, ...)`，`Color.white -> e.color`，outer stroke `e.fout()*1.5+0.5`，15 条线，`ang=e.rotation+rand.range(9)`，`len=rand.random(90*e.finpow())`，local lifetime `e.lifetime*rand.random(0.5,1)`，line length `p.fout()*7+0.5`。
+  - `Fx.java:2189` 附近：
+    - `shootPayloadDriver = new Effect(30f, ...)`，`Pal.accent`，stroke `0.5+0.5*e.fout()`，20 条线，`rotation±17`，offset length `55*e.fin()`，start jitter `rand.range(9)` x/y，line length `e.fout()*5*rand.random(1)+1`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_RAND_LIFE_SPARK_ID=185` 与 `FX_SHOOT_PAYLOAD_DRIVER_ID=186` 并接入 lookup/metadata；
+    - `standard_effect_draw_plans(...)` 对两者输出 concrete `LineAngle` plans；
+    - `randLifeSpark` 保留每粒子的 scaled lifetime 与 local `fout` line length；
+    - `shootPayloadDriver` 保留 start jitter 与 per-line random length。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_rand_life_and_payload_driver_lines_for_render`，验证两者共 35 条 line primitives 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_rand_life_and_payload_driver_lines --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_rand_life_and_payload_driver_lines_for_render --lib`
+- 仍未完成：
+  - 后续 `casing1=190` 起需要 `Fill.rect` / rotated rectangle primitive；
+  - 真实 renderer/backend 仍未接入，当前仍是局部 Fx primitive 迁移。

@@ -240,6 +240,10 @@ pub const FX_CIRCLE_COLOR_SPARK_ID: i32 = 182;
 pub const FX_COLOR_SPARK_ID: i32 = 183;
 /// Upstream `Fx.colorSparkBig` id in `mindustry.content.Fx` for v158.1.
 pub const FX_COLOR_SPARK_BIG_ID: i32 = 184;
+/// Upstream `Fx.randLifeSpark` id in `mindustry.content.Fx` for v158.1.
+pub const FX_RAND_LIFE_SPARK_ID: i32 = 185;
+/// Upstream `Fx.shootPayloadDriver` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_PAYLOAD_DRIVER_ID: i32 = 186;
 /// Upstream `Fx.shootSmallFlame` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_SMALL_FLAME_ID: i32 = 187;
 /// Upstream `Fx.shootPyraFlame` id in `mindustry.content.Fx` for v158.1.
@@ -391,6 +395,8 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "circleColorSpark" => Some(FX_CIRCLE_COLOR_SPARK_ID),
         "colorSpark" => Some(FX_COLOR_SPARK_ID),
         "colorSparkBig" => Some(FX_COLOR_SPARK_BIG_ID),
+        "randLifeSpark" => Some(FX_RAND_LIFE_SPARK_ID),
+        "shootPayloadDriver" => Some(FX_SHOOT_PAYLOAD_DRIVER_ID),
         "shootSmallFlame" => Some(FX_SHOOT_SMALL_FLAME_ID),
         "shootPyraFlame" => Some(FX_SHOOT_PYRA_FLAME_ID),
         "shootLiquid" => Some(FX_SHOOT_LIQUID_ID),
@@ -651,6 +657,12 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_COLOR_SPARK_BIG_ID => {
             Effect::with_lifetime(FX_COLOR_SPARK_BIG_ID, 25.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_RAND_LIFE_SPARK_ID => {
+            Effect::with_lifetime(FX_RAND_LIFE_SPARK_ID, 24.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_PAYLOAD_DRIVER_ID => {
+            Effect::with_lifetime(FX_SHOOT_PAYLOAD_DRIVER_ID, 30.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SHOOT_SMALL_FLAME_ID => {
             Effect::with_lifetime(FX_SHOOT_SMALL_FLAME_ID, 32.0, 80.0).follow_parent(false)
         }
@@ -740,6 +752,8 @@ pub fn standard_effect_draw_plans(
             | FX_CIRCLE_COLOR_SPARK_ID
             | FX_COLOR_SPARK_ID
             | FX_COLOR_SPARK_BIG_ID
+            | FX_RAND_LIFE_SPARK_ID
+            | FX_SHOOT_PAYLOAD_DRIVER_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -760,6 +774,122 @@ pub fn standard_effect_draw_plans(
     let fout = 1.0 - fin;
     let finpow = effect_finpow_from_fin(fin);
     let fslope = effect_fslope_from_fin(fin);
+
+    if effect_id_i32 == FX_RAND_LIFE_SPARK_ID {
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let mut plans = Vec::with_capacity(15);
+        let stroke = fout * 1.5 + 0.5;
+
+        for _ in 0..15 {
+            let angle = rotation + rand.range(9.0);
+            let length = rand.random(90.0 * finpow);
+            let scaled_lifetime = lifetime * rand.random_between(0.5, 1.0);
+
+            if scaled_lifetime > f32::EPSILON && time <= scaled_lifetime {
+                let local_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
+                let local_fout = 1.0 - local_fin;
+                let (offset_x, offset_y) = trns(angle, length);
+                plans.push(StandardEffectDrawPlan {
+                    effect_id: effect_id_i32,
+                    layer: effect.layer,
+                    kind: StandardEffectDrawKind::LineAngle,
+                    center: (x + offset_x, y + offset_y),
+                    color_from: Some("Color.white"),
+                    color_mid: None,
+                    color_to: Some("Input.color"),
+                    color_mix: fin,
+                    input_color: Some(color),
+                    color_mul: 1.0,
+                    alpha: 1.0,
+                    radius: local_fout * 7.0 + 0.5,
+                    stroke,
+                    particles: Some(StandardEffectParticleSpec {
+                        seed: state_id,
+                        count: 1,
+                        progress: None,
+                        angle: Some(angle),
+                        angle_range: 0.0,
+                        length: 0.0,
+                        fin: local_fin,
+                        fout: local_fout,
+                        fslope: effect_fslope_from_fin(local_fin),
+                        radius_base: 0.0,
+                        radius_fin_scale: 0.0,
+                        radius_fout_scale: 0.0,
+                        radius_fslope_scale: 0.0,
+                        secondary_vector_scale: 0.0,
+                        secondary_radius_base: 0.0,
+                        secondary_radius_fin_scale: 0.0,
+                        secondary_radius_fout_scale: 0.0,
+                        secondary_radius_fslope_scale: 0.0,
+                        alpha_midpoint: false,
+                    }),
+                    light_color: None,
+                    light_radius: 0.0,
+                    light_opacity: 0.0,
+                });
+            }
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_SHOOT_PAYLOAD_DRIVER_ID {
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let mut plans = Vec::with_capacity(20);
+        let stroke = 0.5 + 0.5 * fout;
+
+        for _ in 0..20 {
+            let angle = rotation + rand.range(17.0);
+            let length = rand.random(fin * 55.0);
+            let (offset_x, offset_y) = trns(angle, length);
+            let jitter_x = rand.range(9.0);
+            let jitter_y = rand.range(9.0);
+            let line_length = fout * 5.0 * rand.random(1.0) + 1.0;
+
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::LineAngle,
+                center: (x + offset_x + jitter_x, y + offset_y + jitter_y),
+                color_from: Some("Pal.accent"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: line_length,
+                stroke,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 1,
+                    progress: None,
+                    angle: Some(angle),
+                    angle_range: 0.0,
+                    length: 0.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        return plans;
+    }
 
     if matches!(
         effect_id_i32,
@@ -6484,6 +6614,14 @@ mod tests {
             Some(FX_COLOR_SPARK_BIG_ID)
         );
         assert_eq!(
+            standard_effect_id("randLifeSpark"),
+            Some(FX_RAND_LIFE_SPARK_ID)
+        );
+        assert_eq!(
+            standard_effect_id("shootPayloadDriver"),
+            Some(FX_SHOOT_PAYLOAD_DRIVER_ID)
+        );
+        assert_eq!(
             standard_effect_id("shootSmallFlame"),
             Some(FX_SHOOT_SMALL_FLAME_ID)
         );
@@ -6817,6 +6955,16 @@ mod tests {
         assert_eq!(
             standard_effect(FX_COLOR_SPARK_BIG_ID).unwrap().lifetime,
             25.0
+        );
+        assert_eq!(
+            standard_effect(FX_RAND_LIFE_SPARK_ID).unwrap().lifetime,
+            24.0
+        );
+        assert_eq!(
+            standard_effect(FX_SHOOT_PAYLOAD_DRIVER_ID)
+                .unwrap()
+                .lifetime,
+            30.0
         );
         let shoot_small_flame = standard_effect(FX_SHOOT_SMALL_FLAME_ID).unwrap();
         assert_eq!(shoot_small_flame.lifetime, 32.0);
@@ -8520,6 +8668,89 @@ mod tests {
         assert_eq!(
             suppress.resolved_draw_color(),
             Some(lerp_color(input_color, DecalColor::WHITE, 0.5))
+        );
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_rand_life_and_payload_driver_lines() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+        let rand_life = standard_effect_draw_plans(
+            Some(FX_RAND_LIFE_SPARK_ID as u16),
+            185,
+            3.0,
+            4.0,
+            30.0,
+            12.0,
+            24.0,
+            input_color,
+        );
+        assert_eq!(rand_life.len(), 15);
+
+        let fin = 0.5;
+        let fout = 0.5;
+        let finpow = effect_finpow_from_fin(fin);
+        let mut rand = ArcRand::with_seed(185);
+        let angle = 30.0 + rand.range(9.0);
+        let length = rand.random(90.0 * finpow);
+        let scaled_lifetime = 24.0 * rand.random_between(0.5, 1.0);
+        let local_fin = 12.0 / scaled_lifetime;
+        let local_fout = 1.0 - local_fin;
+        let (offset_x, offset_y) = trns(angle, length);
+        let first = rand_life[0];
+        assert_eq!(first.kind, StandardEffectDrawKind::LineAngle);
+        assert_eq!(first.color_from, Some("Color.white"));
+        assert_eq!(first.color_to, Some("Input.color"));
+        assert_eq!(first.input_color, Some(input_color));
+        assert!((first.center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((first.center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((first.radius - (local_fout * 7.0 + 0.5)).abs() < 0.0001);
+        assert!((first.stroke - (fout * 1.5 + 0.5)).abs() < 0.0001);
+        assert!((first.particles.unwrap().angle.unwrap() - angle).abs() < 0.0001);
+        assert_eq!(
+            rand_life
+                .iter()
+                .flat_map(|plan| plan.line_render_primitives_from_seed())
+                .count(),
+            15
+        );
+
+        let payload = standard_effect_draw_plans(
+            Some(FX_SHOOT_PAYLOAD_DRIVER_ID as u16),
+            186,
+            3.0,
+            4.0,
+            30.0,
+            15.0,
+            30.0,
+            input_color,
+        );
+        assert_eq!(payload.len(), 20);
+        let mut rand = ArcRand::with_seed(186);
+        let angle = 30.0 + rand.range(17.0);
+        let length = rand.random(fin * 55.0);
+        let (base_x, base_y) = trns(angle, length);
+        let jitter_x = rand.range(9.0);
+        let jitter_y = rand.range(9.0);
+        let line_length = fout * 5.0 * rand.random(1.0) + 1.0;
+        let first = payload[0];
+        assert_eq!(first.kind, StandardEffectDrawKind::LineAngle);
+        assert_eq!(first.color_from, Some("Pal.accent"));
+        assert_eq!(first.input_color, None);
+        assert!((first.center.0 - (3.0 + base_x + jitter_x)).abs() < 0.0001);
+        assert!((first.center.1 - (4.0 + base_y + jitter_y)).abs() < 0.0001);
+        assert!((first.radius - line_length).abs() < 0.0001);
+        assert!((first.stroke - 0.75).abs() < 0.0001);
+        assert!((first.particles.unwrap().angle.unwrap() - angle).abs() < 0.0001);
+        assert_eq!(
+            first.resolved_draw_color(),
+            standard_effect_color_symbol("Pal.accent")
+        );
+        assert_eq!(
+            payload
+                .iter()
+                .flat_map(|plan| plan.line_render_primitives_from_seed())
+                .count(),
+            20
         );
     }
 

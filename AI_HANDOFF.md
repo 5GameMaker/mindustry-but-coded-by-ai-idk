@@ -5826,3 +5826,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 如优先少造 primitive，可跳到后续仍为 circle/line 的 Fx；
   3. 若要补 `randLifeSpark`，先给 per-particle scaled lifetime 设计明确字段；
   4. 若要补 `shootPayloadDriver`，先给 line start jitter/per-line random length 增加字段或 concrete plan。
+
+---
+
+## 174. 最新闭环记录：Fx.randLifeSpark/shootPayloadDriver
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `randLifeSpark=185` 与 `shootPayloadDriver=186`，继续把 `Fx.java` line effects 接到 Rust 标准 effect render seam。
+- 本轮迁移：
+  - `randLifeSpark=185`
+  - `shootPayloadDriver=186`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增两个 Fx ID、lookup、metadata；
+    - `standard_effect_draw_plans(...)` 按 Java rand 调用顺序生成 concrete `LineAngle` plans；
+    - `randLifeSpark` 保留 per-particle scaled lifetime；
+    - `shootPayloadDriver` 保留 start jitter 与 per-line random length。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_rand_life_and_payload_driver_lines_for_render`，验证 35 条 line primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_rand_life_and_payload_driver_lines --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_rand_life_and_payload_driver_lines_for_render --lib`
+- 下一步建议：
+  1. `casing1=190` 及后续 casing 系列需要 `Fill.rect` / rotated rectangle primitive；
+  2. 若新增 rectangle seam，应同步补 desktop flatten/cache/render stats；
+  3. 继续避免只做孤立 helper，新增 primitive 必须接入 `standard_effect_draw_plan(s)` 与 desktop frame。
