@@ -115,6 +115,26 @@ pub fn load() -> Vec<BulletContent> {
     fortress_artillery.back_color = "bulletYellowBack".into();
     fortress_artillery.front_color = "bulletYellow".into();
 
+    let mut pulsar_heal_lightning_type = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
+    pulsar_heal_lightning_type.lifetime = 10.0;
+    pulsar_heal_lightning_type.hit_effect = "hitLancer".into();
+    pulsar_heal_lightning_type.despawn_effect = "none".into();
+    pulsar_heal_lightning_type.status = "shocked".into();
+    pulsar_heal_lightning_type.status_duration = 10.0;
+    pulsar_heal_lightning_type.hittable = false;
+    pulsar_heal_lightning_type.heal_percent = 1.6;
+    pulsar_heal_lightning_type.collides_team = true;
+
+    let mut pulsar_heal_lightning = lightning_bullet();
+    pulsar_heal_lightning.lightning_color = "heal".into();
+    pulsar_heal_lightning.hit_color = "heal".into();
+    pulsar_heal_lightning.damage = 15.0;
+    pulsar_heal_lightning.lightning_length = 8;
+    pulsar_heal_lightning.lightning_length_rand = 7;
+    pulsar_heal_lightning.shoot_effect = "shootHeal".into();
+    pulsar_heal_lightning.heal_percent = 2.0;
+    pulsar_heal_lightning.lightning_type = Some(Box::new(pulsar_heal_lightning_type));
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -161,6 +181,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "beta_laser_bolt", beta_laser_bolt),
         make_bullet(&mut next_id, "nova_heal_bolt", nova_heal_bolt),
         make_bullet(&mut next_id, "fortress_artillery", fortress_artillery),
+        make_bullet(&mut next_id, "pulsar_heal_lightning", pulsar_heal_lightning),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -257,6 +278,20 @@ fn artillery_bullet(speed: f32, damage: f32, sprite: &str) -> BulletSpec {
     bullet
 }
 
+fn lightning_bullet() -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Lightning, 0.0, 1.0);
+    bullet.lifetime = 1.0;
+    bullet.despawn_effect = "none".into();
+    bullet.hit_effect = "hitLancer".into();
+    bullet.keep_velocity = false;
+    bullet.hittable = false;
+    bullet.status = "shocked".into();
+    bullet.lightning_length = 25;
+    bullet.lightning_length_rand = 0;
+    bullet.lightning_color = "lancerLaser".into();
+    bullet
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +317,7 @@ mod tests {
                 "beta_laser_bolt",
                 "nova_heal_bolt",
                 "fortress_artillery",
+                "pulsar_heal_lightning",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -471,6 +507,44 @@ mod tests {
         assert_eq!(bullet.trail_effect, "artilleryTrail");
         assert_eq!(bullet.shrink_x, 0.15);
         assert_eq!(bullet.shrink_y, 0.5);
+    }
+
+    #[test]
+    fn pulsar_heal_lightning_matches_java_lightning_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "pulsar_heal_lightning").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Lightning);
+        assert_eq!(bullet.speed, 0.0);
+        assert_eq!(bullet.damage, 15.0);
+        assert_eq!(bullet.lifetime, 1.0);
+        assert_eq!(bullet.lightning_color, "heal");
+        assert_eq!(bullet.hit_color, "heal");
+        assert_eq!(bullet.lightning_length, 8);
+        assert_eq!(bullet.lightning_length_rand, 7);
+        assert_eq!(bullet.shoot_effect, "shootHeal");
+        assert_eq!(bullet.heal_percent, 2.0);
+        assert_eq!(bullet.despawn_effect, "none");
+        assert_eq!(bullet.hit_effect, "hitLancer");
+        assert!(!bullet.keep_velocity);
+        assert!(!bullet.hittable);
+        assert_eq!(bullet.status, "shocked");
+
+        let nested = bullet
+            .lightning_type
+            .as_deref()
+            .expect("pulsar lightning should have nested lightningType");
+        assert_eq!(nested.kind, BulletKind::Generic);
+        assert_eq!(nested.speed, 0.0001);
+        assert_eq!(nested.damage, 0.0);
+        assert_eq!(nested.lifetime, 10.0);
+        assert_eq!(nested.hit_effect, "hitLancer");
+        assert_eq!(nested.despawn_effect, "none");
+        assert_eq!(nested.status, "shocked");
+        assert_eq!(nested.status_duration, 10.0);
+        assert!(!nested.hittable);
+        assert_eq!(nested.heal_percent, 1.6);
+        assert!(nested.collides_team);
     }
 
     #[test]

@@ -154,6 +154,21 @@ pub fn load() -> Vec<UnitType> {
             u.ammo_type = "power:1300".into();
             u.abilities
                 .push("ShieldRegenFieldAbility:20:40:300:60".into());
+            let mut weapon = Weapon::new("heal-shotgun-weapon");
+            weapon.top = false;
+            weapon.x = 5.0;
+            weapon.shake = 2.2;
+            weapon.y = 0.5;
+            weapon.shoot_y = 2.5;
+            weapon.reload = 36.0;
+            weapon.inaccuracy = 35.0;
+            weapon.shoot_shots = 3;
+            weapon.shoot_shot_delay = 0.5;
+            weapon.eject_effect = "none".into();
+            weapon.recoil = 2.5;
+            weapon.shoot_sound = "shootPulsar".into();
+            weapon.bullet = "pulsar_heal_lightning".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "quasar", UnitKind::Standard, |u| {
             u.mine_tier = 3;
@@ -1445,6 +1460,39 @@ mod tests {
         assert_eq!(bullet.spec.max_range, 240.0);
         assert_eq!(bullet.spec.splash_damage, 80.0);
         assert_eq!(bullet.spec.splash_damage_radius, 35.0);
+    }
+
+    #[test]
+    fn pulsar_heal_shotgun_uses_nested_lightning_profile() {
+        let units = load();
+        let pulsar = by_name(&units, "pulsar");
+        assert_eq!(pulsar.weapons.len(), 1);
+
+        let weapon = &pulsar.weapons[0];
+        assert_eq!(weapon.name, "heal-shotgun-weapon");
+        assert!(!weapon.top);
+        assert_eq!(weapon.x, 5.0);
+        assert_eq!(weapon.shake, 2.2);
+        assert_eq!(weapon.y, 0.5);
+        assert_eq!(weapon.shoot_y, 2.5);
+        assert_eq!(weapon.reload, 36.0);
+        assert_eq!(weapon.inaccuracy, 35.0);
+        assert_eq!(weapon.shoot_shots, 3);
+        assert_eq!(weapon.shoot_shot_delay, 0.5);
+        assert_eq!(weapon.eject_effect, "none");
+        assert_eq!(weapon.recoil, 2.5);
+        assert_eq!(weapon.shoot_sound, "shootPulsar");
+        assert_eq!(weapon.bullet, "pulsar_heal_lightning");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing pulsar weapon bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Lightning);
+        assert_eq!(bullet.spec.damage, 15.0);
+        assert_eq!(bullet.spec.heal_percent, 2.0);
+        assert!(bullet.spec.lightning_type.is_some());
     }
 
     #[test]

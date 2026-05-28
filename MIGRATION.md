@@ -9835,3 +9835,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 后续 `pulsar` 需要验证 `LightningBulletType + lightningType` 递归 bullet；
   - 后续 `reign/scepter` 需要接 `fragBullet` / `intervalBullet` / 多 weapon 挂点；
   - 当前总体迁移约 12.85%，远未可玩。
+
+### 12.310 UnitTypes pulsar heal-shotgun LightningBulletType content seam
+
+- 2026-05-28：继续回填 `pulsar` 的 `heal-shotgun-weapon` 与 `LightningBulletType`，并通过 `lightning_type: Option<Box<BulletSpec>>` 表达 Java 嵌套 `lightningType = new BulletType(...)`，验证 content bullet schema 可以承载递归子弹树。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:387-439`
+  - weapon：`new Weapon("heal-shotgun-weapon")`，`top = false`、`x = 5f`、`shake = 2.2f`、`y = 0.5f`、`shootY = 2.5f`、`reload = 36f`、`inaccuracy = 35`、`shoot.shots = 3`、`shoot.shotDelay = 0.5f`、`ejectEffect = Fx.none`、`recoil = 2.5f`、`shootSound = Sounds.shootPulsar`
+  - bullet：`new LightningBulletType()`，`lightningColor = hitColor = Pal.heal`、`damage = 15f`、`lightningLength = 8`、`lightningLengthRand = 7`、`shootEffect = Fx.shootHeal`、`healPercent = 2f`
+  - nested `lightningType`：`new BulletType(0.0001f, 0f)`，`lifetime = Fx.lightning.lifetime`、`hitEffect = Fx.hitLancer`、`despawnEffect = Fx.none`、`status = StatusEffects.shocked`、`statusDuration = 10f`、`hittable = false`、`healPercent = 1.6f`、`collidesTeam = true`
+  - `Fx.lightning` lifetime 为 `10f`。
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `lightning_bullet()` helper，复刻 Java `LightningBulletType` 关键默认值；
+    - 新增具名 bullet preset `pulsar_heal_lightning`；
+    - `pulsar_heal_lightning.lightning_type` 保存嵌套 `BulletSpec`，包含 `heal_percent = 1.6` 与 `collides_team = true`；
+    - 更新 bullet registry 顺序测试，新增 `pulsar_heal_lightning_matches_java_lightning_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `pulsar` 现在注册 `Weapon::new("heal-shotgun-weapon")`；
+    - weapon 引用 `bullet = "pulsar_heal_lightning"`，并设置 Java weapon 字段与 `shoot_shots = 3` / `shoot_shot_delay = 0.5`；
+    - 新增 `pulsar_heal_shotgun_uses_nested_lightning_profile`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core pulsar_heal_lightning_matches_java_lightning_profile --lib`
+  - `cargo test -p mindustry-core pulsar_heal_shotgun_uses_nested_lightning_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `LightningBulletType` 的真实 `Lightning.create(...)`、友方治疗、连锁视觉/音效 runtime 尚未完整实现；
+  - `heal_percent/collides_team` 已进入 content 和 nested bullet，但 world collision healing 仍待接入；
+  - 下一步建议 `reign`，验证 `fragBullet` 递归分裂树；
+  - 当前总体迁移约 12.9%，远未可玩。

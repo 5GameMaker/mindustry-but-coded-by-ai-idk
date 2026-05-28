@@ -7995,3 +7995,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 然后 `reign` 验证 `fragBullet` 递归分裂；
   3. 最后 `scepter` 处理主武器 + 两个 mount + intervalBullet + 共享 smallBullet；
   4. 当前总迁移约 12.85%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 236. 最新闭环记录：UnitTypes pulsar heal-shotgun LightningBulletType content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `pulsar` 的 `heal-shotgun-weapon` 和 `LightningBulletType` 回填进 Rust content registry，并用 `lightning_type` 表达嵌套 `BulletType`。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:387-439`
+  - weapon：`heal-shotgun-weapon`，`top=false`、`x=5`、`shake=2.2`、`y=0.5`、`shootY=2.5`、`reload=36`、`inaccuracy=35`、`shoot.shots=3`、`shoot.shotDelay=0.5`、`ejectEffect=Fx.none`、`recoil=2.5`、`shootSound=Sounds.shootPulsar`
+  - bullet：`LightningBulletType`，`lightningColor=hitColor=Pal.heal`、`damage=15`、`lightningLength=8`、`lightningLengthRand=7`、`shootEffect=Fx.shootHeal`、`healPercent=2`
+  - nested `lightningType`：`BulletType(0.0001, 0)`，`lifetime=10`、`hitEffect=Fx.hitLancer`、`despawnEffect=Fx.none`、`status=shocked`、`statusDuration=10`、`hittable=false`、`healPercent=1.6`、`collidesTeam=true`
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `lightning_bullet()` helper；
+    - 新增 `pulsar_heal_lightning`；
+    - 在 `lightning_type` 内保存嵌套 `BulletSpec`；
+    - 更新 bullet load order 测试；
+    - 新增 `pulsar_heal_lightning_matches_java_lightning_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `pulsar` 追加 `Weapon::new("heal-shotgun-weapon")`；
+    - weapon 引用 `bullet = "pulsar_heal_lightning"`，并设置 Java weapon 字段；
+    - 新增 `pulsar_heal_shotgun_uses_nested_lightning_profile`。
+  - `MIGRATION.md`
+    - 新增 `12.310`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core pulsar_heal_lightning_matches_java_lightning_profile --lib`
+  - `cargo test -p mindustry-core pulsar_heal_shotgun_uses_nested_lightning_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一闭环建议 `reign`，验证 `fragBullet` 递归分裂；
+  2. 然后 `scepter`，处理主武器 + 两个 mount + intervalBullet + 共享 smallBullet；
+  3. `LightningBulletType` 的真实 `Lightning.create`、治疗、显示/音效 runtime 尚未接入；
+  4. 当前总迁移约 12.9%，远未可玩，goal 绝不能标记 complete。
