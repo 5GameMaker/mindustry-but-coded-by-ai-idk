@@ -6414,6 +6414,47 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
   - `git diff --check`
 - 下一步建议：
-  1. 继续 `legDestroy=263`：需要 `LegDestroyData` effect data seam 与 textured line primitive/region；
+  1. `legDestroy=263` 的最小 `LegDestroyData` / textured line seam 已在后续 `190` 节补齐；下一步应继续 `LegsComp.destroy()` 触发链、`UnitType.legRegion/legBaseRegion` 与真实 atlas renderer；
   2. 或先把 `Lines.arc` 从多段 `LineAngle` 升级为专用 arc primitive，并接 desktop stats/renderer seam；
   3. 当前 total 仍约 9% 左右，远未可玩；继续避免让 helper/plan 停留为孤立模块。
+
+---
+
+## 190. 最新闭环记录：Fx.legDestroy
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：迁移 `legDestroy=263` 的本地 `LegDestroyData` effect data seam 与 textured line primitive，让腿部碎裂效果不再只是缺口记录，而能通过 desktop 本地 effect event 展开为带 region 的 line primitive。
+- 本轮迁移：
+  - `legDestroy=263`
+- Rust 主改动：
+  - `core/src/mindustry/entities/leg_destroy_data.rs`
+    - `TextureRegionRef` 增加 `width/height` 与 `with_size(...)`，用于对齐 Java 的 `data.region.width / 8f` offset 与 `data.region.height * scl` stroke。
+  - `core/src/mindustry/io/type_io.rs`
+    - 新增 `TypeValue::LegDestroyData(LegDestroyData)`；
+    - `write_object` 对该 variant 返回 `InvalidInput`，明确 local-only，不发明 Java 不存在的 `TypeIO` tag；
+    - 新增 `leg_destroy_data_is_local_only_and_rejected_by_typeio` 防回归测试。
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_LEG_DESTROY_ID=263`、lookup、metadata，lifetime `90.0`、clip `100.0`、layer `Layer::GROUND_UNIT + 5.0`；
+    - 新增 `StandardEffectDrawKind::TexturedLine`，`StandardEffectLineRenderPrimitive.region: Option<String>`；
+    - `TypeValue::LegDestroyData` 时生成单个 textured line plan，按 Java 语义保留 seeded random lifetime/offset、`foutpowdown` alpha、region height stroke、`a -> b` 长度；
+    - 当前为适配 `StandardEffectDrawPlan.color_from: Option<&'static str>`，使用 effect-region interning seam 缓存 region 名称，避免每个事件重复 `Box::leak`；后续应升级为正式 `String`/`Cow` region 字段或 renderer 端 region 解析。
+  - `core/src/mindustry/core/game_state.rs`、`core/src/mindustry/entities/comp/building.rs`
+    - 补齐 `TypeValue::LegDestroyData` 的 config kind/stringification exhaustive match。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_leg_destroy_textured_line_for_render`，验证 `EffectCallPacket2.data = TypeValue::LegDestroyData(...)` 进入 draw plan、line primitive 与 headless renderer stats。
+  - `MIGRATION.md`
+    - 新增 `12.264` 节，并更新 `12.263` 的遗留说明。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core leg_destroy --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_leg_destroy_textured_line_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+- 下一步建议：
+  1. 继续腿部系统真实接入：迁移 `UnitType.legRegion/legBaseRegion`、atlas region resolve，以及 `LegsComp.destroy()` 死亡时两段 `Fx.legDestroy.at(...)` 触发链；
+  2. 把 `TexturedLine.region` 从 headless primitive seam 接到真实 renderer/backend，支持沿线段绘制 atlas region；
+  3. 将 `StandardEffectDrawPlan` 的 region/颜色字段从临时 `&'static str` 约束升级为 `String`/`Cow` 或专用 region 字段，移除 interning seam；
+  4. 当前总迁移约 9%～10%，仍远未可玩；继续保持所有 helper/plan 最终接入 runtime/content registry/world/entity/network/client-server 调用链。

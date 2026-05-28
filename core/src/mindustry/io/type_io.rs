@@ -4,8 +4,8 @@ use std::io::{self, Read, Write};
 use crate::mindustry::content::blocks::BlockDef;
 use crate::mindustry::core::content_loader::{ContentLoader, ContentRecord};
 use crate::mindustry::ctype::{ContentId, ContentType};
-use crate::mindustry::entities::entity_group::Rect;
 use crate::mindustry::entities::units::{BuildPlan, StatusEntry, WeaponMount};
+use crate::mindustry::entities::{entity_group::Rect, LegDestroyData};
 use crate::mindustry::logic::{LAccess, LMarkerControl};
 use crate::mindustry::net::{AdminAction, KickReason, TraceInfo};
 use crate::mindustry::r#type::{ItemStack, LiquidStack};
@@ -149,6 +149,12 @@ pub enum TypeValue {
     /// `arc.math.geom.Rect`, so this variant is intentionally rejected by
     /// `write_object` instead of inventing an incompatible network tag.
     Rect(Rect),
+    /// Local-only payload used by `Fx.legDestroy`.
+    ///
+    /// Upstream Java carries `LegDestroyData` directly and does not expose a
+    /// stable TypeIO object tag for it, so this variant is rejected by
+    /// `write_object` instead of inventing an incompatible network tag.
+    LegDestroyData(LegDestroyData),
     Team(u8),
     UnitCommand(ContentId),
     IntSeq(Vec<i32>),
@@ -454,6 +460,7 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write_u32(write, value.y.to_bits())
         }
         TypeValue::Rect(_) => Err(invalid_input("rect object is local-only")),
+        TypeValue::LegDestroyData(_) => Err(invalid_input("leg destroy data is local-only")),
         TypeValue::ByteArray(values) => {
             if values.len() > MAX_BYTE_ARRAY_SIZE {
                 return Err(invalid_input("byte array too large"));
@@ -3019,6 +3026,20 @@ mod tests {
         let ints = TypeValue::IntArray(vec![1, 2, 3]);
         write_object(&mut bytes, &ints).unwrap();
         assert_eq!(read_object(&mut bytes.as_slice()).unwrap(), ints);
+    }
+
+    #[test]
+    fn leg_destroy_data_is_local_only_and_rejected_by_typeio() {
+        let value = TypeValue::LegDestroyData(LegDestroyData::new(
+            Vec2::new(1.0, 2.0),
+            Vec2::new(3.0, 4.0),
+            crate::mindustry::entities::TextureRegionRef::with_size("crawler-leg", 16, 8),
+        ));
+        let mut bytes = Vec::new();
+        let err = write_object(&mut bytes, &value).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("local-only"));
+        assert!(bytes.is_empty());
     }
 
     #[test]

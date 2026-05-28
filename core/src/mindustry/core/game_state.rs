@@ -672,6 +672,10 @@ where
             "{},{},{},{}",
             value.x, value.y, value.width, value.height
         )),
+        TypeValue::LegDestroyData(value) => Some(format!(
+            "{},{}->{},{}:{}",
+            value.a.x, value.a.y, value.b.x, value.b.y, value.region.name
+        )),
         TypeValue::Team(value) => Some(value.to_string()),
         TypeValue::UnitCommand(value) => {
             content_name(ContentType::UnitCommand, *value).or_else(|| Some(value.to_string()))

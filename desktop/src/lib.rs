@@ -1852,10 +1852,10 @@ mod tests {
                 BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, PuddleComp,
                 UnitComp, UnitControllerState,
             },
-            entity_class_id, standard_effect_id, PlayerComp, PuddleLiquidInfo,
-            StandardEffectDrawKind, BULLET_CLASS_ID, DECAL_CLASS_ID, EFFECT_STATE_CLASS_ID,
-            FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID, WEATHER_STATE_CLASS_ID,
-            WORLD_LABEL_CLASS_ID,
+            entity_class_id, standard_effect_id, LegDestroyData, PlayerComp, PuddleLiquidInfo,
+            StandardEffectDrawKind, TextureRegionRef, BULLET_CLASS_ID, DECAL_CLASS_ID,
+            EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
+            WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
         game::{BlockPlan, Trigger, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
@@ -4144,6 +4144,57 @@ mod tests {
         assert_eq!(stats.square_primitives, 0);
         assert_eq!(stats.rect_primitives, 0);
         assert_eq!(stats.line_primitives, 16);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_flattens_leg_destroy_textured_line_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("legDestroy").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(0xffffffff_u32 as i32),
+                },
+                data: TypeValue::LegDestroyData(LegDestroyData::new(
+                    IoVec2::new(24.0, 32.0),
+                    IoVec2::new(54.0, 32.0),
+                    TextureRegionRef::with_size("crawler-leg", 16, 8),
+                )),
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 1);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_rect_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 1);
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let line = &launcher.standard_local_effect_line_primitives[0];
+        assert_eq!(line.region.as_deref(), Some("crawler-leg"));
+        assert!((line.length - 30.0).abs() < 0.0001);
+        assert_eq!(line.stroke, 8.0);
+        assert!(line.alpha > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 1);
+        assert_eq!(stats.circle_primitives, 0);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.rect_primitives, 0);
+        assert_eq!(stats.line_primitives, 1);
         assert_eq!(stats.triangle_primitives, 0);
         assert_eq!(stats.light_primitives, 0);
         assert_eq!(renderer.last_stats, stats);

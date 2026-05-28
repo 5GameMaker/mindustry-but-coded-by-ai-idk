@@ -1,3 +1,8 @@
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+
 use crate::mindustry::{
     ctype::ContentType, entities::comp::DecalColor, graphics::Layer, io::TypeValue, vars::TILE_SIZE,
 };
@@ -398,6 +403,8 @@ pub const FX_UNIT_SHIELD_BREAK_ID: i32 = 260;
 pub const FX_CHAIN_LIGHTNING_ID: i32 = 261;
 /// Upstream `Fx.chainEmp` id in `mindustry.content.Fx` for v158.1.
 pub const FX_CHAIN_EMP_ID: i32 = 262;
+/// Upstream `Fx.legDestroy` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LEG_DESTROY_ID: i32 = 263;
 /// Upstream `Fx.debugLine` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DEBUG_LINE_ID: i32 = 264;
 /// Upstream `Fx.debugRect` id in `mindustry.content.Fx` for v158.1.
@@ -601,6 +608,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "unitShieldBreak" => Some(FX_UNIT_SHIELD_BREAK_ID),
         "chainLightning" => Some(FX_CHAIN_LIGHTNING_ID),
         "chainEmp" => Some(FX_CHAIN_EMP_ID),
+        "legDestroy" => Some(FX_LEG_DESTROY_ID),
         "debugLine" => Some(FX_DEBUG_LINE_ID),
         "debugRect" => Some(FX_DEBUG_RECT_ID),
         _ => None,
@@ -1026,6 +1034,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_CHAIN_EMP_ID => Effect::with_lifetime(FX_CHAIN_EMP_ID, 30.0, 300.0)
             .follow_parent(false)
             .rot_with_parent(false),
+        FX_LEG_DESTROY_ID => {
+            Effect::with_lifetime(FX_LEG_DESTROY_ID, 90.0, 100.0).layer(Layer::GROUND_UNIT + 5.0)
+        }
         FX_DEBUG_LINE_ID => Effect::with_lifetime(FX_DEBUG_LINE_ID, 90.0, 1_000_000_000_000.0),
         FX_DEBUG_RECT_ID => Effect::with_lifetime(FX_DEBUG_RECT_ID, 90.0, 1_000_000_000_000.0),
         _ => return None,
@@ -1250,6 +1261,7 @@ fn standard_effect_draw_plans_with_data(
             | FX_UNIT_SHIELD_BREAK_ID
             | FX_CHAIN_LIGHTNING_ID
             | FX_CHAIN_EMP_ID
+            | FX_LEG_DESTROY_ID
             | FX_DEBUG_LINE_ID
             | FX_DEBUG_RECT_ID
     ) {
@@ -1990,6 +2002,55 @@ fn standard_effect_draw_plans_with_data(
         }
 
         return plans;
+    }
+
+    if effect_id_i32 == FX_LEG_DESTROY_ID {
+        let Some(TypeValue::LegDestroyData(data)) = data_value else {
+            return Vec::new();
+        };
+
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let leg_lifetime = rand.random_between(70.0, 130.0);
+        let leg_fin = (time / leg_lifetime).clamp(0.0, 1.0);
+        let leg_foutpowdown = 1.0 - leg_fin.powi(3);
+        let offset_angle = rand.random(360.0);
+        let offset_len =
+            rand.random(data.region.width.max(0) as f32 / 8.0) * effect_finpow_from_fin(leg_fin);
+        let (offset_x, offset_y) = trns(offset_angle, offset_len);
+        let start = (data.a.x + offset_x, data.a.y + offset_y);
+        let end = (data.b.x + offset_x, data.b.y + offset_y);
+        let dx = end.0 - start.0;
+        let dy = end.1 - start.1;
+        let region = intern_effect_region_name(&data.region.name);
+
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::TexturedLine,
+            center: start,
+            color_from: Some(region),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: leg_foutpowdown,
+            radius: (dx * dx + dy * dy).sqrt(),
+            stroke: data.region.height.max(0) as f32,
+            particles: Some(standard_effect_particle_spec(
+                state_id,
+                1,
+                Some(dy.atan2(dx).to_degrees()),
+                0.0,
+                0.0,
+                leg_fin,
+                1.0 - leg_fin,
+                effect_fslope_from_fin(leg_fin),
+            )),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        }];
     }
 
     if effect_id_i32 == FX_DEBUG_LINE_ID {
@@ -3782,6 +3843,7 @@ pub enum StandardEffectDrawKind {
     SeededRadialSquareParticles,
     SeededRotatedSquareParticles,
     LineAngle,
+    TexturedLine,
     TrianglePair,
     TriangleFan,
     SeededRadialTriangleParticles,
@@ -3857,7 +3919,7 @@ pub struct StandardEffectRectRenderPrimitive {
     pub region: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StandardEffectLineRenderPrimitive {
     pub start: (f32, f32),
     pub angle: f32,
@@ -3865,6 +3927,7 @@ pub struct StandardEffectLineRenderPrimitive {
     pub stroke: f32,
     pub alpha: f32,
     pub color: Option<DecalColor>,
+    pub region: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -4033,6 +4096,7 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::SeededRadialSquareParticles
             | StandardEffectDrawKind::SeededRotatedSquareParticles
             | StandardEffectDrawKind::LineAngle
+            | StandardEffectDrawKind::TexturedLine
             | StandardEffectDrawKind::TrianglePair
             | StandardEffectDrawKind::TriangleFan
             | StandardEffectDrawKind::SeededRadialTriangleParticles => Vec::new(),
@@ -4144,6 +4208,7 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::SeededLineParticles
             | StandardEffectDrawKind::SeededRadialLineParticles
             | StandardEffectDrawKind::LineAngle
+            | StandardEffectDrawKind::TexturedLine
             | StandardEffectDrawKind::TrianglePair
             | StandardEffectDrawKind::TriangleFan
             | StandardEffectDrawKind::SeededRadialTriangleParticles => Vec::new(),
@@ -4183,7 +4248,10 @@ impl StandardEffectDrawPlan {
 
     pub fn line_render_primitives_from_seed(&self) -> Vec<StandardEffectLineRenderPrimitive> {
         let color = self.resolved_draw_color();
-        if self.kind == StandardEffectDrawKind::LineAngle {
+        if matches!(
+            self.kind,
+            StandardEffectDrawKind::LineAngle | StandardEffectDrawKind::TexturedLine
+        ) {
             return vec![StandardEffectLineRenderPrimitive {
                 start: self.center,
                 angle: self
@@ -4194,6 +4262,11 @@ impl StandardEffectDrawPlan {
                 stroke: self.stroke,
                 alpha: self.alpha,
                 color,
+                region: if self.kind == StandardEffectDrawKind::TexturedLine {
+                    self.color_from.map(|region| region.to_string())
+                } else {
+                    None
+                },
             }];
         }
 
@@ -4215,6 +4288,7 @@ impl StandardEffectDrawPlan {
                         stroke: self.stroke,
                         alpha: self.alpha,
                         color,
+                        region: None,
                     });
                 }
                 lines
@@ -4233,6 +4307,7 @@ impl StandardEffectDrawPlan {
                     stroke: self.stroke,
                     alpha: self.alpha,
                     color,
+                    region: None,
                 })
                 .collect(),
             _ => Vec::new(),
@@ -8633,6 +8708,21 @@ fn signum_nonzero(value: f32) -> f32 {
     }
 }
 
+fn intern_effect_region_name(name: &str) -> &'static str {
+    static REGION_NAMES: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+    let mut names = REGION_NAMES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("effect region intern mutex poisoned");
+    if let Some(region) = names.get(name) {
+        return region;
+    }
+
+    let region: &'static str = Box::leak(name.to_owned().into_boxed_str());
+    names.insert(region.to_owned(), region);
+    region
+}
+
 pub fn shake_intensity(intensity: f32, camera_x: f32, camera_y: f32, x: f32, y: f32) -> f32 {
     let dx = x - camera_x;
     let dy = y - camera_y;
@@ -9131,6 +9221,7 @@ mod tests {
             Some(FX_CHAIN_LIGHTNING_ID)
         );
         assert_eq!(standard_effect_id("chainEmp"), Some(FX_CHAIN_EMP_ID));
+        assert_eq!(standard_effect_id("legDestroy"), Some(FX_LEG_DESTROY_ID));
         assert_eq!(standard_effect_id("debugLine"), Some(FX_DEBUG_LINE_ID));
         assert_eq!(standard_effect_id("debugRect"), Some(FX_DEBUG_RECT_ID));
         assert_eq!(standard_effect_id("none"), None);
@@ -9665,6 +9756,10 @@ mod tests {
         assert_eq!(chain_emp.clip, 300.0);
         assert!(!chain_emp.follow_parent);
         assert!(!chain_emp.rot_with_parent);
+        let leg_destroy = standard_effect(FX_LEG_DESTROY_ID).unwrap();
+        assert_eq!(leg_destroy.lifetime, 90.0);
+        assert_eq!(leg_destroy.clip, 100.0);
+        assert_eq!(leg_destroy.layer, Layer::GROUND_UNIT + 5.0);
         let debug_line = standard_effect(FX_DEBUG_LINE_ID).unwrap();
         assert_eq!(debug_line.lifetime, 90.0);
         assert_eq!(debug_line.clip, 1_000_000_000_000.0);
@@ -10762,6 +10857,48 @@ mod tests {
         )
         .is_empty());
 
+        let leg_destroy_data =
+            TypeValue::LegDestroyData(crate::mindustry::entities::LegDestroyData::new(
+                crate::mindustry::io::Vec2::new(24.0, 32.0),
+                crate::mindustry::io::Vec2::new(54.0, 32.0),
+                crate::mindustry::entities::TextureRegionRef::with_size("crawler-leg", 16, 8),
+            ));
+        let leg_destroy = standard_effect_draw_plans_with_data_value(
+            Some(FX_LEG_DESTROY_ID as u16),
+            263,
+            24.0,
+            32.0,
+            0.0,
+            10.0,
+            90.0,
+            input_color,
+            Some(&leg_destroy_data),
+        );
+        assert_eq!(leg_destroy.len(), 1);
+        assert_eq!(leg_destroy[0].kind, StandardEffectDrawKind::TexturedLine);
+        assert_eq!(leg_destroy[0].layer, Layer::GROUND_UNIT + 5.0);
+        assert_eq!(leg_destroy[0].input_color, Some(input_color));
+        assert_eq!(leg_destroy[0].stroke, 8.0);
+        assert!((leg_destroy[0].radius - 30.0).abs() < 0.0001);
+        let leg_line = leg_destroy[0].line_render_primitives_from_seed();
+        assert_eq!(leg_line.len(), 1);
+        assert_eq!(leg_line[0].region.as_deref(), Some("crawler-leg"));
+        assert!((leg_line[0].length - 30.0).abs() < 0.0001);
+        assert_eq!(leg_line[0].stroke, 8.0);
+        assert!(leg_line[0].alpha > 0.0);
+        assert!(standard_effect_draw_plans_with_data_value(
+            Some(FX_LEG_DESTROY_ID as u16),
+            263,
+            24.0,
+            32.0,
+            0.0,
+            10.0,
+            90.0,
+            input_color,
+            Some(&TypeValue::Null),
+        )
+        .is_empty());
+
         let debug_line_points = TypeValue::Vec2Array(vec![
             crate::mindustry::io::Vec2::new(10.0, 20.0),
             crate::mindustry::io::Vec2::new(40.0, 20.0),
@@ -11527,7 +11664,7 @@ mod tests {
         assert!((first.particles.unwrap().angle.unwrap() - angle).abs() < 0.0001);
         assert_eq!(first.resolved_draw_color(), Some(input_color));
 
-        let line = first.line_render_primitives_from_seed()[0];
+        let line = first.line_render_primitives_from_seed()[0].clone();
         assert_eq!(line.start, first.center);
         assert!((line.angle - angle).abs() < 0.0001);
         assert_eq!(line.length, first.radius);
@@ -11787,7 +11924,7 @@ mod tests {
             first.resolved_draw_color(),
             Some(lerp_color(DecalColor::WHITE, input_color, fin))
         );
-        let line = first.line_render_primitives_from_seed()[0];
+        let line = first.line_render_primitives_from_seed()[0].clone();
         assert_eq!(line.start, first.center);
         assert!((line.angle - angle).abs() < 0.0001);
         assert_eq!(line.length, first.radius);
