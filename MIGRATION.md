@@ -7666,3 +7666,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `shootSmokeMissile=174` / `shootSmokeMissileColor=175` 需要 35 粒子、clip `300f`、alpha `0.5`、per-particle jitter 与 scaled circle；
   - line primitives 仍是 headless seam，真实 renderer/backend 尚未接入；
   - 当前仍只是 Fx 局部迁移。
+
+### 12.243 Fx.shootSmokeMissile scaled smoke circles
+
+- 2026-05-28：迁移 `shootSmokeMissile=174` 与 `shootSmokeMissileColor=175`，覆盖 clip `300f`、alpha `0.5`、35 粒子、per-particle jitter 与 scaled circle。
+- 本轮迁移：
+  - `shootSmokeMissile=174`
+  - `shootSmokeMissileColor=175`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2048` 附近：
+    - 两者均 `new Effect(130f, 300f, ...)`；
+    - `shootSmokeMissile` 使用 `color(Pal.redLight)`；
+    - `shootSmokeMissileColor` 使用 `color(e.color)`；
+    - 两者均 `alpha(0.5f)`；
+    - `rand.setSeed(e.id)` 后循环 35 次；
+    - offset：`v.trns(e.rotation + 180f + rand.range(21f), rand.random(e.finpow() * 90f)).add(rand.range(3f), rand.range(3f))`；
+    - local lifetime：`e.scaled(e.lifetime * rand.random(0.2f, 1f), b -> ...)`；
+    - radius：`b.fout() * 9f + 0.3f`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SMOKE_MISSILE_ID=174` 与 `FX_SHOOT_SMOKE_MISSILE_COLOR_ID=175`；
+    - 接入 lookup/metadata，lifetime `130.0`，clip `300.0`；
+    - 新增 `Pal.redLight` 颜色符号；
+    - `standard_effect_draw_plans(...)` 对两者按 Java 随机顺序生成 active `FilledCircle` plans，保留 alpha `0.5`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_smoke_missile_scaled_circles_for_render`，验证两个 effect 共 70 个 circle primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_smoke_missile_scaled_circles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_smoke_missile_scaled_circles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 本段之后 `regenParticle` 等非 shoot smoke Fx 仍需继续逐项迁移；
+  - 真实 renderer/backend 仍未接入；
+  - 当前仍只是 Fx 局部迁移。

@@ -5670,3 +5670,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `shootSmokeMissile=174` 与 `shootSmokeMissileColor=175` 是相邻目标；需要 alpha `0.5`、clip `300f`、35 个 scaled circles、`rotation + 180 + rand.range(21)` 和额外 `rand.range(3)` 抖动；
   2. 可复用 `shootSmokeTitan` 的 concrete circle plan 思路，但要补 alpha 与 jitter；
   3. 真实 renderer/backend 仍未接入，headless primitives 只是过渡 seam。
+
+---
+
+## 169. 最新闭环记录：Fx.shootSmokeMissile scaled smoke circles
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `shootSmokeMissile=174` 与 `shootSmokeMissileColor=175`，对齐 clip、alpha、35 粒子 jitter 与 scaled circle。
+- 本轮迁移：
+  - `shootSmokeMissile=174`
+  - `shootSmokeMissileColor=175`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增两个 Fx ID 并接入 lookup/metadata；
+    - `standard_effect(...)` lifetime `130.0`、clip `300.0`；
+    - 新增 `Pal.redLight` 颜色符号；
+    - `standard_effect_draw_plans(...)` 逐粒子复现 Java `range(21)`、`random(finpow*90)`、两次 `range(3)` jitter、`random(0.2,1)` local lifetime 顺序；
+    - active 粒子输出 `FilledCircle`，半径 `b.fout()*9+0.3`，alpha `0.5`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_smoke_missile_scaled_circles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_smoke_missile_scaled_circles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_smoke_missile_scaled_circles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 可继续 `regenParticle` / `regenSuppressParticle` 附近简单 Fx；
+  2. 也应规划真实 renderer/backend，当前 primitives 仍不可见；
+  3. 不要把 Fx seam 误认为完整游戏迁移完成。

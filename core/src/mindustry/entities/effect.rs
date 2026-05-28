@@ -220,6 +220,10 @@ pub const FX_SHOOT_SMOKE_SQUARE_BIG_ID: i32 = 171;
 pub const FX_SHOOT_SMOKE_TITAN_ID: i32 = 172;
 /// Upstream `Fx.shootSmokeSmite` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_SMOKE_SMITE_ID: i32 = 173;
+/// Upstream `Fx.shootSmokeMissile` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMOKE_MISSILE_ID: i32 = 174;
+/// Upstream `Fx.shootSmokeMissileColor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMOKE_MISSILE_COLOR_ID: i32 = 175;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -355,6 +359,8 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootSmokeSquareBig" => Some(FX_SHOOT_SMOKE_SQUARE_BIG_ID),
         "shootSmokeTitan" => Some(FX_SHOOT_SMOKE_TITAN_ID),
         "shootSmokeSmite" => Some(FX_SHOOT_SMOKE_SMITE_ID),
+        "shootSmokeMissile" => Some(FX_SHOOT_SMOKE_MISSILE_ID),
+        "shootSmokeMissileColor" => Some(FX_SHOOT_SMOKE_MISSILE_COLOR_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -586,6 +592,10 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_SHOOT_SMOKE_SMITE_ID => {
             Effect::with_lifetime(FX_SHOOT_SMOKE_SMITE_ID, 70.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SHOOT_SMOKE_MISSILE_ID => Effect::with_lifetime(FX_SHOOT_SMOKE_MISSILE_ID, 130.0, 300.0),
+        FX_SHOOT_SMOKE_MISSILE_COLOR_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMOKE_MISSILE_COLOR_ID, 130.0, 300.0)
+        }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
@@ -660,6 +670,8 @@ pub fn standard_effect_draw_plans(
             | FX_SHOOT_QUELL_PULSE_ID
             | FX_SHOOT_SMOKE_TITAN_ID
             | FX_SHOOT_SMOKE_SMITE_ID
+            | FX_SHOOT_SMOKE_MISSILE_ID
+            | FX_SHOOT_SMOKE_MISSILE_COLOR_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1519,6 +1531,54 @@ pub fn standard_effect_draw_plans(
                         secondary_radius_fslope_scale: 0.0,
                         alpha_midpoint: false,
                     }),
+                    light_color: None,
+                    light_radius: 0.0,
+                    light_opacity: 0.0,
+                });
+            }
+        }
+
+        return plans;
+    }
+
+    if matches!(
+        effect_id_i32,
+        FX_SHOOT_SMOKE_MISSILE_ID | FX_SHOOT_SMOKE_MISSILE_COLOR_ID
+    ) {
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let mut plans = Vec::with_capacity(35);
+
+        for _ in 0..35 {
+            let angle = rotation + 180.0 + rand.range(21.0);
+            let length = rand.random(finpow * 90.0);
+            let (base_x, base_y) = trns(angle, length);
+            let offset_x = base_x + rand.range(3.0);
+            let offset_y = base_y + rand.range(3.0);
+            let scaled_lifetime = lifetime * rand.random_between(0.2, 1.0);
+
+            if scaled_lifetime > f32::EPSILON && time <= scaled_lifetime {
+                let local_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
+                let local_fout = 1.0 - local_fin;
+                plans.push(StandardEffectDrawPlan {
+                    effect_id: effect_id_i32,
+                    layer: effect.layer,
+                    kind: StandardEffectDrawKind::FilledCircle,
+                    center: (x + offset_x, y + offset_y),
+                    color_from: if effect_id_i32 == FX_SHOOT_SMOKE_MISSILE_ID {
+                        Some("Pal.redLight")
+                    } else {
+                        None
+                    },
+                    color_mid: None,
+                    color_to: None,
+                    color_mix: 0.0,
+                    input_color: (effect_id_i32 == FX_SHOOT_SMOKE_MISSILE_COLOR_ID)
+                        .then_some(color),
+                    color_mul: 1.0,
+                    alpha: 0.5,
+                    radius: local_fout * 9.0 + 0.3,
+                    stroke: 0.0,
+                    particles: None,
                     light_color: None,
                     light_radius: 0.0,
                     light_opacity: 0.0,
@@ -4524,6 +4584,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.lightTrail" => Some(DecalColor::from_rgba(0xffe2a9ff)),
         "Pal.bulletYellow" => Some(DecalColor::from_rgba(0xfff8e8ff)),
         "Pal.bulletYellowBack" => Some(DecalColor::from_rgba(0xf9c27aff)),
+        "Pal.redLight" => Some(DecalColor::from_rgba(0xfeb380ff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
         "Pal.meltdownHit" => Some(DecalColor::from_rgba(0xffb98bff)),
@@ -6036,6 +6097,14 @@ mod tests {
             standard_effect_id("shootSmokeSmite"),
             Some(FX_SHOOT_SMOKE_SMITE_ID)
         );
+        assert_eq!(
+            standard_effect_id("shootSmokeMissile"),
+            Some(FX_SHOOT_SMOKE_MISSILE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("shootSmokeMissileColor"),
+            Some(FX_SHOOT_SMOKE_MISSILE_COLOR_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -6325,6 +6394,12 @@ mod tests {
             standard_effect(FX_SHOOT_SMOKE_SMITE_ID).unwrap().lifetime,
             70.0
         );
+        let shoot_smoke_missile = standard_effect(FX_SHOOT_SMOKE_MISSILE_ID).unwrap();
+        assert_eq!(shoot_smoke_missile.lifetime, 130.0);
+        assert_eq!(shoot_smoke_missile.clip, 300.0);
+        let shoot_smoke_missile_color = standard_effect(FX_SHOOT_SMOKE_MISSILE_COLOR_ID).unwrap();
+        assert_eq!(shoot_smoke_missile_color.lifetime, 130.0);
+        assert_eq!(shoot_smoke_missile_color.clip, 300.0);
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
@@ -7890,6 +7965,70 @@ mod tests {
                 .flat_map(|plan| plan.line_render_primitives_from_seed())
                 .count(),
             13
+        );
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_shoot_smoke_missile_scaled_circles() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+        let plans = standard_effect_draw_plans(
+            Some(FX_SHOOT_SMOKE_MISSILE_ID as u16),
+            174,
+            3.0,
+            4.0,
+            30.0,
+            13.0,
+            130.0,
+            input_color,
+        );
+        assert_eq!(plans.len(), 35);
+
+        let fin = 13.0 / 130.0;
+        let finpow = effect_finpow_from_fin(fin);
+        let mut rand = ArcRand::with_seed(174);
+        let angle = 30.0 + 180.0 + rand.range(21.0);
+        let length = rand.random(finpow * 90.0);
+        let (base_x, base_y) = trns(angle, length);
+        let offset_x = base_x + rand.range(3.0);
+        let offset_y = base_y + rand.range(3.0);
+        let scaled_lifetime = 130.0 * rand.random_between(0.2, 1.0);
+        let local_fin = 13.0 / scaled_lifetime;
+        let local_fout = 1.0 - local_fin;
+
+        let first = plans[0];
+        assert_eq!(first.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(first.color_from, Some("Pal.redLight"));
+        assert_eq!(first.input_color, None);
+        assert_eq!(first.alpha, 0.5);
+        assert!((first.center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((first.center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((first.radius - (local_fout * 9.0 + 0.3)).abs() < 0.0001);
+        let mut red_light = standard_effect_color_symbol("Pal.redLight").unwrap();
+        red_light.a *= 0.5;
+        assert_eq!(first.resolved_draw_color(), Some(red_light));
+
+        let color_plans = standard_effect_draw_plans(
+            Some(FX_SHOOT_SMOKE_MISSILE_COLOR_ID as u16),
+            175,
+            3.0,
+            4.0,
+            30.0,
+            13.0,
+            130.0,
+            input_color,
+        );
+        assert_eq!(color_plans.len(), 35);
+        assert_eq!(color_plans[0].color_from, None);
+        assert_eq!(color_plans[0].input_color, Some(input_color));
+        let mut input_alpha = input_color;
+        input_alpha.a *= 0.5;
+        assert_eq!(color_plans[0].resolved_draw_color(), Some(input_alpha));
+        assert_eq!(
+            color_plans
+                .iter()
+                .flat_map(|plan| plan.circle_render_primitives_from_seed())
+                .count(),
+            35
         );
     }
 
