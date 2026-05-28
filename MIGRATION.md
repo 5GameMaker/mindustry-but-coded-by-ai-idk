@@ -7590,3 +7590,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - square primitive 当前仍是 headless render seam，真实 renderer/backend 尚未可见绘制；
   - 后续相邻 `shootSmokeTitan` / `shootSmokeSmite` 需要 per-particle scaled lifetime 与 color interpolation，不能直接套用本轮简单 square kind；
   - 当前仍只是 Fx 局部迁移。
+
+### 12.241 Fx.shootSmokeTitan per-particle scaled circles
+
+- 2026-05-28：迁移 `shootSmokeTitan=172`，用多个 concrete circle draw plans 表达 Java 每粒子随机 offset 与 `e.scaled(...)` 局部 lifetime。
+- 本轮迁移：
+  - `shootSmokeTitan=172`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2025` 附近：
+    - `shootSmokeTitan = new Effect(70f, ...)`
+    - `rand.setSeed(e.id)`；
+    - 13 个粒子；
+    - offset：`v.trns(e.rotation + rand.range(30f), rand.random(e.finpow() * 40f))`；
+    - 局部 lifetime：`e.scaled(e.lifetime * rand.random(0.3f, 1f), b -> ...)`；
+    - color：`color(e.color, Pal.lightishGray, b.fin())`；
+    - radius：`b.fout() * 3.4f + 0.3f`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SMOKE_TITAN_ID=172`；
+    - 接入 lookup/metadata，lifetime `70.0`；
+    - `standard_effect_draw_plans(...)` 对该 effect 逐粒子复现 Java 随机顺序，active particle 输出 `FilledCircle` plan，`color_mix` 使用局部 `b.fin()`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_smoke_titan_scaled_circles_for_render`，验证 13 个 circle primitives 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_smoke_titan_scaled_circles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_smoke_titan_scaled_circles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 相邻 `shootSmokeSmite=173` 需要 `Lines.lineAngle` direct line primitive 或等价 plan，尚未迁移；
+  - 当前 circle primitive 仍是 headless seam，真实 renderer/backend 尚未接入；
+  - 当前仍只是 Fx 局部迁移。

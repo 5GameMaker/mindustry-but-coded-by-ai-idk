@@ -216,6 +216,8 @@ pub const FX_SHOOT_SMOKE_SQUARE_ID: i32 = 169;
 pub const FX_SHOOT_SMOKE_SQUARE_SPARSE_ID: i32 = 170;
 /// Upstream `Fx.shootSmokeSquareBig` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_SMOKE_SQUARE_BIG_ID: i32 = 171;
+/// Upstream `Fx.shootSmokeTitan` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMOKE_TITAN_ID: i32 = 172;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -349,6 +351,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootSmokeSquare" => Some(FX_SHOOT_SMOKE_SQUARE_ID),
         "shootSmokeSquareSparse" => Some(FX_SHOOT_SMOKE_SQUARE_SPARSE_ID),
         "shootSmokeSquareBig" => Some(FX_SHOOT_SMOKE_SQUARE_BIG_ID),
+        "shootSmokeTitan" => Some(FX_SHOOT_SMOKE_TITAN_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -574,6 +577,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_SHOOT_SMOKE_SQUARE_BIG_ID => {
             Effect::with_lifetime(FX_SHOOT_SMOKE_SQUARE_BIG_ID, 32.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SHOOT_SMOKE_TITAN_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMOKE_TITAN_ID, 70.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
@@ -646,6 +652,7 @@ pub fn standard_effect_draw_plans(
             | FX_INST_HIT_ID
             | FX_SHOOT_SCEPTER_SECONDARY_ID
             | FX_SHOOT_QUELL_PULSE_ID
+            | FX_SHOOT_SMOKE_TITAN_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1414,6 +1421,44 @@ pub fn standard_effect_draw_plans(
                 light_radius: 0.0,
                 light_opacity: 0.0,
             });
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_SHOOT_SMOKE_TITAN_ID {
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let mut plans = Vec::with_capacity(13);
+
+        for _ in 0..13 {
+            let angle = rotation + rand.range(30.0);
+            let length = rand.random(finpow * 40.0);
+            let (offset_x, offset_y) = trns(angle, length);
+            let scaled_lifetime = lifetime * rand.random_between(0.3, 1.0);
+
+            if scaled_lifetime > f32::EPSILON && time <= scaled_lifetime {
+                let local_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
+                let local_fout = 1.0 - local_fin;
+                plans.push(StandardEffectDrawPlan {
+                    effect_id: effect_id_i32,
+                    layer: effect.layer,
+                    kind: StandardEffectDrawKind::FilledCircle,
+                    center: (x + offset_x, y + offset_y),
+                    color_from: None,
+                    color_mid: None,
+                    color_to: Some("Pal.lightishGray"),
+                    color_mix: local_fin,
+                    input_color: Some(color),
+                    color_mul: 1.0,
+                    alpha: 1.0,
+                    radius: local_fout * 3.4 + 0.3,
+                    stroke: 0.0,
+                    particles: None,
+                    light_color: None,
+                    light_radius: 0.0,
+                    light_opacity: 0.0,
+                });
+            }
         }
 
         return plans;
@@ -5901,6 +5946,10 @@ mod tests {
             standard_effect_id("shootSmokeSquareBig"),
             Some(FX_SHOOT_SMOKE_SQUARE_BIG_ID)
         );
+        assert_eq!(
+            standard_effect_id("shootSmokeTitan"),
+            Some(FX_SHOOT_SMOKE_TITAN_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -6181,6 +6230,10 @@ mod tests {
                 .unwrap()
                 .lifetime,
             32.0
+        );
+        assert_eq!(
+            standard_effect(FX_SHOOT_SMOKE_TITAN_ID).unwrap().lifetime,
+            70.0
         );
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
@@ -7647,6 +7700,56 @@ mod tests {
         assert_eq!(big_particles.angle_range, 26.0);
         assert_eq!(big_particles.length, effect_finpow_from_fin(0.5) * 30.0);
         assert!((big.square_render_primitives_from_seed()[0].radius - 2.2).abs() < 0.0001);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_shoot_smoke_titan_scaled_circles() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+        let plans = standard_effect_draw_plans(
+            Some(FX_SHOOT_SMOKE_TITAN_ID as u16),
+            172,
+            3.0,
+            4.0,
+            30.0,
+            7.0,
+            70.0,
+            input_color,
+        );
+        assert_eq!(plans.len(), 13);
+
+        let fin = 7.0 / 70.0;
+        let finpow = effect_finpow_from_fin(fin);
+        let mut rand = ArcRand::with_seed(172);
+        let angle = 30.0 + rand.range(30.0);
+        let length = rand.random(finpow * 40.0);
+        let scaled_lifetime = 70.0 * rand.random_between(0.3, 1.0);
+        let local_fin = 7.0 / scaled_lifetime;
+        let local_fout = 1.0 - local_fin;
+        let (offset_x, offset_y) = trns(angle, length);
+
+        let first = plans[0];
+        assert_eq!(first.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(first.input_color, Some(input_color));
+        assert_eq!(first.color_to, Some("Pal.lightishGray"));
+        assert!((first.color_mix - local_fin).abs() < 0.0001);
+        assert!((first.center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((first.center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((first.radius - (local_fout * 3.4 + 0.3)).abs() < 0.0001);
+        assert_eq!(
+            first.resolved_draw_color(),
+            Some(lerp_color(
+                input_color,
+                standard_effect_color_symbol("Pal.lightishGray").unwrap(),
+                local_fin
+            ))
+        );
+        assert_eq!(
+            plans
+                .iter()
+                .flat_map(|plan| plan.circle_render_primitives_from_seed())
+                .count(),
+            13
+        );
     }
 
     #[test]

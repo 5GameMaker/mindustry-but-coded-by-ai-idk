@@ -5607,3 +5607,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 相邻 `shootSmokeTitan` / `shootSmokeSmite` 需要 per-particle scaled lifetime、局部 `b.fin()/b.fout()` 与更复杂颜色，不要半迁移；
   2. 如果继续 Fx，可优先寻找现有 primitives 已能完整表达的效果；
   3. 更长期应推进真实 renderer/backend，避免 headless primitive seam 继续堆积。
+
+---
+
+## 167. 最新闭环记录：Fx.shootSmokeTitan per-particle scaled circles
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `shootSmokeTitan=172`，对齐 Java 每粒子随机 offset、随机局部 lifetime、局部 color mix 与 circle radius。
+- 本轮迁移：
+  - `shootSmokeTitan=172`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SMOKE_TITAN_ID=172`；
+    - 接入 lookup/metadata，lifetime `70.0`；
+    - `standard_effect_draw_plans(...)` 逐粒子复现 `rand.range(30)`、`rand.random(finpow*40)`、`rand.random(0.3,1)` 顺序；
+    - active 粒子输出 concrete `FilledCircle` plan，颜色为 input color → `Pal.lightishGray`，mix 为局部 `b.fin()`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_smoke_titan_scaled_circles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_smoke_titan_scaled_circles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_smoke_titan_scaled_circles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `shootSmokeSmite=173` 需要 direct lineAngle primitive 或新的 line plan，不应伪装成现有 radial line；
+  2. `shootSmokeMissile=174/175` 需要 alpha、clip `300f`、35 粒子、per-particle jitter 与 scaled lifetime，可在 lineAngle 后继续；
+  3. 继续提醒：这些仍是局部 Fx seam，最终仍需真实 renderer/backend 和整体游戏 runtime。
