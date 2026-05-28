@@ -357,7 +357,7 @@ pub enum DesktopGraphicsCommandExecutionTrace {
     NoOp { kind: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsPassExecutionTrace {
     pub kind: RenderPassKind,
     pub order: i32,
@@ -369,17 +369,23 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub draw_texts: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsResolvedSpriteTrace {
     pub symbol: String,
     pub page_type: Option<PageType>,
     pub page_source_path: Option<String>,
+    pub x: Option<u32>,
+    pub y: Option<u32>,
+    pub u: Option<f32>,
+    pub v: Option<f32>,
+    pub u2: Option<f32>,
+    pub v2: Option<f32>,
     pub region_width: Option<u32>,
     pub region_height: Option<u32>,
     pub missing: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsExecutionTrace {
     pub shader_dispatch: DesktopGraphicsShaderDispatchExecutionTrace,
     pub execution_steps: Vec<DesktopGraphicsExecutionStepTrace>,
@@ -505,6 +511,12 @@ fn resolve_sprite_symbol<T>(
             symbol: symbol.to_string(),
             page_type: Some(located.page_type),
             page_source_path: Some(located.page_source_path.to_string()),
+            x: Some(located.region.x),
+            y: Some(located.region.y),
+            u: Some(located.region.u),
+            v: Some(located.region.v),
+            u2: Some(located.region.u2),
+            v2: Some(located.region.v2),
             region_width: Some(located.region.width),
             region_height: Some(located.region.height),
             missing: false,
@@ -513,6 +525,12 @@ fn resolve_sprite_symbol<T>(
             symbol: symbol.to_string(),
             page_type: miss.page_type,
             page_source_path: miss.page_source_path,
+            x: None,
+            y: None,
+            u: None,
+            v: None,
+            u2: None,
+            v2: None,
             region_width: None,
             region_height: None,
             missing: true,
@@ -647,7 +665,7 @@ pub trait DesktopGraphicsRenderer {
     fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats;
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct HeadlessDesktopGraphicsRenderer {
     pub frames_rendered: usize,
     pub last_stats: GraphicsFrameStats,
@@ -4989,6 +5007,12 @@ mod tests {
                 symbol: "router".to_string(),
                 page_type: Some(mindustry_core::mindustry::graphics::PageType::Main),
                 page_source_path: Some("sprites.png".to_string()),
+                x: Some(0),
+                y: Some(0),
+                u: Some(0.0),
+                v: Some(0.0),
+                u2: Some(1.0 / 4096.0),
+                v2: Some(1.0 / 4096.0),
                 region_width: Some(1),
                 region_height: Some(1),
                 missing: false,
@@ -5022,16 +5046,102 @@ mod tests {
             resolved.page_type,
             Some(mindustry_core::mindustry::graphics::PageType::Main)
         );
+        assert_eq!(resolved.x, Some(0));
+        assert_eq!(resolved.y, Some(0));
+        assert_eq!(resolved.u, Some(0.0));
+        assert_eq!(resolved.v, Some(0.0));
+        assert_eq!(resolved.u2, Some(1.0 / 4096.0));
+        assert_eq!(resolved.v2, Some(1.0 / 4096.0));
         assert_eq!(resolved.region_width, Some(1));
         assert!(!resolved.missing);
 
         let missing = &resolved_trace.render_passes[1].resolved_sprites[0];
         assert_eq!(missing.symbol, "cursor");
+        assert_eq!(missing.x, None);
+        assert_eq!(missing.y, None);
+        assert_eq!(missing.u, None);
+        assert_eq!(missing.v, None);
+        assert_eq!(missing.u2, None);
+        assert_eq!(missing.v2, None);
         assert!(missing.missing);
+
+        let lighting = &resolved_trace.render_passes[2].resolved_sprites[0];
+        assert_eq!(lighting.symbol, "lighting-glow");
+        assert_eq!(lighting.x, Some(0));
+        assert_eq!(lighting.y, Some(0));
+        assert_eq!(lighting.u, Some(0.0));
+        assert_eq!(lighting.v, Some(0.0));
+        assert_eq!(lighting.u2, Some(1.0 / 4096.0));
+        assert_eq!(lighting.v2, Some(1.0 / 4096.0));
+        assert_eq!(lighting.region_width, Some(1));
+        assert_eq!(lighting.region_height, Some(1));
+        assert!(!lighting.missing);
 
         let resolved_summary = DesktopGraphicsExecutionSummary::from_trace(&frame, &resolved_trace);
         assert_eq!(resolved_summary.atlas_resolved_sprites, 2);
         assert_eq!(resolved_summary.atlas_missing_sprites, 1);
+    }
+
+    #[test]
+    fn headless_graphics_renderer_resolves_draw_sprite_trace_coordinates_from_manual_atlas() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(88, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Ui);
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(8.0, 12.0, 16.0, 20.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            0.0,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+
+        let mut atlas = TextureAtlasPlan::new();
+        let _ = atlas.insert_region(
+            mindustry_core::mindustry::graphics::PageType::Main,
+            mindustry_core::mindustry::graphics::TextureAtlasRegion::new(
+                mindustry_core::mindustry::graphics::PageType::Main,
+                "router",
+                "sprites/router.png",
+                12,
+                34,
+                8,
+                16,
+                false,
+            ),
+        );
+
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: atlas,
+        };
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+
+        let resolved = &renderer.last_trace.render_passes[0].resolved_sprites[0];
+        assert_eq!(resolved.symbol, "router");
+        assert_eq!(
+            resolved.page_type,
+            Some(mindustry_core::mindustry::graphics::PageType::Main)
+        );
+        assert_eq!(resolved.page_source_path.as_deref(), Some("sprites.png"));
+        assert_eq!(resolved.x, Some(12));
+        assert_eq!(resolved.y, Some(34));
+        assert_eq!(resolved.u, Some(12.0 / 4096.0));
+        assert_eq!(resolved.v, Some(34.0 / 4096.0));
+        assert_eq!(resolved.u2, Some(20.0 / 4096.0));
+        assert_eq!(resolved.v2, Some(50.0 / 4096.0));
+        assert_eq!(resolved.region_width, Some(8));
+        assert_eq!(resolved.region_height, Some(16));
+        assert!(!resolved.missing);
     }
 
     #[test]

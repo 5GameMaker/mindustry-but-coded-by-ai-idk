@@ -11678,3 +11678,60 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 dispatcher 仍以 icon/symbol 输出为主，尚未绑定真实 building runtime warmup/liquid/heat/power 状态；
   - 还需要把 `content/blocks.rs` 的 drawer 字符串批量接到真实 block render snapshot；
   - 当前总体迁移约 20.7%，仍未达到完整可玩。
+
+### 12.365 Mod generic file scan 接入 FileTree 覆盖层
+
+- 2026-05-29：继续把 mod directory scanner 接到真实资源解析链。本轮新增 `mod_file_tree_from_directory(...)`，把 `scan_mod_file_paths(...)` 得到的 root-relative generic 文件写入 `FileTree` 覆盖层，复用现有 `AssetFile::new(..., true)` 与 `FileTree::add_file(...)` 语义，确保普通 mod assets 不再只是扫描结果列表。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `buildFiles(...)` 把非 special folder 的文件写入 file tree；
+    - `sprites` / `sprites-override` / `bundles` / `.git` 不进入 generic file tree，而是走各自专用流程。
+- Rust 新增/接入：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `mod_file_tree_from_directory(...)`；
+    - 新增 `mod_file_tree_from_directory_unwraps_root_and_keeps_generic_assets_only`，验证单子目录 unwrap 后 `assets/foo.txt` 与嵌套文件可被 `FileTree::resolve(...)` 命中，`sprites`、`bundles`、`.git` 不进入 generic tree。
+- 已跑验证：
+  - `cargo test -p mindustry-core mod_file_tree_from_directory_unwraps_root_and_keeps_generic_assets_only --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - zip/jar 与 Arc `Fi` 虚拟文件系统尚未接入；
+  - `bundles` 国际化加载、mod metadata/content lifecycle 仍未串进这个入口；
+  - 当前总体迁移约 20.75%，仍未达到完整可玩。
+
+### 12.366 Desktop DrawSprite trace 暴露 atlas 坐标与 UV
+
+- 2026-05-29：继续推进渲染执行链。本轮把 `DesktopGraphicsResolvedSpriteTrace` 从只记录 page/width/height 扩展为记录 atlas region 的 `x/y/u/v/u2/v2`，使 headless graphics executor 已能观察后端绘制所需的关键纹理坐标，为后续 live renderer/GPU upload 做接口前置。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsResolvedSpriteTrace` 新增 `x/y/u/v/u2/v2`；
+    - `resolve_sprite_symbol(...)` 命中 atlas 时填充坐标/UV，miss 时保持 `None`；
+    - 相关 trace 类型从 `Eq` 调整为 `PartialEq`；
+    - 更新 `headless_graphics_renderer_records_execution_summary_without_polluting_stats`，断言默认 atlas 的坐标/UV；
+    - 新增 `headless_graphics_renderer_resolves_draw_sprite_trace_coordinates_from_manual_atlas`，用手工 region 验证非零 `x/y/u/v/u2/v2`。
+- 已跑验证:
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `5 passed`
+- 仍未完成：
+  - trace 已有坐标，但还没有真实 surface/GPU upload；
+  - `DrawSprite` 仍未绑定真实 texture page 对象或 sampler/filter；
+  - 当前总体迁移约 20.85%，仍未达到完整可玩。
+
+### 12.367 DrawBlock dispatcher 支持 Turret / Power / HeatOutput 静态层
+
+- 2026-05-29：继续扩展上一闭环的 DrawBlock dispatcher。本轮新增最小静态支持：`DrawTurret` 输出 `base -> preview -> top`，`DrawPower` 输出 `<block>-power` 或参数 suffix，`DrawHeatOutput` 按 rot offset 选择 `top1/top2`；这些输出继续走 drawer → `BlockSpriteOp` 桥接，保持与 `BlockRenderer` 主链连接。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - 新增 `draw_heat_output_static_icon(...)`；
+    - `draw_block_dispatch_icons(...)` 支持 `DrawTurret`、`DrawPower`、`DrawHeatOutput`；
+    - 扩展 draw 测试覆盖 turret/power/heat output。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `drawer_dispatch_bridge_covers_static_turret_power_and_heat_output`，覆盖 `BlockSpriteOp` symbol 与 order。
+- 已跑验证：
+  - `cargo test -p mindustry-core draw_default_side_liquid_tile --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-core drawer_dispatch_bridge_covers_static_turret_power_and_heat_output --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - Turret 的 parts/ammoParts/heat overlay、Power 的动态 power status、HeatOutput 的 heat/glow runtime 仍未接；
+  - `DrawLiquid*`、`DrawPistons`、`DrawWeave` 等仍待进入 dispatcher；
+  - 当前总体迁移约 20.9%，仍未达到完整可玩。

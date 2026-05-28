@@ -4,6 +4,7 @@
 //! The first migrated pieces are the Java `Mod` base class hooks and the
 //! `NoPatch` marker annotation.
 
+use crate::mindustry::core::{AssetFile, FileTree};
 use crate::mindustry::graphics::{
     png_dimensions_from_path, MultiPackerPlan, PageType, RegionRequest, TextureAtlasRegionSource,
 };
@@ -480,6 +481,16 @@ pub fn scan_mod_sprite_paths(root: impl AsRef<Path>) -> io::Result<Vec<String>> 
     override_paths.sort();
     regular_paths.extend(override_paths);
     Ok(regular_paths)
+}
+
+/// Build a generic `FileTree` overlay from the files discovered by
+/// [`scan_mod_file_paths`].
+pub fn mod_file_tree_from_directory(root: impl AsRef<Path>) -> io::Result<FileTree> {
+    let mut tree = FileTree::new();
+    for path in scan_mod_file_paths(root)? {
+        tree.add_file(path.clone(), AssetFile::new(path, true));
+    }
+    Ok(tree)
 }
 
 fn walk_relative_files(
@@ -1193,6 +1204,54 @@ mod tests {
                 },
             ]
         );
+
+        let _ = std::fs::remove_dir_all(&outer_root);
+    }
+
+    #[test]
+    fn mod_file_tree_from_directory_unwraps_root_and_keeps_generic_assets_only() {
+        let outer_root = temp_mod_root("mod-file-tree");
+        let mod_root = outer_root.join("example-pack");
+
+        std::fs::create_dir_all(mod_root.join("assets/nested")).unwrap();
+        std::fs::write(mod_root.join("assets/foo.txt"), b"foo").unwrap();
+        std::fs::write(mod_root.join("assets/nested/bar.txt"), b"bar").unwrap();
+
+        std::fs::create_dir_all(mod_root.join("sprites/blocks")).unwrap();
+        std::fs::write(mod_root.join("sprites/blocks/router.png"), b"sprite").unwrap();
+        std::fs::create_dir_all(mod_root.join("bundles")).unwrap();
+        std::fs::write(mod_root.join("bundles/messages.properties"), b"hello=world").unwrap();
+        std::fs::create_dir_all(mod_root.join(".git")).unwrap();
+        std::fs::write(mod_root.join(".git/HEAD"), b"ref: refs/heads/main").unwrap();
+
+        let file_paths = scan_mod_file_paths(&outer_root).unwrap();
+        assert_eq!(
+            file_paths,
+            vec![
+                "assets/foo.txt".to_string(),
+                "assets/nested/bar.txt".to_string()
+            ]
+        );
+
+        let file_tree = mod_file_tree_from_directory(&outer_root).unwrap();
+        assert_eq!(file_tree.file_count(), 2);
+        assert_eq!(
+            file_tree.resolve("assets/foo.txt"),
+            AssetFile::new("assets/foo.txt", true)
+        );
+        assert_eq!(
+            file_tree.resolve("assets\\nested\\bar.txt"),
+            AssetFile::new("assets/nested/bar.txt", true)
+        );
+        assert_eq!(
+            file_tree.get("sprites/blocks/router.png"),
+            AssetFile::missing("sprites/blocks/router.png")
+        );
+        assert_eq!(
+            file_tree.get("bundles/messages.properties"),
+            AssetFile::missing("bundles/messages.properties")
+        );
+        assert_eq!(file_tree.get(".git/HEAD"), AssetFile::missing(".git/HEAD"));
 
         let _ = std::fs::remove_dir_all(&outer_root);
     }

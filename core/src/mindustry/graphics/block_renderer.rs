@@ -2017,6 +2017,61 @@ mod tests {
     }
 
     #[test]
+    fn drawer_dispatch_bridge_covers_static_turret_power_and_heat_output() {
+        let ops = drawer_to_block_sprite_ops(
+            "battery",
+            "DrawMulti(DrawDefault, DrawPower, DrawRegion(-top))",
+            RenderRect::new(1.0, 2.0, 3.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::BLOCK,
+            20,
+        );
+        assert_eq!(
+            ops.iter().map(|op| op.symbol()).collect::<Vec<_>>(),
+            vec!["battery", "battery-power", "battery-top"]
+        );
+        assert_eq!(
+            ops.iter().map(|op| op.order).collect::<Vec<_>>(),
+            vec![20, 21, 22]
+        );
+
+        let turret_ops = drawer_to_block_sprite_ops(
+            "scatter",
+            "DrawTurret",
+            RenderRect::new(1.0, 2.0, 3.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::BLOCK,
+            30,
+        );
+        assert_eq!(
+            turret_ops.iter().map(|op| op.symbol()).collect::<Vec<_>>(),
+            vec!["scatter-base", "scatter-preview", "scatter-top"]
+        );
+        assert_eq!(
+            turret_ops.iter().map(|op| op.order).collect::<Vec<_>>(),
+            vec![30, 31, 32]
+        );
+
+        assert_eq!(
+            drawer_to_block_sprite_ops(
+                "heater",
+                "DrawMulti(DrawHeatOutput, DrawHeatOutput(-1))",
+                RenderRect::new(1.0, 2.0, 3.0, 4.0),
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                Layer::BLOCK,
+                40,
+            )
+            .iter()
+            .map(|op| op.symbol())
+            .collect::<Vec<_>>(),
+            vec!["heater-top1", "heater-top2"]
+        );
+    }
+
+    #[test]
     fn block_renderer_plan_converts_sprite_passes_with_stable_symbols_and_rotation() {
         let mut plan = BlockRendererPlan::default();
 

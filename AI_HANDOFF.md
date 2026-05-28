@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **20.7%**。
+- 当前总体迁移完成度：约 **20.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9001,3 +9001,58 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续补 `DrawTurret/DrawPower/DrawLiquid*/DrawHeat*/DrawPistons/DrawWeave`；
   2. 把 content block drawer 批量接入真实 block render snapshot；
   3. 当前总迁移约 20.7%，仍未达到完整可玩。
+
+---
+
+## 267. 最新闭环记录：Mod scanner → FileTree 覆盖层
+
+- 本轮目标：把真实 mod 目录 generic file walker 接到 `FileTree`，避免只停在路径列表。
+- Rust 主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `mod_file_tree_from_directory(...)`；
+    - 复用 `scan_mod_file_paths(...)` 与 `FileTree::add_file(...)`；
+    - 新增 `mod_file_tree_from_directory_unwraps_root_and_keeps_generic_assets_only`。
+- 已跑验证：
+  - `cargo test -p mindustry-core mod_file_tree_from_directory_unwraps_root_and_keeps_generic_assets_only --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. zip/jar / Arc `Fi` 尚未接入；
+  2. bundles 国际化、metadata、content lifecycle 仍待串联；
+  3. 当前总迁移约 20.75%，仍未达到完整可玩。
+
+---
+
+## 268. 最新闭环记录：Desktop sprite trace atlas 坐标/UV
+
+- 本轮目标：让 headless graphics executor 的 `DrawSprite` trace 暴露后端需要的 atlas 坐标。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsResolvedSpriteTrace` 新增 `x/y/u/v/u2/v2`；
+    - `resolve_sprite_symbol(...)` 命中时填充坐标和 UV，miss 时为 `None`；
+    - 新增 `headless_graphics_renderer_resolves_draw_sprite_trace_coordinates_from_manual_atlas`；
+    - 更新既有 headless graphics renderer summary 测试。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. 真实 GPU/surface/backend 未接；
+  2. sampler/filter/texture page 对象仍待接入；
+  3. 当前总迁移约 20.85%，仍未达到完整可玩。
+
+---
+
+## 269. 最新闭环记录：DrawBlock Turret/Power/HeatOutput 静态层
+
+- 本轮目标：继续扩展 DrawBlock dispatcher 的高频静态覆盖面。
+- Rust 主改动：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - 新增 `draw_heat_output_static_icon(...)`；
+    - dispatcher 支持 `DrawTurret`、`DrawPower`、`DrawHeatOutput`。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `drawer_dispatch_bridge_covers_static_turret_power_and_heat_output`。
+- 已跑验证：
+  - `cargo test -p mindustry-core draw_default_side_liquid_tile --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core drawer_dispatch_bridge_covers_static_turret_power_and_heat_output --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. Turret parts/ammoParts/heat overlay 尚未接；
+  2. Power/HeatOutput 仍无 runtime status；
+  3. DrawLiquid/Pistons/Weave 等仍待接入；
+  4. 当前总迁移约 20.9%，仍未达到完整可玩。

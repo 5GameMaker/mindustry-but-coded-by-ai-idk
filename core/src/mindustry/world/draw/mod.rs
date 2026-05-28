@@ -381,6 +381,15 @@ pub fn draw_heat_output_region_names(block_name: &str) -> [String; 4] {
     ]
 }
 
+pub fn draw_heat_output_static_icon(block_name: &str, rot_offset: i32) -> String {
+    let names = draw_heat_output_region_names(block_name);
+    if draw_heat_output_top_index(0, rot_offset) == 2 {
+        names[3].clone()
+    } else {
+        names[2].clone()
+    }
+}
+
 pub fn draw_multi_icons(drawer_icons: &[Vec<String>]) -> Vec<String> {
     drawer_icons.iter().flatten().cloned().collect()
 }
@@ -452,10 +461,36 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
                 .trim();
             vec![draw_region_name(block_name, suffix, None)]
         }
+        Some(("DrawTurret", _)) => {
+            let names = draw_turret_region_names(block_name, 0, "", None);
+            draw_turret_icons(&names.base, &names.preview, Some(&names.top))
+        }
+        Some(("DrawPower", args)) => {
+            let suffix = split_drawer_args(args)
+                .first()
+                .copied()
+                .unwrap_or("-power")
+                .trim();
+            let suffix = if suffix.is_empty() { "-power" } else { suffix };
+            draw_power_region_names(block_name, suffix, true)
+        }
+        Some(("DrawHeatOutput", args)) => {
+            let rot_offset = split_drawer_args(args)
+                .first()
+                .and_then(|arg| arg.trim().parse::<i32>().ok())
+                .unwrap_or(0);
+            vec![draw_heat_output_static_icon(block_name, rot_offset)]
+        }
         Some(_) => Vec::new(),
         None => match drawer {
             "DrawDefault" => draw_default_icons(block_name),
             "DrawRegion" => draw_region_icons(block_name),
+            "DrawTurret" => {
+                let names = draw_turret_region_names(block_name, 0, "", None);
+                draw_turret_icons(&names.base, &names.preview, Some(&names.top))
+            }
+            "DrawPower" => draw_power_region_names(block_name, "-power", true),
+            "DrawHeatOutput" => vec![draw_heat_output_static_icon(block_name, 0)],
             _ => Vec::new(),
         },
     }
@@ -1347,6 +1382,8 @@ mod tests {
                 String::from("heater-top2")
             ]
         );
+        assert_eq!(draw_heat_output_static_icon("heater", 0), "heater-top1");
+        assert_eq!(draw_heat_output_static_icon("heater", -1), "heater-top2");
         assert!((draw_heat_output_alpha(0.5, 0.8, 0.3, 0.1) - 0.32).abs() < 0.00001);
         assert_eq!(
             draw_multi_icons(&[vec!["a".into(), "b".into()], vec!["c".into()]]),
@@ -1384,6 +1421,30 @@ mod tests {
         assert_eq!(
             draw_block_dispatch_icons("router", "DrawMulti(DrawDefault, DrawPumpLiquid)"),
             vec!["router"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("scatter", "DrawTurret"),
+            vec!["scatter-base", "scatter-preview", "scatter-top"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("spectre", "DrawTurret(reinforced-, RegionPart(-barrel))"),
+            vec!["spectre-base", "spectre-preview", "spectre-top"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("battery", "DrawPower"),
+            vec!["battery-power"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("battery", "DrawPower(-charge)"),
+            vec!["battery-charge"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("heater", "DrawHeatOutput"),
+            vec!["heater-top1"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("heater", "DrawHeatOutput(-1)"),
+            vec!["heater-top2"]
         );
         assert_eq!(
             draw_side_region_names("separator"),
