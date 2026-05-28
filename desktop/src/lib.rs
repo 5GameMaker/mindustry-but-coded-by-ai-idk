@@ -19,7 +19,7 @@ use mindustry_core::mindustry::entities::{
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
     PlayerUnitSwitchContext, StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
-    StandardEffectSquareRenderPrimitive, PLAYER_CLASS_ID,
+    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -54,6 +54,7 @@ pub struct DesktopStandardEffectRenderFrame {
     pub circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
     pub square_primitives: Vec<StandardEffectSquareRenderPrimitive>,
     pub line_primitives: Vec<StandardEffectLineRenderPrimitive>,
+    pub triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
 }
 
@@ -63,6 +64,7 @@ pub struct DesktopEffectRenderStats {
     pub circle_primitives: usize,
     pub square_primitives: usize,
     pub line_primitives: usize,
+    pub triangle_primitives: usize,
     pub light_primitives: usize,
 }
 
@@ -73,6 +75,7 @@ impl DesktopEffectRenderStats {
             circle_primitives: frame.circle_primitives.len(),
             square_primitives: frame.square_primitives.len(),
             line_primitives: frame.line_primitives.len(),
+            triangle_primitives: frame.triangle_primitives.len(),
             light_primitives: frame.light_primitives.len(),
         }
     }
@@ -116,6 +119,7 @@ pub struct DesktopLauncher {
     pub standard_local_effect_circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
     pub standard_local_effect_square_primitives: Vec<StandardEffectSquareRenderPrimitive>,
     pub standard_local_effect_line_primitives: Vec<StandardEffectLineRenderPrimitive>,
+    pub standard_local_effect_triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub standard_local_effect_light_primitives: Vec<StandardEffectLightRenderPrimitive>,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
@@ -166,6 +170,7 @@ impl DesktopLauncher {
             standard_local_effect_circle_primitives: Vec::new(),
             standard_local_effect_square_primitives: Vec::new(),
             standard_local_effect_line_primitives: Vec::new(),
+            standard_local_effect_triangle_primitives: Vec::new(),
             standard_local_effect_light_primitives: Vec::new(),
             connect_target,
             connect_error: None,
@@ -253,6 +258,10 @@ impl DesktopLauncher {
             .iter()
             .flat_map(StandardEffectDrawPlan::line_render_primitives_from_seed)
             .collect();
+        self.standard_local_effect_triangle_primitives = standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::triangle_render_primitives_from_seed)
+            .collect();
         self.standard_local_effect_light_primitives = standard_local_effect_draw_plans
             .iter()
             .flat_map(StandardEffectDrawPlan::light_render_primitives)
@@ -339,12 +348,22 @@ impl DesktopLauncher {
             .collect()
     }
 
+    pub fn collect_standard_local_effect_triangle_primitives_for_render(
+        &self,
+    ) -> Vec<StandardEffectTriangleRenderPrimitive> {
+        self.standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::triangle_render_primitives_from_seed)
+            .collect()
+    }
+
     pub fn standard_effect_render_frame(&self) -> DesktopStandardEffectRenderFrame {
         DesktopStandardEffectRenderFrame {
             draw_plans: self.standard_local_effect_draw_plans.clone(),
             circle_primitives: self.standard_local_effect_circle_primitives.clone(),
             square_primitives: self.standard_local_effect_square_primitives.clone(),
             line_primitives: self.standard_local_effect_line_primitives.clone(),
+            triangle_primitives: self.standard_local_effect_triangle_primitives.clone(),
             light_primitives: self.standard_local_effect_light_primitives.clone(),
         }
     }
@@ -2745,6 +2764,7 @@ mod tests {
                 circle_primitives: 2,
                 square_primitives: 0,
                 line_primitives: 0,
+                triangle_primitives: 0,
                 light_primitives: 1
             }
         );
@@ -2945,9 +2965,64 @@ mod tests {
                 circle_primitives: 0,
                 square_primitives: 1,
                 line_primitives: 0,
+                triangle_primitives: 0,
                 light_primitives: 1
             }
         );
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_flattens_shoot_triangle_pairs_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("shootSmall").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 90.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("shootTitan").unwrap() as u16,
+                    x: 40.0,
+                    y: 48.0,
+                    rotation: 30.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 2);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_triangle_primitives.len(), 4);
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+        let first = launcher
+            .standard_local_effect_triangle_primitives
+            .iter()
+            .find(|triangle| triangle.center == (24.0, 32.0) && triangle.rotation == 90.0)
+            .expect("shootSmall front triangle should be cached");
+        assert!(first.width > 1.0);
+        assert!(first.length > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 2);
+        assert_eq!(stats.triangle_primitives, 4);
+        assert_eq!(stats.circle_primitives, 0);
         assert_eq!(renderer.last_stats, stats);
     }
 

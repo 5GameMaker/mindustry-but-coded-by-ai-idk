@@ -7304,3 +7304,51 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前仍是 standard effect/headless primitive seam，真实图形 backend 尚未绘制 `StrokedRotatedSquare`；
   - `StandardEffectDrawPlan` 仍缺少正式 square rotation 字段，本轮为避免大范围 struct literal 改动暂用 `particles.angle` 过渡；
   - 后续继续迁移 Fx 后续简单效果，或先抽象 hit bullet / squares / squareWave 共享随机与 primitive helper。
+
+### 12.234 Drawf.tri triangle pair seam + shoot muzzle Fx
+
+- 2026-05-28：新增三角 primitive 过渡 seam，并迁移一组只依赖 `Drawf.tri` 的射击口效果。
+- 本轮迁移：
+  - `shootSmall=155`
+  - `shootSmallColor=156`
+  - `shootHeal=157`
+  - `shootHealYellow=158`
+  - `shootBig=160`
+  - `shootBig2=161`
+  - `shootBigColor=162`
+  - `shootTitan=165`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1823` 附近：
+    - `shootSmall` / `shootSmallColor`：两次 `Drawf.tri`，front length `15f * fout`，back length `3f * fout`；
+    - `shootHeal` / `shootHealYellow`：front length `17f * fout`，back length `4f * fout`；
+    - `shootBig` / `shootBig2` / `shootBigColor`：不同 width/front/back 常量；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1961` 附近：
+    - `shootTitan`：`color(Pal.lightOrange, e.color, e.fin())`，front `35f * fout`，back `6f * fout`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增上述 Fx id 常量、lookup 与 lifetime metadata；
+    - 新增 `StandardEffectDrawKind::TrianglePair`；
+    - 新增 `StandardEffectTriangleRenderPrimitive`；
+    - `triangle_render_primitives_from_seed()` 将一个 `TrianglePair` plan 展开为 front/back 两个 triangle primitive；
+    - `resolved_draw_color()` 支持 `Input.color -> static color` 的 lerp，用于 `shootSmallColor` / `shootBigColor`；
+    - `standard_effect_color_symbol()` 新增 `Pal.lightTrail = ffe2a9`。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `StandardEffectTriangleRenderPrimitive`。
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame`、`DesktopEffectRenderStats`、`DesktopLauncher` 增加 triangle primitive 缓存/统计；
+    - `update()` 后会从 standard draw plans 生成 triangle primitives；
+    - 新增 `desktop_launcher_flattens_shoot_triangle_pairs_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_shoot_triangle_pairs --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_triangle_pairs_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 renderer/backend 仍需绘制 `StandardEffectTriangleRenderPrimitive`；
+  - `shootScepterSecondary=163`、`instBomb=101` 等需要多 triangle pass / 多颜色 / light，尚未迁移；
+  - `shootQuellPulse=164` 需要更复杂的随机三角簇与 circle pass，不能强塞进当前简单 `TrianglePair`。

@@ -174,8 +174,24 @@ pub const FX_BLOCK_EXPLOSION_SMOKE_ID: i32 = 152;
 pub const FX_STEAM_COOL_SMOKE_ID: i32 = 153;
 /// Upstream `Fx.smokePuff` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_PUFF_ID: i32 = 154;
+/// Upstream `Fx.shootSmall` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMALL_ID: i32 = 155;
+/// Upstream `Fx.shootSmallColor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMALL_COLOR_ID: i32 = 156;
+/// Upstream `Fx.shootHeal` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_HEAL_ID: i32 = 157;
+/// Upstream `Fx.shootHealYellow` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_HEAL_YELLOW_ID: i32 = 158;
 /// Upstream `Fx.shootSmallSmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_SMALL_SMOKE_ID: i32 = 159;
+/// Upstream `Fx.shootBig` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_BIG_ID: i32 = 160;
+/// Upstream `Fx.shootBig2` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_BIG2_ID: i32 = 161;
+/// Upstream `Fx.shootBigColor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_BIG_COLOR_ID: i32 = 162;
+/// Upstream `Fx.shootTitan` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_TITAN_ID: i32 = 165;
 /// Upstream `Fx.shootBigSmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_BIG_SMOKE_ID: i32 = 166;
 /// Upstream `Fx.shootBigSmoke2` id in `mindustry.content.Fx` for v158.1.
@@ -294,7 +310,15 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "blockExplosionSmoke" => Some(FX_BLOCK_EXPLOSION_SMOKE_ID),
         "steamCoolSmoke" => Some(FX_STEAM_COOL_SMOKE_ID),
         "smokePuff" => Some(FX_SMOKE_PUFF_ID),
+        "shootSmall" => Some(FX_SHOOT_SMALL_ID),
+        "shootSmallColor" => Some(FX_SHOOT_SMALL_COLOR_ID),
+        "shootHeal" => Some(FX_SHOOT_HEAL_ID),
+        "shootHealYellow" => Some(FX_SHOOT_HEAL_YELLOW_ID),
         "shootSmallSmoke" => Some(FX_SHOOT_SMALL_SMOKE_ID),
+        "shootBig" => Some(FX_SHOOT_BIG_ID),
+        "shootBig2" => Some(FX_SHOOT_BIG2_ID),
+        "shootBigColor" => Some(FX_SHOOT_BIG_COLOR_ID),
+        "shootTitan" => Some(FX_SHOOT_TITAN_ID),
         "shootBigSmoke" => Some(FX_SHOOT_BIG_SMOKE_ID),
         "shootBigSmoke2" => Some(FX_SHOOT_BIG_SMOKE2_ID),
         "shootSmokeDisperse" => Some(FX_SHOOT_SMOKE_DISPERSE_ID),
@@ -477,9 +501,23 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_STEAM_COOL_SMOKE_ID, 35.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SMOKE_PUFF_ID => Effect::with_lifetime(FX_SMOKE_PUFF_ID, 30.0, DEFAULT_EFFECT_CLIP),
+        FX_SHOOT_SMALL_ID => Effect::with_lifetime(FX_SHOOT_SMALL_ID, 8.0, DEFAULT_EFFECT_CLIP),
+        FX_SHOOT_SMALL_COLOR_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMALL_COLOR_ID, 8.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_HEAL_ID => Effect::with_lifetime(FX_SHOOT_HEAL_ID, 8.0, DEFAULT_EFFECT_CLIP),
+        FX_SHOOT_HEAL_YELLOW_ID => {
+            Effect::with_lifetime(FX_SHOOT_HEAL_YELLOW_ID, 8.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SHOOT_SMALL_SMOKE_ID => {
             Effect::with_lifetime(FX_SHOOT_SMALL_SMOKE_ID, 20.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SHOOT_BIG_ID => Effect::with_lifetime(FX_SHOOT_BIG_ID, 9.0, DEFAULT_EFFECT_CLIP),
+        FX_SHOOT_BIG2_ID => Effect::with_lifetime(FX_SHOOT_BIG2_ID, 10.0, DEFAULT_EFFECT_CLIP),
+        FX_SHOOT_BIG_COLOR_ID => {
+            Effect::with_lifetime(FX_SHOOT_BIG_COLOR_ID, 11.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_TITAN_ID => Effect::with_lifetime(FX_SHOOT_TITAN_ID, 10.0, DEFAULT_EFFECT_CLIP),
         FX_SHOOT_BIG_SMOKE_ID => {
             Effect::with_lifetime(FX_SHOOT_BIG_SMOKE_ID, 17.0, DEFAULT_EFFECT_CLIP)
         }
@@ -774,6 +812,7 @@ pub enum StandardEffectDrawKind {
     StrokedRotatedSquare,
     SeededSquareParticles,
     SeededRadialSquareParticles,
+    TrianglePair,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -840,6 +879,16 @@ pub struct StandardEffectLineRenderPrimitive {
     pub angle: f32,
     pub length: f32,
     pub stroke: f32,
+    pub alpha: f32,
+    pub color: Option<DecalColor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectTriangleRenderPrimitive {
+    pub center: (f32, f32),
+    pub width: f32,
+    pub length: f32,
+    pub rotation: f32,
     pub alpha: f32,
     pub color: Option<DecalColor>,
 }
@@ -995,7 +1044,8 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::StrokedSquare
             | StandardEffectDrawKind::StrokedRotatedSquare
             | StandardEffectDrawKind::SeededSquareParticles
-            | StandardEffectDrawKind::SeededRadialSquareParticles => Vec::new(),
+            | StandardEffectDrawKind::SeededRadialSquareParticles
+            | StandardEffectDrawKind::TrianglePair => Vec::new(),
         }
     }
 
@@ -1074,7 +1124,8 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::SeededCircleParticles
             | StandardEffectDrawKind::SeededStrokedCircleParticles
             | StandardEffectDrawKind::SeededLineParticles
-            | StandardEffectDrawKind::SeededRadialLineParticles => Vec::new(),
+            | StandardEffectDrawKind::SeededRadialLineParticles
+            | StandardEffectDrawKind::TrianglePair => Vec::new(),
         }
     }
 
@@ -1122,6 +1173,39 @@ impl StandardEffectDrawPlan {
         }
     }
 
+    pub fn triangle_render_primitives_from_seed(
+        &self,
+    ) -> Vec<StandardEffectTriangleRenderPrimitive> {
+        let color = self.resolved_draw_color();
+        match self.kind {
+            StandardEffectDrawKind::TrianglePair => {
+                let Some(particles) = self.particles else {
+                    return Vec::new();
+                };
+                let rotation = particles.angle.unwrap_or(0.0);
+                vec![
+                    StandardEffectTriangleRenderPrimitive {
+                        center: self.center,
+                        width: self.radius,
+                        length: self.stroke,
+                        rotation,
+                        alpha: self.alpha,
+                        color,
+                    },
+                    StandardEffectTriangleRenderPrimitive {
+                        center: self.center,
+                        width: self.radius,
+                        length: particles.length,
+                        rotation: rotation + 180.0,
+                        alpha: self.alpha,
+                        color,
+                    },
+                ]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn light_render_primitives(&self) -> Vec<StandardEffectLightRenderPrimitive> {
         self.light_color
             .filter(|_| self.light_radius > 0.0 && self.light_opacity > 0.0)
@@ -1150,6 +1234,9 @@ impl StandardEffectDrawPlan {
         ) {
             (Some(input), Some(from), None, Some("Input.color")) => {
                 lerp_color(standard_effect_color_symbol(from)?, input, self.color_mix)
+            }
+            (Some(input), None, None, Some(to)) => {
+                lerp_color(input, standard_effect_color_symbol(to)?, self.color_mix)
             }
             (Some(color), _, _, _) => color,
             (None, Some(from), Some(mid), Some(to)) => lerp_color_three(
@@ -2883,6 +2970,122 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_SHOOT_SMALL_ID
+        | FX_SHOOT_SMALL_COLOR_ID
+        | FX_SHOOT_HEAL_ID
+        | FX_SHOOT_HEAL_YELLOW_ID
+        | FX_SHOOT_BIG_ID
+        | FX_SHOOT_BIG2_ID
+        | FX_SHOOT_BIG_COLOR_ID
+        | FX_SHOOT_TITAN_ID => {
+            let (color_from, color_to, input_color, width, front_length, back_length) =
+                match effect_id {
+                    FX_SHOOT_SMALL_ID => (
+                        Some("Pal.lighterOrange"),
+                        Some("Pal.lightOrange"),
+                        None,
+                        1.0 + 5.0 * fout,
+                        15.0 * fout,
+                        3.0 * fout,
+                    ),
+                    FX_SHOOT_SMALL_COLOR_ID => (
+                        None,
+                        Some("Color.gray"),
+                        Some(color),
+                        1.0 + 5.0 * fout,
+                        15.0 * fout,
+                        3.0 * fout,
+                    ),
+                    FX_SHOOT_HEAL_ID => (
+                        Some("Pal.heal"),
+                        None,
+                        None,
+                        1.0 + 5.0 * fout,
+                        17.0 * fout,
+                        4.0 * fout,
+                    ),
+                    FX_SHOOT_HEAL_YELLOW_ID => (
+                        Some("Pal.lightTrail"),
+                        None,
+                        None,
+                        1.0 + 5.0 * fout,
+                        17.0 * fout,
+                        4.0 * fout,
+                    ),
+                    FX_SHOOT_BIG_ID => (
+                        Some("Pal.lighterOrange"),
+                        Some("Pal.lightOrange"),
+                        None,
+                        1.2 + 7.0 * fout,
+                        25.0 * fout,
+                        4.0 * fout,
+                    ),
+                    FX_SHOOT_BIG2_ID => (
+                        Some("Pal.lightOrange"),
+                        Some("Color.gray"),
+                        None,
+                        1.2 + 8.0 * fout,
+                        29.0 * fout,
+                        5.0 * fout,
+                    ),
+                    FX_SHOOT_BIG_COLOR_ID => (
+                        None,
+                        Some("Color.gray"),
+                        Some(color),
+                        1.2 + 9.0 * fout,
+                        32.0 * fout,
+                        3.0 * fout,
+                    ),
+                    FX_SHOOT_TITAN_ID => (
+                        Some("Pal.lightOrange"),
+                        Some("Input.color"),
+                        Some(color),
+                        1.3 + 10.0 * fout,
+                        35.0 * fout,
+                        6.0 * fout,
+                    ),
+                    _ => unreachable!(),
+                };
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TrianglePair,
+                center: (x, y),
+                color_from,
+                color_mid: None,
+                color_to,
+                color_mix: fin,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: width,
+                stroke: front_length,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: Some(rotation),
+                    angle_range: 0.0,
+                    length: back_length,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SHOOT_SMALL_SMOKE_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -3314,6 +3517,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.lightishGray" => Some(DecalColor::from_rgba(0xa2a2a2ff)),
         "Pal.lighterOrange" => Some(DecalColor::from_rgba(0xf6e096ff)),
         "Pal.lightOrange" => Some(DecalColor::from_rgba(0xf68021ff)),
+        "Pal.lightTrail" => Some(DecalColor::from_rgba(0xffe2a9ff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
         "Pal.meltdownHit" => Some(DecalColor::from_rgba(0xffb98bff)),
@@ -4743,10 +4947,27 @@ mod tests {
             Some(FX_STEAM_COOL_SMOKE_ID)
         );
         assert_eq!(standard_effect_id("smokePuff"), Some(FX_SMOKE_PUFF_ID));
+        assert_eq!(standard_effect_id("shootSmall"), Some(FX_SHOOT_SMALL_ID));
+        assert_eq!(
+            standard_effect_id("shootSmallColor"),
+            Some(FX_SHOOT_SMALL_COLOR_ID)
+        );
+        assert_eq!(standard_effect_id("shootHeal"), Some(FX_SHOOT_HEAL_ID));
+        assert_eq!(
+            standard_effect_id("shootHealYellow"),
+            Some(FX_SHOOT_HEAL_YELLOW_ID)
+        );
         assert_eq!(
             standard_effect_id("shootSmallSmoke"),
             Some(FX_SHOOT_SMALL_SMOKE_ID)
         );
+        assert_eq!(standard_effect_id("shootBig"), Some(FX_SHOOT_BIG_ID));
+        assert_eq!(standard_effect_id("shootBig2"), Some(FX_SHOOT_BIG2_ID));
+        assert_eq!(
+            standard_effect_id("shootBigColor"),
+            Some(FX_SHOOT_BIG_COLOR_ID)
+        );
+        assert_eq!(standard_effect_id("shootTitan"), Some(FX_SHOOT_TITAN_ID));
         assert_eq!(
             standard_effect_id("shootBigSmoke"),
             Some(FX_SHOOT_BIG_SMOKE_ID)
@@ -4974,10 +5195,27 @@ mod tests {
             12.0
         );
         assert_eq!(standard_effect(FX_SMOKE_PUFF_ID).unwrap().lifetime, 30.0);
+        assert_eq!(standard_effect(FX_SHOOT_SMALL_ID).unwrap().lifetime, 8.0);
+        assert_eq!(
+            standard_effect(FX_SHOOT_SMALL_COLOR_ID).unwrap().lifetime,
+            8.0
+        );
+        assert_eq!(standard_effect(FX_SHOOT_HEAL_ID).unwrap().lifetime, 8.0);
+        assert_eq!(
+            standard_effect(FX_SHOOT_HEAL_YELLOW_ID).unwrap().lifetime,
+            8.0
+        );
         assert_eq!(
             standard_effect(FX_SHOOT_SMALL_SMOKE_ID).unwrap().lifetime,
             20.0
         );
+        assert_eq!(standard_effect(FX_SHOOT_BIG_ID).unwrap().lifetime, 9.0);
+        assert_eq!(standard_effect(FX_SHOOT_BIG2_ID).unwrap().lifetime, 10.0);
+        assert_eq!(
+            standard_effect(FX_SHOOT_BIG_COLOR_ID).unwrap().lifetime,
+            11.0
+        );
+        assert_eq!(standard_effect(FX_SHOOT_TITAN_ID).unwrap().lifetime, 10.0);
         assert_eq!(
             standard_effect(FX_SHOOT_BIG_SMOKE_ID).unwrap().lifetime,
             17.0
@@ -6226,6 +6464,156 @@ mod tests {
         let despawn_lines = despawn.line_render_primitives_from_seed();
         assert_eq!(despawn_lines.len(), 7);
         assert!((despawn_lines[0].length - 2.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_shoot_triangle_pairs() {
+        let input_color = DecalColor::from_rgba(0x336699cc);
+        let shoot_small = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMALL_ID as u16),
+            155,
+            3.0,
+            4.0,
+            90.0,
+            4.0,
+            8.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_small.kind, StandardEffectDrawKind::TrianglePair);
+        assert_eq!(shoot_small.color_from, Some("Pal.lighterOrange"));
+        assert_eq!(shoot_small.color_to, Some("Pal.lightOrange"));
+        assert_eq!(shoot_small.radius, 3.5);
+        assert_eq!(shoot_small.stroke, 7.5);
+        let triangles = shoot_small.triangle_render_primitives_from_seed();
+        assert_eq!(triangles.len(), 2);
+        assert_eq!(triangles[0].center, (3.0, 4.0));
+        assert_eq!(triangles[0].width, 3.5);
+        assert_eq!(triangles[0].length, 7.5);
+        assert_eq!(triangles[0].rotation, 90.0);
+        assert_eq!(triangles[1].length, 1.5);
+        assert_eq!(triangles[1].rotation, 270.0);
+
+        let shoot_small_color = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMALL_COLOR_ID as u16),
+            156,
+            3.0,
+            4.0,
+            90.0,
+            4.0,
+            8.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(shoot_small_color.input_color, Some(input_color));
+        assert_eq!(shoot_small_color.color_to, Some("Color.gray"));
+        assert_eq!(
+            shoot_small_color.resolved_draw_color(),
+            Some(lerp_color(
+                input_color,
+                standard_effect_color_symbol("Color.gray").unwrap(),
+                0.5
+            ))
+        );
+
+        let shoot_heal = standard_effect_draw_plan(
+            Some(FX_SHOOT_HEAL_ID as u16),
+            157,
+            3.0,
+            4.0,
+            90.0,
+            4.0,
+            8.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_heal.color_from, Some("Pal.heal"));
+        assert_eq!(shoot_heal.stroke, 8.5);
+        assert_eq!(shoot_heal.particles.unwrap().length, 2.0);
+
+        let shoot_heal_yellow = standard_effect_draw_plan(
+            Some(FX_SHOOT_HEAL_YELLOW_ID as u16),
+            158,
+            3.0,
+            4.0,
+            90.0,
+            4.0,
+            8.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_heal_yellow.color_from, Some("Pal.lightTrail"));
+        assert_eq!(
+            shoot_heal_yellow.resolved_draw_color(),
+            standard_effect_color_symbol("Pal.lightTrail")
+        );
+
+        let shoot_big = standard_effect_draw_plan(
+            Some(FX_SHOOT_BIG_ID as u16),
+            160,
+            3.0,
+            4.0,
+            45.0,
+            4.5,
+            9.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_big.radius, 4.7);
+        assert_eq!(shoot_big.stroke, 12.5);
+        assert_eq!(shoot_big.particles.unwrap().length, 2.0);
+
+        let shoot_big2 = standard_effect_draw_plan(
+            Some(FX_SHOOT_BIG2_ID as u16),
+            161,
+            3.0,
+            4.0,
+            45.0,
+            5.0,
+            10.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(shoot_big2.color_from, Some("Pal.lightOrange"));
+        assert_eq!(shoot_big2.color_to, Some("Color.gray"));
+        assert_eq!(shoot_big2.radius, 5.2);
+        assert_eq!(shoot_big2.stroke, 14.5);
+        assert_eq!(shoot_big2.particles.unwrap().length, 2.5);
+
+        let shoot_big_color = standard_effect_draw_plan(
+            Some(FX_SHOOT_BIG_COLOR_ID as u16),
+            162,
+            3.0,
+            4.0,
+            45.0,
+            5.5,
+            11.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(shoot_big_color.input_color, Some(input_color));
+        assert_eq!(shoot_big_color.radius, 5.7);
+        assert_eq!(shoot_big_color.stroke, 16.0);
+        assert_eq!(shoot_big_color.particles.unwrap().length, 1.5);
+
+        let shoot_titan = standard_effect_draw_plan(
+            Some(FX_SHOOT_TITAN_ID as u16),
+            165,
+            3.0,
+            4.0,
+            30.0,
+            5.0,
+            10.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(shoot_titan.color_from, Some("Pal.lightOrange"));
+        assert_eq!(shoot_titan.color_to, Some("Input.color"));
+        assert_eq!(shoot_titan.input_color, Some(input_color));
+        assert_eq!(shoot_titan.radius, 6.3);
+        assert_eq!(shoot_titan.stroke, 17.5);
+        assert_eq!(shoot_titan.particles.unwrap().length, 3.0);
+        assert_eq!(shoot_titan.triangle_render_primitives_from_seed().len(), 2);
     }
 
     #[test]

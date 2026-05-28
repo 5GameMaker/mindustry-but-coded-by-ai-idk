@@ -5373,3 +5373,45 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续从 Java `Fx.java` 后续效果中挑不需要 texture/polygon/triangle/data-position 的低风险候选；
   2. 可以优先考虑已有 primitive 能覆盖的 circle/line/square/light 效果；
   3. 不要把 headless renderer seam 当真实渲染完成，后续仍要把 primitive 接入真实图形 backend。
+
+---
+
+## 160. 最新闭环记录：Drawf.tri triangle pair seam + shoot muzzle Fx
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补 `Drawf.tri` 的最小 triangle pair primitive seam，并迁移一组射击口效果，不把三角效果继续列为无法表达。
+- 本轮迁移：
+  - `shootSmall=155`
+  - `shootSmallColor=156`
+  - `shootHeal=157`
+  - `shootHealYellow=158`
+  - `shootBig=160`
+  - `shootBig2=161`
+  - `shootBigColor=162`
+  - `shootTitan=165`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增上述 Fx id、lookup、metadata；
+    - 新增 `StandardEffectDrawKind::TrianglePair` 与 `StandardEffectTriangleRenderPrimitive`；
+    - `triangle_render_primitives_from_seed()` 将 front/back 两个 `Drawf.tri` 输出为 primitive；
+    - `resolved_draw_color()` 支持 `Input.color -> static color` lerp；
+    - 新增颜色符号 `Pal.lightTrail`。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 triangle primitive。
+  - `desktop/src/lib.rs`
+    - standard effect frame/stats/launcher 缓存新增 triangle primitive；
+    - 新增 desktop triangle flatten 测试。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_shoot_triangle_pairs --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_triangle_pairs_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 可以继续迁移 `shootScepterSecondary=163`，但它需要 multi-pass/multi-color triangle group，不等同于本轮简单 pair；
+  2. `instBomb=101` / `instTrail=102` 也可借用 triangle primitive，但需要 circle/light 或 seed range；
+  3. renderer/backend 仍需真实绘制 triangle primitive，当前只是 headless frame seam。
