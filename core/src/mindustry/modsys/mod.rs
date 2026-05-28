@@ -414,6 +414,85 @@ impl ModResourcePlan {
     }
 }
 
+/// 单个被发现的 mod 目录计划。
+///
+/// `mod_name` 保留容器顶层目录名，`root` 则保存经过单子目录 unwrap 后的
+/// 实际资源根。这样既能在容器级 discovery 中保持稳定命名，又不会丢失
+/// 真实资源扫描锚点。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModResourceDirectoryPlan {
+    pub mod_name: String,
+    pub root: PathBuf,
+    pub file_tree: FileTree,
+    pub resource_plan: ModResourcePlan,
+}
+
+impl ModResourceDirectoryPlan {
+    pub fn from_directory(
+        mod_name: impl Into<String>,
+        headless: bool,
+        root: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let mod_name = mod_name.into();
+        let root = resolve_mod_root(root)?;
+        let file_tree = mod_file_tree_from_directory(&root)?;
+        let resource_plan = ModResourcePlan::from_directory(mod_name.clone(), headless, &root)?;
+
+        Ok(Self {
+            mod_name,
+            root,
+            file_tree,
+            resource_plan,
+        })
+    }
+}
+
+/// `data/mods` 容器级纯数据 discovery 结果。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ModResourceContainerPlan {
+    pub mods: Vec<ModResourceDirectoryPlan>,
+}
+
+impl ModResourceContainerPlan {
+    pub fn discover_from_mods_directory(
+        mods_dir: impl AsRef<Path>,
+        headless: bool,
+    ) -> io::Result<Self> {
+        let mods_dir = mods_dir.as_ref();
+        let mut mods = Vec::new();
+
+        if !mods_dir.is_dir() {
+            return Ok(Self { mods });
+        }
+
+        let mut entries = fs::read_dir(mods_dir)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by(|left, right| {
+            left.file_name()
+                .to_string_lossy()
+                .cmp(&right.file_name().to_string_lossy())
+        });
+
+        for entry in entries {
+            let path = entry.path();
+            let folder = entry.file_name();
+            if !path.is_dir() || is_skipped_mod_container_entry(&folder) {
+                continue;
+            }
+
+            let mod_name = folder.to_string_lossy().into_owned();
+            mods.push(ModResourceDirectoryPlan::from_directory(
+                mod_name, headless, path,
+            )?);
+        }
+
+        Ok(Self { mods })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.mods.is_empty()
+    }
+}
+
 /// 解析真实 mod 目录的 root：如果目录下只有一个子目录，则自动展开到该子目录。
 ///
 /// 这和 upstream Java `resolveRoot(...)` 的行为一致，便于处理“外层包了一层目录”
@@ -541,6 +620,15 @@ fn accept_png_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+}
+
+fn is_skipped_mod_container_entry(name: &std::ffi::OsStr) -> bool {
+    matches!(
+        name.to_str(),
+        Some(name)
+            if name.starts_with('.')
+                || matches!(name, "bundles" | "sprites" | "sprites-override")
+    )
 }
 
 fn is_special_top_level_folder(name: &std::ffi::OsStr) -> bool {
@@ -1281,6 +1369,108 @@ mod tests {
         );
         assert_eq!(file_tree.get(".git/HEAD"), AssetFile::missing(".git/HEAD"));
 
+        let _ = std::fs::remove_dir_all(&outer_root);
+    }
+
+    #[test]
+    fn mod_resource_container_plan_discovers_multiple_mods_and_skips_non_mod_entries() {
+        let outer_root = temp_mod_root("mod-container-plan");
+        let alpha_root = outer_root.join("alpha");
+        let beta_outer_root = outer_root.join("beta");
+        let beta_inner_root = beta_outer_root.join("example-pack");
+
+        std::fs::create_dir_all(alpha_root.join("assets/nested")).unwrap();
+        std::fs::write(alpha_root.join("assets/nested/alpha.txt"), b"alpha").unwrap();
+        write_minimal_png(&alpha_root.join("sprites/router.png"), 16, 16);
+        write_minimal_png(&alpha_root.join("sprites-override/ui/icon.png"), 32, 32);
+
+        std::fs::create_dir_all(beta_inner_root.join("assets")).unwrap();
+        std::fs::write(beta_inner_root.join("assets/beta.txt"), b"beta").unwrap();
+        write_minimal_png(
+            &beta_inner_root.join("sprites-override/rubble/crack.png"),
+            24,
+            24,
+        );
+
+        std::fs::write(outer_root.join("README.txt"), b"ignore").unwrap();
+        std::fs::create_dir_all(outer_root.join(".git")).unwrap();
+        std::fs::write(outer_root.join(".git/HEAD"), b"ref: refs/heads/main").unwrap();
+        std::fs::create_dir_all(outer_root.join(".hidden-mod")).unwrap();
+        std::fs::create_dir_all(outer_root.join("bundles")).unwrap();
+        std::fs::write(
+            outer_root.join("bundles/messages.properties"),
+            b"hello=world",
+        )
+        .unwrap();
+        std::fs::create_dir_all(outer_root.join("sprites/ui")).unwrap();
+        write_minimal_png(&outer_root.join("sprites/ui/root.png"), 8, 8);
+        std::fs::create_dir_all(outer_root.join("sprites-override/ui")).unwrap();
+        write_minimal_png(&outer_root.join("sprites-override/ui/root.png"), 8, 8);
+
+        let container =
+            ModResourceContainerPlan::discover_from_mods_directory(&outer_root, false).unwrap();
+
+        assert_eq!(
+            container
+                .mods
+                .iter()
+                .map(|plan| plan.mod_name.clone())
+                .collect::<Vec<_>>(),
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+
+        let alpha = &container.mods[0];
+        assert_eq!(
+            alpha.root.file_name().and_then(|name| name.to_str()),
+            Some("alpha")
+        );
+        assert_eq!(alpha.file_tree.file_count(), 1);
+        assert_eq!(
+            alpha.file_tree.resolve("assets/nested/alpha.txt"),
+            AssetFile::new("assets/nested/alpha.txt", true)
+        );
+        assert_eq!(
+            alpha.resource_plan.sprite_requests(),
+            vec![
+                SpritePackRequest {
+                    source_path: "sprites/router.png".into(),
+                    atlas_name: "alpha-router".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                    texture_scale: TextureScale::default(),
+                },
+                SpritePackRequest {
+                    source_path: "sprites-override/ui/icon.png".into(),
+                    atlas_name: "icon".into(),
+                    page_hint: "sprites-override".into(),
+                    r#override: true,
+                    texture_scale: TextureScale::default(),
+                },
+            ]
+        );
+
+        let beta = &container.mods[1];
+        assert_eq!(
+            beta.root.file_name().and_then(|name| name.to_str()),
+            Some("example-pack")
+        );
+        assert_eq!(beta.file_tree.file_count(), 1);
+        assert_eq!(
+            beta.file_tree.resolve("assets/beta.txt"),
+            AssetFile::new("assets/beta.txt", true)
+        );
+        assert_eq!(
+            beta.resource_plan.sprite_requests(),
+            vec![SpritePackRequest {
+                source_path: "sprites-override/rubble/crack.png".into(),
+                atlas_name: "crack".into(),
+                page_hint: "sprites-override".into(),
+                r#override: true,
+                texture_scale: TextureScale::default(),
+            }]
+        );
+
+        assert_eq!(container.mods.len(), 2);
         let _ = std::fs::remove_dir_all(&outer_root);
     }
 

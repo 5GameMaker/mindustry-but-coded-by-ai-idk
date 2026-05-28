@@ -11838,3 +11838,50 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 这些 drawer 仍只做静态 icon/symbol，未接 heat/liquid/warmup runtime；
   - `DrawFlame/DrawHeatRegion/DrawLiquidOutputs/DrawParticles` 等仍未覆盖；
   - 当前总体迁移约 21.2%，仍未达到完整可玩。
+
+### 12.373 渲染/模组/服务端/DrawBlock 并行闭环推进
+
+- 2026-05-29：在 `df21c9e` 之后并行推进多个互斥写入面，保持所有新增数据继续接入现有主链而不是孤立 helper。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - `GraphicsFrameBundle::execution_steps()` 生成后端可消费的稳定执行步骤；
+    - 新增 `GraphicsFrameExecutionStage` / `GraphicsFrameExecutionStep`，显式表达 `shader_dispatch -> pixelator_begin -> render_frame -> floor/block/fog/overlay/minimap -> pixelator_restore` 的过渡顺序；
+    - 新增 `bridge_reports_backend_execution_steps_in_stable_order`。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsResolvedSpriteTrace` 继续携带 atlas page source/path、page width/height、region source path、linear filter 与 sampler；
+    - `DesktopGraphicsLiveBackendExecutionState` 保存最后一次 draw sprite trace，使 live backend seam 能拿到 texture page/filter 元数据；
+    - 仍保持 shader dispatch 先于 render pass。
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `TextureAtlasPackHints` / `TextureAtlasPackMetadata`；
+    - padding、duplicate border、edge bleed、linear filter 从 request/source descriptor 流入 page/region；
+    - `TextureAtlasPlan::with_linear_filter(false)` 会刷新页内 region metadata。
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `ModResourceDirectoryPlan` / `ModResourceContainerPlan::discover_from_mods_directory(...)`；
+    - 支持 `data/mods` 容器级多 mod discovery，但不让 Desktop/Server 默认扫真实磁盘；
+    - 顶层 `.git`、隐藏目录、`bundles`、`sprites`、`sprites-override` 等会跳过。
+  - `server/src/lib.rs`
+    - 新增 `ServerModResources`；
+    - `ServerLauncher` 持有 server 侧 mod generic `FileTree` / `ModResourcePlan`；
+    - 新增显式 `load_mod_directory(...)`、`load_mods_directory(...)`、`clear_mod_resources(...)`；
+    - server 侧只保存数据，不做 atlas merge / PNG decode / GPU 资源。
+  - `core/src/mindustry/world/draw/mod.rs` 与 `core/src/mindustry/graphics/block_renderer.rs`
+    - dispatcher 继续覆盖 `DrawFlame`、`DrawHeatRegion`；
+    - `DrawLiquidOutputs`、`DrawParticles` 保持明确 no-op，避免伪造 runtime 依赖 sprite；
+    - 桥接测试确认输出继续进入 `BlockSpriteOp` 主链。
+- 已跑验证：
+  - `cargo test -p mindustry-core render_bridge --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" --lib`
+  - `cargo test -p mindustry-core mod_resource --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core drawer_dispatch_bridge --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop --lib graphics --manifest-path "Cargo.toml"`
+  - `cargo test -p mindustry-server server_launcher_can_load --manifest-path "Cargo.toml" --lib -- --test-threads=1`
+  - `cargo test -p mindustry-server server_launcher_starts_with_empty_mod_resources --manifest-path "Cargo.toml" --lib -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+- 已知验证注意：
+  - `cargo test -p mindustry-server server_launcher --lib -- --test-threads=1` 当前有两个既有网络端口保留测试可能因本机端口不可用失败，不是本轮 mod FileTree 接入失败。
+- 仍未完成：
+  - 真实 GPU/window/surface/texture upload/sampler/filter backend 尚未实现；
+  - `data/mods` 容器 discovery 尚未接到 Desktop 显式 runtime 开关；
+  - Server 侧 FileTree 尚未进入 bundles/content lifecycle；
+  - `DrawLiquidOutputs`、`DrawParticles`、heat/liquid/warmup 仍需运行态输入；
+  - 当前总体迁移约 21.8%，仍未达到完整可玩。

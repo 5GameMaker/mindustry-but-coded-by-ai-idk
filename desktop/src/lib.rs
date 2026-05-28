@@ -371,11 +371,32 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub draw_texts: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopGraphicsTextureSamplerTrace {
+    Nearest,
+    Linear,
+}
+
+impl DesktopGraphicsTextureSamplerTrace {
+    pub const fn from_linear_filter(linear_filter: bool) -> Self {
+        if linear_filter {
+            Self::Linear
+        } else {
+            Self::Nearest
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsResolvedSpriteTrace {
     pub symbol: String,
     pub page_type: Option<PageType>,
     pub page_source_path: Option<String>,
+    pub page_width: Option<u32>,
+    pub page_height: Option<u32>,
+    pub linear_filter: bool,
+    pub sampler: DesktopGraphicsTextureSamplerTrace,
+    pub region_source_path: Option<String>,
     pub x: Option<u32>,
     pub y: Option<u32>,
     pub u: Option<f32>,
@@ -398,11 +419,12 @@ pub struct DesktopGraphicsLiveBackendDrawSpriteTrace {
     pub resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsLiveBackendExecutionState {
     pub render_passes_visited: usize,
     pub render_commands_visited: usize,
     pub draw_sprite_traces_emitted: usize,
+    pub last_draw_sprite_trace: Option<DesktopGraphicsLiveBackendDrawSpriteTrace>,
 }
 
 pub trait DesktopGraphicsLiveBackendDrawSpriteSink {
@@ -449,7 +471,7 @@ impl DesktopGraphicsExecutionTrace {
                 state.render_commands_visited += 1;
 
                 if let DesktopGraphicsCommandExecutionTrace::DrawSprite { symbol } = command {
-                    sink.consume_draw_sprite_trace(DesktopGraphicsLiveBackendDrawSpriteTrace {
+                    let draw_sprite_trace = DesktopGraphicsLiveBackendDrawSpriteTrace {
                         pass_index,
                         command_index,
                         pass_kind: pass.kind.clone(),
@@ -457,8 +479,10 @@ impl DesktopGraphicsExecutionTrace {
                         target: pass.target.clone(),
                         symbol: symbol.clone(),
                         resolved_sprite: pass.resolved_sprites.get(draw_sprite_index).cloned(),
-                    });
+                    };
+                    sink.consume_draw_sprite_trace(draw_sprite_trace.clone());
                     state.draw_sprite_traces_emitted += 1;
+                    state.last_draw_sprite_trace = Some(draw_sprite_trace);
                     draw_sprite_index += 1;
                 }
             }
@@ -569,25 +593,44 @@ fn resolve_sprite_symbol<T>(
     atlas: &TextureAtlasPlan<T>,
     symbol: &str,
 ) -> DesktopGraphicsResolvedSpriteTrace {
+    let linear_filter = atlas.linear_filter();
+    let sampler = DesktopGraphicsTextureSamplerTrace::from_linear_filter(linear_filter);
     match atlas.lookup(symbol) {
-        Ok(located) => DesktopGraphicsResolvedSpriteTrace {
-            symbol: symbol.to_string(),
-            page_type: Some(located.page_type),
-            page_source_path: Some(located.page_source_path.to_string()),
-            x: Some(located.region.x),
-            y: Some(located.region.y),
-            u: Some(located.region.u),
-            v: Some(located.region.v),
-            u2: Some(located.region.u2),
-            v2: Some(located.region.v2),
-            region_width: Some(located.region.width),
-            region_height: Some(located.region.height),
-            missing: false,
-        },
+        Ok(located) => {
+            let page = atlas.page(located.page_type);
+            DesktopGraphicsResolvedSpriteTrace {
+                symbol: symbol.to_string(),
+                page_type: Some(located.page_type),
+                page_source_path: Some(located.page_source_path.to_string()),
+                page_width: Some(page.spec.width),
+                page_height: Some(page.spec.height),
+                linear_filter,
+                sampler,
+                region_source_path: Some(located.region.source_path.clone()),
+                x: Some(located.region.x),
+                y: Some(located.region.y),
+                u: Some(located.region.u),
+                v: Some(located.region.v),
+                u2: Some(located.region.u2),
+                v2: Some(located.region.v2),
+                region_width: Some(located.region.width),
+                region_height: Some(located.region.height),
+                missing: false,
+            }
+        }
         Err(miss) => DesktopGraphicsResolvedSpriteTrace {
             symbol: symbol.to_string(),
             page_type: miss.page_type,
             page_source_path: miss.page_source_path,
+            page_width: miss
+                .page_type
+                .map(|page_type| atlas.page(page_type).spec.width),
+            page_height: miss
+                .page_type
+                .map(|page_type| atlas.page(page_type).spec.height),
+            linear_filter,
+            sampler,
+            region_source_path: None,
             x: None,
             y: None,
             u: None,
@@ -3332,9 +3375,9 @@ mod tests {
         DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
         DesktopGraphicsLiveBackendDrawSpriteSink, DesktopGraphicsLiveBackendDrawSpriteTrace,
         DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
-        DesktopGraphicsShaderApplyExecutionTrace, DesktopLauncher, HeadlessDesktopAudioRenderer,
-        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
-        HeadlessDesktopGraphicsRenderer,
+        DesktopGraphicsShaderApplyExecutionTrace, DesktopGraphicsTextureSamplerTrace,
+        DesktopLauncher, HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
+        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -5176,6 +5219,11 @@ mod tests {
                 symbol: "router".to_string(),
                 page_type: Some(mindustry_core::mindustry::graphics::PageType::Main),
                 page_source_path: Some("sprites.png".to_string()),
+                page_width: Some(4096),
+                page_height: Some(4096),
+                linear_filter: true,
+                sampler: DesktopGraphicsTextureSamplerTrace::Linear,
+                region_source_path: Some("sprites/router.png".to_string()),
                 x: Some(0),
                 y: Some(0),
                 u: Some(0.0),
@@ -5209,6 +5257,23 @@ mod tests {
             renderer.last_live_backend_state.draw_sprite_traces_emitted,
             3
         );
+        let last_state_sprite = renderer
+            .last_live_backend_state
+            .last_draw_sprite_trace
+            .as_ref()
+            .and_then(|trace| trace.resolved_sprite.as_ref())
+            .expect("live backend execution state should remember last sprite metadata");
+        assert_eq!(last_state_sprite.symbol, "lighting-glow");
+        assert_eq!(
+            last_state_sprite.page_source_path.as_deref(),
+            Some("sprites.png")
+        );
+        assert_eq!(last_state_sprite.page_width, Some(4096));
+        assert_eq!(last_state_sprite.page_height, Some(4096));
+        assert_eq!(
+            last_state_sprite.sampler,
+            DesktopGraphicsTextureSamplerTrace::Linear
+        );
 
         let resolved_trace = DesktopGraphicsExecutionTrace::from_frame_with_atlas(&frame, &atlas);
         assert_eq!(
@@ -5223,6 +5288,15 @@ mod tests {
         );
         assert_eq!(resolved.x, Some(0));
         assert_eq!(resolved.y, Some(0));
+        assert_eq!(resolved.page_source_path.as_deref(), Some("sprites.png"));
+        assert_eq!(resolved.page_width, Some(4096));
+        assert_eq!(resolved.page_height, Some(4096));
+        assert!(resolved.linear_filter);
+        assert_eq!(resolved.sampler, DesktopGraphicsTextureSamplerTrace::Linear);
+        assert_eq!(
+            resolved.region_source_path.as_deref(),
+            Some("sprites/router.png")
+        );
         assert_eq!(resolved.u, Some(0.0));
         assert_eq!(resolved.v, Some(0.0));
         assert_eq!(resolved.u2, Some(1.0 / 4096.0));
@@ -5232,6 +5306,13 @@ mod tests {
 
         let missing = &resolved_trace.render_passes[1].resolved_sprites[0];
         assert_eq!(missing.symbol, "cursor");
+        assert_eq!(missing.page_type, None);
+        assert_eq!(missing.page_source_path, None);
+        assert_eq!(missing.page_width, None);
+        assert_eq!(missing.page_height, None);
+        assert!(missing.linear_filter);
+        assert_eq!(missing.sampler, DesktopGraphicsTextureSamplerTrace::Linear);
+        assert_eq!(missing.region_source_path, None);
         assert_eq!(missing.x, None);
         assert_eq!(missing.y, None);
         assert_eq!(missing.u, None);
@@ -5242,6 +5323,15 @@ mod tests {
 
         let lighting = &resolved_trace.render_passes[2].resolved_sprites[0];
         assert_eq!(lighting.symbol, "lighting-glow");
+        assert_eq!(lighting.page_source_path.as_deref(), Some("sprites.png"));
+        assert_eq!(lighting.page_width, Some(4096));
+        assert_eq!(lighting.page_height, Some(4096));
+        assert!(lighting.linear_filter);
+        assert_eq!(lighting.sampler, DesktopGraphicsTextureSamplerTrace::Linear);
+        assert_eq!(
+            lighting.region_source_path.as_deref(),
+            Some("sprites/lighting-glow.png")
+        );
         assert_eq!(lighting.x, Some(0));
         assert_eq!(lighting.y, Some(0));
         assert_eq!(lighting.u, Some(0.0));
@@ -5308,6 +5398,14 @@ mod tests {
             Some(mindustry_core::mindustry::graphics::PageType::Main)
         );
         assert_eq!(resolved.page_source_path.as_deref(), Some("sprites.png"));
+        assert_eq!(resolved.page_width, Some(4096));
+        assert_eq!(resolved.page_height, Some(4096));
+        assert!(resolved.linear_filter);
+        assert_eq!(resolved.sampler, DesktopGraphicsTextureSamplerTrace::Linear);
+        assert_eq!(
+            resolved.region_source_path.as_deref(),
+            Some("sprites/router.png")
+        );
         assert_eq!(resolved.x, Some(12));
         assert_eq!(resolved.y, Some(34));
         assert_eq!(resolved.u, Some(12.0 / 4096.0));
@@ -5584,7 +5682,8 @@ mod tests {
                 "sprites/alpha.png",
                 "sprites/beta.png",
                 "sprites/gamma.png",
-            ]),
+            ])
+            .with_linear_filter(false),
         };
         let original_frame = frame.clone();
 
@@ -5610,6 +5709,11 @@ mod tests {
                     symbol: "alpha".to_string(),
                     page_type: Some(PageType::Main),
                     page_source_path: Some("sprites.png".to_string()),
+                    page_width: Some(4096),
+                    page_height: Some(4096),
+                    linear_filter: false,
+                    sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+                    region_source_path: Some("sprites/alpha.png".to_string()),
                     x: Some(0),
                     y: Some(0),
                     u: Some(0.0),
@@ -5630,6 +5734,19 @@ mod tests {
             sink.traces[1].target,
             RenderTarget::Buffer("backend-buffer".into())
         );
+        let beta_sprite = sink.traces[1]
+            .resolved_sprite
+            .as_ref()
+            .expect("live backend trace should carry resolved beta sprite");
+        assert_eq!(beta_sprite.page_source_path.as_deref(), Some("sprites.png"));
+        assert_eq!(beta_sprite.page_width, Some(4096));
+        assert_eq!(beta_sprite.page_height, Some(4096));
+        assert_eq!(
+            beta_sprite.sampler,
+            DesktopGraphicsTextureSamplerTrace::Nearest
+        );
+        assert!(!beta_sprite.linear_filter);
+        assert_eq!(state.last_draw_sprite_trace.as_ref(), sink.traces.last());
         assert_eq!(sink.traces[2].pass_index, 1);
         assert_eq!(sink.traces[2].command_index, 1);
         assert_eq!(sink.traces[2].symbol, "gamma".to_string());

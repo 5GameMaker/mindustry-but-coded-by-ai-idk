@@ -2109,6 +2109,47 @@ mod tests {
     }
 
     #[test]
+    fn drawer_dispatch_bridge_covers_flame_heat_region_and_dynamic_shell_noops() {
+        let drawer = "DrawMulti(DrawFlame(ffc999), DrawHeatRegion(-vents), DrawLiquidOutputs, DrawParticles, DrawDefault)";
+        let rect = RenderRect::new(1.0, 2.0, 3.0, 4.0);
+        let tint = [0.9, 0.8, 0.7, 0.6];
+        let direct =
+            drawer_to_block_sprite_ops("surge-crucible", drawer, rect, tint, 0.0, Layer::BLOCK, 60);
+        let wrapped = draw_block_drawer_sprite_ops(
+            "surge-crucible",
+            drawer,
+            rect,
+            tint,
+            0.0,
+            Layer::BLOCK,
+            60,
+        );
+
+        assert_eq!(direct, wrapped);
+        assert_eq!(
+            direct.iter().map(|op| op.symbol()).collect::<Vec<_>>(),
+            vec![
+                "surge-crucible-top",
+                "surge-crucible-vents",
+                "surge-crucible",
+            ]
+        );
+        assert_eq!(
+            direct.iter().map(|op| op.order).collect::<Vec<_>>(),
+            vec![60, 61, 62]
+        );
+        assert!(direct.iter().all(|op| op.rect == rect));
+        assert_eq!(
+            crate::mindustry::world::draw::draw_block_dispatch_icons("surge-crucible", drawer),
+            vec![
+                "surge-crucible-top",
+                "surge-crucible-vents",
+                "surge-crucible",
+            ]
+        );
+    }
+
+    #[test]
     fn drawer_dispatch_bridge_covers_static_pistons_weave_and_side_region() {
         assert_eq!(
             crate::mindustry::world::draw::draw_block_dispatch_icons("press", "DrawPistons(-arm)"),

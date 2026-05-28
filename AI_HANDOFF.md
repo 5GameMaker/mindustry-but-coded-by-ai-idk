@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **21.2%**。
+- 当前总体迁移完成度：约 **21.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9153,3 +9153,43 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. runtime heat/liquid/warmup 状态尚未接；
   2. `DrawFlame/DrawHeatRegion/DrawLiquidOutputs/DrawParticles` 仍待覆盖；
   3. 当前总迁移约 21.2%，仍未达到完整可玩。
+
+---
+
+## 275. 最新闭环记录：渲染 backend seam / mod container / server FileTree / DrawBlock 下一批
+
+- 当前工作路径仍是 `D:/MDT/rust-mindustry`，不要使用 `D:/MDT/mindustry-rust`。
+- 本轮总体进度更新：约 **21.8%**，仍未达到完整可玩。
+- 已完成/待提交的主改动：
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - 新增 `GraphicsFrameExecutionStage` / `GraphicsFrameExecutionStep`；
+    - `GraphicsFrameBundle::execution_steps()` 输出 shader、pixelator、render frame、floor/block/fog/overlay/minimap 的稳定后端执行顺序。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsResolvedSpriteTrace` 增加 page width/height、linear filter、sampler、region source path；
+    - live backend state 记录最后一次 sprite trace。
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `TextureAtlasPackHints` / `TextureAtlasPackMetadata`；
+    - padding、duplicate border、edge bleed、linear filter metadata 从 request/source 传到 page/region。
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `ModResourceDirectoryPlan` / `ModResourceContainerPlan::discover_from_mods_directory(...)`；
+    - 支持 `data/mods` 容器多 mod discovery，保持默认不扫真实磁盘。
+  - `server/src/lib.rs`
+    - `ServerLauncher` 新增 `mod_resources: ServerModResources`；
+    - 新增显式加载单 mod 或 mods 容器的入口；
+    - server 侧只持有 FileTree/plan，不做 atlas/GPU。
+  - `core/src/mindustry/world/draw/mod.rs`
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - DrawBlock dispatcher 覆盖 `DrawFlame`、`DrawHeatRegion`；
+    - `DrawLiquidOutputs`、`DrawParticles` 明确 no-op。
+- 本轮已验证：
+  - `cargo test -p mindustry-core render_bridge --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" --lib`
+  - `cargo test -p mindustry-core mod_resource --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core drawer_dispatch_bridge --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop --lib graphics --manifest-path "Cargo.toml"`
+  - `cargo test -p mindustry-server server_launcher_can_load --manifest-path "Cargo.toml" --lib -- --test-threads=1`
+  - `cargo test -p mindustry-server server_launcher_starts_with_empty_mod_resources --manifest-path "Cargo.toml" --lib -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+- 注意：
+  - `cargo test -p mindustry-server server_launcher --lib -- --test-threads=1` 在本机可能因两个端口保留测试失败；新增 server mod resource 测试本身已过。
+  - 下一步优先：真实窗口/surface/GPU texture upload/sampler/filter、Desktop 显式 mods container 开关、Server bundles/content lifecycle、网络 P0 smoke test。

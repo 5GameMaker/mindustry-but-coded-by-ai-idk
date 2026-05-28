@@ -367,6 +367,122 @@ impl<R, B, F, G, O, M, P, S> GraphicsFrameBundle<R, B, F, G, O, M, P, S> {
     pub fn into_stats(self) -> GraphicsFrameStats {
         self.stats
     }
+
+    pub fn execution_steps(&self) -> Vec<GraphicsFrameExecutionStep> {
+        let mut steps = Vec::new();
+
+        if self.shader_dispatch.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::ShaderDispatch,
+            ));
+        }
+        if self.pixelator.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::PixelatorBegin,
+            ));
+        }
+        if self.render_frame.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::RenderFrame,
+            ));
+        }
+        if self.floor_renderer.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::FloorRenderer,
+            ));
+        }
+        if self.block_renderer.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::BlockRenderer,
+            ));
+        }
+        if self.fog_frame.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::FogFrame,
+            ));
+        }
+        if self.overlay_renderer.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::OverlayRenderer,
+            ));
+        }
+        if self.minimap_overlay.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::MinimapOverlay,
+            ));
+        }
+        if self.pixelator.is_some() {
+            steps.push(GraphicsFrameExecutionStep::new(
+                GraphicsFrameExecutionStage::PixelatorRestore,
+            ));
+        }
+
+        steps
+    }
+
+    pub fn has_execution_work(&self) -> bool {
+        !self.execution_steps().is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphicsFrameExecutionStage {
+    ShaderDispatch,
+    PixelatorBegin,
+    RenderFrame,
+    FloorRenderer,
+    BlockRenderer,
+    FogFrame,
+    OverlayRenderer,
+    MinimapOverlay,
+    PixelatorRestore,
+}
+
+impl GraphicsFrameExecutionStage {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ShaderDispatch => "shader_dispatch",
+            Self::PixelatorBegin => "pixelator_begin",
+            Self::RenderFrame => "render_frame",
+            Self::FloorRenderer => "floor_renderer",
+            Self::BlockRenderer => "block_renderer",
+            Self::FogFrame => "fog_frame",
+            Self::OverlayRenderer => "overlay_renderer",
+            Self::MinimapOverlay => "minimap_overlay",
+            Self::PixelatorRestore => "pixelator_restore",
+        }
+    }
+
+    pub const fn order_key(self) -> i32 {
+        match self {
+            Self::ShaderDispatch => 0,
+            Self::PixelatorBegin => 10,
+            Self::RenderFrame => 20,
+            Self::FloorRenderer => 30,
+            Self::BlockRenderer => 40,
+            Self::FogFrame => 50,
+            Self::OverlayRenderer => 60,
+            Self::MinimapOverlay => 70,
+            Self::PixelatorRestore => 80,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphicsFrameExecutionStep {
+    pub stage: GraphicsFrameExecutionStage,
+    pub label: &'static str,
+    pub order_key: i32,
+}
+
+impl GraphicsFrameExecutionStep {
+    pub const fn new(stage: GraphicsFrameExecutionStage) -> Self {
+        Self {
+            stage,
+            label: stage.label(),
+            order_key: stage.order_key(),
+        }
+    }
 }
 
 impl<R, B, F, G, O, M, P, S> GraphicsFrameBundle<R, B, F, G, O, M, P, S>
@@ -750,6 +866,8 @@ mod tests {
         assert_eq!(stats.present_plans, 0);
         assert_eq!(stats.total_units, 0);
         assert!(bundle.shader_dispatch.is_none());
+        assert!(!bundle.has_execution_work());
+        assert!(bundle.execution_steps().is_empty());
     }
 
     #[test]
@@ -883,5 +1001,57 @@ mod tests {
         assert_eq!(bundle.stats.render_passes, 1);
         assert_eq!(bundle.stats.render_commands, 2);
         assert_eq!(bundle.stats.total_units, total_units(&bundle.stats));
+    }
+
+    #[test]
+    fn bridge_reports_backend_execution_steps_in_stable_order() {
+        let mut bridge: RenderBridge = RenderBridge::new();
+
+        bridge
+            .set_overlay_renderer(overlay_plan(1, 1, 1))
+            .set_block_renderer(block_plan(1, 1, 1, 1, 1, 1))
+            .set_shader_dispatch(shader_dispatch(1))
+            .set_floor_renderer(floor_plan(1, 1, 1, 1))
+            .set_pixelator(pixelator_plan(64, 32))
+            .set_minimap_overlay(minimap_plan(1))
+            .set_render_frame(render_frame(&[1]))
+            .set_fog_frame(fog_plan(1, 1, false, true));
+
+        let bundle = bridge.finish();
+        let steps = bundle.execution_steps();
+
+        assert!(bundle.has_execution_work());
+        assert_eq!(
+            steps.iter().map(|step| step.stage).collect::<Vec<_>>(),
+            vec![
+                GraphicsFrameExecutionStage::ShaderDispatch,
+                GraphicsFrameExecutionStage::PixelatorBegin,
+                GraphicsFrameExecutionStage::RenderFrame,
+                GraphicsFrameExecutionStage::FloorRenderer,
+                GraphicsFrameExecutionStage::BlockRenderer,
+                GraphicsFrameExecutionStage::FogFrame,
+                GraphicsFrameExecutionStage::OverlayRenderer,
+                GraphicsFrameExecutionStage::MinimapOverlay,
+                GraphicsFrameExecutionStage::PixelatorRestore,
+            ]
+        );
+        assert_eq!(
+            steps.iter().map(|step| step.label).collect::<Vec<_>>(),
+            vec![
+                "shader_dispatch",
+                "pixelator_begin",
+                "render_frame",
+                "floor_renderer",
+                "block_renderer",
+                "fog_frame",
+                "overlay_renderer",
+                "minimap_overlay",
+                "pixelator_restore",
+            ]
+        );
+        assert!(steps
+            .windows(2)
+            .all(|window| window[0].order_key < window[1].order_key));
+        assert_eq!(bundle.stats.present_plans, 7);
     }
 }

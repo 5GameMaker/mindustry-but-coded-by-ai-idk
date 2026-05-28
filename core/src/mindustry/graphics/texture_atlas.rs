@@ -36,6 +36,98 @@ impl Default for TextureScale {
     }
 }
 
+/// atlas 打包阶段使用的可选/最终元数据。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct TextureAtlasPackHints {
+    pub padding: Option<u32>,
+    pub duplicate_border: Option<bool>,
+    pub edge_bleed: Option<bool>,
+    pub linear_filter: Option<bool>,
+}
+
+impl TextureAtlasPackHints {
+    pub const fn new() -> Self {
+        Self {
+            padding: None,
+            duplicate_border: None,
+            edge_bleed: None,
+            linear_filter: None,
+        }
+    }
+
+    pub fn with_padding(mut self, padding: u32) -> Self {
+        self.padding = Some(padding);
+        self
+    }
+
+    pub fn with_duplicate_border(mut self, duplicate_border: bool) -> Self {
+        self.duplicate_border = Some(duplicate_border);
+        self
+    }
+
+    pub fn with_edge_bleed(mut self, edge_bleed: bool) -> Self {
+        self.edge_bleed = Some(edge_bleed);
+        self
+    }
+
+    pub fn with_linear_filter(mut self, linear_filter: bool) -> Self {
+        self.linear_filter = Some(linear_filter);
+        self
+    }
+
+    pub fn resolve(self, page_spec: PageSpec, linear_filter: bool) -> TextureAtlasPackMetadata {
+        let duplicate_border = self.duplicate_border.unwrap_or(page_spec.duplicate_border);
+        let linear_filter = self.linear_filter.unwrap_or(linear_filter);
+        let edge_bleed = self.edge_bleed.unwrap_or(duplicate_border && linear_filter);
+        TextureAtlasPackMetadata {
+            padding: self.padding.unwrap_or(page_spec.padding),
+            duplicate_border,
+            edge_bleed,
+            linear_filter,
+        }
+    }
+}
+
+/// 解析后的 atlas 打包元数据：供后续真实像素打包阶段直接消费。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextureAtlasPackMetadata {
+    pub padding: u32,
+    pub duplicate_border: bool,
+    pub edge_bleed: bool,
+    pub linear_filter: bool,
+}
+
+impl TextureAtlasPackMetadata {
+    pub const fn new(
+        padding: u32,
+        duplicate_border: bool,
+        edge_bleed: bool,
+        linear_filter: bool,
+    ) -> Self {
+        Self {
+            padding,
+            duplicate_border,
+            edge_bleed,
+            linear_filter,
+        }
+    }
+
+    pub const fn from_page_spec(page_spec: PageSpec, linear_filter: bool) -> Self {
+        Self {
+            padding: page_spec.padding,
+            duplicate_border: page_spec.duplicate_border,
+            edge_bleed: page_spec.duplicate_border && linear_filter,
+            linear_filter,
+        }
+    }
+}
+
+impl Default for TextureAtlasPackMetadata {
+    fn default() -> Self {
+        Self::new(2, true, true, true)
+    }
+}
+
 impl PageType {
     /// 上游 `sprites*.png` 的默认页资源路径。
     pub const fn atlas_source_path(self) -> &'static str {
@@ -53,6 +145,7 @@ impl PageType {
 pub struct TextureAtlasRegionSource<T = ()> {
     pub source_path: String,
     pub texture_scale: TextureScale,
+    pub pack_hints: TextureAtlasPackHints,
     pub payload: T,
 }
 
@@ -61,12 +154,38 @@ impl<T> TextureAtlasRegionSource<T> {
         Self {
             source_path: source_path.into(),
             texture_scale: TextureScale::default(),
+            pack_hints: TextureAtlasPackHints::default(),
             payload,
         }
     }
 
     pub fn with_texture_scale(mut self, scale: f32) -> Self {
         self.texture_scale = TextureScale::new(scale);
+        self
+    }
+
+    pub fn with_pack_hints(mut self, pack_hints: TextureAtlasPackHints) -> Self {
+        self.pack_hints = pack_hints;
+        self
+    }
+
+    pub fn with_padding(mut self, padding: u32) -> Self {
+        self.pack_hints = self.pack_hints.with_padding(padding);
+        self
+    }
+
+    pub fn with_duplicate_border(mut self, duplicate_border: bool) -> Self {
+        self.pack_hints = self.pack_hints.with_duplicate_border(duplicate_border);
+        self
+    }
+
+    pub fn with_edge_bleed(mut self, edge_bleed: bool) -> Self {
+        self.pack_hints = self.pack_hints.with_edge_bleed(edge_bleed);
+        self
+    }
+
+    pub fn with_linear_filter(mut self, linear_filter: bool) -> Self {
+        self.pack_hints = self.pack_hints.with_linear_filter(linear_filter);
         self
     }
 
@@ -78,6 +197,7 @@ impl<T> TextureAtlasRegionSource<T> {
         TextureAtlasRegionSource {
             source_path: self.source_path,
             texture_scale: self.texture_scale,
+            pack_hints: self.pack_hints,
             payload,
         }
     }
@@ -96,6 +216,7 @@ pub struct TextureAtlasSpriteSourceDescriptor {
     pub page_hint: String,
     pub r#override: bool,
     pub texture_scale: TextureScale,
+    pub pack_hints: TextureAtlasPackHints,
 }
 
 impl TextureAtlasSpriteSourceDescriptor {
@@ -106,6 +227,7 @@ impl TextureAtlasSpriteSourceDescriptor {
             page_hint: String::new(),
             r#override: false,
             texture_scale: TextureScale::default(),
+            pack_hints: TextureAtlasPackHints::default(),
         }
     }
 
@@ -133,6 +255,7 @@ impl TextureAtlasSpriteSourceDescriptor {
             page_hint,
             r#override,
             texture_scale: TextureScale::default(),
+            pack_hints: TextureAtlasPackHints::default(),
         }
     }
 
@@ -148,6 +271,31 @@ impl TextureAtlasSpriteSourceDescriptor {
 
     pub fn with_texture_scale(mut self, texture_scale: f32) -> Self {
         self.texture_scale = TextureScale::new(texture_scale);
+        self
+    }
+
+    pub fn with_pack_hints(mut self, pack_hints: TextureAtlasPackHints) -> Self {
+        self.pack_hints = pack_hints;
+        self
+    }
+
+    pub fn with_padding(mut self, padding: u32) -> Self {
+        self.pack_hints = self.pack_hints.with_padding(padding);
+        self
+    }
+
+    pub fn with_duplicate_border(mut self, duplicate_border: bool) -> Self {
+        self.pack_hints = self.pack_hints.with_duplicate_border(duplicate_border);
+        self
+    }
+
+    pub fn with_edge_bleed(mut self, edge_bleed: bool) -> Self {
+        self.pack_hints = self.pack_hints.with_edge_bleed(edge_bleed);
+        self
+    }
+
+    pub fn with_linear_filter(mut self, linear_filter: bool) -> Self {
+        self.pack_hints = self.pack_hints.with_linear_filter(linear_filter);
         self
     }
 
@@ -174,7 +322,8 @@ impl TextureAtlasSpriteSourceDescriptor {
             width.max(1),
             height.max(1),
             TextureAtlasRegionSource::new(self.source_path.clone(), self.r#override)
-                .with_texture_scale(self.texture_scale()),
+                .with_texture_scale(self.texture_scale())
+                .with_pack_hints(self.pack_hints),
         )
     }
 }
@@ -310,6 +459,8 @@ pub struct TextureAtlasRegion<T = ()> {
     pub v: f32,
     pub u2: f32,
     pub v2: f32,
+    pub pack_hints: TextureAtlasPackHints,
+    pub pack_meta: TextureAtlasPackMetadata,
     pub payload: T,
 }
 
@@ -339,6 +490,8 @@ impl<T> TextureAtlasRegion<T> {
             v: 0.0,
             u2: 0.0,
             v2: 0.0,
+            pack_hints: TextureAtlasPackHints::default(),
+            pack_meta: TextureAtlasPackMetadata::default(),
             payload,
         }
     }
@@ -358,6 +511,7 @@ impl<T> TextureAtlasRegion<T> {
         let TextureAtlasRegionSource {
             source_path,
             texture_scale,
+            pack_hints,
             payload,
         } = payload;
 
@@ -376,8 +530,14 @@ impl<T> TextureAtlasRegion<T> {
             v: 0.0,
             u2: 0.0,
             v2: 0.0,
+            pack_hints,
+            pack_meta: pack_hints.resolve(page_type.spec(), true),
             payload,
         }
+    }
+
+    fn resolve_pack_meta(&mut self, page_spec: PageSpec, linear_filter: bool) {
+        self.pack_meta = self.pack_hints.resolve(page_spec, linear_filter);
     }
 
     pub fn with_position(mut self, x: u32, y: u32) -> Self {
@@ -421,6 +581,12 @@ impl<T> TextureAtlasRegion<T> {
         self
     }
 
+    pub fn with_pack_hints(mut self, pack_hints: TextureAtlasPackHints) -> Self {
+        self.pack_hints = pack_hints;
+        self.pack_meta = pack_hints.resolve(PageType::Main.spec(), true);
+        self
+    }
+
     pub fn sync_uv(&mut self, page_width: u32, page_height: u32) {
         if page_width == 0 || page_height == 0 {
             self.u = 0.0;
@@ -445,6 +611,7 @@ pub struct TextureAtlasPage<T = ()> {
     pub page_type: PageType,
     pub source_path: String,
     pub spec: PageSpec,
+    pub linear_filter: bool,
     pub regions: Vec<TextureAtlasRegion<T>>,
 }
 
@@ -460,6 +627,7 @@ impl<T> TextureAtlasPage<T> {
             page_type,
             source_path: page_type.atlas_source_path().to_string(),
             spec: page_type.spec(),
+            linear_filter: true,
             regions: Vec::new(),
         }
     }
@@ -467,6 +635,17 @@ impl<T> TextureAtlasPage<T> {
     pub fn with_source_path(mut self, source_path: impl Into<String>) -> Self {
         self.source_path = source_path.into();
         self
+    }
+
+    pub fn with_linear_filter(mut self, linear_filter: bool) -> Self {
+        self.linear_filter = linear_filter;
+        self.refresh_pack_meta();
+        self
+    }
+
+    pub fn set_linear_filter(&mut self, linear_filter: bool) {
+        self.linear_filter = linear_filter;
+        self.refresh_pack_meta();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -489,6 +668,12 @@ impl<T> TextureAtlasPage<T> {
         self.get(name).is_some()
     }
 
+    fn refresh_pack_meta(&mut self) {
+        for region in &mut self.regions {
+            region.resolve_pack_meta(self.spec, self.linear_filter);
+        }
+    }
+
     pub fn insert_region(
         &mut self,
         mut region: TextureAtlasRegion<T>,
@@ -501,6 +686,7 @@ impl<T> TextureAtlasPage<T> {
         }
 
         region.page_type = self.page_type;
+        region.resolve_pack_meta(self.spec, self.linear_filter);
         region.sync_uv(self.spec.width, self.spec.height);
         self.regions.push(region);
         Ok(())
@@ -516,6 +702,7 @@ impl<T> TextureAtlasPage<T> {
             .position(|item| item.name == region.name)
         {
             region.page_type = self.page_type;
+            region.resolve_pack_meta(self.spec, self.linear_filter);
             region.sync_uv(self.spec.width, self.spec.height);
             Some(std::mem::replace(&mut self.regions[index], region))
         } else {
@@ -538,13 +725,22 @@ impl<T> TextureAtlasPage<T> {
 
     pub fn refresh_uvs(&mut self) {
         for region in &mut self.regions {
+            region.resolve_pack_meta(self.spec, self.linear_filter);
             region.sync_uv(self.spec.width, self.spec.height);
         }
     }
 
     pub fn from_page_plan(page_plan: PagePlan<TextureAtlasRegionSource<T>>) -> Self {
+        Self::from_page_plan_with_linear_filter(page_plan, true)
+    }
+
+    pub fn from_page_plan_with_linear_filter(
+        page_plan: PagePlan<TextureAtlasRegionSource<T>>,
+        linear_filter: bool,
+    ) -> Self {
         let mut page = Self::new(page_plan.page_type);
         page.spec = page_plan.spec;
+        page.linear_filter = linear_filter;
         let mut cursor_x = 0u32;
         let mut cursor_y = 0u32;
         let mut row_height = 0u32;
@@ -653,6 +849,9 @@ impl<T> TextureAtlasPlan<T> {
 
     pub fn with_linear_filter(mut self, linear_filter: bool) -> Self {
         self.linear_filter = linear_filter;
+        for page in &mut self.pages {
+            page.set_linear_filter(linear_filter);
+        }
         self
     }
 
@@ -786,7 +985,8 @@ impl<T> TextureAtlasPlan<T> {
 
         for page_plan in pack_plan.pages {
             let page_type = page_plan.page_type;
-            atlas.pages[page_type.index()] = TextureAtlasPage::from_page_plan(page_plan);
+            atlas.pages[page_type.index()] =
+                TextureAtlasPage::from_page_plan_with_linear_filter(page_plan, atlas.linear_filter);
         }
 
         atlas.rebuild_lookup_order();
@@ -1274,6 +1474,7 @@ mod tests {
         );
         let region = TextureAtlasRegion::from_request(PageType::Main, request);
         assert_f32_close(region.scale, 2.5);
+        assert_eq!(region.pack_meta, TextureAtlasPackMetadata::default());
 
         let mut main = PagePlan::new(PageType::Main);
         main.insert_request(RegionRequest::new(
@@ -1287,10 +1488,65 @@ mod tests {
         let plan = TextureAtlasPlan::from_pack_plan(PackPlan::new(vec![main]));
         assert!(plan.linear_filter());
         assert_f32_close(plan.lookup("half").unwrap().region.scale, 0.5);
+        assert_eq!(
+            plan.lookup("half").unwrap().region.pack_meta,
+            TextureAtlasPackMetadata::default()
+        );
 
         let nearest = plan.clone().with_linear_filter(false);
         assert!(!nearest.linear_filter());
         assert_f32_close(nearest.lookup("half").unwrap().region.scale, 0.5);
+        assert!(
+            !nearest
+                .lookup("half")
+                .unwrap()
+                .region
+                .pack_meta
+                .linear_filter
+        );
+        assert!(!nearest.lookup("half").unwrap().region.pack_meta.edge_bleed);
+    }
+
+    #[test]
+    fn texture_atlas_pack_hints_flow_from_request_into_page_plan_and_region() {
+        let plan = TextureAtlasPlan::from_sprite_sources([
+            TextureAtlasSpriteSourceDescriptor::from_source_path("sprites/blocks/stone-wall.png"),
+            TextureAtlasSpriteSourceDescriptor::new("sprites/ui/custom.png", "custom")
+                .with_page_hint("ui")
+                .with_padding(6)
+                .with_duplicate_border(false)
+                .with_edge_bleed(true)
+                .with_linear_filter(false),
+        ]);
+
+        let default_region = plan.page(PageType::Main).get("stone-wall").unwrap();
+        assert_eq!(default_region.pack_hints, TextureAtlasPackHints::default());
+        assert_eq!(
+            default_region.pack_meta,
+            TextureAtlasPackMetadata::default()
+        );
+
+        let custom_region = plan.page(PageType::Ui).get("custom").unwrap();
+        assert_eq!(custom_region.pack_hints.padding, Some(6));
+        assert_eq!(custom_region.pack_hints.duplicate_border, Some(false));
+        assert_eq!(custom_region.pack_hints.edge_bleed, Some(true));
+        assert_eq!(custom_region.pack_hints.linear_filter, Some(false));
+        assert_eq!(
+            custom_region.pack_meta,
+            TextureAtlasPackMetadata::new(6, false, true, false)
+        );
+
+        let nearest = plan.clone().with_linear_filter(false);
+        let nearest_default_region = nearest.page(PageType::Main).get("stone-wall").unwrap();
+        assert_eq!(
+            nearest_default_region.pack_meta,
+            TextureAtlasPackMetadata::new(2, true, false, false)
+        );
+        let nearest_custom_region = nearest.page(PageType::Ui).get("custom").unwrap();
+        assert_eq!(
+            nearest_custom_region.pack_meta,
+            TextureAtlasPackMetadata::new(6, false, true, false)
+        );
     }
 
     #[test]

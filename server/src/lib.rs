@@ -44,6 +44,7 @@ use mindustry_core::mindustry::input::{
 use mindustry_core::mindustry::io::{
     type_io, BuildPlanWire, ContentPatchSet, EntityRef, TeamId, TypeValue, UnitRef,
 };
+use mindustry_core::mindustry::modsys::{ModResourceContainerPlan, ModResourceDirectoryPlan};
 use mindustry_core::mindustry::net::{
     write_world_data, ArcNetProvider, AssemblerDroneSpawnedCallPacket,
     AssemblerUnitSpawnedCallPacket, ClientPlanSnapshotCallPacket, CommandBuildingCallPacket,
@@ -74,6 +75,7 @@ use server_control::ServerControl;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     io,
+    path::Path,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -99,6 +101,48 @@ struct ServerWeaponBulletSpawnPlan {
     mover: Option<ShotMover>,
 }
 
+/// Server-side holder for mod resource discovery results.
+///
+/// This keeps the generic `FileTree` overlays and pure `ModResourcePlan`
+/// metadata available for later bundle/content lifecycle work without ever
+/// touching atlas merge or GPU resource paths on the server.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ServerModResources {
+    pub container: ModResourceContainerPlan,
+}
+
+impl ServerModResources {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.container.is_empty()
+    }
+
+    pub fn load_mod_directory(
+        &mut self,
+        mod_name: impl Into<String>,
+        root: impl AsRef<Path>,
+    ) -> io::Result<()> {
+        self.container
+            .mods
+            .push(ModResourceDirectoryPlan::from_directory(
+                mod_name, true, root,
+            )?);
+        Ok(())
+    }
+
+    pub fn load_mods_directory(&mut self, mods_dir: impl AsRef<Path>) -> io::Result<()> {
+        self.container = ModResourceContainerPlan::discover_from_mods_directory(mods_dir, true)?;
+        Ok(())
+    }
+
+    pub fn clear(&mut self) {
+        self.container.mods.clear();
+    }
+}
+
 fn server_fire_entity_id(x: i32, y: i32) -> i32 {
     SERVER_FIRE_ENTITY_ID_BASE.saturating_add(point2_pack(x, y))
 }
@@ -117,6 +161,7 @@ pub struct ServerLauncher {
     pub control: ServerControl,
     pub runtime: GameRuntime,
     pub content_loader: ContentLoader,
+    pub mod_resources: ServerModResources,
     pub last_runtime_effect_report: Option<EffectBlockFrameBatchReport>,
     pub last_runtime_item_transport_report: Option<GameRuntimeOwnedItemTransportFrameReport>,
     pub last_runtime_payload_report: Option<GameRuntimeOwnedPayloadFrameReport>,
@@ -191,6 +236,7 @@ impl ServerLauncher {
             control: ServerControl::new(args.clone()),
             runtime,
             content_loader: ContentLoader::create_base_content_or_panic(),
+            mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
@@ -265,6 +311,22 @@ impl ServerLauncher {
 
     pub fn seed_playable_smoke_world(&mut self) -> GameRuntimePlayableSmokeReport {
         self.runtime.seed_playable_smoke_world(&self.content_loader)
+    }
+
+    pub fn load_mod_directory(
+        &mut self,
+        mod_name: impl Into<String>,
+        root: impl AsRef<Path>,
+    ) -> io::Result<()> {
+        self.mod_resources.load_mod_directory(mod_name, root)
+    }
+
+    pub fn load_mods_directory(&mut self, mods_dir: impl AsRef<Path>) -> io::Result<()> {
+        self.mod_resources.load_mods_directory(mods_dir)
+    }
+
+    pub fn clear_mod_resources(&mut self) {
+        self.mod_resources.clear();
     }
 
     pub fn open_network(&mut self) {
@@ -4827,7 +4889,8 @@ fn has_playable_smoke_arg(args: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ServerLauncher, CARGO_AI_DROP_SPACING, CARGO_AI_RETARGET_INTERVAL, CARGO_AI_TRANSFER_RANGE,
+        ServerLauncher, ServerModResources, CARGO_AI_DROP_SPACING, CARGO_AI_RETARGET_INTERVAL,
+        CARGO_AI_TRANSFER_RANGE,
     };
     use mindustry_core::mindustry::content::blocks::{BlockDef, UnitAssemblerBlockData};
     use mindustry_core::mindustry::core::game_runtime::{
@@ -4879,6 +4942,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
     use std::io;
     use std::net::{TcpListener, UdpSocket};
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
@@ -4891,6 +4955,120 @@ mod tests {
             }
         }
         panic!("could not reserve a local TCP/UDP port pair");
+    }
+
+    fn temp_mod_root(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "mindustry-server-{prefix}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn server_launcher_starts_with_empty_mod_resources_and_no_disk_scan() {
+        let launcher = ServerLauncher::new(Vec::new());
+
+        assert!(launcher.mod_resources.is_empty());
+        assert!(launcher.mod_resources.container.mods.is_empty());
+    }
+
+    #[test]
+    fn server_launcher_can_load_single_mod_directory_into_server_resources_without_atlas_merge() {
+        let root = temp_mod_root("single-mod");
+        let mod_root = root.join("example-pack");
+
+        std::fs::create_dir_all(mod_root.join("assets/nested")).unwrap();
+        std::fs::write(mod_root.join("assets/foo.txt"), b"foo").unwrap();
+        std::fs::write(mod_root.join("assets/nested/bar.txt"), b"bar").unwrap();
+        std::fs::create_dir_all(mod_root.join("sprites")).unwrap();
+        std::fs::create_dir_all(mod_root.join("sprites-override/ui")).unwrap();
+        std::fs::write(mod_root.join("sprites/router.png"), b"not-a-real-png").unwrap();
+        std::fs::write(
+            mod_root.join("sprites-override/ui/icon.png"),
+            b"still-not-png",
+        )
+        .unwrap();
+        std::fs::create_dir_all(mod_root.join("bundles")).unwrap();
+        std::fs::write(mod_root.join("bundles/messages.properties"), b"hello=world").unwrap();
+
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher
+            .load_mod_directory("example", &mod_root)
+            .expect("server should accept an explicit mod directory");
+
+        assert_eq!(launcher.mod_resources.container.mods.len(), 1);
+        let plan = &launcher.mod_resources.container.mods[0];
+        assert_eq!(plan.mod_name, "example");
+        assert!(plan.resource_plan.icon.candidates.is_empty());
+        assert_eq!(plan.file_tree.file_count(), 2);
+        assert!(plan.file_tree.get("assets/foo.txt").exists);
+        assert!(plan.file_tree.get("assets/nested/bar.txt").exists);
+        assert!(!plan.file_tree.get("sprites/router.png").exists);
+        assert!(!plan.file_tree.get("sprites-override/ui/icon.png").exists);
+        assert_eq!(plan.resource_plan.sprite_requests().len(), 2);
+        assert_eq!(
+            plan.resource_plan.sprite_requests()[0].source_path,
+            "sprites/router.png"
+        );
+        assert_eq!(
+            plan.resource_plan.sprite_requests()[1].source_path,
+            "sprites-override/ui/icon.png"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn server_launcher_can_load_mods_container_into_server_resources() {
+        let root = temp_mod_root("mods-container");
+        let alpha = root.join("alpha");
+        let beta = root.join("beta");
+
+        std::fs::create_dir_all(alpha.join("assets")).unwrap();
+        std::fs::write(alpha.join("assets/alpha.txt"), b"alpha").unwrap();
+        std::fs::create_dir_all(alpha.join("sprites")).unwrap();
+        std::fs::write(alpha.join("sprites/alpha.png"), b"not-a-real-png").unwrap();
+
+        std::fs::create_dir_all(beta.join("assets")).unwrap();
+        std::fs::write(beta.join("assets/beta.txt"), b"beta").unwrap();
+        std::fs::create_dir_all(beta.join("sprites")).unwrap();
+        std::fs::write(beta.join("sprites/ignored.png"), b"not-a-real-png").unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/HEAD"), b"ref: refs/heads/main").unwrap();
+
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher
+            .load_mods_directory(&root)
+            .expect("server should accept an explicit mods container");
+
+        assert_eq!(launcher.mod_resources.container.mods.len(), 2);
+        assert_eq!(launcher.mod_resources.container.mods[0].mod_name, "alpha");
+        assert_eq!(launcher.mod_resources.container.mods[1].mod_name, "beta");
+        assert!(
+            launcher.mod_resources.container.mods[0]
+                .file_tree
+                .get("assets/alpha.txt")
+                .exists
+        );
+        assert!(
+            launcher.mod_resources.container.mods[1]
+                .file_tree
+                .get("assets/beta.txt")
+                .exists
+        );
+        assert_eq!(
+            launcher.mod_resources.container.mods[0]
+                .resource_plan
+                .sprite_requests()
+                .len(),
+            1
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn seed_server_assembler_drones_in_position(
@@ -6120,6 +6298,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
@@ -6233,6 +6412,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
@@ -8623,6 +8803,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
@@ -8809,6 +8990,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
@@ -8932,6 +9114,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
@@ -9067,6 +9250,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,
@@ -9221,6 +9405,7 @@ mod tests {
             control: super::ServerControl::new(Vec::new()),
             runtime: GameRuntime::default(),
             content_loader: ContentLoader::create_base_content_or_panic(),
+            mod_resources: ServerModResources::new(),
             last_runtime_effect_report: None,
             last_runtime_item_transport_report: None,
             last_runtime_payload_report: None,

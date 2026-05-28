@@ -498,13 +498,20 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
             let suffix = drawer_suffix_or_default(args, "-heat");
             vec![draw_heat_input_region_name(block_name, &suffix)]
         }
+        Some(("DrawFlame", _)) => vec![draw_flame_top_name(block_name)],
+        Some(("DrawHeatRegion", args)) => {
+            let suffix = drawer_suffix_or_default(args, "-glow");
+            vec![draw_heat_region_name(block_name, &suffix)]
+        }
         Some(("DrawGlowRegion", args)) => {
             let suffix = drawer_suffix_or_default(args, "-glow");
             vec![draw_glow_region_name(block_name, &suffix)]
         }
+        Some(("DrawLiquidOutputs", _)) => Vec::new(),
         Some(("DrawLiquidRegion", _)) => vec![draw_liquid_region_name(block_name, "-liquid")],
         Some(("DrawWarmupRegion", _)) => vec![draw_warmup_region_name(block_name)],
         Some(("DrawLiquidTile", _)) => Vec::new(),
+        Some(("DrawParticles", _)) => Vec::new(),
         Some(("DrawWeave", _)) => vec![draw_weave_name(block_name)],
         Some(("DrawMultiWeave", _)) => {
             let (weave, _) = draw_multi_weave_region_names(block_name);
@@ -540,10 +547,16 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
             "DrawRegion" => draw_region_icons(block_name),
             "DrawPistons" => vec![draw_piston_region_names(block_name, "-piston")[3].clone()],
             "DrawHeatInput" => vec![draw_heat_input_region_name(block_name, "-heat")],
+            "DrawFlame" => vec![draw_flame_top_name(block_name)],
+            "DrawHeatRegion" => vec![draw_heat_region_name(block_name, "-glow")],
             "DrawGlowRegion" => vec![draw_glow_region_name(block_name, "-glow")],
+            // These shells depend on runtime block liquid/particle state and do not have a
+            // stable atlas symbol to bridge into sprite ops yet.
+            "DrawLiquidOutputs" => Vec::new(),
             "DrawLiquidRegion" => vec![draw_liquid_region_name(block_name, "-liquid")],
             "DrawWarmupRegion" => vec![draw_warmup_region_name(block_name)],
             "DrawLiquidTile" => Vec::new(),
+            "DrawParticles" => Vec::new(),
             "DrawWeave" => vec![draw_weave_name(block_name)],
             "DrawMultiWeave" => {
                 let (weave, _) = draw_multi_weave_region_names(block_name);
@@ -1757,6 +1770,38 @@ mod tests {
                     side_variant: 1,
                     rotation: 270.0
                 }
+            ]
+        );
+
+        assert_eq!(
+            draw_block_dispatch_icons("combustion-generator", "DrawFlame(ffc999)"),
+            vec!["combustion-generator-top"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("surge-crucible", "DrawHeatRegion"),
+            vec!["surge-crucible-glow"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("surge-crucible", "DrawHeatRegion(-vents)"),
+            vec!["surge-crucible-vents"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("cyanogen-synthesizer", "DrawLiquidOutputs"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("cyanogen-synthesizer", "DrawParticles"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            draw_block_dispatch_icons(
+                "surge-crucible",
+                "DrawMulti(DrawFlame(ffc999), DrawHeatRegion(-vents), DrawLiquidOutputs, DrawParticles, DrawDefault)"
+            ),
+            vec![
+                "surge-crucible-top",
+                "surge-crucible-vents",
+                "surge-crucible"
             ]
         );
     }
