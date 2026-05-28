@@ -6,7 +6,7 @@ use super::{
     decal::DecalColor,
 };
 use crate::mindustry::{
-    entities::Effect,
+    entities::{Effect, DEFAULT_EFFECT_CLIP},
     io::{EffectStateSyncWire, TypeValue},
 };
 
@@ -54,7 +54,7 @@ impl EffectStateComp {
             time: 0.0,
             lifetime: 0.0,
             color: DecalColor::WHITE,
-            effect_clip: 0.0,
+            effect_clip: DEFAULT_EFFECT_CLIP,
             data: TypeValue::Null,
             effect_id: None,
             offset_x: 0.0,
@@ -129,7 +129,9 @@ impl EffectStateComp {
         self.data = sync.data.clone();
         self.effect_id = Some(sync.effect_id);
         self.lifetime = sync.lifetime;
-        self.effect_clip = effect.map(|effect| effect.clip).unwrap_or(self.effect_clip);
+        self.effect_clip = effect
+            .map(|effect| effect.clip)
+            .unwrap_or(DEFAULT_EFFECT_CLIP);
         self.offset_pos = sync.offset_pos;
         self.offset_rot = sync.offset_rot;
         self.offset_x = sync.offset_x;
@@ -187,6 +189,33 @@ mod tests {
         state.effect_clip = 32.0;
 
         assert_eq!(state.clip_size(), 32.0);
+    }
+
+    #[test]
+    fn effect_state_sync_without_effect_falls_back_to_default_clip() {
+        let mut state = EffectStateComp::new(11);
+        state.effect_clip = 1.0;
+        let sync = EffectStateSyncWire {
+            color: crate::mindustry::io::type_io::RgbaColor::new(0xff00ff00u32 as i32),
+            data: TypeValue::Null,
+            effect_id: 99,
+            lifetime: 10.0,
+            offset_pos: 0.0,
+            offset_rot: 0.0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            parent_id: None,
+            rot_with_parent: false,
+            rotation: 0.0,
+            time: 0.0,
+            x: 0.0,
+            y: 0.0,
+        };
+
+        state.apply_sync_wire(&sync, None);
+
+        assert_eq!(state.effect_clip, DEFAULT_EFFECT_CLIP);
+        assert_eq!(state.clip_size(), DEFAULT_EFFECT_CLIP);
     }
 
     #[test]
