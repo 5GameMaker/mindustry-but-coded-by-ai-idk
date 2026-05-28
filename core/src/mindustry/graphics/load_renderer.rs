@@ -5,6 +5,24 @@
 //! stage selection, progress bar, prompt text, logo/planet/background layers,
 //! plus error and completion overlays.
 
+use super::{
+    RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
+    RenderTextAlign,
+};
+
+const LOAD_PASS_KIND: &str = "load";
+const LOAD_GLOW_LAYER: f32 = 1.0;
+const LOAD_PLANET_LAYER: f32 = 2.0;
+const LOAD_LOGO_LAYER: f32 = 3.0;
+const LOAD_PROGRESS_TRACK_LAYER: f32 = 10.0;
+const LOAD_PROGRESS_FILL_LAYER: f32 = 11.0;
+const LOAD_PROGRESS_TEXT_LAYER: f32 = 12.0;
+const LOAD_STAGE_TEXT_LAYER: f32 = 20.0;
+const LOAD_PROMPT_TEXT_LAYER: f32 = 21.0;
+const LOAD_BANNER_BACKGROUND_LAYER: f32 = 30.0;
+const LOAD_BANNER_MESSAGE_LAYER: f32 = 31.0;
+const LOAD_BANNER_DETAILS_LAYER: f32 = 32.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoadStage {
     Boot,
@@ -302,6 +320,28 @@ pub struct LoadFramePlan {
     pub commands: Vec<LoadRenderCommand>,
 }
 
+impl LoadFramePlan {
+    pub fn to_render_pass(&self) -> Option<RenderPass> {
+        self.clone().into_render_pass()
+    }
+
+    pub fn into_render_pass(self) -> Option<RenderPass> {
+        let commands = self
+            .commands
+            .into_iter()
+            .flat_map(LoadRenderCommand::into_render_commands)
+            .collect::<Vec<_>>();
+
+        if commands.is_empty() {
+            return None;
+        }
+
+        let mut pass = RenderPass::new(RenderPassKind::Custom(LOAD_PASS_KIND.to_string()));
+        pass.extend(commands);
+        Some(pass)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoadRenderCommand {
     Clear {
@@ -360,6 +400,222 @@ pub enum LoadRenderCommand {
     },
 }
 
+impl LoadRenderCommand {
+    pub fn to_render_commands(&self) -> Vec<RenderCommand> {
+        self.clone().into_render_commands()
+    }
+
+    pub fn into_render_commands(self) -> Vec<RenderCommand> {
+        let mut commands = Vec::new();
+
+        match self {
+            Self::Clear { color } => {
+                commands.push(RenderCommand::clear(color));
+            }
+            Self::BackgroundGlow {
+                center,
+                radius,
+                color,
+            } => {
+                commands.push(RenderCommand::draw_circle(
+                    RenderPoint::new(center.0, center.1),
+                    radius,
+                    color,
+                    true,
+                    LOAD_GLOW_LAYER,
+                ));
+            }
+            Self::BackgroundGrid {
+                spacing,
+                stroke,
+                color,
+            } => {
+                commands.push(RenderCommand::custom(
+                    "load-background-grid",
+                    vec![
+                        RenderProperty::new("spacing", spacing.to_string()),
+                        RenderProperty::new("stroke", stroke.to_string()),
+                        RenderProperty::new("r", color[0].to_string()),
+                        RenderProperty::new("g", color[1].to_string()),
+                        RenderProperty::new("b", color[2].to_string()),
+                        RenderProperty::new("a", color[3].to_string()),
+                    ],
+                ));
+            }
+            Self::Logo {
+                text,
+                center,
+                scale,
+                color,
+            } => {
+                commands.push(RenderCommand::draw_text(
+                    text,
+                    RenderPoint::new(center.0, center.1),
+                    color,
+                    (scale * 36.0).max(1.0),
+                    0.0,
+                    RenderTextAlign::Center,
+                    LOAD_LOGO_LAYER,
+                ));
+            }
+            Self::Planet {
+                name,
+                center,
+                radius,
+                rotation_deg,
+                color,
+            } => {
+                commands.push(RenderCommand::draw_sprite(
+                    name,
+                    RenderRect::from_center(
+                        RenderPoint::new(center.0, center.1),
+                        radius * 2.0,
+                        radius * 2.0,
+                    ),
+                    color,
+                    rotation_deg,
+                    LOAD_PLANET_LAYER,
+                ));
+            }
+            Self::ProgressBar {
+                rect,
+                progress,
+                label,
+                fill_color,
+                track_color,
+            } => {
+                let rect = RenderRect::new(rect.x, rect.y, rect.width, rect.height);
+                let progress = clamp_progress(progress);
+                let filled_width = rect.width * progress;
+                let text_color = contrasting_color(track_color);
+
+                commands.push(RenderCommand::fill_rect(
+                    rect,
+                    track_color,
+                    LOAD_PROGRESS_TRACK_LAYER,
+                ));
+
+                if filled_width > 0.0 {
+                    commands.push(RenderCommand::fill_rect(
+                        RenderRect::new(rect.x, rect.y, filled_width, rect.height),
+                        fill_color,
+                        LOAD_PROGRESS_FILL_LAYER,
+                    ));
+                }
+
+                commands.push(RenderCommand::draw_text(
+                    label,
+                    rect.center(),
+                    text_color,
+                    (rect.height * 0.78).max(1.0),
+                    0.0,
+                    RenderTextAlign::Center,
+                    LOAD_PROGRESS_TEXT_LAYER,
+                ));
+            }
+            Self::StageLabel {
+                text,
+                center,
+                color,
+            } => {
+                commands.push(RenderCommand::draw_text(
+                    text,
+                    RenderPoint::new(center.0, center.1),
+                    color,
+                    18.0,
+                    0.0,
+                    RenderTextAlign::Center,
+                    LOAD_STAGE_TEXT_LAYER,
+                ));
+            }
+            Self::PromptText {
+                text,
+                center,
+                color,
+            } => {
+                commands.push(RenderCommand::draw_text(
+                    text,
+                    RenderPoint::new(center.0, center.1),
+                    color,
+                    16.0,
+                    0.0,
+                    RenderTextAlign::Center,
+                    LOAD_PROMPT_TEXT_LAYER,
+                ));
+            }
+            Self::ErrorBanner {
+                message,
+                details,
+                rect,
+                color,
+            } => {
+                let banner_rect = RenderRect::new(rect.x, rect.y, rect.width, rect.height);
+                let text_color = contrasting_color(color);
+                let message_center = RenderPoint::new(
+                    banner_rect.x + banner_rect.width / 2.0,
+                    banner_rect.y + banner_rect.height * 0.40,
+                );
+                let details_center = RenderPoint::new(
+                    banner_rect.x + banner_rect.width / 2.0,
+                    banner_rect.y + banner_rect.height * 0.70,
+                );
+
+                commands.push(RenderCommand::fill_rect(
+                    banner_rect,
+                    color,
+                    LOAD_BANNER_BACKGROUND_LAYER,
+                ));
+                commands.push(RenderCommand::draw_text(
+                    message,
+                    message_center,
+                    text_color,
+                    (banner_rect.height * 0.34).max(1.0),
+                    0.0,
+                    RenderTextAlign::Center,
+                    LOAD_BANNER_MESSAGE_LAYER,
+                ));
+
+                if let Some(details) = details {
+                    commands.push(RenderCommand::draw_text(
+                        details,
+                        details_center,
+                        text_color,
+                        (banner_rect.height * 0.22).max(1.0),
+                        0.0,
+                        RenderTextAlign::Center,
+                        LOAD_BANNER_DETAILS_LAYER,
+                    ));
+                }
+            }
+            Self::CompletionBanner {
+                message,
+                rect,
+                color,
+            } => {
+                let banner_rect = RenderRect::new(rect.x, rect.y, rect.width, rect.height);
+                let text_color = contrasting_color(color);
+
+                commands.push(RenderCommand::fill_rect(
+                    banner_rect,
+                    color,
+                    LOAD_BANNER_BACKGROUND_LAYER,
+                ));
+                commands.push(RenderCommand::draw_text(
+                    message,
+                    banner_rect.center(),
+                    text_color,
+                    (banner_rect.height * 0.34).max(1.0),
+                    0.0,
+                    RenderTextAlign::Center,
+                    LOAD_BANNER_MESSAGE_LAYER,
+                ));
+            }
+        }
+
+        commands
+    }
+}
+
 fn stage_color(stage: LoadStage, theme: &LoadTheme) -> [f32; 4] {
     match stage {
         LoadStage::Failed => theme.error_rgba,
@@ -394,6 +650,23 @@ fn prompt_or(value: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         value.to_string()
+    }
+}
+
+fn clamp_progress(progress: f32) -> f32 {
+    if progress.is_finite() {
+        progress.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn contrasting_color(color: [f32; 4]) -> [f32; 4] {
+    let luminance = color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114;
+    if luminance > 0.5 {
+        [0.0, 0.0, 0.0, 1.0]
+    } else {
+        [1.0, 1.0, 1.0, 1.0]
     }
 }
 
@@ -530,5 +803,164 @@ mod tests {
             plan.commands[4],
             LoadRenderCommand::PromptText { .. }
         ));
+    }
+
+    #[test]
+    fn empty_load_frame_plan_does_not_create_render_pass() {
+        let plan = LoadFramePlan {
+            stage: LoadStage::Boot,
+            progress: 0.0,
+            stage_text: String::new(),
+            prompt_text: String::new(),
+            commands: Vec::new(),
+        };
+
+        assert_eq!(plan.to_render_pass(), None);
+        assert_eq!(plan.into_render_pass(), None);
+    }
+
+    #[test]
+    fn load_frame_plan_maps_commands_into_load_render_pass_in_order() {
+        let plan = LoadFramePlan {
+            stage: LoadStage::Failed,
+            progress: 0.25,
+            stage_text: "error  25%".to_string(),
+            prompt_text: "loading assets".to_string(),
+            commands: vec![
+                LoadRenderCommand::Clear {
+                    color: [0.04, 0.04, 0.06, 1.0],
+                },
+                LoadRenderCommand::BackgroundGlow {
+                    center: (10.0, 20.0),
+                    radius: 30.0,
+                    color: [0.20, 0.42, 0.83, 0.18],
+                },
+                LoadRenderCommand::BackgroundGrid {
+                    spacing: 48.0,
+                    stroke: 2.0,
+                    color: [0.10, 0.18, 0.28, 1.0],
+                },
+                LoadRenderCommand::Planet {
+                    name: "serpulo".to_string(),
+                    center: (100.0, 120.0),
+                    radius: 24.0,
+                    rotation_deg: 45.0,
+                    color: [0.30, 0.70, 1.00, 1.0],
+                },
+                LoadRenderCommand::Logo {
+                    text: "mindustry".to_string(),
+                    center: (100.0, 40.0),
+                    scale: 1.5,
+                    color: [0.30, 0.70, 1.00, 1.0],
+                },
+                LoadRenderCommand::ProgressBar {
+                    rect: LoadRect::new(20.0, 140.0, 160.0, 18.0),
+                    progress: 0.25,
+                    label: "assets".to_string(),
+                    fill_color: [0.30, 0.70, 1.00, 1.0],
+                    track_color: [0.10, 0.18, 0.28, 1.0],
+                },
+                LoadRenderCommand::StageLabel {
+                    text: "error  25%".to_string(),
+                    center: (100.0, 180.0),
+                    color: [0.95, 0.26, 0.22, 1.0],
+                },
+                LoadRenderCommand::PromptText {
+                    text: "loading assets".to_string(),
+                    center: (100.0, 210.0),
+                    color: [0.30, 0.70, 1.00, 1.0],
+                },
+                LoadRenderCommand::ErrorBanner {
+                    message: "asset loader crashed".to_string(),
+                    details: Some("retry or inspect the failure source".to_string()),
+                    rect: LoadRect::new(16.0, 220.0, 168.0, 54.0),
+                    color: [0.95, 0.26, 0.22, 1.0],
+                },
+                LoadRenderCommand::CompletionBanner {
+                    message: "all assets ready".to_string(),
+                    rect: LoadRect::new(16.0, 220.0, 168.0, 54.0),
+                    color: [0.32, 0.84, 0.50, 1.0],
+                },
+            ],
+        };
+
+        let borrowed = plan.to_render_pass().expect("plan should produce a pass");
+        let owned = plan.into_render_pass().expect("plan should produce a pass");
+
+        assert_eq!(borrowed, owned);
+        assert_eq!(owned.kind, RenderPassKind::Custom("load".to_string()));
+        assert_eq!(
+            owned.order,
+            RenderPassKind::Custom("load".to_string()).default_order()
+        );
+        assert_eq!(owned.commands.len(), 15);
+
+        assert!(matches!(owned.commands[0], RenderCommand::Clear { .. }));
+        assert!(matches!(
+            owned.commands[1],
+            RenderCommand::DrawCircle { .. }
+        ));
+        assert!(matches!(
+            owned.commands[2],
+            RenderCommand::Custom { ref name, .. } if name == "load-background-grid"
+        ));
+        assert!(matches!(
+            owned.commands[3],
+            RenderCommand::DrawSprite { .. }
+        ));
+        assert!(matches!(owned.commands[4], RenderCommand::DrawText { .. }));
+        assert!(matches!(owned.commands[5], RenderCommand::FillRect { .. }));
+        assert!(matches!(owned.commands[6], RenderCommand::FillRect { .. }));
+        assert!(matches!(owned.commands[7], RenderCommand::DrawText { .. }));
+        assert!(matches!(owned.commands[8], RenderCommand::DrawText { .. }));
+        assert!(matches!(owned.commands[9], RenderCommand::DrawText { .. }));
+        assert!(matches!(owned.commands[10], RenderCommand::FillRect { .. }));
+        assert!(matches!(owned.commands[11], RenderCommand::DrawText { .. }));
+        assert!(matches!(owned.commands[12], RenderCommand::DrawText { .. }));
+        assert!(matches!(owned.commands[13], RenderCommand::FillRect { .. }));
+        assert!(matches!(owned.commands[14], RenderCommand::DrawText { .. }));
+
+        match &owned.commands[7] {
+            RenderCommand::DrawText { text, .. } => assert_eq!(text, "assets"),
+            other => panic!("unexpected progress label command: {other:?}"),
+        }
+
+        match &owned.commands[8] {
+            RenderCommand::DrawText { text, .. } => assert_eq!(text, "error  25%"),
+            other => panic!("unexpected stage label command: {other:?}"),
+        }
+
+        match &owned.commands[9] {
+            RenderCommand::DrawText { text, .. } => assert_eq!(text, "loading assets"),
+            other => panic!("unexpected prompt command: {other:?}"),
+        }
+
+        match &owned.commands[11] {
+            RenderCommand::DrawText { text, .. } => {
+                assert_eq!(text, "asset loader crashed")
+            }
+            other => panic!("unexpected banner message command: {other:?}"),
+        }
+
+        match &owned.commands[12] {
+            RenderCommand::DrawText { text, .. } => {
+                assert_eq!(text, "retry or inspect the failure source")
+            }
+            other => panic!("unexpected banner details command: {other:?}"),
+        }
+
+        match &owned.commands[13] {
+            RenderCommand::FillRect { color, .. } => {
+                assert_eq!(*color, [0.32, 0.84, 0.50, 1.0]);
+            }
+            other => panic!("unexpected completion background command: {other:?}"),
+        }
+
+        match &owned.commands[14] {
+            RenderCommand::DrawText { text, .. } => {
+                assert_eq!(text, "all assets ready")
+            }
+            other => panic!("unexpected completion message command: {other:?}"),
+        }
     }
 }
