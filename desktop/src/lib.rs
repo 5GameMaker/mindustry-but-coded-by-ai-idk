@@ -36,7 +36,9 @@ use mindustry_core::mindustry::graphics::{
     MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
     OverlayRendererPlan, OverlayRendererState, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
     PixelatorState, RenderBridge, RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan,
-    RenderPoint, RenderSize, RenderViewport, TileBounds, TileCoord, Viewport as FloorViewport,
+    RenderPoint, RenderSize, RenderViewport, ShaderApplyContext, ShaderCamera, ShaderCatalog,
+    ShaderDispatchFrame, ShaderId, ShaderViewport, TileBounds, TileCoord,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -1236,6 +1238,28 @@ impl DesktopLauncher {
         ))
     }
 
+    pub fn shader_dispatch_frame_plan(
+        &self,
+        camera: RenderCamera,
+        viewport: RenderViewport,
+    ) -> ShaderDispatchFrame {
+        let mut context = ShaderApplyContext::default();
+        context.camera = Some(ShaderCamera::new(
+            camera.center.x,
+            camera.center.y,
+            viewport.width,
+            viewport.height,
+        ));
+        context.graphics = Some(ShaderViewport::new(viewport.width, viewport.height));
+        context.time = self.game_state.tick as f32;
+        context.global_time = self.game_state.update_id as f32;
+
+        ShaderDispatchFrame::from_applies([
+            ShaderCatalog::apply_plan(ShaderId::Light, &context),
+            ShaderCatalog::apply_plan(ShaderId::Shockwave, &context),
+        ])
+    }
+
     pub fn menu_frame_for_render(&mut self, input: MenuFrameInput) -> DesktopFrame {
         let plan = self.menu_renderer_state.render_plan(input);
         DesktopFrame {
@@ -1310,6 +1334,7 @@ impl DesktopLauncher {
         let floor_chunk_batches = self.floor_chunk_draw_batches(camera, viewport);
         let fog_frame = self.fog_frame_plan(camera, viewport);
         let pixelator = self.pixelator_frame_plan(camera, viewport);
+        let shader_dispatch = self.shader_dispatch_frame_plan(camera, viewport);
         let overlay_renderer = self.drain_overlay_renderer_plan();
         let minimap_texture_frame = self.minimap_texture_frame_plan();
         let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
@@ -1317,6 +1342,7 @@ impl DesktopLauncher {
         let mut bridge = RenderBridge::new();
         bridge
             .set_render_frame(render_frame)
+            .set_shader_dispatch(shader_dispatch)
             .set_overlay_renderer(overlay_renderer)
             .set_minimap_overlay(minimap_overlay);
         if let Some(block_renderer) = block_renderer {
@@ -3942,6 +3968,15 @@ mod tests {
         );
         assert_eq!(execution.minimap_texture_frames, 1);
         assert_eq!(execution.minimap_full_uploads, 1);
+        assert_eq!(execution.shader_dispatch_applies, 2);
+        assert_eq!(
+            frame
+                .bundle
+                .shader_dispatch
+                .as_ref()
+                .map(|dispatch| dispatch.applies.len()),
+            Some(2)
+        );
     }
 
     #[test]
