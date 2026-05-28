@@ -7024,3 +7024,46 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `pointBeam=10` 需要 line-to-data-position 与 light line primitive；
   - `attackCommand=18` 需要 polygon primitive；
   - `pointShockwave=16` 需要 circle + seeded radial line 的 multi-pass 表达。
+
+### 12.227 Fx.coreBuildShockwave dynamic lifetime ring
+
+- 2026-05-28：迁移早期核心建造冲击波效果 `coreBuildShockwave=14`，并补齐 Java 在 draw 回调内覆盖 `e.lifetime = e.rotation` 的动态寿命语义。
+- 本轮迁移：
+  - `coreBuildShockwave=14`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:207` 附近：
+    - `coreBuildShockwave = new Effect(120, 500f, ...)`
+    - `e.lifetime = e.rotation`
+    - `color(Pal.command)`
+    - `stroke(e.fout(Interp.pow5Out) * 4f)`
+    - `Lines.circle(e.x, e.y, e.fin() * e.rotation * 2f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_CORE_BUILD_SHOCKWAVE_ID=14`；
+    - metadata 使用 lifetime `120`、clip `500`；
+    - `standard_effect_render_lifetime(...)` 对该 id 返回 `rotation`，对齐 Java draw-time lifetime override；
+    - 新增 `interp_pow5_out(...)`；
+    - draw plan 使用 `StrokedCircle`、`Pal.command`、半径 `fin * rotation * 2`、stroke `(1 - pow5Out(fin)) * 4`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime/clip；
+  - `standard_effect_render_lifetime_applies_ripple_dynamic_rotation_rule` 同时覆盖 `coreBuildShockwave` 的 dynamic lifetime；
+  - `standard_effect_draw_plan_covers_early_command_and_point_shapes` 覆盖半径和 pow5Out stroke。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_render_lifetime_applies_ripple_dynamic_rotation_rule --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_early_command_and_point_shapes --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 并行探索确认：
+  - 当前 `circle_primitives` / `square_primitives` / `line_primitives` / `light_primitives` 仍只进入 `DesktopLauncher` frame cache 与测试；
+  - `desktop/src/main.rs` 目前只有 `launcher.update()` + `sleep`，没有真实 renderer/backend 消费；
+  - 最小真实接入点应在 `desktop/src/main.rs` 主循环和 `DesktopLauncher::standard_effect_render_frame()` 之间增加薄 renderer/backend 消费层。
+- 仍未完成：
+  - `pointShockwave=16` 需要 circle + seeded line 的 multi-pass 表达；
+  - `attackCommand=18` 需要 polygon primitive；
+  - desktop renderer/backend 仍未真正消费 effect primitive frame。

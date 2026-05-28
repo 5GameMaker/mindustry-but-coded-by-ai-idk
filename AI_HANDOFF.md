@@ -5137,3 +5137,42 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `pointBeam=10` 需要 line segment + line light primitive，不要半迁移；
   2. `attackCommand=18` 需要 polygon primitive；
   3. 可继续补单 kind circle/square wave，或转去 renderer/backend 消费 primitives。
+
+---
+
+## 153. 最新闭环记录：Fx.coreBuildShockwave dynamic lifetime ring
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `coreBuildShockwave=14`，重点补 Java draw-time `e.lifetime = e.rotation` 的动态寿命规则。
+- Java 依据：
+  - `Fx.java:207-213`
+  - static lifetime `120`、clip `500`
+  - draw 内改 lifetime 为 `e.rotation`
+  - color `Pal.command`
+  - stroke `e.fout(Interp.pow5Out) * 4`
+  - circle radius `e.fin() * e.rotation * 2`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_CORE_BUILD_SHOCKWAVE_ID=14`；
+    - `standard_effect_render_lifetime(...)` 对该 id 返回 `rotation`；
+    - 新增 `interp_pow5_out(...)`；
+    - draw plan 使用 `StrokedCircle` 输出 `Pal.command`、动态半径和 pow5Out stroke；
+    - 扩展 id/metadata/render-lifetime/draw-plan 测试。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_render_lifetime_applies_ripple_dynamic_rotation_rule --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_early_command_and_point_shapes --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- renderer/backend 探索结论：
+  - 子代理只读确认：当前 standard effect primitives 只到 `DesktopLauncher` 缓存和 `DesktopStandardEffectRenderFrame`；
+  - `desktop/src/main.rs` 仍未消费 frame；
+  - 最小后续接入方案是在 desktop 层增加薄 renderer/backend 接口，并在 main loop 的 `launcher.update()` 后消费 `standard_effect_render_frame()`。
+- 下一步建议：
+  1. 若继续 Fx：优先单 kind circle/square wave；`pointShockwave=16` 需要 multi-pass，不要半迁移；
+  2. 若转集成：在 `desktop/src/lib.rs`/`desktop/src/main.rs` 增加最小 renderer 消费口，并用现有 desktop primitive tests 扩展验证；
+  3. 不要把 frame cache 误判为真实渲染完成。

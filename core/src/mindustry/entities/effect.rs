@@ -52,6 +52,8 @@ pub const FX_HIT_LASER_COLOR_ID: i32 = 99;
 pub const FX_DESPAWN_ID: i32 = 100;
 /// Upstream `Fx.pointHit` id in `mindustry.content.Fx` for v158.1.
 pub const FX_POINT_HIT_ID: i32 = 11;
+/// Upstream `Fx.coreBuildShockwave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CORE_BUILD_SHOCKWAVE_ID: i32 = 14;
 /// Upstream `Fx.moveCommand` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MOVE_COMMAND_ID: i32 = 17;
 /// Upstream `Fx.commandSend` id in `mindustry.content.Fx` for v158.1.
@@ -196,6 +198,7 @@ pub const FX_OVERDRIVE_BLOCK_FULL_ID: i32 = 255;
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
         "pointHit" => Some(FX_POINT_HIT_ID),
+        "coreBuildShockwave" => Some(FX_CORE_BUILD_SHOCKWAVE_ID),
         "moveCommand" => Some(FX_MOVE_COMMAND_ID),
         "commandSend" => Some(FX_COMMAND_SEND_ID),
         "upgradeCoreBloom" => Some(FX_UPGRADE_CORE_BLOOM_ID),
@@ -296,6 +299,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
 pub fn standard_effect(effect_id: i32) -> Option<Effect> {
     let effect = match effect_id {
         FX_POINT_HIT_ID => Effect::with_lifetime(FX_POINT_HIT_ID, 8.0, DEFAULT_EFFECT_CLIP),
+        FX_CORE_BUILD_SHOCKWAVE_ID => {
+            Effect::with_lifetime(FX_CORE_BUILD_SHOCKWAVE_ID, 120.0, 500.0)
+        }
         FX_MOVE_COMMAND_ID => Effect::with_lifetime(FX_MOVE_COMMAND_ID, 20.0, DEFAULT_EFFECT_CLIP)
             .layer(Layer::OVERLAY_UI),
         FX_COMMAND_SEND_ID => Effect::with_lifetime(FX_COMMAND_SEND_ID, 28.0, DEFAULT_EFFECT_CLIP),
@@ -488,6 +494,10 @@ pub fn standard_effect_render_lifetime(effect_id: Option<u16>, rotation: f32, cu
         // renderer, so it must be applied during `EffectStateComp::draw_with`
         // rather than at static metadata lookup time.
         Some(FX_RIPPLE_ID) => 30.0 * rotation,
+        // Java `Fx.coreBuildShockwave` overrides `e.lifetime = e.rotation`
+        // before using fin/fout, so desktop/core render helpers must do the
+        // same lifetime rewrite when materializing a standard draw plan.
+        Some(FX_CORE_BUILD_SHOCKWAVE_ID) => rotation,
         _ => current,
     }
 }
@@ -935,6 +945,25 @@ pub fn standard_effect_draw_plan(
             alpha: 1.0,
             radius: fin * 6.0,
             stroke: fout + 0.2,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_CORE_BUILD_SHOCKWAVE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: Some("Pal.command"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fin * rotation * 2.0,
+            stroke: (1.0 - interp_pow5_out(fin)) * 4.0,
             particles: None,
             light_color: None,
             light_radius: 0.0,
@@ -2858,6 +2887,10 @@ fn interp_pow3_out(value: f32) -> f32 {
     1.0 - (1.0 - value.clamp(0.0, 1.0)).powi(3)
 }
 
+fn interp_pow5_out(value: f32) -> f32 {
+    1.0 - (1.0 - value.clamp(0.0, 1.0)).powi(5)
+}
+
 fn mathf_random_seed_range(seed: i64, range: f32) -> f32 {
     ArcRand::with_seed(seed.wrapping_mul(99_999)).range(range)
 }
@@ -4179,6 +4212,10 @@ mod tests {
     #[test]
     fn standard_effect_ids_include_puddle_ripple_dependencies() {
         assert_eq!(standard_effect_id("pointHit"), Some(FX_POINT_HIT_ID));
+        assert_eq!(
+            standard_effect_id("coreBuildShockwave"),
+            Some(FX_CORE_BUILD_SHOCKWAVE_ID)
+        );
         assert_eq!(standard_effect_id("moveCommand"), Some(FX_MOVE_COMMAND_ID));
         assert_eq!(standard_effect_id("commandSend"), Some(FX_COMMAND_SEND_ID));
         assert_eq!(
@@ -4386,6 +4423,9 @@ mod tests {
     #[test]
     fn standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers() {
         assert_eq!(standard_effect(FX_POINT_HIT_ID).unwrap().lifetime, 8.0);
+        let core_build_shockwave = standard_effect(FX_CORE_BUILD_SHOCKWAVE_ID).unwrap();
+        assert_eq!(core_build_shockwave.lifetime, 120.0);
+        assert_eq!(core_build_shockwave.clip, 500.0);
         let move_command = standard_effect(FX_MOVE_COMMAND_ID).unwrap();
         assert_eq!(move_command.lifetime, 20.0);
         assert_eq!(move_command.layer, Layer::OVERLAY_UI);
@@ -4620,6 +4660,10 @@ mod tests {
             75.0
         );
         assert_eq!(
+            standard_effect_render_lifetime(Some(FX_CORE_BUILD_SHOCKWAVE_ID as u16), 45.0, 120.0),
+            45.0
+        );
+        assert_eq!(
             standard_effect_render_lifetime(Some(FX_SMOKE_ID as u16), 2.5, 100.0),
             100.0
         );
@@ -4646,6 +4690,25 @@ mod tests {
         assert_eq!(point_hit.input_color, Some(input_color));
         assert_eq!(point_hit.radius, 3.0);
         assert!((point_hit.stroke - 0.7).abs() < 0.0001);
+
+        let core_build_shockwave = standard_effect_draw_plan(
+            Some(FX_CORE_BUILD_SHOCKWAVE_ID as u16),
+            14,
+            10.0,
+            20.0,
+            60.0,
+            30.0,
+            120.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            core_build_shockwave.kind,
+            StandardEffectDrawKind::StrokedCircle
+        );
+        assert_eq!(core_build_shockwave.color_from, Some("Pal.command"));
+        assert_eq!(core_build_shockwave.radius, 60.0);
+        assert!((core_build_shockwave.stroke - 0.125).abs() < 0.0001);
 
         let move_command = standard_effect_draw_plan(
             Some(FX_MOVE_COMMAND_ID as u16),
