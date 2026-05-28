@@ -29,8 +29,9 @@ use mindustry_core::mindustry::graphics::{
     FogFrameInput, FogFramePlan, FogRendererState, FogViewport, GraphicsFrameBundle,
     GraphicsFrameStats, LightRendererPlan, LightRendererState, MinimapCamera, MinimapOverlayInput,
     MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan,
-    OverlayRendererState, RenderBridge, RenderCamera, RenderEngineState, RenderFramePlan,
-    RenderPoint, RenderSize, RenderViewport, TileBounds, TileCoord, Viewport as FloorViewport,
+    OverlayRendererState, PixelatorCamera, PixelatorFramePlan, PixelatorInput, PixelatorState,
+    RenderBridge, RenderCamera, RenderEngineState, RenderFramePlan, RenderPoint, RenderSize,
+    RenderViewport, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -356,6 +357,11 @@ pub struct DesktopLauncher {
     pub light_renderer_state: LightRendererState,
     pub floor_renderer_state: FloorRendererState,
     pub fog_renderer_state: FogRendererState,
+    pub pixelator_state: PixelatorState,
+    pub pixelate: bool,
+    pub renderer_scale: f32,
+    pub land_scale: f32,
+    pub cutscene: bool,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -452,6 +458,11 @@ impl DesktopLauncher {
             light_renderer_state: LightRendererState::default(),
             floor_renderer_state: FloorRendererState::default(),
             fog_renderer_state: FogRendererState::default(),
+            pixelator_state: PixelatorState::default(),
+            pixelate: false,
+            renderer_scale: 1.0,
+            land_scale: 1.0,
+            cutscene: false,
             connect_target,
             connect_error: None,
             args,
@@ -969,6 +980,29 @@ impl DesktopLauncher {
         self.fog_renderer_state.draw_fog_plan(input)
     }
 
+    pub fn pixelator_frame_plan(
+        &mut self,
+        mut camera: RenderCamera,
+        viewport: RenderViewport,
+    ) -> Option<PixelatorFramePlan> {
+        camera.viewport = viewport;
+        let world_rect = camera.world_rect();
+        self.pixelator_state.draw_pixelate_plan(PixelatorInput::new(
+            self.pixelate,
+            self.renderer_scale,
+            self.land_scale,
+            self.cutscene,
+            viewport.width.max(0.0).round() as i32,
+            viewport.height.max(0.0).round() as i32,
+            PixelatorCamera::new(
+                camera.center.x,
+                camera.center.y,
+                world_rect.width,
+                world_rect.height,
+            ),
+        ))
+    }
+
     pub fn graphics_frame_for_render(
         &mut self,
         frame_index: u64,
@@ -985,6 +1019,7 @@ impl DesktopLauncher {
         let block_renderer = self.block_render_plan(camera, viewport);
         let floor_renderer = self.floor_render_plan(camera, viewport);
         let fog_frame = self.fog_frame_plan(camera, viewport);
+        let pixelator = self.pixelator_frame_plan(camera, viewport);
         let overlay_renderer = self.drain_overlay_renderer_plan();
         let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
 
@@ -1001,6 +1036,9 @@ impl DesktopLauncher {
         }
         if let Some(fog_frame) = fog_frame {
             bridge.set_fog_frame(fog_frame);
+        }
+        if let Some(pixelator) = pixelator {
+            bridge.set_pixelator(pixelator);
         }
 
         DesktopGraphicsFrame {
@@ -1849,6 +1887,7 @@ impl DesktopLauncher {
         self.light_renderer_state = LightRendererState::default();
         self.floor_renderer_state = FloorRendererState::default();
         self.fog_renderer_state = FogRendererState::default();
+        self.pixelator_state = PixelatorState::default();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -3582,6 +3621,35 @@ mod tests {
         assert_eq!(block_plan.tile_passes[0].stage, BlockDrawStage::TileBase);
         assert_eq!(frame.bundle.stats.block_tile_passes, 1);
         assert_eq!(block_plan.tile_passes[0].tiles.len(), 6);
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_carries_pixelator_wrapper_when_enabled() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.pixelate = true;
+        launcher.renderer_scale = 2.75;
+        launcher.land_scale = 1.0;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 48.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.25, 24.75), viewport);
+        let minimap_camera = MinimapCamera::new(32.25, 24.75, 64.0, 48.0);
+
+        let frame = launcher.graphics_frame_for_render(
+            14,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        let pixelator = frame.bundle.pixelator.as_ref().unwrap();
+        assert_eq!(frame.bundle.stats.pixelator_frames, 1);
+        assert_eq!(pixelator.pixel_scale, 2.0);
+        assert_eq!(pixelator.buffer_width, 64);
+        assert_eq!(pixelator.buffer_height, 48);
+        assert_eq!(pixelator.restore.renderer_scale, 2.75);
+        assert_eq!(pixelator.restore.camera_x, 32.25);
+        assert_eq!(pixelator.restore.camera_y, 24.75);
     }
 
     #[test]
