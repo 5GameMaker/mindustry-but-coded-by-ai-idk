@@ -6749,3 +6749,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `hitBulletSmall=77`、`hitBulletColor=78`、`hitSquaresColor=79`、`hitFuse=81` 仍需 multi-pass/附加 scaled circle/light 表达；
   - `inst*`/laser 后续命中特效需要继续逐个对照，避免近似硬塞；
   - renderer/backend 仍需真实消费 desktop frame 中的 square/line primitives。
+
+### 12.220 Fx.hitLaser + Fx.despawn
+
+- 2026-05-28：迁移 `hitLaser=98` 与 `despawn=100`。`hitLaserColor=99` 暂不迁移，因为 Java light 使用 `e.color`，当前 `StandardEffectLightRenderPrimitive` 仍只支持符号色，不能完整表达输入色 light。
+- 本轮迁移：
+  - `hitLaser=98`
+  - `despawn=100`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1129` 附近：
+    - `hitLaser = new Effect(8, ...)`
+    - `color(Color.white, Pal.heal, e.fin())`
+    - `stroke(0.5f + e.fout())`
+    - `Lines.circle(e.x, e.y, e.fin() * 5f)`
+    - `Drawf.light(e.x, e.y, 23f, Pal.heal, e.fout() * 0.7f)`
+  - `Fx.java:1145` 附近：
+    - `despawn = new Effect(12, ...)`
+    - `color(Pal.lighterOrange, Color.gray, e.fin())`
+    - `stroke(e.fout())`
+    - `randLenVectors(e.id, 7, e.fin() * 7f, e.rotation, 40f, ...)`
+    - `lineAngle(..., e.fout() * 2 + 1f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_LASER_ID = 98`、`FX_DESPAWN_ID = 100`；
+    - `hitLaser` 使用 `StrokedCircle` + `Pal.heal` light；
+    - `despawn` 使用 `SeededRadialLineParticles`，颜色 `Pal.lighterOrange -> Color.gray`；
+    - 扩展 `standard_effect_draw_plan_covers_hit_radial_line_batch` 覆盖二者。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_hit_radial_line_batch --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `hitLaserColor=99` 需要 input-color light primitive；
+  - `hitBulletSmall=77`、`hitBulletColor=78`、`hitSquaresColor=79`、`hitFuse=81` 需要 scaled circle + particle + light 的组合表达；
+  - `airBubble=101` 需要 texture/renderer bubble primitive；
+  - flak/plastic/blast/sap/massive explosion 系列需要 multi-pass。

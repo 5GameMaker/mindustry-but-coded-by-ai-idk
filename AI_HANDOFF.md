@@ -4903,3 +4903,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 下一组如果继续 Fx，可考虑 `instTrail`/`instShoot`/`instHit` 前先对照是否需要 polygon/tri/laser primitives。
   2. `hitBulletSmall`、`hitBulletColor`、`hitSquaresColor`、`hitFuse` 暂不要半迁移，先设计 multi-pass/附加 circle+light 表达。
   3. 也可以转向 desktop renderer，把 frame cache 里的 square/line primitive 真正画出来。
+
+---
+
+## 146. 最新闭环记录：Fx.hitLaser 与 Fx.despawn
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移当前 primitive 能完整表达的 `hitLaser=98` 与 `despawn=100`；跳过 `hitLaserColor=99`，因为它需要 input-color light，当前 light primitive 还不支持。
+- Java 依据：
+  - `Fx.java:1129-1135`：`hitLaser`，lifetime `8`，`Color.white -> Pal.heal`，圆环半径 `fin*5`，stroke `0.5+fout`，light `Pal.heal` 半径 `23` opacity `fout*0.7`。
+  - `Fx.java:1145-1154`：`despawn`，lifetime `12`，`Pal.lighterOrange -> Color.gray`，7 条 cone radial line，长度 `fin*7`，line length `fout*2+1`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_LASER_ID=98` 与 `FX_DESPAWN_ID=100`；
+    - 接入 id lookup、metadata 和 draw plan；
+    - `hitLaser` 使用 `StrokedCircle` + `light_render_primitives()`；
+    - `despawn` 使用 `SeededRadialLineParticles`；
+    - 扩展 `standard_effect_draw_plan_covers_hit_radial_line_batch`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_hit_radial_line_batch --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 若要迁移 `hitLaserColor=99`，先扩展 light primitive 支持输入色，而不是丢掉 light。
+  2. 根据只读探索结果：`artilleryTrail`、`incendTrail`、`colorTrail`、`absorb` 可用现有 primitive 完整迁移；`airBubble` 需要 texture，爆炸系列需要 multi-pass。
+  3. `hitBulletSmall`/`hitBulletColor`/`hitSquaresColor`/`hitFuse` 仍应等 multi-pass 表达。

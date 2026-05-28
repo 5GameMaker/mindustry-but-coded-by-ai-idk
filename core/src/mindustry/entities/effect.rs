@@ -44,6 +44,10 @@ pub const FX_HIT_FLAME_BEAM_ID: i32 = 91;
 pub const FX_HIT_MELTDOWN_ID: i32 = 92;
 /// Upstream `Fx.hitMeltHeal` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_MELT_HEAL_ID: i32 = 93;
+/// Upstream `Fx.hitLaser` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_LASER_ID: i32 = 98;
+/// Upstream `Fx.despawn` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DESPAWN_ID: i32 = 100;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_ID: i32 = 28;
 /// Upstream `Fx.fallSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -195,6 +199,8 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "hitFlameBeam" => Some(FX_HIT_FLAME_BEAM_ID),
         "hitMeltdown" => Some(FX_HIT_MELTDOWN_ID),
         "hitMeltHeal" => Some(FX_HIT_MELT_HEAL_ID),
+        "hitLaser" => Some(FX_HIT_LASER_ID),
+        "despawn" => Some(FX_DESPAWN_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
@@ -315,6 +321,8 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_HIT_MELT_HEAL_ID => {
             Effect::with_lifetime(FX_HIT_MELT_HEAL_ID, 12.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_HIT_LASER_ID => Effect::with_lifetime(FX_HIT_LASER_ID, 8.0, DEFAULT_EFFECT_CLIP),
+        FX_DESPAWN_ID => Effect::with_lifetime(FX_DESPAWN_ID, 12.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
             Effect::with_lifetime(FX_UNIT_ASSEMBLE_ID, 70.0, DEFAULT_EFFECT_CLIP)
@@ -1408,6 +1416,64 @@ pub fn standard_effect_draw_plan(
                 fout,
                 fslope,
                 radius_base: 0.5,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 2.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_HIT_LASER_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: Some("Color.white"),
+            color_mid: None,
+            color_to: Some("Pal.heal"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fin * 5.0,
+            stroke: 0.5 + fout,
+            particles: None,
+            light_color: Some("Pal.heal"),
+            light_radius: 23.0,
+            light_opacity: fout * 0.7,
+        },
+        FX_DESPAWN_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: Some("Pal.lighterOrange"),
+            color_mid: None,
+            color_to: Some("Color.gray"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 1.0,
+            stroke: fout,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 7,
+                progress: None,
+                angle: Some(rotation),
+                angle_range: 40.0,
+                length: fin * 7.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
                 radius_fin_scale: 0.0,
                 radius_fout_scale: 2.0,
                 radius_fslope_scale: 0.0,
@@ -3909,6 +3975,8 @@ mod tests {
         );
         assert_eq!(standard_effect_id("hitMeltdown"), Some(FX_HIT_MELTDOWN_ID));
         assert_eq!(standard_effect_id("hitMeltHeal"), Some(FX_HIT_MELT_HEAL_ID));
+        assert_eq!(standard_effect_id("hitLaser"), Some(FX_HIT_LASER_ID));
+        assert_eq!(standard_effect_id("despawn"), Some(FX_DESPAWN_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("unitAssemble"),
@@ -4107,6 +4175,8 @@ mod tests {
         );
         assert_eq!(standard_effect(FX_HIT_MELTDOWN_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_MELT_HEAL_ID).unwrap().lifetime, 12.0);
+        assert_eq!(standard_effect(FX_HIT_LASER_ID).unwrap().lifetime, 8.0);
+        assert_eq!(standard_effect(FX_DESPAWN_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
@@ -4909,6 +4979,55 @@ mod tests {
         .unwrap();
         assert_eq!(hit_melt_heal.color_from, Some("Pal.heal"));
         assert_eq!(hit_melt_heal.line_render_primitives_from_seed().len(), 6);
+
+        let hit_laser = standard_effect_draw_plan(
+            Some(FX_HIT_LASER_ID as u16),
+            98,
+            3.0,
+            4.0,
+            30.0,
+            4.0,
+            8.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(hit_laser.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(hit_laser.color_from, Some("Color.white"));
+        assert_eq!(hit_laser.color_to, Some("Pal.heal"));
+        assert_eq!(hit_laser.color_mix, 0.5);
+        assert_eq!(hit_laser.radius, 2.5);
+        assert_eq!(hit_laser.stroke, 1.0);
+        assert_eq!(hit_laser.light_color, Some("Pal.heal"));
+        assert_eq!(hit_laser.light_radius, 23.0);
+        assert_eq!(hit_laser.light_opacity, 0.35);
+
+        let despawn = standard_effect_draw_plan(
+            Some(FX_DESPAWN_ID as u16),
+            100,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            despawn.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(despawn.color_from, Some("Pal.lighterOrange"));
+        assert_eq!(despawn.color_to, Some("Color.gray"));
+        assert_eq!(despawn.stroke, 0.5);
+        let despawn_particles = despawn.particles.unwrap();
+        assert_eq!(despawn_particles.count, 7);
+        assert_eq!(despawn_particles.angle, Some(30.0));
+        assert_eq!(despawn_particles.angle_range, 40.0);
+        assert_eq!(despawn_particles.length, 3.5);
+        assert_eq!(despawn_particles.radius_fout_scale, 2.0);
+        let despawn_lines = despawn.line_render_primitives_from_seed();
+        assert_eq!(despawn_lines.len(), 7);
+        assert!((despawn_lines[0].length - 2.0).abs() < 0.0001);
     }
 
     #[test]
