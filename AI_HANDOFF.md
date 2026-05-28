@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **20.1%**。
+- 当前总体迁移完成度：约 **20.2%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -8865,3 +8865,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. bleed / duplicate border / flush / UV 仍是后续主线；
   3. live graphics backend 仍未执行真实 GPU 绘制；
   4. 当前总迁移约 20.1%，仍未达到完整可玩，goal 绝不能标记 complete。
+
+---
+
+## 261. 最新闭环记录：TextureAtlas 读取 PNG IHDR 尺寸
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把真实 PNG 的宽高从文件边界接入 atlas request/region，替代真实文件场景下的固定 `1x1` 占位；虚拟路径或不存在文件仍保持 `1x1` 回退，避免破坏默认虚拟 atlas。
+- Rust 主改动：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `png_dimensions_from_path(...)`；
+    - 手写 PNG signature + IHDR 头部解析，只读取宽高，不引入额外 image/png crate；
+    - `TextureAtlasSpriteSourceDescriptor::to_region_request()` 会优先读取真实 PNG 尺寸，失败时回退 `1x1`；
+    - `TextureAtlasPlan::from_sprite_sources(...)` 改为通过 descriptor 的 region request 构建 region；
+    - 新增 `texture_atlas_plan_from_existing_png_source_paths_reads_dimensions`，用临时最小 PNG 验证 atlas region 宽高来自 IHDR。
+  - `README.md`
+    - 当前总体完成度更新为约 `20.2%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.359`。
+- 已跑验证：
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop default_texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. PNG 像素内容尚未解码，bleed/duplicate border 仍未实现；
+  2. MultiPacker 仍未按真实图片面积做完整 packing/flush；
+  3. desktop trace 还需要暴露/验证 atlas x/y/UV；
+  4. 当前总迁移约 20.2%，仍未达到完整可玩，goal 绝不能标记 complete。

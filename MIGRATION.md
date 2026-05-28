@@ -11519,3 +11519,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 PNG decode / atlas region 宽高仍未接入；
   - bleed、duplicate border、flush、UV 与 GPU texture upload 仍未实现；
   - 当前总体迁移约 20.1%，仍未达到完整可玩。
+
+### 12.359 TextureAtlas reads PNG IHDR dimensions for real source paths
+
+- 2026-05-29：继续推进 atlas 从“路径计划 + 1x1 占位”向真实资源链路靠近。本轮新增轻量 PNG IHDR 解析：当 `TextureAtlasSpriteSourceDescriptor::to_region_request()` 遇到真实存在的 PNG 文件路径时，会读取 signature + IHDR 中的 width/height，并将其写入 `RegionRequest` / `TextureAtlasRegion`；虚拟路径或不存在文件仍回退 `1x1`，保持默认 atlas 和测试资源清单稳定。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `packSprites(...)` 通过 `new Pixmap(file.readBytes())` 得到真实图像宽高；
+    - `MultiPacker.add(...)` 接收真实 `PixmapRegion`，不是固定 1x1。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `PNG_SIGNATURE` / `PNG_HEADER_LEN`；
+    - 新增 `png_dimensions_from_path(...)`；
+    - 新增内部 `png_dimensions_from_reader(...)`；
+    - `TextureAtlasSpriteSourceDescriptor::to_region_request()` 优先使用真实 PNG IHDR 尺寸；
+    - `TextureAtlasPlan::from_sprite_sources(...)` 改为从 descriptor 的 request 构建 region；
+    - 新增 `texture_atlas_plan_from_existing_png_source_paths_reads_dimensions`，验证真实临时 PNG 的 `32x16` 会进入 atlas region。
+- 已跑验证：
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `13 passed`
+  - `cargo test -p mindustry-desktop default_texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - 当前只读取 PNG 宽高，尚未解码像素；
+  - Java `Pixmap.bleed(...)`、texture scale、flush/updateTextureAtlas、GPU texture upload 仍未接入；
+  - atlas trace 仍未暴露 page 内 x/y/UV；
+  - 当前总体迁移约 20.2%，仍未达到完整可玩。

@@ -1,4 +1,8 @@
 use super::multi_packer::{MultiPackerPlan, PackPlan, PagePlan, PageSpec, PageType, RegionRequest};
+use std::{fs::File, io::Read, path::Path};
+
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
+const PNG_HEADER_LEN: usize = 24;
 
 impl PageType {
     /// 上游 `sprites*.png` 的默认页资源路径。
@@ -100,7 +104,8 @@ impl TextureAtlasSpriteSourceDescriptor {
     }
 
     pub fn to_region_request(&self) -> RegionRequest<TextureAtlasRegionSource<bool>> {
-        self.to_region_request_with_size(1, 1)
+        let (width, height) = png_dimensions_from_path(&self.source_path).unwrap_or((1, 1));
+        self.to_region_request_with_size(width, height)
     }
 
     pub fn to_region_request_with_size(
@@ -115,6 +120,29 @@ impl TextureAtlasSpriteSourceDescriptor {
             TextureAtlasRegionSource::new(self.source_path.clone(), self.r#override),
         )
     }
+}
+
+pub fn png_dimensions_from_path(path: impl AsRef<Path>) -> Option<(u32, u32)> {
+    let mut file = File::open(path.as_ref()).ok()?;
+    png_dimensions_from_reader(&mut file)
+}
+
+fn png_dimensions_from_reader(reader: &mut impl Read) -> Option<(u32, u32)> {
+    let mut header = [0u8; PNG_HEADER_LEN];
+    reader.read_exact(&mut header).ok()?;
+
+    if header[..8] != PNG_SIGNATURE {
+        return None;
+    }
+
+    let ihdr_len = u32::from_be_bytes(header[8..12].try_into().ok()?);
+    if ihdr_len != 13 || &header[12..16] != b"IHDR" {
+        return None;
+    }
+
+    let width = u32::from_be_bytes(header[16..20].try_into().ok()?);
+    let height = u32::from_be_bytes(header[20..24].try_into().ok()?);
+    (width > 0 && height > 0).then_some((width, height))
 }
 
 fn resolve_sprite_page_type(page_hint: &str, source_path: &str) -> PageType {
@@ -687,16 +715,7 @@ impl TextureAtlasPlan<bool> {
 
         for source in sources {
             let page_type = source.page_type();
-            let region = TextureAtlasRegion::new(
-                page_type,
-                source.atlas_name,
-                source.source_path,
-                0,
-                0,
-                1,
-                1,
-                source.r#override,
-            );
+            let region = TextureAtlasRegion::from_request(page_type, source.to_region_request());
             let _ = atlas.insert_or_replace_region(page_type, region);
         }
 
@@ -786,6 +805,29 @@ mod tests {
         );
     }
 
+    fn minimal_png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&PNG_SIGNATURE);
+        bytes.extend_from_slice(&13u32.to_be_bytes());
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+        bytes.extend_from_slice(&0u32.to_be_bytes());
+        bytes
+    }
+
+    fn temp_png_path(stem: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "mindustry-rust-{stem}-{}-{nanos}.png",
+            std::process::id()
+        ))
+    }
+
     #[test]
     fn texture_atlas_page_type_source_paths_match_mindustry_sprite_pages() {
         assert_eq!(PageType::Main.atlas_source_path(), "sprites.png");
@@ -873,6 +915,29 @@ mod tests {
         let rubble = plan.page(PageType::Rubble).get("crack").unwrap();
         assert_eq!(rubble.source_path, "sprites-override/rubble/crack.png");
         assert_eq!(rubble.payload, false);
+    }
+
+    #[test]
+    fn texture_atlas_plan_from_existing_png_source_paths_reads_dimensions() {
+        let path = temp_png_path("router-real-dim");
+        std::fs::write(&path, minimal_png_bytes(32, 16)).unwrap();
+        let source_path = path.to_string_lossy().replace('\\', "/");
+        let atlas_name = path
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_ascii_lowercase();
+
+        let plan = TextureAtlasPlan::from_source_paths([source_path.clone()]);
+        let region = plan.lookup(&atlas_name).unwrap().region;
+
+        assert_eq!(png_dimensions_from_path(&path), Some((32, 16)));
+        assert_eq!(region.source_path, source_path);
+        assert_eq!(region.width, 32);
+        assert_eq!(region.height, 16);
+
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
