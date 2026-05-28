@@ -4206,9 +4206,24 @@ impl GameRuntime {
         y: f32,
         rotation: f32,
     ) -> Option<i32> {
+        let bullet_id = self.alloc_client_local_bullet_id();
+        let bullet =
+            Self::build_unit_shoot_on_death_bullet(content, unit, bullet_name, x, y, rotation)?;
+        self.client_bullet_snapshot_entities
+            .insert(bullet_id, bullet);
+        Some(bullet_id)
+    }
+
+    pub fn build_unit_shoot_on_death_bullet(
+        content: &ContentLoader,
+        unit: &UnitComp,
+        bullet_name: &str,
+        x: f32,
+        y: f32,
+        rotation: f32,
+    ) -> Option<BulletComp> {
         let bullet_content = content.bullet_by_name(bullet_name)?;
         let spec = &bullet_content.spec;
-        let bullet_id = self.alloc_client_local_bullet_id();
         let mut bullet = BulletComp::new(
             bullet_content.id(),
             unit.team_id(),
@@ -4225,9 +4240,7 @@ impl GameRuntime {
             y: radians.sin() * spec.speed,
         };
         bullet.building_damage_multiplier = spec.building_damage_multiplier;
-        self.client_bullet_snapshot_entities
-            .insert(bullet_id, bullet);
-        Some(bullet_id)
+        Some(bullet)
     }
 
     fn unit_destroy_explosiveness(content: &ContentLoader, unit: &UnitComp) -> f32 {

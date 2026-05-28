@@ -9252,3 +9252,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `bullet_kill_shooter` 后续应由真实 BulletType/Weapon bullet 引用自动导出，而不是手动镜像字段；
   - flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
   - 当前总体迁移仍约 11% 左右，远未可玩。
+
+### 12.291 Server death shootOnDeath bullet snapshot smoke
+
+- 2026-05-28：继续对照 Java `UnitComp.destroy()` 的死亡武器分支，把上一节 client-only 本地 bullet materialize 推进到 server authoritative 最小链路：dead server unit 的 `shootOnDeath` 生成 `BulletComp`，进入 `EntitySnapshotCallPacket`，再由客户端 typed bullet snapshot materialize。
+- Java 依据：
+  - `UnitComp.destroy()` 中满足 `shootOnDeath && !(bullet.killShooter && mount.totalShots > 0)` 后，先将 `mount.reload = 0f`、`mount.shoot = true`，再调用 `mount.weapon.update(self(), mount)`；
+  - Rust 当前仍未完整移植 `Weapon.update(...)`，本节只打通 server/runtime/network/client snapshot 的最小闭环。
+- Rust 新增/变化：
+  - `server/src/lib.rs`
+    - `ServerLauncher` 新增 `server_bullets: BTreeMap<i32, BulletComp>` 与 `SERVER_RUNTIME_BULLET_ID_START`；
+    - dead unit 清理路径新增 `apply_server_unit_shoot_on_death(...)`，保留 Java `bullet_kill_shooter && total_shots > 0` gate；
+    - 死亡发射时同步设置 mount `reload = 0.0`、`shoot = true`、`allow_shoot_effects`，再复用 `GameRuntime::build_unit_shoot_on_death_bullet(...)` 构建 server bullet；
+    - `server_unit_entity_snapshot_packet(...)` 新增 `BULLET_CLASS_ID` 记录，使用现有 `type_io::write_bullet_sync(...)` 写出 owner/team/x/y/rotation/damage/lifetime/velocity 等字段。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `build_unit_shoot_on_death_bullet(...)` 保持为公共 helper，供 client destroy 与 server death path 复用。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-server server_update_spawns_death_bullet_snapshot_when_unit_shoots_on_death --lib`
+  - `cargo test -p mindustry-server server_update_skips_death_bullet_when_kill_shooter_and_total_shots_positive --lib`
+  - `cargo test -p mindustry-core game_runtime_unit_shoot_on_death_spawns_bullet_and_honors_kill_shooter_gate --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 仍不是完整 Java `Weapon.update(...)`，缺 shoot pattern、barrel counter、多枪管、ammo/eject/recoil/sound、连续武器与完整 server bullet lifecycle；
+  - `shootOnDeathEffect` 目前仍主要记录在 runtime event，服务端没有完整复刻效果广播消费；
+  - 需要继续防止 Java/Rust 混合联机路径下 UnitDestroy 本地 bullet 与服务端 EntitySnapshot bullet 产生重复表现；
+  - flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
+  - 当前总体迁移约 12%，远未可玩。

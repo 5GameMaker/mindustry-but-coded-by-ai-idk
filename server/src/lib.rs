@@ -6,7 +6,7 @@ use mindustry_core::mindustry::content::blocks::{
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
     GameRuntimePowerNodeConfigResult, GameRuntimeUnitBlockState,
-    GameRuntimeUnitCargoUnloadConfigureResult,
+    GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitShootOnDeathEvent,
 };
 use mindustry_core::mindustry::core::net_server::{
     PlayerPreviewPlanSource, PLAN_PREVIEW_SYNC_INTERVAL_MS,
@@ -28,7 +28,7 @@ use mindustry_core::mindustry::entities::{
     entity_class_id, standard_effect_id, units_can_create, EnergyFieldAction, EnergyFieldTarget,
     FireCreateResult, FireRules, FireTile, Fires, LiquidExplodeDepositPlan, PuddleDepositContext,
     PuddleLiquidInfo, PuddleTileView, PuddleUpdateEvent, Puddles, UnitCapRules, UnitCapTeam,
-    UnitCapType, UnitSpawnAbility, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
+    UnitCapType, UnitSpawnAbility, BULLET_CLASS_ID, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
 };
 use mindustry_core::mindustry::game::{vanilla_teams, Trigger};
 use mindustry_core::mindustry::input::{
@@ -78,6 +78,7 @@ use std::{
 };
 
 const SERVER_RUNTIME_UNIT_ID_START: i32 = 1_000_000;
+const SERVER_RUNTIME_BULLET_ID_START: i32 = 2_000_000;
 const CARGO_AI_EMPTY_WAIT_TIME: f32 = 60.0 * 2.0;
 const CARGO_AI_DROP_SPACING: f32 = 60.0 * 1.5;
 const CARGO_AI_RETARGET_INTERVAL: f32 = 40.0;
@@ -110,6 +111,7 @@ pub struct ServerLauncher {
     pub runtime_unit_cargo_unload_config_packets_forwarded: usize,
     pub server_preview_players: BTreeMap<i32, PlayerComp>,
     pub server_units: BTreeMap<i32, UnitComp>,
+    pub server_bullets: BTreeMap<i32, BulletComp>,
     pub runtime_request_item_packets_seen: usize,
     pub runtime_request_item_packets_accepted: usize,
     pub runtime_request_item_packets_rejected: usize,
@@ -181,6 +183,7 @@ impl ServerLauncher {
             runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
+            server_bullets: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -1528,6 +1531,16 @@ impl ServerLauncher {
             .saturating_add(1)
     }
 
+    fn next_server_runtime_bullet_id(&self) -> i32 {
+        self.server_bullets
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or(SERVER_RUNTIME_BULLET_ID_START - 1)
+            .max(SERVER_RUNTIME_BULLET_ID_START - 1)
+            .saturating_add(1)
+    }
+
     fn tick_server_unit_spawn_abilities(&mut self, delta_ticks: f32) -> io::Result<usize> {
         let parent_ids: Vec<i32> = self.server_units.keys().copied().collect();
         let team_registry = vanilla_teams();
@@ -2409,11 +2422,12 @@ impl ServerLauncher {
         let mut spawned = 0;
 
         for parent_id in dead_ids {
-            let Some(parent) = self.server_units.remove(&parent_id) else {
+            let Some(mut parent) = self.server_units.remove(&parent_id) else {
                 continue;
             };
             self.runtime
                 .note_unit_suicide_bomb_trigger(&self.content_loader, None, &parent);
+            self.apply_server_unit_shoot_on_death(&mut parent);
             self.runtime.note_unit_ability_death_events(&parent);
             self.runtime.note_unit_type_killed_event(&parent);
             if self.net_server.is_active() {
@@ -2451,6 +2465,58 @@ impl ServerLauncher {
         }
 
         Ok(spawned)
+    }
+
+    fn apply_server_unit_shoot_on_death(&mut self, parent: &mut UnitComp) -> usize {
+        let mut spawned = 0;
+        for weapon_index in 0..parent.weapons.mounts.len() {
+            let mount = &mut parent.weapons.mounts[weapon_index];
+            if !mount.weapon.shoot_on_death {
+                continue;
+            }
+            if mount.weapon.bullet_kill_shooter && mount.total_shots > 0 {
+                continue;
+            }
+
+            let override_effect = if !parent.has_target {
+                mount.weapon.shoot_on_death_effect.clone()
+            } else {
+                None
+            };
+            mount.reload = 0.0;
+            mount.shoot = true;
+            mount.allow_shoot_effects = override_effect.is_none();
+            let weapon_name = mount.weapon.name.clone();
+            let bullet_name = mount.weapon.bullet.clone();
+            self.runtime
+                .unit_shoot_on_death_events
+                .push(GameRuntimeUnitShootOnDeathEvent {
+                    unit_id: parent.id(),
+                    weapon_index,
+                    weapon_name,
+                    bullet: bullet_name.clone(),
+                    x: parent.x(),
+                    y: parent.y(),
+                    rotation: parent.rotation(),
+                    override_effect: override_effect.clone(),
+                    allow_shoot_effects: override_effect.is_none(),
+                });
+
+            let Some(bullet) = GameRuntime::build_unit_shoot_on_death_bullet(
+                &self.content_loader,
+                parent,
+                &bullet_name,
+                parent.x(),
+                parent.y(),
+                parent.rotation(),
+            ) else {
+                continue;
+            };
+            let bullet_id = self.next_server_runtime_bullet_id();
+            self.server_bullets.insert(bullet_id, bullet);
+            spawned += 1;
+        }
+        spawned
     }
 
     fn apply_server_liquid_explode_deposits(
@@ -3077,6 +3143,35 @@ impl ServerLauncher {
             data.extend_from_slice(&unit.id().to_be_bytes());
             data.push(type_id);
             type_io::write_unit_sync(&mut data, &self.content_loader, &unit.to_sync_wire())?;
+            amount += 1;
+        }
+        for (entity_id, bullet) in &self.server_bullets {
+            if amount == i16::MAX {
+                break;
+            }
+            if bullet.removed {
+                continue;
+            }
+            data.extend_from_slice(&entity_id.to_be_bytes());
+            data.push(BULLET_CLASS_ID);
+            type_io::write_bullet_sync(
+                &mut data,
+                &type_io::BulletSyncWire {
+                    collided: bullet.collided_ids.clone(),
+                    damage: bullet.damage,
+                    data: bullet.data.clone(),
+                    fdata: bullet.fdata,
+                    lifetime: bullet.lifetime,
+                    owner: bullet.owner,
+                    rotation: bullet.rotation,
+                    team: bullet.team,
+                    time: bullet.time,
+                    bullet_type_id: bullet.bullet_type_id,
+                    vel: bullet.velocity,
+                    x: bullet.x,
+                    y: bullet.y,
+                },
+            )?;
             amount += 1;
         }
         for (_tile, entry) in self.runtime.server_puddles.entries() {
@@ -4455,7 +4550,7 @@ mod tests {
         RequestDropPayloadCallPacket, RequestItemCallPacket, RequestUnitPayloadCallPacket,
         TileConfigCallPacket, TransferInventoryCallPacket,
     };
-    use mindustry_core::mindustry::r#type::{PayloadKey, PayloadSeq, Sector, UnitType};
+    use mindustry_core::mindustry::r#type::{PayloadKey, PayloadSeq, Sector, UnitType, Weapon};
     use mindustry_core::mindustry::vars::{AppContext, RuntimeMode, TILE_SIZE};
     use mindustry_core::mindustry::world::blocks::autotiler_direction;
     use mindustry_core::mindustry::world::blocks::campaign::LandingPadState;
@@ -5646,6 +5741,7 @@ mod tests {
             runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
+            server_bullets: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -5757,6 +5853,7 @@ mod tests {
             runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
+            server_bullets: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -6818,6 +6915,117 @@ mod tests {
     }
 
     #[test]
+    fn server_update_spawns_death_bullet_snapshot_when_unit_shoots_on_death() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6597).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut weapon = Weapon::new("death-gun");
+        weapon.bullet = "placeholder".into();
+        weapon.shoot_on_death = true;
+        let mut unit_type = UnitType::new(9101, "death-gunner");
+        unit_type.weapons.push(weapon);
+        let mut unit = UnitComp::new(92, unit_type, TeamId(2));
+        unit.set_pos(32.0, 48.0);
+        unit.set_rotation(90.0);
+        unit.health.kill();
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        assert!(!launcher.server_units.contains_key(&92));
+        assert_eq!(launcher.server_bullets.len(), 1);
+        assert_eq!(launcher.runtime.unit_shoot_on_death_events.len(), 1);
+        let shoot_event = &launcher.runtime.unit_shoot_on_death_events[0];
+        assert_eq!(shoot_event.unit_id, 92);
+        assert_eq!(shoot_event.weapon_index, 0);
+        assert_eq!(shoot_event.bullet, "placeholder");
+
+        let (&server_bullet_id, server_bullet) = launcher.server_bullets.iter().next().unwrap();
+        assert!(server_bullet_id >= super::SERVER_RUNTIME_BULLET_ID_START);
+        let placeholder = launcher
+            .content_loader
+            .bullet_by_name("placeholder")
+            .expect("baseline content should include placeholder bullet");
+        assert_eq!(server_bullet.bullet_type_id, placeholder.id());
+        assert_eq!(server_bullet.owner, EntityRef::new(92));
+        assert_eq!(server_bullet.team, TeamId(2));
+        assert_eq!(server_bullet.x, 32.0);
+        assert_eq!(server_bullet.y, 48.0);
+        assert_eq!(server_bullet.rotation, 90.0);
+        assert_eq!(server_bullet.damage, placeholder.spec.damage);
+        assert_eq!(server_bullet.lifetime, placeholder.spec.lifetime);
+        assert!(server_bullet.velocity.x.abs() < 0.0001);
+        assert!((server_bullet.velocity.y - placeholder.spec.speed).abs() < 0.0001);
+
+        let snapshot_packet = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|(_connection_id, packet, reliable)| {
+                if !*reliable {
+                    if let PacketKind::EntitySnapshotCallPacket(packet) = packet {
+                        return Some(packet.clone());
+                    }
+                }
+                None
+            })
+            .expect("death shootOnDeath bullet should be broadcast as entity snapshot");
+        assert_eq!(snapshot_packet.amount, 1);
+        let mut client_runtime = GameRuntime::default();
+        let report = client_runtime.apply_client_entity_snapshot_packet_with_content(
+            &launcher.content_loader,
+            snapshot_packet.amount,
+            &snapshot_packet.data,
+        );
+        assert_eq!(report.entity_parse_errors, 0);
+        assert_eq!(report.entity_typed_records_applied, 1);
+        let client_bullet = client_runtime
+            .client_bullet_snapshot_entities
+            .get(&server_bullet_id)
+            .expect("client should materialize server death bullet snapshot");
+        assert_eq!(client_bullet.bullet_type_id, server_bullet.bullet_type_id);
+        assert_eq!(client_bullet.owner, server_bullet.owner);
+        assert_eq!(client_bullet.team, server_bullet.team);
+        assert_eq!(client_bullet.x, server_bullet.x);
+        assert_eq!(client_bullet.y, server_bullet.y);
+        assert_eq!(client_bullet.rotation, server_bullet.rotation);
+        assert_eq!(client_bullet.damage, server_bullet.damage);
+        assert_eq!(client_bullet.lifetime, server_bullet.lifetime);
+        assert_eq!(client_bullet.velocity, server_bullet.velocity);
+        assert!(!client_bullet.removed);
+    }
+
+    #[test]
+    fn server_update_skips_death_bullet_when_kill_shooter_and_total_shots_positive() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut weapon = Weapon::new("death-gun");
+        weapon.bullet = "placeholder".into();
+        weapon.shoot_on_death = true;
+        weapon.bullet_kill_shooter = true;
+        let mut unit_type = UnitType::new(9102, "gated-death-gunner");
+        unit_type.weapons.push(weapon);
+        let mut unit = UnitComp::new(93, unit_type, TeamId(2));
+        unit.weapons.mounts[0].total_shots = 1;
+        unit.health.kill();
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        assert!(!launcher.server_units.contains_key(&93));
+        assert!(launcher.server_bullets.is_empty());
+        assert!(launcher.runtime.unit_shoot_on_death_events.is_empty());
+    }
+
+    #[test]
     fn server_update_ticks_renale_neoplasm_regen() {
         let mut launcher = ServerLauncher::new(Vec::new());
         launcher.runtime.state.set(GameStateState::Playing);
@@ -7670,6 +7878,7 @@ mod tests {
             runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
+            server_bullets: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -7854,6 +8063,7 @@ mod tests {
             runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
+            server_bullets: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -7975,6 +8185,7 @@ mod tests {
             runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
+            server_bullets: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -8108,6 +8319,7 @@ mod tests {
             runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
+            server_bullets: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -8260,6 +8472,7 @@ mod tests {
             runtime_unit_cargo_unload_config_packets_forwarded: 0,
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
+            server_bullets: BTreeMap::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
