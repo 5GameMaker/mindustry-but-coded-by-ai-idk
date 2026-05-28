@@ -6,7 +6,7 @@
 #[cfg(not(test))]
 use super::{
     BlockRendererPlan, FloorRenderPlan, FogFramePlan, MinimapOverlayPlan, OverlayRendererPlan,
-    RenderFramePlan,
+    PixelatorFramePlan, RenderFramePlan,
 };
 
 #[cfg(test)]
@@ -64,12 +64,18 @@ mod test_support {
     pub struct MinimapOverlayPlan {
         pub commands: Vec<()>,
     }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct PixelatorFramePlan {
+        pub buffer_width: i32,
+        pub buffer_height: i32,
+    }
 }
 
 #[cfg(test)]
 use test_support::{
     BlockRendererPlan, FloorRenderPlan, FogFramePlan, MinimapOverlayPlan, OverlayRendererPlan,
-    RenderFramePlan,
+    PixelatorFramePlan, RenderFramePlan,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +101,8 @@ pub struct GraphicsFrameStats {
     pub overlay_build_placements: usize,
     pub overlay_commands: usize,
     pub minimap_commands: usize,
+    pub pixelator_frames: usize,
+    pub pixelator_buffer_pixels: usize,
     pub total_units: usize,
 }
 
@@ -120,7 +128,9 @@ impl GraphicsFrameStats {
             + self.overlay_core_edges
             + self.overlay_build_placements
             + self.overlay_commands
-            + self.minimap_commands;
+            + self.minimap_commands
+            + self.pixelator_frames
+            + self.pixelator_buffer_pixels;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -152,6 +162,8 @@ impl Default for GraphicsFrameStats {
             overlay_build_placements: 0,
             overlay_commands: 0,
             minimap_commands: 0,
+            pixelator_frames: 0,
+            pixelator_buffer_pixels: 0,
             total_units: 0,
         }
     }
@@ -285,6 +297,24 @@ impl GraphicsFrameStatsSource for MinimapOverlayPlan {
     }
 }
 
+#[cfg(not(test))]
+impl GraphicsFrameStatsSource for PixelatorFramePlan {
+    fn contribute_graphics_stats(&self, stats: &mut GraphicsFrameStats) {
+        stats.pixelator_frames += 1;
+        stats.pixelator_buffer_pixels +=
+            (self.buffer_width.max(0) as usize) * (self.buffer_height.max(0) as usize);
+    }
+}
+
+#[cfg(test)]
+impl GraphicsFrameStatsSource for PixelatorFramePlan {
+    fn contribute_graphics_stats(&self, stats: &mut GraphicsFrameStats) {
+        stats.pixelator_frames += 1;
+        stats.pixelator_buffer_pixels +=
+            (self.buffer_width.max(0) as usize) * (self.buffer_height.max(0) as usize);
+    }
+}
+
 fn accumulate_plan<T: GraphicsFrameStatsSource>(slot: &Option<T>, stats: &mut GraphicsFrameStats) {
     if let Some(plan) = slot {
         stats.present_plans += 1;
@@ -300,6 +330,7 @@ pub struct GraphicsFrameBundle<
     G = FogFramePlan,
     O = OverlayRendererPlan,
     M = MinimapOverlayPlan,
+    P = PixelatorFramePlan,
 > {
     pub render_frame: Option<R>,
     pub block_renderer: Option<B>,
@@ -307,10 +338,11 @@ pub struct GraphicsFrameBundle<
     pub fog_frame: Option<G>,
     pub overlay_renderer: Option<O>,
     pub minimap_overlay: Option<M>,
+    pub pixelator: Option<P>,
     pub stats: GraphicsFrameStats,
 }
 
-impl<R, B, F, G, O, M> Default for GraphicsFrameBundle<R, B, F, G, O, M> {
+impl<R, B, F, G, O, M, P> Default for GraphicsFrameBundle<R, B, F, G, O, M, P> {
     fn default() -> Self {
         Self {
             render_frame: None,
@@ -319,18 +351,19 @@ impl<R, B, F, G, O, M> Default for GraphicsFrameBundle<R, B, F, G, O, M> {
             fog_frame: None,
             overlay_renderer: None,
             minimap_overlay: None,
+            pixelator: None,
             stats: GraphicsFrameStats::default(),
         }
     }
 }
 
-impl<R, B, F, G, O, M> GraphicsFrameBundle<R, B, F, G, O, M> {
+impl<R, B, F, G, O, M, P> GraphicsFrameBundle<R, B, F, G, O, M, P> {
     pub fn into_stats(self) -> GraphicsFrameStats {
         self.stats
     }
 }
 
-impl<R, B, F, G, O, M> GraphicsFrameBundle<R, B, F, G, O, M>
+impl<R, B, F, G, O, M, P> GraphicsFrameBundle<R, B, F, G, O, M, P>
 where
     R: GraphicsFrameStatsSource,
     B: GraphicsFrameStatsSource,
@@ -338,6 +371,7 @@ where
     G: GraphicsFrameStatsSource,
     O: GraphicsFrameStatsSource,
     M: GraphicsFrameStatsSource,
+    P: GraphicsFrameStatsSource,
 {
     pub fn rebuild_stats(&mut self) -> &mut Self {
         let mut stats = GraphicsFrameStats::default();
@@ -348,6 +382,7 @@ where
         accumulate_plan(&self.fog_frame, &mut stats);
         accumulate_plan(&self.overlay_renderer, &mut stats);
         accumulate_plan(&self.minimap_overlay, &mut stats);
+        accumulate_plan(&self.pixelator, &mut stats);
 
         stats.recalculate_total();
         self.stats = stats;
@@ -361,6 +396,7 @@ where
             && self.fog_frame.is_none()
             && self.overlay_renderer.is_none()
             && self.minimap_overlay.is_none()
+            && self.pixelator.is_none()
             && self.stats.is_empty()
     }
 }
@@ -373,11 +409,12 @@ pub struct FrameComposer<
     G = FogFramePlan,
     O = OverlayRendererPlan,
     M = MinimapOverlayPlan,
+    P = PixelatorFramePlan,
 > {
-    bundle: GraphicsFrameBundle<R, B, F, G, O, M>,
+    bundle: GraphicsFrameBundle<R, B, F, G, O, M, P>,
 }
 
-impl<R, B, F, G, O, M> Default for FrameComposer<R, B, F, G, O, M> {
+impl<R, B, F, G, O, M, P> Default for FrameComposer<R, B, F, G, O, M, P> {
     fn default() -> Self {
         Self {
             bundle: GraphicsFrameBundle::default(),
@@ -385,16 +422,16 @@ impl<R, B, F, G, O, M> Default for FrameComposer<R, B, F, G, O, M> {
     }
 }
 
-impl<R, B, F, G, O, M> FrameComposer<R, B, F, G, O, M> {
+impl<R, B, F, G, O, M, P> FrameComposer<R, B, F, G, O, M, P> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn bundle(&self) -> &GraphicsFrameBundle<R, B, F, G, O, M> {
+    pub fn bundle(&self) -> &GraphicsFrameBundle<R, B, F, G, O, M, P> {
         &self.bundle
     }
 
-    pub fn bundle_mut(&mut self) -> &mut GraphicsFrameBundle<R, B, F, G, O, M> {
+    pub fn bundle_mut(&mut self) -> &mut GraphicsFrameBundle<R, B, F, G, O, M, P> {
         &mut self.bundle
     }
 
@@ -403,7 +440,7 @@ impl<R, B, F, G, O, M> FrameComposer<R, B, F, G, O, M> {
     }
 }
 
-impl<R, B, F, G, O, M> FrameComposer<R, B, F, G, O, M>
+impl<R, B, F, G, O, M, P> FrameComposer<R, B, F, G, O, M, P>
 where
     R: GraphicsFrameStatsSource,
     B: GraphicsFrameStatsSource,
@@ -411,6 +448,7 @@ where
     G: GraphicsFrameStatsSource,
     O: GraphicsFrameStatsSource,
     M: GraphicsFrameStatsSource,
+    P: GraphicsFrameStatsSource,
 {
     pub fn rebuild_stats(&mut self) -> &mut Self {
         self.bundle.rebuild_stats();
@@ -447,7 +485,12 @@ where
         self.rebuild_stats()
     }
 
-    pub fn finish(mut self) -> GraphicsFrameBundle<R, B, F, G, O, M> {
+    pub fn set_pixelator(&mut self, plan: P) -> &mut Self {
+        self.bundle.pixelator = Some(plan);
+        self.rebuild_stats()
+    }
+
+    pub fn finish(mut self) -> GraphicsFrameBundle<R, B, F, G, O, M, P> {
         self.bundle.rebuild_stats();
         self.bundle
     }
@@ -461,11 +504,12 @@ pub struct RenderBridge<
     G = FogFramePlan,
     O = OverlayRendererPlan,
     M = MinimapOverlayPlan,
+    P = PixelatorFramePlan,
 > {
-    composer: FrameComposer<R, B, F, G, O, M>,
+    composer: FrameComposer<R, B, F, G, O, M, P>,
 }
 
-impl<R, B, F, G, O, M> Default for RenderBridge<R, B, F, G, O, M> {
+impl<R, B, F, G, O, M, P> Default for RenderBridge<R, B, F, G, O, M, P> {
     fn default() -> Self {
         Self {
             composer: FrameComposer::default(),
@@ -473,20 +517,20 @@ impl<R, B, F, G, O, M> Default for RenderBridge<R, B, F, G, O, M> {
     }
 }
 
-impl<R, B, F, G, O, M> RenderBridge<R, B, F, G, O, M> {
+impl<R, B, F, G, O, M, P> RenderBridge<R, B, F, G, O, M, P> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn composer(&self) -> &FrameComposer<R, B, F, G, O, M> {
+    pub fn composer(&self) -> &FrameComposer<R, B, F, G, O, M, P> {
         &self.composer
     }
 
-    pub fn composer_mut(&mut self) -> &mut FrameComposer<R, B, F, G, O, M> {
+    pub fn composer_mut(&mut self) -> &mut FrameComposer<R, B, F, G, O, M, P> {
         &mut self.composer
     }
 
-    pub fn bundle(&self) -> &GraphicsFrameBundle<R, B, F, G, O, M> {
+    pub fn bundle(&self) -> &GraphicsFrameBundle<R, B, F, G, O, M, P> {
         self.composer.bundle()
     }
 
@@ -495,7 +539,7 @@ impl<R, B, F, G, O, M> RenderBridge<R, B, F, G, O, M> {
     }
 }
 
-impl<R, B, F, G, O, M> RenderBridge<R, B, F, G, O, M>
+impl<R, B, F, G, O, M, P> RenderBridge<R, B, F, G, O, M, P>
 where
     R: GraphicsFrameStatsSource,
     B: GraphicsFrameStatsSource,
@@ -503,6 +547,7 @@ where
     G: GraphicsFrameStatsSource,
     O: GraphicsFrameStatsSource,
     M: GraphicsFrameStatsSource,
+    P: GraphicsFrameStatsSource,
 {
     pub fn rebuild_stats(&mut self) -> &mut Self {
         self.composer.rebuild_stats();
@@ -539,7 +584,12 @@ where
         self
     }
 
-    pub fn finish(self) -> GraphicsFrameBundle<R, B, F, G, O, M> {
+    pub fn set_pixelator(&mut self, plan: P) -> &mut Self {
+        self.composer.set_pixelator(plan);
+        self
+    }
+
+    pub fn finish(self) -> GraphicsFrameBundle<R, B, F, G, O, M, P> {
         self.composer.finish()
     }
 }
@@ -622,6 +672,13 @@ mod tests {
         }
     }
 
+    fn pixelator_plan(width: i32, height: i32) -> PixelatorFramePlan {
+        PixelatorFramePlan {
+            buffer_width: width,
+            buffer_height: height,
+        }
+    }
+
     fn total_units(stats: &GraphicsFrameStats) -> usize {
         stats.present_plans
             + stats.render_passes
@@ -644,6 +701,8 @@ mod tests {
             + stats.overlay_build_placements
             + stats.overlay_commands
             + stats.minimap_commands
+            + stats.pixelator_frames
+            + stats.pixelator_buffer_pixels
     }
 
     #[test]
@@ -666,7 +725,8 @@ mod tests {
             .set_floor_renderer(floor_plan(7, 8, 9, 10))
             .set_fog_frame(fog_plan(11, 12, true, false))
             .set_overlay_renderer(overlay_plan(13, 14, 15))
-            .set_minimap_overlay(minimap_plan(16));
+            .set_minimap_overlay(minimap_plan(16))
+            .set_pixelator(pixelator_plan(17, 18));
 
         let bundle = composer.finish();
 
@@ -676,8 +736,9 @@ mod tests {
         assert!(bundle.fog_frame.is_some());
         assert!(bundle.overlay_renderer.is_some());
         assert!(bundle.minimap_overlay.is_some());
+        assert!(bundle.pixelator.is_some());
 
-        assert_eq!(bundle.stats.present_plans, 6);
+        assert_eq!(bundle.stats.present_plans, 7);
         assert_eq!(bundle.stats.render_passes, 2);
         assert_eq!(bundle.stats.render_commands, 3);
         assert_eq!(bundle.stats.block_tile_passes, 2);
@@ -698,10 +759,12 @@ mod tests {
         assert_eq!(bundle.stats.overlay_build_placements, 14);
         assert_eq!(bundle.stats.overlay_commands, 15);
         assert_eq!(bundle.stats.minimap_commands, 16);
+        assert_eq!(bundle.stats.pixelator_frames, 1);
+        assert_eq!(bundle.stats.pixelator_buffer_pixels, 17 * 18);
         assert_eq!(bundle.stats.total_units, total_units(&bundle.stats));
 
         let stats = bundle.into_stats();
-        assert_eq!(stats.present_plans, 6);
+        assert_eq!(stats.present_plans, 7);
         assert_eq!(stats.render_passes, 2);
         assert_eq!(stats.render_commands, 3);
         assert_eq!(stats.block_tile_passes, 2);
@@ -722,6 +785,8 @@ mod tests {
         assert_eq!(stats.overlay_build_placements, 14);
         assert_eq!(stats.overlay_commands, 15);
         assert_eq!(stats.minimap_commands, 16);
+        assert_eq!(stats.pixelator_frames, 1);
+        assert_eq!(stats.pixelator_buffer_pixels, 17 * 18);
         assert_eq!(stats.total_units, total_units(&stats));
     }
 
@@ -741,5 +806,24 @@ mod tests {
         assert_eq!(bundle.stats.block_tile_passes, 1);
         assert_eq!(bundle.stats.present_plans, 2);
         assert_eq!(bundle.stats.total_units, total_units(&bundle.stats));
+    }
+
+    #[test]
+    fn bridge_carries_pixelator_as_frame_wrapper_slot() {
+        let mut bridge: RenderBridge = RenderBridge::new();
+
+        bridge
+            .set_render_frame(render_frame(&[1]))
+            .set_pixelator(pixelator_plan(320, 240));
+
+        let bundle = bridge.finish();
+
+        assert!(bundle.render_frame.is_some());
+        assert!(bundle.pixelator.is_some());
+        assert_eq!(bundle.stats.present_plans, 2);
+        assert_eq!(bundle.stats.pixelator_frames, 1);
+        assert_eq!(bundle.stats.pixelator_buffer_pixels, 320 * 240);
+        assert_eq!(bundle.stats.render_passes, 1);
+        assert_eq!(bundle.stats.render_commands, 1);
     }
 }

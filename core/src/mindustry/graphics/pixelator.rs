@@ -78,6 +78,12 @@ pub struct PixelatorFramePlan {
     pub restore: PixelatorRestorePlan,
 }
 
+impl PixelatorFramePlan {
+    pub const fn restore_plan(&self) -> PixelatorRestorePlan {
+        self.restore
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PixelatorState {
     pub last_camera_x: f32,
@@ -232,5 +238,27 @@ mod tests {
         assert_eq!(plan.pixel_scale, 3.0);
         assert_eq!(plan.buffer_width, 200);
         assert_eq!(plan.buffer_height, 100);
+    }
+
+    #[test]
+    fn pixelator_frame_plan_exposes_restore_without_becoming_draw_pass() {
+        let mut state = PixelatorState::default();
+        let input = PixelatorInput::new(
+            true,
+            2.0,
+            1.0,
+            false,
+            800,
+            600,
+            PixelatorCamera::new(10.2, 20.7, 320.0, 240.0),
+        );
+
+        let plan = state.draw_pixelate_plan(input).unwrap();
+        let restore = plan.restore_plan();
+
+        assert_eq!(restore.layer, Layer::END);
+        assert_eq!(restore.camera_x, 10.2);
+        assert_eq!(restore.camera_y, 20.7);
+        assert_eq!(restore.renderer_scale, 2.0);
     }
 }
