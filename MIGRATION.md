@@ -10961,3 +10961,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - minimap/floor 已有 backend plan，但 desktop/backend 仍未实际消费上传帧和 chunk batch；
   - `ShaderDispatchFrame` 仍需接入 `DesktopGraphicsRenderer::render_graphics_frame(...)` 的真实执行通道；
   - 当前总体迁移约 18.3%，仍未达到完整可玩。
+
+### 12.343 Sprite request flow and first render-command consumption
+
+- 2026-05-29：继续把渲染 P0 从“计划层”推进到“主渲染命令链”。本轮把 mod sprite packing 请求升级为可供 atlas 后端消费的数据结构，把 `BlockRendererPlan` 转成 `RenderCommand::DrawSprite`，并让 desktop/headless renderer 记录实际遍历的 bundle/render-frame/shader-dispatch 摘要。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mod.java`
+    - `packSprites(MultiPacker packer)` 是 mod 自定义贴图进入 atlas 的入口；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/Block.java`
+    - `drawBase(...)` / `drawPlanRegion(...)` 最终落到 atlas region draw；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/draw/DrawBlock.java`
+    - block/building drawer 最终产出 sprite region draw；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - renderer/backend 应消费 frame command，而不是只保留静态 plan。
+- Rust 新增/接入：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `SpritePackRequest { source_path, atlas_name, page_hint, override }`；
+    - `SpritePacker` 保留 `add_texture(...)` / `textures()` 兼容 API，同时新增 `add_request(...)` / `requests()`。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `BlockRendererPlan::to_sprite_render_passes(tile_size_world)`；
+    - tile/building base、cracks、team overlay、status、light 现在可进入 `RenderPass` / `RenderCommand::DrawSprite`；
+    - 复杂 drawer 仍待后续按 Java `DrawBlock` 规则精细解析。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsExecutionSummary`；
+    - `HeadlessDesktopGraphicsRenderer` 现在记录 render pass、command、DrawSprite、shader dispatch apply 与 bundle slot 消费摘要；
+    - 该摘要不污染 `GraphicsFrameStats`，shader dispatch 仍保持 side-channel。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core modsys --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `8 passed`
+  - `cargo test -p mindustry-core block_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `8 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - `BlockRendererPlan::to_sprite_render_passes(...)` 尚未由 `DesktopLauncher::graphics_frame_for_render(...)` 自动并入 world `RenderFramePlan`；
+  - atlas request/registry 还未接 mod sprite scan、PNG decode、bleed/outline、GPU upload；
+  - desktop execution summary 只是 headless 遍历摘要，不是真实 GPU backend；
+  - 当前总体迁移约 18.5%，仍未达到完整可玩。
