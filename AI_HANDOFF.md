@@ -8222,3 +8222,42 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一闭环建议 `atrax`，需要新增/确认 `LiquidBulletType` 的 liquid 记录位；
   3. `crawler` 目前仍是 content seam，`SuicideAI`、death weapon trigger、splash damage 与 `kill_shooter` runtime 尚未完整实现；
   4. 当前总迁移约 13.15%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 242. 最新闭环记录：UnitTypes atrax LiquidBulletType slag content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `atrax` 的 `atrax-weapon` 与 `LiquidBulletType(Liquids.slag)` 回填进 Rust content registry，并保留来源液体身份。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:691-731`
+  - unit：`drag=0.4`、`immunities={burning,melting}`、`stepSound=walkerStepSmall`、`shadowElevation=0.2` 等字段相对旧 Rust 内容缺失；
+  - weapon：`atrax-weapon`，`top=false`、`shootY=3`、`reload=9`、`ejectEffect=none`、`recoil=1`、`x=7`、`shootSound=shootAtrax`；
+  - bullet：`LiquidBulletType(Liquids.slag)`，`damage=13`、`speed=2.5`、`drag=0.009`、`shootEffect=shootSmall`、`lifetime=57`、`collidesAir=false`，并继承 LiquidBulletType 默认 puddle/orb/boil/status/light 字段。
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `liquid: String`；
+    - shared `liquid_bullet(...)` 写入来源液体名与 `light_opacity`；
+    - 扩展 `liquid_and_power_turrets_keep_upstream_subset` / `heavy_liquid_turrets_keep_upstream_subset`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `liquid_bullet("slag")` helper；
+    - 新增 `atrax_slag`；
+    - 更新 bullet load order；
+    - 新增 `atrax_slag_matches_java_liquid_bullet_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `atrax` 补齐 Java 缺失字段；
+    - 新增 `atrax-weapon`，引用 `atrax_slag`；
+    - 新增 `atrax_weapon_uses_slag_liquid_bullet_profile`。
+  - `MIGRATION.md`
+    - 新增 `12.316`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core atrax_slag_matches_java_liquid_bullet_profile --lib`
+  - `cargo test -p mindustry-core atrax_weapon_uses_slag_liquid_bullet_profile --lib`
+  - `cargo test -p mindustry-core liquid_and_power_turrets_keep_upstream_subset --lib`
+  - `cargo test -p mindustry-core heavy_liquid_turrets_keep_upstream_subset --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一闭环建议 `spiroct`：需要新增 `BulletKind::Sap` 和 `BulletSpec.sap_strength`，两把 SapBulletType 不能共用一个 spec；
+  3. `LiquidBulletType` 的 puddle deposit、boil/vapor、extinguish、draw runtime 未完成；
+  4. 当前总迁移约 13.2%，远未可玩，goal 绝不能标记 complete。

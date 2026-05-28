@@ -627,6 +627,7 @@ pub struct BulletSpec {
     pub to_color: String,
     pub light_color: String,
     pub colors: Vec<String>,
+    pub liquid: String,
     pub homing_power: f32,
     pub homing_delay: f32,
     pub homing_range: f32,
@@ -789,6 +790,7 @@ impl BulletSpec {
             to_color: String::new(),
             light_color: "powerLight".into(),
             colors: Vec::new(),
+            liquid: String::new(),
             homing_power: 0.0,
             homing_delay: 0.0,
             homing_range: 0.0,
@@ -6701,6 +6703,7 @@ fn rgba_name(color: u32) -> String {
 
 fn liquid_bullet(liquids: &[Liquid], name: &str) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::Liquid, 3.5, 0.0);
+    bullet.liquid = name.into();
     bullet.ammo_multiplier = 1.0;
     bullet.lifetime = 34.0;
     bullet.status_duration = 60.0 * 2.0;
@@ -6722,6 +6725,7 @@ fn liquid_bullet(liquids: &[Liquid], name: &str) -> BulletSpec {
         bullet.status = liquid.effect.clone().unwrap_or_else(|| "none".into());
         bullet.hit_color = rgba_name(liquid.color_rgba);
         bullet.light_color = rgba_name(liquid.light_color_rgba);
+        bullet.light_opacity = (liquid.light_color_rgba & 0xff) as f32 / 255.0;
     }
 
     bullet
@@ -15697,14 +15701,17 @@ mod tests {
         assert_eq!(water.puddle_size, 6.0);
         assert_eq!(water.orb_size, 3.0);
         assert_eq!(water.boil_time, 5.0);
+        assert_eq!(water.liquid, "water");
         assert_eq!(water.status, "wet");
         assert_eq!(water.hit_color, "596ab8ff");
 
         let slag = &liquid_ammo_for(wave, liquid_content_id("slag")).bullet;
         assert_eq!(slag.damage, 4.0);
         assert_eq!(slag.drag, 0.01);
+        assert_eq!(slag.liquid, "slag");
         assert_eq!(slag.status, "melting");
         assert_eq!(slag.light_color, "f0511d66");
+        assert_eq!(slag.light_opacity, 0.4);
 
         let cryofluid = &liquid_ammo_for(wave, liquid_content_id("cryofluid")).bullet;
         assert_eq!(cryofluid.drag, 0.01);
@@ -18551,6 +18558,7 @@ mod tests {
         assert_eq!(slag.drag, 0.001);
         assert_eq!(slag.ammo_multiplier, 0.4);
         assert_eq!(slag.status_duration, 60.0 * 4.0);
+        assert_eq!(slag.liquid, "slag");
         assert_eq!(slag.status, "melting");
 
         let cryofluid = &liquid_ammo_for(tsunami, liquid_content_id("cryofluid")).bullet;

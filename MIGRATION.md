@@ -10030,3 +10030,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `crawler_explosion` 目前已作为 content preset 进入 registry，但爆炸伤害、建筑倍率、命中特效和死亡触发时序仍是后续 runtime 闭环；
   - 下一步建议继续 `atrax`，先补 `LiquidBulletType(Liquids.slag)` 的 liquid 记录位，再回填 atrax weapon；
   - 当前总体迁移约 13.15%，远未可玩。
+
+### 12.316 UnitTypes atrax LiquidBulletType slag content seam
+
+- 2026-05-28：继续回填 `atrax` 的 `atrax-weapon` 与 `LiquidBulletType(Liquids.slag)`。本闭环补出 `BulletSpec.liquid` 记录位，避免普通 bullet content 中丢失 `LiquidBulletType` 绑定的来源液体身份，并同步让 block liquid turret ammo helper 写入该字段。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:691-731`
+  - unit：`speed = 0.6f`、`drag = 0.4f`、`hitSize = 13f`、`rotateSpeed = 3f`、`targetAir = false`、`health = 600`、`immunities = {burning, melting}`、`stepSound = Sounds.walkerStepSmall`、`stepSoundPitch = 1f`、`stepSoundVolume = 0.25f`、`legCount = 4`、`legLength = 9f`、`legForwardScl = 0.6f`、`legMoveSpace = 1.4f`、`hovering = true`、`armor = 3f`、`shadowElevation = 0.2f`、`groundLayer = Layer.legUnit - 1f`
+  - weapon：`new Weapon("atrax-weapon")`，`top = false`、`shootY = 3f`、`reload = 9f`、`ejectEffect = Fx.none`、`recoil = 1f`、`x = 7f`、`shootSound = Sounds.shootAtrax`
+  - bullet：`new LiquidBulletType(Liquids.slag)`，覆盖 `damage = 13`、`speed = 2.5f`、`drag = 0.009f`、`shootEffect = Fx.shootSmall`、`lifetime = 57f`、`collidesAir = false`；LiquidBulletType 默认携带 `ammoMultiplier = 1f`、`statusDuration = 120f`、`despawnEffect = Fx.none`、`hitEffect = Fx.hitLiquid`、`smokeEffect = Fx.none`、`knockback = 0.55f`、`displayAmmoMultiplier = false`、`puddleSize = 6f`、`orbSize = 3f`、`boilTime = 5f`，并从 `slag` 写入 `status = melting`、`hitColor = ffa166ff`、`lightColor = f0511d66`、`lightOpacity = 0.4`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `liquid: String`，默认空字符串；
+    - `liquid_bullet(...)` 现在写入来源液体名，并按液体 `light_color_rgba` 的 alpha 同步 `light_opacity`；
+    - 扩展 liquid turret 测试，验证 `water/slag` ammo bullet 保留 `liquid` 身份。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增本地 `liquid_bullet("slag")` helper；
+    - 新增具名 bullet preset `atrax_slag`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `atrax_slag_matches_java_liquid_bullet_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `atrax` 补齐 `drag`、双免疫、`step_sound`、`shadow_elevation`；
+    - `atrax` 注册 `atrax-weapon`，引用 `bullet = "atrax_slag"`；
+    - 新增 `atrax_weapon_uses_slag_liquid_bullet_profile`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core atrax_slag_matches_java_liquid_bullet_profile --lib`
+  - `cargo test -p mindustry-core atrax_weapon_uses_slag_liquid_bullet_profile --lib`
+  - `cargo test -p mindustry-core liquid_and_power_turrets_keep_upstream_subset --lib`
+  - `cargo test -p mindustry-core heavy_liquid_turrets_keep_upstream_subset --lib`
+- 仍未完成：
+  - `LiquidBulletType` 的真实 puddle deposit、boil/vapor、extinguish 与 liquid draw runtime 还未完整接入；
+  - `atrax_slag` 目前进入 content registry，并通过 unit weapon 引用，但服务端/客户端真实液体弹命中环境交互仍是后续 runtime 闭环；
+  - 下一步建议继续 `spiroct`，补 `BulletKind::Sap` 与 `BulletSpec.sap_strength` 后回填两把 SapBulletType 武器；
+  - 当前总体迁移约 13.2%，远未可玩。

@@ -385,10 +385,14 @@ pub fn load() -> Vec<UnitType> {
         }),
         unit(&mut next_id, "atrax", UnitKind::Standard, |u| {
             u.speed = 0.6;
+            u.drag = 0.4;
             u.hit_size = 13.0;
             u.rotate_speed = 3.0;
             u.target_air = false;
             u.health = 600.0;
+            u.immunities.push("burning".into());
+            u.immunities.push("melting".into());
+            u.step_sound = "walkerStepSmall".into();
             u.step_sound_pitch = 1.0;
             u.step_sound_volume = 0.25;
             u.leg_count = 4;
@@ -397,8 +401,19 @@ pub fn load() -> Vec<UnitType> {
             u.leg_move_space = 1.4;
             u.hovering = true;
             u.armor = 3.0;
+            u.shadow_elevation = 0.2;
             u.ground_layer = LAYER_LEG_UNIT - 1.0;
             u.allow_leg_step = true;
+            let mut weapon = Weapon::new("atrax-weapon");
+            weapon.top = false;
+            weapon.shoot_y = 3.0;
+            weapon.reload = 9.0;
+            weapon.eject_effect = "none".into();
+            weapon.recoil = 1.0;
+            weapon.x = 7.0;
+            weapon.shoot_sound = "shootAtrax".into();
+            weapon.bullet = "atrax_slag".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "spiroct", UnitKind::Standard, |u| {
             u.speed = 0.54;
@@ -1839,6 +1854,41 @@ mod tests {
         assert_eq!(bullet.spec.splash_damage, 80.0);
         assert!(bullet.spec.kill_shooter);
         assert!(!bullet.spec.collides);
+    }
+
+    #[test]
+    fn atrax_weapon_uses_slag_liquid_bullet_profile() {
+        let units = load();
+        let atrax = by_name(&units, "atrax");
+        assert_eq!(atrax.drag, 0.4);
+        assert!(atrax.immunities.iter().any(|entry| entry == "burning"));
+        assert!(atrax.immunities.iter().any(|entry| entry == "melting"));
+        assert_eq!(atrax.step_sound, "walkerStepSmall");
+        assert_eq!(atrax.shadow_elevation, 0.2);
+        assert_eq!(atrax.ground_layer, LAYER_LEG_UNIT - 1.0);
+        assert_eq!(atrax.weapons.len(), 1);
+
+        let weapon = &atrax.weapons[0];
+        assert_eq!(weapon.name, "atrax-weapon");
+        assert!(!weapon.top);
+        assert_eq!(weapon.shoot_y, 3.0);
+        assert_eq!(weapon.reload, 9.0);
+        assert_eq!(weapon.eject_effect, "none");
+        assert_eq!(weapon.recoil, 1.0);
+        assert_eq!(weapon.x, 7.0);
+        assert_eq!(weapon.shoot_sound, "shootAtrax");
+        assert_eq!(weapon.bullet, "atrax_slag");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing atrax bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Liquid);
+        assert_eq!(bullet.spec.liquid, "slag");
+        assert_eq!(bullet.spec.damage, 13.0);
+        assert_eq!(bullet.spec.speed, 2.5);
+        assert!(!bullet.spec.collides_air);
     }
 
     #[test]

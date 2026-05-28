@@ -259,6 +259,14 @@ pub fn load() -> Vec<BulletContent> {
     crawler_explosion.hittable = false;
     crawler_explosion.collides_air = true;
 
+    let mut atrax_slag = liquid_bullet("slag");
+    atrax_slag.damage = 13.0;
+    atrax_slag.speed = 2.5;
+    atrax_slag.drag = 0.009;
+    atrax_slag.shoot_effect = "shootSmall".into();
+    atrax_slag.lifetime = 57.0;
+    atrax_slag.collides_air = false;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -313,6 +321,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "vela_repair_range", vela_repair_range),
         make_bullet(&mut next_id, "corvus_laser", corvus_laser),
         make_bullet(&mut next_id, "crawler_explosion", crawler_explosion),
+        make_bullet(&mut next_id, "atrax_slag", atrax_slag),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -423,6 +432,33 @@ fn lightning_bullet() -> BulletSpec {
     bullet
 }
 
+fn liquid_bullet(liquid: &str) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Liquid, 3.5, 0.0);
+    bullet.liquid = liquid.into();
+    bullet.ammo_multiplier = 1.0;
+    bullet.lifetime = 34.0;
+    bullet.status_duration = 60.0 * 2.0;
+    bullet.despawn_effect = "none".into();
+    bullet.hit_effect = "hitLiquid".into();
+    bullet.smoke_effect = "none".into();
+    bullet.shoot_effect = "none".into();
+    bullet.drag = 0.001;
+    bullet.knockback = 0.55;
+    bullet.display_ammo_multiplier = false;
+    bullet.puddle_size = 6.0;
+    bullet.orb_size = 3.0;
+    bullet.boil_time = 5.0;
+
+    if liquid == "slag" {
+        bullet.status = "melting".into();
+        bullet.hit_color = "ffa166ff".into();
+        bullet.light_color = "f0511d66".into();
+        bullet.light_opacity = 0.4;
+    }
+
+    bullet
+}
+
 fn continuous_laser_bullet(damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
     bullet.length = 220.0;
@@ -489,6 +525,7 @@ mod tests {
                 "vela_repair_range",
                 "corvus_laser",
                 "crawler_explosion",
+                "atrax_slag",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -917,6 +954,35 @@ mod tests {
         assert!(bullet.kill_shooter);
         assert!(!bullet.hittable);
         assert!(bullet.collides_air);
+    }
+
+    #[test]
+    fn atrax_slag_matches_java_liquid_bullet_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "atrax_slag").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Liquid);
+        assert_eq!(bullet.liquid, "slag");
+        assert_eq!(bullet.speed, 2.5);
+        assert_eq!(bullet.damage, 13.0);
+        assert_eq!(bullet.drag, 0.009);
+        assert_eq!(bullet.shoot_effect, "shootSmall");
+        assert_eq!(bullet.lifetime, 57.0);
+        assert!(!bullet.collides_air);
+        assert_eq!(bullet.ammo_multiplier, 1.0);
+        assert_eq!(bullet.status_duration, 120.0);
+        assert_eq!(bullet.despawn_effect, "none");
+        assert_eq!(bullet.hit_effect, "hitLiquid");
+        assert_eq!(bullet.smoke_effect, "none");
+        assert_eq!(bullet.knockback, 0.55);
+        assert!(!bullet.display_ammo_multiplier);
+        assert_eq!(bullet.puddle_size, 6.0);
+        assert_eq!(bullet.orb_size, 3.0);
+        assert_eq!(bullet.boil_time, 5.0);
+        assert_eq!(bullet.status, "melting");
+        assert_eq!(bullet.hit_color, "ffa166ff");
+        assert_eq!(bullet.light_color, "f0511d66");
+        assert_eq!(bullet.light_opacity, 0.4);
     }
 
     #[test]
