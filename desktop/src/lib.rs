@@ -25,10 +25,10 @@ use mindustry_core::mindustry::entities::{
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::{
-    GraphicsFrameBundle, GraphicsFrameStats, MinimapCamera, MinimapOverlayInput,
-    MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan,
-    OverlayRendererState, RenderBridge, RenderCamera, RenderEngineState, RenderFramePlan,
-    RenderPoint, RenderSize, RenderViewport,
+    GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState, MinimapCamera,
+    MinimapOverlayInput, MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapWorldSize,
+    OverlayRendererPlan, OverlayRendererState, RenderBridge, RenderCamera, RenderEngineState,
+    RenderFramePlan, RenderPoint, RenderSize, RenderViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -350,6 +350,7 @@ pub struct DesktopLauncher {
     pub camera_shake_state: DesktopCameraShakeState,
     pub last_camera_shake_frame: DesktopCameraShakeFrame,
     pub overlay_renderer_state: OverlayRendererState,
+    pub light_renderer_state: LightRendererState,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -407,6 +408,7 @@ impl DesktopLauncher {
             camera_shake_state: DesktopCameraShakeState::default(),
             last_camera_shake_frame: DesktopCameraShakeFrame::default(),
             overlay_renderer_state: OverlayRendererState::default(),
+            light_renderer_state: LightRendererState::default(),
             connect_target,
             connect_error: None,
             args,
@@ -831,6 +833,10 @@ impl DesktopLauncher {
         self.overlay_renderer_state.drain_plan()
     }
 
+    pub fn drain_light_renderer_plan(&mut self) -> LightRendererPlan {
+        self.light_renderer_state.drain_plan()
+    }
+
     pub fn graphics_frame_for_render(
         &mut self,
         frame_index: u64,
@@ -839,7 +845,11 @@ impl DesktopLauncher {
         minimap_camera: MinimapCamera,
         minimap_input: MinimapOverlayInput,
     ) -> DesktopGraphicsFrame {
-        let render_frame = self.render_frame_plan(frame_index, camera, viewport);
+        let mut render_frame = self.render_frame_plan(frame_index, camera, viewport);
+        if let Some(light_pass) = self.drain_light_renderer_plan().to_render_pass() {
+            render_frame.push_pass(light_pass);
+            render_frame.sort_passes();
+        }
         let overlay_renderer = self.drain_overlay_renderer_plan();
         let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
 
@@ -1691,6 +1701,7 @@ impl DesktopLauncher {
         self.camera_shake_state = DesktopCameraShakeState::default();
         self.last_camera_shake_frame = DesktopCameraShakeFrame::default();
         self.overlay_renderer_state = OverlayRendererState::default();
+        self.light_renderer_state = LightRendererState::default();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -2310,8 +2321,10 @@ mod tests {
     };
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::ctype::{Content, ContentId};
+    use mindustry_core::mindustry::entities::comp::DecalColor;
     use mindustry_core::mindustry::graphics::{
-        MinimapCamera, MinimapOverlayInput, RenderCamera, RenderPoint, RenderSize, RenderViewport,
+        LightPrimitive, MinimapCamera, MinimapOverlayInput, RenderCamera, RenderCommand,
+        RenderPassKind, RenderPoint, RenderSize, RenderViewport,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -3374,6 +3387,69 @@ mod tests {
         let minimap_plan = frame.bundle.minimap_overlay.as_ref().unwrap();
         assert_eq!(minimap_plan.world_rect.width, 24.0);
         assert_eq!(minimap_plan.world_rect.height, 16.0);
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_drains_light_renderer_into_render_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let viewport = RenderViewport::new(0.0, 0.0, 48.0, 48.0);
+        let camera = RenderCamera::new(RenderPoint::new(24.0, 24.0), viewport);
+        let minimap_camera = MinimapCamera::new(24.0, 24.0, 48.0, 48.0);
+
+        assert!(launcher.light_renderer_state.add_circle(
+            12.0,
+            16.0,
+            8.0,
+            LightPrimitive {
+                center: (0.0, 0.0),
+                radius: 0.0,
+                color: DecalColor::from_rgba(0xffcc66ff),
+                opacity: 0.5,
+            }
+        ));
+
+        let frame = launcher.graphics_frame_for_render(
+            11,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        assert_eq!(frame.bundle.stats.present_plans, 3);
+        assert_eq!(frame.bundle.stats.render_passes, 1);
+        assert_eq!(frame.bundle.stats.render_commands, 1);
+        assert!(launcher.light_renderer_state.circle_lights.is_empty());
+        assert!(launcher.light_renderer_state.commands.is_empty());
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        assert_eq!(render_frame.frame_index, 11);
+        assert_eq!(render_frame.passes.len(), 1);
+        assert_eq!(render_frame.passes[0].kind, RenderPassKind::Lighting);
+
+        match &render_frame.passes[0].commands[0] {
+            RenderCommand::DrawCircle {
+                center,
+                radius,
+                filled,
+                ..
+            } => {
+                assert_eq!(*center, RenderPoint::new(12.0, 16.0));
+                assert_eq!(*radius, 8.0);
+                assert!(*filled);
+            }
+            other => panic!("expected drained circle light command, got {other:?}"),
+        }
+
+        let empty_frame = launcher.graphics_frame_for_render(
+            12,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+        assert_eq!(empty_frame.bundle.stats.render_passes, 0);
+        assert_eq!(empty_frame.bundle.stats.render_commands, 0);
     }
 
     #[test]

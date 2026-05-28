@@ -10696,3 +10696,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `LightRendererPlan::to_render_pass()` 已经能产出统一 lighting pass，但尚未接入 desktop/main draw loop 的真实 GPU backend、light framebuffer、`Shaders.light` ambient blit；
   - 下一步应把 lighting pass 纳入 `RenderBridge/FrameComposer/DesktopGraphicsFrame` 的真实帧聚合，并继续实现 renderer event dispatcher 与后端 draw adapter；
   - 当前总体迁移约 16.9%，仍未达到完整可玩。
+
+### 12.336 Desktop graphics frame drains LightRenderer into RenderFramePlan
+
+- 2026-05-29：继续优先推进渲染引擎 runtime 接入；本轮没有扩展 `RenderBridge` 结构，而是把 `LightRendererState` 挂到 `DesktopLauncher`，在 desktop 图形帧构建时把 light plan drain 成 `RenderPassKind::Lighting` 并注入 `RenderFramePlan`。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - `Renderer` 持有 `LightRenderer lights`；
+    - draw pipeline 中 light renderer 作为一帧 render 阶段被调度；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/LightRenderer.java`
+    - `draw()` 绘制 runnable/region/line/circle lights 后清空本帧 light 队列。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `light_renderer_state: LightRendererState`；
+    - 新增 `DesktopLauncher::drain_light_renderer_plan()`；
+    - `DesktopLauncher::graphics_frame_for_render(...)` 现在会把非空 light plan 转成 `Lighting` pass，追加到 `RenderFramePlan` 并按 pass order 排序后交给 `RenderBridge::set_render_frame(...)`；
+    - `clear_snapshot_apply_cursors()` 会重置 `light_renderer_state`，避免跨世界/快照残留；
+    - 新增 desktop 级测试，验证 light circle 被 drain 成 `RenderCommand::DrawCircle`，并且下一帧不会重复渲染。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `3 passed`
+  - `cargo test -p mindustry-core light_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `4 passed`
+  - `cargo check -p mindustry-desktop --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+- 仍未完成：
+  - desktop 目前只把 light plan 放进 headless/backend-neutral `RenderFramePlan`；真实 GPU 后端、light framebuffer resize、blend equation、`Shaders.light` ambient blit 仍未实现；
+  - block/floor/fog plan 仍未从真实 world runtime 喂入 `DesktopGraphicsFrame`；
+  - 当前总体迁移约 17.0%，仍未达到完整可玩。
