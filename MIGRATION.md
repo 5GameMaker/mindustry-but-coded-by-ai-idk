@@ -9165,3 +9165,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - puddle 客户端粒子/渲染表现、液体扩散后的连续 snapshot、Java 客户端互通 smoke 仍需继续；
   - suicide trigger、wreckRegions decal、weapon bullet spawn、`Damage.dynamicExplosion(...)` lightning/fire/wave damage 仍未完成；
   - 当前总体迁移仍约 10%~11%，远未可玩。
+
+### 12.288 UnitDestroy suicideBomb trigger 接入
+
+- 2026-05-28：继续对照 Java `UnitComp.destroy()`，把 `Events.fire(Trigger.suicideBomb)` 从缺失状态接入 Rust runtime / desktop service / server death path。
+- Java 依据：
+  - `explosiveness = 2f + item().explosiveness * stack().amount * 1.53f`；
+  - 仅当 `explosiveness > 7f && (isLocal() || wasPlayer)` 时触发 `Trigger.suicideBomb`。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `unit_destroy_explosiveness(...)`，用 `ContentLoader` 查当前携带 item 的 `explosiveness`，按 Java 公式计算；
+    - 新增 `unit_destroy_is_local_or_was_player(...)`，把 Java `isLocal()` 映射为 Rust 已知本地 `local_player_id` 与 `UnitControllerState::Player { player_id }` 相等，保留 `was_player` 分支；
+    - 新增 `note_unit_suicide_bomb_trigger(...)`，满足条件时进入现有 `trigger_events` 队列；
+    - `apply_client_unit_destroy_packet_with_content(...)` 允许 desktop lifecycle 分发时传入 `ContentLoader` 与本地 player id；
+    - 保留旧 `apply_client_unit_destroy_packet(...)`，无 content 时不伪造该 trigger。
+  - `desktop/src/lib.rs`
+    - `UnitDestroyCallPacket` lifecycle 分支改为调用 content-aware destroy；
+    - unit destroy desktop 测试覆盖本地玩家携带 `blast-compound x3` 死亡后，`Trigger::SuicideBomb` 在同一 update 被 drain 到 `GameService`，campaign 下完成 `suicideBomb` achievement。
+  - `server/src/lib.rs`
+    - server dead unit 移除路径调用同一 `note_unit_suicide_bomb_trigger(...)`，当前 server 侧用 `was_player` 分支保持 Java 条件边界；
+    - 新增 server 测试验证 dead `was_player` unit 携带爆炸物时记录 `Trigger::SuicideBomb`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_unit_destroy_fires_suicide_bomb_for_local_or_was_player --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects --lib`
+  - `cargo test -p mindustry-server server_update_records_suicide_bomb_trigger_for_dead_was_player_unit --lib`
+  - `cargo fmt`
+  - `git diff --check`
+- 仍未完成：
+  - `isLocal()` 仍依赖 desktop 传入本地 player id；更完整的 player/unit locality runtime 仍需后续统一；
+  - `shootOnDeath` 尚未严格实现 `!(bullet.killShooter && totalShots > 0)`，也尚未真正 `mount.weapon.update(...)` 生成 bullet；
+  - `wreckRegions` decal、crash damage、`Damage.dynamicExplosion(...)` lightning/fire/wave damage 仍未完成；
+  - 当前总体迁移仍约 11%，远未可玩。

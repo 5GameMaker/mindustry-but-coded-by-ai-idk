@@ -4023,7 +4023,12 @@ impl GameRuntime {
         self.queue_client_leg_destroy_plan(plan)
     }
 
-    fn queue_client_unit_destroy_side_effects(&mut self, unit: &UnitComp) {
+    fn queue_client_unit_destroy_side_effects(
+        &mut self,
+        content: Option<&ContentLoader>,
+        local_player_id: Option<i32>,
+        unit: &UnitComp,
+    ) {
         let x = unit.x();
         let y = unit.y();
         let hit_size = unit.type_info.hit_size;
@@ -4077,6 +4082,9 @@ impl GameRuntime {
             x,
             y,
         });
+        if let Some(content) = content {
+            self.note_unit_suicide_bomb_trigger(content, local_player_id, unit);
+        }
 
         for (weapon_index, mount) in unit.weapons.mounts.iter().enumerate() {
             if !mount.weapon.shoot_on_death {
@@ -4136,6 +4144,43 @@ impl GameRuntime {
             decal.color = DecalColor::from_rgba(0x1c1817ff);
             let id = self.alloc_client_local_decal_id();
             self.client_decal_snapshot_entities.insert(id, decal);
+        }
+    }
+
+    fn unit_destroy_explosiveness(content: &ContentLoader, unit: &UnitComp) -> f32 {
+        let carried_item_explosiveness = unit
+            .items
+            .stack
+            .item
+            .as_deref()
+            .and_then(|item_name| content.item_by_name(item_name))
+            .map(|item| item.explosiveness)
+            .unwrap_or(0.0);
+        let carried_amount = unit.items.stack.amount.max(0) as f32;
+        2.0 + carried_item_explosiveness * carried_amount * 1.53
+    }
+
+    fn unit_destroy_is_local_or_was_player(unit: &UnitComp, local_player_id: Option<i32>) -> bool {
+        unit.was_player
+            || matches!(
+                (&unit.controller, local_player_id),
+                (UnitControllerState::Player { player_id }, Some(local_player_id))
+                    if *player_id == local_player_id
+            )
+    }
+
+    pub fn note_unit_suicide_bomb_trigger(
+        &mut self,
+        content: &ContentLoader,
+        local_player_id: Option<i32>,
+        unit: &UnitComp,
+    ) -> Option<GameRuntimeTriggerEvent> {
+        if Self::unit_destroy_explosiveness(content, unit) > 7.0
+            && Self::unit_destroy_is_local_or_was_player(unit, local_player_id)
+        {
+            Some(self.note_trigger_event(Trigger::SuicideBomb))
+        } else {
+            None
         }
     }
 
@@ -4419,11 +4464,29 @@ impl GameRuntime {
     }
 
     pub fn apply_client_unit_destroy_packet(&mut self, packet: &UnitDestroyCallPacket) -> bool {
+        self.apply_client_unit_destroy_packet_inner(None, None, packet)
+    }
+
+    pub fn apply_client_unit_destroy_packet_with_content(
+        &mut self,
+        content: &ContentLoader,
+        local_player_id: Option<i32>,
+        packet: &UnitDestroyCallPacket,
+    ) -> bool {
+        self.apply_client_unit_destroy_packet_inner(Some(content), local_player_id, packet)
+    }
+
+    fn apply_client_unit_destroy_packet_inner(
+        &mut self,
+        content: Option<&ContentLoader>,
+        local_player_id: Option<i32>,
+        packet: &UnitDestroyCallPacket,
+    ) -> bool {
         if packet.uid < 0 || !self.client_unit_snapshot_entities.contains_key(&packet.uid) {
             return false;
         }
         if let Some(mut unit) = self.client_unit_snapshot_entities.remove(&packet.uid) {
-            self.queue_client_unit_destroy_side_effects(&unit);
+            self.queue_client_unit_destroy_side_effects(content, local_player_id, &unit);
             if let Some(plan) = unit.legs_destroy_plan(false) {
                 self.queue_client_leg_destroy_plan(plan);
             }
@@ -26801,6 +26864,61 @@ mod tests {
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));
+    }
+
+    #[test]
+    fn game_runtime_unit_destroy_fires_suicide_bomb_for_local_or_was_player() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let volatile_unit = |id, controller, was_player| {
+            let mut unit =
+                UnitComp::new(id, UnitType::new(id as i16, "volatile-crawler"), TeamId(1));
+            unit.add();
+            unit.items.stack.item = Some("blast-compound".into());
+            unit.items.stack.amount = 3;
+            unit.set_controller(controller);
+            unit.was_player = was_player;
+            unit
+        };
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(
+            88,
+            volatile_unit(88, UnitControllerState::Player { player_id: 91 }, false),
+        );
+        assert!(runtime.apply_client_unit_destroy_packet_with_content(
+            &content,
+            Some(91),
+            &UnitDestroyCallPacket { uid: 88 },
+        ));
+        let events = runtime.drain_trigger_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].trigger, Trigger::SuicideBomb);
+
+        runtime.client_unit_snapshot_entities.insert(
+            89,
+            volatile_unit(89, UnitControllerState::Player { player_id: 92 }, false),
+        );
+        assert!(runtime.apply_client_unit_destroy_packet_with_content(
+            &content,
+            Some(91),
+            &UnitDestroyCallPacket { uid: 89 },
+        ));
+        assert!(
+            runtime.drain_trigger_events().is_empty(),
+            "remote player unit should not satisfy Java isLocal()"
+        );
+
+        runtime
+            .client_unit_snapshot_entities
+            .insert(90, volatile_unit(90, UnitControllerState::Ground, true));
+        assert!(runtime.apply_client_unit_destroy_packet_with_content(
+            &content,
+            None,
+            &UnitDestroyCallPacket { uid: 90 },
+        ));
+        let events = runtime.drain_trigger_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].trigger, Trigger::SuicideBomb);
     }
 
     #[test]

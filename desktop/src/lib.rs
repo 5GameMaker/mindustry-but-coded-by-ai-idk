@@ -1065,7 +1065,11 @@ impl DesktopLauncher {
                     self.runtime.apply_client_unit_despawn_packet(&packet)
                 }
                 PacketKind::UnitDestroyCallPacket(packet) => {
-                    self.runtime.apply_client_unit_destroy_packet(&packet)
+                    self.runtime.apply_client_unit_destroy_packet_with_content(
+                        &self.content_loader,
+                        Some(self.player.id),
+                        &packet,
+                    )
                 }
                 PacketKind::UnitDeathCallPacket(packet) => {
                     self.runtime.apply_client_unit_death_packet(&packet)
@@ -5490,6 +5494,7 @@ mod tests {
             state.last_loaded_world_data = Some(world_data);
         }
         launcher.update();
+        launcher.runtime.state.set_sector(Some(Sector::new(7)));
 
         let mut unit_type = UnitType::new(9903, "crawler");
         unit_type.allow_leg_step = true;
@@ -5509,6 +5514,11 @@ mod tests {
         let mut unit = UnitComp::new(9903, unit_type, TeamId(4));
         unit.add();
         unit.set_pos(10.0, 20.0);
+        unit.set_controller(UnitControllerState::Player {
+            player_id: launcher.player.id,
+        });
+        unit.items.stack.item = Some("blast-compound".into());
+        unit.items.stack.amount = 3;
         launcher
             .runtime
             .client_unit_snapshot_entities
@@ -5562,6 +5572,21 @@ mod tests {
             launcher.runtime.unit_type_killed_events[0].unit_type_name,
             "crawler"
         );
+        assert!(
+            launcher.runtime.trigger_events.is_empty(),
+            "suicideBomb should be drained into GameService during the same desktop update"
+        );
+        assert_eq!(
+            launcher
+                .last_service_trigger_apply_summary
+                .map(|summary| summary.achievements_completed),
+            Some(1)
+        );
+        assert!(launcher
+            .client
+            .service
+            .achievements()
+            .contains("suicideBomb"));
         let leg_primitives = launcher
             .standard_local_effect_line_primitives
             .iter()

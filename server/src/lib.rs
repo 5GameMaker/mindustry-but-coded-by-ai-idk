@@ -2412,6 +2412,8 @@ impl ServerLauncher {
             let Some(parent) = self.server_units.remove(&parent_id) else {
                 continue;
             };
+            self.runtime
+                .note_unit_suicide_bomb_trigger(&self.content_loader, None, &parent);
             self.runtime.note_unit_ability_death_events(&parent);
             self.runtime.note_unit_type_killed_event(&parent);
             if self.net_server.is_active() {
@@ -6793,6 +6795,26 @@ mod tests {
         );
         assert_eq!(launcher.runtime.unit_create_events.len(), 5);
         assert_eq!(launcher.runtime.state.stats.units_created, 5);
+    }
+
+    #[test]
+    fn server_update_records_suicide_bomb_trigger_for_dead_was_player_unit() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut unit = UnitComp::new(91, UnitType::new(9100, "volatile-crawler"), TeamId(1));
+        unit.items.stack.item = Some("blast-compound".into());
+        unit.items.stack.amount = 3;
+        unit.was_player = true;
+        unit.health.kill();
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        assert!(!launcher.server_units.contains_key(&91));
+        let events = launcher.runtime.drain_trigger_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].trigger, Trigger::SuicideBomb);
     }
 
     #[test]
