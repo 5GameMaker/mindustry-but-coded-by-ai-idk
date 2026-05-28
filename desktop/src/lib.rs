@@ -339,11 +339,31 @@ pub struct DesktopGraphicsShaderDispatchExecutionTrace {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsExecutionStepTrace {
+    ShaderDispatch {
+        apply_count: usize,
+    },
+    RenderPass {
+        kind: RenderPassKind,
+        order: i32,
+        target: RenderTarget,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsCommandExecutionTrace {
+    DrawSprite { symbol: String },
+    DrawText { text: String },
+    NoOp { kind: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsPassExecutionTrace {
     pub kind: RenderPassKind,
     pub order: i32,
     pub target: RenderTarget,
     pub command_count: usize,
+    pub command_trace: Vec<DesktopGraphicsCommandExecutionTrace>,
     pub draw_sprite_symbols: Vec<String>,
     pub resolved_sprites: Vec<DesktopGraphicsResolvedSpriteTrace>,
     pub draw_texts: Vec<String>,
@@ -362,6 +382,7 @@ pub struct DesktopGraphicsResolvedSpriteTrace {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsExecutionTrace {
     pub shader_dispatch: DesktopGraphicsShaderDispatchExecutionTrace,
+    pub execution_steps: Vec<DesktopGraphicsExecutionStepTrace>,
     pub render_passes: Vec<DesktopGraphicsPassExecutionTrace>,
 }
 
@@ -396,6 +417,13 @@ impl DesktopGraphicsExecutionTrace {
             },
         );
 
+        let mut execution_steps = Vec::new();
+        if frame.bundle.shader_dispatch.is_some() {
+            execution_steps.push(DesktopGraphicsExecutionStepTrace::ShaderDispatch {
+                apply_count: shader_dispatch.applies.len(),
+            });
+        }
+
         let render_passes =
             frame
                 .bundle
@@ -406,12 +434,24 @@ impl DesktopGraphicsExecutionTrace {
                         .passes
                         .iter()
                         .map(|pass| {
+                            execution_steps.push(DesktopGraphicsExecutionStepTrace::RenderPass {
+                                kind: pass.kind.clone(),
+                                order: pass.order,
+                                target: pass.target.clone(),
+                            });
+
+                            let mut command_trace = Vec::with_capacity(pass.commands.len());
                             let mut draw_sprite_symbols = Vec::new();
                             let mut resolved_sprites = Vec::new();
                             let mut draw_texts = Vec::new();
                             for command in &pass.commands {
                                 match command {
                                     RenderCommand::DrawSprite { symbol, .. } => {
+                                        command_trace.push(
+                                            DesktopGraphicsCommandExecutionTrace::DrawSprite {
+                                                symbol: symbol.clone(),
+                                            },
+                                        );
                                         draw_sprite_symbols.push(symbol.clone());
                                         if let Some(atlas) = atlas {
                                             resolved_sprites
@@ -419,9 +459,18 @@ impl DesktopGraphicsExecutionTrace {
                                         }
                                     }
                                     RenderCommand::DrawText { text, .. } => {
+                                        command_trace.push(
+                                            DesktopGraphicsCommandExecutionTrace::DrawText {
+                                                text: text.clone(),
+                                            },
+                                        );
                                         draw_texts.push(text.clone());
                                     }
-                                    _ => {}
+                                    other => command_trace.push(
+                                        DesktopGraphicsCommandExecutionTrace::NoOp {
+                                            kind: render_command_trace_kind(other).to_string(),
+                                        },
+                                    ),
                                 }
                             }
 
@@ -430,6 +479,7 @@ impl DesktopGraphicsExecutionTrace {
                                 order: pass.order,
                                 target: pass.target.clone(),
                                 command_count: pass.commands.len(),
+                                command_trace,
                                 draw_sprite_symbols,
                                 resolved_sprites,
                                 draw_texts,
@@ -440,6 +490,7 @@ impl DesktopGraphicsExecutionTrace {
 
         Self {
             shader_dispatch,
+            execution_steps,
             render_passes,
         }
     }
@@ -466,6 +517,23 @@ fn resolve_sprite_symbol<T>(
             region_height: None,
             missing: true,
         },
+    }
+}
+
+fn render_command_trace_kind(command: &RenderCommand) -> &'static str {
+    match command {
+        RenderCommand::Clear { .. } => "Clear",
+        RenderCommand::SetBlend { .. } => "SetBlend",
+        RenderCommand::SetClip { .. } => "SetClip",
+        RenderCommand::ClearClip => "ClearClip",
+        RenderCommand::FillRect { .. } => "FillRect",
+        RenderCommand::StrokeRect { .. } => "StrokeRect",
+        RenderCommand::DrawSprite { .. } => "DrawSprite",
+        RenderCommand::DrawLine { .. } => "DrawLine",
+        RenderCommand::DrawCircle { .. } => "DrawCircle",
+        RenderCommand::DrawPixel { .. } => "DrawPixel",
+        RenderCommand::DrawText { .. } => "DrawText",
+        RenderCommand::Custom { .. } => "Custom",
     }
 }
 
@@ -3162,11 +3230,12 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{
         run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopFrameKind,
-        DesktopFramePayload, DesktopGraphicsExecutionSummary, DesktopGraphicsExecutionTrace,
-        DesktopGraphicsFrame, DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
-        DesktopGraphicsShaderApplyExecutionTrace, DesktopLauncher, HeadlessDesktopAudioRenderer,
-        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
-        HeadlessDesktopGraphicsRenderer,
+        DesktopFramePayload, DesktopGraphicsCommandExecutionTrace,
+        DesktopGraphicsExecutionStepTrace, DesktopGraphicsExecutionSummary,
+        DesktopGraphicsExecutionTrace, DesktopGraphicsFrame, DesktopGraphicsRenderer,
+        DesktopGraphicsResolvedSpriteTrace, DesktopGraphicsShaderApplyExecutionTrace,
+        DesktopLauncher, HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
+        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -4963,6 +5032,213 @@ mod tests {
         let resolved_summary = DesktopGraphicsExecutionSummary::from_trace(&frame, &resolved_trace);
         assert_eq!(resolved_summary.atlas_resolved_sprites, 2);
         assert_eq!(resolved_summary.atlas_missing_sprites, 1);
+    }
+
+    #[test]
+    fn headless_graphics_renderer_records_shader_dispatch_before_render_passes() {
+        let viewport = RenderViewport::new(0.0, 0.0, 48.0, 48.0);
+        let camera = RenderCamera::new(RenderPoint::new(24.0, 24.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(11, RenderSize::new(48.0, 48.0), camera, viewport);
+
+        let mut ui_pass = RenderPass::new(RenderPassKind::Ui).with_order(200);
+        ui_pass.push(RenderCommand::draw_sprite(
+            "ui-sprite",
+            RenderRect::new(16.0, 16.0, 6.0, 6.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            61.0,
+        ));
+        render_frame.push_pass(ui_pass);
+
+        let mut block_pass = RenderPass::new(RenderPassKind::Block).with_order(100);
+        block_pass.push(RenderCommand::draw_sprite(
+            "block-sprite",
+            RenderRect::new(4.0, 4.0, 8.0, 8.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            20.0,
+        ));
+        render_frame.push_pass(block_pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame).set_shader_dispatch(
+            ShaderDispatchFrame::from_applies([
+                ShaderCatalog::apply_plan(ShaderId::Light, &ShaderApplyContext::default()),
+                ShaderApplyPlan::new(ShaderId::Shield),
+            ]),
+        );
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
+                "sprites/ui-sprite.png",
+                "sprites/block-sprite.png",
+            ]),
+        };
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+
+        assert_eq!(
+            renderer.last_trace.execution_steps,
+            vec![
+                DesktopGraphicsExecutionStepTrace::ShaderDispatch { apply_count: 2 },
+                DesktopGraphicsExecutionStepTrace::RenderPass {
+                    kind: RenderPassKind::Ui,
+                    order: 200,
+                    target: RenderTarget::Screen,
+                },
+                DesktopGraphicsExecutionStepTrace::RenderPass {
+                    kind: RenderPassKind::Block,
+                    order: 100,
+                    target: RenderTarget::Screen,
+                },
+            ]
+        );
+        assert_eq!(
+            renderer
+                .last_trace
+                .render_passes
+                .iter()
+                .map(|pass| pass.draw_sprite_symbols.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                vec!["ui-sprite".to_string()],
+                vec!["block-sprite".to_string()],
+            ]
+        );
+        assert_eq!(renderer.last_trace.shader_dispatch.applies.len(), 2);
+    }
+
+    #[test]
+    fn headless_graphics_renderer_keeps_draw_sprite_order_when_non_sprite_commands_are_interleaved()
+    {
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 32.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(12, RenderSize::new(32.0, 32.0), camera, viewport);
+
+        let mut pass = RenderPass::new(RenderPassKind::Overlay);
+        pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        pass.push(RenderCommand::draw_sprite(
+            "alpha",
+            RenderRect::new(1.0, 1.0, 4.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            10.0,
+        ));
+        pass.push(RenderCommand::draw_text(
+            "status",
+            RenderPoint::new(2.0, 3.0),
+            [1.0, 1.0, 1.0, 1.0],
+            8.0,
+            0.0,
+            RenderTextAlign::Start,
+            11.0,
+        ));
+        pass.push(RenderCommand::custom(
+            "noop",
+            vec![mindustry_core::mindustry::graphics::RenderProperty::new(
+                "kind", "debug",
+            )],
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            "beta",
+            RenderRect::new(5.0, 5.0, 4.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            12.0,
+        ));
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(0.0, 0.0, 2.0, 2.0),
+            [0.0, 0.0, 0.0, 1.0],
+            13.0,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
+                "sprites/alpha.png",
+                "sprites/beta.png",
+            ]),
+        };
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+
+        let pass_trace = &renderer.last_trace.render_passes[0];
+        assert_eq!(
+            pass_trace.command_trace,
+            vec![
+                DesktopGraphicsCommandExecutionTrace::NoOp {
+                    kind: "Clear".to_string(),
+                },
+                DesktopGraphicsCommandExecutionTrace::DrawSprite {
+                    symbol: "alpha".to_string(),
+                },
+                DesktopGraphicsCommandExecutionTrace::DrawText {
+                    text: "status".to_string(),
+                },
+                DesktopGraphicsCommandExecutionTrace::NoOp {
+                    kind: "Custom".to_string(),
+                },
+                DesktopGraphicsCommandExecutionTrace::DrawSprite {
+                    symbol: "beta".to_string(),
+                },
+                DesktopGraphicsCommandExecutionTrace::NoOp {
+                    kind: "FillRect".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            pass_trace.draw_sprite_symbols,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+        assert_eq!(pass_trace.draw_texts, vec!["status".to_string()]);
+    }
+
+    #[test]
+    fn headless_graphics_renderer_does_not_write_back_frame() {
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 32.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(13, RenderSize::new(32.0, 32.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Block);
+        pass.push(RenderCommand::draw_sprite(
+            "immutable",
+            RenderRect::new(8.0, 8.0, 4.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            20.0,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/immutable.png"]),
+        };
+        let original_frame = frame.clone();
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        let stats = renderer.render_graphics_frame(&frame);
+
+        assert_eq!(frame, original_frame);
+        assert_eq!(stats.render_passes, 1);
+        assert_eq!(
+            renderer.last_trace.render_passes[0].draw_sprite_symbols,
+            vec!["immutable".to_string()]
+        );
     }
 
     #[test]

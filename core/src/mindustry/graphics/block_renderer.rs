@@ -990,6 +990,67 @@ impl BlockSpriteOp {
     }
 }
 
+pub fn drawer_icons_to_block_sprite_ops(
+    icons: &[String],
+    rect: RenderRect,
+    tint: [f32; 4],
+    rotation: f32,
+    layer: f32,
+    order_start: i32,
+) -> Vec<BlockSpriteOp> {
+    icons
+        .iter()
+        .enumerate()
+        .map(|(index, symbol)| {
+            BlockSpriteOp::new(
+                order_start + index as i32,
+                symbol.clone(),
+                rect,
+                tint,
+                rotation,
+                layer,
+            )
+        })
+        .collect()
+}
+
+pub fn drawer_to_block_sprite_ops(
+    block_name: &str,
+    drawer: &str,
+    rect: RenderRect,
+    tint: [f32; 4],
+    rotation: f32,
+    layer: f32,
+    order_start: i32,
+) -> Vec<BlockSpriteOp> {
+    let icons = crate::mindustry::world::draw::draw_block_dispatch_icons(block_name, drawer);
+    drawer_icons_to_block_sprite_ops(&icons, rect, tint, rotation, layer, order_start)
+}
+
+pub fn draw_block_drawer_sprite_ops(
+    block_name: &str,
+    drawer: &str,
+    rect: RenderRect,
+    tint: [f32; 4],
+    rotation: f32,
+    layer: f32,
+    order_start: i32,
+) -> Vec<BlockSpriteOp> {
+    drawer_to_block_sprite_ops(block_name, drawer, rect, tint, rotation, layer, order_start)
+}
+
+pub fn draw_block_dispatch_sprite_ops(
+    block_name: &str,
+    drawer: &str,
+    rect: RenderRect,
+    tint: [f32; 4],
+    rotation: f32,
+    layer: f32,
+    order_start: i32,
+) -> Vec<BlockSpriteOp> {
+    drawer_to_block_sprite_ops(block_name, drawer, rect, tint, rotation, layer, order_start)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockRendererPlan {
     pub sprite_ops: Vec<BlockSpriteOp>,
@@ -1913,6 +1974,46 @@ mod tests {
             }
             other => panic!("expected DrawSprite, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn drawer_dispatch_and_sprite_bridge_preserve_multi_order_and_skip_effects() {
+        let icons = crate::mindustry::world::draw::draw_block_drawer_icons(
+            "separator",
+            "DrawMulti(DrawRegion(-bottom), DrawGlowRegion(sky), DrawDefault, DrawRegion(-top))",
+        );
+        assert_eq!(
+            icons,
+            vec!["separator-bottom", "separator", "separator-top"]
+        );
+
+        let ops = drawer_to_block_sprite_ops(
+            "separator",
+            "DrawMulti(DrawRegion(-bottom), DrawGlowRegion(sky), DrawDefault, DrawRegion(-top))",
+            RenderRect::new(1.0, 2.0, 3.0, 4.0),
+            [1.0, 1.0, 1.0, 1.0],
+            90.0,
+            Layer::BLOCK + 0.5,
+            7,
+        );
+        assert_eq!(
+            ops.iter().map(|op| op.symbol()).collect::<Vec<_>>(),
+            vec!["separator-bottom", "separator", "separator-top"]
+        );
+        assert_eq!(
+            ops.iter().map(|op| op.order).collect::<Vec<_>>(),
+            vec![7, 8, 9]
+        );
+
+        let mut plan = BlockRendererPlan::default();
+        plan.sprite_ops = ops.clone();
+        assert_eq!(plan.to_block_sprite_ops(8.0), ops);
+
+        let passes = plan.to_sprite_render_passes(8.0);
+        assert_eq!(passes.len(), 3);
+        assert_eq!(passes[0].order, 7);
+        assert_eq!(passes[1].order, 8);
+        assert_eq!(passes[2].order, 9);
     }
 
     #[test]

@@ -11576,3 +11576,105 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 仍只读取 PNG 宽高，未解码像素、bleed、duplicate border、flush、packing x/y/UV 或 GPU texture upload；
   - live graphics backend 仍未执行真实 window/surface/GPU 绘制；
   - 当前总体迁移约 20.3%，仍未达到完整可玩。
+
+### 12.361 TextureAtlasPage 从 PackPlan 分配稳定行位置与 UV
+
+- 2026-05-29：继续把 atlas 从“所有 region 停在 `(0,0)`”推进到可被后端消费的纯数据 packing 过渡层。本轮在 `TextureAtlasPage::from_page_plan(...)` 中加入稳定行扫描：按输入顺序把 request 放入当前行，超过 page 宽度时换行，使用 `PageSpec.padding` 作为行内/行间间距，并在插入 region 时同步计算 `x/y/u/v/u2/v2`。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/MultiPacker.java`
+    - Java `MultiPacker.flush(...)` 最终把打包后的 page/region 写回 atlas；
+    - Rust 当前仍是最小行布局，不等价于完整 PixmapPacker，但已避免所有 region 共用 `(0,0)`。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - `TextureAtlasPage::from_page_plan(...)` 对 `RegionRequest` 分配稳定 `x/y`；
+    - 超出 page 高度时 panic，避免静默生成无效 UV；
+    - 新增 `texture_atlas_page_plan_assigns_stable_rows_and_uvs`，验证换行、同一行继续排布与 UV 分母来自 page spec。
+- 已跑验证：
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `15 passed`
+- 仍未完成：
+  - 这只是无依赖行布局，不是完整 Java PixmapPacker；未处理真实像素、bleed、duplicate border、texture scale 或 atlas flush；
+  - desktop trace 仍需继续把 `x/y/UV` 暴露到渲染执行轨迹；
+  - 当前总体迁移约 20.4%，仍未达到完整可玩。
+
+### 12.362 Mod directory root unwrap 与真实目录扫描入口
+
+- 2026-05-29：继续把 mod resource 计划从“调用方传入路径列表”推进到真实文件系统目录扫描。本轮新增 root resolver 与 walker：目录只有一个子目录时会按 Java `resolveRoot(...)` 展开；普通文件 walker 会跳过顶层 `bundles/`、`sprites/`、`sprites-override/`、`.git/`；sprite walker 单独扫描 `sprites/**/*.png` 与 `sprites-override/**/*.png` 并复用 `ModResourcePlan::from_file_paths(...)`。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `resolveRoot(...)` 处理单子目录包裹；
+    - `buildFiles(...)` 跳过 special folders；
+    - `packSprites(...)` 对 `sprites` 与 `sprites-override` 单独扫描 PNG。
+- Rust 新增/接入：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `resolve_mod_root(...)`；
+    - 新增 `scan_mod_file_paths(...)`；
+    - 新增 `scan_mod_sprite_paths(...)`；
+    - 新增 `ModResourcePlan::from_directory(...)`；
+    - 新增 `mod_resource_plan_from_directory_unwraps_single_child_root_and_scans_sprites`，覆盖 root unwrap、special folder skip、sprite/override 扫描与 `from_directory(...)` 接入。
+- 已跑验证：
+  - `cargo test -p mindustry-core mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `5 passed`
+- 仍未完成：
+  - zip/jar root 与 Arc `Fi` 虚拟文件系统尚未接入；
+  - generic walker 输出尚未写入 `FileTree` 覆盖层；
+  - icon 的真实存在性加载仍只是候选计划；
+  - 当前总体迁移约 20.5%，仍未达到完整可玩。
+
+### 12.363 Desktop graphics executor 记录 shader/pass/command 执行轨迹
+
+- 2026-05-29：继续推进渲染引擎主链。本轮把 `HeadlessDesktopGraphicsRenderer` 从汇总统计推进为最小记录/执行型 executor：先记录 `ShaderDispatchFrame`，再按 `RenderFramePlan.passes` 的当前顺序遍历 pass，`DrawSprite` / `DrawText` 进入明确 command trace，其他 `RenderCommand` 作为 no-op trace 保留，确保后续 live backend 能复用同一执行顺序而不是另起孤岛。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - Java `Renderer.draw()` 统一调度 shader/render passes 与 world/UI 绘制；
+    - Rust 当前仍是 headless trace executor，但已经锁定 shader 在 pass 前、command 按 pass 内顺序消费。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsExecutionStepTrace`；
+    - 新增 `DesktopGraphicsCommandExecutionTrace`；
+    - `DesktopGraphicsPassExecutionTrace` 新增 `command_trace`；
+    - `DesktopGraphicsExecutionTrace` 新增 `execution_steps`；
+    - `DesktopGraphicsExecutionTrace::from_frame_and_atlas(...)` 记录 shader dispatch、pass 与 command 执行轨迹；
+    - 新增 `headless_graphics_renderer_records_shader_dispatch_before_render_passes`；
+    - 新增 `headless_graphics_renderer_keeps_draw_sprite_order_when_non_sprite_commands_are_interleaved`；
+    - 新增 `headless_graphics_renderer_does_not_write_back_frame`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `4 passed`
+- 仍未完成：
+  - 仍未接真实 window/surface/GPU；
+  - 还需要把 executor 与真实 live renderer/backend 类型分离，并把 `DrawSprite` 解析到 atlas `x/y/UV`；
+  - pixelator/camera restore、post processing、真实 shader apply 仍未执行；
+  - 当前总体迁移约 20.6%，仍未达到完整可玩。
+
+### 12.364 DrawBlock drawer 最小 dispatcher 接入 BlockRenderer
+
+- 2026-05-29：继续推进渲染主链，避免 `content/blocks.rs` 中的 drawer 字符串只停留在数据表。本轮新增最小 DrawBlock dispatcher：支持 `DrawMulti`、`DrawDefault`、`DrawRegion`，effect-only / 尚未迁移的 drawer 子项先 no-op 跳过，并提供 drawer → `BlockSpriteOp` 桥接函数，供 `BlockRenderer` 消费。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/draw`
+    - `DrawMulti` 按子 drawer 顺序调用；
+    - `DrawDefault` 使用 block 默认 region；
+    - `DrawRegion` 使用 block name + suffix/name override 的 region 命名。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - 新增 `draw_block_dispatch_icons(...)`；
+    - 新增 `draw_block_drawer_icons(...)`；
+    - 新增内部 `split_drawer_call(...)` / `split_drawer_args(...)`，支持嵌套 `DrawMulti(...)` 的最小参数拆分；
+    - 扩展 `draw_default_side_liquid_tile_and_parts_follow_upstream_shells`，覆盖 `DrawDefault`、`DrawRegion`、`DrawMulti`、effect-only 子项跳过。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `drawer_icons_to_block_sprite_ops(...)`；
+    - 新增 `drawer_to_block_sprite_ops(...)`；
+    - 新增 `draw_block_drawer_sprite_ops(...)`；
+    - 新增 `drawer_dispatch_and_sprite_bridge_preserve_multi_order_and_skip_effects`，验证 dispatcher 输出顺序、`BlockSpriteOp` order 与 render pass 转换。
+- 已跑验证：
+  - `cargo test -p mindustry-core draw_default_side_liquid_tile --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-core drawer_dispatch_and_sprite_bridge --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-core block_renderer_plan_converts_sprite_passes_with_stable_symbols_and_rotation --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - 仅覆盖最常见静态 drawer 子集，`DrawTurret/DrawPower/DrawLiquid*/DrawHeat*/DrawPistons/DrawWeave` 等尚未进入 dispatcher；
+  - 当前 dispatcher 仍以 icon/symbol 输出为主，尚未绑定真实 building runtime warmup/liquid/heat/power 状态；
+  - 还需要把 `content/blocks.rs` 的 drawer 字符串批量接到真实 block render snapshot；
+  - 当前总体迁移约 20.7%，仍未达到完整可玩。

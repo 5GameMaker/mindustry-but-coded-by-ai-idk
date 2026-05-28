@@ -7,6 +7,10 @@
 use crate::mindustry::graphics::{
     png_dimensions_from_path, MultiPackerPlan, PageType, RegionRequest, TextureAtlasRegionSource,
 };
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModConfigPaths {
@@ -377,12 +381,149 @@ impl ModResourcePlan {
         }
     }
 
+    /// 真实目录入口：先做 root unwrap，再扫描 `sprites/**/*.png` 与
+    /// `sprites-override/**/*.png`，最后复用 `from_file_paths(...)` 生成纯数据计划。
+    pub fn from_directory(
+        mod_name: impl Into<String>,
+        headless: bool,
+        root: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let sprite_paths = scan_mod_sprite_paths(root)?;
+        Ok(Self::from_file_paths(mod_name, headless, sprite_paths))
+    }
+
     pub fn sprite_requests(&self) -> Vec<SpritePackRequest> {
         self.sprite_sources
             .iter()
             .filter_map(ModSpritePackSource::to_request)
             .collect()
     }
+}
+
+/// 解析真实 mod 目录的 root：如果目录下只有一个子目录，则自动展开到该子目录。
+///
+/// 这和 upstream Java `resolveRoot(...)` 的行为一致，便于处理“外层包了一层目录”
+/// 的导入资源。
+pub fn resolve_mod_root(root: impl AsRef<Path>) -> io::Result<PathBuf> {
+    let root = root.as_ref();
+    if !root.is_dir() {
+        return Ok(root.to_path_buf());
+    }
+
+    let entries: Vec<_> = fs::read_dir(root)?.collect::<Result<_, _>>()?;
+    let mut visible = entries
+        .into_iter()
+        .filter(|entry| entry.file_name() != ".DS_Store")
+        .collect::<Vec<_>>();
+
+    if visible.len() == 1 {
+        let candidate = visible.remove(0).path();
+        if candidate.is_dir() {
+            return Ok(candidate);
+        }
+    }
+
+    Ok(root.to_path_buf())
+}
+
+/// 扫描真实 mod 目录中的普通文件，行为参考 Java `buildFiles(...)`：
+/// 跳过顶层 `bundles/`、`sprites/`、`sprites-override/` 和 `.git/`。
+pub fn scan_mod_file_paths(root: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    let root = resolve_mod_root(root)?;
+    let mut paths = Vec::new();
+
+    if !root.is_dir() {
+        return Ok(paths);
+    }
+
+    for entry in fs::read_dir(&root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let folder = entry.file_name();
+        if is_special_top_level_folder(&folder) {
+            continue;
+        }
+
+        walk_relative_files(&root, &path, &mut paths, accept_all_files)?;
+    }
+
+    paths.sort();
+    Ok(paths)
+}
+
+/// 单独扫描 sprite 资源，严格收集 `sprites/**/*.png` 和
+/// `sprites-override/**/*.png`。
+pub fn scan_mod_sprite_paths(root: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    let root = resolve_mod_root(root)?;
+    let mut regular_paths = Vec::new();
+    let mut override_paths = Vec::new();
+
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let regular_dir = root.join("sprites");
+    if regular_dir.is_dir() {
+        walk_relative_files(&root, &regular_dir, &mut regular_paths, accept_png_file)?;
+    }
+
+    let override_dir = root.join("sprites-override");
+    if override_dir.is_dir() {
+        walk_relative_files(&root, &override_dir, &mut override_paths, accept_png_file)?;
+    }
+
+    regular_paths.sort();
+    override_paths.sort();
+    regular_paths.extend(override_paths);
+    Ok(regular_paths)
+}
+
+fn walk_relative_files(
+    root: &Path,
+    current: &Path,
+    out: &mut Vec<String>,
+    accept: fn(&Path) -> bool,
+) -> io::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            walk_relative_files(root, &path, out, accept)?;
+            continue;
+        }
+
+        if accept(&path) {
+            out.push(normalize_mod_resource_path(
+                path.strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn accept_all_files(_: &Path) -> bool {
+    true
+}
+
+fn accept_png_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+}
+
+fn is_special_top_level_folder(name: &std::ffi::OsStr) -> bool {
+    matches!(
+        name.to_str(),
+        Some("bundles") | Some("sprites") | Some("sprites-override") | Some(".git")
+    )
 }
 
 pub fn mod_sprite_atlas_name(
@@ -937,6 +1078,21 @@ mod tests {
             .join(format!("{stem}.png"))
     }
 
+    fn write_minimal_png(path: &Path, width: u32, height: u32) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, minimal_png_bytes(width, height)).unwrap();
+    }
+
+    fn temp_mod_root(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("{prefix}-{}-{nanos}", std::process::id()))
+            .join("outer")
+    }
+
     #[test]
     fn mod_resource_plan_to_texture_atlas_pipeline_reads_real_png_dimensions() {
         let path = temp_png_path("mod-resource-plan");
@@ -972,6 +1128,73 @@ mod tests {
         assert_eq!(missing_region.height, 1);
 
         std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
+    fn mod_resource_plan_from_directory_unwraps_single_child_root_and_scans_sprites() {
+        let outer_root = temp_mod_root("mod-root-scan");
+        let mod_root = outer_root.join("example-pack");
+
+        write_minimal_png(&mod_root.join("sprites/router.png"), 16, 16);
+        write_minimal_png(&mod_root.join("sprites-override/ui/icon.png"), 32, 32);
+        write_minimal_png(&mod_root.join("sprites/blocks/environment/ore.png"), 24, 24);
+        std::fs::create_dir_all(mod_root.join("bundles")).unwrap();
+        std::fs::write(mod_root.join("bundles/bundle.properties"), b"hello=world").unwrap();
+        std::fs::create_dir_all(mod_root.join(".git")).unwrap();
+        std::fs::write(mod_root.join(".git/HEAD"), b"ref: refs/heads/main").unwrap();
+        std::fs::create_dir_all(mod_root.join("assets/nested")).unwrap();
+        std::fs::write(mod_root.join("assets/nested/keep.txt"), b"keep").unwrap();
+        std::fs::write(mod_root.join("assets/readme.md"), b"readme").unwrap();
+
+        let file_paths = scan_mod_file_paths(&outer_root).unwrap();
+        assert_eq!(
+            file_paths,
+            vec![
+                "assets/nested/keep.txt".to_string(),
+                "assets/readme.md".to_string()
+            ]
+        );
+
+        let sprite_paths = scan_mod_sprite_paths(&outer_root).unwrap();
+        assert_eq!(
+            sprite_paths,
+            vec![
+                "sprites/blocks/environment/ore.png".to_string(),
+                "sprites/router.png".to_string(),
+                "sprites-override/ui/icon.png".to_string(),
+            ]
+        );
+
+        let plan = ModResourcePlan::from_directory("example", false, &outer_root).unwrap();
+        assert_eq!(
+            plan.icon.candidates,
+            vec!["icon.png".to_string(), "preview.png".to_string()]
+        );
+        assert_eq!(
+            plan.sprite_requests(),
+            vec![
+                SpritePackRequest {
+                    source_path: "sprites/blocks/environment/ore.png".into(),
+                    atlas_name: "example-ore".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "sprites/router.png".into(),
+                    atlas_name: "example-router".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "sprites-override/ui/icon.png".into(),
+                    atlas_name: "icon".into(),
+                    page_hint: "sprites-override".into(),
+                    r#override: true,
+                },
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(&outer_root);
     }
 
     #[test]

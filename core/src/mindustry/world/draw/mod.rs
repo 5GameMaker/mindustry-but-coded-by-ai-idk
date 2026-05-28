@@ -430,6 +430,41 @@ pub fn draw_default_icons(block_region: &str) -> Vec<String> {
     vec![block_region.to_string()]
 }
 
+pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> {
+    let drawer = drawer.trim();
+    if drawer.is_empty() {
+        return Vec::new();
+    }
+
+    match split_drawer_call(drawer) {
+        Some(("DrawMulti", args)) => draw_multi_icons(
+            &split_drawer_args(args)
+                .into_iter()
+                .map(|child| draw_block_dispatch_icons(block_name, child))
+                .collect::<Vec<_>>(),
+        ),
+        Some(("DrawDefault", _)) => draw_default_icons(block_name),
+        Some(("DrawRegion", args)) => {
+            let suffix = split_drawer_args(args)
+                .first()
+                .copied()
+                .unwrap_or("")
+                .trim();
+            vec![draw_region_name(block_name, suffix, None)]
+        }
+        Some(_) => Vec::new(),
+        None => match drawer {
+            "DrawDefault" => draw_default_icons(block_name),
+            "DrawRegion" => draw_region_icons(block_name),
+            _ => Vec::new(),
+        },
+    }
+}
+
+pub fn draw_block_drawer_icons(block_name: &str, drawer: &str) -> Vec<String> {
+    draw_block_dispatch_icons(block_name, drawer)
+}
+
 pub fn draw_side_region_names(block_name: &str) -> (String, String) {
     (format!("{block_name}-top1"), format!("{block_name}-top2"))
 }
@@ -1193,6 +1228,43 @@ fn approx_eq(left: f32, right: f32) -> bool {
     (left - right).abs() <= 0.00001
 }
 
+fn split_drawer_call(drawer: &str) -> Option<(&str, &str)> {
+    let open = drawer.find('(')?;
+    if !drawer.ends_with(')') {
+        return None;
+    }
+
+    Some((drawer[..open].trim(), &drawer[open + 1..drawer.len() - 1]))
+}
+
+fn split_drawer_args(args: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+
+    for (index, ch) in args.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let part = args[start..index].trim();
+                if !part.is_empty() {
+                    out.push(part);
+                }
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    let tail = args[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1290,6 +1362,29 @@ mod tests {
     #[test]
     fn draw_default_side_liquid_tile_and_parts_follow_upstream_shells() {
         assert_eq!(draw_default_icons("router"), vec!["router"]);
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawDefault"),
+            vec!["router"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawRegion(-top)"),
+            vec!["router-top"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawRegion"),
+            vec!["router"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons(
+                "router",
+                "DrawMulti(DrawRegion(-bottom), DrawGlowRegion(sky), DrawDefault, DrawRegion(-top))"
+            ),
+            vec!["router-bottom", "router", "router-top"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawMulti(DrawDefault, DrawPumpLiquid)"),
+            vec!["router"]
+        );
         assert_eq!(
             draw_side_region_names("separator"),
             ("separator-top1".into(), "separator-top2".into())

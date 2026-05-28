@@ -475,14 +475,40 @@ impl<T> TextureAtlasPage<T> {
     pub fn from_page_plan(page_plan: PagePlan<TextureAtlasRegionSource<T>>) -> Self {
         let mut page = Self::new(page_plan.page_type);
         page.spec = page_plan.spec;
+        let mut cursor_x = 0u32;
+        let mut cursor_y = 0u32;
+        let mut row_height = 0u32;
 
         for request in page_plan.requests {
+            let width = request.width.max(1);
+            let height = request.height.max(1);
+            if cursor_x > 0 && cursor_x.saturating_add(width) > page.spec.width {
+                cursor_x = 0;
+                cursor_y = cursor_y
+                    .saturating_add(row_height)
+                    .saturating_add(page.spec.padding);
+                row_height = 0;
+            }
+            if cursor_y.saturating_add(height) > page.spec.height {
+                panic!(
+                    "page plan region '{}' does not fit atlas page",
+                    request.name
+                );
+            }
+
             if page
-                .insert_region(TextureAtlasRegion::from_request(page.page_type, request))
+                .insert_region(
+                    TextureAtlasRegion::from_request(page.page_type, request)
+                        .with_position(cursor_x, cursor_y),
+                )
                 .is_err()
             {
                 panic!("page plan should not contain duplicate region names");
             }
+            cursor_x = cursor_x
+                .saturating_add(width)
+                .saturating_add(page.spec.padding);
+            row_height = row_height.max(height);
         }
 
         page
@@ -1155,6 +1181,49 @@ mod tests {
                 name: "missing".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn texture_atlas_page_plan_assigns_stable_rows_and_uvs() {
+        let mut main = PagePlan::new(PageType::Main);
+        main.spec = PageSpec::new(20, 40, 2, true);
+        main.insert_request(RegionRequest::new(
+            "wide",
+            16,
+            10,
+            TextureAtlasRegionSource::new("sprites/wide.png", "wide"),
+        ))
+        .unwrap();
+        main.insert_request(RegionRequest::new(
+            "wrapped",
+            8,
+            5,
+            TextureAtlasRegionSource::new("sprites/wrapped.png", "wrapped"),
+        ))
+        .unwrap();
+        main.insert_request(RegionRequest::new(
+            "same-row",
+            4,
+            4,
+            TextureAtlasRegionSource::new("sprites/same-row.png", "same-row"),
+        ))
+        .unwrap();
+
+        let plan = TextureAtlasPlan::from_pack_plan(PackPlan::new(vec![main]));
+        let wide = plan.lookup("wide").unwrap().region;
+        assert_eq!((wide.x, wide.y, wide.width, wide.height), (0, 0, 16, 10));
+        assert_f32_close(wide.u2, 16.0 / 20.0);
+        assert_f32_close(wide.v2, 10.0 / 40.0);
+
+        let wrapped = plan.lookup("wrapped").unwrap().region;
+        assert_eq!((wrapped.x, wrapped.y), (0, 12));
+        assert_f32_close(wrapped.v, 12.0 / 40.0);
+        assert_f32_close(wrapped.u2, 8.0 / 20.0);
+
+        let same_row = plan.lookup("same-row").unwrap().region;
+        assert_eq!((same_row.x, same_row.y), (10, 12));
+        assert_f32_close(same_row.u, 10.0 / 20.0);
+        assert_f32_close(same_row.v2, 16.0 / 40.0);
     }
 
     #[test]

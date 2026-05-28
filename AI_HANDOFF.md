@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **20.3%**。
+- 当前总体迁移完成度：约 **20.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -8920,3 +8920,84 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. PNG 仍只读宽高，未解码像素、bleed、duplicate border、packing x/y/UV、flush 或 GPU texture upload；
   3. 渲染引擎下一步优先做 desktop live graphics executor，只消费现有 `DesktopGraphicsFrame`，不要把 backend 逻辑塞回 core；
   4. 当前总迁移约 20.3%，仍未达到完整可玩，goal 绝不能标记 complete。
+
+---
+
+## 263. 最新闭环记录：TextureAtlasPage 稳定行布局
+
+- 本轮目标：让 `TextureAtlasPlan::from_pack_plan(...)` 产出的 region 不再全部停在 `(0,0)`，为后续 atlas trace / live backend 提供可消费的 `x/y/u/v/u2/v2`。
+- Rust 主改动：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - `TextureAtlasPage::from_page_plan(...)` 按 `PageSpec.padding` 做稳定行扫描布局；
+    - region 插入前写入 `x/y`，插入时同步 UV；
+    - 新增 `texture_atlas_page_plan_assigns_stable_rows_and_uvs`。
+- 已跑验证：
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. 仍不是完整 Java PixmapPacker；
+  2. 还缺真实像素、bleed、duplicate border、texture scale、flush/GPU upload；
+  3. 当前总迁移约 20.4%，仍未达到完整可玩。
+
+---
+
+## 264. 最新闭环记录：Mod directory scanner / root resolver
+
+- 本轮目标：让 mod resource 计划能从真实目录入口扫描，而不是只吃调用方手工传入的路径列表。
+- Rust 主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `resolve_mod_root(...)`，支持单子目录 unwrap 并忽略 `.DS_Store`；
+    - 新增 `scan_mod_file_paths(...)`，递归普通文件并跳过顶层 `bundles/sprites/sprites-override/.git`；
+    - 新增 `scan_mod_sprite_paths(...)`，只收 `sprites/**/*.png` 与 `sprites-override/**/*.png`；
+    - 新增 `ModResourcePlan::from_directory(...)`；
+    - 新增 `mod_resource_plan_from_directory_unwraps_single_child_root_and_scans_sprites`。
+- 已跑验证：
+  - `cargo test -p mindustry-core mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. zip/jar 和 Arc `Fi` 虚拟文件系统尚未接入；
+  2. generic walker 输出尚未写入 `FileTree` 覆盖层；
+  3. 当前总迁移约 20.5%，仍未达到完整可玩。
+
+---
+
+## 265. 最新闭环记录：Desktop graphics executor trace
+
+- 本轮目标：优先推进渲染引擎，把 headless graphics renderer 从“只统计”推进为可复用的最小执行轨迹层。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsExecutionStepTrace`；
+    - 新增 `DesktopGraphicsCommandExecutionTrace`；
+    - `DesktopGraphicsPassExecutionTrace` 增加 `command_trace`；
+    - `DesktopGraphicsExecutionTrace` 增加 `execution_steps`；
+    - trace 顺序为 shader dispatch 先于 render pass，pass 内保留 `DrawSprite/DrawText/NoOp` 命令顺序；
+    - 新增 3 个 headless graphics renderer 测试，覆盖 shader/pass 顺序、sprite 与非 sprite interleave、frame 不被回写。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. 仍未接真实 window/surface/GPU backend；
+  2. 下一步应把 `DrawSprite` trace 接到 atlas `x/y/UV`，并抽出 live renderer 后端 seam；
+  3. 当前总迁移约 20.6%，仍未达到完整可玩。
+
+---
+
+## 266. 最新闭环记录：DrawBlock drawer dispatcher 最小接入
+
+- 本轮目标：让 `content/blocks.rs` 中的 drawer 字符串开始能进入 `BlockRenderer` sprite op 链，而不是只保存在数据表。
+- Rust 主改动：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - 新增 `draw_block_dispatch_icons(...)` / `draw_block_drawer_icons(...)`；
+    - 支持 `DrawMulti`、`DrawDefault`、`DrawRegion`；
+    - 其他 effect-only 或尚未迁移 drawer 先 no-op 跳过；
+    - 新增最小 drawer call/args 拆分 helper。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `drawer_icons_to_block_sprite_ops(...)`；
+    - 新增 `drawer_to_block_sprite_ops(...)`；
+    - 新增 `draw_block_drawer_sprite_ops(...)`；
+    - 新增 `drawer_dispatch_and_sprite_bridge_preserve_multi_order_and_skip_effects`。
+- 已跑验证：
+  - `cargo test -p mindustry-core draw_default_side_liquid_tile --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core drawer_dispatch_and_sprite_bridge --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_renderer_plan_converts_sprite_passes_with_stable_symbols_and_rotation --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. 继续补 `DrawTurret/DrawPower/DrawLiquid*/DrawHeat*/DrawPistons/DrawWeave`；
+  2. 把 content block drawer 批量接入真实 block render snapshot；
+  3. 当前总迁移约 20.7%，仍未达到完整可玩。
