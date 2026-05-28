@@ -934,7 +934,7 @@ fn real_server_desktop_world_stream_materializes_multiple_payload_sidecars() {
 #[test]
 fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
     use mindustry_core::mindustry::core::GameRuntimeNetworkContext;
-    use mindustry_core::mindustry::net::StateSnapshotCallPacket;
+    use mindustry_core::mindustry::net::{PacketKind, ProviderEvent, StateSnapshotCallPacket};
     use mindustry_server::ServerLauncher;
     use std::thread;
     use std::time::Duration;
@@ -983,6 +983,7 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
         .expect("real server should send state snapshot");
 
     let mut applied = false;
+    let mut saw_provider_snapshot = false;
     let mut last_client_status = String::new();
     for _ in 0..80 {
         desktop.update();
@@ -991,6 +992,13 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
             let state = desktop.net_client.state();
             let state = state.lock().unwrap();
             applied = state.last_state_snapshot.as_ref() == Some(&snapshot);
+            saw_provider_snapshot |= state.last_provider_events.iter().any(|event| {
+                matches!(
+                    event,
+                    ProviderEvent::ClientPacket(PacketKind::StateSnapshotCallPacket(packet))
+                        if packet == &snapshot
+                )
+            });
             last_client_status = format!(
                 "state_snapshots={} last_snapshot={} last_server_snapshot={:?} provider_events={:?}",
                 state.state_snapshot_packets_seen,
@@ -1008,6 +1016,10 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
     assert!(
         applied,
         "desktop should receive real state snapshot after world stream; client: {last_client_status}"
+    );
+    assert!(
+        saw_provider_snapshot,
+        "desktop should observe StateSnapshotCallPacket through real ArcNetProvider events"
     );
     {
         let state = server.net_server.state();
@@ -1037,6 +1049,17 @@ fn real_server_desktop_state_snapshot_updates_runtime_after_world_stream() {
         snapshot.time_data
     );
     assert!(desktop.game_state.is_paused());
+    assert_eq!(desktop.runtime.state.wavetime, snapshot.wave_time);
+    assert_eq!(desktop.runtime.state.wave, snapshot.wave);
+    assert_eq!(desktop.runtime.state.enemies, snapshot.enemies);
+    assert_eq!(desktop.runtime.state.game_over, snapshot.game_over);
+    assert_eq!(desktop.runtime.state.rand_seed0, snapshot.rand0);
+    assert_eq!(desktop.runtime.state.rand_seed1, snapshot.rand1);
+    assert_eq!(
+        desktop.runtime.state.universe.seconds(true),
+        snapshot.time_data
+    );
+    assert!(desktop.runtime.state.is_paused());
     assert_eq!(
         desktop.runtime.network_context,
         GameRuntimeNetworkContext::client()
