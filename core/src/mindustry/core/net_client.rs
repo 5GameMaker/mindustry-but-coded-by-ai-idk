@@ -5701,14 +5701,20 @@ mod tests {
             sent: Arc::clone(&sent),
         };
         let client = NetClient::with_net(Net::new(Box::new(provider)));
-        client.set_connect_config(Some(ClientConnectConfig {
+        let connect_config = ClientConnectConfig {
+            version: super::DEFAULT_CLIENT_VERSION,
+            version_type: super::DEFAULT_CLIENT_VERSION_TYPE.into(),
+            mods: vec!["mod-a".into(), "mod-b".into()],
             name: "rust-player".into(),
             locale: "zh_CN".into(),
             usid: "usid".into(),
             uuid: "uuid".into(),
+            mobile: false,
             color: 42,
-            ..ClientConnectConfig::default()
-        }));
+            uuid_crc32: Some(0x0102_0304),
+        };
+        let expected_packet = connect_config.to_connect_packet();
+        client.set_connect_config(Some(connect_config));
 
         {
             let mut net = client.net_mut();
@@ -5725,13 +5731,9 @@ mod tests {
         assert!(sent[0].1);
         match &sent[0].0 {
             PacketKind::ConnectPacket(packet) => {
-                assert_eq!(packet.version, 158);
-                assert_eq!(packet.version_type, "official");
-                assert_eq!(packet.name, "rust-player");
-                assert_eq!(packet.locale, "zh_CN");
-                assert_eq!(packet.usid, "usid");
-                assert_eq!(packet.uuid, "uuid");
-                assert_eq!(packet.color, 42);
+                assert_eq!(packet, &expected_packet);
+                assert_eq!(packet.mods, vec!["mod-a", "mod-b"]);
+                assert_eq!(packet.uuid_crc32, Some(0x0102_0304));
             }
             other => panic!("unexpected packet: {other:?}"),
         }

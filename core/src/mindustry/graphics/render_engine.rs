@@ -423,6 +423,98 @@ impl RenderCommand {
             properties,
         }
     }
+
+    pub fn backend_flush_boundary(&self) -> Option<RenderBackendFlushBoundary> {
+        match self {
+            Self::Clear { .. } => Some(RenderBackendFlushBoundary::Clear),
+            Self::SetBlend { .. } => Some(RenderBackendFlushBoundary::BlendState),
+            Self::SetClip { .. } | Self::ClearClip => Some(RenderBackendFlushBoundary::ClipState),
+            Self::Custom { .. } => Some(RenderBackendFlushBoundary::Custom),
+            Self::FillRect { .. }
+            | Self::StrokeRect { .. }
+            | Self::DrawSprite { .. }
+            | Self::DrawLine { .. }
+            | Self::DrawCircle { .. }
+            | Self::DrawPixel { .. }
+            | Self::DrawText { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderBackendFlushBoundary {
+    Clear,
+    BlendState,
+    ClipState,
+    Custom,
+}
+
+impl RenderBackendFlushBoundary {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Clear => "clear",
+            Self::BlendState => "blend_state",
+            Self::ClipState => "clip_state",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderPassExecutionStepKind {
+    BeginPass,
+    FlushBoundary,
+    Command,
+    EndPass,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderPassExecutionStep {
+    pub kind: RenderPassExecutionStepKind,
+    pub command_index: Option<usize>,
+    pub boundary: Option<RenderBackendFlushBoundary>,
+    pub label: &'static str,
+}
+
+impl RenderPassExecutionStep {
+    pub const fn begin_pass() -> Self {
+        Self {
+            kind: RenderPassExecutionStepKind::BeginPass,
+            command_index: None,
+            boundary: None,
+            label: "begin_pass",
+        }
+    }
+
+    pub const fn flush_boundary(
+        command_index: usize,
+        boundary: RenderBackendFlushBoundary,
+    ) -> Self {
+        Self {
+            kind: RenderPassExecutionStepKind::FlushBoundary,
+            command_index: Some(command_index),
+            boundary: Some(boundary),
+            label: boundary.label(),
+        }
+    }
+
+    pub const fn command(command_index: usize) -> Self {
+        Self {
+            kind: RenderPassExecutionStepKind::Command,
+            command_index: Some(command_index),
+            boundary: None,
+            label: "command",
+        }
+    }
+
+    pub const fn end_pass() -> Self {
+        Self {
+            kind: RenderPassExecutionStepKind::EndPass,
+            command_index: None,
+            boundary: None,
+            label: "end_pass",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -606,6 +698,21 @@ impl RenderPass {
 
     pub fn extend(&mut self, commands: impl IntoIterator<Item = RenderCommand>) {
         self.commands.extend(commands);
+    }
+
+    pub fn backend_execution_steps(&self) -> Vec<RenderPassExecutionStep> {
+        let mut steps = Vec::with_capacity(self.commands.len() * 2 + 2);
+        steps.push(RenderPassExecutionStep::begin_pass());
+
+        for (index, command) in self.commands.iter().enumerate() {
+            if let Some(boundary) = command.backend_flush_boundary() {
+                steps.push(RenderPassExecutionStep::flush_boundary(index, boundary));
+            }
+            steps.push(RenderPassExecutionStep::command(index));
+        }
+
+        steps.push(RenderPassExecutionStep::end_pass());
+        steps
     }
 
     pub fn effective_viewport(&self, fallback: RenderViewport) -> RenderViewport {
@@ -1030,6 +1137,88 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn render_pass_backend_execution_steps_mark_state_flush_boundaries() {
+        let mut pass = RenderPass::new(RenderPassKind::Block);
+        pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(1.0, 2.0, 8.0, 8.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            20.0,
+        ));
+        pass.push(RenderCommand::set_blend(RenderBlendMode::Additive));
+        pass.push(RenderCommand::set_clip(RenderRect::new(
+            0.0, 0.0, 16.0, 16.0,
+        )));
+        pass.push(RenderCommand::draw_text(
+            "label",
+            RenderPoint::new(4.0, 5.0),
+            [1.0, 1.0, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextAlign::Center,
+            30.0,
+        ));
+        pass.push(RenderCommand::custom(
+            "backend-marker",
+            vec![RenderProperty::new("stage", "block")],
+        ));
+
+        assert_eq!(
+            pass.commands
+                .iter()
+                .map(RenderCommand::backend_flush_boundary)
+                .collect::<Vec<_>>(),
+            vec![
+                Some(RenderBackendFlushBoundary::Clear),
+                None,
+                Some(RenderBackendFlushBoundary::BlendState),
+                Some(RenderBackendFlushBoundary::ClipState),
+                None,
+                Some(RenderBackendFlushBoundary::Custom),
+            ]
+        );
+
+        let steps = pass.backend_execution_steps();
+        assert_eq!(steps.first(), Some(&RenderPassExecutionStep::begin_pass()));
+        assert_eq!(steps.last(), Some(&RenderPassExecutionStep::end_pass()));
+        assert_eq!(
+            steps
+                .iter()
+                .filter(|step| step.kind == RenderPassExecutionStepKind::Command)
+                .map(|step| step.command_index)
+                .collect::<Vec<_>>(),
+            vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]
+        );
+        assert_eq!(
+            steps
+                .iter()
+                .filter_map(|step| step.boundary)
+                .collect::<Vec<_>>(),
+            vec![
+                RenderBackendFlushBoundary::Clear,
+                RenderBackendFlushBoundary::BlendState,
+                RenderBackendFlushBoundary::ClipState,
+                RenderBackendFlushBoundary::Custom,
+            ]
+        );
+        assert_eq!(
+            steps
+                .iter()
+                .filter(|step| step.kind == RenderPassExecutionStepKind::FlushBoundary)
+                .map(|step| (step.command_index, step.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some(0), "clear"),
+                (Some(2), "blend_state"),
+                (Some(3), "clip_state"),
+                (Some(5), "custom"),
+            ]
+        );
     }
 
     #[test]

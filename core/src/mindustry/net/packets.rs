@@ -7787,7 +7787,7 @@ mod tests {
     #[test]
     fn connect_packet_write_matches_upstream_field_order_and_crc_slot() {
         let packet = ConnectPacket {
-            version: 157,
+            version: 158,
             version_type: "official".into(),
             mods: vec!["mod-a".into(), "mod-b".into()],
             name: "p".into(),
@@ -7804,7 +7804,7 @@ mod tests {
 
         let expected_crc = packet.uuid_crc32().unwrap() as i64;
         let mut expected = Vec::new();
-        expected.extend_from_slice(&157i32.to_be_bytes());
+        expected.extend_from_slice(&158i32.to_be_bytes());
         crate::mindustry::io::write_string(&mut expected, Some("official")).unwrap();
         crate::mindustry::io::write_string(&mut expected, Some("p")).unwrap();
         crate::mindustry::io::write_string(&mut expected, Some("en_US")).unwrap();
@@ -7829,7 +7829,7 @@ mod tests {
             hasher.finalize()
         };
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&157i32.to_be_bytes());
+        bytes.extend_from_slice(&158i32.to_be_bytes());
         crate::mindustry::io::write_string(&mut bytes, Some("official")).unwrap();
         crate::mindustry::io::write_string(&mut bytes, Some("p")).unwrap();
         crate::mindustry::io::write_string(&mut bytes, Some("en_US")).unwrap();
@@ -7838,7 +7838,9 @@ mod tests {
         bytes.extend_from_slice(&(crc as i64).to_be_bytes());
         bytes.push(1);
         bytes.extend_from_slice(&5i32.to_be_bytes());
-        bytes.push(0);
+        bytes.push(2);
+        crate::mindustry::io::write_string(&mut bytes, Some("mod-a")).unwrap();
+        crate::mindustry::io::write_string(&mut bytes, Some("mod-b")).unwrap();
 
         let decoded = ConnectPacket::read_from(&mut bytes.as_slice()).unwrap();
         let mut uuid_and_crc = Vec::from(raw_uuid);
@@ -7847,8 +7849,137 @@ mod tests {
             decoded.uuid,
             base64::engine::general_purpose::STANDARD.encode(uuid_and_crc)
         );
+        assert_eq!(decoded.version, 158);
+        assert_eq!(decoded.version_type, "official");
+        assert_eq!(decoded.name, "p");
+        assert_eq!(decoded.locale, "en_US");
+        assert_eq!(decoded.usid, "usid");
+        assert_eq!(
+            decoded.mods,
+            vec![String::from("mod-a"), String::from("mod-b")]
+        );
         assert!(decoded.mobile);
         assert_eq!(decoded.color, 5);
+        assert!(decoded.uuid_crc32.is_none());
+    }
+
+    #[test]
+    fn handshake_smoke_matches_java_v1581_field_order_and_roundtrips_control_packets() {
+        let connect = ConnectPacket {
+            version: 158,
+            version_type: "official".into(),
+            mods: vec!["mod-a".into(), "mod-b".into()],
+            name: "player".into(),
+            locale: "en_US".into(),
+            uuid: base64::engine::general_purpose::STANDARD.encode([1, 2, 3, 4, 5, 6, 7, 8]),
+            usid: "usid".into(),
+            mobile: true,
+            color: 0x11223344,
+            uuid_crc32: Some(0x0102_0304),
+        };
+
+        let mut bytes = Vec::new();
+        connect.write_to(&mut bytes).unwrap();
+        let expected_crc = connect.uuid_crc32().unwrap() as i64;
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&158i32.to_be_bytes());
+        crate::mindustry::io::write_string(&mut expected, Some("official")).unwrap();
+        crate::mindustry::io::write_string(&mut expected, Some("player")).unwrap();
+        crate::mindustry::io::write_string(&mut expected, Some("en_US")).unwrap();
+        crate::mindustry::io::write_string(&mut expected, Some("usid")).unwrap();
+        expected.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        expected.extend_from_slice(&expected_crc.to_be_bytes());
+        expected.push(1);
+        expected.extend_from_slice(&0x11223344i32.to_be_bytes());
+        expected.push(2);
+        crate::mindustry::io::write_string(&mut expected, Some("mod-a")).unwrap();
+        crate::mindustry::io::write_string(&mut expected, Some("mod-b")).unwrap();
+        assert_eq!(bytes, expected);
+
+        let decoded = ConnectPacket::read_from(&mut bytes.as_slice()).unwrap();
+        let mut uuid_and_crc = Vec::from([1u8, 2, 3, 4, 5, 6, 7, 8]);
+        uuid_and_crc.extend_from_slice(&expected_crc.to_be_bytes());
+        assert_eq!(
+            decoded.uuid,
+            base64::engine::general_purpose::STANDARD.encode(uuid_and_crc)
+        );
+        assert_eq!(decoded.version, 158);
+        assert_eq!(decoded.version_type, "official");
+        assert_eq!(decoded.name, "player");
+        assert_eq!(decoded.locale, "en_US");
+        assert_eq!(decoded.usid, "usid");
+        assert_eq!(decoded.mods, vec!["mod-a", "mod-b"]);
+        assert!(decoded.mobile);
+        assert_eq!(decoded.color, 0x11223344);
+        assert!(decoded.uuid_crc32.is_none());
+
+        let disconnect = Disconnect {
+            reason: "left".into(),
+        };
+        assert_eq!(disconnect.reason, "left");
+
+        let connect_call = ConnectCallPacket {
+            ip: "127.0.0.1".into(),
+            port: 6567,
+        };
+        let mut bytes = Vec::new();
+        connect_call.write_to(&mut bytes).unwrap();
+        let mut expected = Vec::new();
+        crate::mindustry::io::write_string(&mut expected, Some("127.0.0.1")).unwrap();
+        expected.extend_from_slice(&6567i32.to_be_bytes());
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            ConnectCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            connect_call
+        );
+
+        let confirm = ConnectConfirmCallPacket;
+        let mut bytes = Vec::new();
+        confirm.write_to(&mut bytes).unwrap();
+        assert!(bytes.is_empty());
+        assert_eq!(
+            ConnectConfirmCallPacket::read_from(&mut bytes.as_slice()).unwrap(),
+            confirm
+        );
+
+        let kick_reason = KickCallPacket2 {
+            reason: KickReason::TypeMismatch,
+        };
+        let mut bytes = Vec::new();
+        kick_reason.write_to(&mut bytes).unwrap();
+        assert_eq!(bytes, vec![KickReason::TypeMismatch.ordinal()]);
+        assert_eq!(
+            KickCallPacket2::read_from(&mut bytes.as_slice()).unwrap(),
+            kick_reason
+        );
+
+        let begin = StreamBegin {
+            id: 7,
+            total: 300,
+            packet_type: packet_ids::WORLD_STREAM,
+        };
+        let mut bytes = Vec::new();
+        begin.write_to(&mut bytes).unwrap();
+        assert_eq!(
+            bytes,
+            vec![0, 0, 0, 7, 0, 0, 1, 44, packet_ids::WORLD_STREAM]
+        );
+        assert_eq!(
+            StreamBegin::read_from(&mut bytes.as_slice()).unwrap(),
+            begin
+        );
+
+        let chunk = StreamChunk {
+            id: 3,
+            data: vec![1, 2, 3],
+        };
+        let mut bytes = Vec::new();
+        chunk.write_to(&mut bytes).unwrap();
+        assert_eq!(bytes, vec![0, 0, 0, 3, 0, 3, 1, 2, 3]);
+        assert_eq!(
+            StreamChunk::read_from(&mut bytes.as_slice()).unwrap(),
+            chunk
+        );
     }
 
     #[test]

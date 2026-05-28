@@ -11885,3 +11885,53 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Server 侧 FileTree 尚未进入 bundles/content lifecycle；
   - `DrawLiquidOutputs`、`DrawParticles`、heat/liquid/warmup 仍需运行态输入；
   - 当前总体迁移约 21.8%，仍未达到完整可玩。
+
+### 12.374 渲染执行 seam / Pixelator / Shader / CacheLayer 与网络握手 smoke
+
+- 2026-05-29：继续优先推进渲染引擎主链，同时补 P0 联机握手 smoke 前置与 server mod resource overlay。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs` / `desktop/src/main.rs`
+    - 新增 `DesktopSurfaceSize`、`DesktopSurfaceConfig`、`DesktopFramePacing`、`DesktopFrameLoopEvent`、`DesktopFrameLoopState`、`DesktopPresentResult`、`DesktopFrameLoopRunSummary`；
+    - `DesktopLauncher::step_desktop_frame_loop(...)` 与 `run_with_desktop_frame_loop(...)` 提供可替换 surface/frame-loop seam；
+    - `main.rs` 不再手写无限 sleep loop，改用 frame-loop seam 驱动 headless renderer，后续真实 surface/backend 可替换。
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderBackendFlushBoundary`、`RenderPassExecutionStepKind`、`RenderPassExecutionStep`；
+    - `RenderCommand::backend_flush_boundary()` 与 `RenderPass::backend_execution_steps()` 标记 clear/blend/clip/custom 等 backend flush 边界。
+  - `core/src/mindustry/graphics/pixelator.rs`
+    - `PixelatorFramePlan` 扩展 begin/resize/camera snap/blit/restore 后端中立生命周期；
+    - 保留 disabled/no-op、重复帧 no-resize 与 camera restore 语义。
+  - `core/src/mindustry/graphics/shaders.rs`
+    - 新增 shader binding metadata：kind、semantic、buffer target、texture slot；
+    - `ShaderApplyPlan::binding_metadata()` 为 projection/camera/resolution/time/texture/effect buffer 等生成稳定绑定计划。
+  - `core/src/mindustry/graphics/cache_layer.rs`
+    - CacheLayer 增加 layer id/pass metadata、target、shader/blend hint、begin/render/end/blit/resume 顺序与 invalidation hint。
+  - `server/src/lib.rs`
+    - `ServerModResources` 新增 resource overlay；
+    - `ServerLauncher::lookup_mod_resource(...)` 可查 generic assets 与 `bundles/*` 文件；
+    - `clear_mod_resources()` 会清掉 overlay。
+  - `core/src/mindustry/net/packets.rs`、`core/src/mindustry/core/net_client.rs`、`core/src/mindustry/core/net_server.rs`
+    - 增加 Java v158.1 handshake smoke：`ConnectPacket` 字段顺序、mods、uuid CRC slot、connect/confirm/kick/stream begin/chunk roundtrip；
+    - client connect config 与 server validation 保留 mods。
+- 已跑验证：
+  - `cargo test -p mindustry-core render_engine --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core cache_layer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core pixelator --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core shaders --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core handshake_smoke_matches_java_v1581_field_order_and_roundtrips_control_packets --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core connect_packet --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core net_client --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core net_server --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_frame_loop --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_default_run_keeps_headless_data_path_without_mod_scan_flags --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-server server_launcher_can_load_ --manifest-path "Cargo.toml" --lib -- --test-threads=1`
+  - `cargo test -p mindustry-server server_launcher_starts_with_empty_mod_resources_and_no_disk_scan --manifest-path "Cargo.toml" --lib -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 已知注意：
+  - `cargo test -p mindustry-desktop` 全量仍有既有失败 `desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue`（lifetime 0.0 vs 30.0），非本轮 frame-loop seam 引入。
+- 仍未完成：
+  - 真实 window/surface/GPU texture upload、present、sampler/filter 仍未落地；
+  - Pixelator/CacheLayer/Shader 仍为后端中立计划，尚未绑定真实 FBO/GPU；
+  - network smoke 仍是纯内存字段/roundtrip，还不是 Rust↔Java 真实进程互联；
+  - 当前总体迁移约 22.4%，仍未达到完整可玩。

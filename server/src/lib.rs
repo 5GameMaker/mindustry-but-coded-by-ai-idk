@@ -12,7 +12,7 @@ use mindustry_core::mindustry::core::net_server::{
     PlayerPreviewPlanSource, PLAN_PREVIEW_SYNC_INTERVAL_MS,
 };
 use mindustry_core::mindustry::core::{
-    content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext,
+    content_loader::ContentLoader, AssetFile, FileTree, GameRuntime, GameRuntimeNetworkContext,
     GameRuntimeOwnedEffectResources, GameRuntimeOwnedFrameReport,
     GameRuntimeOwnedItemTransportFrameReport, GameRuntimeOwnedPayloadFrameReport, NetServer, World,
 };
@@ -109,6 +109,7 @@ struct ServerWeaponBulletSpawnPlan {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ServerModResources {
     pub container: ModResourceContainerPlan,
+    resource_overlay: FileTree,
 }
 
 impl ServerModResources {
@@ -117,7 +118,7 @@ impl ServerModResources {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.container.is_empty()
+        self.container.is_empty() && self.resource_overlay.file_count() == 0
     }
 
     pub fn load_mod_directory(
@@ -125,22 +126,126 @@ impl ServerModResources {
         mod_name: impl Into<String>,
         root: impl AsRef<Path>,
     ) -> io::Result<()> {
-        self.container
-            .mods
-            .push(ModResourceDirectoryPlan::from_directory(
-                mod_name, true, root,
-            )?);
+        let plan = ModResourceDirectoryPlan::from_directory(mod_name, true, root)?;
+        let mut container = self.container.clone();
+        container.mods.push(plan);
+        let resource_overlay = build_server_resource_overlay(&container)?;
+        self.container = container;
+        self.resource_overlay = resource_overlay;
         Ok(())
     }
 
     pub fn load_mods_directory(&mut self, mods_dir: impl AsRef<Path>) -> io::Result<()> {
-        self.container = ModResourceContainerPlan::discover_from_mods_directory(mods_dir, true)?;
+        let container = ModResourceContainerPlan::discover_from_mods_directory(mods_dir, true)?;
+        let resource_overlay = build_server_resource_overlay(&container)?;
+        self.container = container;
+        self.resource_overlay = resource_overlay;
         Ok(())
     }
 
     pub fn clear(&mut self) {
         self.container.mods.clear();
+        self.resource_overlay.clear();
     }
+
+    pub fn lookup_resource(&self, path: &str) -> AssetFile {
+        self.resource_overlay.get(path)
+    }
+}
+
+fn build_server_resource_overlay(container: &ModResourceContainerPlan) -> io::Result<FileTree> {
+    let mut resource_overlay = FileTree::new();
+
+    for mod_plan in &container.mods {
+        for path in scan_server_mod_generic_paths(&mod_plan.root)? {
+            resource_overlay.add_file(path.clone(), AssetFile::new(path, true));
+        }
+        for path in scan_server_mod_bundle_paths(&mod_plan.root)? {
+            resource_overlay.add_file(path.clone(), AssetFile::new(path, true));
+        }
+    }
+
+    Ok(resource_overlay)
+}
+
+fn scan_server_mod_generic_paths(root: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    let root = root.as_ref();
+    let mut paths = Vec::new();
+
+    if !root.is_dir() {
+        return Ok(paths);
+    }
+
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let folder = entry.file_name();
+        if is_skipped_mod_overlay_folder(&folder) {
+            continue;
+        }
+
+        walk_server_relative_files(root, &path, &mut paths, accept_all_server_files)?;
+    }
+
+    paths.sort();
+    Ok(paths)
+}
+
+fn scan_server_mod_bundle_paths(root: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    let root = root.as_ref();
+    let mut paths = Vec::new();
+    let bundles_dir = root.join("bundles");
+
+    if bundles_dir.is_dir() {
+        walk_server_relative_files(root, &bundles_dir, &mut paths, accept_all_server_files)?;
+    }
+
+    paths.sort();
+    Ok(paths)
+}
+
+fn walk_server_relative_files(
+    root: &Path,
+    current: &Path,
+    out: &mut Vec<String>,
+    accept: fn(&Path) -> bool,
+) -> io::Result<()> {
+    for entry in std::fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            walk_server_relative_files(root, &path, out, accept)?;
+            continue;
+        }
+
+        if accept(&path) {
+            out.push(
+                path.strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn accept_all_server_files(_: &Path) -> bool {
+    true
+}
+
+fn is_skipped_mod_overlay_folder(name: &std::ffi::OsStr) -> bool {
+    matches!(
+        name.to_str(),
+        Some(name)
+            if name.starts_with('.')
+                || matches!(name, "bundles" | "sprites" | "sprites-override")
+    )
 }
 
 fn server_fire_entity_id(x: i32, y: i32) -> i32 {
@@ -327,6 +432,10 @@ impl ServerLauncher {
 
     pub fn clear_mod_resources(&mut self) {
         self.mod_resources.clear();
+    }
+
+    pub fn lookup_mod_resource(&self, path: &str) -> AssetFile {
+        self.mod_resources.lookup_resource(path)
     }
 
     pub fn open_network(&mut self) {
@@ -4900,8 +5009,8 @@ mod tests {
         GameRuntimeUnitBlockState, GameRuntimeUnitCargoUnloadConfigureResult,
     };
     use mindustry_core::mindustry::core::{
-        content_loader::ContentLoader, GameRuntime, GameRuntimeNetworkContext, GameStateState,
-        NetServer,
+        content_loader::ContentLoader, AssetFile, GameRuntime, GameRuntimeNetworkContext,
+        GameStateState, NetServer,
     };
     use mindustry_core::mindustry::ctype::{Content, ContentType};
     use mindustry_core::mindustry::entities::comp::{
@@ -5018,6 +5127,28 @@ mod tests {
             plan.resource_plan.sprite_requests()[1].source_path,
             "sprites-override/ui/icon.png"
         );
+        assert_eq!(
+            launcher.lookup_mod_resource("assets/foo.txt"),
+            AssetFile::new("assets/foo.txt", true)
+        );
+        assert_eq!(
+            launcher.lookup_mod_resource("assets/nested/bar.txt"),
+            AssetFile::new("assets/nested/bar.txt", true)
+        );
+        assert_eq!(
+            launcher.lookup_mod_resource("bundles/messages.properties"),
+            AssetFile::new("bundles/messages.properties", true)
+        );
+
+        launcher.clear_mod_resources();
+        assert_eq!(
+            launcher.lookup_mod_resource("assets/foo.txt"),
+            AssetFile::missing("assets/foo.txt")
+        );
+        assert_eq!(
+            launcher.lookup_mod_resource("bundles/messages.properties"),
+            AssetFile::missing("bundles/messages.properties")
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -5030,6 +5161,8 @@ mod tests {
 
         std::fs::create_dir_all(alpha.join("assets")).unwrap();
         std::fs::write(alpha.join("assets/alpha.txt"), b"alpha").unwrap();
+        std::fs::create_dir_all(alpha.join("bundles")).unwrap();
+        std::fs::write(alpha.join("bundles/messages.properties"), b"alpha=world").unwrap();
         std::fs::create_dir_all(alpha.join("sprites")).unwrap();
         std::fs::write(alpha.join("sprites/alpha.png"), b"not-a-real-png").unwrap();
 
@@ -5066,6 +5199,19 @@ mod tests {
                 .sprite_requests()
                 .len(),
             1
+        );
+        assert_eq!(
+            launcher.lookup_mod_resource("assets/alpha.txt"),
+            AssetFile::new("assets/alpha.txt", true)
+        );
+        assert_eq!(
+            launcher.lookup_mod_resource("bundles/messages.properties"),
+            AssetFile::new("bundles/messages.properties", true)
+        );
+        launcher.clear_mod_resources();
+        assert_eq!(
+            launcher.lookup_mod_resource("assets/alpha.txt"),
+            AssetFile::missing("assets/alpha.txt")
         );
 
         let _ = std::fs::remove_dir_all(&root);

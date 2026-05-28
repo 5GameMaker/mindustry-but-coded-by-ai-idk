@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **21.8%**。
+- 当前总体迁移完成度：约 **22.4%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9193,3 +9193,48 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 注意：
   - `cargo test -p mindustry-server server_launcher --lib -- --test-threads=1` 在本机可能因两个端口保留测试失败；新增 server mod resource 测试本身已过。
   - 下一步优先：真实窗口/surface/GPU texture upload/sampler/filter、Desktop 显式 mods container 开关、Server bundles/content lifecycle、网络 P0 smoke test。
+
+---
+
+## 276. 最新闭环记录：Desktop frame-loop seam / Pixelator-Shader-Cache 后端计划 / handshake smoke
+
+- 本轮总体进度更新：约 **22.4%**，仍未达到完整可玩。
+- 待提交主改动：
+  - `desktop/src/lib.rs`
+  - `desktop/src/main.rs`
+    - 新增 surface/frame-loop seam：surface config、frame pacing、resize/close/input tick event、present result、run summary；
+    - `DesktopLauncher::step_desktop_frame_loop(...)` / `run_with_desktop_frame_loop(...)`；
+    - `main.rs` 改用 frame-loop seam，不再手写无限 sleep loop。
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 backend flush boundary 与 pass execution steps。
+  - `core/src/mindustry/graphics/pixelator.rs`
+    - Pixelator plan 增加 begin/resize/camera snap/blit/restore 生命周期。
+  - `core/src/mindustry/graphics/shaders.rs`
+    - Shader binding metadata：uniform/texture/buffer kind、semantic、slot、target。
+  - `core/src/mindustry/graphics/cache_layer.rs`
+    - CacheLayer pass/blit/target/shader/blend/invalidation metadata。
+  - `server/src/lib.rs`
+    - Server mod resource overlay 与 `lookup_mod_resource(...)`。
+  - `core/src/mindustry/net/packets.rs`
+  - `core/src/mindustry/core/net_client.rs`
+  - `core/src/mindustry/core/net_server.rs`
+    - Java v158.1 handshake smoke：connect fields/mods/uuid crc、connect confirm、kick、stream begin/chunk。
+- 本轮已验证：
+  - `cargo test -p mindustry-core render_engine --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core cache_layer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core pixelator --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core shaders --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core handshake_smoke_matches_java_v1581_field_order_and_roundtrips_control_packets --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core connect_packet --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core net_client --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core net_server --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_frame_loop --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_default_run_keeps_headless_data_path_without_mod_scan_flags --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-server server_launcher_can_load_ --manifest-path "Cargo.toml" --lib -- --test-threads=1`
+  - `cargo test -p mindustry-server server_launcher_starts_with_empty_mod_resources_and_no_disk_scan --manifest-path "Cargo.toml" --lib -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 注意：
+  - `cargo test -p mindustry-desktop` 全量仍有既有失败 `desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue`，不是本轮改动引入。
+  - 下一步优先：真实 GPU/window/surface backend、texture upload/sampler/filter、Pixelator/CacheLayer/Shader 的真实执行器、Rust↔Java 进程级 handshake smoke。

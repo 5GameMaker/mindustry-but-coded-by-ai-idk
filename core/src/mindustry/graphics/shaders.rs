@@ -598,6 +598,11 @@ impl ShaderTextureRequest {
             gen_mip_maps: true,
         }
     }
+
+    /// All modeled shader texture requests currently bind to sampler slot 1.
+    pub const fn binding_slot(&self) -> u8 {
+        1
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -616,6 +621,65 @@ pub enum TextureFilter {
 pub enum TextureWrap {
     Repeat,
     MirroredRepeat,
+}
+
+/// Backend-neutral classification for shader bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShaderBindingKind {
+    Uniform,
+    Texture,
+    Buffer,
+}
+
+/// High-level semantic tags for common Java shader bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShaderBindingSemantic {
+    Projection,
+    InverseProjection,
+    CameraPosition,
+    CameraDirection,
+    CameraRelativePosition,
+    Resolution,
+    InverseResolution,
+    Time,
+    Scale,
+    Progress,
+    Alpha,
+    Color,
+    Uv,
+    Uv2,
+    TextureSize,
+    Ambient,
+    AmbientColor,
+    LightDirection,
+    Mouse,
+    Emissive,
+    InnerRadius,
+    OuterRadius,
+    ShockwaveCount,
+    Shockwaves,
+    TextureSlot,
+    BufferTarget,
+    Unknown,
+}
+
+/// Symbolic buffer targets used by backend-neutral plans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShaderBufferTarget {
+    EffectBuffer,
+    ShockwaveFrameBuffer,
+}
+
+/// Metadata for a single resolved binding in an apply plan.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShaderBindingMetadata {
+    pub kind: ShaderBindingKind,
+    pub semantic: ShaderBindingSemantic,
+    pub name: &'static str,
+    pub slot: Option<u8>,
+    pub texture: Option<TextureBinding>,
+    pub buffer_target: Option<ShaderBufferTarget>,
+    pub value: Option<UniformValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -692,6 +756,59 @@ pub enum ShaderApplyOperation {
     },
 }
 
+impl ShaderApplyOperation {
+    pub fn metadata(&self) -> ShaderBindingMetadata {
+        match self {
+            Self::SetUniform(binding) | Self::SetUniformIfPresent(binding) => {
+                let semantic = shader_uniform_semantic(binding.name);
+                ShaderBindingMetadata {
+                    kind: ShaderBindingKind::Uniform,
+                    semantic,
+                    name: binding.name,
+                    slot: None,
+                    texture: None,
+                    buffer_target: None,
+                    value: Some(binding.value.clone()),
+                }
+            }
+            Self::BindTexture {
+                uniform,
+                slot,
+                texture,
+            } => ShaderBindingMetadata {
+                kind: ShaderBindingKind::Texture,
+                semantic: ShaderBindingSemantic::TextureSlot,
+                name: uniform,
+                slot: Some(*slot),
+                texture: Some(texture.clone()),
+                buffer_target: match texture {
+                    TextureBinding::EffectBuffer => Some(ShaderBufferTarget::EffectBuffer),
+                    TextureBinding::Asset(_) => None,
+                },
+                value: None,
+            },
+            Self::ShockwavePreDraw { buffer, .. } => ShaderBindingMetadata {
+                kind: ShaderBindingKind::Buffer,
+                semantic: ShaderBindingSemantic::BufferTarget,
+                name: buffer,
+                slot: None,
+                texture: None,
+                buffer_target: Some(ShaderBufferTarget::ShockwaveFrameBuffer),
+                value: None,
+            },
+            Self::ShockwavePostDraw { buffer, .. } => ShaderBindingMetadata {
+                kind: ShaderBindingKind::Buffer,
+                semantic: ShaderBindingSemantic::BufferTarget,
+                name: buffer,
+                slot: None,
+                texture: None,
+                buffer_target: Some(ShaderBufferTarget::ShockwaveFrameBuffer),
+                value: None,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextureBinding {
     Asset(String),
@@ -726,6 +843,13 @@ impl ShaderApplyPlan {
                 | ShaderApplyOperation::SetUniformIfPresent(binding) => Some(binding),
                 _ => None,
             })
+    }
+
+    pub fn binding_metadata(&self) -> Vec<ShaderBindingMetadata> {
+        self.operations
+            .iter()
+            .map(ShaderApplyOperation::metadata)
+            .collect()
     }
 
     fn set(&mut self, name: &'static str, value: UniformValue) {
@@ -1316,6 +1440,45 @@ fn canonical_name(name: &str) -> String {
         .collect()
 }
 
+fn shader_uniform_semantic(name: &str) -> ShaderBindingSemantic {
+    match name {
+        "u_projection" => ShaderBindingSemantic::Projection,
+        "u_invproj" | "u_invprojection" => ShaderBindingSemantic::InverseProjection,
+        "u_campos" | "u_ccampos" => ShaderBindingSemantic::CameraPosition,
+        "u_camdir" => ShaderBindingSemantic::CameraDirection,
+        "u_rcampos" => ShaderBindingSemantic::CameraRelativePosition,
+        "u_offset" => ShaderBindingSemantic::CameraRelativePosition,
+        "u_resolution" => ShaderBindingSemantic::Resolution,
+        "u_invsize" => ShaderBindingSemantic::InverseResolution,
+        "u_time" => ShaderBindingSemantic::Time,
+        "u_dp" => ShaderBindingSemantic::Scale,
+        "u_progress" => ShaderBindingSemantic::Progress,
+        "u_alpha" => ShaderBindingSemantic::Alpha,
+        "u_color" => ShaderBindingSemantic::Color,
+        "u_uv" => ShaderBindingSemantic::Uv,
+        "u_uv2" => ShaderBindingSemantic::Uv2,
+        "u_texsize" => ShaderBindingSemantic::TextureSize,
+        "u_ambient" => ShaderBindingSemantic::Ambient,
+        "u_ambientColor" => ShaderBindingSemantic::AmbientColor,
+        "u_lightdir" | "u_light" => ShaderBindingSemantic::LightDirection,
+        "u_mouse" => ShaderBindingSemantic::Mouse,
+        "u_emissive" => ShaderBindingSemantic::Emissive,
+        "u_innerRadius" => ShaderBindingSemantic::InnerRadius,
+        "u_outerRadius" => ShaderBindingSemantic::OuterRadius,
+        "u_shockwave_count" => ShaderBindingSemantic::ShockwaveCount,
+        "u_shockwaves" => ShaderBindingSemantic::Shockwaves,
+        "u_noise" | "u_stars" => ShaderBindingSemantic::TextureSlot,
+        "effectBuffer" => ShaderBindingSemantic::BufferTarget,
+        _ if canonical_name(name).contains("projection") => ShaderBindingSemantic::Projection,
+        _ if canonical_name(name).contains("camera") => ShaderBindingSemantic::CameraPosition,
+        _ if canonical_name(name).contains("resolution") => ShaderBindingSemantic::Resolution,
+        _ if canonical_name(name).contains("invsize") => ShaderBindingSemantic::InverseResolution,
+        _ if canonical_name(name).contains("time") => ShaderBindingSemantic::Time,
+        _ if canonical_name(name).contains("buffer") => ShaderBindingSemantic::BufferTarget,
+        _ => ShaderBindingSemantic::Unknown,
+    }
+}
+
 const fn normalized_one() -> [f32; 3] {
     [0.57735026, 0.57735026, 0.57735026]
 }
@@ -1328,6 +1491,13 @@ mod tests {
         plan.uniforms()
             .find(|binding| binding.name == name)
             .unwrap_or_else(|| panic!("missing uniform {name}"))
+    }
+
+    fn metadata_entry(plan: &ShaderApplyPlan, name: &str) -> ShaderBindingMetadata {
+        plan.binding_metadata()
+            .into_iter()
+            .find(|entry| entry.name == name)
+            .unwrap_or_else(|| panic!("missing binding metadata {name}"))
     }
 
     fn apply_plan(shader: ShaderId) -> ShaderApplyPlan {
@@ -1581,6 +1751,222 @@ mod tests {
     }
 
     #[test]
+    fn binding_metadata_tracks_common_uniforms_slots_and_buffer_targets() {
+        let blockbuild = ShaderCatalog::apply_plan(
+            ShaderId::BlockBuild,
+            &ShaderApplyContext {
+                parameters: ShaderParameters {
+                    progress: 0.25,
+                    time: 7.0,
+                    ..ShaderParameters::default()
+                },
+                ..ShaderApplyContext::default()
+            },
+        );
+        assert!(!blockbuild.has_errors());
+        assert_eq!(
+            blockbuild
+                .binding_metadata()
+                .iter()
+                .map(|entry| (entry.name, entry.kind, entry.semantic))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "u_progress",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Progress
+                ),
+                (
+                    "u_time",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Time
+                ),
+                (
+                    "u_alpha",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Alpha
+                ),
+                (
+                    "u_uv",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Uv
+                ),
+                (
+                    "u_uv2",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Uv2
+                ),
+                (
+                    "u_texsize",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::TextureSize,
+                ),
+            ]
+        );
+
+        let shield = ShaderCatalog::apply_plan(
+            ShaderId::Shield,
+            &ShaderApplyContext {
+                camera: Some(ShaderCamera::new(100.0, 80.0, 50.0, 40.0)),
+                time: 8.0,
+                dp: 2.0,
+                ..ShaderApplyContext::default()
+            },
+        );
+        assert!(!shield.has_errors());
+        assert_eq!(
+            shield
+                .binding_metadata()
+                .iter()
+                .map(|entry| (entry.name, entry.kind, entry.semantic, entry.slot))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "u_dp",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Scale,
+                    None
+                ),
+                (
+                    "u_time",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Time,
+                    None
+                ),
+                (
+                    "u_offset",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::CameraRelativePosition,
+                    None,
+                ),
+                (
+                    "u_texsize",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::TextureSize,
+                    None,
+                ),
+                (
+                    "u_invsize",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::InverseResolution,
+                    None,
+                ),
+            ]
+        );
+
+        let surface = ShaderCatalog::apply_plan(
+            ShaderId::Water,
+            &ShaderApplyContext {
+                camera: Some(ShaderCamera::new(10.0, 20.0, 100.0, 80.0)),
+                time: 11.0,
+                ..ShaderApplyContext::default()
+            },
+        );
+        assert!(!surface.has_errors());
+        assert_eq!(
+            surface
+                .binding_metadata()
+                .iter()
+                .map(|entry| (
+                    entry.name,
+                    entry.kind,
+                    entry.semantic,
+                    entry.slot,
+                    entry.buffer_target
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "u_campos",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::CameraPosition,
+                    None,
+                    None,
+                ),
+                (
+                    "u_resolution",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Resolution,
+                    None,
+                    None,
+                ),
+                (
+                    "u_time",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::Time,
+                    None,
+                    None,
+                ),
+                (
+                    "u_noise",
+                    ShaderBindingKind::Texture,
+                    ShaderBindingSemantic::TextureSlot,
+                    Some(1),
+                    None,
+                ),
+                (
+                    "effectBuffer",
+                    ShaderBindingKind::Texture,
+                    ShaderBindingSemantic::TextureSlot,
+                    Some(0),
+                    Some(ShaderBufferTarget::EffectBuffer),
+                ),
+                (
+                    "u_noise",
+                    ShaderBindingKind::Uniform,
+                    ShaderBindingSemantic::TextureSlot,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            ShaderCatalog::descriptor(ShaderId::Water).texture_requests()[0].binding_slot(),
+            1
+        );
+        assert_eq!(
+            metadata_entry(&surface, "u_noise").semantic,
+            ShaderBindingSemantic::TextureSlot
+        );
+        assert_eq!(metadata_entry(&surface, "u_noise").slot, Some(1));
+        assert_eq!(
+            surface
+                .binding_metadata()
+                .iter()
+                .find(|entry| entry.name == "effectBuffer")
+                .and_then(|entry| entry.buffer_target),
+            Some(ShaderBufferTarget::EffectBuffer)
+        );
+        assert!(surface
+            .binding_metadata()
+            .iter()
+            .any(|entry| entry.name == "effectBuffer" && entry.kind == ShaderBindingKind::Texture));
+    }
+
+    #[test]
+    fn surface_missing_texture_reports_error_without_reducing_plan_data() {
+        let plan = ShaderCatalog::apply_plan(
+            ShaderId::Water,
+            &ShaderApplyContext {
+                camera: Some(ShaderCamera::new(10.0, 20.0, 100.0, 80.0)),
+                noise_texture: None,
+                ..ShaderApplyContext::default()
+            },
+        );
+
+        assert_eq!(plan.errors.len(), 1);
+        assert_eq!(plan.errors[0].kind, ShaderPlanErrorKind::MissingTexture);
+        assert_eq!(
+            metadata_entry(&plan, "u_campos").semantic,
+            ShaderBindingSemantic::CameraPosition
+        );
+        assert_eq!(
+            metadata_entry(&plan, "u_time").semantic,
+            ShaderBindingSemantic::Time
+        );
+    }
+
+    #[test]
     fn atmosphere_collects_required_state_and_uniforms() {
         let mut planet = ShaderPlanetState::default();
         planet.position = [1.0, 2.0, 3.0];
@@ -1620,6 +2006,14 @@ mod tests {
         assert_eq!(
             uniform(&plan, "u_outerRadius").value,
             UniformValue::Float(15.0)
+        );
+        assert_eq!(
+            metadata_entry(&plan, "u_projection").semantic,
+            ShaderBindingSemantic::Projection
+        );
+        assert_eq!(
+            metadata_entry(&plan, "u_invproj").semantic,
+            ShaderBindingSemantic::InverseProjection
         );
     }
 
@@ -1664,6 +2058,11 @@ mod tests {
             .operations
             .iter()
             .any(|operation| matches!(operation, ShaderApplyOperation::ShockwavePostDraw { .. })));
+        assert!(plan.binding_metadata().iter().any(|entry| {
+            entry.kind == ShaderBindingKind::Buffer
+                && entry.semantic == ShaderBindingSemantic::BufferTarget
+                && entry.buffer_target == Some(ShaderBufferTarget::ShockwaveFrameBuffer)
+        }));
     }
 
     #[test]

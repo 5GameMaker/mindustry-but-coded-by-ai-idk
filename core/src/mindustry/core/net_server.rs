@@ -3648,7 +3648,7 @@ mod tests {
         ConnectPacket {
             version: 158,
             version_type: "official".into(),
-            mods: Vec::new(),
+            mods: vec!["mod-a".into(), "mod-b".into()],
             name: name.into(),
             locale: "en_US".into(),
             uuid: "uuid".into(),
@@ -3704,6 +3704,7 @@ mod tests {
     fn connect_packet_validation_accepts_and_normalizes_java_handshake_fields() {
         let mut packet = connect_packet("\n player\t");
         packet.locale.clear();
+        assert_eq!(packet.mods, vec!["mod-a", "mod-b"]);
         let context = ConnectPacketValidationContext {
             connection_address: "steam:steam-uuid".into(),
             ..Default::default()
@@ -3992,6 +3993,10 @@ mod tests {
             "10.0.0.2:6567"
         );
         assert_eq!(state.last_handshake.as_ref().unwrap().name, "player");
+        assert_eq!(
+            state.last_handshake.as_ref().unwrap().mods,
+            vec!["mod-a", "mod-b"]
+        );
         assert_eq!(state.last_connect_confirm_connection_id, Some(12));
         assert_eq!(state.last_disconnect_reason.as_deref(), Some("left"));
         let connection = state.connection_states.get(&12).unwrap();

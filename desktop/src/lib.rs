@@ -64,7 +64,7 @@ use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopConnectTarget {
@@ -765,6 +765,171 @@ pub enum DesktopFramePayload {
 pub struct DesktopFrame {
     pub kind: DesktopFrameKind,
     pub payload: DesktopFramePayload,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopSurfaceSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl DesktopSurfaceSize {
+    pub const fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+}
+
+impl Default for DesktopSurfaceSize {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 720,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopSurfaceConfig {
+    pub title: String,
+    pub size: DesktopSurfaceSize,
+    pub scale_factor: f32,
+    pub resizable: bool,
+    pub visible: bool,
+}
+
+impl Default for DesktopSurfaceConfig {
+    fn default() -> Self {
+        Self {
+            title: "Mindustry".into(),
+            size: DesktopSurfaceSize::default(),
+            scale_factor: 1.0,
+            resizable: true,
+            visible: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopFramePacing {
+    pub target_frame_time: Duration,
+}
+
+impl DesktopFramePacing {
+    pub const fn new(target_frame_time: Duration) -> Self {
+        Self { target_frame_time }
+    }
+
+    pub const fn uncapped() -> Self {
+        Self {
+            target_frame_time: Duration::ZERO,
+        }
+    }
+
+    pub fn is_paced(self) -> bool {
+        !self.target_frame_time.is_zero()
+    }
+}
+
+impl Default for DesktopFramePacing {
+    fn default() -> Self {
+        Self {
+            target_frame_time: Duration::from_millis(16),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopInputTickEvent {
+    Key { key_code: String, pressed: bool },
+    MouseButton { button: String, pressed: bool },
+    CursorMoved { x: f32, y: f32 },
+    Text(String),
+    Scroll { delta_x: f32, delta_y: f32 },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopFrameLoopEvent {
+    Tick,
+    Resize(DesktopSurfaceSize),
+    Input(DesktopInputTickEvent),
+    CloseRequested,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopFrameLoopState {
+    pub surface: DesktopSurfaceConfig,
+    pub pacing: DesktopFramePacing,
+    pub next_frame_index: u64,
+    pub closed: bool,
+    pub input_events_seen: u64,
+}
+
+impl DesktopFrameLoopState {
+    pub fn new(surface: DesktopSurfaceConfig, pacing: DesktopFramePacing) -> Self {
+        Self {
+            surface,
+            pacing,
+            next_frame_index: 0,
+            closed: false,
+            input_events_seen: 0,
+        }
+    }
+
+    pub fn request_close(&mut self) {
+        self.closed = true;
+    }
+}
+
+impl Default for DesktopFrameLoopState {
+    fn default() -> Self {
+        Self::new(
+            DesktopSurfaceConfig::default(),
+            DesktopFramePacing::default(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopFrameSkipReason {
+    AlreadyClosed,
+    CloseRequested,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopPresentResult {
+    pub frame_index: u64,
+    pub surface: DesktopSurfaceConfig,
+    pub presented: bool,
+    pub skip_reason: Option<DesktopFrameSkipReason>,
+    pub close_requested: bool,
+    pub resized_to: Option<DesktopSurfaceSize>,
+    pub input_events: Vec<DesktopInputTickEvent>,
+    pub graphics_stats: Option<GraphicsFrameStats>,
+    pub effect_stats: Option<DesktopEffectRenderStats>,
+}
+
+impl DesktopPresentResult {
+    pub fn should_stop(&self) -> bool {
+        self.close_requested
+            || matches!(
+                self.skip_reason,
+                Some(DesktopFrameSkipReason::AlreadyClosed)
+            )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopFrameLoopExitReason {
+    FrameLimit,
+    Closed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopFrameLoopRunSummary {
+    pub steps: u64,
+    pub frames_presented: u64,
+    pub last_frame_index: Option<u64>,
+    pub exit_reason: DesktopFrameLoopExitReason,
 }
 
 pub trait DesktopGraphicsRenderer {
@@ -1945,6 +2110,160 @@ impl DesktopLauncher {
             minimap_input,
             renderer,
         )
+    }
+
+    pub fn step_desktop_frame_loop<R, E>(
+        &mut self,
+        loop_state: &mut DesktopFrameLoopState,
+        events: &[DesktopFrameLoopEvent],
+        graphics_renderer: &mut R,
+        effect_renderer: &mut E,
+    ) -> DesktopPresentResult
+    where
+        R: DesktopGraphicsRenderer,
+        E: DesktopEffectRenderer,
+    {
+        let frame_index = loop_state.next_frame_index;
+        if loop_state.closed {
+            return DesktopPresentResult {
+                frame_index,
+                surface: loop_state.surface.clone(),
+                presented: false,
+                skip_reason: Some(DesktopFrameSkipReason::AlreadyClosed),
+                close_requested: true,
+                resized_to: None,
+                input_events: Vec::new(),
+                graphics_stats: None,
+                effect_stats: None,
+            };
+        }
+
+        let mut close_requested = false;
+        let mut resized_to = None;
+        let mut input_events = Vec::new();
+        for event in events {
+            match event {
+                DesktopFrameLoopEvent::Tick => {}
+                DesktopFrameLoopEvent::Resize(size) => {
+                    loop_state.surface.size = *size;
+                    resized_to = Some(*size);
+                }
+                DesktopFrameLoopEvent::Input(input) => input_events.push(input.clone()),
+                DesktopFrameLoopEvent::CloseRequested => close_requested = true,
+            }
+        }
+        loop_state.input_events_seen = loop_state
+            .input_events_seen
+            .saturating_add(input_events.len() as u64);
+
+        if close_requested {
+            loop_state.request_close();
+            return DesktopPresentResult {
+                frame_index,
+                surface: loop_state.surface.clone(),
+                presented: false,
+                skip_reason: Some(DesktopFrameSkipReason::CloseRequested),
+                close_requested: true,
+                resized_to,
+                input_events,
+                graphics_stats: None,
+                effect_stats: None,
+            };
+        }
+
+        self.update();
+        let graphics_stats =
+            self.render_default_graphics_frame_with(frame_index, graphics_renderer);
+        let effect_stats = self.render_standard_effect_frame_with(effect_renderer);
+        loop_state.next_frame_index = loop_state.next_frame_index.wrapping_add(1);
+
+        DesktopPresentResult {
+            frame_index,
+            surface: loop_state.surface.clone(),
+            presented: true,
+            skip_reason: None,
+            close_requested: false,
+            resized_to,
+            input_events,
+            graphics_stats: Some(graphics_stats),
+            effect_stats: Some(effect_stats),
+        }
+    }
+
+    pub fn run_with_desktop_frame_loop<R, E, P, A, S>(
+        &mut self,
+        loop_state: &mut DesktopFrameLoopState,
+        graphics_renderer: &mut R,
+        effect_renderer: &mut E,
+        max_presented_frames: Option<u64>,
+        mut poll_events: P,
+        mut after_present: A,
+        mut sleep_frame: S,
+    ) -> DesktopFrameLoopRunSummary
+    where
+        R: DesktopGraphicsRenderer,
+        E: DesktopEffectRenderer,
+        P: FnMut(&DesktopFrameLoopState) -> Vec<DesktopFrameLoopEvent>,
+        A: FnMut(&DesktopPresentResult),
+        S: FnMut(Duration),
+    {
+        let mut steps = 0;
+        let mut frames_presented = 0;
+        let mut last_frame_index = None;
+
+        loop {
+            if loop_state.closed {
+                return DesktopFrameLoopRunSummary {
+                    steps,
+                    frames_presented,
+                    last_frame_index,
+                    exit_reason: DesktopFrameLoopExitReason::Closed,
+                };
+            }
+            if max_presented_frames.is_some_and(|limit| frames_presented >= limit) {
+                return DesktopFrameLoopRunSummary {
+                    steps,
+                    frames_presented,
+                    last_frame_index,
+                    exit_reason: DesktopFrameLoopExitReason::FrameLimit,
+                };
+            }
+
+            let events = poll_events(loop_state);
+            let result = self.step_desktop_frame_loop(
+                loop_state,
+                &events,
+                graphics_renderer,
+                effect_renderer,
+            );
+            steps += 1;
+            if result.presented {
+                frames_presented += 1;
+                last_frame_index = Some(result.frame_index);
+            }
+            let should_stop = result.should_stop();
+            after_present(&result);
+
+            if should_stop || loop_state.closed {
+                return DesktopFrameLoopRunSummary {
+                    steps,
+                    frames_presented,
+                    last_frame_index,
+                    exit_reason: DesktopFrameLoopExitReason::Closed,
+                };
+            }
+            if max_presented_frames.is_some_and(|limit| frames_presented >= limit) {
+                return DesktopFrameLoopRunSummary {
+                    steps,
+                    frames_presented,
+                    last_frame_index,
+                    exit_reason: DesktopFrameLoopExitReason::FrameLimit,
+                };
+            }
+            if loop_state.pacing.is_paced() {
+                sleep_frame(loop_state.pacing.target_frame_time);
+            }
+        }
     }
 
     pub fn playable_smoke_status(&self) -> DesktopPlayableSmokeStatus {
@@ -3370,14 +3689,16 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{
         run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopFrameKind,
-        DesktopFramePayload, DesktopGraphicsCommandExecutionTrace,
-        DesktopGraphicsExecutionStepTrace, DesktopGraphicsExecutionSummary,
-        DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
+        DesktopFrameLoopEvent, DesktopFrameLoopExitReason, DesktopFrameLoopState,
+        DesktopFramePacing, DesktopFramePayload, DesktopFrameSkipReason,
+        DesktopGraphicsCommandExecutionTrace, DesktopGraphicsExecutionStepTrace,
+        DesktopGraphicsExecutionSummary, DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
         DesktopGraphicsLiveBackendDrawSpriteSink, DesktopGraphicsLiveBackendDrawSpriteTrace,
         DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
         DesktopGraphicsShaderApplyExecutionTrace, DesktopGraphicsTextureSamplerTrace,
-        DesktopLauncher, HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
-        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
+        DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceSize, HeadlessDesktopAudioRenderer,
+        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
+        HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -3547,6 +3868,133 @@ mod tests {
             }),
             ..NetworkWorldData::default()
         }
+    }
+
+    #[test]
+    fn desktop_frame_loop_presents_limited_frames_and_increments_frame_index() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("fire").unwrap() as u16,
+                    x: 32.0,
+                    y: 48.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let mut results = Vec::new();
+
+        let summary = launcher.run_with_desktop_frame_loop(
+            &mut frame_loop,
+            &mut graphics_renderer,
+            &mut effect_renderer,
+            Some(2),
+            |_| vec![DesktopFrameLoopEvent::Tick],
+            |result| results.push(result.clone()),
+            |_| panic!("uncapped test loop should not sleep"),
+        );
+
+        assert_eq!(summary.exit_reason, DesktopFrameLoopExitReason::FrameLimit);
+        assert_eq!(summary.steps, 2);
+        assert_eq!(summary.frames_presented, 2);
+        assert_eq!(summary.last_frame_index, Some(1));
+        assert_eq!(frame_loop.next_frame_index, 2);
+        assert_eq!(graphics_renderer.frames_rendered, 2);
+        assert_eq!(effect_renderer.frames_rendered, 2);
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.frame_index)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert!(results.iter().all(|result| result.presented));
+        assert!(results[0].graphics_stats.is_some());
+        assert_eq!(results[0].effect_stats.unwrap().draw_plans, 1);
+    }
+
+    #[test]
+    fn desktop_frame_loop_close_event_stops_without_presenting() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let mut results = Vec::new();
+
+        let summary = launcher.run_with_desktop_frame_loop(
+            &mut frame_loop,
+            &mut graphics_renderer,
+            &mut effect_renderer,
+            None,
+            |_| vec![DesktopFrameLoopEvent::CloseRequested],
+            |result| results.push(result.clone()),
+            |_| panic!("close-before-present should not sleep"),
+        );
+
+        assert_eq!(summary.exit_reason, DesktopFrameLoopExitReason::Closed);
+        assert_eq!(summary.steps, 1);
+        assert_eq!(summary.frames_presented, 0);
+        assert_eq!(summary.last_frame_index, None);
+        assert!(frame_loop.closed);
+        assert_eq!(frame_loop.next_frame_index, 0);
+        assert_eq!(graphics_renderer.frames_rendered, 0);
+        assert_eq!(effect_renderer.frames_rendered, 0);
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].skip_reason,
+            Some(DesktopFrameSkipReason::CloseRequested)
+        );
+        assert!(results[0].close_requested);
+        assert!(!results[0].presented);
+    }
+
+    #[test]
+    fn desktop_frame_loop_applies_resize_and_input_tick_events() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let resized = DesktopSurfaceSize::new(800, 600);
+        let input = DesktopInputTickEvent::CursorMoved { x: 12.5, y: 25.0 };
+
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[
+                DesktopFrameLoopEvent::Resize(resized),
+                DesktopFrameLoopEvent::Input(input.clone()),
+            ],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert!(result.presented);
+        assert_eq!(result.frame_index, 0);
+        assert_eq!(result.resized_to, Some(resized));
+        assert_eq!(result.surface.size, resized);
+        assert_eq!(result.input_events, vec![input]);
+        assert_eq!(frame_loop.surface.size, resized);
+        assert_eq!(frame_loop.input_events_seen, 1);
+        assert_eq!(frame_loop.next_frame_index, 1);
+    }
+
+    #[test]
+    fn desktop_default_run_keeps_headless_data_path_without_mod_scan_flags() {
+        let launcher = run(vec!["mindustry-desktop".into()]);
+
+        assert_eq!(launcher.client.context.paths.data_dir, "data");
+        assert_eq!(launcher.args, vec!["mindustry-desktop".to_string()]);
+        assert_eq!(launcher.connect_target, None);
+        assert_eq!(launcher.connect_error, None);
     }
 
     #[test]
