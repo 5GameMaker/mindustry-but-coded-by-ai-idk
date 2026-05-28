@@ -5278,3 +5278,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续 `hitSquaresColor=79`，它与本轮结构相似，但第二 pass 是 `SeededSquareParticles`；
   2. 继续 `hitFuse=81`，结构相似但颜色 `Pal.surge`、scaled circle 半径 `7`、line count `6`；
   3. 之后考虑把这些 multi-pass 迁移集中抽 helper，避免重复逻辑膨胀。
+
+---
+
+## 157. 最新闭环记录：Fx.hitFuse multi-pass hit effect
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：继续处理 hit bullet 阻塞簇，迁移不需要新增 primitive 语义的 `hitFuse=81`。
+- 本轮迁移：
+  - `hitFuse=81`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_FUSE_ID=81`；
+    - 接入 lookup/metadata；
+    - `standard_effect_draw_plans(...)` 复用 multi-pass hit bullet 分支：
+      - scaled circle 半径 `scaled_fin * 7`；
+      - radial lines count `6`；
+      - 颜色 `Color.white -> Pal.surge`；
+      - 无 light。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `hitSquaresColor=79` 需要先扩展 `SeededSquareParticles` 支持 per-particle radial rotation，对齐 Java `Fill.square(..., ang)`；
+  2. 扩展时要验证 desktop `square_primitives` 中每个 square 的 rotation，而不是统一 rotation；
+  3. 不要在缺少该语义时半迁移 `hitSquaresColor`。

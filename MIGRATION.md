@@ -7183,3 +7183,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `hitSquaresColor=79` 可沿用本轮 scaled circle + light，但第二 pass 需要 seeded square particles；
   - `hitFuse=81` 可沿用 scaled circle + radial lines，但颜色/半径/count 不同；
   - 真实 renderer/backend 仍未绘制这些 primitives。
+
+### 12.231 Fx.hitFuse multi-pass hit effect
+
+- 2026-05-28：继续沿用 hit bullet multi-pass 路径，迁移无需新增 primitive 语义的 `hitFuse=81`。
+- 本轮迁移：
+  - `hitFuse=81`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:918` 附近：
+    - `hitFuse = new Effect(14, ...)`
+    - `color(Color.white, Pal.surge, e.fin())`
+    - `e.scaled(7f, s -> { stroke(0.5f + s.fout()); Lines.circle(... s.fin() * 7f); })`
+    - `stroke(0.5f + e.fout())`
+    - `randLenVectors(e.id, 6, e.fin() * 15f, ...)`
+    - `lineAngle(..., e.fout() * 3 + 1f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_FUSE_ID=81`；
+    - 接入 name lookup 与 metadata；
+    - `standard_effect_draw_plans(...)` 复用 hit bullet multi-pass 结构：
+      - pass 1：scaled `StrokedCircle`，半径 `scaled_fin * 7`；
+      - pass 2：`SeededRadialLineParticles`，count `6`，距离 `fin * 15`，line length `1 + fout * 3`；
+      - 颜色为 `Color.white -> Pal.surge`；
+      - 无 light pass，对齐 Java。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `hitFuse`；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light` 扩展覆盖 `hitFuse` 的 scaled circle、线粒子 count 与无 light。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `hitSquaresColor=79` 暂未迁移，因为 Java `Fill.square(..., ang)` 要求每个 seeded square 使用自身向量角度；当前 `SeededSquareParticles` 只支持统一 rotation；
+  - 需要先扩展 square primitive / particle spec 的 per-particle radial rotation 语义，再迁移 `hitSquaresColor`；
+  - renderer/backend 仍未真实绘制 primitives。

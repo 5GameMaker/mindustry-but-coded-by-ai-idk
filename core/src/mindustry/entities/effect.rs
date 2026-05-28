@@ -26,6 +26,8 @@ pub const FX_DISPERSE_TRAIL_ID: i32 = 76;
 pub const FX_HIT_BULLET_SMALL_ID: i32 = 77;
 /// Upstream `Fx.hitBulletColor` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_BULLET_COLOR_ID: i32 = 78;
+/// Upstream `Fx.hitFuse` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_FUSE_ID: i32 = 81;
 /// Upstream `Fx.hitBulletBig` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_BULLET_BIG_ID: i32 = 82;
 /// Upstream `Fx.hitFlameSmall` id in `mindustry.content.Fx` for v158.1.
@@ -233,6 +235,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "disperseTrail" => Some(FX_DISPERSE_TRAIL_ID),
         "hitBulletSmall" => Some(FX_HIT_BULLET_SMALL_ID),
         "hitBulletColor" => Some(FX_HIT_BULLET_COLOR_ID),
+        "hitFuse" => Some(FX_HIT_FUSE_ID),
         "hitBulletBig" => Some(FX_HIT_BULLET_BIG_ID),
         "hitFlameSmall" => Some(FX_HIT_FLAME_SMALL_ID),
         "hitFlamePlasma" => Some(FX_HIT_FLAME_PLASMA_ID),
@@ -367,6 +370,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_HIT_BULLET_COLOR_ID => {
             Effect::with_lifetime(FX_HIT_BULLET_COLOR_ID, 14.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_HIT_FUSE_ID => Effect::with_lifetime(FX_HIT_FUSE_ID, 14.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_BULLET_BIG_ID => {
             Effect::with_lifetime(FX_HIT_BULLET_BIG_ID, 13.0, DEFAULT_EFFECT_CLIP)
         }
@@ -536,7 +540,7 @@ pub fn standard_effect_draw_plans(
 
     if !matches!(
         effect_id_i32,
-        FX_POINT_SHOCKWAVE_ID | FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID
+        FX_POINT_SHOCKWAVE_ID | FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID | FX_HIT_FUSE_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -560,19 +564,29 @@ pub fn standard_effect_draw_plans(
 
     if matches!(
         effect_id_i32,
-        FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID
+        FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID | FX_HIT_FUSE_ID
     ) {
         let dynamic_color = effect_id_i32 == FX_HIT_BULLET_COLOR_ID;
-        let color_to = if dynamic_color {
-            "Input.color"
-        } else {
-            "Pal.lightOrange"
+        let color_to = match effect_id_i32 {
+            FX_HIT_BULLET_COLOR_ID => "Input.color",
+            FX_HIT_FUSE_ID => "Pal.surge",
+            _ => "Pal.lightOrange",
         };
         let input_color = dynamic_color.then_some(color);
-        let light_color = if dynamic_color {
-            "Input.color"
+        let light_color = match effect_id_i32 {
+            FX_HIT_BULLET_COLOR_ID => Some("Input.color"),
+            FX_HIT_BULLET_SMALL_ID => Some("Pal.lightOrange"),
+            _ => None,
+        };
+        let scaled_circle_radius = if effect_id_i32 == FX_HIT_FUSE_ID {
+            7.0
         } else {
-            "Pal.lightOrange"
+            5.0
+        };
+        let particle_count = if effect_id_i32 == FX_HIT_FUSE_ID {
+            6
+        } else {
+            5
         };
         let scaled_lifetime = 7.0;
         let scaled_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
@@ -592,7 +606,7 @@ pub fn standard_effect_draw_plans(
                 input_color,
                 color_mul: 1.0,
                 alpha: 1.0,
-                radius: scaled_fin * 5.0,
+                radius: scaled_fin * scaled_circle_radius,
                 stroke: 0.5 + scaled_fout,
                 particles: None,
                 light_color: None,
@@ -617,7 +631,7 @@ pub fn standard_effect_draw_plans(
             stroke: 0.5 + fout,
             particles: Some(StandardEffectParticleSpec {
                 seed: state_id,
-                count: 5,
+                count: particle_count,
                 progress: None,
                 angle: None,
                 angle_range: 0.0,
@@ -636,9 +650,13 @@ pub fn standard_effect_draw_plans(
                 secondary_radius_fslope_scale: 0.0,
                 alpha_midpoint: false,
             }),
-            light_color: Some(light_color),
-            light_radius: 20.0,
-            light_opacity: 0.6 * fout,
+            light_color,
+            light_radius: if light_color.is_some() { 20.0 } else { 0.0 },
+            light_opacity: if light_color.is_some() {
+                0.6 * fout
+            } else {
+                0.0
+            },
         });
 
         return plans;
@@ -4475,6 +4493,7 @@ mod tests {
             standard_effect_id("hitBulletColor"),
             Some(FX_HIT_BULLET_COLOR_ID)
         );
+        assert_eq!(standard_effect_id("hitFuse"), Some(FX_HIT_FUSE_ID));
         assert_eq!(
             standard_effect_id("hitBulletBig"),
             Some(FX_HIT_BULLET_BIG_ID)
@@ -4720,6 +4739,7 @@ mod tests {
             standard_effect(FX_HIT_BULLET_COLOR_ID).unwrap().lifetime,
             14.0
         );
+        assert_eq!(standard_effect(FX_HIT_FUSE_ID).unwrap().lifetime, 14.0);
         assert_eq!(
             standard_effect(FX_HIT_BULLET_BIG_ID).unwrap().lifetime,
             13.0
@@ -5066,6 +5086,30 @@ mod tests {
         assert_eq!(late_small.len(), 1);
         assert_eq!(late_small[0].color_to, Some("Pal.lightOrange"));
         assert_eq!(late_small[0].light_color, Some("Pal.lightOrange"));
+
+        let fuse = standard_effect_draw_plans(
+            Some(FX_HIT_FUSE_ID as u16),
+            81,
+            10.0,
+            20.0,
+            0.0,
+            3.5,
+            14.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(fuse.len(), 2);
+        assert_eq!(fuse[0].kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(fuse[0].color_to, Some("Pal.surge"));
+        assert_eq!(fuse[0].radius, 3.5);
+        assert_eq!(fuse[0].stroke, 1.0);
+        assert_eq!(
+            fuse[1].kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(fuse[1].color_to, Some("Pal.surge"));
+        assert_eq!(fuse[1].light_color, None);
+        assert_eq!(fuse[1].particles.unwrap().count, 6);
+        assert_eq!(fuse[1].line_render_primitives_from_seed().len(), 6);
     }
 
     #[test]
