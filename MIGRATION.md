@@ -7780,3 +7780,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `regenSuppressSeek=178` 仍未迁移，需要 effect data/position + Bezier seam；
   - 后续 `circleColorSpark` / `colorSpark` / `colorSparkBig` 可继续用 line primitive 迁移；
   - 真实 renderer/backend 仍未接入。
+
+
+### 12.246 Fx.circleColorSpark/colorSpark/colorSparkBig
+
+- 2026-05-28：继续对照 v158.1 `Fx.java`，迁移 `circleColorSpark=182`、`colorSpark=183`、`colorSparkBig=184`。三者均为颜色插值线段 spark 效果，现阶段落到 headless `LineAngle` primitive/render seam，后续仍需接入真实 2D/GPU renderer。
+- 本轮迁移：
+  - `circleColorSpark=182`
+  - `colorSpark=183`
+  - `colorSparkBig=184`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2148` 附近：
+    - `circleColorSpark = new Effect(21f, ...)`，`Color.white -> e.color`，stroke `e.fout()*1.1+0.5`，9 条随机 radial `lineAngle`，offset 使用 `randLenVectors(e.id, 9, 27f*e.fin(), 9f, ...)`。
+    - `colorSpark = new Effect(21f, ...)`，5 条以 `e.rotation ± 9f` 扩散的 `lineAngle`，长度 `27f*e.fin()`。
+    - `colorSparkBig = new Effect(25f, ...)`，8 条以 `e.rotation ± 10f` 扩散的 `lineAngle`，长度 `41f*e.fin()`，stroke `e.fout()*1.3+0.7`，线长 `e.fslope()*6+0.5`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_CIRCLE_COLOR_SPARK_ID=182`、`FX_COLOR_SPARK_ID=183`、`FX_COLOR_SPARK_BIG_ID=184` 并接入 `standard_effect_id` / `standard_effect`；
+    - `standard_effect_draw_plans(...)` 为三者按 Java 随机顺序生成 concrete `LineAngle` plans，保留 `Color.white -> Input.color` 与 stroke/line length 公式；
+    - `circleColorSpark` 单独按 `randLenVectors(seed, amount, length, randLength, ...)` 的 base-length + random-range 语义实现，避免误用普通 `random(length)`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_color_spark_lines_for_render`，验证三种 spark 共 22 条 line primitives 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_color_spark_lines --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_color_spark_lines_for_render --lib`
+- 仍未完成：
+  - `randLifeSpark=185` 需要 per-particle scaled lifetime seam；
+  - `shootPayloadDriver=186` 需要 line 起点 jitter 和 per-line random length/stroke seam；
+  - 真实 renderer/backend 仍未接入，当前仍是局部 Fx primitive 迁移。

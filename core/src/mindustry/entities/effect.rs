@@ -234,6 +234,12 @@ pub const FX_SURGE_CRUCI_SMOKE_ID: i32 = 179;
 pub const FX_NEOPLASIA_SMOKE_ID: i32 = 180;
 /// Upstream `Fx.heatReactorSmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HEAT_REACTOR_SMOKE_ID: i32 = 181;
+/// Upstream `Fx.circleColorSpark` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CIRCLE_COLOR_SPARK_ID: i32 = 182;
+/// Upstream `Fx.colorSpark` id in `mindustry.content.Fx` for v158.1.
+pub const FX_COLOR_SPARK_ID: i32 = 183;
+/// Upstream `Fx.colorSparkBig` id in `mindustry.content.Fx` for v158.1.
+pub const FX_COLOR_SPARK_BIG_ID: i32 = 184;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -376,6 +382,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "surgeCruciSmoke" => Some(FX_SURGE_CRUCI_SMOKE_ID),
         "neoplasiaSmoke" => Some(FX_NEOPLASIA_SMOKE_ID),
         "heatReactorSmoke" => Some(FX_HEAT_REACTOR_SMOKE_ID),
+        "circleColorSpark" => Some(FX_CIRCLE_COLOR_SPARK_ID),
+        "colorSpark" => Some(FX_COLOR_SPARK_ID),
+        "colorSparkBig" => Some(FX_COLOR_SPARK_BIG_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -626,6 +635,13 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_HEAT_REACTOR_SMOKE_ID => {
             Effect::with_lifetime(FX_HEAT_REACTOR_SMOKE_ID, 180.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_CIRCLE_COLOR_SPARK_ID => {
+            Effect::with_lifetime(FX_CIRCLE_COLOR_SPARK_ID, 21.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_COLOR_SPARK_ID => Effect::with_lifetime(FX_COLOR_SPARK_ID, 21.0, DEFAULT_EFFECT_CLIP),
+        FX_COLOR_SPARK_BIG_ID => {
+            Effect::with_lifetime(FX_COLOR_SPARK_BIG_ID, 25.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
@@ -705,6 +721,9 @@ pub fn standard_effect_draw_plans(
             | FX_SURGE_CRUCI_SMOKE_ID
             | FX_NEOPLASIA_SMOKE_ID
             | FX_HEAT_REACTOR_SMOKE_ID
+            | FX_CIRCLE_COLOR_SPARK_ID
+            | FX_COLOR_SPARK_ID
+            | FX_COLOR_SPARK_BIG_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -725,6 +744,77 @@ pub fn standard_effect_draw_plans(
     let fout = 1.0 - fin;
     let finpow = effect_finpow_from_fin(fin);
     let fslope = effect_fslope_from_fin(fin);
+
+    if matches!(
+        effect_id_i32,
+        FX_CIRCLE_COLOR_SPARK_ID | FX_COLOR_SPARK_ID | FX_COLOR_SPARK_BIG_ID
+    ) {
+        let (count, line_length, stroke, length_scale, angle_range) = match effect_id_i32 {
+            FX_CIRCLE_COLOR_SPARK_ID => (9, fslope * 5.0 + 0.5, fout * 1.1 + 0.5, 27.0, 9.0),
+            FX_COLOR_SPARK_ID => (5, fslope * 5.0 + 0.5, fout * 1.1 + 0.5, 27.0, 9.0),
+            FX_COLOR_SPARK_BIG_ID => (8, fslope * 6.0 + 0.5, fout * 1.3 + 0.7, 41.0, 10.0),
+            _ => unreachable!(),
+        };
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let mut plans = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            let (angle, length) = if effect_id_i32 == FX_CIRCLE_COLOR_SPARK_ID {
+                (
+                    rand.random(360.0),
+                    length_scale * fin + rand.random(angle_range),
+                )
+            } else {
+                (
+                    rotation + rand.range(angle_range),
+                    rand.random(length_scale * fin),
+                )
+            };
+            let (offset_x, offset_y) = trns(angle, length);
+
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::LineAngle,
+                center: (x + offset_x, y + offset_y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: Some("Input.color"),
+                color_mix: fin,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: line_length,
+                stroke,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 1,
+                    progress: None,
+                    angle: Some(angle),
+                    angle_range: 0.0,
+                    length: 0.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        return plans;
+    }
 
     if matches!(
         effect_id_i32,
@@ -6274,6 +6364,15 @@ mod tests {
             standard_effect_id("heatReactorSmoke"),
             Some(FX_HEAT_REACTOR_SMOKE_ID)
         );
+        assert_eq!(
+            standard_effect_id("circleColorSpark"),
+            Some(FX_CIRCLE_COLOR_SPARK_ID)
+        );
+        assert_eq!(standard_effect_id("colorSpark"), Some(FX_COLOR_SPARK_ID));
+        assert_eq!(
+            standard_effect_id("colorSparkBig"),
+            Some(FX_COLOR_SPARK_BIG_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -6590,6 +6689,15 @@ mod tests {
         assert_eq!(
             standard_effect(FX_HEAT_REACTOR_SMOKE_ID).unwrap().lifetime,
             180.0
+        );
+        assert_eq!(
+            standard_effect(FX_CIRCLE_COLOR_SPARK_ID).unwrap().lifetime,
+            21.0
+        );
+        assert_eq!(standard_effect(FX_COLOR_SPARK_ID).unwrap().lifetime, 21.0);
+        assert_eq!(
+            standard_effect(FX_COLOR_SPARK_BIG_ID).unwrap().lifetime,
+            25.0
         );
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
@@ -8282,6 +8390,96 @@ mod tests {
         assert_eq!(
             suppress.resolved_draw_color(),
             Some(lerp_color(input_color, DecalColor::WHITE, 0.5))
+        );
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_color_spark_lines() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+        let circle = standard_effect_draw_plans(
+            Some(FX_CIRCLE_COLOR_SPARK_ID as u16),
+            182,
+            3.0,
+            4.0,
+            45.0,
+            10.5,
+            21.0,
+            input_color,
+        );
+        assert_eq!(circle.len(), 9);
+        let fin = 0.5;
+        let fslope = effect_fslope_from_fin(fin);
+        let mut rand = ArcRand::with_seed(182);
+        let angle = rand.random(360.0);
+        let length = 27.0 * fin + rand.random(9.0);
+        let (offset_x, offset_y) = trns(angle, length);
+        let first = circle[0];
+        assert_eq!(first.kind, StandardEffectDrawKind::LineAngle);
+        assert_eq!(first.color_from, Some("Color.white"));
+        assert_eq!(first.color_to, Some("Input.color"));
+        assert_eq!(first.input_color, Some(input_color));
+        assert_eq!(first.color_mix, fin);
+        assert!((first.center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((first.center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((first.radius - (fslope * 5.0 + 0.5)).abs() < 0.0001);
+        assert!((first.stroke - 1.05).abs() < 0.0001);
+        assert!((first.particles.unwrap().angle.unwrap() - angle).abs() < 0.0001);
+        assert_eq!(
+            first.resolved_draw_color(),
+            Some(lerp_color(DecalColor::WHITE, input_color, fin))
+        );
+        let line = first.line_render_primitives_from_seed()[0];
+        assert_eq!(line.start, first.center);
+        assert!((line.angle - angle).abs() < 0.0001);
+        assert_eq!(line.length, first.radius);
+        assert_eq!(line.stroke, first.stroke);
+
+        let spark = standard_effect_draw_plans(
+            Some(FX_COLOR_SPARK_ID as u16),
+            183,
+            3.0,
+            4.0,
+            45.0,
+            10.5,
+            21.0,
+            input_color,
+        );
+        assert_eq!(spark.len(), 5);
+        let mut rand = ArcRand::with_seed(183);
+        let angle = 45.0 + rand.range(9.0);
+        let length = rand.random(27.0 * fin);
+        let (offset_x, offset_y) = trns(angle, length);
+        assert!((spark[0].center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((spark[0].center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((spark[0].particles.unwrap().angle.unwrap() - angle).abs() < 0.0001);
+        assert!((spark[0].radius - 5.5).abs() < 0.0001);
+        assert!((spark[0].stroke - 1.05).abs() < 0.0001);
+
+        let big = standard_effect_draw_plans(
+            Some(FX_COLOR_SPARK_BIG_ID as u16),
+            184,
+            3.0,
+            4.0,
+            45.0,
+            12.5,
+            25.0,
+            input_color,
+        );
+        assert_eq!(big.len(), 8);
+        let mut rand = ArcRand::with_seed(184);
+        let angle = 45.0 + rand.range(10.0);
+        let length = rand.random(41.0 * fin);
+        let (offset_x, offset_y) = trns(angle, length);
+        assert!((big[0].center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((big[0].center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((big[0].particles.unwrap().angle.unwrap() - angle).abs() < 0.0001);
+        assert!((big[0].radius - 6.5).abs() < 0.0001);
+        assert!((big[0].stroke - 1.35).abs() < 0.0001);
+        assert_eq!(
+            big.iter()
+                .flat_map(|plan| plan.line_render_primitives_from_seed())
+                .count(),
+            8
         );
     }
 

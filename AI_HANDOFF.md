@@ -5768,3 +5768,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `circleColorSpark=182`、`colorSpark=183`、`colorSparkBig=184` 是相邻 line effects，已有 line primitive 可承载；
   2. `regenSuppressSeek=178` 仍需单独处理 data Position + Bezier；
   3. 当前仍是 headless primitive seam，真实 renderer/backend 未接入。
+
+---
+
+## 172. 最新闭环记录：Fx.circleColorSpark/colorSpark/colorSparkBig
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前已是 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先按 UTF-8 读取。
+- 本轮目标：迁移相邻 line spark 效果 `circleColorSpark=182`、`colorSpark=183`、`colorSparkBig=184`，继续推进 `Fx.java` 到 Rust 标准 effect render seam。
+- 本轮迁移：
+  - `circleColorSpark=182`
+  - `colorSpark=183`
+  - `colorSparkBig=184`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三者的 Fx ID 常量、name lookup 与 metadata lifetime；
+    - `standard_effect_draw_plans(...)` 输出 concrete `LineAngle` plans；
+    - `circleColorSpark` 按 Java `randLenVectors(seed, amount, length, randLength, ...)` 的 base-length + random-range 语义实现；
+    - `colorSpark` / `colorSparkBig` 按 `rotation + rand.range(range)` 与 `rand.random(length)` 实现。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_color_spark_lines_for_render`，验证 22 条 line primitives 进入 headless frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_color_spark_lines --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_color_spark_lines_for_render --lib`
+- 下一步建议：
+  1. `randLifeSpark=185` 需要 per-particle scaled lifetime，不要硬塞到现有 line spec；
+  2. `shootPayloadDriver=186` 需要 line start jitter 和 per-line random length/stroke seam；
+  3. `shootSmallFlame=187` 可优先迁移，能直接复用 `SeededCircleParticles`；
+  4. 继续维护 `MIGRATION.md`，每个闭环验证、中文提交并推送 `origin main`。
