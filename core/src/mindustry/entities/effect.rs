@@ -9638,30 +9638,30 @@ mod tests {
         assert_eq!(rail_shoot.lifetime, 24.0);
         assert_eq!(rail_shoot.clip, DEFAULT_EFFECT_CLIP);
         assert_eq!(rail_shoot.layer, DEFAULT_EFFECT_LAYER);
-        assert_eq!(standard_effect(FX_RAIL_TRAIL_ID).unwrap().lifetime, 16.0);
+        let rail_trail = standard_effect(FX_RAIL_TRAIL_ID).unwrap();
+        assert_eq!(rail_trail.lifetime, 16.0);
+        assert_eq!(rail_trail.clip, DEFAULT_EFFECT_CLIP);
+        assert_eq!(rail_trail.layer, DEFAULT_EFFECT_LAYER);
         let rail_hit = standard_effect(FX_RAIL_HIT_ID).unwrap();
         assert_eq!(rail_hit.lifetime, 18.0);
         assert_eq!(rail_hit.clip, 200.0);
-        assert_eq!(
-            standard_effect(FX_LANCER_LASER_SHOOT_ID).unwrap().lifetime,
-            21.0
-        );
-        assert_eq!(
-            standard_effect(FX_LANCER_LASER_SHOOT_SMOKE_ID)
-                .unwrap()
-                .lifetime,
-            26.0
-        );
-        assert_eq!(
-            standard_effect(FX_LANCER_LASER_CHARGE_ID).unwrap().lifetime,
-            38.0
-        );
-        assert_eq!(
-            standard_effect(FX_LANCER_LASER_CHARGE_BEGIN_ID)
-                .unwrap()
-                .lifetime,
-            60.0
-        );
+        assert_eq!(rail_hit.layer, DEFAULT_EFFECT_LAYER);
+        let lancer_shoot = standard_effect(FX_LANCER_LASER_SHOOT_ID).unwrap();
+        assert_eq!(lancer_shoot.lifetime, 21.0);
+        assert_eq!(lancer_shoot.clip, DEFAULT_EFFECT_CLIP);
+        assert_eq!(lancer_shoot.layer, DEFAULT_EFFECT_LAYER);
+        let lancer_shoot_smoke = standard_effect(FX_LANCER_LASER_SHOOT_SMOKE_ID).unwrap();
+        assert_eq!(lancer_shoot_smoke.lifetime, 26.0);
+        assert_eq!(lancer_shoot_smoke.clip, DEFAULT_EFFECT_CLIP);
+        assert_eq!(lancer_shoot_smoke.layer, DEFAULT_EFFECT_LAYER);
+        let lancer_charge = standard_effect(FX_LANCER_LASER_CHARGE_ID).unwrap();
+        assert_eq!(lancer_charge.lifetime, 38.0);
+        assert_eq!(lancer_charge.clip, DEFAULT_EFFECT_CLIP);
+        assert_eq!(lancer_charge.layer, DEFAULT_EFFECT_LAYER);
+        let lancer_charge_begin = standard_effect(FX_LANCER_LASER_CHARGE_BEGIN_ID).unwrap();
+        assert_eq!(lancer_charge_begin.lifetime, 60.0);
+        assert_eq!(lancer_charge_begin.clip, DEFAULT_EFFECT_CLIP);
+        assert_eq!(lancer_charge_begin.layer, DEFAULT_EFFECT_LAYER);
         assert_eq!(
             standard_effect(FX_LIGHTNING_CHARGE_ID).unwrap().lifetime,
             38.0
@@ -12315,6 +12315,8 @@ mod tests {
         );
         assert_eq!(rail_shoot.len(), 2);
         let shoot_circle = rail_shoot[0];
+        assert_eq!(shoot_circle.effect_id, FX_RAIL_SHOOT_ID);
+        assert_eq!(shoot_circle.layer, DEFAULT_EFFECT_LAYER);
         assert_eq!(shoot_circle.kind, StandardEffectDrawKind::StrokedCircle);
         assert_eq!(shoot_circle.color_from, Some("Color.white"));
         assert_eq!(shoot_circle.color_to, Some("Color.lightGray"));
@@ -12322,6 +12324,8 @@ mod tests {
         assert!((shoot_circle.stroke - 1.7).abs() < 0.0001);
         let shoot_tri = rail_shoot[1];
         assert_eq!(shoot_tri.kind, StandardEffectDrawKind::TrianglePair);
+        assert_eq!(shoot_tri.effect_id, FX_RAIL_SHOOT_ID);
+        assert_eq!(shoot_tri.layer, DEFAULT_EFFECT_LAYER);
         assert_eq!(shoot_tri.color_from, Some("Pal.orangeSpark"));
         assert_eq!(
             standard_effect_color_symbol("Pal.orangeSpark"),
@@ -12347,6 +12351,8 @@ mod tests {
         );
         assert_eq!(rail_trail.len(), 1);
         let trail = rail_trail[0];
+        assert_eq!(trail.effect_id, FX_RAIL_TRAIL_ID);
+        assert_eq!(trail.layer, DEFAULT_EFFECT_LAYER);
         assert_eq!(trail.kind, StandardEffectDrawKind::TrianglePair);
         assert_eq!(trail.radius, 5.0);
         let trail_triangles = trail.triangle_render_primitives_from_seed();
@@ -12371,6 +12377,8 @@ mod tests {
         );
         assert_eq!(rail_hit.len(), 1);
         let hit = rail_hit[0];
+        assert_eq!(hit.effect_id, FX_RAIL_HIT_ID);
+        assert_eq!(hit.layer, DEFAULT_EFFECT_LAYER);
         assert_eq!(hit.kind, StandardEffectDrawKind::TriangleFan);
         assert_eq!(hit.radius, 5.0);
         assert_eq!(hit.stroke, 60.0);
@@ -12390,6 +12398,8 @@ mod tests {
             DecalColor::WHITE,
         );
         assert_eq!(lancer_shoot.len(), 1);
+        assert_eq!(lancer_shoot[0].effect_id, FX_LANCER_LASER_SHOOT_ID);
+        assert_eq!(lancer_shoot[0].layer, DEFAULT_EFFECT_LAYER);
         let lancer_triangles = lancer_shoot[0].triangle_render_primitives_from_seed();
         assert_eq!(lancer_triangles.len(), 2);
         assert_eq!(lancer_triangles[0].width, 2.0);
@@ -12413,6 +12423,8 @@ mod tests {
             None,
         );
         assert_eq!(smoke_default.len(), 1);
+        assert_eq!(smoke_default[0].effect_id, FX_LANCER_LASER_SHOOT_SMOKE_ID);
+        assert_eq!(smoke_default[0].layer, DEFAULT_EFFECT_LAYER);
         let smoke_particles = smoke_default[0].particles.unwrap();
         assert_eq!(smoke_particles.count, 7);
         assert_eq!(smoke_particles.length, 70.0);
@@ -12444,6 +12456,8 @@ mod tests {
             DecalColor::WHITE,
         );
         assert_eq!(charge.len(), 1);
+        assert_eq!(charge[0].effect_id, FX_LANCER_LASER_CHARGE_ID);
+        assert_eq!(charge[0].layer, DEFAULT_EFFECT_LAYER);
         assert_eq!(
             charge[0].kind,
             StandardEffectDrawKind::SeededRadialLineParticles
@@ -12467,6 +12481,10 @@ mod tests {
             DecalColor::WHITE,
         );
         assert_eq!(begin.len(), 2);
+        assert_eq!(begin[0].effect_id, FX_LANCER_LASER_CHARGE_BEGIN_ID);
+        assert_eq!(begin[0].layer, DEFAULT_EFFECT_LAYER);
+        assert_eq!(begin[1].effect_id, FX_LANCER_LASER_CHARGE_BEGIN_ID);
+        assert_eq!(begin[1].layer, DEFAULT_EFFECT_LAYER);
         assert_eq!(begin[0].kind, StandardEffectDrawKind::FilledCircle);
         assert_eq!(begin[0].color_from, Some("Pal.lancerLaser"));
         assert_eq!(begin[0].radius, 1.5);
