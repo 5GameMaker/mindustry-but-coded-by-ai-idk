@@ -7067,3 +7067,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `pointShockwave=16` 需要 circle + seeded line 的 multi-pass 表达；
   - `attackCommand=18` 需要 polygon primitive；
   - desktop renderer/backend 仍未真正消费 effect primitive frame。
+
+### 12.228 Desktop effect frame backend consumption seam
+
+- 2026-05-28：根据只读探索结果，当前 effect primitives 此前只到 `DesktopLauncher` frame cache；本轮在 desktop 层增加最小 backend 消费口，并把 headless backend 接入 `desktop/src/main.rs` 主循环。该实现仍不是图形绘制后端，但已经把 `standard_effect_render_frame()` 从测试/缓存推进到 desktop runtime 的可替换 renderer seam。
+- 本轮迁移/接入：
+  - `DesktopEffectRenderer` trait；
+  - `DesktopEffectRenderStats` frame 统计；
+  - `HeadlessDesktopEffectRenderer`；
+  - `DesktopLauncher::render_standard_effect_frame_with(...)`；
+  - `desktop/src/main.rs` 在 `launcher.update()` 后消费 `standard_effect_render_frame()`。
+- Rust 新增/变化：
+  - `desktop/src/lib.rs`
+    - 新增 effect renderer trait 与 headless backend；
+    - `DesktopEffectRenderStats::from_standard_effect_frame(...)` 统计 draw plans 与 circle/square/line/light primitive 数量；
+    - `render_standard_effect_frame_with(...)` 以当前 `DesktopStandardEffectRenderFrame` 调用 backend；
+    - 扩展 `desktop_launcher_caches_fire_light_primitives_for_render`，验证 frame 可被 backend 消费且记录 stats。
+  - `desktop/src/main.rs`
+    - 创建 `HeadlessDesktopEffectRenderer`；
+    - 主循环 `launcher.update()` 后调用 `launcher.render_standard_effect_frame_with(&mut effect_renderer)`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_fire_light_primitives_for_render --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_square_and_line_primitives_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - headless backend 只是消费 seam，不是实际屏幕绘制；
+  - 后续需要替换/扩展为真实图形 backend，将 circle/square/line/light primitives 映射到窗口、批处理和 shader/light pipeline；
+  - 仍需确认渲染坐标系、层排序、alpha/blend/light 与 Java Draw/Drawf 语义一致。

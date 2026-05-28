@@ -5176,3 +5176,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 若继续 Fx：优先单 kind circle/square wave；`pointShockwave=16` 需要 multi-pass，不要半迁移；
   2. 若转集成：在 `desktop/src/lib.rs`/`desktop/src/main.rs` 增加最小 renderer 消费口，并用现有 desktop primitive tests 扩展验证；
   3. 不要把 frame cache 误判为真实渲染完成。
+
+---
+
+## 154. 最新闭环记录：Desktop effect frame backend consumption seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：把 standard effect primitive frame 从“只在 `DesktopLauncher` 缓存/测试中存在”推进到 desktop 主循环中的 backend 消费 seam。
+- 重要边界：
+  - 本轮不是实际图形绘制；
+  - `HeadlessDesktopEffectRenderer` 只是无窗口/headless backend，用于打通调用链和记录 stats；
+  - 不要把它写成“真实 renderer 已完成”。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopEffectRenderStats`；
+    - 新增 `DesktopEffectRenderer` trait；
+    - 新增 `HeadlessDesktopEffectRenderer`；
+    - 新增 `DesktopLauncher::render_standard_effect_frame_with(...)`；
+    - 扩展 fire/light primitive 测试，验证 renderer 消费 frame 并记录 draw/circle/square/line/light 数量。
+  - `desktop/src/main.rs`
+    - 主循环中创建并调用 headless renderer，`launcher.update()` 后消费 `standard_effect_render_frame()`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_fire_light_primitives_for_render --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_caches_square_and_line_primitives_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 在此 trait 后接真实窗口/绘制 backend，而不是继续只加 headless 统计；
+  2. renderer 需要处理 layer、alpha、color、stroke、filled/stroked circle/square/line/light；
+  3. 继续迁移 Fx 时，避免把需要 multi-pass/texture/polygon 的效果硬塞进单 kind plan。

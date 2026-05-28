@@ -57,6 +57,52 @@ pub struct DesktopStandardEffectRenderFrame {
     pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopEffectRenderStats {
+    pub draw_plans: usize,
+    pub circle_primitives: usize,
+    pub square_primitives: usize,
+    pub line_primitives: usize,
+    pub light_primitives: usize,
+}
+
+impl DesktopEffectRenderStats {
+    pub fn from_standard_effect_frame(frame: &DesktopStandardEffectRenderFrame) -> Self {
+        Self {
+            draw_plans: frame.draw_plans.len(),
+            circle_primitives: frame.circle_primitives.len(),
+            square_primitives: frame.square_primitives.len(),
+            line_primitives: frame.line_primitives.len(),
+            light_primitives: frame.light_primitives.len(),
+        }
+    }
+}
+
+pub trait DesktopEffectRenderer {
+    fn render_standard_effect_frame(
+        &mut self,
+        frame: &DesktopStandardEffectRenderFrame,
+    ) -> DesktopEffectRenderStats;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeadlessDesktopEffectRenderer {
+    pub frames_rendered: usize,
+    pub last_stats: DesktopEffectRenderStats,
+}
+
+impl DesktopEffectRenderer for HeadlessDesktopEffectRenderer {
+    fn render_standard_effect_frame(
+        &mut self,
+        frame: &DesktopStandardEffectRenderFrame,
+    ) -> DesktopEffectRenderStats {
+        let stats = DesktopEffectRenderStats::from_standard_effect_frame(frame);
+        self.frames_rendered += 1;
+        self.last_stats = stats;
+        stats
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DesktopLauncher {
     pub client: ClientLauncher,
@@ -303,6 +349,14 @@ impl DesktopLauncher {
             line_primitives: self.standard_local_effect_line_primitives.clone(),
             light_primitives: self.standard_local_effect_light_primitives.clone(),
         }
+    }
+
+    pub fn render_standard_effect_frame_with<R>(&self, renderer: &mut R) -> DesktopEffectRenderStats
+    where
+        R: DesktopEffectRenderer,
+    {
+        let frame = self.standard_effect_render_frame();
+        renderer.render_standard_effect_frame(&frame)
     }
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
@@ -1660,7 +1714,7 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 
 #[cfg(test)]
 mod tests {
-    use super::{run, DesktopLauncher};
+    use super::{run, DesktopEffectRenderStats, DesktopLauncher, HeadlessDesktopEffectRenderer};
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeDistributionBlockState,
         GameRuntimePayloadBlockState, GameRuntimeReconstructorConfigureResult,
@@ -2682,6 +2736,21 @@ mod tests {
         assert!((light.radius - 0.8).abs() < 0.0001);
         assert_eq!(light.color, "Pal.lightFlame");
         assert_eq!(light.opacity, 0.5);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(renderer.frames_rendered, 1);
+        assert_eq!(
+            stats,
+            DesktopEffectRenderStats {
+                draw_plans: 1,
+                circle_primitives: 2,
+                square_primitives: 0,
+                line_primitives: 0,
+                light_primitives: 1
+            }
+        );
+        assert_eq!(renderer.last_stats, stats);
     }
 
     #[test]
