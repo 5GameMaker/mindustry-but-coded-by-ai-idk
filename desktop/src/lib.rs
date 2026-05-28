@@ -27,11 +27,13 @@ use mindustry_core::mindustry::entities::{
 use mindustry_core::mindustry::graphics::{
     BlockRendererPlan, BlockRendererState, FloorRenderPlan, FloorRendererState, FogColor,
     FogFrameInput, FogFramePlan, FogRendererState, FogViewport, GraphicsFrameBundle,
-    GraphicsFrameStats, LightRendererPlan, LightRendererState, MinimapCamera, MinimapOverlayInput,
-    MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan,
-    OverlayRendererState, PixelatorCamera, PixelatorFramePlan, PixelatorInput, PixelatorState,
-    RenderBridge, RenderCamera, RenderEngineState, RenderFramePlan, RenderPoint, RenderSize,
-    RenderViewport, TileBounds, TileCoord, Viewport as FloorViewport,
+    GraphicsFrameStats, LightRendererPlan, LightRendererState, LoadFrameInput, LoadFramePlan,
+    LoadRendererState, MenuFrameInput, MenuFramePlan, MenuRendererConfig, MenuRendererState,
+    MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect, MinimapRendererState,
+    MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, PixelatorCamera,
+    PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBridge, RenderCamera,
+    RenderEngineState, RenderFramePlan, RenderPoint, RenderSize, RenderViewport, TileBounds,
+    TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -313,6 +315,26 @@ impl DesktopGraphicsFrame {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopFrameKind {
+    World,
+    Menu,
+    Load,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopFramePayload {
+    World(DesktopGraphicsFrame),
+    Menu(MenuFramePlan),
+    Load(LoadFramePlan),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopFrame {
+    pub kind: DesktopFrameKind,
+    pub payload: DesktopFramePayload,
+}
+
 pub trait DesktopGraphicsRenderer {
     fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats;
 }
@@ -357,6 +379,8 @@ pub struct DesktopLauncher {
     pub light_renderer_state: LightRendererState,
     pub floor_renderer_state: FloorRendererState,
     pub fog_renderer_state: FogRendererState,
+    pub menu_renderer_state: MenuRendererState,
+    pub load_renderer_state: LoadRendererState,
     pub pixelator_state: PixelatorState,
     pub pixelate: bool,
     pub renderer_scale: f32,
@@ -458,6 +482,8 @@ impl DesktopLauncher {
             light_renderer_state: LightRendererState::default(),
             floor_renderer_state: FloorRendererState::default(),
             fog_renderer_state: FogRendererState::default(),
+            menu_renderer_state: MenuRendererState::new(MenuRendererConfig::new(false, 7)),
+            load_renderer_state: LoadRendererState::default(),
             pixelator_state: PixelatorState::default(),
             pixelate: false,
             renderer_scale: 1.0,
@@ -1003,6 +1029,22 @@ impl DesktopLauncher {
         ))
     }
 
+    pub fn menu_frame_for_render(&mut self, input: MenuFrameInput) -> DesktopFrame {
+        let plan = self.menu_renderer_state.render_plan(input);
+        DesktopFrame {
+            kind: DesktopFrameKind::Menu,
+            payload: DesktopFramePayload::Menu(plan),
+        }
+    }
+
+    pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
+        let plan = self.load_renderer_state.build_plan(input);
+        DesktopFrame {
+            kind: DesktopFrameKind::Load,
+            payload: DesktopFramePayload::Load(plan),
+        }
+    }
+
     pub fn graphics_frame_for_render(
         &mut self,
         frame_index: u64,
@@ -1014,8 +1056,8 @@ impl DesktopLauncher {
         let mut render_frame = self.render_frame_plan(frame_index, camera, viewport);
         if let Some(light_pass) = self.drain_light_renderer_plan().to_render_pass() {
             render_frame.push_pass(light_pass);
-            render_frame.sort_passes();
         }
+        render_frame.sort_passes_like_java_renderer_draw();
         let block_renderer = self.block_render_plan(camera, viewport);
         let floor_renderer = self.floor_render_plan(camera, viewport);
         let fog_frame = self.fog_frame_plan(camera, viewport);
@@ -1887,6 +1929,8 @@ impl DesktopLauncher {
         self.light_renderer_state = LightRendererState::default();
         self.floor_renderer_state = FloorRendererState::default();
         self.fog_renderer_state = FogRendererState::default();
+        self.menu_renderer_state = MenuRendererState::new(MenuRendererConfig::new(false, 7));
+        self.load_renderer_state = LoadRendererState::default();
         self.pixelator_state = PixelatorState::default();
     }
 
@@ -2487,9 +2531,10 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 #[cfg(test)]
 mod tests {
     use super::{
-        run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopLauncher,
-        HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
-        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
+        run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopFrameKind,
+        DesktopFramePayload, DesktopLauncher, HeadlessDesktopAudioRenderer,
+        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
+        HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -2509,8 +2554,9 @@ mod tests {
     use mindustry_core::mindustry::ctype::{Content, ContentId};
     use mindustry_core::mindustry::entities::comp::DecalColor;
     use mindustry_core::mindustry::graphics::{
-        BlockDrawStage, LightPrimitive, MinimapCamera, MinimapOverlayInput, RenderCamera,
-        RenderCommand, RenderPassKind, RenderPoint, RenderSize, RenderViewport,
+        BlockDrawStage, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput, MinimapCamera,
+        MinimapOverlayInput, RenderCamera, RenderCommand, RenderPassKind, RenderPoint, RenderSize,
+        RenderViewport,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -3689,6 +3735,7 @@ mod tests {
         let render_frame = frame.bundle.render_frame.as_ref().unwrap();
         assert_eq!(render_frame.frame_index, 11);
         assert_eq!(render_frame.passes.len(), 1);
+        assert!(render_frame.matches_java_renderer_draw_order());
         assert_eq!(render_frame.passes[0].kind, RenderPassKind::Lighting);
 
         match &render_frame.passes[0].commands[0] {
@@ -3792,6 +3839,94 @@ mod tests {
         let plan = launcher.drain_overlay_renderer_plan();
         assert_eq!(plan.build_fade, 0.0);
         assert!(plan.updated_cores);
+    }
+
+    #[test]
+    fn desktop_launcher_menu_frame_for_render_uses_menu_payload_without_world_bundle() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let frame = launcher.menu_frame_for_render(MenuFrameInput {
+            graphics_width: 640.0,
+            graphics_height: 360.0,
+            scl4: 1.25,
+            delta: 0.016,
+        });
+
+        assert_eq!(frame.kind, DesktopFrameKind::Menu);
+        match frame.payload {
+            DesktopFramePayload::Menu(plan) => {
+                assert!(!plan.commands.is_empty());
+            }
+            DesktopFramePayload::World(_) => {
+                panic!("menu frame must not contain a world bundle");
+            }
+            DesktopFramePayload::Load(_) => {
+                panic!("menu frame must not use load payload");
+            }
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_load_frame_for_render_uses_load_payload_without_world_bundle() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut input = LoadFrameInput::new(800.0, 600.0, 1.0, 0.25, LoadStage::Initializing, 0.42);
+        input.prompt = Some("initializing".to_string());
+        input.completion = Some("done".to_string());
+
+        let frame = launcher.load_frame_for_render(input);
+
+        assert_eq!(frame.kind, DesktopFrameKind::Load);
+        match frame.payload {
+            DesktopFramePayload::Load(plan) => {
+                assert_eq!(plan.stage, LoadStage::Initializing);
+                assert!(!plan.commands.is_empty());
+            }
+            DesktopFramePayload::World(_) => {
+                panic!("load frame must not contain a world bundle");
+            }
+            DesktopFramePayload::Menu(_) => {
+                panic!("load frame must not use menu payload");
+            }
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_world_graphics_frame_is_not_affected_by_menu_or_load_renderer_state() {
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 32.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let minimap_camera = MinimapCamera::new(16.0, 16.0, 32.0, 32.0);
+
+        let mut baseline = DesktopLauncher::new(Vec::new());
+        let baseline_frame = baseline.graphics_frame_for_render(
+            7,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        let mut polluted = DesktopLauncher::new(Vec::new());
+        let menu_frame = polluted.menu_frame_for_render(MenuFrameInput {
+            graphics_width: 640.0,
+            graphics_height: 360.0,
+            scl4: 1.25,
+            delta: 0.5,
+        });
+        let mut load_input = LoadFrameInput::new(640.0, 360.0, 1.0, 0.5, LoadStage::Failed, 0.75);
+        load_input.error = Some("failure".to_string());
+        let load_frame = polluted.load_frame_for_render(load_input);
+
+        assert!(matches!(menu_frame.payload, DesktopFramePayload::Menu(_)));
+        assert!(matches!(load_frame.payload, DesktopFramePayload::Load(_)));
+
+        let polluted_frame = polluted.graphics_frame_for_render(
+            7,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        assert_eq!(baseline_frame, polluted_frame);
     }
 
     #[test]
