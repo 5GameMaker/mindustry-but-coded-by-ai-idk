@@ -11488,3 +11488,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `RenderCommand::DrawSprite` 与 `ShaderDispatchFrame` 尚未进入 live backend 执行；
   - 真实 PNG 尺寸、global override lookup、bleed/flush/UV 与 GPU texture region 仍需继续补齐；
   - 当前总体迁移约 20.0%，仍未达到完整可玩。
+
+### 12.358 TextureAtlas global lookup prefers latest inserted region
+
+- 2026-05-29：继续收紧 atlas 与 Java `TextureAtlas.regionMap.put(...)` 的覆盖语义。本轮把 Rust `TextureAtlasPlan::lookup(...)` 从固定 page 顺序优先，改为优先使用内部全局 `lookup_order`，使同名 region 的后插入/后替换条目成为全局 lookup 命中结果，保留 `lookup_in_page(...)` / `get_in_page(...)` 的 page 内精确查询。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `packSprites(...)` 会把 mod sprite/override sprite 写进 packer；
+    - Java `TextureAtlas` 的 region map 会在更新时按 region name 后写覆盖；
+    - `sprites-override` 的语义是无前缀同名 region 覆盖，而不是被固定 page 顺序遮蔽。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - `TextureAtlasPlan<T>` 新增内部 `lookup_order: Vec<(String, PageType)>`；
+    - `insert_region(...)` 成功后记录全局 lookup；
+    - `replace_region(...)` 与 `insert_or_replace_region(...)` 会刷新同名 region 的全局命中页；
+    - `remove_region(...)` / `clear_page(...)` 清理对应 lookup；
+    - `from_pack_plan(...)` 会在页面载入后重建 lookup 顺序；
+    - 新增 `texture_atlas_lookup_prefers_latest_inserted_region_across_pages`；
+    - 新增 `texture_atlas_from_sprite_sources_uses_input_order_for_global_lookup`。
+- 已跑验证：
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `12 passed`
+  - `cargo test -p mindustry-desktop mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop default_texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 PNG decode / atlas region 宽高仍未接入；
+  - bleed、duplicate border、flush、UV 与 GPU texture upload 仍未实现；
+  - 当前总体迁移约 20.1%，仍未达到完整可玩。

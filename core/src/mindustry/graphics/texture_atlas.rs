@@ -509,6 +509,7 @@ impl TextureAtlasLookupMiss {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextureAtlasPlan<T = ()> {
     pub pages: [TextureAtlasPage<T>; 4],
+    lookup_order: Vec<(String, PageType)>,
 }
 
 impl<T> TextureAtlasPlan<T> {
@@ -520,6 +521,7 @@ impl<T> TextureAtlasPlan<T> {
                 TextureAtlasPage::new(PageType::Ui),
                 TextureAtlasPage::new(PageType::Rubble),
             ],
+            lookup_order: Vec::new(),
         }
     }
 
@@ -532,7 +534,23 @@ impl<T> TextureAtlasPlan<T> {
     }
 
     pub fn get(&self, name: &str) -> Option<LocatedTextureAtlasRegion<'_, T>> {
-        self.pages.iter().find_map(|page| {
+        if let Some((_, page_type)) = self
+            .lookup_order
+            .iter()
+            .rev()
+            .find(|(region_name, _)| region_name == name)
+        {
+            let page = self.page(*page_type);
+            if let Some(region) = page.get(name) {
+                return Some(LocatedTextureAtlasRegion {
+                    page_type: page.page_type,
+                    page_source_path: &page.source_path,
+                    region,
+                });
+            }
+        }
+
+        self.pages.iter().rev().find_map(|page| {
             page.get(name).map(|region| LocatedTextureAtlasRegion {
                 page_type: page.page_type,
                 page_source_path: &page.source_path,
@@ -577,7 +595,10 @@ impl<T> TextureAtlasPlan<T> {
         page_type: PageType,
         region: TextureAtlasRegion<T>,
     ) -> Result<(), TextureAtlasInsertError<T>> {
-        self.page_mut(page_type).insert_region(region)
+        let name = region.name.clone();
+        self.page_mut(page_type).insert_region(region)?;
+        self.remember_lookup(name, page_type);
+        Ok(())
     }
 
     pub fn replace_region(
@@ -585,7 +606,10 @@ impl<T> TextureAtlasPlan<T> {
         page_type: PageType,
         region: TextureAtlasRegion<T>,
     ) -> Option<TextureAtlasRegion<T>> {
-        self.page_mut(page_type).replace_region(region)
+        let name = region.name.clone();
+        let replaced = self.page_mut(page_type).replace_region(region);
+        self.remember_lookup(name, page_type);
+        replaced
     }
 
     pub fn insert_or_replace_region(
@@ -593,7 +617,7 @@ impl<T> TextureAtlasPlan<T> {
         page_type: PageType,
         region: TextureAtlasRegion<T>,
     ) -> Option<TextureAtlasRegion<T>> {
-        self.page_mut(page_type).insert_or_replace_region(region)
+        self.replace_region(page_type, region)
     }
 
     pub fn remove_region(
@@ -601,11 +625,19 @@ impl<T> TextureAtlasPlan<T> {
         page_type: PageType,
         name: &str,
     ) -> Option<TextureAtlasRegion<T>> {
-        self.page_mut(page_type).remove_region(name)
+        let removed = self.page_mut(page_type).remove_region(name);
+        if removed.is_some() {
+            self.lookup_order.retain(|(region_name, region_page)| {
+                region_name != name || *region_page != page_type
+            });
+        }
+        removed
     }
 
     pub fn clear_page(&mut self, page_type: PageType) {
         self.page_mut(page_type).regions.clear();
+        self.lookup_order
+            .retain(|(_, region_page)| *region_page != page_type);
     }
 
     pub fn refresh_uvs(&mut self) {
@@ -622,7 +654,27 @@ impl<T> TextureAtlasPlan<T> {
             atlas.pages[page_type.index()] = TextureAtlasPage::from_page_plan(page_plan);
         }
 
+        atlas.rebuild_lookup_order();
         atlas
+    }
+
+    fn remember_lookup(&mut self, name: String, page_type: PageType) {
+        self.lookup_order
+            .retain(|(region_name, _)| region_name != &name);
+        self.lookup_order.push((name, page_type));
+    }
+
+    fn rebuild_lookup_order(&mut self) {
+        self.lookup_order.clear();
+        let mut entries = Vec::new();
+        for page in &self.pages {
+            for region in &page.regions {
+                entries.push((region.name.clone(), page.page_type));
+            }
+        }
+        for (name, page_type) in entries {
+            self.remember_lookup(name, page_type);
+        }
     }
 }
 
@@ -858,6 +910,67 @@ mod tests {
         let rubble = plan.page(PageType::Rubble).get("crack").unwrap();
         assert_eq!(rubble.source_path, "rubble/crack.png");
         assert_eq!(rubble.payload, false);
+    }
+
+    #[test]
+    fn texture_atlas_lookup_prefers_latest_inserted_region_across_pages() {
+        let mut plan = TextureAtlasPlan::new();
+        let _ = plan.insert_or_replace_region(
+            PageType::Main,
+            TextureAtlasRegion::new(
+                PageType::Main,
+                "router",
+                "sprites/blocks/router.png",
+                0,
+                0,
+                32,
+                32,
+                false,
+            ),
+        );
+        let _ = plan.insert_or_replace_region(
+            PageType::Ui,
+            TextureAtlasRegion::new(
+                PageType::Ui,
+                "router",
+                "sprites-override/ui/router.png",
+                0,
+                0,
+                16,
+                16,
+                true,
+            ),
+        );
+
+        let hit = plan.lookup("router").unwrap();
+        assert_eq!(hit.page_type, PageType::Ui);
+        assert_eq!(hit.region.source_path, "sprites-override/ui/router.png");
+        assert_eq!(
+            plan.get_in_page(PageType::Main, "router")
+                .unwrap()
+                .source_path,
+            "sprites/blocks/router.png"
+        );
+    }
+
+    #[test]
+    fn texture_atlas_from_sprite_sources_uses_input_order_for_global_lookup() {
+        let plan = TextureAtlasPlan::from_sprite_sources([
+            TextureAtlasSpriteSourceDescriptor::new("sprites/ui/shared.png", "shared")
+                .with_page_hint("ui"),
+            TextureAtlasSpriteSourceDescriptor::new("sprites/blocks/shared.png", "shared")
+                .with_page_hint("sprites"),
+        ]);
+
+        let hit = plan.lookup("shared").unwrap();
+        assert_eq!(hit.page_type, PageType::Main);
+        assert_eq!(hit.region.source_path, "sprites/blocks/shared.png");
+        assert_eq!(
+            plan.get_in_page(PageType::Ui, "shared")
+                .unwrap()
+                .source_path,
+            "sprites/ui/shared.png"
+        );
     }
 
     #[test]

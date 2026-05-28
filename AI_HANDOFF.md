@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **20.0%**。
+- 当前总体迁移完成度：约 **20.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -8835,3 +8835,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `RenderCommand::DrawSprite`、`ShaderDispatchFrame`、atlas region 仍需进入真实执行端；
   3. 需要继续推进 texture atlas 真实 PNG 尺寸、override 全局 lookup、bleed/flush/UV；
   4. 当前总迁移约 20.0%，仍未达到完整可玩，goal 绝不能标记 complete。
+
+---
+
+## 260. 最新闭环记录：TextureAtlas 全局后写覆盖 lookup
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Rust `TextureAtlasPlan::lookup(...)` 从固定 page 顺序优先改为更接近 Java `TextureAtlas.regionMap.put(...)` 的全局后写覆盖语义，避免同名 region 在不同 page 中被 mod override 后仍命中旧 page。
+- Rust 主改动：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - `TextureAtlasPlan` 新增内部 `lookup_order`；
+    - `insert_region(...)`、`replace_region(...)`、`insert_or_replace_region(...)` 更新全局 lookup 顺序；
+    - `remove_region(...)`、`clear_page(...)` 同步清理 lookup 顺序；
+    - `from_pack_plan(...)` 会重建 lookup 顺序；
+    - `get(...)` 优先按最新 lookup 顺序定位，保留 page 内查询 API 不变；
+    - 新增跨 page 后写覆盖与 `from_sprite_sources` 输入顺序 lookup 测试。
+  - `README.md`
+    - 当前总体完成度更新为约 `20.1%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.358`。
+- 已跑验证：
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop default_texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 真实 PNG 尺寸仍未进入 atlas region 宽高；
+  2. bleed / duplicate border / flush / UV 仍是后续主线；
+  3. live graphics backend 仍未执行真实 GPU 绘制；
+  4. 当前总迁移约 20.1%，仍未达到完整可玩，goal 绝不能标记 complete。
