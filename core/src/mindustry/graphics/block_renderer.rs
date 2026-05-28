@@ -1977,19 +1977,24 @@ mod tests {
     }
 
     #[test]
-    fn drawer_dispatch_and_sprite_bridge_preserve_multi_order_and_skip_effects() {
+    fn drawer_dispatch_and_sprite_bridge_preserve_multi_order_with_glow_and_liquid_tile_noop() {
         let icons = crate::mindustry::world::draw::draw_block_drawer_icons(
             "separator",
-            "DrawMulti(DrawRegion(-bottom), DrawGlowRegion(sky), DrawDefault, DrawRegion(-top))",
+            "DrawMulti(DrawRegion(-bottom), DrawLiquidTile, DrawGlowRegion(-glow), DrawDefault, DrawRegion(-top))",
         );
         assert_eq!(
             icons,
-            vec!["separator-bottom", "separator", "separator-top"]
+            vec![
+                "separator-bottom",
+                "separator-glow",
+                "separator",
+                "separator-top"
+            ]
         );
 
         let ops = drawer_to_block_sprite_ops(
             "separator",
-            "DrawMulti(DrawRegion(-bottom), DrawGlowRegion(sky), DrawDefault, DrawRegion(-top))",
+            "DrawMulti(DrawRegion(-bottom), DrawLiquidTile, DrawGlowRegion(-glow), DrawDefault, DrawRegion(-top))",
             RenderRect::new(1.0, 2.0, 3.0, 4.0),
             [1.0, 1.0, 1.0, 1.0],
             90.0,
@@ -1998,11 +2003,16 @@ mod tests {
         );
         assert_eq!(
             ops.iter().map(|op| op.symbol()).collect::<Vec<_>>(),
-            vec!["separator-bottom", "separator", "separator-top"]
+            vec![
+                "separator-bottom",
+                "separator-glow",
+                "separator",
+                "separator-top"
+            ]
         );
         assert_eq!(
             ops.iter().map(|op| op.order).collect::<Vec<_>>(),
-            vec![7, 8, 9]
+            vec![7, 8, 9, 10]
         );
 
         let mut plan = BlockRendererPlan::default();
@@ -2010,10 +2020,37 @@ mod tests {
         assert_eq!(plan.to_block_sprite_ops(8.0), ops);
 
         let passes = plan.to_sprite_render_passes(8.0);
-        assert_eq!(passes.len(), 3);
+        assert_eq!(passes.len(), 4);
         assert_eq!(passes[0].order, 7);
         assert_eq!(passes[1].order, 8);
         assert_eq!(passes[2].order, 9);
+        assert_eq!(passes[3].order, 10);
+    }
+
+    #[test]
+    fn drawer_dispatch_bridge_covers_static_heat_input_liquid_region_and_warmup_region() {
+        let ops = drawer_to_block_sprite_ops(
+            "reactor",
+            "DrawMulti(DrawHeatInput, DrawLiquidTile, DrawGlowRegion, DrawLiquidRegion, DrawWarmupRegion)",
+            RenderRect::new(1.0, 2.0, 3.0, 4.0),
+            [0.7, 0.8, 0.9, 1.0],
+            0.0,
+            Layer::BLOCK,
+            20,
+        );
+        assert_eq!(
+            ops.iter().map(|op| op.symbol()).collect::<Vec<_>>(),
+            vec![
+                "reactor-heat",
+                "reactor-glow",
+                "reactor-liquid",
+                "reactor-top"
+            ]
+        );
+        assert_eq!(
+            ops.iter().map(|op| op.order).collect::<Vec<_>>(),
+            vec![20, 21, 22, 23]
+        );
     }
 
     #[test]

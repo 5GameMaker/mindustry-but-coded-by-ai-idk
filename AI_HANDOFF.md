@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **21.1%**。
+- 当前总体迁移完成度：约 **21.2%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9116,3 +9116,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. 下一批高频 drawer：`DrawLiquidTile/DrawHeatInput/DrawGlowRegion/DrawLiquidRegion/DrawWarmupRegion`；
   2. 当前总迁移约 21.1%，仍未达到完整可玩。
+
+---
+
+## 273. 最新闭环记录：Desktop 显式 mod directory atlas merge
+
+- 本轮目标：把 `ModResourcePlan::from_directory(...)` 接到 Desktop atlas 链路，同时不污染 `DesktopLauncher::new(Vec::new())` 默认行为。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::merge_mod_directory_into_texture_atlas(mod_name, headless, root)`；
+    - `merge_mod_resource_plan_into_texture_atlas(...)` 保留 `texture_scale`；
+    - 新增 `desktop_launcher_merges_mod_directory_into_texture_atlas_without_clobbering_vanilla`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_merges_mod --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. 多 mod root discovery 未接；
+  2. `run(...)` 的显式开关未接；
+  3. 当前总迁移约 21.15%，仍未达到完整可玩。
+
+---
+
+## 274. 最新闭环记录：DrawBlock Heat/Glow/Liquid/Warmup 静态层
+
+- 本轮目标：继续覆盖 `content/blocks.rs` 高频 drawer。
+- Rust 主改动：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - dispatcher 支持 `DrawHeatInput`、`DrawGlowRegion`、`DrawLiquidRegion`、`DrawWarmupRegion`；
+    - `DrawLiquidTile` 明确 no-op；
+    - 新增 suffix 解析辅助，避免数字/布尔参数误判。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 更新/新增桥接测试，验证 `DrawMulti` 中 liquid tile no-op 不打乱顺序。
+- 已跑验证：
+  - `cargo test -p mindustry-core drawer_dispatch_bridge_covers_static_heat_input_liquid_region_and_warmup_region --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core draw_default_side_liquid_tile --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. runtime heat/liquid/warmup 状态尚未接；
+  2. `DrawFlame/DrawHeatRegion/DrawLiquidOutputs/DrawParticles` 仍待覆盖；
+  3. 当前总迁移约 21.2%，仍未达到完整可玩。

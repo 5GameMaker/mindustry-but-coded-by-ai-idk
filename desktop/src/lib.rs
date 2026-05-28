@@ -62,6 +62,8 @@ use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::{BuildingRef, CacheLayer as WorldCacheLayer, Tile};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
+use std::io;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1104,12 +1106,24 @@ impl DesktopLauncher {
         }
     }
 
+    pub fn merge_mod_directory_into_texture_atlas(
+        &mut self,
+        mod_name: impl Into<String>,
+        headless: bool,
+        root: impl AsRef<Path>,
+    ) -> io::Result<usize> {
+        let plan = ModResourcePlan::from_directory(mod_name, headless, root)?;
+        Ok(self.merge_mod_resource_plan_into_texture_atlas(&plan))
+    }
+
     pub fn merge_mod_resource_plan_into_texture_atlas(&mut self, plan: &ModResourcePlan) -> usize {
         let mod_atlas = TextureAtlasPlan::from_sprite_sources(
             plan.sprite_requests().into_iter().map(|request| {
+                let texture_scale = request.texture_scale();
                 TextureAtlasSpriteSourceDescriptor::new(request.source_path, request.atlas_name)
                     .with_page_hint(request.page_hint)
                     .with_override(request.r#override)
+                    .with_texture_scale(texture_scale)
             }),
         );
         let mut merged = 0;
@@ -4756,6 +4770,94 @@ mod tests {
             .filter(|region| region.name.starts_with("cracks-"))
             .count();
         assert_eq!(crack_count, 7 * 8);
+    }
+
+    fn write_test_png(path: &std::path::Path) {
+        const PNG_1X1_TRANSPARENT: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE5, 0x27, 0xD4, 0xA2, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        std::fs::write(path, PNG_1X1_TRANSPARENT).expect("test png should be writable");
+    }
+
+    fn create_mod_sprite_fixture_root() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "mindustry-desktop-mod-atlas-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("sprites"))
+            .expect("mod fixture directories should be creatable");
+        std::fs::create_dir_all(root.join("sprites-override/ui"))
+            .expect("mod fixture directories should be creatable");
+
+        write_test_png(&root.join("sprites").join("router-plus.png"));
+        write_test_png(&root.join("sprites-override").join("router.png"));
+        write_test_png(&root.join("sprites-override/ui").join("block-router-ui.png"));
+
+        root
+    }
+
+    #[test]
+    fn desktop_launcher_merges_mod_directory_into_texture_atlas_without_clobbering_vanilla() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let vanilla_router = launcher.texture_atlas.lookup("router").unwrap();
+        assert_eq!(
+            vanilla_router.region.source_path,
+            "sprites/blocks/router.png"
+        );
+
+        let root = create_mod_sprite_fixture_root();
+        let merge_count = launcher
+            .merge_mod_directory_into_texture_atlas("example", false, &root)
+            .expect("mod directory should scan and merge");
+
+        assert_eq!(merge_count, 3);
+
+        let mod_sprite = launcher
+            .texture_atlas
+            .lookup("example-router-plus")
+            .unwrap();
+        assert_eq!(mod_sprite.page_type, PageType::Main);
+        assert_eq!(mod_sprite.region.source_path, "sprites/router-plus.png");
+        assert!(!mod_sprite.region.payload);
+
+        let overridden_router = launcher.texture_atlas.lookup("router").unwrap();
+        assert_eq!(overridden_router.page_type, PageType::Main);
+        assert_eq!(
+            overridden_router.region.source_path,
+            "sprites-override/router.png"
+        );
+        assert!(overridden_router.region.payload);
+
+        let overridden_ui = launcher.texture_atlas.lookup("block-router-ui").unwrap();
+        assert_eq!(overridden_ui.page_type, PageType::Ui);
+        assert_eq!(
+            overridden_ui.region.source_path,
+            "sprites-override/ui/block-router-ui.png"
+        );
+        assert!(overridden_ui.region.payload);
+
+        assert!(launcher.texture_atlas.lookup("item-copper-full").is_ok());
+        assert!(launcher.texture_atlas.lookup("liquid-water-ui").is_ok());
+        assert!(launcher.texture_atlas.lookup("cracks-1-0").is_ok());
+        assert!(launcher.texture_atlas.lookup("cracks-7-7").is_ok());
+        let crack_count = launcher
+            .texture_atlas
+            .page(PageType::Rubble)
+            .regions
+            .iter()
+            .filter(|region| region.name.starts_with("cracks-"))
+            .count();
+        assert_eq!(crack_count, 7 * 8);
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

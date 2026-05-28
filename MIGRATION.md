@@ -11800,3 +11800,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 这批 drawer 仍未接真实 runtime 动态状态；
   - `DrawLiquidTile/DrawLiquidRegion/DrawHeatInput/DrawGlowRegion/DrawWarmupRegion` 是下一批高频缺口；
   - 当前总体迁移约 21.1%，仍未达到完整可玩。
+
+### 12.371 Desktop 显式合并 mod directory 到 texture atlas
+
+- 2026-05-29：把 core 侧 `ModResourcePlan::from_directory(...)` 继续接入 Desktop 资源链，但保持 `DesktopLauncher::new(Vec::new())` 默认纯构造、不扫描真实 `data/mods`，避免测试和本机环境污染。本轮新增显式入口 `DesktopLauncher::merge_mod_directory_into_texture_atlas(...)`，调用方传入单个 mod root 与 mod name 后，会扫描目录并复用既有 atlas merge。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `merge_mod_directory_into_texture_atlas(mod_name, headless, root)`；
+    - `merge_mod_resource_plan_into_texture_atlas(...)` 合并时继续传递 `texture_scale`；
+    - 新增 `desktop_launcher_merges_mod_directory_into_texture_atlas_without_clobbering_vanilla`，使用临时目录和真实 PNG 验证目录扫描、override 合并、vanilla atlas 不被 clobber。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_merges_mod --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `2 passed`
+- 仍未完成：
+  - 还没有 `data/mods` 容器目录的多 mod 发现阶段；
+  - 还没有 run-time 显式开关接到 `run(...)`；
+  - Server 侧目前应先接 FileTree，不应做 atlas merge；
+  - 当前总体迁移约 21.15%，仍未达到完整可玩。
+
+### 12.372 DrawBlock 高频静态层：HeatInput / Glow / LiquidRegion / Warmup
+
+- 2026-05-29：继续按 `content/blocks.rs` 高频 drawer 扩展 dispatcher。本轮新增 `DrawHeatInput`、`DrawGlowRegion`、`DrawLiquidRegion`、`DrawWarmupRegion` 的最小静态降级；`DrawLiquidTile` 明确 no-op，避免伪造不存在的 atlas symbol，同时保证其位于 `DrawMulti` 中时不会打乱其它子 drawer 顺序。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - 新增 suffix 解析辅助，避免把数字/布尔参数误当成 suffix；
+    - dispatcher 支持 `DrawHeatInput` -> `-heat`；
+    - dispatcher 支持 `DrawGlowRegion` -> `-glow` 或 suffix；
+    - dispatcher 支持 `DrawLiquidRegion` -> `-liquid`；
+    - dispatcher 支持 `DrawWarmupRegion` -> `-top`；
+    - dispatcher 对 `DrawLiquidTile` 返回空。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 更新/新增桥接测试，覆盖 glow/liquid tile no-op、heat input、liquid region、warmup region。
+- 已跑验证：
+  - `cargo test -p mindustry-core drawer_dispatch_bridge_covers_static_heat_input_liquid_region_and_warmup_region --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core draw_default_side_liquid_tile --manifest-path "Cargo.toml" -- --test-threads=1`
+- 仍未完成：
+  - 这些 drawer 仍只做静态 icon/symbol，未接 heat/liquid/warmup runtime；
+  - `DrawFlame/DrawHeatRegion/DrawLiquidOutputs/DrawParticles` 等仍未覆盖；
+  - 当前总体迁移约 21.2%，仍未达到完整可玩。

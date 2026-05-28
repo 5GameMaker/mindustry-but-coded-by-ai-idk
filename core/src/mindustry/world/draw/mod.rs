@@ -439,6 +439,30 @@ pub fn draw_default_icons(block_region: &str) -> Vec<String> {
     vec![block_region.to_string()]
 }
 
+fn drawer_arg_is_numeric_or_bool(arg: &str) -> bool {
+    let arg = arg.trim();
+    if arg.eq_ignore_ascii_case("true") || arg.eq_ignore_ascii_case("false") {
+        return true;
+    }
+
+    let stripped = arg.trim_end_matches(['f', 'F']);
+    !stripped.is_empty() && stripped.parse::<f32>().is_ok()
+}
+
+fn drawer_suffix_or_default(args: &str, default_suffix: &str) -> String {
+    let suffix = split_drawer_args(args)
+        .first()
+        .copied()
+        .unwrap_or("")
+        .trim();
+
+    if suffix.is_empty() || drawer_arg_is_numeric_or_bool(suffix) {
+        default_suffix.to_string()
+    } else {
+        suffix.to_string()
+    }
+}
+
 pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> {
     let drawer = drawer.trim();
     if drawer.is_empty() {
@@ -470,6 +494,17 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
             let suffix = if suffix.is_empty() { "-piston" } else { suffix };
             vec![draw_piston_region_names(block_name, suffix)[3].clone()]
         }
+        Some(("DrawHeatInput", args)) => {
+            let suffix = drawer_suffix_or_default(args, "-heat");
+            vec![draw_heat_input_region_name(block_name, &suffix)]
+        }
+        Some(("DrawGlowRegion", args)) => {
+            let suffix = drawer_suffix_or_default(args, "-glow");
+            vec![draw_glow_region_name(block_name, &suffix)]
+        }
+        Some(("DrawLiquidRegion", _)) => vec![draw_liquid_region_name(block_name, "-liquid")],
+        Some(("DrawWarmupRegion", _)) => vec![draw_warmup_region_name(block_name)],
+        Some(("DrawLiquidTile", _)) => Vec::new(),
         Some(("DrawWeave", _)) => vec![draw_weave_name(block_name)],
         Some(("DrawMultiWeave", _)) => {
             let (weave, _) = draw_multi_weave_region_names(block_name);
@@ -504,6 +539,11 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
             "DrawDefault" => draw_default_icons(block_name),
             "DrawRegion" => draw_region_icons(block_name),
             "DrawPistons" => vec![draw_piston_region_names(block_name, "-piston")[3].clone()],
+            "DrawHeatInput" => vec![draw_heat_input_region_name(block_name, "-heat")],
+            "DrawGlowRegion" => vec![draw_glow_region_name(block_name, "-glow")],
+            "DrawLiquidRegion" => vec![draw_liquid_region_name(block_name, "-liquid")],
+            "DrawWarmupRegion" => vec![draw_warmup_region_name(block_name)],
+            "DrawLiquidTile" => Vec::new(),
             "DrawWeave" => vec![draw_weave_name(block_name)],
             "DrawMultiWeave" => {
                 let (weave, _) = draw_multi_weave_region_names(block_name);
@@ -1442,9 +1482,29 @@ mod tests {
         assert_eq!(
             draw_block_dispatch_icons(
                 "router",
-                "DrawMulti(DrawRegion(-bottom), DrawGlowRegion(sky), DrawDefault, DrawRegion(-top))"
+                "DrawMulti(DrawRegion(-bottom), DrawLiquidTile, DrawDefault, DrawRegion(-top))"
             ),
             vec!["router-bottom", "router", "router-top"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawHeatInput"),
+            vec!["router-heat"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawGlowRegion(-ventglow)"),
+            vec!["router-ventglow"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawLiquidRegion"),
+            vec!["router-liquid"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawWarmupRegion"),
+            vec!["router-top"]
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("router", "DrawLiquidTile"),
+            Vec::<String>::new()
         );
         assert_eq!(
             draw_block_dispatch_icons(
