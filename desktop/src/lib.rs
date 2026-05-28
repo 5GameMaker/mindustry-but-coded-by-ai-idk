@@ -739,6 +739,7 @@ fn block_renderer_building_snapshot_from_world(
         snapshot.cache_layer = graphics_cache_layer_from_world(block.cache_layer);
         snapshot.size = block.size.max(1).min(u8::MAX as i32) as u8;
         snapshot.emits_light = block.emit_light;
+        snapshot.draw_cracks = block.draw_cracks;
     }
 
     if let Some(def) = content_block {
@@ -754,6 +755,7 @@ fn block_renderer_building_snapshot_from_world(
         snapshot.was_visible = building.was_visible;
         snapshot.damaged =
             building.health + f32::EPSILON < building.max_health || building.was_damaged;
+        snapshot.health_fraction = building_health_fraction(building.health, building.max_health);
     } else if let Some(build_ref) = tile_build {
         snapshot.rotation = build_ref.rotation as i16;
         snapshot.team = build_ref.team.clamp(0, u8::MAX as i32) as u8;
@@ -761,6 +763,14 @@ fn block_renderer_building_snapshot_from_world(
     }
 
     Some(snapshot)
+}
+
+fn building_health_fraction(health: f32, max_health: f32) -> f32 {
+    if max_health > 0.0 && health.is_finite() && max_health.is_finite() {
+        (health / max_health).clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
 }
 
 fn block_renderer_tile_snapshot_from_world(
@@ -4189,7 +4199,7 @@ mod tests {
 
         let mut building = BuildingComp::new(tile_pos, wall_large.clone(), TeamId(7));
         building.rotation = 2;
-        building.health = building.max_health - 12.0;
+        building.health = building.max_health * 0.5;
         building.was_visible = true;
         building.was_damaged = true;
         building.visible_flags = 1;
@@ -4221,6 +4231,9 @@ mod tests {
         assert!(building.visible);
         assert!(building.was_visible);
         assert!(building.damaged);
+        assert!((building.health_fraction - 0.5).abs() < f32::EPSILON);
+        assert_eq!(plan.cracks.len(), 1);
+        assert_eq!(plan.cracks[0].region_symbol(), "cracks-2-4");
         assert!(plan
             .building_passes
             .iter()

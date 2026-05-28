@@ -11226,3 +11226,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - desktop atlas 解析仍是 headless trace 诊断，不是真实 GPU region bind/sprite batch；
   - 下一步可继续把 `ModResourcePlan -> SpritePacker -> TextureAtlasPlan` 接入 desktop/content 启动流程，或按 Java crack atlas 规则推进 `BlockRenderer` 裂纹 region 数据链；
   - 当前总体迁移约 19.2%，仍未达到完整可玩。
+
+### 12.350 BlockRenderer crack atlas region chain
+
+- 2026-05-29：继续优先推进渲染引擎主线。本轮把 Java `BlockRenderer`/`BuildingComp.drawCracks()` 的裂纹 region 命名、血量档位、tile position 旋转、`base -> cracks -> team/status` 顺序接入 Rust block renderer 计划与 desktop world snapshot 链路。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - `crackRegions = 8`、`maxCrackSize = 7`；
+    - `ClientLoadEvent` 预加载 `cracks-{size}-{i}`，`size = 1..7`，`i = 0..7`；
+    - building base 后在 `Layer.blockCracks` 绘制裂纹，再回到 `Layer.block` 处理 team/status。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/entities/comp/BuildingComp.java`
+    - `drawCracks()` gate：`block.drawCracks && damaged() && block.size <= maxCrackSize`；
+    - region index：`clamp((1f - healthf()) * crackRegions, 0, crackRegions - 1)`；
+    - rotation：`(pos() % 4) * 90`，不是建筑朝向。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/block.rs`
+    - `Block` 新增 `draw_cracks`，默认 `true`，作为 Java `Block.drawCracks` 的数据入口。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBuildingSnapshot`/`BuildingDrawPlan` 新增 `health_fraction` 与 `draw_cracks`；
+    - `CrackAtlasPlan` 新增 size 支持判断、health fraction 到 region index 的 Java 对齐计算、`cracks-{size}-{index}` region name 列表；
+    - `CrackPlan` 现在携带 region symbol、tile position 旋转、裂纹 tint，并可从 `BuildingDrawPlan` 生成；
+    - `BlockRendererState::build_plan_from_snapshot(...)` 会填充 `plan.cracks`，`BlockRendererPlan::to_block_sprite_ops(...)` 在 `BuildingCracks` stage 消费真实 `cracks-{size}-{index}`，避免继续输出孤立的 `"block-cracks"` 占位 symbol。
+  - `desktop/src/lib.rs`
+    - `block_renderer_building_snapshot_from_world(...)` 从 runtime `BuildingComp.health/max_health` 传递 `health_fraction`，并从 block 定义传递 `draw_cracks`；
+    - desktop block render plan 测试现在验证 runtime building 损伤会生成 `cracks-2-4`。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-core block_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `12 passed`
+  - `cargo test -p mindustry-desktop desktop_launcher_block_render_plan_uses_world_tile_and_runtime_building_snapshots --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `8 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - 裂纹 region 仍通过 symbol/trace 表达，尚未接真实 `Core.atlas.find(...)`、PNG decode、GPU texture region bind；
+  - Java 各 `Block.drawCracks()` 子类 override 还未逐类迁移，当前只接入了默认 `Block.drawCracks` gate；
+  - 后续需继续把真实 atlas 构建、sprite batch 和 `DrawBlock` 子类渲染逻辑接入整体 runtime；
+  - 当前总体迁移约 19.3%，仍未达到完整可玩。

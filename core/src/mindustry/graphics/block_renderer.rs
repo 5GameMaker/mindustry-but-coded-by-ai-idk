@@ -10,6 +10,7 @@ use crate::mindustry::{
     graphics::{
         CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
     },
+    world::point2_pack,
 };
 
 pub const CRACK_REGION_COUNT: usize = 8;
@@ -265,6 +266,8 @@ pub struct BuildingDrawPlan {
     pub visible: bool,
     pub was_visible: bool,
     pub damaged: bool,
+    pub health_fraction: f32,
+    pub draw_cracks: bool,
     pub draw_team_overlay: bool,
     pub draw_status: bool,
     pub emits_light: bool,
@@ -282,10 +285,18 @@ impl Default for BuildingDrawPlan {
             visible: false,
             was_visible: false,
             damaged: false,
+            health_fraction: 1.0,
+            draw_cracks: true,
             draw_team_overlay: false,
             draw_status: false,
             emits_light: false,
         }
+    }
+}
+
+impl BuildingDrawPlan {
+    pub fn should_draw_cracks(&self, atlas: &CrackAtlasPlan) -> bool {
+        self.draw_cracks && self.damaged && atlas.supports_size(self.size)
     }
 }
 
@@ -300,6 +311,8 @@ pub struct BlockRendererBuildingSnapshot {
     pub visible: bool,
     pub was_visible: bool,
     pub damaged: bool,
+    pub health_fraction: f32,
+    pub draw_cracks: bool,
     pub draw_team_overlay: bool,
     pub draw_status: bool,
     pub emits_light: bool,
@@ -317,6 +330,8 @@ impl BlockRendererBuildingSnapshot {
             visible: false,
             was_visible: false,
             damaged: false,
+            health_fraction: 1.0,
+            draw_cracks: true,
             draw_team_overlay: false,
             draw_status: false,
             emits_light: false,
@@ -338,6 +353,8 @@ impl BlockRendererBuildingSnapshot {
             visible: self.visible,
             was_visible: self.was_visible,
             damaged: self.damaged,
+            health_fraction: normalize_health_fraction(self.health_fraction),
+            draw_cracks: self.draw_cracks,
             draw_team_overlay: self.draw_team_overlay,
             draw_status: self.draw_status,
             emits_light: self.emits_light,
@@ -405,6 +422,45 @@ impl CrackAtlasPlan {
             loaded: false,
         }
     }
+
+    pub fn supports_size(&self, size: u8) -> bool {
+        size >= 1 && usize::from(size) <= self.max_size
+    }
+
+    pub fn region_index_for(&self, health_fraction: f32) -> usize {
+        if self.regions_per_size == 0 {
+            return 0;
+        }
+
+        let health_fraction = normalize_health_fraction(health_fraction);
+        let damage_fraction = 1.0 - health_fraction;
+        let raw = (damage_fraction * self.regions_per_size as f32) as usize;
+        raw.min(self.regions_per_size - 1)
+    }
+
+    pub fn region_name(&self, size: u8, index: usize) -> Option<String> {
+        if !self.supports_size(size) || self.regions_per_size == 0 {
+            return None;
+        }
+
+        Some(format!(
+            "cracks-{}-{}",
+            size,
+            index.min(self.regions_per_size - 1)
+        ))
+    }
+
+    pub fn region_names(&self) -> Vec<String> {
+        if self.regions_per_size == 0 || self.max_size == 0 {
+            return Vec::new();
+        }
+
+        (1..=self.max_size)
+            .flat_map(|size| {
+                (0..self.regions_per_size).map(move |index| format!("cracks-{}-{}", size, index))
+            })
+            .collect()
+    }
 }
 
 impl Default for CrackAtlasPlan {
@@ -420,6 +476,8 @@ pub struct CrackPlan {
     pub region_index: usize,
     pub layer: f32,
     pub mirrored: bool,
+    pub rotation: f32,
+    pub tint: [f32; 4],
 }
 
 impl CrackPlan {
@@ -430,7 +488,35 @@ impl CrackPlan {
             region_index: region_index % CRACK_REGION_COUNT,
             layer: Layer::BLOCK_CRACKS,
             mirrored: false,
+            rotation: crack_rotation_degrees(coord),
+            tint: crack_tint_from_health_fraction(1.0),
         }
+    }
+
+    pub fn from_building(building: &BuildingDrawPlan, atlas: &CrackAtlasPlan) -> Option<Self> {
+        if !building.should_draw_cracks(atlas) {
+            return None;
+        }
+
+        let region_index = atlas.region_index_for(building.health_fraction);
+        let mut plan = Self::new(building.coord, building.size, region_index);
+        plan.tint = crack_tint_from_health_fraction(building.health_fraction);
+        Some(plan)
+    }
+
+    pub fn region_symbol(&self) -> String {
+        format!("cracks-{}-{}", self.size, self.region_index)
+    }
+
+    pub fn append_sprite_op(&self, tile_size_world: f32, order: i32, ops: &mut Vec<BlockSpriteOp>) {
+        ops.push(BlockSpriteOp::new(
+            order,
+            self.region_symbol(),
+            building_sprite_rect(self.coord, self.size, tile_size_world),
+            self.tint,
+            self.rotation,
+            self.layer,
+        ));
     }
 }
 
@@ -981,13 +1067,34 @@ impl BlockRendererPlan {
         }
 
         for pass in &self.building_passes {
-            if pass.append_sprite_ops(tile_size_world, order, &mut ops) {
+            if pass.stage == BlockDrawStage::BuildingCracks {
+                if self.append_crack_sprite_ops(tile_size_world, order, &mut ops) {
+                    order += 1;
+                }
+            } else if pass.append_sprite_ops(tile_size_world, order, &mut ops) {
                 order += 1;
             }
         }
 
         ops.sort_by_key(|op| op.order);
         ops
+    }
+
+    pub fn append_crack_sprite_ops(
+        &self,
+        tile_size_world: f32,
+        order: i32,
+        ops: &mut Vec<BlockSpriteOp>,
+    ) -> bool {
+        if self.cracks.is_empty() {
+            return false;
+        }
+
+        for crack in &self.cracks {
+            crack.append_sprite_op(tile_size_world, order, ops);
+        }
+
+        true
     }
 }
 
@@ -1101,8 +1208,13 @@ fn append_building_passes_from_snapshot(
         BlockDrawStage::BuildingCracks,
         buildings
             .iter()
-            .filter(|building| building.damaged)
+            .filter(|building| building.should_draw_cracks(&state.crack_atlas))
             .cloned(),
+    );
+    plan.cracks.extend(
+        buildings
+            .iter()
+            .filter_map(|building| CrackPlan::from_building(building, &state.crack_atlas)),
     );
     push_building_pass(
         plan,
@@ -1148,7 +1260,6 @@ where
 
 const SPRITE_TINT_WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 const SPRITE_SYMBOL_BLOCK_SHADOW: &str = "block-shadow";
-const SPRITE_SYMBOL_BLOCK_CRACKS: &str = "block-cracks";
 const SPRITE_SYMBOL_BLOCK_TEAM: &str = "block-team";
 const SPRITE_SYMBOL_BLOCK_STATUS: &str = "block-status";
 const SPRITE_SYMBOL_BLOCK_LIGHT: &str = "block-light";
@@ -1201,7 +1312,7 @@ impl BuildingPassPlan {
         for building in &self.buildings {
             let symbol = match self.stage {
                 BlockDrawStage::BuildingBase => building.block.as_str(),
-                BlockDrawStage::BuildingCracks => SPRITE_SYMBOL_BLOCK_CRACKS,
+                BlockDrawStage::BuildingCracks => "",
                 BlockDrawStage::BuildingTeamOverlay => SPRITE_SYMBOL_BLOCK_TEAM,
                 BlockDrawStage::BuildingStatus => SPRITE_SYMBOL_BLOCK_STATUS,
                 BlockDrawStage::Light => SPRITE_SYMBOL_BLOCK_LIGHT,
@@ -1252,6 +1363,23 @@ fn building_sprite_rect(coord: TileCoord, size: u8, tile_size_world: f32) -> Ren
 
 fn building_rotation_degrees(rotation: i16) -> f32 {
     rotation.rem_euclid(4) as f32 * 90.0
+}
+
+fn crack_rotation_degrees(coord: TileCoord) -> f32 {
+    point2_pack(coord.x, coord.y).rem_euclid(4) as f32 * 90.0
+}
+
+fn normalize_health_fraction(health_fraction: f32) -> f32 {
+    if health_fraction.is_finite() {
+        health_fraction.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+fn crack_tint_from_health_fraction(health_fraction: f32) -> [f32; 4] {
+    let damage_fraction = 1.0 - normalize_health_fraction(health_fraction);
+    [0.2, 0.2, 0.2, 0.1 + damage_fraction * 0.6]
 }
 
 fn quadtree_debug_overlays(
@@ -1330,6 +1458,9 @@ mod tests {
         assert_eq!(crack.region_index, 1);
         assert_eq!(crack.layer, Layer::BLOCK_CRACKS);
         assert!(!crack.mirrored);
+        assert_eq!(crack.rotation, 0.0);
+        assert_eq!(crack.tint, [0.2, 0.2, 0.2, 0.1]);
+        assert_eq!(crack.region_symbol(), "cracks-7-1");
 
         let preview = BuildPlanPreview::new(TileCoord::new(5, 6), "router", 2, 1);
         assert_eq!(preview.layer, Layer::PLANS);
@@ -1363,6 +1494,75 @@ mod tests {
             OverlayPlan::debug_bounds(TileCoord::new(7, 8)).layer,
             Layer::OVERLAY_UI
         );
+    }
+
+    #[test]
+    fn crack_atlas_region_names_match_java_load_keys() {
+        let atlas = CrackAtlasPlan::default();
+
+        assert!(atlas.supports_size(1));
+        assert!(atlas.supports_size(MAX_CRACK_SIZE as u8));
+        assert!(!atlas.supports_size(0));
+        assert!(!atlas.supports_size((MAX_CRACK_SIZE + 1) as u8));
+        assert_eq!(atlas.region_name(1, 0).as_deref(), Some("cracks-1-0"));
+        assert_eq!(
+            atlas
+                .region_name(MAX_CRACK_SIZE as u8, CRACK_REGION_COUNT - 1)
+                .as_deref(),
+            Some("cracks-7-7")
+        );
+        assert_eq!(atlas.region_name(8, 0), None);
+
+        let names = atlas.region_names();
+        assert_eq!(names.len(), MAX_CRACK_SIZE * CRACK_REGION_COUNT);
+        assert_eq!(names.first().map(String::as_str), Some("cracks-1-0"));
+        assert_eq!(names.last().map(String::as_str), Some("cracks-7-7"));
+    }
+
+    #[test]
+    fn crack_atlas_region_index_clamps_by_health_fraction() {
+        let atlas = CrackAtlasPlan::default();
+
+        assert_eq!(atlas.region_index_for(1.0), 0);
+        assert_eq!(atlas.region_index_for(0.875), 1);
+        assert_eq!(atlas.region_index_for(0.5), 4);
+        assert_eq!(atlas.region_index_for(0.0), CRACK_REGION_COUNT - 1);
+        assert_eq!(atlas.region_index_for(-0.25), CRACK_REGION_COUNT - 1);
+        assert_eq!(atlas.region_index_for(1.25), 0);
+        assert_eq!(atlas.region_index_for(f32::NAN), 0);
+    }
+
+    #[test]
+    fn crack_plan_uses_health_fraction_and_tile_position_rotation() {
+        let atlas = CrackAtlasPlan::default();
+        let building = BuildingDrawPlan {
+            coord: TileCoord::new(10, 7),
+            size: 2,
+            rotation: 1,
+            damaged: true,
+            health_fraction: 0.25,
+            draw_cracks: true,
+            ..BuildingDrawPlan::default()
+        };
+
+        let crack = CrackPlan::from_building(&building, &atlas).unwrap();
+        assert_eq!(crack.region_index, 6);
+        assert_eq!(crack.region_symbol(), "cracks-2-6");
+        assert_eq!(crack.rotation, 270.0);
+        assert_ne!(crack.rotation, building_rotation_degrees(building.rotation));
+        assert_eq!(crack.tint, [0.2, 0.2, 0.2, 0.55]);
+
+        let oversized = BuildingDrawPlan {
+            size: (MAX_CRACK_SIZE + 1) as u8,
+            ..building.clone()
+        };
+        assert!(CrackPlan::from_building(&oversized, &atlas).is_none());
+
+        let disabled = BuildingDrawPlan {
+            draw_cracks: false,
+            ..building
+        };
+        assert!(CrackPlan::from_building(&disabled, &atlas).is_none());
     }
 
     #[test]
@@ -1547,6 +1747,7 @@ mod tests {
         damaged_building.team = 7;
         damaged_building.visible = true;
         damaged_building.damaged = true;
+        damaged_building.health_fraction = 0.5;
         damaged_building.draw_team_overlay = true;
         damaged_building.draw_status = true;
         damaged_building.emits_light = true;
@@ -1625,6 +1826,13 @@ mod tests {
             BlockDrawStage::BuildingCracks
         );
         assert_eq!(plan.building_passes[1].buildings[0].block, "duo");
+        assert_eq!(plan.cracks.len(), 1);
+        assert_eq!(plan.cracks[0].coord, TileCoord::new(4, 4));
+        assert_eq!(plan.cracks[0].size, 2);
+        assert_eq!(plan.cracks[0].region_index, 4);
+        assert_eq!(plan.cracks[0].region_symbol(), "cracks-2-4");
+        assert_eq!(plan.cracks[0].rotation, 0.0);
+        assert_eq!(plan.cracks[0].tint, [0.2, 0.2, 0.2, 0.4]);
         assert_eq!(
             plan.building_passes[2].stage,
             BlockDrawStage::BuildingTeamOverlay
@@ -1741,10 +1949,14 @@ mod tests {
             visible: true,
             was_visible: false,
             damaged: true,
+            health_fraction: 0.5,
+            draw_cracks: true,
             draw_team_overlay: true,
             draw_status: true,
             emits_light: true,
         };
+        plan.cracks
+            .push(CrackPlan::from_building(&building, &CrackAtlasPlan::default()).unwrap());
 
         for stage in [
             BlockDrawStage::BuildingBase,
@@ -1763,7 +1975,10 @@ mod tests {
         let ops = plan.to_block_sprite_ops(8.0);
         assert_eq!(ops.len(), 8);
         assert!(ops.windows(2).all(|pair| pair[0].order <= pair[1].order));
-        assert!(ops.iter().all(|op| op.tint == SPRITE_TINT_WHITE));
+        assert!(ops
+            .iter()
+            .filter(|op| !op.symbol().starts_with("cracks-"))
+            .all(|op| op.tint == SPRITE_TINT_WHITE));
         assert_eq!(ops[0].symbol(), "router");
         assert_eq!(ops[0].rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
         assert_eq!(ops[0].rotation, 0.0);
@@ -1815,10 +2030,14 @@ mod tests {
         assert_eq!(layer, BlockDrawStage::BuildingBase.layer());
 
         let (symbol, rect, rotation, layer) = check_sprite(&passes[4].commands[0]);
-        assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_CRACKS);
+        assert_eq!(symbol, "cracks-2-4");
         assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
         assert_eq!(rotation, 90.0);
         assert_eq!(layer, BlockDrawStage::BuildingCracks.layer());
+        match &passes[4].commands[0] {
+            RenderCommand::DrawSprite { tint, .. } => assert_eq!(*tint, [0.2, 0.2, 0.2, 0.4]),
+            other => panic!("expected DrawSprite, got {other:?}"),
+        }
 
         let (symbol, rect, rotation, layer) = check_sprite(&passes[5].commands[0]);
         assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_TEAM);
