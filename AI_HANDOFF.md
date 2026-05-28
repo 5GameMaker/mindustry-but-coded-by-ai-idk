@@ -7657,3 +7657,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. 然后接 `ShootHelix` mover、`ShootMulti` / `ShootSummon`；
   4. content 方向子代理建议优先把 dagger / mace / beta / nova / quasar 的 unit weapon 注册回填到 `unit_types.rs` / `bullets.rs`；
   5. 当前总迁移约 12.4%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 227. 最新闭环记录：Weapon ShootAlternate core/server offset seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：接入 Java `ShootAlternate` 的最小 barrel offset/flip 语义，并让 server 发弹消费 `Shot.x`，避免 `ShootAlternate` 只作为 `pattern.rs` 独立实现存在。
+- Rust 主改动：
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `shoot_alternate_barrels` / `shoot_alternate_spread` / `shoot_barrel_offset` / `shoot_pattern_mirror`；
+    - `Weapon::shoot_pattern_shots(...)` 新增 `"ShootAlternate"` 分支并复用 core `ShootAlternate`；
+    - `Weapon::flip()` 在 alternate pattern 下切换 mirror；
+    - 新增 `weapon_shoot_pattern_shots_supports_alternate_and_flip`。
+  - `server/src/lib.rs`
+    - 新增 `server_update_applies_shoot_alternate_offsets_to_weapon_bullets`；
+    - 通过真实 `ServerLauncher::update()` 验证两发 bullet 的 x offset 为 `-4/+4` 后分别落在 `36/44`。
+  - `MIGRATION.md`
+    - 新增 `12.301`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_reuses_core_spread_pattern --lib`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_supports_alternate_and_flip --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_queues_shoot_pattern_delays_before_spawning_weapon_bullets --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_alternate_offsets_to_weapon_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 继续接 `ShootBarrel` 的 `[x, y, rotation]` 数组和 flip；
+  2. 然后处理 `ShootHelix` mover、`ShootMulti` / `ShootSummon`；
+  3. delayed branch 对 `mount.barrelCounter` 临时恢复、recoil/heat/eject/sound/effect 的精确时序还没完全复现；
+  4. 当前总迁移约 12.45%，远未可玩，goal 绝不能标记 complete。

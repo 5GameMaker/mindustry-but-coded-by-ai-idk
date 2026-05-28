@@ -9537,3 +9537,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Shot.mover` / `ShootHelix` 尚未进入 server bullet runtime；
   - `ShootAlternate` / `ShootBarrel` / `ShootMulti` / `ShootSummon` 尚未接到 `Weapon::shoot_pattern_shots(...)`；
   - 当前总体迁移约 12.4%，远未可玩。
+
+### 12.301 Weapon ShootAlternate core/server offset seam
+
+- 2026-05-28：按子代理给出的下一优先级，继续接入 Java `ShootAlternate` 的左右 barrel offset 语义，并让 server weapon bullet spawn 消费该 `Shot.x` offset；这一步继续把 pattern 逻辑接在真实 server update/bullet snapshot 链路上，而不是停留在独立 pattern 单测。
+- Java 依据：
+  - `ShootAlternate.barrels = 2`、`spread = 5f`、`barrelOffset = 0`、`mirror = false`；
+  - `ShootAlternate.shoot(...)` 使用 `((totalShots + i + barrelOffset) % barrels) - (barrels - 1) / 2f` 计算 index，并输出 `index * spread * -Mathf.sign(mirror)` 作为 x offset；
+  - `Weapon.flip()` 会 `shoot = shoot.copy(); shoot.flip();`，对 `ShootAlternate` 即切换 mirror。
+- Rust 新增/变化：
+  - `core/src/mindustry/type/weapon.rs`
+    - `Weapon` 新增 `shoot_alternate_barrels` / `shoot_alternate_spread` / `shoot_barrel_offset` / `shoot_pattern_mirror`；
+    - `Weapon::shoot_pattern_shots(...)` 新增 `"ShootAlternate"` 分支，复用 `core/src/mindustry/entities/pattern.rs` 的 `ShootAlternate`；
+    - `Weapon::flip()` 在 `shoot_pattern == "ShootAlternate"` 时切换 `shoot_pattern_mirror`；
+    - 新增 `weapon_shoot_pattern_shots_supports_alternate_and_flip`。
+  - `server/src/lib.rs`
+    - 新增 `server_update_applies_shoot_alternate_offsets_to_weapon_bullets`，通过真实 `ServerLauncher::update()` 验证 `ShootAlternate` 两发 bullet 分别出现在 `x=36/44`，证明 server 已消费 core `Shot.x` offset。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_reuses_core_spread_pattern --lib`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_supports_alternate_and_flip --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_queues_shoot_pattern_delays_before_spawning_weapon_bullets --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_alternate_offsets_to_weapon_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `ShootBarrel` 的 `[x, y, rotation]` barrel 数组与 flip 尚未接入；
+  - `ShootHelix` mover、`ShootMulti` / `ShootSummon`、完整 delayed recoil/heat/effect 时序仍未完成；
+  - 当前总体迁移约 12.45%，远未可玩。
