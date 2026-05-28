@@ -1,9 +1,10 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::content::blocks::{BlockDef, DistributionBlockKind};
 use mindustry_core::mindustry::core::game_runtime::{
-    GameRuntimeClientSnapshotApplyReport, GameRuntimeClientUnitEnteredPayloadApplyReport,
-    GameRuntimeCommandBuildingReport, GameRuntimeReconstructorConfigureResult,
-    GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
+    GameRuntimeClientCameraShakeEvent, GameRuntimeClientSnapshotApplyReport,
+    GameRuntimeClientUnitEnteredPayloadApplyReport, GameRuntimeCommandBuildingReport,
+    GameRuntimeReconstructorConfigureResult, GameRuntimeUnitCargoUnloadConfigureResult,
+    GameRuntimeUnitFactoryConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
@@ -15,7 +16,7 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, standard_effect,
+    entity_class_kind, shake_intensity, standard_effect,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
     PlayerUnitSwitchContext, ShieldArcAbility, StandardEffectCircleRenderPrimitive,
@@ -59,6 +60,73 @@ pub struct DesktopStandardEffectRenderFrame {
     pub line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DesktopCameraShakeFrame {
+    pub max_offset: f32,
+    pub remaining_intensity: f32,
+    pub remaining_time: f32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DesktopCameraShakeState {
+    pub intensity: f32,
+    pub time: f32,
+    pub reduction: f32,
+}
+
+impl DesktopCameraShakeState {
+    pub fn apply(&mut self, intensity: f32, duration: f32) {
+        if !intensity.is_finite() || !duration.is_finite() {
+            return;
+        }
+        let intensity = intensity.clamp(0.0, 100.0);
+        let duration = duration.max(0.0);
+        if intensity <= 0.0 || duration <= 0.0 {
+            return;
+        }
+
+        self.intensity = self.intensity.max(intensity);
+        self.time = self.time.max(duration);
+        self.reduction = if self.time > 0.0 {
+            self.intensity / self.time
+        } else {
+            0.0
+        };
+    }
+
+    pub fn tick(&mut self, delta: f32, screen_shake_setting: i32) -> DesktopCameraShakeFrame {
+        let max_offset = if self.time > 0.0 {
+            let setting = screen_shake_setting.clamp(0, 4) as f32 / 4.0;
+            self.intensity * setting * 0.75
+        } else {
+            0.0
+        };
+
+        if self.time > 0.0 {
+            let delta = if delta.is_finite() {
+                delta.max(0.0)
+            } else {
+                0.0
+            };
+            self.intensity = (self.intensity - self.reduction * delta).clamp(0.0, 100.0);
+            self.time = (self.time - delta).max(0.0);
+            if self.time <= 0.0 {
+                self.intensity = 0.0;
+                self.reduction = 0.0;
+            }
+        } else {
+            self.intensity = 0.0;
+            self.reduction = 0.0;
+        }
+
+        DesktopCameraShakeFrame {
+            max_offset,
+            remaining_intensity: self.intensity,
+            remaining_time: self.time,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -127,6 +195,9 @@ pub struct DesktopLauncher {
     pub standard_local_effect_line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub standard_local_effect_triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub standard_local_effect_light_primitives: Vec<StandardEffectLightRenderPrimitive>,
+    pub pending_camera_shake_events: Vec<GameRuntimeClientCameraShakeEvent>,
+    pub camera_shake_state: DesktopCameraShakeState,
+    pub last_camera_shake_frame: DesktopCameraShakeFrame,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -179,6 +250,9 @@ impl DesktopLauncher {
             standard_local_effect_line_primitives: Vec::new(),
             standard_local_effect_triangle_primitives: Vec::new(),
             standard_local_effect_light_primitives: Vec::new(),
+            pending_camera_shake_events: Vec::new(),
+            camera_shake_state: DesktopCameraShakeState::default(),
+            last_camera_shake_frame: DesktopCameraShakeFrame::default(),
             connect_target,
             connect_error: None,
             args,
@@ -250,6 +324,8 @@ impl DesktopLauncher {
             });
         self.puddle_particle_rand_state = puddle_particle_rand_state;
         self.materialize_local_effect_events_for_render();
+        self.sync_local_camera_shake_events_for_render(self.player.x, self.player.y);
+        self.tick_camera_shake_for_render(1.0, 4);
         self.tick_local_effect_states_for_render(1.0);
         let standard_local_effect_draw_plans =
             self.collect_standard_local_effect_draw_plans_for_render();
@@ -456,6 +532,39 @@ impl DesktopLauncher {
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
         std::mem::take(&mut self.runtime.client_local_effect_events)
+    }
+
+    pub fn sync_local_camera_shake_events_for_render(
+        &mut self,
+        camera_x: f32,
+        camera_y: f32,
+    ) -> usize {
+        let events = std::mem::take(&mut self.runtime.client_local_camera_shake_events);
+        let count = events.len();
+        for event in events {
+            let resolved_intensity =
+                shake_intensity(event.intensity, camera_x, camera_y, event.x, event.y);
+            self.camera_shake_state
+                .apply(resolved_intensity, event.duration);
+            self.pending_camera_shake_events.push(event);
+        }
+        count
+    }
+
+    pub fn tick_camera_shake_for_render(
+        &mut self,
+        delta: f32,
+        screen_shake_setting: i32,
+    ) -> DesktopCameraShakeFrame {
+        let frame = self.camera_shake_state.tick(delta, screen_shake_setting);
+        self.last_camera_shake_frame = frame;
+        frame
+    }
+
+    pub fn drain_camera_shake_events_for_render(
+        &mut self,
+    ) -> Vec<GameRuntimeClientCameraShakeEvent> {
+        std::mem::take(&mut self.pending_camera_shake_events)
     }
 
     pub fn connect_from_args(&mut self) {
@@ -1238,6 +1347,9 @@ impl DesktopLauncher {
         self.standard_local_effect_line_primitives.clear();
         self.standard_local_effect_triangle_primitives.clear();
         self.standard_local_effect_light_primitives.clear();
+        self.pending_camera_shake_events.clear();
+        self.camera_shake_state = DesktopCameraShakeState::default();
+        self.last_camera_shake_frame = DesktopCameraShakeFrame::default();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -1834,10 +1946,10 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{run, DesktopEffectRenderStats, DesktopLauncher, HeadlessDesktopEffectRenderer};
     use mindustry_core::mindustry::core::game_runtime::{
-        GameRuntimeCampaignBlockState, GameRuntimeDistributionBlockState,
-        GameRuntimePayloadBlockState, GameRuntimeReconstructorConfigureResult,
-        GameRuntimeUnitBlockState, GameRuntimeUnitCargoUnloadConfigureResult,
-        GameRuntimeUnitFactoryConfigureResult,
+        GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
+        GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
+        GameRuntimeReconstructorConfigureResult, GameRuntimeUnitBlockState,
+        GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
     };
     use mindustry_core::mindustry::core::net_client::{
         ClientBlockSnapshotMirror, ClientBlockSnapshotRecordMirror, ClientEntitySnapshotMirror,
@@ -5340,11 +5452,46 @@ mod tests {
             launcher.runtime.client_local_sound_at_events[0].sound_id,
             mindustry_core::mindustry::audio::standard_sound_id("unitExplode1").unwrap()
         );
-        assert_eq!(launcher.runtime.client_local_camera_shake_events.len(), 1);
-        assert!(
-            (launcher.runtime.client_local_camera_shake_events[0].intensity - 16.0 / 3.0).abs()
-                < 0.0001
+        assert!(launcher.runtime.client_local_camera_shake_events.is_empty());
+        assert_eq!(launcher.pending_camera_shake_events.len(), 1);
+        assert_eq!(launcher.pending_camera_shake_events[0].x, 30.0);
+        assert_eq!(launcher.pending_camera_shake_events[0].y, 40.0);
+        assert!((launcher.pending_camera_shake_events[0].intensity - 16.0 / 3.0).abs() < 0.0001);
+        assert!((launcher.last_camera_shake_frame.max_offset - 4.0).abs() < 0.0001);
+        assert!((launcher.camera_shake_state.intensity - (16.0 / 3.0 - 1.0)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn desktop_launcher_resolves_camera_shake_events_for_render_like_java_effect_shake() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_camera_shake_events
+            .push(GameRuntimeClientCameraShakeEvent {
+                x: 200.0,
+                y: 0.0,
+                intensity: 8.0,
+                duration: 8.0,
+            });
+
+        assert_eq!(
+            launcher.sync_local_camera_shake_events_for_render(0.0, 0.0),
+            1
         );
+        assert!(launcher.runtime.client_local_camera_shake_events.is_empty());
+        assert_eq!(launcher.pending_camera_shake_events.len(), 1);
+        assert_eq!(launcher.camera_shake_state.intensity, 2.0);
+        assert_eq!(launcher.camera_shake_state.time, 8.0);
+        assert_eq!(launcher.camera_shake_state.reduction, 0.25);
+
+        let frame = launcher.tick_camera_shake_for_render(1.0, 4);
+        assert_eq!(frame.max_offset, 1.5);
+        assert_eq!(frame.remaining_intensity, 1.75);
+        assert_eq!(frame.remaining_time, 7.0);
+
+        let drained = launcher.drain_camera_shake_events_for_render();
+        assert_eq!(drained.len(), 1);
+        assert!(launcher.pending_camera_shake_events.is_empty());
     }
 
     #[test]

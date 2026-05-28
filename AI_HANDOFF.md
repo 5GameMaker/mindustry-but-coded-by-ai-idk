@@ -6845,7 +6845,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-desktop`
   - `git diff --check`
 - 当前仍需继续：
-  1. camera shake 目前只是 runtime 本地事件，还未接 desktop camera/backend；
+  1. camera shake runtime 本地事件已在 `201` 节下沉到 desktop pending/state；真实 camera backend 随机 offset 仍未接；
   2. `UnitComp.destroy()`、flying wreck、其他 effect shake 调用仍未全面接入；
-  3. 多个 shake event 的合并、衰减、视距过滤还需对照 Java/Arc 实现；
+  3. 多个 shake event 的真实 camera 合并、随机方向 offset 与 settings 读取还需对照 Java/Arc 实现；
   4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 接到真实 runtime/content/world/entity/network/client-server 链路。
+
+---
+
+## 201. 最新闭环记录：UnitSafeDeath camera shake 下沉到 desktop render seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 `GameRuntime.client_local_camera_shake_events` 从 core runtime 队列继续接到 desktop launcher 层，避免 `Effect.shake(...)` 只停在孤立事件上。
+- Java 对照：
+  - `Effect.shake(intensity, duration, x, y)` 根据 camera 到事件点距离和 `shakeFalloff` 衰减强度；
+  - `Renderer.shake(intensity, duration)` 对 `shakeIntensity` / `shakeTime` 取 max，设置 `shakeReduction = shakeIntensity / shakeTime`；
+  - renderer update 用 `screenshake / 4f * 0.75f` 得到随机 camera offset 最大强度，并按 delta 衰减。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopCameraShakeState`、`DesktopCameraShakeFrame`；
+    - `DesktopLauncher` 新增 `pending_camera_shake_events`、`camera_shake_state`、`last_camera_shake_frame`；
+    - `update()` 中从 `runtime.client_local_camera_shake_events` 转移到 desktop pending queue，用 `shake_intensity(...)` 解析距离衰减，并 tick 出 `last_camera_shake_frame`；
+    - 新增 `sync_local_camera_shake_events_for_render(...)`、`tick_camera_shake_for_render(...)`、`drain_camera_shake_events_for_render(...)`；
+    - 更新 safe death desktop 测试，新增 `desktop_launcher_resolves_camera_shake_events_for_render_like_java_effect_shake`。
+  - `MIGRATION.md`
+    - 新增 `12.275`，并更新 `12.274` 剩余项。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_resolves_camera_shake_events_for_render_like_java_effect_shake`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 真实 desktop camera/backend 还没有使用 `last_camera_shake_frame.max_offset` 生成随机 `camShakeOffset` 并应用到 camera；
+  2. `screenshake` 暂时在 `update()` 以 Java 默认最大值 `4` 传入，后续要接 settings；
+  3. `sync_local_camera_shake_events_for_render(...)` 暂用 `player.x/y` 作为 camera 参考，后续需要接真实 camera state；
+  4. audio 本地事件、flying wreck sound/update、完整 `UnitComp.destroy()` side effects 仍是后续主线；
+  5. 当前总迁移仍约 10% 左右，远未可玩。
