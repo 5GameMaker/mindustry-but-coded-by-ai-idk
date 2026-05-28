@@ -228,6 +228,12 @@ pub const FX_SHOOT_SMOKE_MISSILE_COLOR_ID: i32 = 175;
 pub const FX_REGEN_PARTICLE_ID: i32 = 176;
 /// Upstream `Fx.regenSuppressParticle` id in `mindustry.content.Fx` for v158.1.
 pub const FX_REGEN_SUPPRESS_PARTICLE_ID: i32 = 177;
+/// Upstream `Fx.surgeCruciSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SURGE_CRUCI_SMOKE_ID: i32 = 179;
+/// Upstream `Fx.neoplasiaSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_NEOPLASIA_SMOKE_ID: i32 = 180;
+/// Upstream `Fx.heatReactorSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HEAT_REACTOR_SMOKE_ID: i32 = 181;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -367,6 +373,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootSmokeMissileColor" => Some(FX_SHOOT_SMOKE_MISSILE_COLOR_ID),
         "regenParticle" => Some(FX_REGEN_PARTICLE_ID),
         "regenSuppressParticle" => Some(FX_REGEN_SUPPRESS_PARTICLE_ID),
+        "surgeCruciSmoke" => Some(FX_SURGE_CRUCI_SMOKE_ID),
+        "neoplasiaSmoke" => Some(FX_NEOPLASIA_SMOKE_ID),
+        "heatReactorSmoke" => Some(FX_HEAT_REACTOR_SMOKE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -608,6 +617,15 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_REGEN_SUPPRESS_PARTICLE_ID => {
             Effect::with_lifetime(FX_REGEN_SUPPRESS_PARTICLE_ID, 35.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SURGE_CRUCI_SMOKE_ID => {
+            Effect::with_lifetime(FX_SURGE_CRUCI_SMOKE_ID, 160.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_NEOPLASIA_SMOKE_ID => {
+            Effect::with_lifetime(FX_NEOPLASIA_SMOKE_ID, 280.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HEAT_REACTOR_SMOKE_ID => {
+            Effect::with_lifetime(FX_HEAT_REACTOR_SMOKE_ID, 180.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
@@ -684,6 +702,9 @@ pub fn standard_effect_draw_plans(
             | FX_SHOOT_SMOKE_SMITE_ID
             | FX_SHOOT_SMOKE_MISSILE_ID
             | FX_SHOOT_SMOKE_MISSILE_COLOR_ID
+            | FX_SURGE_CRUCI_SMOKE_ID
+            | FX_NEOPLASIA_SMOKE_ID
+            | FX_HEAT_REACTOR_SMOKE_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1589,6 +1610,61 @@ pub fn standard_effect_draw_plans(
                     color_mul: 1.0,
                     alpha: 0.5,
                     radius: local_fout * 9.0 + 0.3,
+                    stroke: 0.0,
+                    particles: None,
+                    light_color: None,
+                    light_radius: 0.0,
+                    light_opacity: 0.0,
+                });
+            }
+        }
+
+        return plans;
+    }
+
+    if matches!(
+        effect_id_i32,
+        FX_SURGE_CRUCI_SMOKE_ID | FX_NEOPLASIA_SMOKE_ID | FX_HEAT_REACTOR_SMOKE_ID
+    ) {
+        let (count, color_from, base_alpha, len_range, angle_range, radius_base, radius_scale) =
+            match effect_id_i32 {
+                FX_SURGE_CRUCI_SMOKE_ID => (3, "Pal.slagOrange", 0.6, 6.0, 40.0, 0.2, 2.0),
+                FX_NEOPLASIA_SMOKE_ID => (6, "Pal.neoplasmMid", 0.6, 10.0, 120.0, 0.2, 3.3),
+                FX_HEAT_REACTOR_SMOKE_ID => (5, "Color.gray", 1.0, 6.0, 50.0, 0.6, 2.4),
+                _ => unreachable!(),
+            };
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let mut plans = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            let length = rand.random(len_range);
+            let angle = rotation + rand.range(angle_range);
+            let scaled_lifetime = lifetime * rand.random_between(0.3, 1.0);
+
+            if scaled_lifetime > f32::EPSILON && time <= scaled_lifetime {
+                let local_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
+                let local_fout = 1.0 - local_fin;
+                let local_fslope = effect_fslope_from_fin(local_fin);
+                let (offset_x, offset_y) = trns(angle, length * effect_finpow_from_fin(local_fin));
+                let (alpha, radius) = if effect_id_i32 == FX_HEAT_REACTOR_SMOKE_ID {
+                    (0.9 * local_fout, radius_scale * local_fin + radius_base)
+                } else {
+                    (base_alpha, radius_scale * local_fslope + radius_base)
+                };
+
+                plans.push(StandardEffectDrawPlan {
+                    effect_id: effect_id_i32,
+                    layer: effect.layer,
+                    kind: StandardEffectDrawKind::FilledCircle,
+                    center: (x + offset_x, y + offset_y),
+                    color_from: Some(color_from),
+                    color_mid: None,
+                    color_to: None,
+                    color_mix: 0.0,
+                    input_color: None,
+                    color_mul: 1.0,
+                    alpha,
+                    radius,
                     stroke: 0.0,
                     particles: None,
                     light_color: None,
@@ -4656,6 +4732,8 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.bulletYellowBack" => Some(DecalColor::from_rgba(0xf9c27aff)),
         "Pal.redLight" => Some(DecalColor::from_rgba(0xfeb380ff)),
         "Pal.regen" => Some(DecalColor::from_rgba(0xd1efffff)),
+        "Pal.slagOrange" => Some(DecalColor::from_rgba(0xffa166ff)),
+        "Pal.neoplasmMid" => Some(DecalColor::from_rgba(0xe05438ff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
         "Pal.meltdownHit" => Some(DecalColor::from_rgba(0xffb98bff)),
@@ -6184,6 +6262,18 @@ mod tests {
             standard_effect_id("regenSuppressParticle"),
             Some(FX_REGEN_SUPPRESS_PARTICLE_ID)
         );
+        assert_eq!(
+            standard_effect_id("surgeCruciSmoke"),
+            Some(FX_SURGE_CRUCI_SMOKE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("neoplasiaSmoke"),
+            Some(FX_NEOPLASIA_SMOKE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("heatReactorSmoke"),
+            Some(FX_HEAT_REACTOR_SMOKE_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -6488,6 +6578,18 @@ mod tests {
                 .unwrap()
                 .lifetime,
             35.0
+        );
+        assert_eq!(
+            standard_effect(FX_SURGE_CRUCI_SMOKE_ID).unwrap().lifetime,
+            160.0
+        );
+        assert_eq!(
+            standard_effect(FX_NEOPLASIA_SMOKE_ID).unwrap().lifetime,
+            280.0
+        );
+        assert_eq!(
+            standard_effect(FX_HEAT_REACTOR_SMOKE_ID).unwrap().lifetime,
+            180.0
         );
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
@@ -8181,6 +8283,75 @@ mod tests {
             suppress.resolved_draw_color(),
             Some(lerp_color(input_color, DecalColor::WHITE, 0.5))
         );
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_reactor_and_neoplasia_smoke_circles() {
+        let surge = standard_effect_draw_plans(
+            Some(FX_SURGE_CRUCI_SMOKE_ID as u16),
+            179,
+            3.0,
+            4.0,
+            30.0,
+            16.0,
+            160.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(surge.len(), 3);
+
+        let mut rand = ArcRand::with_seed(179);
+        let length = rand.random(6.0);
+        let angle = 30.0 + rand.range(40.0);
+        let scaled_lifetime = 160.0 * rand.random_between(0.3, 1.0);
+        let local_fin = 16.0 / scaled_lifetime;
+        let local_fslope = effect_fslope_from_fin(local_fin);
+        let (offset_x, offset_y) = trns(angle, length * effect_finpow_from_fin(local_fin));
+        let first = surge[0];
+        assert_eq!(first.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(first.color_from, Some("Pal.slagOrange"));
+        assert_eq!(first.alpha, 0.6);
+        assert!((first.center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((first.center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((first.radius - (2.0 * local_fslope + 0.2)).abs() < 0.0001);
+        assert_eq!(first.circle_render_primitives_from_seed().len(), 1);
+
+        let neoplasia = standard_effect_draw_plans(
+            Some(FX_NEOPLASIA_SMOKE_ID as u16),
+            180,
+            3.0,
+            4.0,
+            30.0,
+            16.0,
+            280.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(neoplasia.len(), 6);
+        assert_eq!(neoplasia[0].color_from, Some("Pal.neoplasmMid"));
+        assert_eq!(neoplasia[0].alpha, 0.6);
+
+        let heat = standard_effect_draw_plans(
+            Some(FX_HEAT_REACTOR_SMOKE_ID as u16),
+            181,
+            3.0,
+            4.0,
+            30.0,
+            18.0,
+            180.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(heat.len(), 5);
+        let mut rand = ArcRand::with_seed(181);
+        let length = rand.random(6.0);
+        let angle = 30.0 + rand.range(50.0);
+        let scaled_lifetime = 180.0 * rand.random_between(0.3, 1.0);
+        let local_fin = 18.0 / scaled_lifetime;
+        let local_fout = 1.0 - local_fin;
+        let (offset_x, offset_y) = trns(angle, length * effect_finpow_from_fin(local_fin));
+        assert_eq!(heat[0].color_from, Some("Color.gray"));
+        assert!((heat[0].alpha - 0.9 * local_fout).abs() < 0.0001);
+        assert!((heat[0].center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((heat[0].center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((heat[0].radius - (2.4 * local_fin + 0.6)).abs() < 0.0001);
     }
 
     #[test]

@@ -5735,3 +5735,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `regenSuppressSeek=178` 需要 data `Position`、随机 lifetime 和 Bezier 轨迹，应先补 effect data/position plan 再迁移；
   2. 或跳到后续不依赖 data 的 smoke/simple particle Fx；
   3. 真实 renderer/backend 仍未接入，当前仍只是 headless primitive seam。
+
+---
+
+## 171. 最新闭环记录：Fx.surgeCruciSmoke/neoplasiaSmoke/heatReactorSmoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：跳过需 data/Bezier seam 的 `regenSuppressSeek=178`，迁移后续 simple smoke circle 效果。
+- 本轮迁移：
+  - `surgeCruciSmoke=179`
+  - `neoplasiaSmoke=180`
+  - `heatReactorSmoke=181`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三个 Fx ID 并接入 lookup/metadata；
+    - 新增 `Pal.slagOrange` 与 `Pal.neoplasmMid`；
+    - `standard_effect_draw_plans(...)` 逐粒子复现 Java `len -> rot -> random local lifetime` 顺序；
+    - active 粒子输出 concrete `FilledCircle` plans，分别对齐 alpha/radius。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_reactor_and_neoplasia_smoke_circles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_reactor_and_neoplasia_smoke_circles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_reactor_and_neoplasia_smoke_circles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `circleColorSpark=182`、`colorSpark=183`、`colorSparkBig=184` 是相邻 line effects，已有 line primitive 可承载；
+  2. `regenSuppressSeek=178` 仍需单独处理 data Position + Bezier；
+  3. 当前仍是 headless primitive seam，真实 renderer/backend 未接入。

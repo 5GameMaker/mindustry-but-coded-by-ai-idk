@@ -7746,3 +7746,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `regenSuppressSeek=178` 依赖 `Position data`、动态 lifetime 和 Bezier 轨迹，不能复用本轮简单 primitive；
   - 真实 renderer/backend 仍未接入；
   - 当前仍只是 Fx 局部迁移。
+
+### 12.245 Fx.surgeCruciSmoke/neoplasiaSmoke/heatReactorSmoke
+
+- 2026-05-28：跳过需专门 data/Bezier seam 的 `regenSuppressSeek=178`，迁移后续不依赖 data 的 `surgeCruciSmoke=179`、`neoplasiaSmoke=180`、`heatReactorSmoke=181`。
+- 本轮迁移：
+  - `surgeCruciSmoke=179`
+  - `neoplasiaSmoke=180`
+  - `heatReactorSmoke=181`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2103` 附近：
+    - `surgeCruciSmoke = new Effect(160f, ...)`，颜色 `Pal.slagOrange`，alpha `0.6`，3 粒子，`len=random(6)`、`rot=range(40)+rotation`、local lifetime `random(0.3,1)`，radius `2*fslope+0.2`；
+    - `neoplasiaSmoke = new Effect(280f, ...)`，颜色 `Pal.neoplasmMid`，alpha `0.6`，6 粒子，`len=random(10)`、`rot=range(120)+rotation`，radius `3.3*fslope+0.2`；
+    - `heatReactorSmoke = new Effect(180f, ...)`，颜色 `Color.gray`，5 粒子，`len=random(6)`、`rot=range(50)+rotation`，alpha `0.9*fout`，radius `2.4*fin+0.6`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三个 Fx ID 并接入 lookup/metadata；
+    - 新增 `Pal.slagOrange`、`Pal.neoplasmMid` 颜色符号；
+    - `standard_effect_draw_plans(...)` 按 Java `len -> rot -> scaled lifetime` 顺序生成 active concrete `FilledCircle` plans。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_reactor_and_neoplasia_smoke_circles_for_render`，验证 14 个 circle primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_reactor_and_neoplasia_smoke_circles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_reactor_and_neoplasia_smoke_circles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `regenSuppressSeek=178` 仍未迁移，需要 effect data/position + Bezier seam；
+  - 后续 `circleColorSpark` / `colorSpark` / `colorSparkBig` 可继续用 line primitive 迁移；
+  - 真实 renderer/backend 仍未接入。
