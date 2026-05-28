@@ -7691,3 +7691,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 然后处理 `ShootHelix` mover、`ShootMulti` / `ShootSummon`；
   3. delayed branch 对 `mount.barrelCounter` 临时恢复、recoil/heat/eject/sound/effect 的精确时序还没完全复现；
   4. 当前总迁移约 12.45%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 228. 最新闭环记录：Weapon ShootBarrel core/server offset seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：接入 Java `ShootBarrel` 的 `[x, y, rotation]` barrel 数组，并让真实 server weapon bullet spawn 消费 `Shot.x/y/rotation`。
+- Rust 主改动：
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `shoot_barrels`；
+    - `Weapon::shoot_pattern_shots(...)` 新增 `"ShootBarrel"` 分支；
+    - `Weapon::flip()` 对 `ShootBarrel` 反转每组三元组的 x 与 rotation；
+    - 新增 `weapon_shoot_pattern_shots_supports_barrel_offsets_and_flip`。
+  - `server/src/lib.rs`
+    - 新增 `server_update_applies_shoot_barrel_offsets_to_weapon_bullets`；
+    - 通过真实 `ServerLauncher::update()` 验证 barrel offsets 最终生成正确 bullet 坐标和 rotation。
+  - `MIGRATION.md`
+    - 新增 `12.302`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_supports_alternate_and_flip --lib`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_supports_barrel_offsets_and_flip --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_alternate_offsets_to_weapon_bullets --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_barrel_offsets_to_weapon_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `ShootHelix` mover 还没接到 server bullet runtime；
+  2. `ShootMulti` / `ShootSummon` 还没进入 `Weapon::shoot_pattern_shots(...)`；
+  3. content 方向仍可并行回填 dagger/mace/beta/nova/quasar 的 unit weapon/bullet 注册；
+  4. 当前总迁移约 12.5%，远未可玩，goal 绝不能标记 complete。

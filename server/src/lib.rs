@@ -7537,6 +7537,48 @@ mod tests {
     }
 
     #[test]
+    fn server_update_applies_shoot_barrel_offsets_to_weapon_bullets() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut weapon = Weapon::new("barrel-rifle");
+        weapon.bullet = "placeholder".into();
+        weapon.reload = 10.0;
+        weapon.shoot_x = 0.0;
+        weapon.shoot_y = 0.0;
+        weapon.x = 0.0;
+        weapon.y = 0.0;
+        weapon.shoot_pattern = "ShootBarrel".into();
+        weapon.shoot_shots = 2;
+        weapon.shoot_barrels = vec![2.0, 3.0, 5.0, -2.0, 4.0, -5.0];
+        let mut unit_type = UnitType::new(9108, "server-barrel-shooter");
+        unit_type.weapons.push(weapon);
+        let mut unit = UnitComp::new(99, unit_type, TeamId(2));
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(90.0);
+        unit.weapons.mounts[0].reload = 1.0;
+        unit.weapons.mounts[0].shoot = true;
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&99).unwrap();
+        let mount = &unit.weapons.mounts[0];
+        assert_eq!(mount.total_shots, 2);
+        assert_eq!(mount.barrel_counter, 2);
+        assert_eq!(launcher.server_bullets.len(), 2);
+        let bullet_positions = launcher
+            .server_bullets
+            .values()
+            .map(|bullet| (bullet.x, bullet.y, bullet.rotation))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            bullet_positions,
+            vec![(42.0, 59.0, 95.0), (38.0, 60.0, 85.0)]
+        );
+    }
+
+    #[test]
     fn server_update_ticks_renale_neoplasm_regen() {
         let mut launcher = ServerLauncher::new(Vec::new());
         launcher.runtime.state.set(GameStateState::Playing);

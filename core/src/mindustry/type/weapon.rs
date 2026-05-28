@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::mindustry::entities::{ShootAlternate, ShootPattern, ShootSpread, Shot};
+use crate::mindustry::entities::{ShootAlternate, ShootBarrel, ShootPattern, ShootSpread, Shot};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Weapon {
@@ -51,6 +51,7 @@ pub struct Weapon {
     pub shoot_spread: f32,
     pub shoot_alternate_barrels: i32,
     pub shoot_alternate_spread: f32,
+    pub shoot_barrels: Vec<f32>,
     pub shoot_barrel_offset: i32,
     pub shoot_pattern_mirror: bool,
     pub shoot_first_shot_delay: f32,
@@ -139,6 +140,7 @@ impl Weapon {
             shoot_spread: 0.0,
             shoot_alternate_barrels: 2,
             shoot_alternate_spread: 5.0,
+            shoot_barrels: vec![0.0, 0.0, 0.0],
             shoot_barrel_offset: 0,
             shoot_pattern_mirror: false,
             shoot_first_shot_delay: 0.0,
@@ -212,6 +214,13 @@ impl Weapon {
             pattern.barrel_offset = self.shoot_barrel_offset;
             pattern.mirror = self.shoot_pattern_mirror;
             pattern.shoot(total_shots, &mut |shot| shots.push(shot), None);
+        } else if self.shoot_pattern == "ShootBarrel" {
+            let mut pattern = ShootBarrel::new(self.shoot_barrels.clone());
+            pattern.pattern.shots = self.shoot_shots();
+            pattern.pattern.first_shot_delay = self.shoot_first_shot_delay;
+            pattern.pattern.shot_delay = self.shoot_shot_delay;
+            pattern.barrel_offset = self.shoot_barrel_offset;
+            pattern.shoot(total_shots, &mut |shot| shots.push(shot), None);
         } else {
             let mut pattern = ShootPattern::new();
             pattern.shots = self.shoot_shots();
@@ -237,6 +246,13 @@ impl Weapon {
         self.flip_sprite = !self.flip_sprite;
         if self.shoot_pattern == "ShootAlternate" {
             self.shoot_pattern_mirror = !self.shoot_pattern_mirror;
+        } else if self.shoot_pattern == "ShootBarrel" {
+            for i in (0..self.shoot_barrels.len()).step_by(3) {
+                self.shoot_barrels[i] *= -1.0;
+                if i + 2 < self.shoot_barrels.len() {
+                    self.shoot_barrels[i + 2] *= -1.0;
+                }
+            }
         }
     }
 
@@ -295,6 +311,7 @@ mod tests {
         assert_eq!(weapon.shoot_spread, 0.0);
         assert_eq!(weapon.shoot_alternate_barrels, 2);
         assert_eq!(weapon.shoot_alternate_spread, 5.0);
+        assert_eq!(weapon.shoot_barrels, vec![0.0, 0.0, 0.0]);
         assert_eq!(weapon.shoot_barrel_offset, 0);
         assert!(!weapon.shoot_pattern_mirror);
 
@@ -357,6 +374,39 @@ mod tests {
         assert_eq!(
             flipped.iter().map(|shot| shot.x).collect::<Vec<_>>(),
             vec![2.0, -2.0]
+        );
+    }
+
+    #[test]
+    fn weapon_shoot_pattern_shots_supports_barrel_offsets_and_flip() {
+        let mut weapon = Weapon::new("barrel");
+        weapon.shoot_pattern = "ShootBarrel".into();
+        weapon.shoot_shots = 2;
+        weapon.shoot_barrels = vec![1.0, 2.0, 3.0, -4.0, -5.0, -6.0];
+        weapon.shoot_first_shot_delay = 1.0;
+        weapon.shoot_shot_delay = 0.5;
+
+        let shots = weapon.shoot_pattern_shots(0);
+
+        assert_eq!(shots.len(), 2);
+        assert_eq!(
+            shots
+                .iter()
+                .map(|shot| (shot.x, shot.y, shot.rotation, shot.delay))
+                .collect::<Vec<_>>(),
+            vec![(1.0, 2.0, 3.0, 1.0), (-4.0, -5.0, -6.0, 1.5)]
+        );
+
+        weapon.flip();
+        let flipped = weapon.shoot_pattern_shots(0);
+
+        assert_eq!(weapon.shoot_barrels, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+        assert_eq!(
+            flipped
+                .iter()
+                .map(|shot| (shot.x, shot.y, shot.rotation))
+                .collect::<Vec<_>>(),
+            vec![(-1.0, 2.0, -3.0), (4.0, -5.0, 6.0)]
         );
     }
 

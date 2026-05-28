@@ -9568,3 +9568,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ShootBarrel` 的 `[x, y, rotation]` barrel 数组与 flip 尚未接入；
   - `ShootHelix` mover、`ShootMulti` / `ShootSummon`、完整 delayed recoil/heat/effect 时序仍未完成；
   - 当前总体迁移约 12.45%，远未可玩。
+
+### 12.302 Weapon ShootBarrel core/server offset seam
+
+- 2026-05-28：继续推进 Java `ShootBarrel`，把 `[x, y, rotation]` barrel 数组接入 `Weapon::shoot_pattern_shots(...)`，并通过真实 `ServerLauncher::update()` 验证 server bullet spawn 同时消费 `Shot.x/y/rotation`。
+- Java 依据：
+  - `ShootBarrel.barrels` 默认 `{0f, 0f, 0f}`；
+  - `ShootBarrel.shoot(...)` 按 `((i + totalShots + barrelOffset) % (barrels.length / 3)) * 3` 选择三元组，并输出 `x/y/rotation/delay`；
+  - `ShootBarrel.flip()` 会 clone barrel 数组并反转每组三元组的 x 与 rotation。
+- Rust 新增/变化：
+  - `core/src/mindustry/type/weapon.rs`
+    - `Weapon` 新增 `shoot_barrels: Vec<f32>`，默认 `[0, 0, 0]`；
+    - `Weapon::shoot_pattern_shots(...)` 新增 `"ShootBarrel"` 分支，复用 core `ShootBarrel`；
+    - `Weapon::flip()` 在 `"ShootBarrel"` 下反转每组 barrel 的 x 与 rotation；
+    - 新增 `weapon_shoot_pattern_shots_supports_barrel_offsets_and_flip`。
+  - `server/src/lib.rs`
+    - 新增 `server_update_applies_shoot_barrel_offsets_to_weapon_bullets`，确认两发 barrel bullet 分别使用 `(x,y,rotation) = (2,3,5)` 与 `(-2,4,-5)`，落地为 `(42,59,95)` 与 `(38,60,85)`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_supports_alternate_and_flip --lib`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_supports_barrel_offsets_and_flip --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_alternate_offsets_to_weapon_bullets --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_barrel_offsets_to_weapon_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `ShootHelix` 的 mover 仍未进入 bullet runtime；
+  - `ShootMulti` / `ShootSummon` 仍未接入 weapon pattern seam；
+  - delayed branch 对 `mount.barrelCounter` 临时恢复、recoil/heat/eject/sound/effect 的精确时序仍未完全复现；
+  - 当前总体迁移约 12.5%，远未可玩。
