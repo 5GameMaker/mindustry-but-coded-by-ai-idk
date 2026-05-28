@@ -196,6 +196,8 @@ pub const FX_SHOOT_BIG_ID: i32 = 160;
 pub const FX_SHOOT_BIG2_ID: i32 = 161;
 /// Upstream `Fx.shootBigColor` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_BIG_COLOR_ID: i32 = 162;
+/// Upstream `Fx.shootScepterSecondary` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SCEPTER_SECONDARY_ID: i32 = 163;
 /// Upstream `Fx.shootTitan` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_TITAN_ID: i32 = 165;
 /// Upstream `Fx.shootBigSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -327,6 +329,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootBig" => Some(FX_SHOOT_BIG_ID),
         "shootBig2" => Some(FX_SHOOT_BIG2_ID),
         "shootBigColor" => Some(FX_SHOOT_BIG_COLOR_ID),
+        "shootScepterSecondary" => Some(FX_SHOOT_SCEPTER_SECONDARY_ID),
         "shootTitan" => Some(FX_SHOOT_TITAN_ID),
         "shootBigSmoke" => Some(FX_SHOOT_BIG_SMOKE_ID),
         "shootBigSmoke2" => Some(FX_SHOOT_BIG_SMOKE2_ID),
@@ -529,6 +532,10 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_SHOOT_BIG_COLOR_ID => {
             Effect::with_lifetime(FX_SHOOT_BIG_COLOR_ID, 11.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SHOOT_SCEPTER_SECONDARY_ID => {
+            Effect::with_lifetime(FX_SHOOT_SCEPTER_SECONDARY_ID, 4.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::EFFECT + 1.0)
+        }
         FX_SHOOT_TITAN_ID => Effect::with_lifetime(FX_SHOOT_TITAN_ID, 10.0, DEFAULT_EFFECT_CLIP),
         FX_SHOOT_BIG_SMOKE_ID => {
             Effect::with_lifetime(FX_SHOOT_BIG_SMOKE_ID, 17.0, DEFAULT_EFFECT_CLIP)
@@ -608,6 +615,7 @@ pub fn standard_effect_draw_plans(
             | FX_INST_BOMB_ID
             | FX_INST_TRAIL_ID
             | FX_INST_SHOOT_ID
+            | FX_SHOOT_SCEPTER_SECONDARY_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1047,6 +1055,90 @@ pub fn standard_effect_draw_plans(
         });
 
         return plans;
+    }
+
+    if effect_id_i32 == FX_SHOOT_SCEPTER_SECONDARY_ID {
+        let width = 1.2 + 7.0 * fout;
+        return vec![
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TriangleFan,
+                center: (x, y),
+                color_from: Some("Pal.bulletYellow"),
+                color_mid: None,
+                color_to: Some("Pal.bulletYellowBack"),
+                color_mix: fout * 1.5,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: width,
+                stroke: 10.0 + fout * 2.0,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: Some(rotation - 90.0),
+                    angle_range: 180.0,
+                    length: 0.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TrianglePair,
+                center: (x, y),
+                color_from: Some("Pal.bulletYellow"),
+                color_mid: None,
+                color_to: Some("Pal.bulletYellowBack"),
+                color_mix: fout * 0.5,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: width,
+                stroke: 15.0 * fout,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: Some(rotation),
+                    angle_range: 0.0,
+                    length: 3.0 * fout,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+        ];
     }
 
     vec![
@@ -5303,6 +5395,10 @@ mod tests {
             standard_effect_id("shootBigColor"),
             Some(FX_SHOOT_BIG_COLOR_ID)
         );
+        assert_eq!(
+            standard_effect_id("shootScepterSecondary"),
+            Some(FX_SHOOT_SCEPTER_SECONDARY_ID)
+        );
         assert_eq!(standard_effect_id("shootTitan"), Some(FX_SHOOT_TITAN_ID));
         assert_eq!(
             standard_effect_id("shootBigSmoke"),
@@ -5556,6 +5652,9 @@ mod tests {
             standard_effect(FX_SHOOT_BIG_COLOR_ID).unwrap().lifetime,
             11.0
         );
+        let shoot_scepter_secondary = standard_effect(FX_SHOOT_SCEPTER_SECONDARY_ID).unwrap();
+        assert_eq!(shoot_scepter_secondary.lifetime, 4.0);
+        assert_eq!(shoot_scepter_secondary.layer, Layer::EFFECT + 1.0);
         assert_eq!(standard_effect(FX_SHOOT_TITAN_ID).unwrap().lifetime, 10.0);
         assert_eq!(
             standard_effect(FX_SHOOT_BIG_SMOKE_ID).unwrap().lifetime,
@@ -7081,6 +7180,45 @@ mod tests {
         );
         assert_eq!(late.len(), 2);
         assert_eq!(late[0].kind, StandardEffectDrawKind::TriangleFan);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_shoot_scepter_secondary_triangles() {
+        let plans = standard_effect_draw_plans(
+            Some(FX_SHOOT_SCEPTER_SECONDARY_ID as u16),
+            163,
+            5.0,
+            6.0,
+            30.0,
+            2.0,
+            4.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(plans.len(), 2);
+
+        let side = plans[0];
+        assert_eq!(side.layer, Layer::EFFECT + 1.0);
+        assert_eq!(side.kind, StandardEffectDrawKind::TriangleFan);
+        assert_eq!(side.color_from, Some("Pal.bulletYellow"));
+        assert_eq!(side.color_to, Some("Pal.bulletYellowBack"));
+        assert_eq!(side.color_mix, 0.75);
+        assert_eq!(side.radius, 4.7);
+        assert_eq!(side.stroke, 11.0);
+        let side_triangles = side.triangle_render_primitives_from_seed();
+        assert_eq!(side_triangles.len(), 2);
+        assert_eq!(side_triangles[0].rotation, -60.0);
+        assert_eq!(side_triangles[1].rotation, 120.0);
+
+        let pair = plans[1];
+        assert_eq!(pair.kind, StandardEffectDrawKind::TrianglePair);
+        assert_eq!(pair.color_mix, 0.25);
+        assert_eq!(pair.radius, 4.7);
+        assert_eq!(pair.stroke, 7.5);
+        assert_eq!(pair.particles.unwrap().length, 1.5);
+        let pair_triangles = pair.triangle_render_primitives_from_seed();
+        assert_eq!(pair_triangles.len(), 2);
+        assert_eq!(pair_triangles[0].rotation, 30.0);
+        assert_eq!(pair_triangles[1].rotation, 210.0);
     }
 
     #[test]

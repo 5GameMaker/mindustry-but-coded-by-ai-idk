@@ -3126,6 +3126,45 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_shoot_scepter_secondary_triangles_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("shootScepterSecondary").unwrap() as u16,
+                    x: 32.0,
+                    y: 40.0,
+                    rotation: 30.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 2);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_triangle_primitives.len(), 4);
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+        let side = launcher
+            .standard_local_effect_triangle_primitives
+            .iter()
+            .find(|triangle| triangle.center == (32.0, 40.0) && triangle.rotation == -60.0)
+            .expect("shootScepterSecondary side triangle should be cached");
+        assert!(side.width > 0.0);
+        assert!(side.length > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 2);
+        assert_eq!(stats.triangle_primitives, 4);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_syncs_assembler_unit_spawned_packet_to_runtime() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let world_data = sample_network_world_data(None);

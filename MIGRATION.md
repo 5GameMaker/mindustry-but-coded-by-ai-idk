@@ -7430,3 +7430,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `instHit=104` 仍更复杂，需要 randomSeedRange 多组 triangle、scaled circle、seeded square；
   - `shootScepterSecondary=163` 也需要 multi-pass/multi-color triangle 组合；
   - 真实 renderer/backend 仍未绘制 triangle primitive。
+
+### 12.237 Fx.shootScepterSecondary multi-pass triangles
+
+- 2026-05-28：迁移 `shootScepterSecondary=163`，补齐其 layered multi-pass triangle 表达。
+- 本轮迁移：
+  - `shootScepterSecondary=163`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1880` 附近：
+    - `shootScepterSecondary = new Effect(4, ...)`
+    - `float w = 1.2f + 7 * e.fout()`
+    - `for(int i : Mathf.signs)`：颜色 `Pal.bulletYellow -> Pal.bulletYellowBack`，mix `e.fout() * 1.5f`，两个侧向 `Drawf.tri(..., 10f + e.fout() * 2f, e.rotation + i * 90f)`；
+    - 第二组颜色 mix `e.fout() * 0.5f`，front/back `Drawf.tri(..., 15f * e.fout(), e.rotation)` 与 `3f * e.fout(), e.rotation + 180f`；
+    - `.layer(Layer.effect + 1f)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SCEPTER_SECONDARY_ID=163`；
+    - 接入 lookup/metadata，layer `Layer::EFFECT + 1.0`；
+    - `standard_effect_draw_plans(...)` 输出两个 pass：
+      - side `TriangleFan`：2 个 triangle，角度 `rotation - 90` 与 `rotation + 90`；
+      - front/back `TrianglePair`：角度 `rotation` 与 `rotation + 180`；
+    - 保持两组不同 color mix。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_scepter_secondary_triangles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_scepter_secondary_triangles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_scepter_secondary_triangles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - triangle primitive 仍需真实 renderer/backend 接入；
+  - `shootQuellPulse=164` 与 `instHit=104` 需要更复杂随机三角簇，暂未迁移；
+  - 当前 Fx 迁移仍只是全项目迁移中的局部闭环。

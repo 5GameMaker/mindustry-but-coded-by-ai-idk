@@ -5480,3 +5480,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `instHit=104` 是相邻目标，但复杂度明显更高：randomSeedRange 多 triangle、scaled circle、seeded square；
   2. 若要保守推进，可先迁移 `shootScepterSecondary=163` 的 multi triangle pass；
   3. triangle primitive 仍要接入真实 renderer/backend。
+
+---
+
+## 163. 最新闭环记录：Fx.shootScepterSecondary multi-pass triangles
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `shootScepterSecondary=163`，验证 triangle fan + pair 可表达带 layer 的 multi-pass triangle 效果。
+- 本轮迁移：
+  - `shootScepterSecondary=163`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SCEPTER_SECONDARY_ID=163`；
+    - 接入 lookup/metadata，layer `Layer::EFFECT + 1.0`；
+    - `standard_effect_draw_plans(...)` 输出 side `TriangleFan` + front/back `TrianglePair` 两个 pass。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_scepter_secondary_triangles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_scepter_secondary_triangles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_scepter_secondary_triangles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `shootQuellPulse=164` / `instHit=104` 更复杂，涉及随机三角簇与多 pass；
+  2. 可考虑先把 triangle primitive 接入真实 renderer/backend，避免 headless seam 积累过多；
+  3. 若继续 Fx，优先挑已有 primitive 能完整表达的效果。
