@@ -54,6 +54,8 @@ pub const FX_DESPAWN_ID: i32 = 100;
 pub const FX_POINT_HIT_ID: i32 = 11;
 /// Upstream `Fx.coreBuildShockwave` id in `mindustry.content.Fx` for v158.1.
 pub const FX_CORE_BUILD_SHOCKWAVE_ID: i32 = 14;
+/// Upstream `Fx.pointShockwave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_POINT_SHOCKWAVE_ID: i32 = 16;
 /// Upstream `Fx.moveCommand` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MOVE_COMMAND_ID: i32 = 17;
 /// Upstream `Fx.commandSend` id in `mindustry.content.Fx` for v158.1.
@@ -199,6 +201,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
         "pointHit" => Some(FX_POINT_HIT_ID),
         "coreBuildShockwave" => Some(FX_CORE_BUILD_SHOCKWAVE_ID),
+        "pointShockwave" => Some(FX_POINT_SHOCKWAVE_ID),
         "moveCommand" => Some(FX_MOVE_COMMAND_ID),
         "commandSend" => Some(FX_COMMAND_SEND_ID),
         "upgradeCoreBloom" => Some(FX_UPGRADE_CORE_BLOOM_ID),
@@ -301,6 +304,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_POINT_HIT_ID => Effect::with_lifetime(FX_POINT_HIT_ID, 8.0, DEFAULT_EFFECT_CLIP),
         FX_CORE_BUILD_SHOCKWAVE_ID => {
             Effect::with_lifetime(FX_CORE_BUILD_SHOCKWAVE_ID, 120.0, 500.0)
+        }
+        FX_POINT_SHOCKWAVE_ID => {
+            Effect::with_lifetime(FX_POINT_SHOCKWAVE_ID, 20.0, DEFAULT_EFFECT_CLIP)
         }
         FX_MOVE_COMMAND_ID => Effect::with_lifetime(FX_MOVE_COMMAND_ID, 20.0, DEFAULT_EFFECT_CLIP)
             .layer(Layer::OVERLAY_UI),
@@ -500,6 +506,103 @@ pub fn standard_effect_render_lifetime(effect_id: Option<u16>, rotation: f32, cu
         Some(FX_CORE_BUILD_SHOCKWAVE_ID) => rotation,
         _ => current,
     }
+}
+
+pub fn standard_effect_draw_plans(
+    effect_id: Option<u16>,
+    state_id: i32,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    time: f32,
+    lifetime: f32,
+    color: DecalColor,
+) -> Vec<StandardEffectDrawPlan> {
+    let Some(effect_id_i32) = effect_id.map(i32::from) else {
+        return Vec::new();
+    };
+
+    if effect_id_i32 != FX_POINT_SHOCKWAVE_ID {
+        return standard_effect_draw_plan(
+            effect_id, state_id, x, y, rotation, time, lifetime, color,
+        )
+        .into_iter()
+        .collect();
+    }
+
+    let Some(effect) = standard_effect(effect_id_i32) else {
+        return Vec::new();
+    };
+    let lifetime = standard_effect_render_lifetime(effect_id, rotation, lifetime);
+    let fin = if lifetime.abs() <= f32::EPSILON {
+        1.0
+    } else {
+        (time / lifetime).clamp(0.0, 1.0)
+    };
+    let fout = 1.0 - fin;
+    let finpow = effect_finpow_from_fin(fin);
+    let fslope = effect_fslope_from_fin(fin);
+
+    vec![
+        StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: finpow * rotation,
+            stroke: fout * 2.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 1.0,
+            stroke: fout * 2.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id + 1,
+                count: 8,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 1.0 + 23.0 * finpow,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 3.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4216,6 +4319,10 @@ mod tests {
             standard_effect_id("coreBuildShockwave"),
             Some(FX_CORE_BUILD_SHOCKWAVE_ID)
         );
+        assert_eq!(
+            standard_effect_id("pointShockwave"),
+            Some(FX_POINT_SHOCKWAVE_ID)
+        );
         assert_eq!(standard_effect_id("moveCommand"), Some(FX_MOVE_COMMAND_ID));
         assert_eq!(standard_effect_id("commandSend"), Some(FX_COMMAND_SEND_ID));
         assert_eq!(
@@ -4426,6 +4533,10 @@ mod tests {
         let core_build_shockwave = standard_effect(FX_CORE_BUILD_SHOCKWAVE_ID).unwrap();
         assert_eq!(core_build_shockwave.lifetime, 120.0);
         assert_eq!(core_build_shockwave.clip, 500.0);
+        assert_eq!(
+            standard_effect(FX_POINT_SHOCKWAVE_ID).unwrap().lifetime,
+            20.0
+        );
         let move_command = standard_effect(FX_MOVE_COMMAND_ID).unwrap();
         assert_eq!(move_command.lifetime, 20.0);
         assert_eq!(move_command.layer, Layer::OVERLAY_UI);
@@ -4742,6 +4853,44 @@ mod tests {
         assert_eq!(command_send.color_from, Some("Pal.command"));
         assert_eq!(command_send.radius, 14.5);
         assert_eq!(command_send.stroke, 1.0);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_point_shockwave_multi_pass() {
+        let input_color = DecalColor::from_rgba(0x99aaeeff);
+        let plans = standard_effect_draw_plans(
+            Some(FX_POINT_SHOCKWAVE_ID as u16),
+            16,
+            10.0,
+            20.0,
+            40.0,
+            10.0,
+            20.0,
+            input_color,
+        );
+        assert_eq!(plans.len(), 2);
+        let circle = plans[0];
+        assert_eq!(circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(circle.input_color, Some(input_color));
+        assert_eq!(circle.radius, 35.0);
+        assert_eq!(circle.stroke, 1.0);
+
+        let lines = plans[1];
+        assert_eq!(
+            lines.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(lines.input_color, Some(input_color));
+        assert_eq!(lines.stroke, 1.0);
+        assert_eq!(lines.radius, 1.0);
+        let particles = lines.particles.unwrap();
+        assert_eq!(particles.seed, 17);
+        assert_eq!(particles.count, 8);
+        assert_eq!(particles.length, 21.125);
+        assert_eq!(particles.radius_fout_scale, 3.0);
+        let line_primitives = lines.line_render_primitives_from_seed();
+        assert_eq!(line_primitives.len(), 8);
+        assert!((line_primitives[0].length - 2.5).abs() < 0.0001);
     }
 
     #[test]

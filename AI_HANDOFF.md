@@ -5208,3 +5208,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 在此 trait 后接真实窗口/绘制 backend，而不是继续只加 headless 统计；
   2. renderer 需要处理 layer、alpha、color、stroke、filled/stroked circle/square/line/light；
   3. 继续迁移 Fx 时，避免把需要 multi-pass/texture/polygon 的效果硬塞进单 kind plan。
+
+---
+
+## 155. 最新闭环记录：Multi-pass standard effect plans + Fx.pointShockwave
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：开始解决此前反复阻塞的 standard Fx multi-pass 表达问题，不再只能返回单个 `StandardEffectDrawPlan`。
+- 本轮迁移：
+  - `pointShockwave=16`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_POINT_SHOCKWAVE_ID=16`；
+    - 新增 `standard_effect_draw_plans(...)`；
+    - 默认路径兼容原单 pass `standard_effect_draw_plan(...)`；
+    - `pointShockwave` 返回两个 pass：`StrokedCircle` + `SeededRadialLineParticles`。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `standard_effect_draw_plans(...)`。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render()` 改为 flatten 多 pass；
+    - 新增 `desktop_launcher_flattens_multi_pass_standard_effects_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_point_shockwave_multi_pass --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_multi_pass_standard_effects_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 用 multi-pass 接口回头迁移 `hitBulletColor=78`、`hitSquaresColor=79`、`hitFuse=81`，但仍要逐个对照 Java；
+  2. `pointBeam=10` 仍需要 line-to-data-position 与 light line primitive，不属于当前接口已解决范围；
+  3. renderer/backend 仍需从 headless seam 发展到真实绘制。

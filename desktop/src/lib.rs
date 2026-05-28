@@ -15,9 +15,9 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, standard_effect, standard_effect_draw_plan, standard_effect_render_lifetime,
-    EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
-    StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
+    entity_class_kind, standard_effect, standard_effect_draw_plans,
+    standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
+    PlayerUnitSwitchContext, StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
     StandardEffectSquareRenderPrimitive, PLAYER_CLASS_ID,
 };
@@ -288,7 +288,7 @@ impl DesktopLauncher {
     ) -> Vec<StandardEffectDrawPlan> {
         let mut plans = Vec::new();
         self.draw_local_effect_states_for_render(|input| {
-            if let Some(plan) = standard_effect_draw_plan(
+            plans.extend(standard_effect_draw_plans(
                 input.effect_id,
                 input.id,
                 input.x,
@@ -297,9 +297,7 @@ impl DesktopLauncher {
                 input.time,
                 input.lifetime,
                 input.color,
-            ) {
-                plans.push(plan);
-            }
+            ));
             standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
         });
         plans
@@ -2808,6 +2806,38 @@ mod tests {
             frame.line_primitives,
             launcher.standard_local_effect_line_primitives
         );
+    }
+
+    #[test]
+    fn desktop_launcher_flattens_multi_pass_standard_effects_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("pointShockwave").unwrap() as u16,
+                    x: 40.0,
+                    y: 64.0,
+                    rotation: 32.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 2);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 1);
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 8);
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 2);
+        assert_eq!(stats.circle_primitives, 1);
+        assert_eq!(stats.line_primitives, 8);
+        assert_eq!(renderer.frames_rendered, 1);
     }
 
     #[test]

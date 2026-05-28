@@ -7098,3 +7098,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - headless backend 只是消费 seam，不是实际屏幕绘制；
   - 后续需要替换/扩展为真实图形 backend，将 circle/square/line/light primitives 映射到窗口、批处理和 shader/light pipeline；
   - 仍需确认渲染坐标系、层排序、alpha/blend/light 与 Java Draw/Drawf 语义一致。
+
+### 12.229 Multi-pass standard effect plans + Fx.pointShockwave
+
+- 2026-05-28：补标准特效 multi-pass plan 接口，避免继续把需要多个绘制 pass 的 Java Fx 半迁移成单 kind；以 `pointShockwave=16` 作为最小用例，完整表达圆环 + 径向线批次。
+- 本轮迁移/接入：
+  - `pointShockwave=16`
+  - `standard_effect_draw_plans(...)`
+  - desktop effect 收集逻辑从单 plan 改为 flatten 多 plan
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:223` 附近：
+    - `pointShockwave = new Effect(20, ...)`
+    - `color(e.color)`
+    - `stroke(e.fout() * 2f)`
+    - `Lines.circle(e.x, e.y, e.finpow() * e.rotation)`
+    - `randLenVectors(e.id + 1, 8, 1f + 23f * e.finpow(), ...)`
+    - `lineAngle(..., 1f + e.fout() * 3f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_POINT_SHOCKWAVE_ID=16`；
+    - 新增 `standard_effect_draw_plans(...)`，默认把原 `standard_effect_draw_plan(...)` 包装为单元素，`pointShockwave` 返回两个 pass；
+    - pass 1：`StrokedCircle`，输入色，radius `finpow * rotation`，stroke `fout * 2`；
+    - pass 2：`SeededRadialLineParticles`，seed `id+1`，count `8`，粒子距离 `1 + 23*finpow`，line length `1 + fout*3`。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `standard_effect_draw_plans(...)`。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render()` 改为 extend 多 pass；
+    - 新增 desktop 测试覆盖 `pointShockwave` 被 flatten 成 2 个 draw plans、1 个 circle primitive 和 8 个 line primitives，并进入 headless backend stats。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_point_shockwave_multi_pass --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_multi_pass_standard_effects_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 现有 `standard_effect_draw_plan(...)` 仍是单 pass 兼容口，后续复杂效果应优先走 `standard_effect_draw_plans(...)`；
+  - `hitBulletColor=78` / `hitSquaresColor=79` / `hitFuse=81` 等仍需逐个基于 multi-pass 接口迁移；
+  - desktop 仍是 headless 消费 seam，未真实绘制。
