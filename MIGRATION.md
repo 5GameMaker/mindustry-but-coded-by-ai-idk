@@ -8497,6 +8497,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
 - 仍未完成：
   - 当前 `UnitType.leg_base_region` 只记录 `<name>-leg-base` 名称，尚未接 Java `Core.atlas.find(name + "-leg-base", name + "-leg")` 的真实 fallback/尺寸解析；
-  - `LegsComp` 仍是独立 component shell，尚未成为 `UnitComp` 的持久运行时子组件；下一步应把腿状态与 typed unit snapshot / unit runtime lifecycle 接起来；
+  - `LegsComp` 已在 `12.266` 成为 `UnitComp` 的持久运行时子组件；下一步仍需把腿状态接入真实 update tick、typed unit snapshot 与死亡生命周期调用点；
   - `Damage.dynamicExplosion(...)` 目前只形成 `LegsDynamicExplosionEvent` plan，尚未接入真实 damage/explosion runtime；
   - 真实图形 renderer 仍未消费 `TexturedLine.region`。
+
+### 12.266 UnitComp 持久 LegsComp 接入
+
+- 2026-05-28：继续对照 Java 组合组件语义，把上一轮仍需手工构造的 `LegsComp` 挂入 `UnitComp` 的真实持久状态，并让 runtime 可以按 unit id 触发腿部碎裂本地 effect 队列。
+- 本轮迁移：
+  - `UnitComp.legs: Option<LegsComp>`；
+  - `UnitType -> LegsType` 映射；
+  - `UnitComp` 级 `legs_destroy_plan(...)`；
+  - `GameRuntime.queue_client_unit_legs_destroy_effects(unit_id, ...)`。
+- Java 依据：
+  - Java `LegsComp` 是 Unit 组合组件，字段通过 `@Import UnitType type`、`@Import x/y/rotation/speedMultiplier` 与单位本体保持同步；
+  - `LegsComp.destroy()` 的 guard 使用 entity added/headless 状态，真实调用点来自 Unit 生命周期，而不是单独构造的 helper。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `UnitComp` 新增 `legs: Option<LegsComp>`；
+    - `set_type(...)` 通过 `legs_type_from_unit_type(...)` 创建/复用/清空 legs，并同步 `x/y/rotation/speed_multiplier`；
+    - `refresh_component_views()` 将单位 transform 与 `status.speed_multiplier` 镜像到 `legs`；
+    - 新增 `legs_destroy_regions()` 与 `legs_destroy_plan(headless)`，从 `UnitType.leg_region/leg_base_region/death_explosion_effect` 取数据并调用 `LegsComp::destroy_plan(...)`；
+    - `legs_type_from_unit_type(...)` 以 `allow_leg_step && leg_count > 0` 作为当前 legged unit 判定，`LegsType.speed` 对齐 Java 连续移动用的 `UnitType.speed`，`UnitType.leg_speed` 后续仍需单独进入腿部步进插值。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `queue_client_unit_legs_destroy_effects(unit_id, headless)`，从 `client_unit_snapshot_entities` 中按 id 找到 `UnitComp`，调用其 `legs_destroy_plan(...)`，再写入现有 `client_local_effect_events`；
+    - 复用私有 `queue_client_leg_destroy_plan(...)`，避免 component 和 unit-id 两条入口重复构造 `EffectCallPacket2`。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core unit_component_initializes_and_syncs_legs_from_unit_type --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core game_runtime_queues_legs_destroy_into_local_effect_events --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+- 仍未完成：
+  - `UnitComp.legs` 已持久化，但尚未被真实 unit update tick 驱动；下一步应把 delta/floor/deep feet 等输入从 runtime/world 接入 `LegsComp::update(...)`；
+  - `UnitSyncWire`/typed snapshot 仍未携带 legs transient 状态；Java 原生腿状态多为 transient，本端需决定客户端预测/重建策略；
+  - `LegsType` 仍缺 Java `legSpeed` 对步进插值的独立语义，目前只保留连续移动总推进用 speed；
+  - unit 死亡/移除路径尚未自动调用 `queue_client_unit_legs_destroy_effects(...)`。

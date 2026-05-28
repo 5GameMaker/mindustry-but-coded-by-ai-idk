@@ -6495,8 +6495,44 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
 - 下一步建议：
-  1. 把 `LegsComp` 作为 `UnitComp`/typed unit snapshot 的真实持久子组件接入，不再只由测试手工构造；
+  1. `LegsComp` 已在后续 `192` 节接入 `UnitComp` 持久状态；下一步继续真实 unit update tick、死亡/移除生命周期和 atlas fallback/尺寸 resolve；
   2. 为 `TextureRegionRef` 接入真实 atlas/content registry 尺寸与 Java `legBaseRegion` fallback：`name + "-leg-base"` fallback 到 `name + "-leg"`；
   3. 将 `LegsDynamicExplosionEvent` 接到 damage/explosion runtime，补齐 Java `Damage.dynamicExplosion(...)` 的实际副作用；
   4. 把 `TexturedLine.region` 接入真实图形 renderer，移除 `StandardEffectDrawPlan` region interning 过渡 seam；
   5. 当前总迁移约 10% 左右，仍远未可玩，继续避免 helper/plan 停留为孤立模块。
+
+---
+
+## 192. 最新闭环记录：UnitComp 持久 LegsComp 接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 `LegsComp` 从测试手工构造/外部传参推进为 `UnitComp` 的真实持久子组件，并让 `GameRuntime` 可以按 unit id 触发腿部碎裂本地 effect 队列。
+- 本轮迁移：
+  - `UnitComp.legs: Option<LegsComp>`；
+  - `UnitType -> LegsType` 映射；
+  - `UnitComp.legs_destroy_plan(...)`；
+  - `GameRuntime.queue_client_unit_legs_destroy_effects(...)`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `legs: Option<LegsComp>`；
+    - `set_type(...)` 通过 `legs_type_from_unit_type(...)` 创建/复用/清空 legs，使用 `allow_leg_step && leg_count > 0` 判定当前 legged unit；
+    - `refresh_component_views()` 同步 `x/y/rotation/status.speed_multiplier` 到 legs；
+    - 新增 `legs_destroy_regions()` 与 `legs_destroy_plan(headless)`，从 `UnitType.leg_region/leg_base_region/death_explosion_effect` 生成 destroy plan；
+    - `LegsType.speed` 修正为映射 `UnitType.speed`，用于 Java `legContinuousMove` 的总推进；`UnitType.leg_speed` 的步进插值语义后续仍需单独迁移。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `queue_client_unit_legs_destroy_effects(unit_id, headless)`，从 `client_unit_snapshot_entities` 取 `UnitComp` 后调用其 `legs_destroy_plan(...)`；
+    - 抽出私有 `queue_client_leg_destroy_plan(...)`，让 component 入口和 unit-id 入口复用同一 `EffectCallPacket2` 构造路径。
+  - `MIGRATION.md`
+    - 新增 `12.266` 节，并更新 `12.265` 的遗留说明。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core unit_component_initializes_and_syncs_legs_from_unit_type --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core game_runtime_queues_legs_destroy_into_local_effect_events --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+- 下一步建议：
+  1. 把 `LegsComp::update(...)` 接到真实 `UnitComp`/`GameRuntime` tick：需要 delta、deltaX/deltaY、deep feet/floor 输入；
+  2. 在 unit 死亡/移除生命周期中自动调用 `queue_client_unit_legs_destroy_effects(...)`，而不是仅由测试或外部手动触发；
+  3. 为 `TextureRegionRef` 接真实 atlas 尺寸与 Java `legBaseRegion` fallback；
+  4. 将 `LegsDynamicExplosionEvent` 接入 damage/explosion runtime；
+  5. 当前总迁移约 10% 左右，仍远未可玩，继续保证 helper/plan 最终接入真实 runtime/content/world/entity/network 链路。

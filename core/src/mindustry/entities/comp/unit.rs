@@ -41,6 +41,7 @@ use super::entity::EntityComp;
 use super::health::HealthComp;
 use super::hitbox::HitboxComp;
 use super::items::ItemsComp;
+use super::legs::{LegsComp, LegsDestroyPlan, LegsDestroyRegions, LegsType};
 use super::miner::{MineTile, MinerComp, MinerType, PrebuildMiningRuntimeStep};
 use super::payload::PayloadComp;
 use super::physics::PhysicsComp;
@@ -234,6 +235,7 @@ pub struct UnitComp {
     pub building_tether: Option<BuildingTetherComp>,
     pub cargo_ai: Option<CargoAiRuntimeState>,
     pub payload: Option<PayloadComp>,
+    pub legs: Option<LegsComp>,
     pub type_info: UnitType,
     pub controller: UnitControllerState,
     pub abilities: Vec<AbilityWire>,
@@ -299,6 +301,7 @@ impl UnitComp {
             building_tether: None,
             cargo_ai: None,
             payload: None,
+            legs: None,
             type_info: type_info.clone(),
             controller: UnitControllerState::Ground,
             abilities: Vec::new(),
@@ -389,6 +392,11 @@ impl UnitComp {
     }
 
     pub fn set_type(&mut self, type_info: UnitType) {
+        let x = self.x();
+        let y = self.y();
+        let rotation = self.rotation();
+        let speed_multiplier = self.status.speed_multiplier;
+        let legs_type = legs_type_from_unit_type(&type_info);
         self.health.max_health = type_info.health;
         self.vel.drag = type_info.drag * self.status.drag_multiplier;
         self.shield.armor = type_info.armor;
@@ -419,6 +427,18 @@ impl UnitComp {
             payload.payload_capacity = type_info.payload_capacity;
             payload.pickup_units = type_info.pickup_units;
         }
+
+        let previous_legs = self.legs.take();
+        self.legs = legs_type.map(|legs_type| {
+            let mut legs = previous_legs.unwrap_or_else(|| LegsComp::new(legs_type));
+            legs.type_info = legs_type;
+            legs.x = x;
+            legs.y = y;
+            legs.rotation = rotation;
+            legs.speed_multiplier = speed_multiplier;
+            legs.reset_legs(legs_type.leg_length);
+            legs
+        });
 
         self.type_info = type_info;
         self.refresh_component_views();
@@ -894,6 +914,32 @@ impl UnitComp {
             payload.payload_capacity = self.type_info.payload_capacity;
             payload.pickup_units = self.type_info.pickup_units;
         }
+
+        if let Some(legs) = &mut self.legs {
+            legs.x = x;
+            legs.y = y;
+            legs.rotation = rotation;
+            legs.speed_multiplier = self.status.speed_multiplier;
+        }
+    }
+
+    pub fn legs_destroy_regions(&self) -> Option<LegsDestroyRegions> {
+        self.legs.as_ref()?;
+        Some(LegsDestroyRegions::new(
+            self.type_info.leg_region.clone(),
+            self.type_info.leg_base_region.clone(),
+        ))
+    }
+
+    pub fn legs_destroy_plan(&self, headless: bool) -> Option<LegsDestroyPlan> {
+        let legs = self.legs.as_ref()?;
+        let regions = self.legs_destroy_regions()?;
+        Some(legs.destroy_plan(
+            &regions,
+            &self.type_info.death_explosion_effect,
+            self.entity.is_added(),
+            headless,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1545,6 +1591,36 @@ fn unit_ammo_capacity(type_info: &UnitType) -> f32 {
     type_info.ammo_capacity.max(0) as f32
 }
 
+fn legs_type_from_unit_type(type_info: &UnitType) -> Option<LegsType> {
+    if !type_info.allow_leg_step || type_info.leg_count <= 0 {
+        return None;
+    }
+
+    Some(LegsType {
+        leg_count: type_info.leg_count,
+        leg_length: type_info.leg_length,
+        rotate_speed: type_info.rotate_speed,
+        lock_leg_base: type_info.lock_leg_base,
+        allow_leg_step: type_info.allow_leg_step,
+        leg_base_offset: type_info.leg_base_offset,
+        leg_straightness: type_info.leg_straightness,
+        leg_straight_length: type_info.leg_straight_length,
+        base_leg_straightness: type_info.base_leg_straightness,
+        leg_group_size: type_info.leg_group_size,
+        leg_move_space: type_info.leg_move_space,
+        leg_continuous_move: type_info.leg_continuous_move,
+        leg_forward_scl: type_info.leg_forward_scl,
+        leg_pair_offset: type_info.leg_pair_offset,
+        leg_length_scl: type_info.leg_length_scl,
+        leg_extension: type_info.leg_extension,
+        leg_min_length: type_info.leg_min_length,
+        leg_max_length: type_info.leg_max_length,
+        flip_back_legs: type_info.flip_back_legs,
+        flip_leg_side: type_info.flip_leg_side,
+        speed: type_info.speed,
+    })
+}
+
 fn vector_length(v: Vec2) -> f32 {
     vector_length_sq(v).sqrt()
 }
@@ -1616,7 +1692,7 @@ mod tests {
     use super::*;
     use crate::mindustry::entities::comp::BuilderAiRuntimeBranch;
     use crate::mindustry::entities::units::BuildPlan;
-    use crate::mindustry::entities::StatusEntry;
+    use crate::mindustry::entities::{StatusEntry, TextureRegionRef};
     use crate::mindustry::io::TypeValue;
     use crate::mindustry::r#type::Weapon;
 
@@ -1669,6 +1745,55 @@ mod tests {
 
         assert_eq!(unit.health.max_health, 200.0);
         assert_eq!(unit.weapons.mounts.len(), 2);
+    }
+
+    #[test]
+    fn unit_component_initializes_and_syncs_legs_from_unit_type() {
+        let mut unit_type = unit_type();
+        unit_type.allow_leg_step = true;
+        unit_type.leg_count = 6;
+        unit_type.leg_length = 14.0;
+        unit_type.speed = 0.72;
+        unit_type.leg_speed = 0.35;
+        unit_type.leg_base_offset = 5.0;
+        unit_type.leg_extension = 3.0;
+        unit_type.leg_region = TextureRegionRef::with_size("alpha-leg", 16, 8);
+        unit_type.leg_base_region = TextureRegionRef::with_size("alpha-leg-base", 12, 6);
+        unit_type.death_explosion_effect = "dynamicExplosion".into();
+
+        let unadded = UnitComp::new(43, unit_type.clone(), TeamId(1));
+        assert!(unadded.legs_destroy_plan(false).unwrap().effects.is_empty());
+
+        let mut unit = UnitComp::new(42, unit_type.clone(), TeamId(1));
+        unit.add();
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(90.0);
+
+        let legs = unit.legs.as_ref().expect("legged unit should own LegsComp");
+        assert_eq!(legs.legs.len(), 6);
+        assert_eq!(legs.type_info.leg_count, 6);
+        assert_eq!(legs.type_info.leg_length, 14.0);
+        assert_eq!(legs.type_info.leg_extension, 3.0);
+        assert_eq!(legs.type_info.speed, 0.72);
+        assert_eq!((legs.x, legs.y, legs.rotation), (100.0, 200.0, 90.0));
+
+        let regions = unit.legs_destroy_regions().unwrap();
+        assert_eq!(regions.leg, unit_type.leg_region.clone());
+        assert_eq!(regions.leg_base, unit_type.leg_base_region.clone());
+        let destroy = unit.legs_destroy_plan(false).unwrap();
+        assert_eq!(destroy.effects.len(), 12);
+        assert_eq!(destroy.explosions.len(), 18);
+        assert!(unit.legs_destroy_plan(true).unwrap().effects.is_empty());
+
+        let mut replacement = unit_type.clone();
+        replacement.allow_leg_step = false;
+        unit.set_type(replacement);
+        assert!(unit.legs.is_none());
+        assert!(unit.legs_destroy_regions().is_none());
+
+        unit.set_type(unit_type);
+        assert!(unit.legs.is_some());
+        assert_eq!(unit.legs.as_ref().unwrap().legs.len(), 6);
     }
 
     #[test]

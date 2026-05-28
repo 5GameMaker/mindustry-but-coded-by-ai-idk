@@ -29,9 +29,9 @@ use crate::mindustry::{
         comp::{
             BuildingComp, BuildingTetherComp, BuildingTetherRef, BulletComp, CargoAiRuntimeState,
             ChildParent, DecalComp, DecalRegion, EffectRenderInput, EffectStateComp, FireComp,
-            LaunchCoreBlock, LaunchCoreComp, LegsComp, LegsDestroyRegions, PayloadComp,
-            PayloadKind, PayloadState, PuddleComp, PuddleTile, UnitComp, UnitControllerState,
-            WorldLabelComp,
+            LaunchCoreBlock, LaunchCoreComp, LegsComp, LegsDestroyPlan, LegsDestroyRegions,
+            PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile, UnitComp,
+            UnitControllerState, WorldLabelComp,
         },
         entity_class_id, entity_class_kind, standard_effect, standard_effect_id, Effect,
         EntityClassKind, Fires, PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent,
@@ -3869,10 +3869,14 @@ impl GameRuntime {
         is_added: bool,
         headless: bool,
     ) -> usize {
+        let plan = legs.destroy_plan(regions, death_explosion_effect, is_added, headless);
+        self.queue_client_leg_destroy_plan(plan)
+    }
+
+    fn queue_client_leg_destroy_plan(&mut self, plan: LegsDestroyPlan) -> usize {
         let Some(effect_id) = standard_effect_id("legDestroy") else {
             return 0;
         };
-        let plan = legs.destroy_plan(regions, death_explosion_effect, is_added, headless);
         let mut emitted = 0;
         for event in plan.effects {
             self.client_local_effect_events.push(EffectCallPacket2 {
@@ -3888,6 +3892,21 @@ impl GameRuntime {
             emitted += 1;
         }
         emitted
+    }
+
+    pub fn queue_client_unit_legs_destroy_effects(
+        &mut self,
+        unit_id: i32,
+        headless: bool,
+    ) -> usize {
+        let Some(plan) = self
+            .client_unit_snapshot_entities
+            .get(&unit_id)
+            .and_then(|unit| unit.legs_destroy_plan(headless))
+        else {
+            return 0;
+        };
+        self.queue_client_leg_destroy_plan(plan)
     }
 
     fn alloc_client_local_effect_id(&mut self) -> i32 {
@@ -25939,6 +25958,27 @@ mod tests {
                 true,
                 true
             ),
+            0
+        );
+
+        let mut unit_type = UnitType::new(77, "crawler");
+        unit_type.allow_leg_step = true;
+        unit_type.leg_count = 2;
+        unit_type.leg_length = 10.0;
+        unit_type.leg_extension = 3.0;
+        unit_type.leg_region = TextureRegionRef::with_size("crawler-leg", 16, 8);
+        unit_type.leg_base_region = TextureRegionRef::with_size("crawler-leg-base", 12, 6);
+        let mut unit = UnitComp::new(77, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(10.0, 20.0);
+        unit.set_rotation(45.0);
+        runtime.client_unit_snapshot_entities.insert(77, unit);
+
+        assert_eq!(runtime.queue_client_unit_legs_destroy_effects(77, false), 4);
+        assert_eq!(runtime.client_local_effect_events.len(), 4);
+        assert_eq!(runtime.queue_client_unit_legs_destroy_effects(77, true), 0);
+        assert_eq!(
+            runtime.queue_client_unit_legs_destroy_effects(9999, false),
             0
         );
     }
