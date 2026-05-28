@@ -16,9 +16,9 @@ use mindustry_core::mindustry::core::{
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
     entity_class_kind, standard_effect,
-    standard_effect_draw_plans_with_data_value_and_unit_hit_size, standard_effect_render_lifetime,
-    EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
-    StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
+    standard_effect_draw_plans_with_data_value_and_resolved_context,
+    standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
+    PlayerUnitSwitchContext, StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
     StandardEffectRectRenderPrimitive, StandardEffectSquareRenderPrimitive,
     StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
@@ -313,13 +313,24 @@ impl DesktopLauncher {
             .iter()
             .map(|(id, unit)| (*id, unit.hitbox.hit_size))
             .collect();
+        let block_full_icon_sizes: BTreeMap<ContentId, i32> = self
+            .content_loader
+            .blocks()
+            .map(|block| (block.base().id, block.base().size))
+            .collect();
         self.draw_local_effect_states_for_render(|input| {
             let resolved_unit_hit_size = match input.data {
                 TypeValue::Unit(id) => unit_hit_sizes.get(id).copied(),
                 _ => None,
             };
+            let resolved_block_full_icon_size = match input.data {
+                TypeValue::Content(content) if content.content_type == ContentType::Block => {
+                    block_full_icon_sizes.get(&content.id).copied()
+                }
+                _ => None,
+            };
             plans.extend(
-                standard_effect_draw_plans_with_data_value_and_unit_hit_size(
+                standard_effect_draw_plans_with_data_value_and_resolved_context(
                     input.effect_id,
                     input.id,
                     input.x,
@@ -330,6 +341,7 @@ impl DesktopLauncher {
                     input.color,
                     Some(input.data),
                     resolved_unit_hit_size,
+                    resolved_block_full_icon_size,
                 ),
             );
             standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
@@ -3496,7 +3508,7 @@ mod tests {
         assert_eq!(textured_rects.len(), 7);
         assert!(textured_rects
             .iter()
-            .all(|rect| rect.region == Some("casing")));
+            .all(|rect| rect.region.as_deref() == Some("casing")));
         assert!(textured_rects
             .iter()
             .any(|rect| rect.width == 3.0 && rect.height == 6.0));
@@ -3977,6 +3989,71 @@ mod tests {
         assert_eq!(stats.square_primitives, 0);
         assert_eq!(stats.rect_primitives, 0);
         assert_eq!(stats.line_primitives, 4);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_resolves_heal_block_full_icon_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let block = launcher
+            .content_loader
+            .block_by_name("duo")
+            .expect("base content should include duo")
+            .base()
+            .clone();
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("healBlockFull").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(0x33cc66ff_i32),
+                },
+                data: TypeValue::Content(type_io::ContentRef::new(ContentType::Block, block.id)),
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 1);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_rect_primitives.len(), 1);
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let rect = &launcher.standard_local_effect_rect_primitives[0];
+        assert_eq!(rect.kind, StandardEffectDrawKind::TexturedRect);
+        assert_eq!(rect.center, (24.0, 32.0));
+        assert_eq!(
+            rect.width,
+            block.size as f32 * mindustry_core::mindustry::vars::TILE_SIZE as f32
+        );
+        assert_eq!(rect.height, rect.width);
+        let expected_region = format!("block-fullIcon:{}", block.id);
+        assert_eq!(rect.region.as_deref(), Some(expected_region.as_str()));
+        let rect_color = rect.color.expect("heal block full should mix input color");
+        let input_color =
+            mindustry_core::mindustry::entities::comp::DecalColor::from_rgba(0x33cc66ff);
+        assert_eq!(rect_color.r, input_color.r);
+        assert_eq!(rect_color.g, input_color.g);
+        assert_eq!(rect_color.b, input_color.b);
+        assert!(rect_color.a > 0.0 && rect_color.a <= 1.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 1);
+        assert_eq!(stats.circle_primitives, 0);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.rect_primitives, 1);
+        assert_eq!(stats.line_primitives, 0);
         assert_eq!(stats.triangle_primitives, 0);
         assert_eq!(stats.light_primitives, 0);
         assert_eq!(renderer.last_stats, stats);

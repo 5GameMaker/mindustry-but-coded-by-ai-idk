@@ -1,5 +1,5 @@
 use crate::mindustry::{
-    entities::comp::DecalColor, graphics::Layer, io::TypeValue, vars::TILE_SIZE,
+    ctype::ContentType, entities::comp::DecalColor, graphics::Layer, io::TypeValue, vars::TILE_SIZE,
 };
 
 pub const SHAKE_FALLOFF: f32 = 10000.0;
@@ -376,6 +376,8 @@ pub const FX_HEAL_WAVE_MEND_ID: i32 = 249;
 pub const FX_OVERDRIVE_WAVE_ID: i32 = 250;
 /// Upstream `Fx.healBlock` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HEAL_BLOCK_ID: i32 = 251;
+/// Upstream `Fx.healBlockFull` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HEAL_BLOCK_FULL_ID: i32 = 252;
 /// Upstream `Fx.rotateBlock` id in `mindustry.content.Fx` for v158.1.
 pub const FX_ROTATE_BLOCK_ID: i32 = 253;
 /// Upstream `Fx.lightBlock` id in `mindustry.content.Fx` for v158.1.
@@ -586,6 +588,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "healWaveMend" => Some(FX_HEAL_WAVE_MEND_ID),
         "overdriveWave" => Some(FX_OVERDRIVE_WAVE_ID),
         "healBlock" => Some(FX_HEAL_BLOCK_ID),
+        "healBlockFull" => Some(FX_HEAL_BLOCK_FULL_ID),
         "rotateBlock" => Some(FX_ROTATE_BLOCK_ID),
         "lightBlock" => Some(FX_LIGHT_BLOCK_ID),
         "overdriveBlockFull" => Some(FX_OVERDRIVE_BLOCK_FULL_ID),
@@ -991,6 +994,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_OVERDRIVE_WAVE_ID, 50.0, DEFAULT_EFFECT_CLIP)
         }
         FX_HEAL_BLOCK_ID => Effect::with_lifetime(FX_HEAL_BLOCK_ID, 20.0, DEFAULT_EFFECT_CLIP),
+        FX_HEAL_BLOCK_FULL_ID => {
+            Effect::with_lifetime(FX_HEAL_BLOCK_FULL_ID, 20.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_ROTATE_BLOCK_ID => Effect::with_lifetime(FX_ROTATE_BLOCK_ID, 30.0, DEFAULT_EFFECT_CLIP),
         FX_LIGHT_BLOCK_ID => Effect::with_lifetime(FX_LIGHT_BLOCK_ID, 60.0, DEFAULT_EFFECT_CLIP),
         FX_OVERDRIVE_BLOCK_FULL_ID => {
@@ -1066,7 +1072,7 @@ pub fn standard_effect_draw_plans_with_data_float(
     data_float: Option<f32>,
 ) -> Vec<StandardEffectDrawPlan> {
     standard_effect_draw_plans_with_data(
-        effect_id, state_id, x, y, rotation, time, lifetime, color, data_float, None, None,
+        effect_id, state_id, x, y, rotation, time, lifetime, color, data_float, None, None, None,
     )
 }
 
@@ -1098,6 +1104,34 @@ pub fn standard_effect_draw_plans_with_data_value_and_unit_hit_size(
     data_value: Option<&TypeValue>,
     resolved_unit_hit_size: Option<f32>,
 ) -> Vec<StandardEffectDrawPlan> {
+    standard_effect_draw_plans_with_data_value_and_resolved_context(
+        effect_id,
+        state_id,
+        x,
+        y,
+        rotation,
+        time,
+        lifetime,
+        color,
+        data_value,
+        resolved_unit_hit_size,
+        None,
+    )
+}
+
+pub fn standard_effect_draw_plans_with_data_value_and_resolved_context(
+    effect_id: Option<u16>,
+    state_id: i32,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    time: f32,
+    lifetime: f32,
+    color: DecalColor,
+    data_value: Option<&TypeValue>,
+    resolved_unit_hit_size: Option<f32>,
+    resolved_block_full_icon_size: Option<i32>,
+) -> Vec<StandardEffectDrawPlan> {
     let data_float = match data_value {
         Some(TypeValue::Float(value)) => Some(*value),
         _ => None,
@@ -1114,6 +1148,7 @@ pub fn standard_effect_draw_plans_with_data_value_and_unit_hit_size(
         data_float,
         data_value,
         resolved_unit_hit_size,
+        resolved_block_full_icon_size,
     )
 }
 
@@ -1129,6 +1164,7 @@ fn standard_effect_draw_plans_with_data(
     data_float: Option<f32>,
     data_value: Option<&TypeValue>,
     resolved_unit_hit_size: Option<f32>,
+    resolved_block_full_icon_size: Option<i32>,
 ) -> Vec<StandardEffectDrawPlan> {
     let Some(effect_id_i32) = effect_id.map(i32::from) else {
         return Vec::new();
@@ -1182,6 +1218,7 @@ fn standard_effect_draw_plans_with_data(
             | FX_TELEPORT_ID
             | FX_TELEPORT_OUT_ID
             | FX_LAUNCH_POD_ID
+            | FX_HEAL_BLOCK_FULL_ID
             | FX_SHIELD_BREAK_ID
             | FX_CORE_LAND_DUST_ID
             | FX_POD_LAND_DUST_ID
@@ -1616,6 +1653,59 @@ fn standard_effect_draw_plans_with_data(
         }
 
         return plans;
+    }
+
+    if effect_id_i32 == FX_HEAL_BLOCK_FULL_ID {
+        let Some(TypeValue::Content(block_ref)) = data_value else {
+            return Vec::new();
+        };
+        if block_ref.content_type != ContentType::Block {
+            return Vec::new();
+        }
+        let Some(block_size) = resolved_block_full_icon_size else {
+            return Vec::new();
+        };
+
+        let side = block_size.max(1) as f32 * TILE_SIZE as f32;
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::TexturedRect,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: fout,
+            radius: side,
+            stroke: side,
+            particles: Some(StandardEffectParticleSpec {
+                seed: block_ref.id as i32,
+                count: 1,
+                progress: None,
+                angle: Some(0.0),
+                angle_range: 0.0,
+                length: 0.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        }];
     }
 
     if matches!(effect_id_i32, FX_CORE_LAND_DUST_ID | FX_POD_LAND_DUST_ID) {
@@ -3643,7 +3733,7 @@ pub struct StandardEffectSquareRenderPrimitive {
     pub color: Option<DecalColor>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StandardEffectRectRenderPrimitive {
     pub kind: StandardEffectDrawKind,
     pub center: (f32, f32),
@@ -3652,7 +3742,7 @@ pub struct StandardEffectRectRenderPrimitive {
     pub rotation: f32,
     pub alpha: f32,
     pub color: Option<DecalColor>,
-    pub region: Option<&'static str>,
+    pub region: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3964,7 +4054,12 @@ impl StandardEffectDrawPlan {
                     alpha: self.alpha,
                     color,
                     region: if self.kind == StandardEffectDrawKind::TexturedRect {
-                        Some("casing")
+                        if self.effect_id == FX_HEAL_BLOCK_FULL_ID {
+                            self.particles
+                                .map(|particles| format!("block-fullIcon:{}", particles.seed))
+                        } else {
+                            Some("casing".to_string())
+                        }
                     } else {
                         None
                     },
@@ -8895,6 +8990,10 @@ mod tests {
             Some(FX_OVERDRIVE_WAVE_ID)
         );
         assert_eq!(standard_effect_id("healBlock"), Some(FX_HEAL_BLOCK_ID));
+        assert_eq!(
+            standard_effect_id("healBlockFull"),
+            Some(FX_HEAL_BLOCK_FULL_ID)
+        );
         assert_eq!(standard_effect_id("rotateBlock"), Some(FX_ROTATE_BLOCK_ID));
         assert_eq!(standard_effect_id("lightBlock"), Some(FX_LIGHT_BLOCK_ID));
         assert_eq!(
@@ -9413,6 +9512,10 @@ mod tests {
             50.0
         );
         assert_eq!(standard_effect(FX_HEAL_BLOCK_ID).unwrap().lifetime, 20.0);
+        assert_eq!(
+            standard_effect(FX_HEAL_BLOCK_FULL_ID).unwrap().lifetime,
+            20.0
+        );
         assert_eq!(standard_effect(FX_ROTATE_BLOCK_ID).unwrap().lifetime, 30.0);
         assert_eq!(standard_effect(FX_LIGHT_BLOCK_ID).unwrap().lifetime, 60.0);
         assert_eq!(
@@ -10612,6 +10715,60 @@ mod tests {
         assert_eq!(heal_block_square.len(), 1);
         assert_eq!(heal_block_square[0].stroke, 1.5);
 
+        let heal_block_full_data =
+            TypeValue::Content(crate::mindustry::io::ContentRef::new(ContentType::Block, 7));
+        let heal_block_full = standard_effect_draw_plans_with_data_value_and_resolved_context(
+            Some(FX_HEAL_BLOCK_FULL_ID as u16),
+            252,
+            3.0,
+            4.0,
+            0.0,
+            10.0,
+            20.0,
+            input_color,
+            Some(&heal_block_full_data),
+            None,
+            Some(2),
+        );
+        assert_eq!(heal_block_full.len(), 1);
+        assert_eq!(
+            heal_block_full[0].kind,
+            StandardEffectDrawKind::TexturedRect
+        );
+        assert_eq!(heal_block_full[0].input_color, Some(input_color));
+        assert_eq!(heal_block_full[0].alpha, 0.5);
+        assert_eq!(heal_block_full[0].radius, 16.0);
+        assert_eq!(heal_block_full[0].stroke, 16.0);
+        let heal_block_full_color = heal_block_full[0].resolved_draw_color().unwrap();
+        assert_eq!(heal_block_full_color.r, input_color.r);
+        assert_eq!(heal_block_full_color.g, input_color.g);
+        assert_eq!(heal_block_full_color.b, input_color.b);
+        assert_eq!(heal_block_full_color.a, input_color.a * 0.5);
+        let heal_block_full_rect = heal_block_full[0].rect_render_primitives_from_seed();
+        assert_eq!(heal_block_full_rect.len(), 1);
+        assert_eq!(
+            heal_block_full_rect[0].region.as_deref(),
+            Some("block-fullIcon:7")
+        );
+        assert_eq!(heal_block_full_rect[0].width, 16.0);
+        assert_eq!(heal_block_full_rect[0].height, 16.0);
+        assert!(
+            standard_effect_draw_plans_with_data_value_and_resolved_context(
+                Some(FX_HEAL_BLOCK_FULL_ID as u16),
+                252,
+                3.0,
+                4.0,
+                0.0,
+                10.0,
+                20.0,
+                input_color,
+                Some(&heal_block_full_data),
+                None,
+                None,
+            )
+            .is_empty()
+        );
+
         let rotate_block = standard_effect_draw_plan(
             Some(FX_ROTATE_BLOCK_ID as u16),
             253,
@@ -11650,7 +11807,7 @@ mod tests {
         assert_eq!(casing2[0].color_mid, Some("Color.lightGray"));
         assert_eq!(casing2_rect[0].width, 2.0);
         assert_eq!(casing2_rect[0].height, 3.0);
-        assert_eq!(casing2_rect[0].region, Some("casing"));
+        assert_eq!(casing2_rect[0].region.as_deref(), Some("casing"));
         assert_eq!(casing2_rect[0].rotation, 95.0);
 
         let casing3 = standard_effect_draw_plans(
@@ -11668,7 +11825,7 @@ mod tests {
         let casing3_rect = casing3[0].rect_render_primitives_from_seed();
         assert_eq!(casing3_rect[0].width, 2.5);
         assert_eq!(casing3_rect[0].height, 4.0);
-        assert_eq!(casing3_rect[0].region, Some("casing"));
+        assert_eq!(casing3_rect[0].region.as_deref(), Some("casing"));
 
         let casing4 = standard_effect_draw_plans(
             Some(FX_CASING4_ID as u16),
@@ -11705,7 +11862,7 @@ mod tests {
         assert_eq!(double_rects[1].rotation, 145.0);
         assert!(double_rects
             .iter()
-            .all(|rect| rect.region == Some("casing")));
+            .all(|rect| rect.region.as_deref() == Some("casing")));
 
         let casing3_double = standard_effect_draw_plans(
             Some(FX_CASING3_DOUBLE_ID as u16),

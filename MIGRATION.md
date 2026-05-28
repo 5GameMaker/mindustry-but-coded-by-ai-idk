@@ -8343,3 +8343,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 hit size 解析依赖 `client_unit_snapshot_entities` 中已有对应单位；如果 Java/Rust 联机中 effect 先于单位 snapshot 到达，仍会按 Java guard 返回空，后续可补 effect data 延迟解析或单位镜像缓存；
   - 目前以 seeded line particles + stroked circle primitives 表达 Java drawing calls，真实 renderer/backend 仍需继续接入；
   - `arcShieldBreak=257` 仍需要 `ShieldArcAbility` typed resolver / arc primitive；`legDestroy=263` 仍需要 `LegDestroyData` 与 textured line/region seam。
+
+### 12.262 Fx.healBlockFull
+
+- 2026-05-28：对照 `Fx.java:2781-2787`，迁移方块完整治疗贴图效果 `healBlockFull=252`，并把 Java `Block` effect data 映射到 Rust `TypeValue::Content(ContentType::Block, id)` 与 desktop content registry。
+- 本轮迁移：
+  - `healBlockFull=252`
+- Java 依据：
+  - `healBlockFull = new Effect(20, ...)`；
+  - 要求 `e.data instanceof Block block`，否则直接 return；
+  - `mixcol(e.color, 1f)`、`alpha(e.fout())`；
+  - `Draw.rect(block.fullIcon, e.x, e.y)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HEAL_BLOCK_FULL_ID=252`、lookup 与 metadata，lifetime `20.0`；
+    - 新增 `standard_effect_draw_plans_with_data_value_and_resolved_context(...)`，将 `unit hitSize` 和 `block fullIcon size` 统一作为 runtime 解析上下文传入 standard effect plan；
+    - `TypeValue::Content(ContentRef { content_type: Block, id }) + resolved_block_full_icon_size` 时输出 `TexturedRect` plan，side 为 `block.size * tilesize`，颜色使用输入 color，alpha 使用 `fout`；
+    - `StandardEffectRectRenderPrimitive.region` 从静态 `&str` 扩展为 `String`，并为 block full icon 生成 `block-fullIcon:<id>` 区域约定，保留 casing 的 `casing` 区域；
+    - core 测试覆盖 ID、metadata、缺 block size 返回空、纹理矩形尺寸/颜色/region。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出新的 resolved context 入口。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render(...)` 从 `content_loader.blocks()` 建立 `block_id -> block.size` 映射；
+    - 对 `EffectCallPacket2.data = TypeValue::Content(Block, id)` 解析 full icon side 后传入 core plan；
+    - 新增 `desktop_launcher_resolves_heal_block_full_icon_for_render`，验证本地 effect event → content registry → textured rect primitive → headless renderer stats 的完整接线。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plans_cover_casing_rects --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_resolves_heal_block_full_icon_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前 `block-fullIcon:<id>` 是 renderer-facing region 约定，真实图形 renderer 后续必须把该约定接到 atlas/content registry 的 `Block.fullIcon`；
+  - `arcShieldBreak=257` 仍需要 `ShieldArcAbility` typed resolver / arc primitive；
+  - `legDestroy=263` 仍需要 `LegDestroyData` 与 textured line/region seam。

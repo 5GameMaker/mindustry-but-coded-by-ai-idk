@@ -6339,3 +6339,43 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `arcShieldBreak=257` 需要 `ShieldArcAbility` typed data/resolver，建议先让能力实例/参数进入 effect data 或 runtime sidecar；
   3. `legDestroy=263` 需要 `LegDestroyData` 与 textured line/region seam，复杂度高于普通 shape 特效；
   4. 当前总迁移仍约 9% 左右，远未可玩；后续继续把每个 helper/plan 接入真实 runtime、renderer 与联机路径。
+
+---
+
+## 188. 最新闭环记录：Fx.healBlockFull
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `healBlockFull=252`，让 Java `Block` effect data 在 Rust 端通过 `TypeValue::Content(ContentType::Block, id)` 接入 desktop content registry，解析 `block.size` 后生成 `block.fullIcon` 纹理矩形 primitive。
+- 本轮迁移：
+  - `healBlockFull=252`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HEAL_BLOCK_FULL_ID=252`、lookup、metadata，lifetime `20.0`；
+    - 新增 `standard_effect_draw_plans_with_data_value_and_resolved_context(...)`，把 unit hitSize 与 block fullIcon size 统一作为 runtime 解析上下文传入；
+    - `TypeValue::Content(Block, id) + block_size` 时输出 `TexturedRect`，side 为 `block.size * TILE_SIZE`，颜色走输入 color，alpha 走 `fout`；缺少 block data 或 block size 时返回空，保持 Java guard 语义；
+    - `StandardEffectRectRenderPrimitive.region` 改为 `Option<String>`，新增 `block-fullIcon:<id>` region 约定，同时保持 casing region 为 `casing`；
+    - core 测试覆盖 ID、metadata、纹理矩形尺寸/颜色/region、缺 resolver 返回空，并回归 casing rect region。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出新的 resolved context 入口。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render(...)` 从 `content_loader.blocks()` 建立 `block_id -> block.size` 映射；
+    - 本地 standard effect event 若带 `TypeValue::Content(Block, id)`，会把对应 block size 传入 core plan；
+    - 新增 `desktop_launcher_resolves_heal_block_full_icon_for_render`，验证 effect event、content registry、textured rect primitive 与 headless renderer stats 的完整接线。
+  - `MIGRATION.md`
+    - 新增 `12.262` 节。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plans_cover_casing_rects --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_resolves_heal_block_full_icon_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 `arcShieldBreak=257`：需要为 `ShieldArcAbility` 建 typed resolver，并补 arc primitive/desktop stats；
+  2. 或继续 `legDestroy=263`：需要 `LegDestroyData` effect data seam 与 textured line primitive；
+  3. 当前 `block-fullIcon:<id>` 仍只是 renderer-facing region 约定，真实图形 renderer 后续必须把它解析到 content atlas 的 `Block.fullIcon`；
+  4. 当前总迁移仍约 9% 左右，远未可玩，不能把 headless primitive seam 当成最终渲染完成。

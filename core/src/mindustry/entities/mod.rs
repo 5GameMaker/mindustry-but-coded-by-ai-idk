@@ -374,6 +374,7 @@ pub use effect::{
     shake_intensity, standard_effect, standard_effect_by_name, standard_effect_color_symbol,
     standard_effect_draw_plan, standard_effect_draw_plans,
     standard_effect_draw_plans_with_data_float, standard_effect_draw_plans_with_data_value,
+    standard_effect_draw_plans_with_data_value_and_resolved_context,
     standard_effect_draw_plans_with_data_value_and_unit_hit_size, standard_effect_id,
     standard_effect_render_lifetime, Effect, EffectContainer, EffectCreateContext,
     EffectCreatePlan, EffectInterp, EffectParent, EffectRegistry, EffectRenderParams,
