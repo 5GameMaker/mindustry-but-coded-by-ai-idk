@@ -8200,3 +8200,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `shieldBreak` 的 `ForceFieldAbility` data 分支仍需 typed data resolver；
   - 真实 renderer/backend 仍未接入，当前仍是 headless line primitive seam。
+
+### 12.258 Fx.chainLightning/chainEmp
+
+- 2026-05-28：对照 `Fx.java:2871-2943`，迁移依赖目标位置数据的链式闪电效果，并把标准 effect seam 从仅支持 `Float` data 扩展到可接收完整 `TypeValue`。
+- 本轮迁移：
+  - `chainLightning=261`
+  - `chainEmp=262`
+- Java 依据：
+  - 两者都要求 `e.data instanceof Position`，否则直接 return；
+  - `chainLightning = new Effect(20f, 300f, ...)`，stroke `2.5f * e.fout()`；
+  - `chainEmp = new Effect(30f, 300f, ...)`，stroke `4f * e.fout()`；
+  - 二者都从起点到目标点按 `range=6` 切分，非末端点加入固定 seed 的随机方向抖动，最后用 `Lines.beginLine()/linePoint()/endLine()` 绘制折线。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_CHAIN_LIGHTNING_ID=261`、`FX_CHAIN_EMP_ID=262`、lookup 与 metadata，clip `300`，`follow_parent=false`、`rot_with_parent=false`；
+    - 新增 `standard_effect_draw_plans_with_data_value(...)`，保留原 `standard_effect_draw_plans_with_data_float(...)` 兼容 wrapper；
+    - `TypeValue::Vec2` 作为 Java `Position` 的当前 wire-level 等价输入；
+    - 将 chain polyline 拆成多段 deterministic `LineAngle` plans，颜色 `Color.white -> Input.color`，stroke 按 Java 公式。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `standard_effect_draw_plans_with_data_value(...)`。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render(...)` 直接传入 `EffectRenderInput.data`，不再只抽取 `Float`；
+    - 新增 `desktop_launcher_flattens_chain_effect_vec2_data_lines_for_render`，验证 `chainLightning` / `chainEmp` 的 `TypeValue::Vec2` 数据展开为 10 条 line primitives。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_chain_effect_vec2_data_lines_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前使用 `TypeValue::Vec2` 覆盖 Java `Position` 的网络/运行时等价路径；其他 `Position` 实现若进入 effect data，后续仍需 resolver；
+  - 当前以多段 `LineAngle` plans 表达 polyline，真实 renderer/backend 尚未接入专用 polyline primitive。

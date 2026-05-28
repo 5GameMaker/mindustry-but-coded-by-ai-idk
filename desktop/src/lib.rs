@@ -15,7 +15,7 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, standard_effect, standard_effect_draw_plans_with_data_float,
+    entity_class_kind, standard_effect, standard_effect_draw_plans_with_data_value,
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
     PlayerUnitSwitchContext, StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
@@ -307,11 +307,7 @@ impl DesktopLauncher {
     ) -> Vec<StandardEffectDrawPlan> {
         let mut plans = Vec::new();
         self.draw_local_effect_states_for_render(|input| {
-            let data_float = match input.data {
-                TypeValue::Float(value) => Some(*value),
-                _ => None,
-            };
-            plans.extend(standard_effect_draw_plans_with_data_float(
+            plans.extend(standard_effect_draw_plans_with_data_value(
                 input.effect_id,
                 input.id,
                 input.x,
@@ -320,7 +316,7 @@ impl DesktopLauncher {
                 input.time,
                 input.lifetime,
                 input.color,
-                data_float,
+                Some(input.data),
             ));
             standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
         });
@@ -3814,6 +3810,53 @@ mod tests {
         assert_eq!(stats.square_primitives, 0);
         assert_eq!(stats.rect_primitives, 0);
         assert_eq!(stats.line_primitives, 6);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_flattens_chain_effect_vec2_data_lines_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        for (name, y) in [("chainLightning", 32.0_f32), ("chainEmp", 48.0_f32)] {
+            launcher
+                .runtime
+                .client_local_effect_events
+                .push(EffectCallPacket2 {
+                    effect: EffectCallPacket {
+                        effect_id: standard_effect_id(name).unwrap() as u16,
+                        x: 24.0,
+                        y,
+                        rotation: 0.0,
+                        color: type_io::RgbaColor::new(0x336699ff_i32),
+                    },
+                    data: TypeValue::Vec2(IoVec2::new(54.0, y)),
+                });
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 10);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_rect_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 10);
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let line = &launcher.standard_local_effect_line_primitives[0];
+        assert!(line.length > 0.0);
+        assert!(line.stroke > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 10);
+        assert_eq!(stats.circle_primitives, 0);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.rect_primitives, 0);
+        assert_eq!(stats.line_primitives, 10);
         assert_eq!(stats.triangle_primitives, 0);
         assert_eq!(stats.light_primitives, 0);
         assert_eq!(renderer.last_stats, stats);

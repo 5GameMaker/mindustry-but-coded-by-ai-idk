@@ -6192,3 +6192,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `shieldBreak` 还缺 `ForceFieldAbility` data 分支，后续应新增 typed data resolver；
   2. 继续 246–265 段剩余缺口时，优先考虑 `Polyline/Path` primitive 覆盖 chain/debug line；
   3. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。
+
+---
+
+## 184. 最新闭环记录：Fx.chainLightning/chainEmp
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `chainLightning=261` / `chainEmp=262`，同时把标准 effect data seam 从 Float-only 扩展到完整 `TypeValue`，为后续数据驱动 Fx 铺路。
+- 本轮迁移：
+  - `chainLightning=261`
+  - `chainEmp=262`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_CHAIN_LIGHTNING_ID` / `FX_CHAIN_EMP_ID`、lookup、metadata；
+    - 新增 `standard_effect_draw_plans_with_data_value(...)`，原 `standard_effect_draw_plans_with_data_float(...)` 保持兼容；
+    - `TypeValue::Vec2` 暂作 Java `Position` 等价目标点；
+    - chain 折线拆为多段 `LineAngle` plans，保留 Java `range=6`、seeded jitter、stroke `2.5*fout` / `4*fout`、颜色 `Color.white -> Input.color`。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `standard_effect_draw_plans_with_data_value(...)`。
+  - `desktop/src/lib.rs`
+    - 标准 effect plan 收集改为传入完整 `EffectRenderInput.data`；
+    - 新增 `desktop_launcher_flattens_chain_effect_vec2_data_lines_for_render`，验证 2 个 event 展开 10 条 line primitives。
+  - `MIGRATION.md`
+    - 新增 `12.258` 节。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_chain_effect_vec2_data_lines_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续用 `TypeValue` seam 攻克 `debugLine=264`（`Vec2Array`）和 `debugRect=265`（当前可能需要新增 Rect TypeValue）；
+  2. `unitShieldBreak=260` 需要从 Unit id resolve hitSize，适合下一步补 typed resolver；
+  3. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。
