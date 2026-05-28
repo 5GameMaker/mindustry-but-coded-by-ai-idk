@@ -4,6 +4,10 @@
 /// wall caches, then renders flyers and a dark fullscreen overlay.  This module
 /// keeps generation and render planning in `mindustry-core`; concrete backends
 /// are expected to translate `MenuRenderCommand` into GPU/cache calls.
+use super::{
+    RenderCamera, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
+    RenderRect, RenderViewport,
+};
 
 pub const MENU_DARKNESS: f32 = 0.3;
 pub const MENU_TILE_SIZE: f32 = 8.0;
@@ -131,6 +135,56 @@ pub enum MenuRenderCommand {
     },
 }
 
+impl MenuRenderCommand {
+    pub fn to_render_command(&self) -> RenderCommand {
+        self.clone().into_render_command()
+    }
+
+    pub fn into_render_command(self) -> RenderCommand {
+        match self {
+            Self::DrawCache { cache_id, label } => RenderCommand::custom(
+                "menu-cache",
+                vec![
+                    RenderProperty::new("cache_id", cache_id.to_string()),
+                    RenderProperty::new("label", label),
+                ],
+            ),
+            Self::DrawShadowTexture {
+                x,
+                y,
+                width,
+                height,
+            } => RenderCommand::custom(
+                "menu-shadow-texture",
+                vec![
+                    RenderProperty::new("x", x.to_string()),
+                    RenderProperty::new("y", y.to_string()),
+                    RenderProperty::new("width", width.to_string()),
+                    RenderProperty::new("height", height.to_string()),
+                ],
+            ),
+            Self::DrawFlyer(flyer) => RenderCommand::custom(
+                "menu-flyer",
+                vec![
+                    RenderProperty::new("x", flyer.x.to_string()),
+                    RenderProperty::new("y", flyer.y.to_string()),
+                    RenderProperty::new("rotation", flyer.rotation.to_string()),
+                    RenderProperty::new("unit_name", flyer.unit_name),
+                ],
+            ),
+            Self::DrawDarkness {
+                alpha,
+                width,
+                height,
+            } => RenderCommand::fill_rect(
+                RenderRect::new(0.0, 0.0, width, height),
+                [0.0, 0.0, 0.0, alpha],
+                0.0,
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MenuFramePlan {
     pub camera_x: f32,
@@ -139,6 +193,58 @@ pub struct MenuFramePlan {
     pub camera_height: f32,
     pub scaling: f32,
     pub commands: Vec<MenuRenderCommand>,
+}
+
+impl MenuFramePlan {
+    pub fn to_render_pass(&self) -> Option<RenderPass> {
+        if self.commands.is_empty() {
+            return None;
+        }
+
+        let viewport = RenderViewport::new(
+            0.0,
+            0.0,
+            self.camera_width * self.scaling,
+            self.camera_height * self.scaling,
+        );
+        let camera = RenderCamera::new(RenderPoint::new(self.camera_x, self.camera_y), viewport)
+            .with_zoom(self.scaling);
+
+        let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
+            .with_viewport(viewport)
+            .with_camera(camera);
+        pass.extend(
+            self.commands
+                .iter()
+                .map(MenuRenderCommand::to_render_command),
+        );
+        Some(pass)
+    }
+
+    pub fn into_render_pass(self) -> Option<RenderPass> {
+        if self.commands.is_empty() {
+            return None;
+        }
+
+        let viewport = RenderViewport::new(
+            0.0,
+            0.0,
+            self.camera_width * self.scaling,
+            self.camera_height * self.scaling,
+        );
+        let camera = RenderCamera::new(RenderPoint::new(self.camera_x, self.camera_y), viewport)
+            .with_zoom(self.scaling);
+
+        let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
+            .with_viewport(viewport)
+            .with_camera(camera);
+        pass.extend(
+            self.commands
+                .into_iter()
+                .map(MenuRenderCommand::into_render_command),
+        );
+        Some(pass)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -600,5 +706,73 @@ mod tests {
             }
         ));
         assert_eq!(plan.commands.len(), 6);
+    }
+
+    #[test]
+    fn menu_frame_plan_to_render_pass_preserves_menu_command_order() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 7));
+        state.flyer_count = 1;
+
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1920.0,
+            graphics_height: 1080.0,
+            scl4: 4.0,
+            delta: 1.0,
+        });
+
+        let borrowed = plan
+            .to_render_pass()
+            .expect("menu plan should produce a pass");
+        let owned = plan
+            .clone()
+            .into_render_pass()
+            .expect("menu plan should produce a pass");
+
+        assert_eq!(borrowed, owned);
+        assert_eq!(borrowed.kind, RenderPassKind::Custom("menu".to_string()));
+        assert_eq!(
+            borrowed.order,
+            RenderPassKind::Custom("menu".to_string()).default_order()
+        );
+        assert_eq!(
+            borrowed.viewport,
+            Some(RenderViewport::new(0.0, 0.0, 1920.0, 1080.0))
+        );
+        assert_eq!(
+            borrowed.camera,
+            Some(
+                RenderCamera::new(
+                    RenderPoint::new(400.0, 200.0),
+                    RenderViewport::new(0.0, 0.0, 1920.0, 1080.0),
+                )
+                .with_zoom(4.0)
+            )
+        );
+        assert_eq!(borrowed.commands.len(), 5);
+        assert_eq!(menu_command_tag(&borrowed.commands[0]), "menu-cache");
+        assert_eq!(
+            menu_command_tag(&borrowed.commands[1]),
+            "menu-shadow-texture"
+        );
+        assert_eq!(menu_command_tag(&borrowed.commands[2]), "menu-cache");
+        assert_eq!(menu_command_tag(&borrowed.commands[3]), "menu-flyer");
+        assert_eq!(menu_command_tag(&borrowed.commands[4]), "fill-rect");
+
+        match &borrowed.commands[4] {
+            RenderCommand::FillRect { rect, color, layer } => {
+                assert_eq!(*rect, RenderRect::new(0.0, 0.0, 1920.0, 1080.0));
+                assert_eq!(*color, [0.0, 0.0, 0.0, MENU_DARKNESS]);
+                assert_eq!(*layer, 0.0);
+            }
+            other => panic!("unexpected darkness command: {other:?}"),
+        }
+    }
+
+    fn menu_command_tag(command: &RenderCommand) -> &str {
+        match command {
+            RenderCommand::Custom { name, .. } => name.as_str(),
+            RenderCommand::FillRect { .. } => "fill-rect",
+            other => panic!("unexpected menu render command: {other:?}"),
+        }
     }
 }
