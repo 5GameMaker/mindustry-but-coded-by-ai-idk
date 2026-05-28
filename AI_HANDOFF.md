@@ -7411,3 +7411,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 继续检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
   3. flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
   4. 当前总迁移约 12%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 219. 最新闭环记录：Server death bullet lifecycle hidden snapshot smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：修补 `server_bullets` 只生成不同步生命周期的风险，让死亡发弹 bullet 能按 tick 计时/运动并在 lifetime 到期后通过 hidden snapshot 清理客户端实体。
+- Rust 主改动：
+  - `core/src/mindustry/core/content_loader.rs`
+    - 新增 `bullet_by_id(...)`，供 server bullet tick 由 `bullet_type_id` 反查 content spec。
+  - `server/src/lib.rs`
+    - 新增 `tick_server_bullets(delta_ticks)`；
+    - server update 在 death sweep 前 tick 已存在 `server_bullets`；
+    - tick 时映射 content bullet 的 speed/drag/collide 最小字段到 runtime `BulletSpec`，调用 `BulletComp::step_motion(...)`；
+    - `time >= lifetime` 时移除 server bullet，并广播 `HiddenSnapshotCallPacket`；
+    - 新增 `server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot`。
+  - `MIGRATION.md`
+    - 新增 `12.293`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-server server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_spawns_death_bullet_snapshot_when_unit_shoots_on_death --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 完整 Java bullet runtime：`BulletType.update/hit/despawn`、碰撞、命中、伤害、frag、interval、trail/sound；
+  2. 统一 content bullet spec 与 entity runtime bullet spec，避免手工字段映射漂移；
+  3. 继续检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
+  4. 当前总迁移约 12%，远未可玩，goal 绝不能标记 complete。

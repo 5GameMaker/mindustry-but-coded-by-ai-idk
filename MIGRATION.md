@@ -9304,3 +9304,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 需要继续检查 Java/Rust 混合联机路径下本地 destroy bullet 与服务端 snapshot bullet 的重复表现风险；
   - flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
   - 当前总体迁移约 12%，远未可玩。
+
+### 12.293 Server death bullet lifecycle hidden snapshot smoke
+
+- 2026-05-28：继续把上一节 server death bullet 从“一次性 EntitySnapshot 实体”推进到 server runtime 生命周期：每 tick 推进 `server_bullets` 时间/运动，过期后从服务端实体表移除，并通过 `HiddenSnapshotCallPacket` 通知客户端隐藏。
+- Java 对照意图：
+  - 原版 bullet 是实体组中的 runtime entity，创建后会随 update 推进并在 lifetime 结束时移除；
+  - Rust 目前仍未完整接入碰撞/命中/伤害，但不能让死亡发射 bullet 永久残留。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/content_loader.rs`
+    - 新增 `bullet_by_id(...)`，供 server tick 由 bullet content id 反查 spec。
+  - `server/src/lib.rs`
+    - 新增 `tick_server_bullets(delta_ticks)`；
+    - server update 在死亡处理前 tick 已存在 bullet，按 content bullet spec 的 speed/drag/collide 字段驱动 `BulletComp::step_motion(...)`；
+    - bullet `time >= lifetime` 后从 `server_bullets` 移除并广播 `HiddenSnapshotCallPacket`；
+    - 新增 `server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot` 覆盖死亡 bullet 过期隐藏。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-server server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_spawns_death_bullet_snapshot_when_unit_shoots_on_death --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - bullet runtime 仍缺完整 Java `BulletType.update/hit/despawn`、碰撞、命中、伤害、frag、interval、trail/sound 等；
+  - motion spec 目前只映射最小 speed/drag/collide 字段，后续应统一 content bullet spec 与 entity bullet runtime spec；
+  - 需要继续检查 Java/Rust 混合联机路径下本地 destroy bullet 与服务端 snapshot bullet 的重复表现风险；
+  - 当前总体迁移约 12%，远未可玩。

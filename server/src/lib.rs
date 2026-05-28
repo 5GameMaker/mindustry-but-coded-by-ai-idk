@@ -22,8 +22,8 @@ use mindustry_core::mindustry::entities::{
     bullet::BulletType,
     comp::{
         BuildingComp, BuildingTetherAction, BuildingTetherComp, BuildingTetherRef, BulletComp,
-        CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp, PlayerUnitState, UnitComp,
-        UnitControllerState,
+        BulletSpec, CargoAiRuntimeState, PayloadKind, PayloadState, PlayerComp, PlayerUnitState,
+        UnitComp, UnitControllerState,
     },
     entity_class_id, standard_effect_id, units_can_create, EnergyFieldAction, EnergyFieldTarget,
     FireCreateResult, FireRules, FireTile, Fires, LiquidExplodeDepositPlan, PuddleDepositContext,
@@ -320,6 +320,9 @@ impl ServerLauncher {
                 self.network_error = Some(error.to_string());
             }
             if let Err(error) = self.tick_server_puddles(1.0) {
+                self.network_error = Some(error.to_string());
+            }
+            if let Err(error) = self.tick_server_bullets(1.0) {
                 self.network_error = Some(error.to_string());
             }
             self.tick_server_force_field_abilities(1.0);
@@ -2525,6 +2528,59 @@ impl ServerLauncher {
             spawned += 1;
         }
         Ok(spawned)
+    }
+
+    fn tick_server_bullets(&mut self, delta_ticks: f32) -> io::Result<usize> {
+        let mut updates = 0;
+        let mut removed_ids = Vec::new();
+        let bullet_ids: Vec<i32> = self.server_bullets.keys().copied().collect();
+
+        for bullet_id in bullet_ids {
+            let Some(bullet) = self.server_bullets.get_mut(&bullet_id) else {
+                continue;
+            };
+            if bullet.removed {
+                removed_ids.push(bullet_id);
+                continue;
+            }
+            let Some(bullet_content) = self.content_loader.bullet_by_id(bullet.bullet_type_id)
+            else {
+                continue;
+            };
+
+            bullet.time = (bullet.time + delta_ticks.max(0.0)).min(bullet.lifetime);
+            if bullet.time >= bullet.lifetime {
+                bullet.removed = true;
+                removed_ids.push(bullet_id);
+                continue;
+            }
+            let motion_spec = BulletSpec {
+                damage: bullet_content.spec.damage,
+                speed: bullet_content.spec.speed,
+                hit_size: bullet_content.spec.hit_size,
+                draw_size: bullet_content.spec.draw_size,
+                drag: bullet_content.spec.drag,
+                collides: bullet_content.spec.collides,
+                collides_air: bullet_content.spec.collides_air,
+                collides_ground: bullet_content.spec.collides_ground,
+                collides_tiles: bullet_content.spec.collides_tiles,
+                ..BulletSpec::default()
+            };
+            bullet.step_motion(delta_ticks, &motion_spec);
+            updates += 1;
+        }
+
+        removed_ids.sort_unstable();
+        removed_ids.dedup();
+        for bullet_id in &removed_ids {
+            self.server_bullets.remove(bullet_id);
+        }
+        if !removed_ids.is_empty() {
+            self.broadcast_server_hidden_snapshot(&removed_ids)?;
+            updates += removed_ids.len();
+        }
+
+        Ok(updates)
     }
 
     fn apply_server_liquid_explode_deposits(
@@ -7056,6 +7112,47 @@ mod tests {
         assert!(!launcher.server_units.contains_key(&93));
         assert!(launcher.server_bullets.is_empty());
         assert!(launcher.runtime.unit_shoot_on_death_events.is_empty());
+    }
+
+    #[test]
+    fn server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6598).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut weapon = Weapon::new("death-gun");
+        weapon.bullet = "placeholder".into();
+        weapon.shoot_on_death = true;
+        let mut unit_type = UnitType::new(9103, "expiring-death-gunner");
+        unit_type.weapons.push(weapon);
+        let mut unit = UnitComp::new(94, unit_type, TeamId(2));
+        unit.health.kill();
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+        let (&server_bullet_id, bullet) = launcher.server_bullets.iter_mut().next().unwrap();
+        bullet.lifetime = 1.0;
+        sent.lock().unwrap().clear();
+
+        launcher.update();
+
+        assert!(launcher.server_bullets.is_empty());
+        let sent_packets = sent.lock().unwrap();
+        assert!(sent_packets
+            .iter()
+            .any(|(_connection_id, packet, reliable)| {
+                !*reliable
+                    && matches!(
+                        packet,
+                        PacketKind::HiddenSnapshotCallPacket(packet)
+                            if packet.ids.contains(&server_bullet_id)
+                    )
+            }));
     }
 
     #[test]
