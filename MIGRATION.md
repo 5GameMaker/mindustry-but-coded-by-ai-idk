@@ -9899,3 +9899,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `splashDamage` / `pierce` / `pierceBuilding` runtime 仍待 world collision 系统补全；
   - 下一步建议 `scepter`，处理主武器、两个 mount、`intervalBullet` 与共享 `smallBullet`；
   - 当前总体迁移约 12.95%，远未可玩。
+
+### 12.312 UnitTypes scepter multi-weapon intervalBullet content seam
+
+- 2026-05-28：完成本批最复杂的 `scepter` content 回填：主武器 `scepter-weapon`、两个 `scepter-mount`、共享 `smallBullet` 与主弹的 `intervalBullet`。本闭环补出 `BulletSpec.shrink_interp` 与 `trail_spread` 记录位，避免丢失 `Interp.slope` 与 `trailSpread`。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:189-287`
+  - shared `smallBullet`：`new BasicBulletType(12f, 20)`，`width = 4.5f`、`height = 35f`、`lifetime = (26f * tilesize) / 12f`、`shrinkX = 0.6f`、`shrinkY = 0f`、`shrinkInterp = Interp.slope`、`trailChance = 10f / 60f`、`trailColor = Pal.bulletYellowBack`、`trailEffect = Fx.bulletSparkSmokeTrailSmall`、`trailSpread = 12f`、`shootEffect = Fx.shootScepterSecondary`、`hitEffect = Fx.hitScepterSecondary`
+  - main weapon：`new Weapon("scepter-weapon")`，`top = false`、`y = 1f`、`x = 16f`、`shootY = 8f`、`reload = 45f`、`recoil = 5f`、`shake = 2f`、`ejectEffect = Fx.casing3`、`shootSound = Sounds.shootScepter`、`shootSoundVolume = 0.95f`、`inaccuracy = 3f`、`shoot.shots = 3`、`shoot.shotDelay = 4f`
+  - main bullet：`new BasicBulletType(8f, 70)`，`width = 11f`、`height = 20f`、`lifetime = 27f`、`shrinkX = 0.4f`、`shrinkY = 0f`、`shootEffect = Fx.shootBig`、`hitEffect = Fx.blastExplosion`、`trailParam = 0.5f`、`lightning = 2`、`lightningLength = 6`、`lightningColor = Pal.surge`、`lightningDamage = 20`、`despawnSound = Sounds.shockBullet`、`bulletInterval = 4f`
+  - main interval bullet：`new LightningBulletType()`，`damage = 5f`、`lightningLength = 3`、`lightningLengthRand = 4`、`lightningColor = Pal.surge`、`hitEffect = Fx.hitLancerLow`
+  - mount weapons：两个 `new Weapon("scepter-mount")`，分别 `reload = 12f, y = 6f` 与 `reload = 15f, y = -7f`，共同 `x = 8.5f`、`rotate = true`、`ejectEffect = Fx.casing1`、`bullet = smallBullet`、`shootSound = Sounds.shootScepterSecondary`、`rotateSpeed = 3f`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `shrink_interp`（默认 `"linear"`）与 `trail_spread`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `scepter_small_bullet`；
+    - 新增 `scepter_bullet`，其 `interval_bullet` 保存嵌套 `Lightning` `BulletSpec`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `scepter_small_bullet_matches_java_shared_mount_profile` 与 `scepter_bullet_matches_java_interval_lightning_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `scepter` 现在注册 3 个 weapon：`scepter-weapon` + 两个 `scepter-mount`；
+    - 两个 mount 共同引用 `bullet = "scepter_small_bullet"`；
+    - 新增 `scepter_weapons_use_main_and_shared_mount_bullets`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core scepter_small_bullet_matches_java_shared_mount_profile --lib`
+  - `cargo test -p mindustry-core scepter_bullet_matches_java_interval_lightning_profile --lib`
+  - `cargo test -p mindustry-core scepter_weapons_use_main_and_shared_mount_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `interval_bullet` 与 shared bullet 已在 content tree/registry 中存在，但真实 interval spawn、lightning、trail 和多 mount aiming runtime 仍未完整实现；
+  - `shrink_interp/trail_spread` 目前为 content 记录位，客户端绘制路径尚未消费；
+  - 下一步可继续 Java UnitTypes 后续单位（如 `vela/corvus/crawler/atrax`）或转向补 bullet runtime；
+  - 当前总体迁移约 13.0%，远未可玩。

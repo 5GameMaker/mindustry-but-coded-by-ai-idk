@@ -163,6 +163,44 @@ pub fn load() -> Vec<BulletContent> {
     reign_shell.despawn_sound = "explosion".into();
     reign_shell.frag_bullet = Some(Box::new(reign_frag));
 
+    let mut scepter_small_bullet = basic_bullet(12.0, 20.0);
+    scepter_small_bullet.width = 4.5;
+    scepter_small_bullet.height = 35.0;
+    scepter_small_bullet.lifetime = (26.0 * 8.0) / 12.0;
+    scepter_small_bullet.shrink_x = 0.6;
+    scepter_small_bullet.shrink_y = 0.0;
+    scepter_small_bullet.shrink_interp = "slope".into();
+    scepter_small_bullet.trail_chance = 10.0 / 60.0;
+    scepter_small_bullet.trail_color = "bulletYellowBack".into();
+    scepter_small_bullet.trail_effect = "bulletSparkSmokeTrailSmall".into();
+    scepter_small_bullet.trail_spread = 12.0;
+    scepter_small_bullet.shoot_effect = "shootScepterSecondary".into();
+    scepter_small_bullet.hit_effect = "hitScepterSecondary".into();
+
+    let mut scepter_interval = lightning_bullet();
+    scepter_interval.damage = 5.0;
+    scepter_interval.lightning_length = 3;
+    scepter_interval.lightning_length_rand = 4;
+    scepter_interval.lightning_color = "surge".into();
+    scepter_interval.hit_effect = "hitLancerLow".into();
+
+    let mut scepter_bullet = basic_bullet(8.0, 70.0);
+    scepter_bullet.width = 11.0;
+    scepter_bullet.height = 20.0;
+    scepter_bullet.lifetime = 27.0;
+    scepter_bullet.shrink_x = 0.4;
+    scepter_bullet.shrink_y = 0.0;
+    scepter_bullet.shoot_effect = "shootBig".into();
+    scepter_bullet.hit_effect = "blastExplosion".into();
+    scepter_bullet.trail_param = 0.5;
+    scepter_bullet.lightning = 2;
+    scepter_bullet.lightning_length = 6;
+    scepter_bullet.lightning_color = "surge".into();
+    scepter_bullet.lightning_damage = 20.0;
+    scepter_bullet.despawn_sound = "shockBullet".into();
+    scepter_bullet.bullet_interval = 4.0;
+    scepter_bullet.interval_bullet = Some(Box::new(scepter_interval));
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -211,6 +249,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "fortress_artillery", fortress_artillery),
         make_bullet(&mut next_id, "pulsar_heal_lightning", pulsar_heal_lightning),
         make_bullet(&mut next_id, "reign_shell", reign_shell),
+        make_bullet(&mut next_id, "scepter_small_bullet", scepter_small_bullet),
+        make_bullet(&mut next_id, "scepter_bullet", scepter_bullet),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -348,6 +388,8 @@ mod tests {
                 "fortress_artillery",
                 "pulsar_heal_lightning",
                 "reign_shell",
+                "scepter_small_bullet",
+                "scepter_bullet",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -616,6 +658,63 @@ mod tests {
         assert_eq!(frag.hit_effect, "flakExplosion");
         assert_eq!(frag.splash_damage, 15.0);
         assert_eq!(frag.splash_damage_radius, 10.0);
+    }
+
+    #[test]
+    fn scepter_small_bullet_matches_java_shared_mount_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "scepter_small_bullet").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Basic);
+        assert_eq!(bullet.speed, 12.0);
+        assert_eq!(bullet.damage, 20.0);
+        assert_eq!(bullet.width, 4.5);
+        assert_eq!(bullet.height, 35.0);
+        assert!((bullet.lifetime - ((26.0 * 8.0) / 12.0)).abs() < 0.0001);
+        assert_eq!(bullet.shrink_x, 0.6);
+        assert_eq!(bullet.shrink_y, 0.0);
+        assert_eq!(bullet.shrink_interp, "slope");
+        assert!((bullet.trail_chance - (10.0 / 60.0)).abs() < 0.0001);
+        assert_eq!(bullet.trail_color, "bulletYellowBack");
+        assert_eq!(bullet.trail_effect, "bulletSparkSmokeTrailSmall");
+        assert_eq!(bullet.trail_spread, 12.0);
+        assert_eq!(bullet.shoot_effect, "shootScepterSecondary");
+        assert_eq!(bullet.hit_effect, "hitScepterSecondary");
+    }
+
+    #[test]
+    fn scepter_bullet_matches_java_interval_lightning_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "scepter_bullet").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Basic);
+        assert_eq!(bullet.speed, 8.0);
+        assert_eq!(bullet.damage, 70.0);
+        assert_eq!(bullet.width, 11.0);
+        assert_eq!(bullet.height, 20.0);
+        assert_eq!(bullet.lifetime, 27.0);
+        assert_eq!(bullet.shrink_x, 0.4);
+        assert_eq!(bullet.shrink_y, 0.0);
+        assert_eq!(bullet.shoot_effect, "shootBig");
+        assert_eq!(bullet.hit_effect, "blastExplosion");
+        assert_eq!(bullet.trail_param, 0.5);
+        assert_eq!(bullet.lightning, 2);
+        assert_eq!(bullet.lightning_length, 6);
+        assert_eq!(bullet.lightning_color, "surge");
+        assert_eq!(bullet.lightning_damage, 20.0);
+        assert_eq!(bullet.despawn_sound, "shockBullet");
+        assert_eq!(bullet.bullet_interval, 4.0);
+
+        let interval = bullet
+            .interval_bullet
+            .as_deref()
+            .expect("scepter bullet should have intervalBullet");
+        assert_eq!(interval.kind, BulletKind::Lightning);
+        assert_eq!(interval.damage, 5.0);
+        assert_eq!(interval.lightning_length, 3);
+        assert_eq!(interval.lightning_length_rand, 4);
+        assert_eq!(interval.lightning_color, "surge");
+        assert_eq!(interval.hit_effect, "hitLancerLow");
     }
 
     #[test]

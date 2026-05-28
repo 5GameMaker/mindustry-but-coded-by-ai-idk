@@ -8070,3 +8070,45 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `frag_bullet` 还只是 content tree，真实 frag spawn runtime 尚未接入；
   3. `splashDamage` / `pierce` / `pierceBuilding` runtime 仍待 world collision 系统补全；
   4. 当前总迁移约 12.95%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 238. 最新闭环记录：UnitTypes scepter multi-weapon intervalBullet content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `scepter` 的主武器、两个 mount、共享 `smallBullet` 与主弹 `intervalBullet` 回填进 Rust content registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:189-287`
+  - shared `smallBullet`：`BasicBulletType(12, 20)`，`width=4.5`、`height=35`、`lifetime=(26*8)/12`、`shrinkX=0.6`、`shrinkY=0`、`shrinkInterp=Interp.slope`、`trailChance=10/60`、`trailColor=Pal.bulletYellowBack`、`trailEffect=Fx.bulletSparkSmokeTrailSmall`、`trailSpread=12`、`shootEffect=Fx.shootScepterSecondary`、`hitEffect=Fx.hitScepterSecondary`
+  - main weapon：`scepter-weapon`，`top=false`、`y=1`、`x=16`、`shootY=8`、`reload=45`、`recoil=5`、`shake=2`、`ejectEffect=Fx.casing3`、`shootSound=Sounds.shootScepter`、`shootSoundVolume=0.95`、`inaccuracy=3`、`shoot.shots=3`、`shoot.shotDelay=4`
+  - main bullet：`BasicBulletType(8, 70)`，带 `lightning=2` 与 `intervalBullet=LightningBulletType(damage=5, lightningLength=3, lightningLengthRand=4, lightningColor=Pal.surge, hitEffect=Fx.hitLancerLow)`
+  - mount weapons：两个 `scepter-mount`，分别 `reload=12,y=6` 与 `reload=15,y=-7`，共同引用 shared small bullet。
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `shrink_interp` / `trail_spread`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `scepter_small_bullet`；
+    - 新增 `scepter_bullet`，其 `interval_bullet` 保存嵌套 Lightning bullet；
+    - 更新 bullet load order 测试；
+    - 新增 `scepter_small_bullet_matches_java_shared_mount_profile`；
+    - 新增 `scepter_bullet_matches_java_interval_lightning_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `scepter` 追加 3 个 weapons：`scepter-weapon` + 两个 `scepter-mount`；
+    - 两个 mount 共同引用 `scepter_small_bullet`；
+    - 新增 `scepter_weapons_use_main_and_shared_mount_bullets`。
+  - `MIGRATION.md`
+    - 新增 `12.312`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core scepter_small_bullet_matches_java_shared_mount_profile --lib`
+  - `cargo test -p mindustry-core scepter_bullet_matches_java_interval_lightning_profile --lib`
+  - `cargo test -p mindustry-core scepter_weapons_use_main_and_shared_mount_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `dagger/mace/fortress/scepter/reign/nova/pulsar/quasar/beta` 的首批 weapon content 已回填；
+  2. 下一步可继续 Java UnitTypes 后续单位（`vela/corvus/crawler/atrax/...`）或转向补 `fragBullet/intervalBullet/Lightning/LaserBolt` runtime；
+  3. `interval_bullet` / shared bullet / trail/shrink 字段仍未进入真实 client draw/runtime；
+  4. 当前总迁移约 13.0%，远未可玩，goal 绝不能标记 complete。

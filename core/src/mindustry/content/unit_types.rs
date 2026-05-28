@@ -100,6 +100,44 @@ pub fn load() -> Vec<UnitType> {
             u.step_sound_volume = 0.35;
             u.abilities
                 .push("ShieldRegenFieldAbility:25:250:60:60".into());
+            let mut main = Weapon::new("scepter-weapon");
+            main.top = false;
+            main.y = 1.0;
+            main.x = 16.0;
+            main.shoot_y = 8.0;
+            main.reload = 45.0;
+            main.recoil = 5.0;
+            main.shake = 2.0;
+            main.eject_effect = "casing3".into();
+            main.shoot_sound = "shootScepter".into();
+            main.shoot_sound_volume = 0.95;
+            main.inaccuracy = 3.0;
+            main.shoot_shots = 3;
+            main.shoot_shot_delay = 4.0;
+            main.bullet = "scepter_bullet".into();
+            u.weapons.push(main);
+
+            let mut upper_mount = Weapon::new("scepter-mount");
+            upper_mount.reload = 12.0;
+            upper_mount.x = 8.5;
+            upper_mount.y = 6.0;
+            upper_mount.rotate = true;
+            upper_mount.eject_effect = "casing1".into();
+            upper_mount.bullet = "scepter_small_bullet".into();
+            upper_mount.shoot_sound = "shootScepterSecondary".into();
+            upper_mount.rotate_speed = 3.0;
+            u.weapons.push(upper_mount);
+
+            let mut lower_mount = Weapon::new("scepter-mount");
+            lower_mount.reload = 15.0;
+            lower_mount.x = 8.5;
+            lower_mount.y = -7.0;
+            lower_mount.rotate = true;
+            lower_mount.eject_effect = "casing1".into();
+            lower_mount.bullet = "scepter_small_bullet".into();
+            lower_mount.shoot_sound = "shootScepterSecondary".into();
+            lower_mount.rotate_speed = 3.0;
+            u.weapons.push(lower_mount);
         }),
         unit(&mut next_id, "reign", UnitKind::Standard, |u| {
             u.speed = 0.4;
@@ -1535,6 +1573,62 @@ mod tests {
         assert_eq!(bullet.spec.damage, 80.0);
         assert_eq!(bullet.spec.frag_bullets, 3);
         assert!(bullet.spec.frag_bullet.is_some());
+    }
+
+    #[test]
+    fn scepter_weapons_use_main_and_shared_mount_bullets() {
+        let units = load();
+        let scepter = by_name(&units, "scepter");
+        assert_eq!(scepter.weapons.len(), 3);
+
+        let main = &scepter.weapons[0];
+        assert_eq!(main.name, "scepter-weapon");
+        assert!(!main.top);
+        assert_eq!(main.y, 1.0);
+        assert_eq!(main.x, 16.0);
+        assert_eq!(main.shoot_y, 8.0);
+        assert_eq!(main.reload, 45.0);
+        assert_eq!(main.recoil, 5.0);
+        assert_eq!(main.shake, 2.0);
+        assert_eq!(main.eject_effect, "casing3");
+        assert_eq!(main.shoot_sound, "shootScepter");
+        assert_eq!(main.shoot_sound_volume, 0.95);
+        assert_eq!(main.inaccuracy, 3.0);
+        assert_eq!(main.shoot_shots, 3);
+        assert_eq!(main.shoot_shot_delay, 4.0);
+        assert_eq!(main.bullet, "scepter_bullet");
+
+        for (mount, reload, y) in [
+            (&scepter.weapons[1], 12.0_f32, 6.0_f32),
+            (&scepter.weapons[2], 15.0_f32, -7.0_f32),
+        ] {
+            assert_eq!(mount.name, "scepter-mount");
+            assert_eq!(mount.reload, reload);
+            assert_eq!(mount.x, 8.5);
+            assert_eq!(mount.y, y);
+            assert!(mount.rotate);
+            assert_eq!(mount.eject_effect, "casing1");
+            assert_eq!(mount.bullet, "scepter_small_bullet");
+            assert_eq!(mount.shoot_sound, "shootScepterSecondary");
+            assert_eq!(mount.rotate_speed, 3.0);
+        }
+
+        let bullets = bullets::load();
+        let main_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == main.bullet)
+            .unwrap_or_else(|| panic!("missing scepter main bullet {}", main.bullet));
+        assert_eq!(main_bullet.spec.kind, BulletKind::Basic);
+        assert_eq!(main_bullet.spec.bullet_interval, 4.0);
+        assert!(main_bullet.spec.interval_bullet.is_some());
+
+        let small_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == "scepter_small_bullet")
+            .expect("missing scepter shared small bullet");
+        assert_eq!(small_bullet.spec.speed, 12.0);
+        assert_eq!(small_bullet.spec.damage, 20.0);
+        assert_eq!(small_bullet.spec.shrink_interp, "slope");
     }
 
     #[test]
