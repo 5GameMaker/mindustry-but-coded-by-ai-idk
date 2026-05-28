@@ -8639,3 +8639,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议进入 naval attack 段，从 `risso` 开始；
   3. DefenderAI、shield break sound、payload/repair runtime 仍未完整 content-driven；
   4. 当前总迁移约 14.2%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 254. 最新闭环记录：UnitTypes risso naval attack weapons
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：回填 Java `risso` naval attack 字段、`mount-weapon`、`missiles-mount` 与对应 bullets，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1551-1618`
+  - `risso`：`drag=0.13`、`accel=0.4`、`faceTarget=false`、`trailLength=20`、`waveTrailX=4`、`trailScl=1.3`、`moveSoundVolume=0.4`、`moveSound=shipMove`；
+  - `risso_basic`：`BasicBulletType(2.5,9)`，`width=7`、`height=9`、`lifetime=60`、`ammoMultiplier=2`；
+  - `risso_missile`：`MissileBulletType(2.7,12,"missile")`，`keepVelocity=true`、`drag=-0.003`、`homingRange=60`、`splashDamage=10`、`lifetime=65`、`trailColor=gray`、`weaveScale=8`、`weaveMag=2`。
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `risso_basic` 与 `risso_missile`；
+    - 更新 bullet load order；
+    - 新增 `risso_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `risso` 补齐 Java 字段并注册两把 weapon；
+    - 新增 `risso_naval_attack_profile_matches_java`。
+  - `README.md`
+    - 当前总体完成度更新为约 `14.3%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.328`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core risso_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core risso_naval_attack_profile_matches_java --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议 `minke`；
+  3. naval wake/trail、ship movement、missile runtime 仍未完整 content-driven；
+  4. 当前总迁移约 14.3%，远未可玩，goal 绝不能标记 complete。

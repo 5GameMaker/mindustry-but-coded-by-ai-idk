@@ -933,10 +933,39 @@ pub fn load() -> Vec<UnitType> {
         }),
         unit(&mut next_id, "risso", UnitKind::Naval, |u| {
             u.speed = 1.1;
+            u.drag = 0.13;
             u.hit_size = 10.0;
             u.health = 280.0;
             u.armor = 2.0;
+            u.accel = 0.4;
             u.rotate_speed = 3.3;
+            u.face_target = false;
+            u.trail_length = 20;
+            u.wave_trail_x = 4.0;
+            u.trail_scl = 1.3;
+            u.move_sound_volume = 0.4;
+            u.move_sound = "shipMove".into();
+
+            let mut basic = Weapon::new("mount-weapon");
+            basic.reload = 13.0;
+            basic.x = 4.0;
+            basic.shoot_y = 4.0;
+            basic.y = 1.5;
+            basic.rotate = true;
+            basic.eject_effect = "casing1".into();
+            basic.bullet = "risso_basic".into();
+            u.weapons.push(basic);
+
+            let mut missile = Weapon::new("missiles-mount");
+            missile.mirror = false;
+            missile.reload = 25.0;
+            missile.x = 0.0;
+            missile.y = -5.0;
+            missile.rotate = true;
+            missile.eject_effect = "casing1".into();
+            missile.shoot_sound = "shootMissileShort".into();
+            missile.bullet = "risso_missile".into();
+            u.weapons.push(missile);
         }),
         unit(&mut next_id, "minke", UnitKind::Naval, |u| {
             u.health = 600.0;
@@ -2923,6 +2952,64 @@ mod tests {
             .iter()
             .any(|entry| entry == "RepairFieldAbility:130:120:140"));
         assert!(oct.weapons.is_empty());
+    }
+
+    #[test]
+    fn risso_naval_attack_profile_matches_java() {
+        let units = load();
+        let risso = by_name(&units, "risso");
+
+        assert!(risso.naval);
+        assert_eq!(risso.speed, 1.1);
+        assert_eq!(risso.drag, 0.13);
+        assert_eq!(risso.hit_size, 10.0);
+        assert_eq!(risso.health, 280.0);
+        assert_eq!(risso.armor, 2.0);
+        assert_eq!(risso.accel, 0.4);
+        assert_eq!(risso.rotate_speed, 3.3);
+        assert!(!risso.face_target);
+        assert_eq!(risso.trail_length, 20);
+        assert_eq!(risso.wave_trail_x, 4.0);
+        assert_eq!(risso.trail_scl, 1.3);
+        assert_eq!(risso.move_sound_volume, 0.4);
+        assert_eq!(risso.move_sound, "shipMove");
+        assert_eq!(risso.weapons.len(), 2);
+
+        let basic = &risso.weapons[0];
+        assert_eq!(basic.name, "mount-weapon");
+        assert_eq!(basic.reload, 13.0);
+        assert_eq!(basic.x, 4.0);
+        assert_eq!(basic.shoot_y, 4.0);
+        assert_eq!(basic.y, 1.5);
+        assert!(basic.rotate);
+        assert_eq!(basic.eject_effect, "casing1");
+        assert_eq!(basic.bullet, "risso_basic");
+
+        let missile = &risso.weapons[1];
+        assert_eq!(missile.name, "missiles-mount");
+        assert!(!missile.mirror);
+        assert_eq!(missile.reload, 25.0);
+        assert_eq!(missile.x, 0.0);
+        assert_eq!(missile.y, -5.0);
+        assert!(missile.rotate);
+        assert_eq!(missile.eject_effect, "casing1");
+        assert_eq!(missile.shoot_sound, "shootMissileShort");
+        assert_eq!(missile.bullet, "risso_missile");
+
+        let bullets = bullets::load();
+        let basic_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == basic.bullet)
+            .expect("missing risso_basic");
+        assert_eq!(basic_bullet.spec.kind, BulletKind::Basic);
+        assert_eq!(basic_bullet.spec.ammo_multiplier, 2.0);
+        let missile_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == missile.bullet)
+            .expect("missing risso_missile");
+        assert_eq!(missile_bullet.spec.kind, BulletKind::Missile);
+        assert_eq!(missile_bullet.spec.splash_damage, 10.0);
+        assert_eq!(missile_bullet.spec.weave_scale, 8.0);
     }
 
     #[test]

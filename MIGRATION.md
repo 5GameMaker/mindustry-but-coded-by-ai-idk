@@ -10407,3 +10407,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - payload defender AI、shield break sound 与 repair field runtime 仍需整体验证；
   - 下一步建议进入 naval attack 段，从 `risso` 开始回填船只 weapon/bullet content；
   - 当前总体迁移约 14.2%，远未可玩。
+
+### 12.328 UnitTypes risso naval attack weapons
+
+- 2026-05-28：进入 Java naval attack 段，回填 `risso` 船只 movement/wake/sound 字段与两把 weapon。该闭环新增 `risso_basic` 与 `risso_missile` bullets，并保持 naval defaults（wet immunity、cannot drown、non-omni movement）由 `UnitKind::Naval` 统一施加。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1551-1618`
+  - `risso`：`speed=1.1`、`drag=0.13`、`hitSize=10`、`health=280`、`armor=2`、`accel=0.4`、`rotateSpeed=3.3`、`faceTarget=false`、`trailLength=20`、`waveTrailX=4`、`trailScl=1.3`、`moveSoundVolume=0.4`、`moveSound=shipMove`
+  - `mount-weapon`：`reload=13`、`x=4`、`shootY=4`、`y=1.5`、`rotate=true`、`ejectEffect=casing1`，bullet `BasicBulletType(2.5f,9)` with `width=7`、`height=9`、`lifetime=60`、`ammoMultiplier=2`
+  - `missiles-mount`：`mirror=false`、`reload=25`、`x=0`、`y=-5`、`rotate=true`、`ejectEffect=casing1`、`shootSound=shootMissileShort`，bullet `MissileBulletType(2.7f,12,"missile")` with `keepVelocity=true`、`width=8`、`height=8`、`shrinkY=0`、`drag=-0.003`、`homingRange=60`、`splashDamageRadius=25`、`splashDamage=10`、`lifetime=65`、`trailColor=gray`、`backColor=bulletYellowBack`、`frontColor=bulletYellow`、`hitEffect/despawnEffect=blastExplosion`、`weaveScale=8`、`weaveMag=2`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `risso_basic` 与 `risso_missile`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `risso_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `risso` 补齐 Java naval movement/wake/sound 字段；
+    - 注册 `mount-weapon` 与 `missiles-mount`；
+    - 新增 `risso_naval_attack_profile_matches_java`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `14.3%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core risso_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core risso_naval_attack_profile_matches_java --lib`
+- 仍未完成：
+  - naval wake/trail rendering、ship movement 和 missile weave/homing/splash runtime 仍需整体接入；
+  - Java 匿名 bullet 对象仍以命名 content 表达；
+  - 下一步建议继续 `minke`，需要双 bullet/mount weapon 与 naval movement 字段；
+  - 当前总体迁移约 14.3%，远未可玩。

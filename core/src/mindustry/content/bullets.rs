@@ -518,6 +518,30 @@ pub fn load() -> Vec<BulletContent> {
     quad_bomb.splash_damage_radius = 80.0;
     quad_bomb.damage = quad_bomb.splash_damage * 0.7;
 
+    let mut risso_basic = basic_bullet(2.5, 9.0);
+    risso_basic.width = 7.0;
+    risso_basic.height = 9.0;
+    risso_basic.lifetime = 60.0;
+    risso_basic.ammo_multiplier = 2.0;
+
+    let mut risso_missile = missile_bullet(2.7, 12.0);
+    risso_missile.keep_velocity = true;
+    risso_missile.width = 8.0;
+    risso_missile.height = 8.0;
+    risso_missile.shrink_y = 0.0;
+    risso_missile.drag = -0.003;
+    risso_missile.homing_range = 60.0;
+    risso_missile.splash_damage_radius = 25.0;
+    risso_missile.splash_damage = 10.0;
+    risso_missile.lifetime = 65.0;
+    risso_missile.trail_color = "gray".into();
+    risso_missile.back_color = "bulletYellowBack".into();
+    risso_missile.front_color = "bulletYellow".into();
+    risso_missile.hit_effect = "blastExplosion".into();
+    risso_missile.despawn_effect = "blastExplosion".into();
+    risso_missile.weave_scale = 8.0;
+    risso_missile.weave_mag = 2.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -590,6 +614,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "mega_heal_bolt_large", mega_heal_bolt_large),
         make_bullet(&mut next_id, "mega_heal_bolt_small", mega_heal_bolt_small),
         make_bullet(&mut next_id, "quad_bomb", quad_bomb),
+        make_bullet(&mut next_id, "risso_basic", risso_basic),
+        make_bullet(&mut next_id, "risso_missile", risso_missile),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -901,6 +927,8 @@ mod tests {
                 "mega_heal_bolt_large",
                 "mega_heal_bolt_small",
                 "quad_bomb",
+                "risso_basic",
+                "risso_missile",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1756,6 +1784,41 @@ mod tests {
         assert_eq!(bomb.splash_damage, 220.0);
         assert_eq!(bomb.splash_damage_radius, 80.0);
         assert_eq!(bomb.damage, 154.0);
+    }
+
+    #[test]
+    fn risso_bullets_match_java_profiles() {
+        let bullets = load();
+        let basic = &by_name(&bullets, "risso_basic").spec;
+
+        assert_eq!(basic.kind, BulletKind::Basic);
+        assert_eq!(basic.speed, 2.5);
+        assert_eq!(basic.damage, 9.0);
+        assert_eq!(basic.width, 7.0);
+        assert_eq!(basic.height, 9.0);
+        assert_eq!(basic.lifetime, 60.0);
+        assert_eq!(basic.ammo_multiplier, 2.0);
+
+        let missile = &by_name(&bullets, "risso_missile").spec;
+        assert_eq!(missile.kind, BulletKind::Missile);
+        assert_eq!(missile.speed, 2.7);
+        assert_eq!(missile.damage, 12.0);
+        assert!(missile.keep_velocity);
+        assert_eq!(missile.width, 8.0);
+        assert_eq!(missile.height, 8.0);
+        assert_eq!(missile.shrink_y, 0.0);
+        assert_eq!(missile.drag, -0.003);
+        assert_eq!(missile.homing_range, 60.0);
+        assert_eq!(missile.splash_damage_radius, 25.0);
+        assert_eq!(missile.splash_damage, 10.0);
+        assert_eq!(missile.lifetime, 65.0);
+        assert_eq!(missile.trail_color, "gray");
+        assert_eq!(missile.back_color, "bulletYellowBack");
+        assert_eq!(missile.front_color, "bulletYellow");
+        assert_eq!(missile.hit_effect, "blastExplosion");
+        assert_eq!(missile.despawn_effect, "blastExplosion");
+        assert_eq!(missile.weave_scale, 8.0);
+        assert_eq!(missile.weave_mag, 2.0);
     }
 
     #[test]
