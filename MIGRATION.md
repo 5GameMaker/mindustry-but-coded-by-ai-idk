@@ -11935,3 +11935,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Pixelator/CacheLayer/Shader 仍为后端中立计划，尚未绑定真实 FBO/GPU；
   - network smoke 仍是纯内存字段/roundtrip，还不是 Rust↔Java 真实进程互联；
   - 当前总体迁移约 22.4%，仍未达到完整可玩。
+
+### 12.375 Desktop mods container 显式合并与动态 drawer runtime 前置
+
+- 2026-05-29：继续把已迁移的 helper/plan 接入主链，避免停留在孤立模块。本轮补 Desktop 显式 `data/mods` 容器 atlas merge、DrawBlock 动态 runtime 快照前置，以及非 sprite 粒子计划。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::merge_mods_directory_into_texture_atlas(mods_dir, headless)`；
+    - 新增 `merge_mod_resource_container_plan_into_texture_atlas(...)`；
+    - 显式容器入口复用 core `ModResourceContainerPlan`，仍不让 `DesktopLauncher::new(Vec::new())` 默认扫真实磁盘；
+    - 新增 `desktop_launcher_merges_mods_container_into_texture_atlas_explicitly`。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeBlockVisualRuntimeSnapshot` 及 liquid/power/turret 子快照；
+    - 新增 `block_visual_runtime_snapshot(...)`、`block_visual_runtime_snapshot_for_building(...)`、`export_block_visual_runtime_snapshots()`；
+    - 当前只从已有 runtime sidecar/module 导出 liquid current/amount/capacity、heat/warmup/progress/charge、power status/production efficiency、turret rotation/recoil/heat/side heat 等可读字段；缺失字段保持 `None`，不伪造。
+  - `core/src/mindustry/graphics/particle_renderer.rs`
+    - 新增 `BlockDrawerParticlePlanConfig` / `BlockDrawerParticlePlan` / `BlockDrawerParticleSample`；
+    - `ParticleRendererState::block_drawer_particle_plan(...)` 为 `DrawParticles` / `DrawSoftParticles` 类非 atlas sprite drawer 提供独立 deterministic 粒子计划；
+    - 不接 `BlockSpriteOp`，避免把粒子类错误伪装成 atlas sprite。
+- 已跑验证：
+  - `cargo test -p mindustry-core block_visual_runtime_snapshot --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core particle_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_merges_mod --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - block visual runtime snapshot 尚未被 `BlockRendererState` 消费；
+  - particle plan 尚未接 `DrawParticles` / `DrawSoftParticles` 真实 block drawer；
+  - Desktop mods container 仍是显式 API，未接 CLI/run-time flag；
+  - 当前总体迁移约 22.6%，仍未达到完整可玩。

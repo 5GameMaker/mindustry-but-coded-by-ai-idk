@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **22.4%**。
+- 当前总体迁移完成度：约 **22.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9238,3 +9238,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 注意：
   - `cargo test -p mindustry-desktop` 全量仍有既有失败 `desktop_launcher_ticks_puddle_particle_snapshots_to_local_effect_queue`，不是本轮改动引入。
   - 下一步优先：真实 GPU/window/surface backend、texture upload/sampler/filter、Pixelator/CacheLayer/Shader 的真实执行器、Rust↔Java 进程级 handshake smoke。
+
+---
+
+## 277. 最新闭环记录：Desktop mods container / block visual runtime snapshot / block drawer particles
+
+- 本轮总体进度更新：约 **22.6%**，仍未达到完整可玩。
+- 待提交主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::merge_mods_directory_into_texture_atlas(...)`；
+    - `merge_mod_resource_container_plan_into_texture_atlas(...)`；
+    - 测试显式容器扫描并合并多个 mod sprite/override，不默认扫盘。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 block visual runtime snapshot；
+    - 导出 liquid、heat/warmup/progress、power、turret 可读状态；
+    - 缺失状态保持 `None`。
+  - `core/src/mindustry/graphics/particle_renderer.rs`
+    - 新增 block drawer particle plan/config/sample；
+    - deterministic seed/sample，用于后续 `DrawParticles` / `DrawSoftParticles`，不走 atlas sprite bridge。
+- 本轮已验证：
+  - `cargo test -p mindustry-core block_visual_runtime_snapshot --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core particle_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_merges_mod --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 下一步优先：
+  1. 把 `GameRuntimeBlockVisualRuntimeSnapshot` 接到 `BlockRendererState` 的 building snapshot/plan 消费；
+  2. 把 `BlockDrawerParticlePlan` 接到 DrawParticles/DrawSoftParticles 的非 sprite 渲染链；
+  3. 为 Desktop mods container 加显式 CLI/run config，不要默认扫描真实 `data/mods`；
+  4. 真实 backend 需先确认是否引入 `sdl2 + glow` 依赖。

@@ -50,7 +50,7 @@ use mindustry_core::mindustry::io::{
     read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
     LegacyTeamBlocks, TeamId, TypeValue, Vec2,
 };
-use mindustry_core::mindustry::modsys::ModResourcePlan;
+use mindustry_core::mindustry::modsys::{ModResourceContainerPlan, ModResourcePlan};
 use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
@@ -1322,6 +1322,26 @@ impl DesktopLauncher {
     ) -> io::Result<usize> {
         let plan = ModResourcePlan::from_directory(mod_name, headless, root)?;
         Ok(self.merge_mod_resource_plan_into_texture_atlas(&plan))
+    }
+
+    pub fn merge_mods_directory_into_texture_atlas(
+        &mut self,
+        mods_dir: impl AsRef<Path>,
+        headless: bool,
+    ) -> io::Result<usize> {
+        let container = ModResourceContainerPlan::discover_from_mods_directory(mods_dir, headless)?;
+        Ok(self.merge_mod_resource_container_plan_into_texture_atlas(&container))
+    }
+
+    pub fn merge_mod_resource_container_plan_into_texture_atlas(
+        &mut self,
+        container: &ModResourceContainerPlan,
+    ) -> usize {
+        container
+            .mods
+            .iter()
+            .map(|mod_dir| self.merge_mod_resource_plan_into_texture_atlas(&mod_dir.resource_plan))
+            .sum()
     }
 
     pub fn merge_mod_resource_plan_into_texture_atlas(&mut self, plan: &ModResourcePlan) -> usize {
@@ -5295,6 +5315,40 @@ mod tests {
         root
     }
 
+    fn create_mods_container_sprite_fixture_root() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "mindustry-desktop-mods-container-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos()
+        ));
+        let alpha = root.join("alpha");
+        let beta = root.join("beta");
+
+        std::fs::create_dir_all(alpha.join("sprites"))
+            .expect("alpha mod sprite directory should be creatable");
+        std::fs::create_dir_all(beta.join("sprites-override"))
+            .expect("beta override sprite directory should be creatable");
+        std::fs::create_dir_all(root.join(".git"))
+            .expect("hidden container entry should be creatable");
+        std::fs::create_dir_all(root.join("sprites"))
+            .expect("top-level sprites folder should be creatable");
+
+        write_test_png(&alpha.join("sprites/alpha-router.png"));
+        write_test_png(&beta.join("sprites-override/router.png"));
+        std::fs::write(alpha.join("mod.hjson"), b"name: alpha")
+            .expect("alpha metadata should be writable");
+        std::fs::write(beta.join("mod.hjson"), b"name: beta")
+            .expect("beta metadata should be writable");
+        write_test_png(&root.join("sprites/ignored-root.png"));
+        std::fs::write(root.join(".git/HEAD"), b"ref: refs/heads/main")
+            .expect("hidden marker should be writable");
+
+        root
+    }
+
     #[test]
     fn desktop_launcher_merges_mod_directory_into_texture_atlas_without_clobbering_vanilla() {
         let mut launcher = DesktopLauncher::new(Vec::new());
@@ -5347,6 +5401,38 @@ mod tests {
             .filter(|region| region.name.starts_with("cracks-"))
             .count();
         assert_eq!(crack_count, 7 * 8);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_merges_mods_container_into_texture_atlas_explicitly() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let vanilla_router = launcher.texture_atlas.lookup("router").unwrap();
+        assert_eq!(
+            vanilla_router.region.source_path,
+            "sprites/blocks/router.png"
+        );
+
+        let root = create_mods_container_sprite_fixture_root();
+        let merge_count = launcher
+            .merge_mods_directory_into_texture_atlas(&root, false)
+            .expect("mods container should scan and merge explicitly");
+
+        assert_eq!(merge_count, 2);
+        let alpha = launcher.texture_atlas.lookup("alpha-alpha-router").unwrap();
+        assert_eq!(alpha.page_type, PageType::Main);
+        assert_eq!(alpha.region.source_path, "sprites/alpha-router.png");
+        assert!(!alpha.region.payload);
+
+        let overridden_router = launcher.texture_atlas.lookup("router").unwrap();
+        assert_eq!(overridden_router.page_type, PageType::Main);
+        assert_eq!(
+            overridden_router.region.source_path,
+            "sprites-override/router.png"
+        );
+        assert!(overridden_router.region.payload);
+        assert!(launcher.texture_atlas.lookup("ignored-root").is_err());
 
         std::fs::remove_dir_all(&root).ok();
     }

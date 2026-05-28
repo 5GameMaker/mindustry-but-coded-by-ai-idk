@@ -1356,6 +1356,41 @@ pub struct GameRuntimeClientCameraShakeEvent {
     pub duration: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct GameRuntimeBlockVisualLiquidSnapshot {
+    pub current: Option<ContentId>,
+    pub amount: Option<f32>,
+    pub capacity: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct GameRuntimeBlockVisualPowerSnapshot {
+    pub status: Option<f32>,
+    pub production_efficiency: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct GameRuntimeBlockVisualTurretSnapshot {
+    pub rotation: Option<f32>,
+    pub recoil: Option<f32>,
+    pub heat: Option<f32>,
+    pub charge: Option<f32>,
+    pub side_heat: Option<[f32; 4]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct GameRuntimeBlockVisualRuntimeSnapshot {
+    pub tile_pos: i32,
+    pub liquid: Option<GameRuntimeBlockVisualLiquidSnapshot>,
+    pub progress: Option<f32>,
+    pub heat: Option<f32>,
+    pub warmup: Option<f32>,
+    pub total_progress: Option<f32>,
+    pub charge: Option<f32>,
+    pub power: Option<GameRuntimeBlockVisualPowerSnapshot>,
+    pub turret: Option<GameRuntimeBlockVisualTurretSnapshot>,
+}
+
 impl GameRuntimeClientSnapshotApplyReport {
     pub fn merge(&mut self, other: Self) {
         self.block_records_seen += other.block_records_seen;
@@ -1682,6 +1717,277 @@ fn game_runtime_turret_state_mut(
         | GameRuntimeTurretBlockState::Continuous { turret, .. } => Some(turret),
         GameRuntimeTurretBlockState::PointDefense(_)
         | GameRuntimeTurretBlockState::TractorBeam(_) => None,
+    }
+}
+
+fn game_runtime_visual_set_once(slot: &mut Option<f32>, value: f32) {
+    if slot.is_none() {
+        *slot = Some(value);
+    }
+}
+
+fn game_runtime_visual_liquid_snapshot(
+    building: &BuildingComp,
+) -> Option<GameRuntimeBlockVisualLiquidSnapshot> {
+    let liquids = building.liquids.as_ref()?;
+    let current = liquids.current();
+    Some(GameRuntimeBlockVisualLiquidSnapshot {
+        current,
+        amount: current.map(|liquid| liquids.get(liquid)),
+        capacity: Some(building.block.liquid_capacity),
+    })
+}
+
+fn game_runtime_power_production_efficiency(state: &GameRuntimePowerBlockState) -> Option<f32> {
+    match state {
+        GameRuntimePowerBlockState::Generator(state) => Some(state.production_efficiency),
+        GameRuntimePowerBlockState::NuclearReactor(state) => {
+            Some(state.generator.production_efficiency)
+        }
+        GameRuntimePowerBlockState::ImpactReactor(state) => {
+            Some(state.generator.production_efficiency)
+        }
+        GameRuntimePowerBlockState::VariableReactor(state) => {
+            Some(state.generator.production_efficiency)
+        }
+        GameRuntimePowerBlockState::HeaterGenerator(state) => {
+            Some(state.generator.production_efficiency)
+        }
+        GameRuntimePowerBlockState::Light(_) => None,
+    }
+}
+
+fn game_runtime_visual_power_snapshot(
+    building: &BuildingComp,
+    state: Option<&GameRuntimePowerBlockState>,
+) -> Option<GameRuntimeBlockVisualPowerSnapshot> {
+    let snapshot = GameRuntimeBlockVisualPowerSnapshot {
+        status: building.power.as_ref().map(|power| power.status),
+        production_efficiency: state.and_then(game_runtime_power_production_efficiency),
+    };
+    (snapshot.status.is_some() || snapshot.production_efficiency.is_some()).then_some(snapshot)
+}
+
+fn game_runtime_visual_apply_power_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimePowerBlockState,
+) {
+    match state {
+        GameRuntimePowerBlockState::Generator(_) | GameRuntimePowerBlockState::Light(_) => {}
+        GameRuntimePowerBlockState::NuclearReactor(state) => {
+            game_runtime_visual_set_once(&mut snapshot.heat, state.heat);
+        }
+        GameRuntimePowerBlockState::ImpactReactor(state) => {
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+        }
+        GameRuntimePowerBlockState::VariableReactor(state) => {
+            game_runtime_visual_set_once(&mut snapshot.heat, state.heat);
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+        }
+        GameRuntimePowerBlockState::HeaterGenerator(state) => {
+            game_runtime_visual_set_once(&mut snapshot.heat, state.heat);
+        }
+    }
+}
+
+fn game_runtime_visual_apply_production_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimeProductionBlockState,
+) {
+    match state {
+        GameRuntimeProductionBlockState::Drill(state) => {
+            game_runtime_visual_set_once(&mut snapshot.progress, state.progress);
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+        }
+        GameRuntimeProductionBlockState::BeamDrill(state) => {
+            game_runtime_visual_set_once(&mut snapshot.progress, state.time);
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+        }
+        GameRuntimeProductionBlockState::BurstDrill(state) => {
+            game_runtime_visual_set_once(&mut snapshot.progress, state.progress);
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+        }
+    }
+}
+
+fn game_runtime_visual_apply_crafter_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GenericCrafterState,
+) {
+    game_runtime_visual_set_once(&mut snapshot.progress, state.progress);
+    game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+    game_runtime_visual_set_once(&mut snapshot.total_progress, state.total_progress);
+}
+
+fn game_runtime_visual_apply_crafting_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimeCraftingBlockState,
+) {
+    match state {
+        GameRuntimeCraftingBlockState::GenericCrafter(state) => {
+            game_runtime_visual_apply_crafter_state(snapshot, state);
+        }
+        GameRuntimeCraftingBlockState::Separator(state) => {
+            game_runtime_visual_set_once(&mut snapshot.progress, state.progress);
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+            game_runtime_visual_set_once(&mut snapshot.total_progress, state.total_progress);
+        }
+        GameRuntimeCraftingBlockState::HeatProducer { crafter, heat } => {
+            game_runtime_visual_apply_crafter_state(snapshot, crafter);
+            game_runtime_visual_set_once(&mut snapshot.heat, heat.heat);
+        }
+    }
+}
+
+fn game_runtime_visual_turret_snapshot_mut(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+) -> &mut GameRuntimeBlockVisualTurretSnapshot {
+    snapshot.turret.get_or_insert_with(Default::default)
+}
+
+fn game_runtime_visual_apply_rotation(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    rotation: f32,
+) {
+    let turret = game_runtime_visual_turret_snapshot_mut(snapshot);
+    game_runtime_visual_set_once(&mut turret.rotation, rotation);
+}
+
+fn game_runtime_visual_apply_turret_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimeTurretBlockState,
+) {
+    match state {
+        GameRuntimeTurretBlockState::Generic(turret)
+        | GameRuntimeTurretBlockState::Item { turret, .. }
+        | GameRuntimeTurretBlockState::PayloadAmmo { turret, .. }
+        | GameRuntimeTurretBlockState::Continuous { turret, .. } => {
+            let visual = game_runtime_visual_turret_snapshot_mut(snapshot);
+            game_runtime_visual_set_once(&mut visual.rotation, turret.rotation);
+            game_runtime_visual_set_once(&mut visual.recoil, turret.cur_recoil);
+            game_runtime_visual_set_once(&mut visual.heat, turret.heat);
+            game_runtime_visual_set_once(&mut visual.charge, turret.charge);
+            if visual.side_heat.is_none() {
+                visual.side_heat = Some(turret.side_heat);
+            }
+        }
+        GameRuntimeTurretBlockState::PointDefense(state) => {
+            game_runtime_visual_apply_rotation(snapshot, state.rotation);
+        }
+        GameRuntimeTurretBlockState::TractorBeam(state) => {
+            game_runtime_visual_apply_rotation(snapshot, state.rotation);
+        }
+    }
+}
+
+fn game_runtime_visual_apply_distribution_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimeDistributionBlockState,
+) {
+    if let GameRuntimeDistributionBlockState::MassDriver(state) = state {
+        game_runtime_visual_apply_rotation(snapshot, state.rotation);
+    }
+}
+
+fn game_runtime_visual_apply_liquid_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimeLiquidBlockState,
+) {
+    match state {
+        GameRuntimeLiquidBlockState::Bridge(state) => {
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+        }
+    }
+}
+
+fn game_runtime_visual_apply_effect_projector_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &EffectProjectorRuntimeState,
+) {
+    match state {
+        EffectProjectorRuntimeState::Mend(state) => {
+            game_runtime_visual_set_once(&mut snapshot.heat, state.heat);
+            game_runtime_visual_set_once(&mut snapshot.charge, state.charge);
+        }
+        EffectProjectorRuntimeState::Overdrive(state) => {
+            game_runtime_visual_set_once(&mut snapshot.heat, state.heat);
+            game_runtime_visual_set_once(&mut snapshot.charge, state.charge);
+            game_runtime_visual_set_once(&mut snapshot.progress, state.use_progress);
+        }
+        EffectProjectorRuntimeState::Regen { .. } => {}
+    }
+}
+
+fn game_runtime_visual_apply_effect_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &EffectBlockRuntimeState,
+) {
+    match state {
+        EffectBlockRuntimeState::Projector(state) => {
+            game_runtime_visual_apply_effect_projector_state(snapshot, state);
+        }
+        EffectBlockRuntimeState::ForceProjector(state) => {
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+        }
+        EffectBlockRuntimeState::Radar(state) => {
+            game_runtime_visual_set_once(&mut snapshot.progress, state.progress);
+            game_runtime_visual_set_once(&mut snapshot.total_progress, state.total_progress);
+        }
+        EffectBlockRuntimeState::BuildTurret(state) => {
+            game_runtime_visual_apply_rotation(snapshot, state.rotation);
+            game_runtime_visual_set_once(&mut snapshot.warmup, state.warmup);
+        }
+        EffectBlockRuntimeState::BaseShield(_) => {}
+        EffectBlockRuntimeState::ShockwaveTower(state) => {
+            game_runtime_visual_set_once(&mut snapshot.heat, state.heat);
+        }
+    }
+}
+
+fn game_runtime_visual_apply_payload_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimePayloadBlockState,
+) {
+    match state {
+        GameRuntimePayloadBlockState::MassDriver { driver, .. } => {
+            game_runtime_visual_apply_rotation(snapshot, driver.turret_rotation);
+            let turret = game_runtime_visual_turret_snapshot_mut(snapshot);
+            game_runtime_visual_set_once(&mut turret.charge, driver.charge);
+        }
+        GameRuntimePayloadBlockState::Deconstructor { deconstructor, .. } => {
+            game_runtime_visual_set_once(&mut snapshot.progress, deconstructor.progress);
+        }
+        GameRuntimePayloadBlockState::Constructor { producer, .. } => {
+            game_runtime_visual_set_once(&mut snapshot.progress, producer.progress);
+            game_runtime_visual_set_once(&mut snapshot.heat, producer.heat);
+        }
+        GameRuntimePayloadBlockState::Loader { .. }
+        | GameRuntimePayloadBlockState::Source { .. }
+        | GameRuntimePayloadBlockState::Conveyor(_)
+        | GameRuntimePayloadBlockState::Router { .. }
+        | GameRuntimePayloadBlockState::Void(_) => {}
+    }
+}
+
+fn game_runtime_visual_apply_unit_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimeUnitBlockState,
+) {
+    match state {
+        GameRuntimeUnitBlockState::Factory { factory, .. } => {
+            game_runtime_visual_set_once(&mut snapshot.progress, factory.base.progress);
+        }
+        GameRuntimeUnitBlockState::Reconstructor { reconstructor, .. } => {
+            game_runtime_visual_set_once(&mut snapshot.progress, reconstructor.base.progress);
+        }
+        GameRuntimeUnitBlockState::RepairTower(state) => {
+            game_runtime_visual_apply_rotation(snapshot, state.rotation);
+        }
+        GameRuntimeUnitBlockState::Assembler { assembler, .. } => {
+            game_runtime_visual_set_once(&mut snapshot.progress, assembler.progress);
+            game_runtime_visual_set_once(&mut snapshot.warmup, assembler.warmup);
+        }
+        GameRuntimeUnitBlockState::AssemblerModule(_) => {}
     }
 }
 
@@ -2802,6 +3108,70 @@ impl GameRuntime {
 
     pub fn buildings_mut(&mut self) -> &mut [BuildingComp] {
         &mut self.buildings
+    }
+
+    pub fn block_visual_runtime_snapshot(
+        &self,
+        tile_pos: i32,
+    ) -> Option<GameRuntimeBlockVisualRuntimeSnapshot> {
+        let building = self
+            .buildings
+            .iter()
+            .find(|building| building.tile_pos == tile_pos)?;
+        Some(self.block_visual_runtime_snapshot_for_building(building))
+    }
+
+    pub fn block_visual_runtime_snapshot_for_building(
+        &self,
+        building: &BuildingComp,
+    ) -> GameRuntimeBlockVisualRuntimeSnapshot {
+        let tile_pos = building.tile_pos;
+        let power_state = self.power_runtime_states.get(&tile_pos);
+        let mut snapshot = GameRuntimeBlockVisualRuntimeSnapshot {
+            tile_pos,
+            liquid: game_runtime_visual_liquid_snapshot(building),
+            power: game_runtime_visual_power_snapshot(building, power_state),
+            ..Default::default()
+        };
+
+        if let Some(state) = power_state {
+            game_runtime_visual_apply_power_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.production_runtime_states.get(&tile_pos) {
+            game_runtime_visual_apply_production_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.crafting_runtime_states.get(&tile_pos) {
+            game_runtime_visual_apply_crafting_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.effect_runtime_store.get(tile_pos) {
+            game_runtime_visual_apply_effect_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.distribution_runtime_states.get(&tile_pos) {
+            game_runtime_visual_apply_distribution_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.liquid_runtime_states.get(&tile_pos) {
+            game_runtime_visual_apply_liquid_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.payload_runtime_states.get(&tile_pos) {
+            game_runtime_visual_apply_payload_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.unit_runtime_states.get(&tile_pos) {
+            game_runtime_visual_apply_unit_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.turret_runtime_states.get(&tile_pos) {
+            game_runtime_visual_apply_turret_state(&mut snapshot, state);
+        }
+
+        snapshot
+    }
+
+    pub fn export_block_visual_runtime_snapshots(
+        &self,
+    ) -> Vec<GameRuntimeBlockVisualRuntimeSnapshot> {
+        self.buildings
+            .iter()
+            .map(|building| self.block_visual_runtime_snapshot_for_building(building))
+            .collect()
     }
 
     pub fn set_network_context(&mut self, network_context: GameRuntimeNetworkContext) {
@@ -21027,6 +21397,188 @@ mod tests {
             .get_or_null(default_team)
             .expect("default team should be present");
         assert!(team.cores.iter().any(|core| core.id == core_tile));
+    }
+
+    #[test]
+    fn game_runtime_exports_block_visual_runtime_snapshot_from_existing_state() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mut runtime = GameRuntime::default();
+
+        let water = content
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let liquid_block = content.block_by_name("liquid-container").unwrap();
+        let liquid_tile = point2_pack(2, 2);
+        let mut liquid_building =
+            BuildingComp::new(liquid_tile, liquid_block.base().clone(), TeamId(1));
+        liquid_building
+            .liquids
+            .as_mut()
+            .expect("liquid container should have liquid module")
+            .add(water, 12.5);
+        runtime.add_building(liquid_building);
+
+        let liquid_snapshot = runtime
+            .block_visual_runtime_snapshot(liquid_tile)
+            .expect("liquid building should snapshot");
+        assert_eq!(
+            liquid_snapshot.liquid,
+            Some(GameRuntimeBlockVisualLiquidSnapshot {
+                current: Some(water),
+                amount: Some(12.5),
+                capacity: Some(liquid_block.base().liquid_capacity),
+            })
+        );
+
+        let power_block = content.block_by_name("combustion-generator").unwrap();
+        let power_tile = point2_pack(5, 2);
+        let mut power_building =
+            BuildingComp::new(power_tile, power_block.base().clone(), TeamId(1));
+        power_building
+            .power
+            .as_mut()
+            .expect("generator should have power module")
+            .status = 0.42;
+        runtime.add_building(power_building);
+        runtime.power_runtime_states.insert(
+            power_tile,
+            GameRuntimePowerBlockState::Generator(PowerGeneratorState {
+                production_efficiency: 0.75,
+                generate_time: 9.0,
+            }),
+        );
+
+        let power_snapshot = runtime
+            .block_visual_runtime_snapshot(power_tile)
+            .expect("power building should snapshot");
+        assert_eq!(
+            power_snapshot.power,
+            Some(GameRuntimeBlockVisualPowerSnapshot {
+                status: Some(0.42),
+                production_efficiency: Some(0.75),
+            })
+        );
+        assert_eq!(power_snapshot.heat, None);
+        assert_eq!(power_snapshot.warmup, None);
+
+        let crafter_block = content.block_by_name("silicon-smelter").unwrap();
+        let crafter_tile = point2_pack(8, 2);
+        runtime.add_building(BuildingComp::new(
+            crafter_tile,
+            crafter_block.base().clone(),
+            TeamId(1),
+        ));
+        runtime.crafting_runtime_states.insert(
+            crafter_tile,
+            GameRuntimeCraftingBlockState::GenericCrafter(GenericCrafterState {
+                progress: 0.25,
+                total_progress: 13.0,
+                warmup: 0.5,
+            }),
+        );
+
+        let crafter_snapshot = runtime
+            .block_visual_runtime_snapshot(crafter_tile)
+            .expect("crafter building should snapshot");
+        assert_eq!(crafter_snapshot.progress, Some(0.25));
+        assert_eq!(crafter_snapshot.warmup, Some(0.5));
+        assert_eq!(crafter_snapshot.total_progress, Some(13.0));
+
+        let turret_block = content.block_by_name("duo").unwrap();
+        let turret_tile = point2_pack(11, 2);
+        runtime.add_building(BuildingComp::new(
+            turret_tile,
+            turret_block.base().clone(),
+            TeamId(1),
+        ));
+        runtime.turret_runtime_states.insert(
+            turret_tile,
+            GameRuntimeTurretBlockState::Generic(TurretState {
+                rotation: 37.0,
+                cur_recoil: 0.2,
+                heat: 0.7,
+                charge: 0.9,
+                side_heat: [0.1, 0.2, 0.3, 0.4],
+                ..TurretState::default()
+            }),
+        );
+
+        let turret_snapshot = runtime
+            .block_visual_runtime_snapshot(turret_tile)
+            .expect("turret building should snapshot");
+        assert_eq!(
+            turret_snapshot.turret,
+            Some(GameRuntimeBlockVisualTurretSnapshot {
+                rotation: Some(37.0),
+                recoil: Some(0.2),
+                heat: Some(0.7),
+                charge: Some(0.9),
+                side_heat: Some([0.1, 0.2, 0.3, 0.4]),
+            })
+        );
+
+        let snapshots = runtime.export_block_visual_runtime_snapshots();
+        assert_eq!(snapshots.len(), 4);
+        assert!(snapshots
+            .iter()
+            .any(|snapshot| snapshot.tile_pos == turret_tile));
+    }
+
+    #[test]
+    fn game_runtime_block_visual_runtime_snapshot_leaves_missing_state_absent() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mut runtime = GameRuntime::default();
+
+        let turret_block = content.block_by_name("duo").unwrap();
+        let turret_tile = point2_pack(2, 5);
+        runtime.add_building(BuildingComp::new(
+            turret_tile,
+            turret_block.base().clone(),
+            TeamId(1),
+        ));
+
+        let turret_snapshot = runtime
+            .block_visual_runtime_snapshot(turret_tile)
+            .expect("known building should snapshot");
+        assert_eq!(turret_snapshot.liquid, None);
+        assert_eq!(turret_snapshot.power, None);
+        assert_eq!(turret_snapshot.progress, None);
+        assert_eq!(turret_snapshot.heat, None);
+        assert_eq!(turret_snapshot.warmup, None);
+        assert_eq!(turret_snapshot.total_progress, None);
+        assert_eq!(turret_snapshot.charge, None);
+        assert_eq!(turret_snapshot.turret, None);
+
+        let generator_block = content.block_by_name("combustion-generator").unwrap();
+        let generator_tile = point2_pack(5, 5);
+        runtime.add_building(BuildingComp::new(
+            generator_tile,
+            generator_block.base().clone(),
+            TeamId(1),
+        ));
+
+        let generator_snapshot = runtime
+            .block_visual_runtime_snapshot(generator_tile)
+            .expect("known generator should snapshot");
+        assert_eq!(
+            generator_snapshot.power,
+            Some(GameRuntimeBlockVisualPowerSnapshot {
+                status: Some(0.0),
+                production_efficiency: None,
+            })
+        );
+        assert_eq!(generator_snapshot.heat, None);
+        assert_eq!(generator_snapshot.warmup, None);
+        assert_eq!(generator_snapshot.turret, None);
+
+        assert_eq!(
+            runtime.block_visual_runtime_snapshot(point2_pack(9, 9)),
+            None
+        );
     }
 
     fn seed_assembler_drones_in_position(

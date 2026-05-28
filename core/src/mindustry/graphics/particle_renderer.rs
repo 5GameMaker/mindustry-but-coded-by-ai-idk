@@ -79,6 +79,180 @@ pub struct ParticleVertex {
     pub color: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParticleColor {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl ParticleColor {
+    pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockDrawerParticlePlanConfig {
+    pub build_id_seed: i32,
+    pub warmup: f32,
+    pub time: f32,
+    pub alpha: f32,
+    pub particle_count: usize,
+    pub particle_life: f32,
+    pub particle_radius: f32,
+    pub particle_size: f32,
+    pub fade_margin: f32,
+    pub rotate_scl: f32,
+    pub reverse: bool,
+    pub layer: f32,
+    pub color: ParticleColor,
+    pub secondary_color: Option<ParticleColor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockDrawerParticleSample {
+    pub fin: f32,
+    pub fout: f32,
+    pub alpha: f32,
+    pub angle: f32,
+    pub length: f32,
+    pub size: f32,
+    pub color_t: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockDrawerParticlePlan {
+    pub build_id_seed: i32,
+    pub warmup: f32,
+    pub time: f32,
+    pub alpha: f32,
+    pub particle_count: usize,
+    pub particle_life: f32,
+    pub particle_radius: f32,
+    pub particle_size: f32,
+    pub fade_margin: f32,
+    pub rotate_scl: f32,
+    pub reverse: bool,
+    pub layer: f32,
+    pub color: ParticleColor,
+    pub secondary_color: Option<ParticleColor>,
+}
+
+impl BlockDrawerParticlePlan {
+    pub const fn new(config: BlockDrawerParticlePlanConfig) -> Self {
+        Self {
+            build_id_seed: config.build_id_seed,
+            warmup: config.warmup,
+            time: config.time,
+            alpha: config.alpha,
+            particle_count: config.particle_count,
+            particle_life: config.particle_life,
+            particle_radius: config.particle_radius,
+            particle_size: config.particle_size,
+            fade_margin: config.fade_margin,
+            rotate_scl: config.rotate_scl,
+            reverse: config.reverse,
+            layer: config.layer,
+            color: config.color,
+            secondary_color: config.secondary_color,
+        }
+    }
+
+    pub fn is_noop(&self) -> bool {
+        self.warmup <= 0.0 || self.alpha <= 0.0 || self.particle_count == 0
+    }
+
+    pub fn effective_alpha(&self) -> f32 {
+        self.alpha * self.warmup
+    }
+
+    pub fn base_time(&self) -> f32 {
+        if self.particle_life == 0.0 {
+            0.0
+        } else {
+            self.time / self.particle_life
+        }
+    }
+
+    pub fn particle_seed(&self, index: usize) -> u64 {
+        seeded_u64(self.build_id_seed, self.time, index)
+    }
+
+    pub fn particle_fin(&self, random_life: f32) -> Option<f32> {
+        if self.warmup <= 0.0 || self.particle_life == 0.0 {
+            return None;
+        }
+
+        let mut fin = (random_life + self.base_time()) % 1.0;
+        if self.reverse {
+            fin = 1.0 - fin;
+        }
+        Some(fin)
+    }
+
+    pub fn particle_fout(&self, random_life: f32) -> Option<f32> {
+        self.particle_fin(random_life).map(|fin| 1.0 - fin)
+    }
+
+    pub fn particle_angle(&self, random_angle: f32) -> Option<f32> {
+        if self.warmup <= 0.0 || self.rotate_scl == 0.0 {
+            return None;
+        }
+
+        Some(random_angle + (self.time / self.rotate_scl) % 360.0)
+    }
+
+    pub fn particle_alpha(&self, fin: f32) -> f32 {
+        self.effective_alpha() * (1.0 - curve(fin, 1.0 - self.fade_margin, 1.0))
+    }
+
+    pub fn particle_length(&self, fout: f32) -> f32 {
+        self.particle_radius * fout.clamp(0.0, 1.0).powf(1.5)
+    }
+
+    pub fn particle_size_regular(&self, fin: f32) -> f32 {
+        self.particle_size * slope(fin) * self.warmup
+    }
+
+    pub fn particle_size_soft(&self, fin: f32) -> f32 {
+        self.particle_size * fin.clamp(0.0, 1.0) * self.warmup * 2.0
+    }
+
+    pub fn sample_for_index(&self, index: usize) -> Option<BlockDrawerParticleSample> {
+        if index >= self.particle_count {
+            return None;
+        }
+
+        let seed = self.particle_seed(index);
+        let random_life = seed01(seed ^ 0xA53A_9E37_79B9_7F4A);
+        let random_angle = seed01(seed ^ 0xC3A5_C85C_97CB_3127) * 360.0;
+        let random_color = seed01(seed ^ 0x9E37_79B9_7F4A_7C15);
+
+        let fin = self.particle_fin(random_life)?;
+        let fout = 1.0 - fin;
+        let angle = self.particle_angle(random_angle)?;
+        let alpha = self.particle_alpha(fin);
+        let length = self.particle_length(fout);
+        let size = if self.secondary_color.is_some() {
+            self.particle_size_soft(fin)
+        } else {
+            self.particle_size_regular(fin)
+        };
+
+        Some(BlockDrawerParticleSample {
+            fin,
+            fout,
+            alpha,
+            angle,
+            length,
+            size,
+            color_t: self.secondary_color.map(|_| random_color),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleRenderPlan {
     pub vertices: Vec<ParticleVertex>,
@@ -170,6 +344,12 @@ impl ParticleRendererState {
         }
     }
 
+    pub fn block_drawer_particle_plan(
+        config: BlockDrawerParticlePlanConfig,
+    ) -> BlockDrawerParticlePlan {
+        BlockDrawerParticlePlan::new(config)
+    }
+
     fn append_pending_like_java(&mut self) {
         let space = self.max_particles.saturating_sub(self.particles.len());
         let max_added = space.min(self.pending.len());
@@ -226,6 +406,38 @@ pub fn build_vertices(particles: &[Particle]) -> Vec<ParticleVertex> {
             color: particle.color,
         })
         .collect()
+}
+
+fn seeded_u64(build_id_seed: i32, time: f32, index: usize) -> u64 {
+    let mut state = build_id_seed as u64
+        ^ time.to_bits() as u64
+        ^ (index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    state = splitmix64(state);
+    state
+}
+
+fn splitmix64(mut state: u64) -> u64 {
+    state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut result = state;
+    result = (result ^ (result >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    result = (result ^ (result >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    result ^ (result >> 31)
+}
+
+fn seed01(seed: u64) -> f32 {
+    ((seed >> 40) as u32 as f32) / ((1u32 << 24) as f32)
+}
+
+fn slope(value: f32) -> f32 {
+    1.0 - (value - 0.5).abs() * 2.0
+}
+
+fn curve(value: f32, start: f32, end: f32) -> f32 {
+    if (end - start).abs() <= f32::EPSILON {
+        return if value >= end { 1.0 } else { 0.0 };
+    }
+
+    ((value - start) / (end - start)).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -287,5 +499,90 @@ mod tests {
         assert_eq!(state.particles.len(), 2);
         assert_eq!(state.particles[0].color, 2.0);
         assert_eq!(state.particles[1].color, 3.0);
+    }
+
+    #[test]
+    fn block_drawer_particle_plan_is_deterministic_for_same_build_id() {
+        let config = BlockDrawerParticlePlanConfig {
+            build_id_seed: 42,
+            warmup: 0.5,
+            time: 70.0,
+            alpha: 0.6,
+            particle_count: 3,
+            particle_life: 70.0,
+            particle_radius: 7.0,
+            particle_size: 3.0,
+            fade_margin: 0.4,
+            rotate_scl: 3.0,
+            reverse: false,
+            layer: 12.0,
+            color: ParticleColor::new(0.2, 0.4, 0.6, 1.0),
+            secondary_color: Some(ParticleColor::new(0.8, 0.1, 0.2, 0.9)),
+        };
+
+        let first = ParticleRendererState::block_drawer_particle_plan(config);
+        let second = ParticleRendererState::block_drawer_particle_plan(config);
+
+        assert_eq!(first, second);
+        assert_eq!(first.sample_for_index(0), second.sample_for_index(0));
+        assert_eq!(first.sample_for_index(1), second.sample_for_index(1));
+    }
+
+    #[test]
+    fn block_drawer_particle_plan_with_zero_warmup_is_noop() {
+        let plan =
+            ParticleRendererState::block_drawer_particle_plan(BlockDrawerParticlePlanConfig {
+                build_id_seed: 7,
+                warmup: 0.0,
+                time: 10.0,
+                alpha: 0.7,
+                particle_count: 5,
+                particle_life: 70.0,
+                particle_radius: 7.0,
+                particle_size: 3.0,
+                fade_margin: 0.4,
+                rotate_scl: 1.5,
+                reverse: true,
+                layer: 9.0,
+                color: ParticleColor::new(1.0, 0.5, 0.25, 1.0),
+                secondary_color: None,
+            });
+
+        assert!(plan.is_noop());
+        assert_eq!(plan.effective_alpha(), 0.0);
+        assert_eq!(plan.sample_for_index(0), None);
+    }
+
+    #[test]
+    fn block_drawer_particle_plan_changes_with_build_id_seed() {
+        let base = BlockDrawerParticlePlanConfig {
+            build_id_seed: 1,
+            warmup: 0.8,
+            time: 90.0,
+            alpha: 0.5,
+            particle_count: 2,
+            particle_life: 70.0,
+            particle_radius: 7.0,
+            particle_size: 3.0,
+            fade_margin: 0.4,
+            rotate_scl: 3.0,
+            reverse: false,
+            layer: 7.0,
+            color: ParticleColor::new(0.4, 0.6, 0.8, 1.0),
+            secondary_color: None,
+        };
+        let other = BlockDrawerParticlePlanConfig {
+            build_id_seed: 2,
+            ..base
+        };
+
+        let base_plan = ParticleRendererState::block_drawer_particle_plan(base);
+        let other_plan = ParticleRendererState::block_drawer_particle_plan(other);
+
+        assert_ne!(base_plan.particle_seed(0), other_plan.particle_seed(0));
+        assert_ne!(
+            base_plan.sample_for_index(0),
+            other_plan.sample_for_index(0)
+        );
     }
 }
