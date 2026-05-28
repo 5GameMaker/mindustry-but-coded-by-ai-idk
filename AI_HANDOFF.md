@@ -5638,3 +5638,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `shootSmokeSmite=173` 需要 direct lineAngle primitive 或新的 line plan，不应伪装成现有 radial line；
   2. `shootSmokeMissile=174/175` 需要 alpha、clip `300f`、35 粒子、per-particle jitter 与 scaled lifetime，可在 lineAngle 后继续；
   3. 继续提醒：这些仍是局部 Fx seam，最终仍需真实 renderer/backend 和整体游戏 runtime。
+
+---
+
+## 168. 最新闭环记录：Fx.shootSmokeSmite direct lineAngle particles
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `shootSmokeSmite=173`，补 direct `Lines.lineAngle` 的标准 effect plan 与 desktop flatten。
+- 本轮迁移：
+  - `shootSmokeSmite=173`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SMOKE_SMITE_ID=173`；
+    - 接入 lookup/metadata，lifetime `70.0`；
+    - 新增 `StandardEffectDrawKind::LineAngle`；
+    - `line_render_primitives_from_seed()` 支持 direct line：`center` 是 start，`particles.angle` 是 angle，`radius` 是 length，`stroke` 是 line stroke；
+    - `standard_effect_draw_plans(...)` 逐粒子复现 Java `range(30)`、`random(finpow*50)`、`random(0.3,1)` 顺序，并输出 active `LineAngle`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_smoke_smite_scaled_lines_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_smoke_smite_scaled_lines --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_smoke_smite_scaled_lines_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `shootSmokeMissile=174` 与 `shootSmokeMissileColor=175` 是相邻目标；需要 alpha `0.5`、clip `300f`、35 个 scaled circles、`rotation + 180 + rand.range(21)` 和额外 `rand.range(3)` 抖动；
+  2. 可复用 `shootSmokeTitan` 的 concrete circle plan 思路，但要补 alpha 与 jitter；
+  3. 真实 renderer/backend 仍未接入，headless primitives 只是过渡 seam。

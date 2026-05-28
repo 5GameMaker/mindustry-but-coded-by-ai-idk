@@ -7626,3 +7626,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 相邻 `shootSmokeSmite=173` 需要 `Lines.lineAngle` direct line primitive 或等价 plan，尚未迁移；
   - 当前 circle primitive 仍是 headless seam，真实 renderer/backend 尚未接入；
   - 当前仍只是 Fx 局部迁移。
+
+### 12.242 Fx.shootSmokeSmite direct lineAngle particles
+
+- 2026-05-28：迁移 `shootSmokeSmite=173`，补齐 Java `Lines.lineAngle(...)` 的 direct line plan/primitive 表达。
+- 本轮迁移：
+  - `shootSmokeSmite=173`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2036` 附近：
+    - `shootSmokeSmite = new Effect(70f, ...)`
+    - `rand.setSeed(e.id)`；
+    - 13 个粒子；
+    - `a = e.rotation + rand.range(30f)`；
+    - `v.trns(a, rand.random(e.finpow() * 50f))`；
+    - `e.scaled(e.lifetime * rand.random(0.3f, 1f), b -> ...)`；
+    - `color(e.color)`；
+    - `Lines.stroke(b.fout() * 3f + 0.5f)`；
+    - `Lines.lineAngle(e.x + v.x, e.y + v.y, a, b.fout() * 8f + 0.4f)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SMOKE_SMITE_ID=173`；
+    - 接入 lookup/metadata，lifetime `70.0`；
+    - 新增 `StandardEffectDrawKind::LineAngle`；
+    - `line_render_primitives_from_seed()` 支持 direct line plan：`center -> start`、`radius -> length`、`stroke -> stroke`、`particles.angle -> angle`；
+    - `standard_effect_draw_plans(...)` 对该 effect 逐粒子复现 Java 随机顺序，并输出 active `LineAngle` plans。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_smoke_smite_scaled_lines_for_render`，验证 13 个 line primitives 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_smoke_smite_scaled_lines --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_smoke_smite_scaled_lines_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `shootSmokeMissile=174` / `shootSmokeMissileColor=175` 需要 35 粒子、clip `300f`、alpha `0.5`、per-particle jitter 与 scaled circle；
+  - line primitives 仍是 headless seam，真实 renderer/backend 尚未接入；
+  - 当前仍只是 Fx 局部迁移。
