@@ -5703,3 +5703,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 可继续 `regenParticle` / `regenSuppressParticle` 附近简单 Fx；
   2. 也应规划真实 renderer/backend，当前 primitives 仍不可见；
   3. 不要把 Fx seam 误认为完整游戏迁移完成。
+
+---
+
+## 170. 最新闭环记录：Fx.regenParticle and regenSuppressParticle
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `regenParticle=176` 与 `regenSuppressParticle=177`，复用现有 square/line primitive seam。
+- 本轮迁移：
+  - `regenParticle=176`
+  - `regenSuppressParticle=177`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增两个 Fx ID 并接入 lookup/metadata；
+    - 新增 `Pal.regen` 颜色符号；
+    - `regenParticle` 输出 `FilledSquare`，radius `fslope*1.5+0.14`，rotation `45`；
+    - `regenSuppressParticle` 输出 `SeededRadialLineParticles`，count `4`，offset length `17*fin`，stroke `fout*1.4+0.5`，line length `fslope*3+0.5`，颜色 input→white。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_regen_particles_square_and_lines_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_regen_particles_square_and_lines --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_regen_particles_square_and_lines_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `regenSuppressSeek=178` 需要 data `Position`、随机 lifetime 和 Bezier 轨迹，应先补 effect data/position plan 再迁移；
+  2. 或跳到后续不依赖 data 的 smoke/simple particle Fx；
+  3. 真实 renderer/backend 仍未接入，当前仍只是 headless primitive seam。

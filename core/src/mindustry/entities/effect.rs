@@ -224,6 +224,10 @@ pub const FX_SHOOT_SMOKE_SMITE_ID: i32 = 173;
 pub const FX_SHOOT_SMOKE_MISSILE_ID: i32 = 174;
 /// Upstream `Fx.shootSmokeMissileColor` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_SMOKE_MISSILE_COLOR_ID: i32 = 175;
+/// Upstream `Fx.regenParticle` id in `mindustry.content.Fx` for v158.1.
+pub const FX_REGEN_PARTICLE_ID: i32 = 176;
+/// Upstream `Fx.regenSuppressParticle` id in `mindustry.content.Fx` for v158.1.
+pub const FX_REGEN_SUPPRESS_PARTICLE_ID: i32 = 177;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -361,6 +365,8 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootSmokeSmite" => Some(FX_SHOOT_SMOKE_SMITE_ID),
         "shootSmokeMissile" => Some(FX_SHOOT_SMOKE_MISSILE_ID),
         "shootSmokeMissileColor" => Some(FX_SHOOT_SMOKE_MISSILE_COLOR_ID),
+        "regenParticle" => Some(FX_REGEN_PARTICLE_ID),
+        "regenSuppressParticle" => Some(FX_REGEN_SUPPRESS_PARTICLE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -595,6 +601,12 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_SHOOT_SMOKE_MISSILE_ID => Effect::with_lifetime(FX_SHOOT_SMOKE_MISSILE_ID, 130.0, 300.0),
         FX_SHOOT_SMOKE_MISSILE_COLOR_ID => {
             Effect::with_lifetime(FX_SHOOT_SMOKE_MISSILE_COLOR_ID, 130.0, 300.0)
+        }
+        FX_REGEN_PARTICLE_ID => {
+            Effect::with_lifetime(FX_REGEN_PARTICLE_ID, 100.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_REGEN_SUPPRESS_PARTICLE_ID => {
+            Effect::with_lifetime(FX_REGEN_SUPPRESS_PARTICLE_ID, 35.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
@@ -4249,6 +4261,64 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_REGEN_PARTICLE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledSquare,
+            center: (x, y),
+            color_from: Some("Pal.regen"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fslope * 1.5 + 0.14,
+            stroke: 45.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_REGEN_SUPPRESS_PARTICLE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: Some("Color.white"),
+            color_mix: fin,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fslope * 3.0 + 0.5,
+            stroke: fout * 1.4 + 0.5,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 4,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 17.0 * fin,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_SMOKE_CLOUD_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -4585,6 +4655,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.bulletYellow" => Some(DecalColor::from_rgba(0xfff8e8ff)),
         "Pal.bulletYellowBack" => Some(DecalColor::from_rgba(0xf9c27aff)),
         "Pal.redLight" => Some(DecalColor::from_rgba(0xfeb380ff)),
+        "Pal.regen" => Some(DecalColor::from_rgba(0xd1efffff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
         "Pal.meltdownHit" => Some(DecalColor::from_rgba(0xffb98bff)),
@@ -6105,6 +6176,14 @@ mod tests {
             standard_effect_id("shootSmokeMissileColor"),
             Some(FX_SHOOT_SMOKE_MISSILE_COLOR_ID)
         );
+        assert_eq!(
+            standard_effect_id("regenParticle"),
+            Some(FX_REGEN_PARTICLE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("regenSuppressParticle"),
+            Some(FX_REGEN_SUPPRESS_PARTICLE_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -6400,6 +6479,16 @@ mod tests {
         let shoot_smoke_missile_color = standard_effect(FX_SHOOT_SMOKE_MISSILE_COLOR_ID).unwrap();
         assert_eq!(shoot_smoke_missile_color.lifetime, 130.0);
         assert_eq!(shoot_smoke_missile_color.clip, 300.0);
+        assert_eq!(
+            standard_effect(FX_REGEN_PARTICLE_ID).unwrap().lifetime,
+            100.0
+        );
+        assert_eq!(
+            standard_effect(FX_REGEN_SUPPRESS_PARTICLE_ID)
+                .unwrap()
+                .lifetime,
+            35.0
+        );
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
@@ -8029,6 +8118,68 @@ mod tests {
                 .flat_map(|plan| plan.circle_render_primitives_from_seed())
                 .count(),
             35
+        );
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_regen_particles_square_and_lines() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+        let regen = standard_effect_draw_plan(
+            Some(FX_REGEN_PARTICLE_ID as u16),
+            176,
+            3.0,
+            4.0,
+            0.0,
+            50.0,
+            100.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(regen.kind, StandardEffectDrawKind::FilledSquare);
+        assert_eq!(regen.color_from, Some("Pal.regen"));
+        assert!((regen.radius - 1.64).abs() < 0.0001);
+        assert_eq!(regen.stroke, 45.0);
+        let square = regen.square_render_primitives_from_seed()[0];
+        assert_eq!(square.center, (3.0, 4.0));
+        assert_eq!(square.rotation, 45.0);
+        assert_eq!(
+            regen.resolved_draw_color(),
+            standard_effect_color_symbol("Pal.regen")
+        );
+
+        let suppress = standard_effect_draw_plan(
+            Some(FX_REGEN_SUPPRESS_PARTICLE_ID as u16),
+            177,
+            3.0,
+            4.0,
+            0.0,
+            17.5,
+            35.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(
+            suppress.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(suppress.color_to, Some("Color.white"));
+        assert_eq!(suppress.input_color, Some(input_color));
+        assert_eq!(suppress.color_mix, 0.5);
+        assert!((suppress.radius - 3.5).abs() < 0.0001);
+        assert!((suppress.stroke - 1.2).abs() < 0.0001);
+        let particles = suppress.particles.unwrap();
+        assert_eq!(particles.count, 4);
+        assert_eq!(particles.length, 8.5);
+        let vectors = suppress.seeded_particle_vectors();
+        let lines = suppress.line_render_primitives_from_seed();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0].start, (3.0 + vectors[0].x, 4.0 + vectors[0].y));
+        assert!((lines[0].angle - vectors[0].y.atan2(vectors[0].x).to_degrees()).abs() < 0.0001);
+        assert!((lines[0].length - 3.5).abs() < 0.0001);
+        assert!((lines[0].stroke - 1.2).abs() < 0.0001);
+        assert_eq!(
+            suppress.resolved_draw_color(),
+            Some(lerp_color(input_color, DecalColor::WHITE, 0.5))
         );
     }
 

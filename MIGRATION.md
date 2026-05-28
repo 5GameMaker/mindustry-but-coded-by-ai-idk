@@ -7705,3 +7705,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 本段之后 `regenParticle` 等非 shoot smoke Fx 仍需继续逐项迁移；
   - 真实 renderer/backend 仍未接入；
   - 当前仍只是 Fx 局部迁移。
+
+### 12.244 Fx.regenParticle and regenSuppressParticle
+
+- 2026-05-28：迁移 `regenParticle=176` 与 `regenSuppressParticle=177`，复用现有 square/line primitives 表达 regen 粒子。
+- 本轮迁移：
+  - `regenParticle=176`
+  - `regenSuppressParticle=177`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2073` 附近：
+    - `regenParticle = new Effect(100f, ...)`
+    - `color(Pal.regen)`；
+    - `Fill.square(e.x, e.y, e.fslope() * 1.5f + 0.14f, 45f)`。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2079` 附近：
+    - `regenSuppressParticle = new Effect(35f, ...)`
+    - `color(e.color, Color.white, e.fin())`；
+    - `stroke(e.fout() * 1.4f + 0.5f)`；
+    - `randLenVectors(e.id, 4, 17f * e.fin(), ...)`；
+    - `lineAngle(..., Mathf.angle(x, y), e.fslope() * 3f + 0.5f)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_REGEN_PARTICLE_ID=176` 与 `FX_REGEN_SUPPRESS_PARTICLE_ID=177`；
+    - 接入 lookup/metadata；
+    - 新增 `Pal.regen` 颜色符号；
+    - `regenParticle` 映射为 `FilledSquare`，rotation 使用 `stroke=45.0`；
+    - `regenSuppressParticle` 映射为 `SeededRadialLineParticles`，count `4`、length `17*fin`、stroke `0.5+1.4*fout`、line length `0.5+3*fslope`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_regen_particles_square_and_lines_for_render`，验证 1 个 square primitive 与 4 个 line primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_regen_particles_square_and_lines --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_regen_particles_square_and_lines_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `regenSuppressSeek=178` 依赖 `Position data`、动态 lifetime 和 Bezier 轨迹，不能复用本轮简单 primitive；
+  - 真实 renderer/backend 仍未接入；
+  - 当前仍只是 Fx 局部迁移。
