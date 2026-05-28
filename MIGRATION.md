@@ -10867,3 +10867,48 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java renderer draw stage 现在是顺序描述与测试 helper，尚未变成真实 GPU executor；
   - Pixelator 已进入 desktop frame bundle，但真实 framebuffer begin/end/blit 仍需后端实现；
   - 当前总体迁移约 17.9%，仍未达到完整可玩。
+
+### 12.341 BlockRenderer snapshot, shader dispatch and desktop frame split
+
+- 2026-05-29：继续把渲染引擎从孤立 plan 推进到 desktop frame/bundle 链路。本轮补齐 BlockRenderer 的纯数据 world snapshot 输入、Shader apply 的独立 dispatch side-channel，并把 desktop 的 menu/load frame 从 world graphics bundle 生命周期中拆出。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - tile/building draw 需要携带 block、cache layer、custom shadow、light、team/status/damage 等真实 runtime 字段；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/Shaders.java`
+    - shader apply 是屏幕/材质状态分发，不应伪装为普通 render pass；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - world draw、menu draw、load draw 是不同生命周期入口，desktop frame 不应混入错误 payload。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `BlockRendererTileSnapshot`、`BlockRendererBuildingSnapshot`、`BlockRendererWorldSnapshot`；
+    - 新增 `BlockRendererState::build_plan_from_snapshot(...)`，可用 snapshot 填充 tile/building pass 的 block、cache layer、team、rotation、damage、light/status 等字段；
+    - 旧 `build_plan()` 保持兼容，仍可在未接真实 world snapshot 时退化为 coord-only 默认计划。
+  - `core/src/mindustry/graphics/shaders.rs`
+    - 新增 `ShaderDispatchFrame`，作为 shader apply plan 的独立 side-channel 容器；
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - `GraphicsFrameBundle` / `FrameComposer` / `RenderBridge` 新增 `shader_dispatch` 槽位；
+    - `shader_dispatch` 会影响 bundle 是否为空，但不污染普通 `render_passes` / `render_commands` 统计；
+  - `desktop/src/lib.rs`
+    - 新增 `menu_renderer_state` / `load_renderer_state`；
+    - 新增 `DesktopFrameKind` / `DesktopFramePayload`；
+    - 新增 `menu_frame_for_render(...)` / `load_frame_for_render(...)`，world `graphics_frame_for_render(...)` 不再混入 menu/load；
+    - `graphics_frame_for_render(...)` 改用 `sort_passes_like_java_renderer_draw()`，保持 Java `Renderer.draw()` stage 顺序。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core block_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+  - `cargo test -p mindustry-core render_bridge --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `5 passed`
+  - `cargo test -p mindustry-core shaders --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `10 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+  - `cargo test -p mindustry-desktop menu_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop load_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - `BlockRendererWorldSnapshot` 还需要接入 `DesktopLauncher::block_render_plan(...)` 的真实 `GameState.world + building/runtime` 生成路径；
+  - `ShaderDispatchFrame` 已进入 core bundle，但 desktop/backend 消费路径仍未实现；
+  - texture atlas / sprite backend 仍是渲染可玩化 P0 阻塞；
+  - 当前总体迁移约 18.1%，仍未达到完整可玩。
