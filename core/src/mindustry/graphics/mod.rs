@@ -13,11 +13,13 @@ pub mod light_renderer;
 pub mod load_renderer;
 pub mod menu_renderer;
 pub mod minimap_renderer;
+pub mod minimap_world_adapter;
 pub mod multi_packer;
 pub mod overlay_renderer;
 pub mod pal;
 pub mod particle_renderer;
 pub mod pixelator;
+pub mod render_bridge;
 pub mod render_engine;
 pub mod shaders;
 pub mod trail;
@@ -44,6 +46,7 @@ pub use menu_renderer::{
     MenuRendererState, MenuTile, MenuWorldPlan, MENU_DARKNESS, MENU_TILE_SIZE,
 };
 pub use minimap_renderer::*;
+pub use minimap_world_adapter::*;
 pub use multi_packer::*;
 pub use overlay_renderer::*;
 pub use pal::{Pal, PalEntry};
@@ -53,6 +56,7 @@ pub use particle_renderer::{
 pub use pixelator::{
     PixelatorCamera, PixelatorFramePlan, PixelatorInput, PixelatorRestorePlan, PixelatorState,
 };
+pub use render_bridge::*;
 pub use render_engine::*;
 pub use shaders::*;
 pub use trail::{Trail, TrailPoint, TrailQuadPlan, TrailSegmentPlan};

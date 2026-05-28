@@ -24,6 +24,12 @@ use mindustry_core::mindustry::entities::{
     StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
+use mindustry_core::mindustry::graphics::{
+    GraphicsFrameBundle, GraphicsFrameStats, MinimapCamera, MinimapOverlayInput,
+    MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan,
+    OverlayRendererState, RenderBridge, RenderCamera, RenderEngineState, RenderFramePlan,
+    RenderPoint, RenderSize, RenderViewport,
+};
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
     OtherPlayerPreviewOverlayPlan,
@@ -293,6 +299,36 @@ impl DesktopCameraShakeRenderer for HeadlessDesktopCameraShakeRenderer {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsFrame {
+    pub bundle: GraphicsFrameBundle,
+}
+
+impl DesktopGraphicsFrame {
+    pub fn stats(&self) -> &GraphicsFrameStats {
+        &self.bundle.stats
+    }
+}
+
+pub trait DesktopGraphicsRenderer {
+    fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeadlessDesktopGraphicsRenderer {
+    pub frames_rendered: usize,
+    pub last_stats: GraphicsFrameStats,
+}
+
+impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
+    fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats {
+        let stats = frame.stats().clone();
+        self.frames_rendered += 1;
+        self.last_stats = stats.clone();
+        stats
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DesktopLauncher {
     pub client: ClientLauncher,
@@ -313,6 +349,7 @@ pub struct DesktopLauncher {
     pub pending_camera_shake_events: Vec<GameRuntimeClientCameraShakeEvent>,
     pub camera_shake_state: DesktopCameraShakeState,
     pub last_camera_shake_frame: DesktopCameraShakeFrame,
+    pub overlay_renderer_state: OverlayRendererState,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -369,6 +406,7 @@ impl DesktopLauncher {
             pending_camera_shake_events: Vec::new(),
             camera_shake_state: DesktopCameraShakeState::default(),
             last_camera_shake_frame: DesktopCameraShakeFrame::default(),
+            overlay_renderer_state: OverlayRendererState::default(),
             connect_target,
             connect_error: None,
             args,
@@ -730,6 +768,112 @@ impl DesktopLauncher {
         &mut self,
     ) -> Vec<GameRuntimeClientCameraShakeEvent> {
         std::mem::take(&mut self.pending_camera_shake_events)
+    }
+
+    pub fn current_render_world_size(&self) -> RenderSize {
+        RenderSize::new(
+            self.game_state.world.unit_width().max(0) as f32,
+            self.game_state.world.unit_height().max(0) as f32,
+        )
+    }
+
+    pub fn current_minimap_world_size(&self) -> MinimapWorldSize {
+        MinimapWorldSize::new(
+            self.game_state.world.width().min(i32::MAX as usize) as i32,
+            self.game_state.world.height().min(i32::MAX as usize) as i32,
+        )
+    }
+
+    pub fn default_render_viewport(&self) -> RenderViewport {
+        let size = self.current_render_world_size();
+        RenderViewport::new(0.0, 0.0, size.width, size.height)
+    }
+
+    pub fn default_render_camera(&self) -> RenderCamera {
+        let viewport = self.default_render_viewport();
+        RenderCamera::new(
+            RenderPoint::new(viewport.width / 2.0, viewport.height / 2.0),
+            viewport,
+        )
+    }
+
+    pub fn render_frame_plan(
+        &self,
+        frame_index: u64,
+        mut camera: RenderCamera,
+        viewport: RenderViewport,
+    ) -> RenderFramePlan {
+        camera.viewport = viewport;
+        let mut state = RenderEngineState::new(self.current_render_world_size(), camera);
+        state.set_viewport(viewport);
+        state.begin_frame(frame_index);
+        state.finish()
+    }
+
+    pub fn minimap_overlay_plan(
+        &self,
+        camera: MinimapCamera,
+        input: MinimapOverlayInput,
+    ) -> MinimapOverlayPlan {
+        let world = self.current_minimap_world_size();
+        if world.width <= 0 || world.height <= 0 {
+            return MinimapOverlayPlan {
+                world_rect: MinimapRect::new(0.0, 0.0, 0.0, 0.0),
+                scale_factor: 0.0,
+                commands: Vec::new(),
+            };
+        }
+
+        MinimapRendererState::new(world).overlay_plan(camera, input)
+    }
+
+    pub fn drain_overlay_renderer_plan(&mut self) -> OverlayRendererPlan {
+        self.overlay_renderer_state.drain_plan()
+    }
+
+    pub fn graphics_frame_for_render(
+        &mut self,
+        frame_index: u64,
+        camera: RenderCamera,
+        viewport: RenderViewport,
+        minimap_camera: MinimapCamera,
+        minimap_input: MinimapOverlayInput,
+    ) -> DesktopGraphicsFrame {
+        let render_frame = self.render_frame_plan(frame_index, camera, viewport);
+        let overlay_renderer = self.drain_overlay_renderer_plan();
+        let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
+
+        let mut bridge = RenderBridge::new();
+        bridge
+            .set_render_frame(render_frame)
+            .set_overlay_renderer(overlay_renderer)
+            .set_minimap_overlay(minimap_overlay);
+
+        DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+        }
+    }
+
+    pub fn render_graphics_frame_with<R>(
+        &mut self,
+        frame_index: u64,
+        camera: RenderCamera,
+        viewport: RenderViewport,
+        minimap_camera: MinimapCamera,
+        minimap_input: MinimapOverlayInput,
+        renderer: &mut R,
+    ) -> GraphicsFrameStats
+    where
+        R: DesktopGraphicsRenderer,
+    {
+        let frame = self.graphics_frame_for_render(
+            frame_index,
+            camera,
+            viewport,
+            minimap_camera,
+            minimap_input,
+        );
+        renderer.render_graphics_frame(&frame)
     }
 
     pub fn playable_smoke_status(&self) -> DesktopPlayableSmokeStatus {
@@ -1546,6 +1690,7 @@ impl DesktopLauncher {
         self.pending_camera_shake_events.clear();
         self.camera_shake_state = DesktopCameraShakeState::default();
         self.last_camera_shake_frame = DesktopCameraShakeFrame::default();
+        self.overlay_renderer_state = OverlayRendererState::default();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -2147,7 +2292,7 @@ mod tests {
     use super::{
         run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopLauncher,
         HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
-        HeadlessDesktopEffectRenderer,
+        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -2165,6 +2310,9 @@ mod tests {
     };
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::ctype::{Content, ContentId};
+    use mindustry_core::mindustry::graphics::{
+        MinimapCamera, MinimapOverlayInput, RenderCamera, RenderPoint, RenderSize, RenderViewport,
+    };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
         LegacyShortChunkMap,
@@ -2424,6 +2572,35 @@ mod tests {
                     names: vec![unit_command_name.into()],
                 },
             ],
+        }
+    }
+
+    fn sample_minimap_overlay_input(full_view: bool) -> MinimapOverlayInput {
+        MinimapOverlayInput {
+            screen_x: 0.0,
+            screen_y: 0.0,
+            screen_width: 128.0,
+            screen_height: 128.0,
+            full_view,
+            mobile: false,
+            net_active: false,
+            show_pings: false,
+            fog: false,
+            static_fog: false,
+            dynamic_color: 0x000000ff,
+            dynamic_alpha: 0.0,
+            show_spawns: false,
+            has_spawns: false,
+            waves: false,
+            wave_team_color: 0xffffffff,
+            drop_zone_radius: 0.0,
+            time: 0.0,
+            global_time: 0.0,
+            units: Vec::new(),
+            players: Vec::new(),
+            spawns: Vec::new(),
+            indicators: Vec::new(),
+            markers: Vec::new(),
         }
     }
 
@@ -3152,6 +3329,79 @@ mod tests {
         assert_eq!(stats.sound_at_events, 1);
         assert_eq!(renderer.frames_played, 2);
         assert!(launcher.pending_sound_at_events.is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_builds_graphics_frame_without_effect_cache_coupling() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 8.0), viewport);
+        let minimap_camera = MinimapCamera::new(12.0, 8.0, 64.0, 64.0);
+        launcher.overlay_renderer_state.set_build_fade(0.5);
+
+        let frame = launcher.graphics_frame_for_render(
+            9,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        assert_eq!(frame.bundle.stats.present_plans, 3);
+        assert_eq!(frame.bundle.stats.render_passes, 0);
+        assert_eq!(frame.bundle.stats.minimap_commands, 1);
+        assert!(launcher.standard_local_effect_draw_plans.is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        assert_eq!(render_frame.frame_index, 9);
+        assert_eq!(render_frame.world_size, RenderSize::new(24.0, 16.0));
+        assert_eq!(render_frame.viewport, viewport);
+
+        let overlay_plan = frame.bundle.overlay_renderer.as_ref().unwrap();
+        assert_eq!(overlay_plan.build_fade, 0.5);
+        assert!(overlay_plan.updated_cores);
+
+        let minimap_plan = frame.bundle.minimap_overlay.as_ref().unwrap();
+        assert_eq!(minimap_plan.world_rect.width, 24.0);
+        assert_eq!(minimap_plan.world_rect.height, 16.0);
+    }
+
+    #[test]
+    fn desktop_launcher_renders_graphics_frame_with_headless_renderer_and_resets_overlay_state() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 32.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let minimap_camera = MinimapCamera::new(16.0, 16.0, 32.0, 32.0);
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        let stats = launcher.render_graphics_frame_with(
+            1,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+            &mut renderer,
+        );
+
+        assert_eq!(stats.present_plans, 3);
+        assert_eq!(renderer.frames_rendered, 1);
+        assert_eq!(renderer.last_stats, stats);
+
+        launcher.overlay_renderer_state.set_build_fade(0.75);
+        launcher.clear_snapshot_apply_cursors();
+        let plan = launcher.drain_overlay_renderer_plan();
+        assert_eq!(plan.build_fade, 0.0);
+        assert!(plan.updated_cores);
     }
 
     #[test]

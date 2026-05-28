@@ -10587,3 +10587,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 这些模块仍主要是数据化计划层；真实 GPU backend、texture atlas、world tile renderer adapter、desktop draw loop、UI/input/minimap live texture、renderer event dispatcher 仍需继续接入。
   - `MinimapRenderer.java` 当前只是数据/计划层，真实 texture 增量上传、单位 Groups 查询、fog texture 绑定、marker draw adapter 和客户端 HUD 接线仍未完成。
   - 当前总体迁移约 16.5%，仍未达到完整可玩。
+
+### 12.333 Graphics frame bridge and desktop plan channel
+
+- 2026-05-29：继续优先推进渲染引擎部分；本轮把 graphics 计划层从“孤立模块”推进到 core 聚合桥与 desktop headless 渲染通道，仍保持后端无关，不抢先绑定真实 GPU。
+- Java 对照/接入意图：
+  - 对照 `core/src/mindustry/core/Renderer.java` 中 renderer/minimap/overlays/blocks 等分层更新与绘制职责；
+  - Rust 侧先落地 `RenderFramePlan + OverlayRendererPlan + MinimapOverlayPlan` 的 desktop 可观测帧，后续再继续把 floor/block/fog/light/texture atlas 接入同一 bundle。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - 新增 `GraphicsFrameBundle / GraphicsFrameStats / GraphicsFrameStatsSource / FrameComposer / RenderBridge`；
+    - 聚合 `RenderFramePlan / BlockRendererPlan / FloorRenderPlan / FogFramePlan / OverlayRendererPlan / MinimapOverlayPlan`；
+    - 统计 present plans、render passes/commands、block/floor/fog/overlay/minimap 细分数量和 `total_units`。
+  - `core/src/mindustry/graphics/minimap_world_adapter.rs`
+    - 新增 `MinimapTileSnapshotInput / MinimapTileSnapshotSource / MinimapWorldTileSnapshotAdapter`；
+    - 支持 tile-like 输入归一化、按 `MinimapTilePos` 缓存、导出 snapshots，并按位置集合生成 `MinimapTileUpdatePlan`。
+  - `core/src/mindustry/graphics/mod.rs`
+    - 接入并导出 `render_bridge` 与 `minimap_world_adapter`，避免新增文件停留在不可达状态。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsFrame / DesktopGraphicsRenderer / HeadlessDesktopGraphicsRenderer`；
+    - `DesktopLauncher` 新增独立 graphics plan 通道：`render_frame_plan(...)`、`minimap_overlay_plan(...)`、`drain_overlay_renderer_plan()`、`graphics_frame_for_render(...)`、`render_graphics_frame_with(...)`；
+    - `OverlayRendererState` 挂到 `DesktopLauncher` 生命周期，并在 `clear_snapshot_apply_cursors()` 中重置；
+    - 新增测试验证 graphics frame 不复用/污染 effect cache，且 headless renderer 能统计 graphics bundle。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo check -p mindustry-core --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo check -p mindustry-desktop --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core graphics --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - 当前 graphics 定向测试：`94 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `2 passed`
+- 仍未完成：
+  - graphics bundle 目前只在 desktop headless 通道可观测，真实 GPU backend、texture atlas、block/floor/fog/light pass 填充、HUD/minimap live texture、renderer event dispatcher、主循环 draw backend 仍需继续接入。
+  - minimap world adapter 仍是 tile-like 归一化层，后续要从真实 `GameState.world + content registry + Block/Tile/Building` 解析最终 minimap/floor/block color 与 wall darkness。
+  - 当前总体迁移约 16.7%，仍未达到完整可玩。
