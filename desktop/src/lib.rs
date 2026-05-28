@@ -5308,6 +5308,8 @@ mod tests {
 
         let mut unit_type = UnitType::new(9921, "crawler");
         unit_type.hit_size = 16.0;
+        unit_type.death_sound = "unitExplode1".into();
+        unit_type.death_sound_volume = 0.7;
         let mut unit = UnitComp::new(9921, unit_type, TeamId(4));
         unit.add();
         unit.set_pos(30.0, 40.0);
@@ -5333,6 +5335,11 @@ mod tests {
             .contains_key(&9921));
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
         assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
+        assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
+        assert_eq!(
+            launcher.runtime.client_local_sound_at_events[0].sound_id,
+            mindustry_core::mindustry::audio::standard_sound_id("unitExplode1").unwrap()
+        );
     }
 
     #[test]

@@ -6687,7 +6687,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `git diff --check`
 - 当前仍需继续：
   1. `Fx.dynamicExplosion` 已在 `198` 节进入 `standard_effect_id`/metadata/动态 lifetime/最小 line draw seam；后续仍需补完整圆形粒子、光照和真实 renderer；
-  2. `standard_sound_id` 仍未覆盖 `unitExplode1/2/3` 等死亡音效；
+  2. `standard_sound_id` 已在 `199` 节覆盖 `unitExplode1/2/3` 与 `wreckFall/wreckFallBig`；更多声音和真实 backend 播放仍需继续；
   3. `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
   4. `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 已在 `197` 节接入 mark-dead + local effect 最小语义；后续仍需 post-destroy 与真实 icon renderer；
   5. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。
@@ -6736,7 +6736,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. Java 的 `Core.app.post(() -> Call.unitDestroy(unit.id))` 后续 destroy 调用尚未在 Rust 客户端主动发出；需要结合真实网络方向决定由 server 后续 packet 负责还是客户端 call；
   2. `Fx.unitCapKill` / `Fx.unitEnvKill` 当前只有 id/metadata 与 effect state，真实 warning/cancel icon renderer 还没迁移；
-  3. `Fx.dynamicExplosion` 已在 `198` 节补最小 seam；死亡音效、camera shake、event bus、weapon shoot-on-death、ability death 仍未完整；
+  3. `Fx.dynamicExplosion` 已在 `198` 节补最小 seam；`unitExplode/wreckFall` id 已在 `199` 节补齐；camera shake、event bus、weapon shoot-on-death、ability death 仍未完整；
   4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。
 
 ---
@@ -6778,5 +6778,43 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. Java `dynamicExplosion` 的灰色圆形粒子 multi-pass、`baseLifetime` 子阶段与 `Drawf.light(...)` 精确行为还没完整；
   2. 真实 renderer/backend 对该效果还只是 primitive seam；
-  3. death sound、camera shake、完整 `UnitComp.destroy()` side effects 仍需继续；
+  3. `unitExplode1/2/3` 与 `wreckFall/wreckFallBig` 已在 `199` 节补入 sound id；camera shake、完整 `UnitComp.destroy()` side effects 仍需继续；
   4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。
+
+---
+
+## 199. 最新闭环记录：unitExplode / wreckFall 死亡音效 id 映射
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：补齐 `UnitSafeDeathCallPacket` / 后续 wreck 分支会用到的基础死亡音效 id，让 `deathSound.at(...)` seam 可以实际写入本地 sound event。
+- Java/资源对照：
+  - 按 `core/assets/sounds` 递归文件名排序确认：
+    - `unitCreate = 190`
+    - `unitCreateBig = 191`
+    - `unitExplode1 = 192`
+    - `unitExplode2 = 193`
+    - `unitExplode3 = 194`
+    - `wreckFall = 203`
+    - `wreckFallBig = 204`
+- Rust 主改动：
+  - `core/src/mindustry/audio/mod.rs`
+    - `standard_sound_id(...)` 新增 `unitExplode1/2/3`、`wreckFall`、`wreckFallBig`；
+    - 更新 `standard_sound_ids_follow_upstream_assets_process_order`。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - safe death 回归设置 `death_sound = "unitExplode1"`、`death_sound_volume = 0.7`，验证 `client_local_sound_at_events` 的 id、位置和音量。
+  - `desktop/src/lib.rs`
+    - desktop safe death 回归验证 launcher update 后 runtime 保留本地 sound event。
+  - `MIGRATION.md`
+    - 新增 `12.273`，并更新 `12.270` / `12.272` 剩余项。
+- 已跑验证：
+  - `cargo test -p mindustry-core standard_sound_ids_follow_upstream_assets_process_order`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `standard_sound_id` 仍是窄表，完整 Java sounds 表尚未迁移；
+  2. desktop/backend 真实播放层仍需从 `client_local_sound_at_events` 下沉到 audio backend；
+  3. flying wreck 分支尚未触发 `wreckFall*`；
+  4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 接到真实 runtime/content/world/entity/network/client-server 链路。

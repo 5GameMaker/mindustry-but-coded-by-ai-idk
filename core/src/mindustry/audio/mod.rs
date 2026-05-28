@@ -11,6 +11,11 @@ pub fn standard_sound_id(name: &str) -> Option<i16> {
     match name {
         "unitCreate" => Some(190),
         "unitCreateBig" => Some(191),
+        "unitExplode1" => Some(192),
+        "unitExplode2" => Some(193),
+        "unitExplode3" => Some(194),
+        "wreckFall" => Some(203),
+        "wreckFallBig" => Some(204),
         _ => None,
     }
 }
@@ -33,6 +38,11 @@ mod tests {
     fn standard_sound_ids_follow_upstream_assets_process_order() {
         assert_eq!(standard_sound_id("unitCreate"), Some(190));
         assert_eq!(standard_sound_id("unitCreateBig"), Some(191));
+        assert_eq!(standard_sound_id("unitExplode1"), Some(192));
+        assert_eq!(standard_sound_id("unitExplode2"), Some(193));
+        assert_eq!(standard_sound_id("unitExplode3"), Some(194));
+        assert_eq!(standard_sound_id("wreckFall"), Some(203));
+        assert_eq!(standard_sound_id("wreckFallBig"), Some(204));
         assert_eq!(standard_sound_id("missing"), None);
     }
 }

@@ -26497,6 +26497,8 @@ mod tests {
         unit_type.allow_leg_step = true;
         unit_type.leg_count = 2;
         unit_type.hit_size = 16.0;
+        unit_type.death_sound = "unitExplode1".into();
+        unit_type.death_sound_volume = 0.7;
         let mut unit = UnitComp::new(80, unit_type, TeamId(4));
         unit.add();
         unit.set_pos(30.0, 40.0);
@@ -26523,6 +26525,12 @@ mod tests {
         assert!(!runtime.client_local_effect_events.iter().any(
             |event| event.effect.effect_id == standard_effect_id("legDestroy").unwrap() as u16
         ));
+        assert_eq!(runtime.client_local_sound_at_events.len(), 1);
+        let sound = &runtime.client_local_sound_at_events[0];
+        assert_eq!(sound.sound_id, standard_sound_id("unitExplode1").unwrap());
+        assert_eq!(sound.x, 30.0);
+        assert_eq!(sound.y, 40.0);
+        assert_eq!(sound.volume, 0.7);
         assert!(
             !runtime.apply_client_unit_safe_death_packet(&UnitSafeDeathCallPacket {
                 unit: UnitRef::Null,

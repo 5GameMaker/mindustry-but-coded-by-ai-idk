@@ -8649,7 +8649,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `core/src/mindustry/core/game_runtime.rs`
     - 新增 `apply_client_unit_safe_death_packet(&UnitSafeDeathCallPacket)`；
     - 从 `UnitRef` 取 unit id，找到本地 snapshot 后先按 `death_explosion_effect` 尝试排入 `client_local_effect_events`，rotation 使用 `hit_size / 8.0`；
-    - 若 `death_sound` 已在当前窄表中可解析，则排入 `client_local_sound_at_events`；当前 sound table 仍很窄，默认 `unitExplode*` 尚未覆盖；
+    - 若 `death_sound` 已在当前窄表中可解析，则排入 `client_local_sound_at_events`；`unitExplode1/2/3` 与 `wreckFall*` 已在 `12.273` 补入窄表；
     - 执行 `UnitComp::remove(true)` 并从 `client_unit_snapshot_entities` 删除；
     - 新增 `game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`，锁定 safe death 只产生 death effect，不产生 `legDestroy`。
   - `desktop/src/lib.rs`
@@ -8665,7 +8665,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：
   - `standard_effect_id("dynamicExplosion")`、metadata、动态 lifetime 与线性粒子绘制 seam 已在 `12.272` 补齐；后续仍需补完整灰色爆炸圆形粒子、光照和更精确 renderer；
-  - `standard_sound_id` 仍只覆盖极少数声音，`unitExplode1/2/3` 等死亡音效需要继续迁移；
+  - `standard_sound_id` 已在 `12.273` 覆盖 `unitExplode1/2/3` 与 `wreckFall/wreckFallBig`；更多音效仍需继续迁移；
   - `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
   - `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 已在 `12.271` 接入 mark-dead + local effect 最小语义；后续仍需把 post destroy call 与完整 icon renderer 行为补齐。
 
@@ -8750,4 +8750,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - Java `dynamicExplosion` 的灰色圆形粒子 multi-pass、`baseLifetime` 子阶段、`Drawf.light(...)` 精确颜色/半径目前只做了主 radial line seam；
   - 真实 renderer/backend 对 dynamicExplosion 的图形还需要继续补；
-  - death sound、camera shake、完整 `UnitComp.destroy()` side effects 仍需继续。
+  - `unitExplode1/2/3` 与 `wreckFall/wreckFallBig` 已在 `12.273` 补入 sound id；camera shake、完整 `UnitComp.destroy()` side effects 仍需继续。
+
+### 12.273 unitExplode / wreckFall 死亡音效 id 映射
+
+- 2026-05-28：对照 Java `AssetsProcess.processSounds(...)` 的 `core/assets/sounds` 递归文件名排序，补齐单位死亡/残骸相关基础音效 id，让 `UnitSafeDeathCallPacket` 的 `deathSound.at(...)` seam 可以实际排入本地 sound event。
+- 本轮迁移：
+  - `unitExplode1 = 192`
+  - `unitExplode2 = 193`
+  - `unitExplode3 = 194`
+  - `wreckFall = 203`
+  - `wreckFallBig = 204`
+- Rust 新增/变化：
+  - `core/src/mindustry/audio/mod.rs`
+    - `standard_sound_id(...)` 新增上述死亡/残骸音效映射；
+    - `standard_sound_ids_follow_upstream_assets_process_order` 覆盖这些 id。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - safe death 回归设置 `death_sound = "unitExplode1"`、`death_sound_volume = 0.7`，验证 `client_local_sound_at_events` 写入 sound id、位置和音量。
+  - `desktop/src/lib.rs`
+    - desktop safe death 回归验证 `UnitSafeDeathCallPacket` 通过 launcher update 后保留本地 sound event。
+- 已跑验证：
+  - `cargo test -p mindustry-core standard_sound_ids_follow_upstream_assets_process_order`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `standard_sound_id` 仍是窄表，不是完整 Java sounds 表；
+  - desktop/backend 真实播放层仍需继续从 `client_local_sound_at_events` 下沉到实际 audio backend；
+  - flying wreck 分支尚未触发 `wreckFall*`，当前只是先补可复用 id。
