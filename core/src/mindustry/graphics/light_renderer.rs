@@ -2,6 +2,10 @@ use crate::mindustry::{
     entities::effect::StandardEffectLightRenderPrimitive, graphics::drawf::LightDrawPlan,
 };
 
+use super::{RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty};
+
+pub const LIGHT_RENDER_LAYER: f32 = 50.0;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegionLightCommand {
     pub x: f32,
@@ -43,6 +47,95 @@ pub struct LightRendererState {
 }
 
 pub type LightPrimitive = LightDrawPlan;
+
+fn light_color(light: LightPrimitive) -> [f32; 4] {
+    [
+        light.color.r,
+        light.color.g,
+        light.color.b,
+        light.color.a * light.opacity,
+    ]
+}
+
+fn float_property(key: &str, value: f32) -> RenderProperty {
+    RenderProperty::new(key, value.to_string())
+}
+
+impl LightRendererPlan {
+    pub fn render_commands(&self) -> Vec<RenderCommand> {
+        let mut commands = Vec::with_capacity(self.circle_lights.len() + self.commands.len());
+
+        commands.extend(self.circle_lights.iter().copied().map(|light| {
+            RenderCommand::draw_circle(
+                RenderPoint::new(light.center.0, light.center.1),
+                light.radius,
+                light_color(light),
+                true,
+                LIGHT_RENDER_LAYER,
+            )
+        }));
+
+        for command in &self.commands {
+            match command {
+                LightCommand::Runnable { label } => {
+                    commands.push(RenderCommand::custom(
+                        "light-runnable",
+                        vec![RenderProperty::new("label", label.clone())],
+                    ));
+                }
+                LightCommand::Region(region) => {
+                    let color = light_color(region.color);
+                    commands.push(RenderCommand::custom(
+                        "light-region",
+                        vec![
+                            float_property("x", region.x),
+                            float_property("y", region.y),
+                            RenderProperty::new("region", region.region.clone()),
+                            float_property("rotation", region.rotation),
+                            float_property("r", color[0]),
+                            float_property("g", color[1]),
+                            float_property("b", color[2]),
+                            float_property("a", color[3]),
+                        ],
+                    ));
+                }
+                LightCommand::Line {
+                    x,
+                    y,
+                    x2,
+                    y2,
+                    stroke,
+                    tint,
+                } => {
+                    commands.push(RenderCommand::draw_line(
+                        RenderPoint::new(*x, *y),
+                        RenderPoint::new(*x2, *y2),
+                        *stroke,
+                        light_color(*tint),
+                        LIGHT_RENDER_LAYER,
+                    ));
+                }
+            }
+        }
+
+        commands
+    }
+
+    pub fn to_render_pass(&self) -> Option<RenderPass> {
+        let commands = self.render_commands();
+        if commands.is_empty() {
+            return None;
+        }
+
+        let mut pass = RenderPass::new(RenderPassKind::Lighting);
+        pass.extend(commands);
+        Some(pass)
+    }
+
+    pub fn into_render_pass(self) -> Option<RenderPass> {
+        self.to_render_pass()
+    }
+}
 
 impl Default for LightRendererState {
     fn default() -> Self {
@@ -207,6 +300,109 @@ mod tests {
     }
 
     #[test]
+    fn light_renderer_plan_returns_none_for_empty_render_pass() {
+        let plan = LightRendererPlan {
+            circle_lights: Vec::new(),
+            commands: Vec::new(),
+        };
+
+        assert_eq!(plan.to_render_pass(), None);
+        assert_eq!(plan.into_render_pass(), None);
+    }
+
+    #[test]
+    fn light_renderer_plan_maps_lights_to_lighting_render_pass() {
+        let mut renderer = LightRendererState::default();
+        let tint = LightPrimitive {
+            center: (0.0, 0.0),
+            radius: 0.0,
+            color: DecalColor::from_rgba(0x20406080),
+            opacity: 0.5,
+        };
+
+        assert!(renderer.add_circle(
+            10.0,
+            20.0,
+            30.0,
+            LightPrimitive {
+                center: (0.0, 0.0),
+                radius: 0.0,
+                color: DecalColor::from_rgba(0x804020ff),
+                opacity: 0.25,
+            }
+        ));
+        assert!(renderer.add_line(1.0, 2.0, 3.0, 4.0, 5.0, tint));
+        assert!(renderer.add_region(6.0, 7.0, "circle-shadow", 45.0, tint));
+        assert!(renderer.add_runnable("custom-light"));
+
+        let pass = renderer
+            .drain_plan()
+            .to_render_pass()
+            .expect("non-empty light plan should produce lighting pass");
+
+        assert_eq!(pass.kind, RenderPassKind::Lighting);
+        assert_eq!(pass.order, RenderPassKind::Lighting.default_order());
+        assert_eq!(pass.commands.len(), 4);
+
+        match &pass.commands[0] {
+            RenderCommand::DrawCircle {
+                center,
+                radius,
+                color,
+                filled,
+                layer,
+            } => {
+                assert_eq!(*center, RenderPoint::new(10.0, 20.0));
+                assert_eq!(*radius, 30.0);
+                assert_eq!(*color, [0.5019608, 0.2509804, 0.1254902, 0.25]);
+                assert!(*filled);
+                assert_eq!(*layer, LIGHT_RENDER_LAYER);
+            }
+            other => panic!("expected circle light command, got {other:?}"),
+        }
+
+        match &pass.commands[1] {
+            RenderCommand::DrawLine {
+                from,
+                to,
+                stroke,
+                color,
+                layer,
+            } => {
+                assert_eq!(*from, RenderPoint::new(1.0, 2.0));
+                assert_eq!(*to, RenderPoint::new(3.0, 4.0));
+                assert_eq!(*stroke, 5.0);
+                assert_eq!(*color, [0.1254902, 0.2509804, 0.3764706, 0.2509804]);
+                assert_eq!(*layer, LIGHT_RENDER_LAYER);
+            }
+            other => panic!("expected line light command, got {other:?}"),
+        }
+
+        match &pass.commands[2] {
+            RenderCommand::Custom { name, properties } => {
+                assert_eq!(name, "light-region");
+                assert_property(properties, "x", "6");
+                assert_property(properties, "y", "7");
+                assert_property(properties, "region", "circle-shadow");
+                assert_property(properties, "rotation", "45");
+                assert_property(properties, "r", "0.1254902");
+                assert_property(properties, "g", "0.2509804");
+                assert_property(properties, "b", "0.3764706");
+                assert_property(properties, "a", "0.2509804");
+            }
+            other => panic!("expected region custom command, got {other:?}"),
+        }
+
+        match &pass.commands[3] {
+            RenderCommand::Custom { name, properties } => {
+                assert_eq!(name, "light-runnable");
+                assert_property(properties, "label", "custom-light");
+            }
+            other => panic!("expected runnable custom command, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn light_renderer_draw_plan_can_convert_to_effect_primitives() {
         let mut renderer = LightRendererState::default();
         renderer.add_circle(
@@ -228,5 +424,13 @@ mod tests {
             primitives[0].color_rgba,
             Some(DecalColor::from_rgba(0x112233ff))
         );
+    }
+
+    fn assert_property(properties: &[RenderProperty], key: &str, value: &str) {
+        let property = properties
+            .iter()
+            .find(|property| property.key == key)
+            .unwrap_or_else(|| panic!("missing property {key}"));
+        assert_eq!(property.value, value);
     }
 }

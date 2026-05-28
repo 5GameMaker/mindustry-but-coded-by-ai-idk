@@ -10665,3 +10665,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Tile::floor_color_rgba_with(...)` 下一步需要接 `ContentLoader + BlockDef::color_rgba(tile)`；
   - `World::get_wall_darkness_with(...)` 已有 closure 入口，后续需要在 minimap/world snapshot adapter 中用真实 block registry 判定 darkened；
   - 当前总体迁移约 16.8%，仍未达到完整可玩。
+
+### 12.335 LightRenderer plan to lighting render pass bridge
+
+- 2026-05-29：继续优先推进渲染引擎部分；本轮把 Rust `LightRendererPlan` 从独立收集器推进到可被统一 `RenderFramePlan` 消费的 `RenderPassKind::Lighting` pass。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/LightRenderer.java`
+    - `add(Runnable)`：收集自定义 light draw 回调；
+    - `add(x,y,radius,color,opacity)`：收集 circle light，忽略 `radius <= 0`；
+    - `add(x,y,TextureRegion,rotation,color,opacity)`：收集 region light draw；
+    - `line(...)`：收集 line light draw；
+    - `draw()`：先执行 runnable/region/line，再绘制 circle，并在帧末清空。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/light_renderer.rs`
+    - 新增 `LIGHT_RENDER_LAYER = 50.0`，对应 `RenderPassKind::Lighting.default_order()`；
+    - 新增 `LightRendererPlan::render_commands()`：
+      - circle light → `RenderCommand::DrawCircle`；
+      - line light → `RenderCommand::DrawLine`；
+      - region light → `RenderCommand::Custom("light-region")`，保留 `x/y/region/rotation/rgba` 属性；
+      - runnable light → `RenderCommand::Custom("light-runnable")`，保留 label；
+    - 新增 `LightRendererPlan::to_render_pass()` 与 `into_render_pass()`，空计划返回 `None`，非空计划返回 `RenderPassKind::Lighting`。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core light_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `4 passed`
+  - `cargo test -p mindustry-core graphics --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - 当前 graphics 定向测试：`96 passed`
+  - `cargo check -p mindustry-core --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+- 仍未完成：
+  - `LightRendererPlan::to_render_pass()` 已经能产出统一 lighting pass，但尚未接入 desktop/main draw loop 的真实 GPU backend、light framebuffer、`Shaders.light` ambient blit；
+  - 下一步应把 lighting pass 纳入 `RenderBridge/FrameComposer/DesktopGraphicsFrame` 的真实帧聚合，并继续实现 renderer event dispatcher 与后端 draw adapter；
+  - 当前总体迁移约 16.9%，仍未达到完整可玩。
