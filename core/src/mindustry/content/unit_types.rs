@@ -417,6 +417,7 @@ pub fn load() -> Vec<UnitType> {
         }),
         unit(&mut next_id, "spiroct", UnitKind::Standard, |u| {
             u.speed = 0.54;
+            u.drag = 0.4;
             u.hit_size = 15.0;
             u.rotate_speed = 3.0;
             u.health = 1000.0;
@@ -427,10 +428,32 @@ pub fn load() -> Vec<UnitType> {
             u.leg_base_offset = 2.0;
             u.hovering = true;
             u.armor = 5.0;
+            u.shadow_elevation = 0.3;
             u.ground_layer = LAYER_LEG_UNIT;
+            u.step_sound = "walkerStepSmall".into();
             u.step_sound_pitch = 0.7;
             u.step_sound_volume = 0.35;
             u.allow_leg_step = true;
+            let mut weapon = Weapon::new("spiroct-weapon");
+            weapon.shoot_y = 4.0;
+            weapon.reload = 14.0;
+            weapon.eject_effect = "none".into();
+            weapon.recoil = 2.0;
+            weapon.rotate = true;
+            weapon.shoot_sound = "shootSap".into();
+            weapon.x = 8.5;
+            weapon.y = -1.5;
+            weapon.bullet = "spiroct_sap".into();
+            u.weapons.push(weapon);
+
+            let mut mount = Weapon::new("mount-purple-weapon");
+            mount.reload = 18.0;
+            mount.rotate = true;
+            mount.x = 4.0;
+            mount.y = 3.0;
+            mount.shoot_sound = "shootSap".into();
+            mount.bullet = "spiroct_mount_sap".into();
+            u.weapons.push(mount);
         }),
         unit(&mut next_id, "arkyid", UnitKind::Standard, |u| {
             u.speed = 0.62;
@@ -1889,6 +1912,58 @@ mod tests {
         assert_eq!(bullet.spec.damage, 13.0);
         assert_eq!(bullet.spec.speed, 2.5);
         assert!(!bullet.spec.collides_air);
+    }
+
+    #[test]
+    fn spiroct_weapons_match_java_sap_profiles() {
+        let units = load();
+        let spiroct = by_name(&units, "spiroct");
+        assert_eq!(spiroct.drag, 0.4);
+        assert_eq!(spiroct.step_sound, "walkerStepSmall");
+        assert_eq!(spiroct.shadow_elevation, 0.3);
+        assert_eq!(spiroct.ground_layer, LAYER_LEG_UNIT);
+        assert_eq!(spiroct.weapons.len(), 2);
+
+        let primary = &spiroct.weapons[0];
+        assert_eq!(primary.name, "spiroct-weapon");
+        assert_eq!(primary.shoot_y, 4.0);
+        assert_eq!(primary.reload, 14.0);
+        assert_eq!(primary.eject_effect, "none");
+        assert_eq!(primary.recoil, 2.0);
+        assert!(primary.rotate);
+        assert_eq!(primary.shoot_sound, "shootSap");
+        assert_eq!(primary.x, 8.5);
+        assert_eq!(primary.y, -1.5);
+        assert_eq!(primary.bullet, "spiroct_sap");
+
+        let mount = &spiroct.weapons[1];
+        assert_eq!(mount.name, "mount-purple-weapon");
+        assert_eq!(mount.reload, 18.0);
+        assert!(mount.rotate);
+        assert_eq!(mount.x, 4.0);
+        assert_eq!(mount.y, 3.0);
+        assert_eq!(mount.shoot_sound, "shootSap");
+        assert_eq!(mount.bullet, "spiroct_mount_sap");
+        assert_ne!(primary.bullet, mount.bullet);
+
+        let bullets = bullets::load();
+        let primary_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == primary.bullet)
+            .unwrap_or_else(|| panic!("missing spiroct bullet {}", primary.bullet));
+        let mount_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == mount.bullet)
+            .unwrap_or_else(|| panic!("missing spiroct mount bullet {}", mount.bullet));
+
+        assert_eq!(primary_bullet.spec.kind, BulletKind::Sap);
+        assert_eq!(primary_bullet.spec.sap_strength, 0.5);
+        assert_eq!(primary_bullet.spec.length, 75.0);
+        assert_eq!(primary_bullet.spec.damage, 23.0);
+        assert_eq!(mount_bullet.spec.kind, BulletKind::Sap);
+        assert_eq!(mount_bullet.spec.sap_strength, 0.8);
+        assert_eq!(mount_bullet.spec.length, 40.0);
+        assert_eq!(mount_bullet.spec.damage, 18.0);
     }
 
     #[test]

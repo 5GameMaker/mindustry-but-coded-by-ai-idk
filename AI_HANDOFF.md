@@ -8261,3 +8261,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一闭环建议 `spiroct`：需要新增 `BulletKind::Sap` 和 `BulletSpec.sap_strength`，两把 SapBulletType 不能共用一个 spec；
   3. `LiquidBulletType` 的 puddle deposit、boil/vapor、extinguish、draw runtime 未完成；
   4. 当前总迁移约 13.2%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 243. 最新闭环记录：UnitTypes spiroct SapBulletType content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `spiroct` 的两把 SapBulletType weapon 回填进 Rust content registry，并保留两条独立 bullet spec。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:734-798`
+  - `spiroct-weapon`：`shootY=4`、`reload=14`、`ejectEffect=none`、`recoil=2`、`rotate=true`、`shootSound=shootSap`、`x=8.5`、`y=-1.5`，bullet `sapStrength=0.5`、`length=75`、`damage=23`、`width=0.54`、`lifetime=35`、`knockback=-1.24`；
+  - `mount-purple-weapon`：`reload=18`、`rotate=true`、`x=4`、`y=3`、`shootSound=shootSap`，bullet `sapStrength=0.8`、`length=40`、`damage=18`、`width=0.4`、`lifetime=25`、`knockback=-0.65`；
+  - 两条 bullet 均覆盖 `shootEffect=shootSmall`、`hitColor=color=bf92f9`、`despawnEffect=none`，并继承 SapBulletType 默认 `status=sapped`、`lightColor=sap`、`lightOpacity=0.6`、`impact=true` 等。
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletKind::Sap`；
+    - `BulletSpec.sap_strength`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `sap_bullet(...)` helper；
+    - 新增 `spiroct_sap` 与 `spiroct_mount_sap`；
+    - 更新 bullet load order；
+    - 新增 `spiroct_sap_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `spiroct` 补齐 `drag`、`step_sound`、`shadow_elevation`；
+    - 注册 `spiroct-weapon` 与 `mount-purple-weapon`；
+    - 新增 `spiroct_weapons_match_java_sap_profiles`。
+  - `MIGRATION.md`
+    - 新增 `12.317`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core spiroct_sap_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core spiroct_weapons_match_java_sap_profiles --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一闭环可继续 `arkyid`，或先把 content `BulletKind::Sap` 接到真实 sap runtime；
+  3. SapBulletType 的 linecast/heal/collision/draw/light runtime 仍未 content-driven；
+  4. 当前总迁移约 13.25%，远未可玩，goal 绝不能标记 complete。

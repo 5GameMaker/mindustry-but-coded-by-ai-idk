@@ -267,6 +267,26 @@ pub fn load() -> Vec<BulletContent> {
     atrax_slag.lifetime = 57.0;
     atrax_slag.collides_air = false;
 
+    let mut spiroct_sap = sap_bullet(23.0);
+    spiroct_sap.sap_strength = 0.5;
+    spiroct_sap.length = 75.0;
+    spiroct_sap.shoot_effect = "shootSmall".into();
+    spiroct_sap.hit_color = "bf92f9".into();
+    spiroct_sap.color = "bf92f9".into();
+    spiroct_sap.width = 0.54;
+    spiroct_sap.lifetime = 35.0;
+    spiroct_sap.knockback = -1.24;
+
+    let mut spiroct_mount_sap = sap_bullet(18.0);
+    spiroct_mount_sap.sap_strength = 0.8;
+    spiroct_mount_sap.length = 40.0;
+    spiroct_mount_sap.shoot_effect = "shootSmall".into();
+    spiroct_mount_sap.hit_color = "bf92f9".into();
+    spiroct_mount_sap.color = "bf92f9".into();
+    spiroct_mount_sap.width = 0.4;
+    spiroct_mount_sap.lifetime = 25.0;
+    spiroct_mount_sap.knockback = -0.65;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -322,6 +342,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "corvus_laser", corvus_laser),
         make_bullet(&mut next_id, "crawler_explosion", crawler_explosion),
         make_bullet(&mut next_id, "atrax_slag", atrax_slag),
+        make_bullet(&mut next_id, "spiroct_sap", spiroct_sap),
+        make_bullet(&mut next_id, "spiroct_mount_sap", spiroct_mount_sap),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -459,6 +481,26 @@ fn liquid_bullet(liquid: &str) -> BulletSpec {
     bullet
 }
 
+fn sap_bullet(damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Sap, 0.0, damage);
+    bullet.despawn_effect = "none".into();
+    bullet.pierce = true;
+    bullet.collides = false;
+    bullet.hit_size = 0.0;
+    bullet.hittable = false;
+    bullet.hit_effect = "hitLiquid".into();
+    bullet.status = "sapped".into();
+    bullet.light_color = "sap".into();
+    bullet.light_opacity = 0.6;
+    bullet.status_duration = 60.0 * 3.0;
+    bullet.impact = true;
+    bullet.sap_strength = 0.5;
+    bullet.length = 100.0;
+    bullet.width = 0.4;
+    bullet.sprite = "laser".into();
+    bullet
+}
+
 fn continuous_laser_bullet(damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
     bullet.length = 220.0;
@@ -526,6 +568,8 @@ mod tests {
                 "corvus_laser",
                 "crawler_explosion",
                 "atrax_slag",
+                "spiroct_sap",
+                "spiroct_mount_sap",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -983,6 +1027,47 @@ mod tests {
         assert_eq!(bullet.hit_color, "ffa166ff");
         assert_eq!(bullet.light_color, "f0511d66");
         assert_eq!(bullet.light_opacity, 0.4);
+    }
+
+    #[test]
+    fn spiroct_sap_bullets_match_java_profiles() {
+        let bullets = load();
+        let primary = &by_name(&bullets, "spiroct_sap").spec;
+        let mount = &by_name(&bullets, "spiroct_mount_sap").spec;
+
+        for bullet in [primary, mount] {
+            assert_eq!(bullet.kind, BulletKind::Sap);
+            assert_eq!(bullet.speed, 0.0);
+            assert_eq!(bullet.shoot_effect, "shootSmall");
+            assert_eq!(bullet.hit_color, "bf92f9");
+            assert_eq!(bullet.color, "bf92f9");
+            assert_eq!(bullet.despawn_effect, "none");
+            assert!(bullet.pierce);
+            assert!(!bullet.collides);
+            assert_eq!(bullet.hit_size, 0.0);
+            assert!(!bullet.hittable);
+            assert_eq!(bullet.hit_effect, "hitLiquid");
+            assert_eq!(bullet.status, "sapped");
+            assert_eq!(bullet.light_color, "sap");
+            assert_eq!(bullet.light_opacity, 0.6);
+            assert_eq!(bullet.status_duration, 180.0);
+            assert!(bullet.impact);
+            assert_eq!(bullet.sprite, "laser");
+        }
+
+        assert_eq!(primary.sap_strength, 0.5);
+        assert_eq!(primary.length, 75.0);
+        assert_eq!(primary.damage, 23.0);
+        assert_eq!(primary.width, 0.54);
+        assert_eq!(primary.lifetime, 35.0);
+        assert_eq!(primary.knockback, -1.24);
+
+        assert_eq!(mount.sap_strength, 0.8);
+        assert_eq!(mount.length, 40.0);
+        assert_eq!(mount.damage, 18.0);
+        assert_eq!(mount.width, 0.4);
+        assert_eq!(mount.lifetime, 25.0);
+        assert_eq!(mount.knockback, -0.65);
     }
 
     #[test]

@@ -10064,3 +10064,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `atrax_slag` 目前进入 content registry，并通过 unit weapon 引用，但服务端/客户端真实液体弹命中环境交互仍是后续 runtime 闭环；
   - 下一步建议继续 `spiroct`，补 `BulletKind::Sap` 与 `BulletSpec.sap_strength` 后回填两把 SapBulletType 武器；
   - 当前总体迁移约 13.2%，远未可玩。
+
+### 12.317 UnitTypes spiroct SapBulletType content seam
+
+- 2026-05-28：继续回填 `spiroct` 的两把 `SapBulletType` 武器。该闭环补出 `BulletKind::Sap` 与 `BulletSpec.sap_strength`，并将 primary/mount 两条 sap bullet 分别注册为独立 content preset，避免两把武器错误共用一个 bullet spec。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:734-798`
+  - unit：`speed = 0.54f`、`drag = 0.4f`、`hitSize = 15f`、`rotateSpeed = 3f`、`health = 1000`、`legCount = 6`、`legLength = 13f`、`legForwardScl = 0.8f`、`legMoveSpace = 1.4f`、`legBaseOffset = 2f`、`hovering = true`、`armor = 5f`、`shadowElevation = 0.3f`、`groundLayer = Layer.legUnit`、`stepSound = Sounds.walkerStepSmall`、`stepSoundPitch = 0.7f`、`stepSoundVolume = 0.35f`
+  - primary weapon：`new Weapon("spiroct-weapon")`，`shootY = 4f`、`reload = 14f`、`ejectEffect = Fx.none`、`recoil = 2f`、`rotate = true`、`shootSound = Sounds.shootSap`、`x = 8.5f`、`y = -1.5f`
+  - primary bullet：`new SapBulletType()`，`sapStrength = 0.5f`、`length = 75f`、`damage = 23`、`shootEffect = Fx.shootSmall`、`hitColor = color = bf92f9`、`despawnEffect = Fx.none`、`width = 0.54f`、`lifetime = 35f`、`knockback = -1.24f`
+  - mount weapon：`new Weapon("mount-purple-weapon")`，`reload = 18f`、`rotate = true`、`x = 4f`、`y = 3f`、`shootSound = Sounds.shootSap`
+  - mount bullet：`new SapBulletType()`，`sapStrength = 0.8f`、`length = 40f`、`damage = 18`、`shootEffect = Fx.shootSmall`、`hitColor = color = bf92f9`、`despawnEffect = Fx.none`、`width = 0.4f`、`lifetime = 25f`、`knockback = -0.65f`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletKind` 新增 `Sap`；
+    - `BulletSpec` 新增 `sap_strength: f32`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增本地 `sap_bullet(...)` helper，记录 Java `SapBulletType` 默认：`speed=0`、`despawnEffect=none`、`pierce=true`、`collides=false`、`hitSize=0`、`hittable=false`、`hitEffect=hitLiquid`、`status=sapped`、`lightColor=sap`、`lightOpacity=0.6`、`statusDuration=180`、`impact=true`、`sprite=laser`；
+    - 新增 `spiroct_sap` 与 `spiroct_mount_sap`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `spiroct_sap_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `spiroct` 补齐 `drag`、`step_sound`、`shadow_elevation`；
+    - `spiroct` 注册 `spiroct-weapon` 与 `mount-purple-weapon`，分别引用不同 sap bullet；
+    - 新增 `spiroct_weapons_match_java_sap_profiles`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core spiroct_sap_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core spiroct_weapons_match_java_sap_profiles --lib`
+- 仍未完成：
+  - content 中已记录 SapBulletType 的核心字段，但真实 sap linecast、吸血/heal owner、collision 与 laser draw/light runtime 尚未接入 content-driven bullet runtime；
+  - `length_rand`、`laser_region`、`laser_end_region` 未作为 content 字段泛化；本轮 Java `spiroct` 未使用这些覆盖项；
+  - 下一步建议继续 `arkyid` 或先做 sap runtime/content mapping，取决于是否优先提高可玩战斗行为；
+  - 当前总体迁移约 13.25%，远未可玩。
