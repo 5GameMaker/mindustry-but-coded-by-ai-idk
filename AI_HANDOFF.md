@@ -6301,3 +6301,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `legDestroy=263` 需要 `LegDestroyData` 进入 effect data 通道，并新增 textured line/region seam；
   3. `arcShieldBreak=257` 需要 `ShieldArcAbility` typed resolver/arc primitive；
   4. 本轮 `Rect` 是 local-only，后续若要跨 Java/Rust 网络传输必须先设计双方兼容的 wire convention。
+
+---
+
+## 187. 最新闭环记录：Fx.unitShieldBreak
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `unitShieldBreak=260`，让 Java `Unit` effect data 在 Rust 端通过 `TypeValue::Unit(id)` 接入客户端单位快照，解析 `hitSize()` 后生成护盾破裂 draw plans。
+- 本轮迁移：
+  - `unitShieldBreak=260`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_UNIT_SHIELD_BREAK_ID=260`、lookup、metadata，lifetime `35.0`；
+    - 新增 `standard_effect_draw_plans_with_data_value_and_unit_hit_size(...)`，用于在 standard effect plan 中传入 runtime 已解析的单位 hit size；
+    - `TypeValue::Unit(_) + hit_size` 时生成 Java 对应的前 16 帧 seeded radial line particles，以及全生命周期 `StrokedCircle`；缺少 unit data 或 hit size 时返回空，保持 Java guard 语义；
+    - core 测试覆盖 ID、metadata、粒子数、圆半径、stroke、缺 hit size 空输出。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出新的 typed resolver 入口。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render(...)` 从 `runtime.client_unit_snapshot_entities` 建立 `unit_id -> hit_size` 映射；
+    - 本地 standard effect event 若带 `TypeValue::Unit(id)`，会把对应 hit size 传入 core plan；
+    - 新增 `desktop_launcher_resolves_unit_shield_break_hit_size_for_render`，验证 effect event、client runtime unit snapshot、circle/line primitives 与 headless renderer stats 的完整 seam。
+  - `MIGRATION.md`
+    - 新增 `12.261` 节，并更新 `12.260` 的剩余项。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_resolves_unit_shield_break_hit_size_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `healBlockFull=252` 可能是下一步最小闭环：需要确认 block/fullIcon seam，可先用现有 square/rect/circle primitive 表达底层效果，但不要脱离 block/content registry；
+  2. `arcShieldBreak=257` 需要 `ShieldArcAbility` typed data/resolver，建议先让能力实例/参数进入 effect data 或 runtime sidecar；
+  3. `legDestroy=263` 需要 `LegDestroyData` 与 textured line/region seam，复杂度高于普通 shape 特效；
+  4. 当前总迁移仍约 9% 左右，远未可玩；后续继续把每个 helper/plan 接入真实 runtime、renderer 与联机路径。

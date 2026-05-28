@@ -15,9 +15,10 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, standard_effect, standard_effect_draw_plans_with_data_value,
-    standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
-    PlayerUnitSwitchContext, StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
+    entity_class_kind, standard_effect,
+    standard_effect_draw_plans_with_data_value_and_unit_hit_size, standard_effect_render_lifetime,
+    EffectRenderInput, EntityClassKind, PlayerComp, PlayerUnitSwitchContext,
+    StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
     StandardEffectRectRenderPrimitive, StandardEffectSquareRenderPrimitive,
     StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
@@ -306,18 +307,31 @@ impl DesktopLauncher {
         &mut self,
     ) -> Vec<StandardEffectDrawPlan> {
         let mut plans = Vec::new();
+        let unit_hit_sizes: BTreeMap<i32, f32> = self
+            .runtime
+            .client_unit_snapshot_entities
+            .iter()
+            .map(|(id, unit)| (*id, unit.hitbox.hit_size))
+            .collect();
         self.draw_local_effect_states_for_render(|input| {
-            plans.extend(standard_effect_draw_plans_with_data_value(
-                input.effect_id,
-                input.id,
-                input.x,
-                input.y,
-                input.rotation,
-                input.time,
-                input.lifetime,
-                input.color,
-                Some(input.data),
-            ));
+            let resolved_unit_hit_size = match input.data {
+                TypeValue::Unit(id) => unit_hit_sizes.get(id).copied(),
+                _ => None,
+            };
+            plans.extend(
+                standard_effect_draw_plans_with_data_value_and_unit_hit_size(
+                    input.effect_id,
+                    input.id,
+                    input.x,
+                    input.y,
+                    input.rotation,
+                    input.time,
+                    input.lifetime,
+                    input.color,
+                    Some(input.data),
+                    resolved_unit_hit_size,
+                ),
+            );
             standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
         });
         plans
@@ -3963,6 +3977,73 @@ mod tests {
         assert_eq!(stats.square_primitives, 0);
         assert_eq!(stats.rect_primitives, 0);
         assert_eq!(stats.line_primitives, 4);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_resolves_unit_shield_break_hit_size_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let flare = launcher
+            .content_loader
+            .unit_by_name("flare")
+            .unwrap()
+            .clone();
+        let mut unit = UnitComp::new(777, flare, TeamId(TEAM_SHARDED));
+        unit.hitbox.hit_size = 10.0;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(777, unit);
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("unitShieldBreak").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(0x336699ff_i32),
+                },
+                data: TypeValue::Unit(777),
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 2);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 1);
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_rect_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 15);
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let circle = &launcher.standard_local_effect_circle_primitives[0];
+        assert_eq!(circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(circle.radius, 13.0);
+        let circle_color = circle
+            .color
+            .expect("unit shield circle should keep input color");
+        let input_color =
+            mindustry_core::mindustry::entities::comp::DecalColor::from_rgba(0x336699ff);
+        assert_eq!(circle_color.r, input_color.r);
+        assert_eq!(circle_color.g, input_color.g);
+        assert_eq!(circle_color.b, input_color.b);
+        assert!(circle_color.a > 0.0);
+        assert!(circle_color.a <= 0.9);
+        assert!(launcher.standard_local_effect_line_primitives[0].length > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 2);
+        assert_eq!(stats.circle_primitives, 1);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.rect_primitives, 0);
+        assert_eq!(stats.line_primitives, 15);
         assert_eq!(stats.triangle_primitives, 0);
         assert_eq!(stats.light_primitives, 0);
         assert_eq!(renderer.last_stats, stats);

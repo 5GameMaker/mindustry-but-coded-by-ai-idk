@@ -8304,4 +8304,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `TypeValue::Rect` 是本地 debug seam，不是 Java TypeIO wire 兼容 tag；如果后续要远程发送 debugRect，需要先确认 Java 端是否存在额外调用路径或改为双方都支持的 object convention；
   - 当前以 4 条 `LineAngle` 表达 `Lines.rect`，真实 renderer/backend 仍未接入专用 debug rectangle 绘制；
-  - `unitShieldBreak=260`、`legDestroy=263`、`arcShieldBreak=257` 仍待 typed resolver / textured line seam。
+  - `legDestroy=263`、`arcShieldBreak=257` 仍待 typed resolver / textured line seam。
+
+### 12.261 Fx.unitShieldBreak
+
+- 2026-05-28：对照 `Fx.java:2852-2869`，迁移单位护盾破裂效果 `unitShieldBreak=260`，并把 effect data 从 `TypeValue::Unit(id)` 接到 desktop/client runtime 的单位 hit size 解析路径。
+- 本轮迁移：
+  - `unitShieldBreak=260`
+- Java 依据：
+  - `unitShieldBreak = new Effect(35, ...)`；
+  - 要求 `e.data instanceof Unit unit`，否则直接 return；
+  - `radius = unit.hitSize() * 1.3f`；
+  - `e.scaled(16f, ...)` 内使用 `randLenVectors(e.id, (int)(radius * 1.2f), radius/2f + c.finpow() * radius*1.25f, ...)` 绘制随机径向短线；
+  - 全生命周期绘制 `Lines.circle(e.x, e.y, radius)`，颜色 alpha 为 `e.fout() * 0.9f`，stroke 为 `e.fout()`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_UNIT_SHIELD_BREAK_ID=260`、lookup 与 metadata，lifetime `35.0`；
+    - 新增 `standard_effect_draw_plans_with_data_value_and_unit_hit_size(...)`，在保持既有 `TypeValue` data seam 的同时允许调用方传入已解析的 Unit hit size；
+    - 当 data 是 `TypeValue::Unit(_)` 且能解析 hit size 时，前 16 帧输出 `SeededRadialLineParticles`，粒子数按 Java `(int)(radius * 1.2f)` 截断；同时输出 `StrokedCircle`，半径 `hit_size * 1.3`；
+    - 缺少 unit data 或 hit size 时返回空，避免用伪默认值画错实体。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出新的 typed resolver 入口，供 desktop/runtime 层接入。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render(...)` 先从 `runtime.client_unit_snapshot_entities` 收集 `unit_id -> hit_size`；
+    - 对 `EffectCallPacket2.data = TypeValue::Unit(id)` 解析 hit size 后传入 core draw plan，验证 `unitShieldBreak` 不再是孤立 helper，而是接入真实客户端 runtime snapshot seam；
+    - 新增 `desktop_launcher_resolves_unit_shield_break_hit_size_for_render`，覆盖本地 effect event → runtime unit snapshot → draw plans → circle/line primitives → headless renderer stats。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_resolves_unit_shield_break_hit_size_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前 hit size 解析依赖 `client_unit_snapshot_entities` 中已有对应单位；如果 Java/Rust 联机中 effect 先于单位 snapshot 到达，仍会按 Java guard 返回空，后续可补 effect data 延迟解析或单位镜像缓存；
+  - 目前以 seeded line particles + stroked circle primitives 表达 Java drawing calls，真实 renderer/backend 仍需继续接入；
+  - `arcShieldBreak=257` 仍需要 `ShieldArcAbility` typed resolver / arc primitive；`legDestroy=263` 仍需要 `LegDestroyData` 与 textured line/region seam。

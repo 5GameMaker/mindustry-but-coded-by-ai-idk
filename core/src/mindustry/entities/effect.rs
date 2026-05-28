@@ -388,6 +388,8 @@ pub const FX_SHIELD_BREAK_ID: i32 = 256;
 pub const FX_CORE_LAND_DUST_ID: i32 = 258;
 /// Upstream `Fx.podLandDust` id in `mindustry.content.Fx` for v158.1.
 pub const FX_POD_LAND_DUST_ID: i32 = 259;
+/// Upstream `Fx.unitShieldBreak` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UNIT_SHIELD_BREAK_ID: i32 = 260;
 /// Upstream `Fx.chainLightning` id in `mindustry.content.Fx` for v158.1.
 pub const FX_CHAIN_LIGHTNING_ID: i32 = 261;
 /// Upstream `Fx.chainEmp` id in `mindustry.content.Fx` for v158.1.
@@ -590,6 +592,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shieldBreak" => Some(FX_SHIELD_BREAK_ID),
         "coreLandDust" => Some(FX_CORE_LAND_DUST_ID),
         "podLandDust" => Some(FX_POD_LAND_DUST_ID),
+        "unitShieldBreak" => Some(FX_UNIT_SHIELD_BREAK_ID),
         "chainLightning" => Some(FX_CHAIN_LIGHTNING_ID),
         "chainEmp" => Some(FX_CHAIN_EMP_ID),
         "debugLine" => Some(FX_DEBUG_LINE_ID),
@@ -1002,6 +1005,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_POD_LAND_DUST_ID, 70.0, DEFAULT_EFFECT_CLIP)
                 .layer(Layer::GROUND_UNIT + 1.0)
         }
+        FX_UNIT_SHIELD_BREAK_ID => {
+            Effect::with_lifetime(FX_UNIT_SHIELD_BREAK_ID, 35.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_CHAIN_LIGHTNING_ID => Effect::with_lifetime(FX_CHAIN_LIGHTNING_ID, 20.0, 300.0)
             .follow_parent(false)
             .rot_with_parent(false),
@@ -1060,7 +1066,7 @@ pub fn standard_effect_draw_plans_with_data_float(
     data_float: Option<f32>,
 ) -> Vec<StandardEffectDrawPlan> {
     standard_effect_draw_plans_with_data(
-        effect_id, state_id, x, y, rotation, time, lifetime, color, data_float, None,
+        effect_id, state_id, x, y, rotation, time, lifetime, color, data_float, None, None,
     )
 }
 
@@ -1075,12 +1081,39 @@ pub fn standard_effect_draw_plans_with_data_value(
     color: DecalColor,
     data_value: Option<&TypeValue>,
 ) -> Vec<StandardEffectDrawPlan> {
+    standard_effect_draw_plans_with_data_value_and_unit_hit_size(
+        effect_id, state_id, x, y, rotation, time, lifetime, color, data_value, None,
+    )
+}
+
+pub fn standard_effect_draw_plans_with_data_value_and_unit_hit_size(
+    effect_id: Option<u16>,
+    state_id: i32,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    time: f32,
+    lifetime: f32,
+    color: DecalColor,
+    data_value: Option<&TypeValue>,
+    resolved_unit_hit_size: Option<f32>,
+) -> Vec<StandardEffectDrawPlan> {
     let data_float = match data_value {
         Some(TypeValue::Float(value)) => Some(*value),
         _ => None,
     };
     standard_effect_draw_plans_with_data(
-        effect_id, state_id, x, y, rotation, time, lifetime, color, data_float, data_value,
+        effect_id,
+        state_id,
+        x,
+        y,
+        rotation,
+        time,
+        lifetime,
+        color,
+        data_float,
+        data_value,
+        resolved_unit_hit_size,
     )
 }
 
@@ -1095,6 +1128,7 @@ fn standard_effect_draw_plans_with_data(
     color: DecalColor,
     data_float: Option<f32>,
     data_value: Option<&TypeValue>,
+    resolved_unit_hit_size: Option<f32>,
 ) -> Vec<StandardEffectDrawPlan> {
     let Some(effect_id_i32) = effect_id.map(i32::from) else {
         return Vec::new();
@@ -1151,6 +1185,7 @@ fn standard_effect_draw_plans_with_data(
             | FX_SHIELD_BREAK_ID
             | FX_CORE_LAND_DUST_ID
             | FX_POD_LAND_DUST_ID
+            | FX_UNIT_SHIELD_BREAK_ID
             | FX_CHAIN_LIGHTNING_ID
             | FX_CHAIN_EMP_ID
             | FX_DEBUG_LINE_ID
@@ -1613,6 +1648,77 @@ fn standard_effect_draw_plans_with_data(
             light_radius: 0.0,
             light_opacity: 0.0,
         }];
+    }
+
+    if effect_id_i32 == FX_UNIT_SHIELD_BREAK_ID {
+        let Some(TypeValue::Unit(_unit_id)) = data_value else {
+            return Vec::new();
+        };
+        let Some(hit_size) = resolved_unit_hit_size else {
+            return Vec::new();
+        };
+
+        let radius = hit_size * 1.3;
+        let scaled_lifetime = 16.0;
+        let scaled_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
+        let scaled_fout = 1.0 - scaled_fin;
+        let scaled_finpow = effect_finpow_from_fin(scaled_fin);
+        let particle_count = (radius * 1.2).max(0.0) as u16;
+        let particle_length = radius / 2.0 + scaled_finpow * radius * 1.25;
+        let mut plans = Vec::with_capacity(if time <= scaled_lifetime { 2 } else { 1 });
+
+        if time <= scaled_lifetime && particle_count > 0 {
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededRadialLineParticles,
+                center: (x, y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 0.9,
+                radius: scaled_fout * 5.0 + 1.0,
+                stroke: scaled_fout * 2.0 + 0.1,
+                particles: Some(standard_effect_particle_spec(
+                    state_id,
+                    particle_count,
+                    None,
+                    0.0,
+                    particle_length,
+                    scaled_fin,
+                    scaled_fout,
+                    effect_fslope_from_fin(scaled_fin),
+                )),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: fout * 0.9,
+            radius,
+            stroke: fout,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        });
+
+        return plans;
     }
 
     if matches!(effect_id_i32, FX_CHAIN_LIGHTNING_ID | FX_CHAIN_EMP_ID) {
@@ -8802,6 +8908,10 @@ mod tests {
         );
         assert_eq!(standard_effect_id("podLandDust"), Some(FX_POD_LAND_DUST_ID));
         assert_eq!(
+            standard_effect_id("unitShieldBreak"),
+            Some(FX_UNIT_SHIELD_BREAK_ID)
+        );
+        assert_eq!(
             standard_effect_id("chainLightning"),
             Some(FX_CHAIN_LIGHTNING_ID)
         );
@@ -9318,6 +9428,10 @@ mod tests {
         let pod_land_dust = standard_effect(FX_POD_LAND_DUST_ID).unwrap();
         assert_eq!(pod_land_dust.lifetime, 70.0);
         assert_eq!(pod_land_dust.layer, Layer::GROUND_UNIT + 1.0);
+        assert_eq!(
+            standard_effect(FX_UNIT_SHIELD_BREAK_ID).unwrap().lifetime,
+            35.0
+        );
         let chain_lightning = standard_effect(FX_CHAIN_LIGHTNING_ID).unwrap();
         assert_eq!(chain_lightning.lifetime, 20.0);
         assert_eq!(chain_lightning.clip, 300.0);
@@ -10282,6 +10396,47 @@ mod tests {
             .all(|plan| plan.input_color == Some(input_color)));
         assert_eq!(shield_break[0].stroke, 1.5);
         assert!(shield_break[0].radius > 0.0);
+
+        let unit_shield_data = TypeValue::Unit(77);
+        let unit_shield = standard_effect_draw_plans_with_data_value_and_unit_hit_size(
+            Some(FX_UNIT_SHIELD_BREAK_ID as u16),
+            260,
+            3.0,
+            4.0,
+            0.0,
+            8.0,
+            35.0,
+            input_color,
+            Some(&unit_shield_data),
+            Some(10.0),
+        );
+        assert_eq!(unit_shield.len(), 2);
+        assert_eq!(
+            unit_shield[0].kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(unit_shield[0].input_color, Some(input_color));
+        assert_eq!(unit_shield[0].alpha, 0.9);
+        assert_eq!(unit_shield[0].stroke, 1.1);
+        assert_eq!(unit_shield[0].particles.unwrap().count, 15);
+        assert_eq!(unit_shield[1].kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(unit_shield[1].radius, 13.0);
+        assert!((unit_shield[1].stroke - (1.0 - 8.0 / 35.0)).abs() < 0.0001);
+        assert!(
+            standard_effect_draw_plans_with_data_value_and_unit_hit_size(
+                Some(FX_UNIT_SHIELD_BREAK_ID as u16),
+                260,
+                3.0,
+                4.0,
+                0.0,
+                8.0,
+                35.0,
+                input_color,
+                Some(&unit_shield_data),
+                None,
+            )
+            .is_empty()
+        );
 
         let chain_target = TypeValue::Vec2(crate::mindustry::io::Vec2::new(33.0, 4.0));
         let chain = standard_effect_draw_plans_with_data_value(
