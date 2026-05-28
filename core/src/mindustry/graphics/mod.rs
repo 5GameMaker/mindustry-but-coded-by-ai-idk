@@ -12,6 +12,7 @@ pub mod layer;
 pub mod light_renderer;
 pub mod load_renderer;
 pub mod menu_renderer;
+pub mod minimap_renderer;
 pub mod multi_packer;
 pub mod overlay_renderer;
 pub mod pal;
@@ -42,6 +43,7 @@ pub use menu_renderer::{
     MenuBlockKind, MenuFrameInput, MenuFramePlan, MenuRenderCommand, MenuRendererConfig,
     MenuRendererState, MenuTile, MenuWorldPlan, MENU_DARKNESS, MENU_TILE_SIZE,
 };
+pub use minimap_renderer::*;
 pub use multi_packer::*;
 pub use overlay_renderer::*;
 pub use pal::{Pal, PalEntry};

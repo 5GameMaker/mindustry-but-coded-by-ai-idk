@@ -185,7 +185,7 @@ rust core/src .rs:      353
 | world | 258 | 59 | 最大缺口，方块/建筑/世界行为需要长期推进 |
 | entities | 135 | 71 | 已有一定迁移，但实体运行态仍需闭环 |
 | ui | 71 | 6 | 客户端可游玩前的大缺口 |
-| graphics | 38 | 24 | 渲染计划层已明显扩展，真实 GPU/客户端接线仍缺 |
+| graphics | 38 | 25 | 渲染计划层已明显扩展，真实 GPU/客户端接线仍缺 |
 | maps | 34 | 5 | 地图加载/编辑/规则仍需推进 |
 | type | 33 | 30 | 类型结构较接近，但行为仍需核查 |
 | logic | 33 | 50 | Rust 拆分较细，需对照行为而非数量 |
@@ -10581,7 +10581,9 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
   - `cargo test -p mindustry-core graphics --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
     - 当前 graphics 定向测试：`77 passed`
+- 后续补充：
+  - 2026-05-29：`core/src/mindustry/graphics/minimap_renderer.rs` 已补入并接入模块树，覆盖 Java `MinimapRenderer` 的基础状态、zoom clamp、两帧批量 tile update、pixmap Y 翻转、cropped texture region、tile color 计算、单位/玩家/ping/fog/spawn/camera/indicator/marker overlay command plan。已跑 `cargo test -p mindustry-core graphics --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`，当前 graphics 定向测试提升为 `82 passed`。
 - 仍未完成：
   - 这些模块仍主要是数据化计划层；真实 GPU backend、texture atlas、world tile renderer adapter、desktop draw loop、UI/input/minimap live texture、renderer event dispatcher 仍需继续接入。
-  - `MinimapRenderer.java` 的 Rust 迁移仍在子代理后台推进；未落地前不能标记 minimap 完成。
-  - 当前总体迁移约 16.4%，仍未达到完整可玩。
+  - `MinimapRenderer.java` 当前只是数据/计划层，真实 texture 增量上传、单位 Groups 查询、fog texture 绑定、marker draw adapter 和客户端 HUD 接线仍未完成。
+  - 当前总体迁移约 16.5%，仍未达到完整可玩。
