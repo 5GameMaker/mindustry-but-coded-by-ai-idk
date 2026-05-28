@@ -11458,3 +11458,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 仍未接真实 filesystem walker、zip/jar mod root、Arc `Fi.findAll` 等价实现；
   - 仍未做真实文件存在性判断、PNG decode、MultiPacker 实际尺寸/bleed/flush 或 GPU texture region；
   - 当前总体迁移约 19.9%，仍未达到完整可玩。
+
+### 12.357 Desktop main loop drives graphics frame renderer
+
+- 2026-05-29：继续推进渲染引擎主链。本轮把 `DesktopLauncher::graphics_frame_for_render(...) -> DesktopGraphicsRenderer` 从测试 seam 接到 `desktop/src/main.rs` 的运行主循环：每帧 `launcher.update()` 后先提交默认 graphics frame，再 drain standard effect frame，避免 block/floor/fog/minimap/pixelator/shader 的 frame bundle 只停留在孤立测试。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - Java `Renderer.draw()` 在主循环中实际驱动 world/block/floor/shader/minimap 等渲染阶段；
+    - Rust 当前仍是 headless backend，但主循环已经开始消费 `DesktopGraphicsFrame`。
+- Rust 新增/接入：
+  - `desktop/src/main.rs`
+    - 新增 `HeadlessDesktopGraphicsRenderer`；
+    - 新增 wrapping `frame_index`；
+    - 主循环调用 `launcher.render_default_graphics_frame_with(frame_index, &mut graphics_renderer)`。
+  - `desktop/src/lib.rs`
+    - 新增 `default_minimap_camera()`；
+    - 新增 `default_minimap_overlay_input()`；
+    - 新增 `render_default_graphics_frame_with(...)`，复用默认 camera/viewport/minimap input 并调用既有 `render_graphics_frame_with(...)`；
+    - 新增 `desktop_launcher_default_graphics_frame_routes_to_renderer`，锁定默认图形帧会被 `HeadlessDesktopGraphicsRenderer` 消费。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `10 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - 当前 renderer 仍是 headless trace/summary 消费端，尚未绘制到真实 window/surface/GPU；
+  - `RenderCommand::DrawSprite` 与 `ShaderDispatchFrame` 尚未进入 live backend 执行；
+  - 真实 PNG 尺寸、global override lookup、bleed/flush/UV 与 GPU texture region 仍需继续补齐；
+  - 当前总体迁移约 20.0%，仍未达到完整可玩。

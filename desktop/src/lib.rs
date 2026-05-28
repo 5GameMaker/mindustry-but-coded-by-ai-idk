@@ -1331,6 +1331,46 @@ impl DesktopLauncher {
         )
     }
 
+    pub fn default_minimap_camera(&self) -> MinimapCamera {
+        let viewport = self.default_render_viewport();
+        MinimapCamera::new(
+            viewport.width / 2.0,
+            viewport.height / 2.0,
+            viewport.width,
+            viewport.height,
+        )
+    }
+
+    pub fn default_minimap_overlay_input(&self) -> MinimapOverlayInput {
+        let viewport = self.default_render_viewport();
+        MinimapOverlayInput {
+            screen_x: viewport.x,
+            screen_y: viewport.y,
+            screen_width: viewport.width,
+            screen_height: viewport.height,
+            full_view: true,
+            mobile: false,
+            net_active: self.net_client.state().lock().unwrap().connected,
+            show_pings: false,
+            fog: false,
+            static_fog: false,
+            dynamic_color: 0x000000ff,
+            dynamic_alpha: 0.0,
+            show_spawns: false,
+            has_spawns: false,
+            waves: self.game_state.rules.waves,
+            wave_team_color: 0xffffffff,
+            drop_zone_radius: self.game_state.rules.drop_zone_radius,
+            time: self.game_state.tick as f32,
+            global_time: self.game_state.tick as f32,
+            units: Vec::new(),
+            players: Vec::new(),
+            spawns: Vec::new(),
+            indicators: Vec::new(),
+            markers: Vec::new(),
+        }
+    }
+
     pub fn render_frame_plan(
         &self,
         frame_index: u64,
@@ -1675,6 +1715,28 @@ impl DesktopLauncher {
             minimap_input,
         );
         renderer.render_graphics_frame(&frame)
+    }
+
+    pub fn render_default_graphics_frame_with<R>(
+        &mut self,
+        frame_index: u64,
+        renderer: &mut R,
+    ) -> GraphicsFrameStats
+    where
+        R: DesktopGraphicsRenderer,
+    {
+        let viewport = self.default_render_viewport();
+        let camera = self.default_render_camera();
+        let minimap_camera = self.default_minimap_camera();
+        let minimap_input = self.default_minimap_overlay_input();
+        self.render_graphics_frame_with(
+            frame_index,
+            camera,
+            viewport,
+            minimap_camera,
+            minimap_input,
+            renderer,
+        )
     }
 
     pub fn playable_smoke_status(&self) -> DesktopPlayableSmokeStatus {
@@ -4716,6 +4778,21 @@ mod tests {
         let plan = launcher.drain_overlay_renderer_plan();
         assert_eq!(plan.build_fade, 0.0);
         assert!(plan.updated_cores);
+    }
+
+    #[test]
+    fn desktop_launcher_default_graphics_frame_routes_to_renderer() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+
+        let stats = launcher.render_default_graphics_frame_with(7, &mut renderer);
+
+        assert_eq!(renderer.frames_rendered, 1);
+        assert_eq!(renderer.last_stats, stats);
+        assert_eq!(renderer.last_stats.present_plans, 3);
+        assert_eq!(renderer.last_execution.overlay_renderer_slots, 1);
+        assert_eq!(renderer.last_execution.minimap_overlay_slots, 1);
+        assert_eq!(renderer.last_trace.render_passes.len(), 0);
     }
 
     #[test]

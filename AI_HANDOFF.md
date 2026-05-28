@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **19.9%**。
+- 当前总体迁移完成度：约 **20.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -8804,3 +8804,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 做 `resolve_mod_icon(icon.png -> preview.png)` 的真实存在性判断；
   3. 继续推进 PNG decode、MultiPacker 实际尺寸/bleed/flush、GPU texture region；
   4. 当前总迁移约 19.9%，仍未达到完整可玩，goal 绝不能标记 complete。
+
+---
+
+## 259. 最新闭环记录：desktop 主循环驱动 graphics frame
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把现有 `DesktopLauncher::graphics_frame_for_render(...) -> DesktopGraphicsRenderer` 从测试 seam 接到 `desktop/src/main.rs` 的运行主循环，避免图形帧只停留在 trace/mock 测试里。
+- Rust 主改动：
+  - `desktop/src/main.rs`
+    - 新增 `HeadlessDesktopGraphicsRenderer`；
+    - 主循环每帧 `launcher.update()` 后调用 `render_default_graphics_frame_with(frame_index, ...)`；
+    - 使用 wrapping `frame_index` 递增，保留原有 standard effect renderer drain。
+  - `desktop/src/lib.rs`
+    - 新增 `default_minimap_camera()`；
+    - 新增 `default_minimap_overlay_input()`；
+    - 新增 `render_default_graphics_frame_with(...)`，统一从默认 camera/viewport/minimap input 构造并提交 graphics frame；
+    - 新增 `desktop_launcher_default_graphics_frame_routes_to_renderer`，验证默认图形帧确实被 renderer 消费。
+  - `README.md`
+    - 当前总体完成度更新为约 `20.0%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.357`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 当前接入的是 headless graphics renderer，仍未实现真实 window/surface/GPU backend；
+  2. `RenderCommand::DrawSprite`、`ShaderDispatchFrame`、atlas region 仍需进入真实执行端；
+  3. 需要继续推进 texture atlas 真实 PNG 尺寸、override 全局 lookup、bleed/flush/UV；
+  4. 当前总迁移约 20.0%，仍未达到完整可玩，goal 绝不能标记 complete。
