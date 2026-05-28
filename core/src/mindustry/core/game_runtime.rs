@@ -22,7 +22,7 @@ use crate::mindustry::{
         UnitAssemblerBlockData, UnitFactoryBlockData,
     },
     core::content_loader::ContentLoader,
-    core::game_state::GameState,
+    core::game_state::{GameState, GameStateState},
     ctype::{Content, ContentId, ContentType},
     entities::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
@@ -2619,6 +2619,18 @@ impl GameRuntimeNetworkContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameRuntimePlayableSmokeReport {
+    pub world_initialized: bool,
+    pub core_added: bool,
+    pub state_was_menu: bool,
+    pub state_playing: bool,
+    pub world_width: usize,
+    pub world_height: usize,
+    pub core_tile_pos: Option<i32>,
+    pub buildings: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameRuntime {
     pub state: GameState,
@@ -2794,6 +2806,90 @@ impl GameRuntime {
 
     pub fn set_network_context(&mut self, network_context: GameRuntimeNetworkContext) {
         self.network_context = network_context;
+    }
+
+    pub fn seed_playable_smoke_world(
+        &mut self,
+        content: &ContentLoader,
+    ) -> GameRuntimePlayableSmokeReport {
+        let state_was_menu = self.state.is_menu();
+        let mut world_initialized = false;
+
+        if self.state.world.width() == 0 || self.state.world.height() == 0 {
+            self.clear_buildings();
+            let floor_id = content
+                .block_by_name("stone")
+                .map(|block| block.base().id)
+                .unwrap_or(Tile::AIR);
+            self.state.world.load_generator(16, 16, |tiles| {
+                for tile in tiles.iter_mut() {
+                    tile.floor = floor_id;
+                    tile.overlay = Tile::AIR;
+                    tile.block = Tile::AIR;
+                    tile.build = None;
+                }
+            });
+            self.state.map.file = "rust-playable-smoke.msav".into();
+            self.state.map.custom = true;
+            self.state.map.width = self.state.world.width() as i32;
+            self.state.map.height = self.state.world.height() as i32;
+            world_initialized = true;
+        }
+
+        self.state
+            .map
+            .tags
+            .insert("name".into(), "rust-playable-smoke".into());
+        self.state
+            .map
+            .tags
+            .insert("width".into(), self.state.world.width().to_string());
+        self.state
+            .map
+            .tags
+            .insert("height".into(), self.state.world.height().to_string());
+
+        let default_team = TeamId(self.state.rules.default_team as u8);
+        let existing_core_tile = self
+            .buildings
+            .iter()
+            .find(|building| {
+                building.team == default_team && building.block.flags.contains(&BlockFlag::Core)
+            })
+            .map(|building| building.tile_pos);
+
+        let mut core_added = false;
+        let core_tile_pos = if let Some(tile_pos) = existing_core_tile {
+            Some(tile_pos)
+        } else {
+            content.block_by_name("core-shard").map(|core| {
+                let x = (self.state.world.width() / 2) as i32;
+                let y = (self.state.world.height() / 2) as i32;
+                let tile_pos = point2_pack(x, y);
+                let building = BuildingComp::new(tile_pos, core.base().clone(), default_team);
+                self.add_building(building);
+                self.storage_runtime_states
+                    .entry(tile_pos)
+                    .or_insert_with(|| {
+                        GameRuntimeStorageBlockState::Core(CoreBuildState::default())
+                    });
+                core_added = true;
+                tile_pos
+            })
+        };
+
+        self.state.set(GameStateState::Playing);
+
+        GameRuntimePlayableSmokeReport {
+            world_initialized,
+            core_added,
+            state_was_menu,
+            state_playing: self.state.is_playing(),
+            world_width: self.state.world.width(),
+            world_height: self.state.world.height(),
+            core_tile_pos,
+            buildings: self.buildings.len(),
+        }
     }
 
     pub fn note_unit_create_event(
@@ -20900,6 +20996,37 @@ mod tests {
             force_coolant,
             spark_random,
         }
+    }
+
+    #[test]
+    fn game_runtime_seed_playable_smoke_world_creates_playing_core_world() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let mut runtime = GameRuntime::default();
+
+        let report = runtime.seed_playable_smoke_world(&content);
+
+        assert_eq!(report.world_width, 16);
+        assert_eq!(report.world_height, 16);
+        assert!(report.world_initialized);
+        assert!(report.core_added);
+        assert!(report.state_was_menu);
+        assert!(report.state_playing);
+        assert!(runtime.state.is_playing());
+        assert_eq!(runtime.state.world.width(), 16);
+        assert_eq!(runtime.state.world.height(), 16);
+        assert_eq!(runtime.buildings().len(), 1);
+        let core_tile = report.core_tile_pos.expect("smoke core tile should exist");
+        assert!(matches!(
+            runtime.storage_runtime_states.get(&core_tile),
+            Some(GameRuntimeStorageBlockState::Core(_))
+        ));
+        let default_team = runtime.state.rules.default_team as u8;
+        let team = runtime
+            .state
+            .teams
+            .get_or_null(default_team)
+            .expect("default team should be present");
+        assert!(team.cores.iter().any(|core| core.id == core_tile));
     }
 
     fn seed_assembler_drones_in_position(

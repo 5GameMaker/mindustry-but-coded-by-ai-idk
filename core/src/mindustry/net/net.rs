@@ -234,8 +234,6 @@ impl PacketKind {
             PacketKind::Connect(_)
             | PacketKind::Disconnect(_)
             | PacketKind::ConnectPacket(_)
-            | PacketKind::StreamBegin(_)
-            | PacketKind::StreamChunk(_)
             | PacketKind::Streamable(_)
             | PacketKind::ClientSnapshotCallPacket(_)
             | PacketKind::ConnectConfirmCallPacket(_) => 2,
@@ -247,7 +245,9 @@ impl PacketKind {
             | PacketKind::RequestBlockSnapshotCallPacket(_)
             | PacketKind::StateSnapshotCallPacket(_) => 0,
             PacketKind::UnitSpawnCallPacket(_) => 0,
-            PacketKind::AdminRequestCallPacket(_)
+            PacketKind::StreamBegin(_)
+            | PacketKind::StreamChunk(_)
+            | PacketKind::AdminRequestCallPacket(_)
             | PacketKind::AnnounceCallPacket(_)
             | PacketKind::AssemblerDroneSpawnedCallPacket(_)
             | PacketKind::AssemblerUnitSpawnedCallPacket(_)
@@ -397,23 +397,15 @@ impl PacketKind {
 
     pub fn allow(&self, server: bool) -> bool {
         match self {
-            PacketKind::Connect(_) | PacketKind::Disconnect(_) => true,
+            PacketKind::Connect(_) | PacketKind::Disconnect(_) | PacketKind::ConnectPacket(_) => {
+                true
+            }
             PacketKind::StreamBegin(_) | PacketKind::StreamChunk(_) | PacketKind::Streamable(_) => {
                 !server
             }
-            PacketKind::ConnectPacket(_)
-            | PacketKind::AnnounceCallPacket(_)
-            | PacketKind::ClearObjectivesCallPacket(_)
-            | PacketKind::CompleteObjectiveCallPacket(_)
-            | PacketKind::CopyToClipboardCallPacket(_)
-            | PacketKind::DebugStatusClientCallPacket(_)
-            | PacketKind::DebugStatusClientUnreliableCallPacket(_)
-            | PacketKind::HideFollowUpMenuCallPacket(_)
-            | PacketKind::HideHudTextCallPacket(_)
-            | PacketKind::InfoMessageCallPacket(_)
-            | PacketKind::InfoToastCallPacket(_)
-            | PacketKind::PlayerDisconnectCallPacket(_)
-            | PacketKind::RemoveMarkerCallPacket(_)
+            PacketKind::BuildingControlSelectCallPacket(_)
+            | PacketKind::CommandBuildingCallPacket(_)
+            | PacketKind::CommandUnitsCallPacket(_)
             | PacketKind::DeletePlansCallPacket(_)
             | PacketKind::MenuChooseCallPacket(_)
             | PacketKind::PingLocationCallPacket(_)
@@ -422,25 +414,46 @@ impl PacketKind {
             | PacketKind::RequestItemCallPacket(_)
             | PacketKind::RequestUnitPayloadCallPacket(_)
             | PacketKind::RotateBlockCallPacket(_)
-            | PacketKind::BuildingControlSelectCallPacket(_)
-            | PacketKind::CommandBuildingCallPacket(_)
-            | PacketKind::CommandUnitsCallPacket(_)
             | PacketKind::SetPlayerTeamEditorCallPacket(_)
             | PacketKind::SetUnitCommandCallPacket(_)
-            | PacketKind::SetUnitStanceCallPacket(_) => true,
+            | PacketKind::SetUnitStanceCallPacket(_)
+            | PacketKind::TextInputResultCallPacket(_)
+            | PacketKind::TileConfigCallPacket(_)
+            | PacketKind::TileTapCallPacket(_)
+            | PacketKind::TransferInventoryCallPacket(_)
+            | PacketKind::UnitClearCallPacket(_)
+            | PacketKind::UnitControlCallPacket(_) => true,
             PacketKind::AdminRequestCallPacket(_)
             | PacketKind::ClientLogicDataReliableCallPacket(_)
             | PacketKind::ClientLogicDataUnreliableCallPacket(_)
+            | PacketKind::ClientPlanSnapshotCallPacket(_)
+            | PacketKind::ClientSnapshotCallPacket(_)
+            | PacketKind::ConnectConfirmCallPacket(_)
+            | PacketKind::DropItemCallPacket(_)
+            | PacketKind::PingCallPacket(_)
+            | PacketKind::RequestBlockSnapshotCallPacket(_)
+            | PacketKind::RequestDebugStatusCallPacket(_)
             | PacketKind::SendChatMessageCallPacket(_)
             | PacketKind::ServerBinaryPacketReliableCallPacket(_)
             | PacketKind::ServerBinaryPacketUnreliableCallPacket(_)
             | PacketKind::ServerPacketReliableCallPacket(_)
             | PacketKind::ServerPacketUnreliableCallPacket(_) => server,
-            PacketKind::ConnectCallPacket(_)
+            PacketKind::AnnounceCallPacket(_)
+            | PacketKind::ClearObjectivesCallPacket(_)
+            | PacketKind::ClientBinaryPacketReliableCallPacket(_)
+            | PacketKind::ClientBinaryPacketUnreliableCallPacket(_)
+            | PacketKind::ClientPacketReliableCallPacket(_)
+            | PacketKind::ClientPacketUnreliableCallPacket(_)
+            | PacketKind::ClientPlanSnapshotReceivedCallPacket(_)
+            | PacketKind::CompleteObjectiveCallPacket(_)
+            | PacketKind::ConnectCallPacket(_)
             | PacketKind::ConstructFinishCallPacket(_)
+            | PacketKind::CopyToClipboardCallPacket(_)
             | PacketKind::CreateBulletCallPacket(_)
             | PacketKind::CreateMarkerCallPacket(_)
             | PacketKind::CreateWeatherCallPacket(_)
+            | PacketKind::DebugStatusClientCallPacket(_)
+            | PacketKind::DebugStatusClientUnreliableCallPacket(_)
             | PacketKind::DeconstructFinishCallPacket(_)
             | PacketKind::DestroyPayloadCallPacket(_)
             | PacketKind::EffectCallPacket(_)
@@ -459,6 +472,9 @@ impl PacketKind {
             | PacketKind::ClearItemsCallPacket(_)
             | PacketKind::ClearLiquidsCallPacket(_)
             | PacketKind::HiddenSnapshotCallPacket(_)
+            | PacketKind::HideFollowUpMenuCallPacket(_)
+            | PacketKind::HideHudTextCallPacket(_)
+            | PacketKind::InfoMessageCallPacket(_)
             | PacketKind::KickCallPacket(_)
             | PacketKind::KickCallPacket2(_)
             | PacketKind::PlayerSpawnCallPacket(_)
@@ -469,6 +485,7 @@ impl PacketKind {
             | PacketKind::InfoPopupCallPacket2(_)
             | PacketKind::InfoPopupReliableCallPacket(_)
             | PacketKind::InfoPopupReliableCallPacket2(_)
+            | PacketKind::InfoToastCallPacket(_)
             | PacketKind::LabelCallPacket(_)
             | PacketKind::LabelCallPacket2(_)
             | PacketKind::LabelReliableCallPacket(_)
@@ -480,6 +497,9 @@ impl PacketKind {
             | PacketKind::PayloadDroppedCallPacket(_)
             | PacketKind::PickedBuildPayloadCallPacket(_)
             | PacketKind::PickedUnitPayloadCallPacket(_)
+            | PacketKind::PingResponseCallPacket(_)
+            | PacketKind::PlayerDisconnectCallPacket(_)
+            | PacketKind::RemoveMarkerCallPacket(_)
             | PacketKind::ResearchedCallPacket(_)
             | PacketKind::SectorCaptureCallPacket(_)
             | PacketKind::SendMessageCallPacket(_)
@@ -513,13 +533,9 @@ impl PacketKind {
             | PacketKind::StateSnapshotCallPacket(_)
             | PacketKind::SyncVariableCallPacket(_)
             | PacketKind::TakeItemsCallPacket(_)
-            | PacketKind::TextInputResultCallPacket(_)
-            | PacketKind::TileConfigCallPacket(_)
-            | PacketKind::TileTapCallPacket(_)
-            | PacketKind::TransferInventoryCallPacket(_)
-            | PacketKind::UnitClearCallPacket(_)
-            | PacketKind::UnitControlCallPacket(_) => true,
-            PacketKind::TraceInfoCallPacket(_)
+            | PacketKind::TextInputCallPacket(_)
+            | PacketKind::TextInputCallPacket2(_)
+            | PacketKind::TraceInfoCallPacket(_)
             | PacketKind::TransferItemEffectCallPacket(_)
             | PacketKind::TransferItemToCallPacket(_)
             | PacketKind::TransferItemToUnitCallPacket(_)
@@ -540,22 +556,7 @@ impl PacketKind {
             | PacketKind::UpdateMarkerTextCallPacket(_)
             | PacketKind::UpdateMarkerTextureCallPacket(_)
             | PacketKind::WarningToastCallPacket(_)
-            | PacketKind::WorldDataBeginCallPacket(_)
-            | PacketKind::TextInputCallPacket(_)
-            | PacketKind::TextInputCallPacket2(_) => !server,
-            PacketKind::ClientBinaryPacketReliableCallPacket(_)
-            | PacketKind::ClientBinaryPacketUnreliableCallPacket(_)
-            | PacketKind::ClientPacketReliableCallPacket(_)
-            | PacketKind::ClientPacketUnreliableCallPacket(_)
-            | PacketKind::ClientPlanSnapshotCallPacket(_)
-            | PacketKind::ClientSnapshotCallPacket(_)
-            | PacketKind::ConnectConfirmCallPacket(_)
-            | PacketKind::DropItemCallPacket(_)
-            | PacketKind::PingCallPacket(_)
-            | PacketKind::RequestBlockSnapshotCallPacket(_)
-            | PacketKind::RequestDebugStatusCallPacket(_) => server,
-            PacketKind::PingResponseCallPacket(_) => !server,
-            PacketKind::ClientPlanSnapshotReceivedCallPacket(_) => !server,
+            | PacketKind::WorldDataBeginCallPacket(_) => !server,
             PacketKind::Other {
                 allow_client,
                 allow_server,
@@ -921,7 +922,7 @@ impl Net {
 
     /// Registers the Rust equivalent of Java `net.handleClient(WorldStream.class, ...)`.
     ///
-    /// Mindustry v157.4 only registers `WorldStream` as a streamable packet, so the
+    /// Mindustry v158.1 only registers `WorldStream` as a streamable packet, so the
     /// reassembled `Streamable` payload is dispatched through this listener.
     pub fn handle_client_world_stream<F>(&mut self, listener: F)
     where
@@ -1330,7 +1331,10 @@ impl Net {
 mod tests {
     use base64::Engine as _;
 
-    use crate::mindustry::net::packets::packet_ids;
+    use crate::mindustry::net::packets::{
+        packet_ids, ClientBinaryPacketCallPacket, ClientPacketCallPacket,
+        ServerBinaryPacketCallPacket, ServerPacketCallPacket,
+    };
 
     use super::*;
 
@@ -1423,6 +1427,116 @@ mod tests {
             net.handled_server_packets()[1],
             PacketKind::Other { id: 8, .. }
         ));
+    }
+
+    #[test]
+    fn generated_custom_packet_allow_matches_java_remote_targets() {
+        let server_to_client = vec![
+            PacketKind::AnnounceCallPacket(AnnounceCallPacket {
+                message: "hello".into(),
+            }),
+            PacketKind::StreamBegin(StreamBegin {
+                id: 1,
+                total: 3,
+                packet_type: packet_ids::WORLD_STREAM,
+            }),
+            PacketKind::ClientPacketReliableCallPacket(ClientPacketReliableCallPacket(
+                ClientPacketCallPacket {
+                    packet_type: "mod:event".into(),
+                    contents: "payload".into(),
+                },
+            )),
+            PacketKind::ClientPacketUnreliableCallPacket(ClientPacketUnreliableCallPacket(
+                ClientPacketCallPacket {
+                    packet_type: "mod:event".into(),
+                    contents: "payload".into(),
+                },
+            )),
+            PacketKind::ClientBinaryPacketReliableCallPacket(ClientBinaryPacketReliableCallPacket(
+                ClientBinaryPacketCallPacket {
+                    packet_type: "mod:bin".into(),
+                    contents: vec![1, 2, 3],
+                },
+            )),
+            PacketKind::ClientBinaryPacketUnreliableCallPacket(
+                ClientBinaryPacketUnreliableCallPacket(ClientBinaryPacketCallPacket {
+                    packet_type: "mod:bin".into(),
+                    contents: vec![1, 2, 3],
+                }),
+            ),
+        ];
+
+        for packet in server_to_client {
+            assert!(packet.allow(false), "{packet:?}");
+            assert!(!packet.allow(true), "{packet:?}");
+        }
+
+        let client_to_server = vec![
+            PacketKind::ServerPacketReliableCallPacket(ServerPacketReliableCallPacket(
+                ServerPacketCallPacket {
+                    packet_type: "mod:event".into(),
+                    contents: "payload".into(),
+                },
+            )),
+            PacketKind::ServerPacketUnreliableCallPacket(ServerPacketUnreliableCallPacket(
+                ServerPacketCallPacket {
+                    packet_type: "mod:event".into(),
+                    contents: "payload".into(),
+                },
+            )),
+            PacketKind::ServerBinaryPacketReliableCallPacket(ServerBinaryPacketReliableCallPacket(
+                ServerBinaryPacketCallPacket {
+                    packet_type: "mod:bin".into(),
+                    contents: vec![1, 2, 3],
+                },
+            )),
+            PacketKind::ServerBinaryPacketUnreliableCallPacket(
+                ServerBinaryPacketUnreliableCallPacket(ServerBinaryPacketCallPacket {
+                    packet_type: "mod:bin".into(),
+                    contents: vec![1, 2, 3],
+                }),
+            ),
+        ];
+
+        for packet in client_to_server {
+            assert!(!packet.allow(false), "{packet:?}");
+            assert!(packet.allow(true), "{packet:?}");
+        }
+    }
+
+    #[test]
+    fn packet_priority_matches_java_runtime_overrides() {
+        assert_eq!(
+            PacketKind::StreamBegin(StreamBegin {
+                id: 1,
+                total: 3,
+                packet_type: packet_ids::WORLD_STREAM,
+            })
+            .priority(),
+            1
+        );
+        assert_eq!(
+            PacketKind::StreamChunk(StreamChunk {
+                id: 1,
+                data: vec![1, 2, 3],
+            })
+            .priority(),
+            1
+        );
+        assert_eq!(
+            PacketKind::Streamable(Streamable::new(vec![1, 2, 3])).priority(),
+            2
+        );
+        assert_eq!(
+            PacketKind::Other {
+                id: 200,
+                priority: 0,
+                allow_client: true,
+                allow_server: false,
+            }
+            .priority(),
+            0
+        );
     }
 
     #[test]

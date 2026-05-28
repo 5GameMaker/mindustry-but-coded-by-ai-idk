@@ -186,7 +186,7 @@ impl StaticWallData {
     }
 
     pub fn can_replace(&self, other: &Block) -> bool {
-        other.cache_layer == CacheLayer::Walls || self.base.always_replace || other.replaceable
+        other.cache_layer == CacheLayer::Walls || self.base.can_replace(other)
     }
 }
 
@@ -507,9 +507,9 @@ mod tests {
         another_static_wall.cache_layer = CacheLayer::Walls;
         assert!(wall.can_replace(&another_static_wall));
 
-        let mut replaceable_floor = Block::new(4, "sand");
-        replaceable_floor.replaceable = true;
-        assert!(wall.can_replace(&replaceable_floor));
+        let mut always_replace_floor = Block::new(4, "sand");
+        always_replace_floor.always_replace = true;
+        assert!(wall.can_replace(&always_replace_floor));
 
         let solid_block = Block::new(5, "router");
         assert!(!wall.can_replace(&solid_block));

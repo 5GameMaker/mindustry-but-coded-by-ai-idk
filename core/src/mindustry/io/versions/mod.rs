@@ -12,7 +12,7 @@ use crate::mindustry::io::{
         write_object, write_u16, write_u8, TypeValue,
     },
 };
-use crate::mindustry::world::{Tile, Tiles};
+use crate::mindustry::world::{point2_pack, BuildingRef, Tile, Tiles};
 
 pub mod legacy_io;
 pub mod save1;
@@ -448,6 +448,24 @@ impl LegacyMapBlockRecord {
     pub fn len(&self) -> usize {
         self.consecutives as usize + 1
     }
+
+    pub fn tile_pos(&self, width: usize) -> Option<i32> {
+        if width == 0 {
+            return None;
+        }
+        Some(point2_pack(
+            (self.index % width) as i32,
+            (self.index / width) as i32,
+        ))
+    }
+
+    pub fn building_ref(&self, width: usize) -> Option<BuildingRef> {
+        if !self.has_entity || !self.is_center {
+            return None;
+        }
+        let tile_pos = self.tile_pos(width)?;
+        BuildingRef::from_save_payload(tile_pos, self.block_id, self.building.as_deref()?)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -505,6 +523,10 @@ impl LegacyShortChunkMap {
                     tile.extra_data = data.extra_data;
                 } else if let Some(data) = record.old_data {
                     tile.data = data;
+                }
+
+                if let Some(building) = record.building_ref(width) {
+                    tile.build = Some(building);
                 }
             }
         }
@@ -917,6 +939,75 @@ mod tests {
         assert_eq!(tile.floor_data, 2);
         assert_eq!(tile.overlay_data, 3);
         assert_eq!(tile.extra_data, 4);
+    }
+
+    #[test]
+    fn legacy_chunk_map_materializes_center_building_ref_from_save_payload() {
+        let mut building = vec![0];
+        building.extend_from_slice(&55.0f32.to_bits().to_be_bytes());
+        building.push(0b1000_0000 | 2);
+        building.push(3);
+
+        let map = LegacyShortChunkMap {
+            width: 2,
+            height: 1,
+            floors: vec![LegacyMapFloorRecord {
+                index: 0,
+                floor_id: 1,
+                ore_id: 0,
+                consecutives: 1,
+            }],
+            blocks: vec![
+                LegacyMapBlockRecord {
+                    index: 0,
+                    block_id: 0,
+                    packed_flags: 0,
+                    has_entity: false,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: None,
+                    consecutives: 0,
+                },
+                LegacyMapBlockRecord {
+                    index: 1,
+                    block_id: 9,
+                    packed_flags: 1,
+                    has_entity: true,
+                    has_old_data: false,
+                    has_new_data: false,
+                    is_center: true,
+                    new_data: None,
+                    old_data: None,
+                    building: Some(building),
+                    consecutives: 0,
+                },
+            ],
+        };
+
+        let record = &map.blocks[1];
+        assert_eq!(
+            record.building_ref(map.width as usize),
+            Some(BuildingRef {
+                tile_pos: point2_pack(1, 0),
+                block: 9,
+                team: 3,
+                rotation: 2,
+            })
+        );
+
+        let tiles = map.to_tiles();
+        assert_eq!(
+            tiles.get(1, 0).unwrap().build,
+            Some(BuildingRef {
+                tile_pos: point2_pack(1, 0),
+                block: 9,
+                team: 3,
+                rotation: 2,
+            })
+        );
     }
 
     #[test]

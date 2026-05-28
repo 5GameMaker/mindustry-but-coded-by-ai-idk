@@ -50,6 +50,10 @@ impl ClientLauncher {
     pub fn service_waiting_for_client_load(&self) -> bool {
         self.service_waiting_for_client_load
     }
+
+    pub fn is_ready_for_play(&self) -> bool {
+        self.loaded && self.service.events_registered() && !self.service_waiting_for_client_load
+    }
 }
 
 #[cfg(test)]
@@ -72,6 +76,7 @@ mod tests {
         assert!(launcher.loaded);
         assert!(!launcher.service_waiting_for_client_load());
         assert!(launcher.service.events_registered());
+        assert!(launcher.is_ready_for_play());
         assert_eq!(launcher.service.state().t5s, java_t5_units());
     }
 }

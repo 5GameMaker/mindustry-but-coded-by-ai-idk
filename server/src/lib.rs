@@ -5,7 +5,7 @@ use mindustry_core::mindustry::content::blocks::{
 };
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
-    GameRuntimePowerNodeConfigResult, GameRuntimeUnitBlockState,
+    GameRuntimePlayableSmokeReport, GameRuntimePowerNodeConfigResult, GameRuntimeUnitBlockState,
     GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitShootOnDeathEvent,
 };
 use mindustry_core::mindustry::core::net_server::{
@@ -72,7 +72,7 @@ use mindustry_core::mindustry::world::{
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use server_control::ServerControl;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     io,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -263,6 +263,10 @@ impl ServerLauncher {
         self.open_network();
     }
 
+    pub fn seed_playable_smoke_world(&mut self) -> GameRuntimePlayableSmokeReport {
+        self.runtime.seed_playable_smoke_world(&self.content_loader)
+    }
+
     pub fn open_network(&mut self) {
         if self.net_server.is_active() {
             self.network_error = None;
@@ -376,12 +380,68 @@ impl ServerLauncher {
 
     pub fn flush_pending_world_data(&mut self) -> io::Result<usize> {
         let template = self.network_world_data_template();
+        let connections = {
+            let state = self.net_server.state();
+            let state = state.lock().expect("NetServerState mutex poisoned");
+            state.connection_states.clone()
+        };
+        let default_team = TeamId(self.runtime.state.rules.default_team as u8);
+        let spawn = self.default_player_spawn(default_team);
         self.net_server.send_pending_world_data(|connection_id| {
             let mut world_data = template.clone();
             world_data.player_id = connection_id;
-            world_data.player = Some(NetworkPlayerData::bootstrap());
+            world_data.player = Some(Self::network_player_data_for_connection(
+                connection_id,
+                &connections,
+                default_team,
+                spawn,
+            ));
             write_world_data(&world_data).expect("runtime world data payload should be encodable")
         })
+    }
+
+    fn default_player_spawn(&self, team: TeamId) -> (f32, f32) {
+        if let Some(core) = self
+            .runtime
+            .state
+            .teams
+            .get_or_null(team.0)
+            .and_then(|team| team.core())
+        {
+            return (core.x, core.y);
+        }
+
+        (
+            self.runtime.state.world.unit_width() as f32 / 2.0,
+            self.runtime.state.world.unit_height() as f32 / 2.0,
+        )
+    }
+
+    fn network_player_data_for_connection(
+        connection_id: i32,
+        connections: &HashMap<i32, NetConnection>,
+        default_team: TeamId,
+        spawn: (f32, f32),
+    ) -> NetworkPlayerData {
+        let mut player = NetworkPlayerData::bootstrap();
+        player.team = default_team;
+        player.unit = UnitRef::Null;
+        player.x = spawn.0;
+        player.y = spawn.1;
+
+        if let Some(connection) = connections.get(&connection_id) {
+            let name = connection.name.trim();
+            player.name = Some(if name.is_empty() {
+                "player".into()
+            } else {
+                connection.name.clone()
+            });
+            player.color = connection.color;
+        } else {
+            player.name = Some("player".into());
+        }
+
+        player
     }
 
     pub fn apply_new_network_server_events(&mut self) -> usize {
@@ -4729,7 +4789,11 @@ impl ServerLauncher {
 }
 
 pub fn run(args: Vec<String>) -> ServerLauncher {
+    let seed_smoke = has_playable_smoke_arg(&args);
     let mut launcher = ServerLauncher::new(args);
+    if seed_smoke {
+        launcher.seed_playable_smoke_world();
+    }
     launcher.init();
     launcher
 }
@@ -4753,6 +4817,11 @@ fn parse_port_arg(args: &[String]) -> Option<u16> {
         }
     }
     None
+}
+
+fn has_playable_smoke_arg(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| arg == "--playable-smoke" || arg == "--smoke")
 }
 
 #[cfg(test)]
@@ -4807,7 +4876,7 @@ mod tests {
         UnitCargoLoaderState, UnitCargoUnloadPointState, UnitFactoryState,
     };
     use mindustry_core::mindustry::world::point2_pack;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::io;
     use std::net::{TcpListener, UdpSocket};
     use std::sync::{Arc, Mutex};
@@ -4908,6 +4977,85 @@ mod tests {
         assert!(launcher.net_server.is_active());
         assert_eq!(launcher.network_error, None);
         launcher.close_network();
+    }
+
+    #[test]
+    fn server_launcher_seed_playable_smoke_world_exports_joinable_template() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+
+        let report = launcher.seed_playable_smoke_world();
+
+        assert!(report.world_initialized);
+        assert!(report.core_added);
+        assert!(launcher.runtime.state.is_playing());
+        assert_eq!(launcher.runtime.state.world.width(), 16);
+        assert_eq!(launcher.runtime.state.world.height(), 16);
+        assert_eq!(launcher.runtime.buildings().len(), 1);
+        let default_team = launcher.runtime.state.rules.default_team as u8;
+        let team = launcher
+            .runtime
+            .state
+            .teams
+            .get_or_null(default_team)
+            .expect("default team should exist");
+        assert!(team
+            .cores
+            .iter()
+            .any(|core| Some(core.id) == report.core_tile_pos));
+
+        let template = launcher.network_world_data_template();
+        assert_eq!(
+            template.map_tags.get("name").map(String::as_str),
+            Some("rust-playable-smoke")
+        );
+        let map = template
+            .map_snapshot
+            .expect("smoke map snapshot should exist");
+        assert_eq!(map.width, 16);
+        assert_eq!(map.height, 16);
+        assert!(map
+            .blocks
+            .iter()
+            .any(|record| record.has_entity && record.is_center));
+        assert!(template.team_blocks_snapshot.is_some());
+    }
+
+    #[test]
+    fn server_network_player_data_uses_default_team_and_core_spawn() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        let report = launcher.seed_playable_smoke_world();
+        let default_team = TeamId(launcher.runtime.state.rules.default_team as u8);
+        let spawn = launcher.default_player_spawn(default_team);
+        let core_tile = report.core_tile_pos.expect("smoke core tile should exist");
+        let core = launcher
+            .runtime
+            .state
+            .teams
+            .get_or_null(default_team.0)
+            .and_then(|team| team.core())
+            .expect("default team core should exist");
+        assert_eq!(core.id, core_tile);
+        assert_eq!(spawn, (core.x, core.y));
+
+        let mut connection = NetConnection::new("127.0.0.1:6567");
+        connection.name = "pilot".into();
+        connection.team = TeamId(99);
+        connection.color = 0x12_34_56;
+        let mut connections = HashMap::new();
+        connections.insert(7, connection);
+
+        let player = ServerLauncher::network_player_data_for_connection(
+            7,
+            &connections,
+            default_team,
+            spawn,
+        );
+
+        assert_eq!(player.team, default_team);
+        assert_eq!(player.unit, UnitRef::Null);
+        assert_eq!(player.name.as_deref(), Some("pilot"));
+        assert_eq!(player.color, 0x12_34_56);
+        assert_eq!((player.x, player.y), spawn);
     }
 
     #[test]
@@ -11740,5 +11888,4 @@ mod tests {
         else {
             panic!("payload void sidecar should remain present");
         };
-    }
-}
+    }

@@ -1,4 +1,6 @@
-use super::{Block, BlockId};
+use crate::mindustry::vars::TILE_SIZE;
+
+use super::{footprint_tiles, Block, BlockId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildingRef {
@@ -6,6 +8,46 @@ pub struct BuildingRef {
     pub block: BlockId,
     pub team: i32,
     pub rotation: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildingBaseWire {
+    pub block_revision: u8,
+    pub health: f32,
+    pub rotation: i32,
+    pub team: i32,
+}
+
+impl BuildingBaseWire {
+    pub const MIN_SAVE_PAYLOAD_LEN: usize = 7;
+
+    pub fn from_save_payload(payload: &[u8]) -> Option<Self> {
+        if payload.len() < Self::MIN_SAVE_PAYLOAD_LEN {
+            return None;
+        }
+
+        let health = f32::from_bits(u32::from_be_bytes([
+            payload[1], payload[2], payload[3], payload[4],
+        ]));
+        Some(Self {
+            block_revision: payload[0],
+            health,
+            rotation: (payload[5] & 0b0111_1111) as i32,
+            team: payload[6] as i32,
+        })
+    }
+}
+
+impl BuildingRef {
+    pub fn from_save_payload(tile_pos: i32, block: BlockId, payload: &[u8]) -> Option<Self> {
+        let base = BuildingBaseWire::from_save_payload(payload)?;
+        Some(Self {
+            tile_pos,
+            block,
+            team: base.team,
+            rotation: base.rotation,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +125,106 @@ impl Tile {
             .map_or(true, |build| build.tile_pos == self.pos())
     }
 
+    pub fn center_pos(&self) -> i32 {
+        self.build
+            .map_or_else(|| self.pos(), |build| build.tile_pos)
+    }
+
+    pub fn center_x(&self) -> i32 {
+        point2_x(self.center_pos()) as i32
+    }
+
+    pub fn center_y(&self) -> i32 {
+        point2_y(self.center_pos()) as i32
+    }
+
+    pub fn team(&self) -> i32 {
+        self.build.map_or(0, |build| build.team)
+    }
+
+    pub fn set_team(&mut self, team: i32) {
+        if let Some(build) = &mut self.build {
+            build.team = team;
+        }
+    }
+
+    pub fn world_x(&self) -> f32 {
+        self.x as f32 * TILE_SIZE as f32
+    }
+
+    pub fn world_y(&self) -> f32 {
+        self.y as f32 * TILE_SIZE as f32
+    }
+
+    pub fn draw_x(&self, block: &Block) -> f32 {
+        self.world_x() + block.offset
+    }
+
+    pub fn draw_y(&self, block: &Block) -> f32 {
+        self.world_y() + block.offset
+    }
+
+    pub fn absolute_relative_to(&self, block: &Block, cx: i32, cy: i32) -> i8 {
+        absolute_relative_to(self.x as i32, self.y as i32, block.size, cx, cy)
+    }
+
+    pub fn adjacent_to(&self, tile: &Tile) -> bool {
+        self.relative_to_tile(tile) != -1
+    }
+
+    pub fn passable(&self, floor: &Block, block: &Block) -> bool {
+        !((floor.solid && (block.id == Self::AIR || block.solidifies))
+            || (block.solid && !block.destructible && !block.update))
+    }
+
+    pub fn synthetic(&self, block: &Block) -> bool {
+        block.synthetic()
+    }
+
+    pub fn breakable(&self, block: &Block) -> bool {
+        block.destructible || block.breakable || block.update
+    }
+
+    pub fn linked_positions(&self, block: &Block) -> Vec<(i32, i32)> {
+        footprint_tiles(self.center_x(), self.center_y(), block.size)
+    }
+
+    pub fn linked_positions_as(&self, block: &Block) -> Vec<(i32, i32)> {
+        footprint_tiles(self.x as i32, self.y as i32, block.size)
+    }
+
+    pub fn static_darkness(&self, block: &Block) -> u8 {
+        if block.solid && block.fills_tile && !block.synthetic() {
+            self.data
+        } else {
+            0
+        }
+    }
+
+    pub fn leg_solid(&self, floor: &Block, block: &Block) -> bool {
+        self.static_darkness(block) >= 2 || (floor.solid && block.id == Self::AIR)
+    }
+
+    pub fn set_block_ref(&mut self, block: &Block, team: i32, rotation: i32) {
+        self.block = block.id;
+        self.build = block.has_building().then(|| BuildingRef {
+            tile_pos: self.pos(),
+            block: block.id,
+            team: block.force_team.unwrap_or(team),
+            rotation: block.plan_rotation(rotation),
+        });
+    }
+
+    pub fn set_proxy_block_ref(&mut self, block: &Block, build: Option<BuildingRef>) {
+        self.block = block.id;
+        self.build = build;
+    }
+
+    pub fn clear_block_ref(&mut self) {
+        self.block = Self::AIR;
+        self.build = None;
+    }
+
     pub fn should_save_data(&self, floor: &Block, overlay: &Block, block: &Block) -> bool {
         floor.save_data || overlay.save_data || block.save_data
     }
@@ -116,6 +258,47 @@ pub fn relative_to(x: i32, y: i32, cx: i32, cy: i32) -> i8 {
     } else {
         -1
     }
+}
+
+pub fn absolute_relative_to(x: i32, y: i32, block_size: i32, cx: i32, cy: i32) -> i8 {
+    if block_size % 2 == 1 {
+        if (x - cx).abs() > (y - cy).abs() {
+            if x <= cx - 1 {
+                return 0;
+            }
+            if x >= cx + 1 {
+                return 2;
+            }
+        } else {
+            if y <= cy - 1 {
+                return 1;
+            }
+            if y >= cy + 1 {
+                return 3;
+            }
+        }
+    } else {
+        let x = x as f32 + 0.5;
+        let y = y as f32 + 0.5;
+        let cx = cx as f32;
+        let cy = cy as f32;
+        if (x - cx).abs() > (y - cy).abs() {
+            if x <= cx - 1.0 {
+                return 0;
+            }
+            if x >= cx + 1.0 {
+                return 2;
+            }
+        } else {
+            if y <= cy - 1.0 {
+                return 1;
+            }
+            if y >= cy + 1.0 {
+                return 3;
+            }
+        }
+    }
+    -1
 }
 
 pub fn point2_pack(x: i32, y: i32) -> i32 {
@@ -195,5 +378,30 @@ mod tests {
         assert_eq!(decoded.data, tile.data);
         assert_eq!(decoded.floor_data, tile.floor_data);
         assert_eq!(decoded.overlay_data, tile.overlay_data);
+    }
+
+    #[test]
+    fn building_ref_decodes_java_save_map_base_prefix() {
+        let mut payload = vec![2];
+        payload.extend_from_slice(&42.5f32.to_bits().to_be_bytes());
+        payload.push(0b1000_0000 | 3);
+        payload.push(6);
+
+        let base = BuildingBaseWire::from_save_payload(&payload).unwrap();
+        assert_eq!(base.block_revision, 2);
+        assert_eq!(base.health, 42.5);
+        assert_eq!(base.rotation, 3);
+        assert_eq!(base.team, 6);
+
+        assert_eq!(
+            BuildingRef::from_save_payload(point2_pack(4, 5), 12, &payload),
+            Some(BuildingRef {
+                tile_pos: point2_pack(4, 5),
+                block: 12,
+                team: 6,
+                rotation: 3,
+            })
+        );
+        assert!(BuildingBaseWire::from_save_payload(&payload[..6]).is_none());
     }
 }

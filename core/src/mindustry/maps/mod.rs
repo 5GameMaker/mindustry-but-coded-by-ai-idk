@@ -3,6 +3,8 @@ use std::{collections::BTreeMap, io, io::Read, path::Path};
 pub mod filters;
 pub mod generators;
 pub mod map_exception;
+pub mod planet;
+pub mod schematics;
 
 use crate::mindustry::{
     game::{rules::GamemodeApplier, Gamemode, Rules},
@@ -184,13 +186,17 @@ impl MapDescriptor {
     }
 
     pub fn rules(&self) -> Rules {
-        Rules::default()
+        self.apply_rules_to(Rules::default())
     }
 
     pub fn apply_rules(&self, mode: Gamemode) -> Rules {
         let mut rules = Rules::default();
         mode.apply(&mut rules);
-        rules
+        self.apply_rules_to(rules)
+    }
+
+    pub fn rules_with_base(&self, base: Rules) -> Rules {
+        self.apply_rules_to(base)
     }
 
     pub fn filters_tag(&self) -> Option<&str> {
@@ -211,6 +217,22 @@ impl MapDescriptor {
         } else {
             self.tags.get("genfilters").map(String::as_str)
         }
+    }
+
+    pub fn filters(&self) -> Option<&str> {
+        self.filters_tag()
+    }
+
+    fn apply_rules_to(&self, mut rules: Rules) -> Rules {
+        let rule_json = rules_tag_json(&self.tags);
+        let _ = rules.apply_json_str(&rule_json);
+
+        if rules.planet == "serpulo" && rules.has_env(crate::mindustry::world::meta::Env::SCORCHING)
+        {
+            rules.planet = "erekir".into();
+        }
+
+        rules
     }
 
     fn preview_stem(&self) -> String {
@@ -295,6 +317,39 @@ fn strip_colors(value: &str) -> String {
     }
     out
 }
+
+pub const BUILTIN_FILTER_NAMES: [&str; 15] = [
+    "noise",
+    "scatter",
+    "terrain",
+    "distort",
+    "rivernoise",
+    "ore",
+    "oremedian",
+    "median",
+    "blend",
+    "mirror",
+    "clear",
+    "corespawn",
+    "enemyspawn",
+    "spawnpath",
+    "logic",
+];
+
+pub const BUILTIN_PLANET_GENERATOR_NAMES: [&str; 4] = [
+    "AsteroidGenerator",
+    "ErekirPlanetGenerator",
+    "SerpuloPlanetGenerator",
+    "TantrosPlanetGenerator",
+];
+
+pub const BUILTIN_WORLD_GENERATOR_NAMES: [&str; 5] = [
+    "BaseGenerator",
+    "BasicGenerator",
+    "BlankPlanetGenerator",
+    "FileMapGenerator",
+    "PlanetGenerator",
+];
 
 #[cfg(test)]
 mod tests {
@@ -385,6 +440,7 @@ mod tests {
         assert!(map.has_tag("author"));
         assert!(!map.has_tag("missing"));
         assert_eq!(rules_tag_json(&map.tags), "{wave:true}");
+        assert_eq!(map.filters(), None);
 
         map.add_steam_id("12345");
         assert_eq!(map.steam_id(), Some("12345"));
@@ -411,6 +467,60 @@ mod tests {
         assert_eq!(
             compare_maps(&alpha, &map, false, false),
             std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn descriptor_rules_apply_java_json_and_erekir_env_fix() {
+        let mut tags = BTreeMap::new();
+        tags.insert("rules".into(), r#"{"planet":"serpulo","env":16}"#.into());
+        let map = MapDescriptor::new("maps/rules.msav", 10, 10, tags, true, 11, 157);
+
+        let rules = map.rules();
+        assert_eq!(rules.planet, "erekir");
+        assert!(rules.has_env(crate::mindustry::world::meta::Env::SCORCHING));
+    }
+
+    #[test]
+    fn builtin_registration_names_follow_upstream_ordering_subset() {
+        assert_eq!(
+            BUILTIN_FILTER_NAMES,
+            [
+                "noise",
+                "scatter",
+                "terrain",
+                "distort",
+                "rivernoise",
+                "ore",
+                "oremedian",
+                "median",
+                "blend",
+                "mirror",
+                "clear",
+                "corespawn",
+                "enemyspawn",
+                "spawnpath",
+                "logic",
+            ]
+        );
+        assert_eq!(
+            BUILTIN_PLANET_GENERATOR_NAMES,
+            [
+                "AsteroidGenerator",
+                "ErekirPlanetGenerator",
+                "SerpuloPlanetGenerator",
+                "TantrosPlanetGenerator",
+            ]
+        );
+        assert_eq!(
+            BUILTIN_WORLD_GENERATOR_NAMES,
+            [
+                "BaseGenerator",
+                "BasicGenerator",
+                "BlankPlanetGenerator",
+                "FileMapGenerator",
+                "PlanetGenerator",
+            ]
         );
     }
 }

@@ -748,6 +748,543 @@ pub fn logic_filter_plan(code: Option<&str>, looped: bool) -> LogicFilterPlan {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoiseFilter {
+    pub seed: i32,
+    pub scl: f32,
+    pub threshold: f32,
+    pub octaves: f32,
+    pub falloff: f32,
+    pub tilt: f32,
+    pub floor: MapBlock,
+    pub block: MapBlock,
+    pub target: MapBlock,
+}
+
+impl Default for NoiseFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            scl: 40.0,
+            threshold: 0.5,
+            octaves: 3.0,
+            falloff: 0.5,
+            tilt: 0.0,
+            floor: MapBlock::STONE,
+            block: MapBlock::STONE_WALL,
+            target: MapBlock::AIR,
+        }
+    }
+}
+
+impl NoiseFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "noise"
+    }
+
+    pub fn is_buffered(&self) -> bool {
+        false
+    }
+
+    pub fn apply(&self, input: &mut GenerateInput) {
+        let noise = terrain_filter_noise(
+            deterministic_chance(input.x, input.y, self.seed),
+            input.x,
+            input.y,
+            input.width,
+            input.height,
+            self.scl,
+        );
+        noise_filter_apply(
+            input,
+            noise,
+            self.threshold,
+            self.target,
+            self.floor,
+            self.block,
+        );
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScatterFilter {
+    pub seed: i32,
+    pub chance: f32,
+    pub flooronto: MapBlock,
+    pub floor: MapBlock,
+    pub block: MapBlock,
+}
+
+impl Default for ScatterFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            chance: 0.013,
+            flooronto: MapBlock::AIR,
+            floor: MapBlock::AIR,
+            block: MapBlock::AIR,
+        }
+    }
+}
+
+impl ScatterFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "scatter"
+    }
+
+    pub fn apply(&self, input: &mut GenerateInput) {
+        scatter_filter_apply(
+            input,
+            deterministic_chance(input.x, input.y, self.seed),
+            self.chance,
+            self.flooronto,
+            self.floor,
+            self.block,
+        );
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TerrainFilter {
+    pub seed: i32,
+    pub scl: f32,
+    pub threshold: f32,
+    pub octaves: f32,
+    pub falloff: f32,
+    pub magnitude: f32,
+    pub circle_scl: f32,
+    pub tilt: f32,
+    pub floor: MapBlock,
+    pub block: MapBlock,
+}
+
+impl Default for TerrainFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            scl: 40.0,
+            threshold: 0.9,
+            octaves: 3.0,
+            falloff: 0.5,
+            magnitude: 1.0,
+            circle_scl: 2.1,
+            tilt: 0.0,
+            floor: MapBlock::AIR,
+            block: MapBlock::STONE_WALL,
+        }
+    }
+}
+
+impl TerrainFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "terrain"
+    }
+
+    pub fn apply(&self, input: &mut GenerateInput) {
+        let noise = terrain_filter_noise(
+            deterministic_chance(input.x, input.y, self.seed),
+            input.x,
+            input.y,
+            input.width,
+            input.height,
+            self.circle_scl,
+        );
+        terrain_filter_apply(input, noise, self.threshold, self.floor, self.block);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DistortFilter {
+    pub seed: i32,
+    pub scl: f32,
+    pub mag: f32,
+}
+
+impl Default for DistortFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            scl: 40.0,
+            mag: 5.0,
+        }
+    }
+}
+
+impl DistortFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "distort"
+    }
+
+    pub fn apply<F>(&self, input: &mut GenerateInput, mut source_at: F)
+    where
+        F: FnMut(i32, i32) -> MapTile,
+    {
+        let random = deterministic_chance(input.x, input.y, self.seed);
+        let (sx, sy) = distort_filter_source_coord(
+            input,
+            random * self.scl,
+            deterministic_chance(input.y, input.x, self.seed.wrapping_add(1)) * self.scl,
+            self.mag,
+        );
+        let source = source_at(sx, sy);
+        distort_filter_apply(input, source);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RiverNoiseFilter {
+    pub seed: i32,
+    pub scl: f32,
+    pub threshold: f32,
+    pub threshold2: f32,
+    pub octaves: f32,
+    pub falloff: f32,
+    pub floor: MapBlock,
+    pub floor2: MapBlock,
+    pub block: MapBlock,
+    pub target: MapBlock,
+}
+
+impl Default for RiverNoiseFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            scl: 40.0,
+            threshold: 0.0,
+            threshold2: 0.1,
+            octaves: 1.0,
+            falloff: 0.5,
+            floor: MapBlock::AIR,
+            floor2: MapBlock::AIR,
+            block: MapBlock::STONE_WALL,
+            target: MapBlock::AIR,
+        }
+    }
+}
+
+impl RiverNoiseFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "rivernoise"
+    }
+
+    pub fn apply(&self, input: &mut GenerateInput) {
+        let noise = terrain_filter_noise(
+            deterministic_chance(input.x, input.y, self.seed),
+            input.x,
+            input.y,
+            input.width,
+            input.height,
+            self.scl,
+        );
+        river_noise_filter_apply(
+            input,
+            noise,
+            self.threshold,
+            self.threshold2,
+            self.floor,
+            self.floor2,
+            self.block,
+            self.target,
+        );
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OreFilter {
+    pub seed: i32,
+    pub scl: f32,
+    pub threshold: f32,
+    pub octaves: f32,
+    pub falloff: f32,
+    pub tilt: f32,
+    pub ore: MapBlock,
+    pub target: MapBlock,
+}
+
+impl Default for OreFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            scl: 23.0,
+            threshold: 0.81,
+            octaves: 2.0,
+            falloff: 0.3,
+            tilt: 0.0,
+            ore: MapBlock::ORE_COPPER,
+            target: MapBlock::AIR,
+        }
+    }
+}
+
+impl OreFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "ore"
+    }
+
+    pub fn apply(&self, input: &mut GenerateInput) {
+        let noise = deterministic_chance(input.x, input.y, self.seed);
+        ore_filter_apply(input, noise, self.threshold, self.ore, self.target);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OreMedianFilter {
+    pub seed: i32,
+    pub radius: f32,
+    pub percentile: f32,
+}
+
+impl Default for OreMedianFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            radius: 2.0,
+            percentile: 0.5,
+        }
+    }
+}
+
+impl OreMedianFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "oremedian"
+    }
+
+    pub fn is_buffered(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MedianFilter {
+    pub seed: i32,
+    pub radius: f32,
+    pub percentile: f32,
+}
+
+impl Default for MedianFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            radius: 2.0,
+            percentile: 0.5,
+        }
+    }
+}
+
+impl MedianFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "median"
+    }
+
+    pub fn is_buffered(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlendFilter {
+    pub seed: i32,
+    pub radius: f32,
+    pub block: MapBlock,
+    pub floor: MapBlock,
+    pub ignore: MapBlock,
+}
+
+impl Default for BlendFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            radius: 2.0,
+            block: MapBlock::SAND,
+            floor: MapBlock::SAND_WATER,
+            ignore: MapBlock::AIR,
+        }
+    }
+}
+
+impl BlendFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "blend"
+    }
+
+    pub fn is_buffered(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MirrorFilter {
+    pub seed: i32,
+    pub angle: i32,
+    pub rotate: bool,
+}
+
+impl Default for MirrorFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            angle: 45,
+            rotate: false,
+        }
+    }
+}
+
+impl MirrorFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "mirror"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClearFilter {
+    pub seed: i32,
+    pub target: MapBlock,
+    pub replace: MapBlock,
+    pub ignore: MapBlock,
+}
+
+impl Default for ClearFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            target: MapBlock::STONE,
+            replace: MapBlock::AIR,
+            ignore: MapBlock::AIR,
+        }
+    }
+}
+
+impl ClearFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "clear"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoreSpawnFilter {
+    pub seed: i32,
+    pub amount: i32,
+}
+
+impl Default for CoreSpawnFilter {
+    fn default() -> Self {
+        Self { seed: 0, amount: 1 }
+    }
+}
+
+impl CoreSpawnFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "corespawn"
+    }
+
+    pub fn is_post(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnemySpawnFilter {
+    pub seed: i32,
+    pub amount: i32,
+}
+
+impl Default for EnemySpawnFilter {
+    fn default() -> Self {
+        Self { seed: 0, amount: 1 }
+    }
+}
+
+impl EnemySpawnFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "enemyspawn"
+    }
+
+    pub fn is_post(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpawnPathFilter {
+    pub seed: i32,
+    pub radius: i32,
+    pub block: MapBlock,
+}
+
+impl Default for SpawnPathFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            radius: 3,
+            block: MapBlock::AIR,
+        }
+    }
+}
+
+impl SpawnPathFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "spawnpath"
+    }
+
+    pub fn is_post(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicFilter {
+    pub seed: i32,
+    pub code: Option<String>,
+    pub looped: bool,
+}
+
+impl Default for LogicFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            code: None,
+            looped: false,
+        }
+    }
+}
+
+impl LogicFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "logic"
+    }
+
+    pub fn is_post(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RandomItemFilter {
+    pub seed: i32,
+    pub drops: Vec<ItemStackSpec>,
+    pub chance: f32,
+}
+
+impl Default for RandomItemFilter {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            drops: Vec::new(),
+            chance: 0.3,
+        }
+    }
+}
+
+impl RandomItemFilter {
+    pub fn simple_name(&self) -> &'static str {
+        "randomitem"
+    }
+
+    pub fn is_post(&self) -> bool {
+        true
+    }
+}
+
 fn distance(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     ((x1 - x2).powi(2) + (y1 - y2).powi(2)).sqrt()
 }
@@ -1166,5 +1703,69 @@ mod tests {
         );
         assert!(plan.looped);
         assert!(plan.update_logic_vars_first);
+    }
+
+    #[test]
+    fn filter_data_defaults_match_upstream_field_initializers() {
+        let noise = NoiseFilter::default();
+        assert_eq!(noise.scl, 40.0);
+        assert_eq!(noise.threshold, 0.5);
+        assert_eq!(noise.octaves, 3.0);
+        assert_eq!(noise.floor, MapBlock::STONE);
+        assert_eq!(noise.block, MapBlock::STONE_WALL);
+        assert_eq!(noise.target, MapBlock::AIR);
+
+        let scatter = ScatterFilter::default();
+        assert_eq!(scatter.chance, 0.013);
+        assert_eq!(scatter.flooronto, MapBlock::AIR);
+
+        let terrain = TerrainFilter::default();
+        assert_eq!(terrain.magnitude, 1.0);
+        assert_eq!(terrain.circle_scl, 2.1);
+
+        let river = RiverNoiseFilter::default();
+        assert_eq!(river.threshold2, 0.1);
+        assert_eq!(river.floor2, MapBlock::AIR);
+        assert_eq!(river.block, MapBlock::STONE_WALL);
+
+        let ore = OreFilter::default();
+        assert_eq!(ore.scl, 23.0);
+        assert_eq!(ore.threshold, 0.81);
+        assert_eq!(ore.ore, MapBlock::ORE_COPPER);
+
+        let blend = BlendFilter::default();
+        assert_eq!(blend.radius, 2.0);
+        assert_eq!(blend.block, MapBlock::SAND);
+
+        let mirror = MirrorFilter::default();
+        assert_eq!(mirror.angle, 45);
+        assert!(!mirror.rotate);
+
+        let clear = ClearFilter::default();
+        assert_eq!(clear.target, MapBlock::STONE);
+        assert_eq!(clear.replace, MapBlock::AIR);
+
+        let core_spawn = CoreSpawnFilter::default();
+        assert_eq!(core_spawn.amount, 1);
+        assert!(core_spawn.is_post());
+
+        let enemy_spawn = EnemySpawnFilter::default();
+        assert_eq!(enemy_spawn.amount, 1);
+        assert!(enemy_spawn.is_post());
+
+        let spawn_path = SpawnPathFilter::default();
+        assert_eq!(spawn_path.radius, 3);
+        assert_eq!(spawn_path.block, MapBlock::AIR);
+        assert!(spawn_path.is_post());
+
+        let logic = LogicFilter::default();
+        assert!(logic.code.is_none());
+        assert!(!logic.looped);
+        assert!(logic.is_post());
+
+        let random_item = RandomItemFilter::default();
+        assert!(random_item.drops.is_empty());
+        assert_eq!(random_item.chance, 0.3);
+        assert!(random_item.is_post());
     }
 }

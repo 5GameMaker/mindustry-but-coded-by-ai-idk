@@ -189,6 +189,35 @@ impl DesktopSoundAudioStats {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopPlayableSmokeStatus {
+    pub client_ready: bool,
+    pub connected: bool,
+    pub world_loaded: bool,
+    pub confirmed: bool,
+    pub game_playing: bool,
+    pub runtime_client: bool,
+    pub world_width: usize,
+    pub world_height: usize,
+    pub buildings: usize,
+    pub player_on_default_team: bool,
+}
+
+impl DesktopPlayableSmokeStatus {
+    pub fn ready(self) -> bool {
+        self.client_ready
+            && self.connected
+            && self.world_loaded
+            && self.confirmed
+            && self.game_playing
+            && self.runtime_client
+            && self.world_width > 0
+            && self.world_height > 0
+            && self.buildings > 0
+            && self.player_on_default_team
+    }
+}
+
 pub trait DesktopEffectRenderer {
     fn render_standard_effect_frame(
         &mut self,
@@ -701,6 +730,32 @@ impl DesktopLauncher {
         &mut self,
     ) -> Vec<GameRuntimeClientCameraShakeEvent> {
         std::mem::take(&mut self.pending_camera_shake_events)
+    }
+
+    pub fn playable_smoke_status(&self) -> DesktopPlayableSmokeStatus {
+        let (connected, confirmed) = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            (state.connected, state.connect_confirm_sent)
+        };
+        let default_team = TeamId(self.game_state.rules.default_team as u8);
+
+        DesktopPlayableSmokeStatus {
+            client_ready: self.client.is_ready_for_play(),
+            connected,
+            world_loaded: self.last_applied_world_data.is_some(),
+            confirmed,
+            game_playing: self.game_state.is_playing(),
+            runtime_client: self.runtime.network_context == GameRuntimeNetworkContext::client(),
+            world_width: self.runtime.state.world.width(),
+            world_height: self.runtime.state.world.height(),
+            buildings: self.runtime.buildings().len(),
+            player_on_default_team: self.player.team == default_team,
+        }
+    }
+
+    pub fn playable_smoke_ready(&self) -> bool {
+        self.playable_smoke_status().ready()
     }
 
     pub fn connect_from_args(&mut self) {
@@ -2253,6 +2308,53 @@ mod tests {
             }),
             ..NetworkWorldData::default()
         }
+    }
+
+    #[test]
+    fn desktop_playable_smoke_ready_after_world_stream_and_confirm() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let content = launcher.content_loader.clone();
+        let mut server_runtime = GameRuntime::default();
+        let smoke = server_runtime.seed_playable_smoke_world(&content);
+        let default_team = TeamId(server_runtime.state.rules.default_team as u8);
+        let (spawn_x, spawn_y) = server_runtime
+            .state
+            .teams
+            .get_or_null(default_team.0)
+            .and_then(|team| team.core())
+            .map(|core| (core.x, core.y))
+            .expect("smoke core spawn should exist");
+        let mut player = NetworkPlayerData::bootstrap();
+        player.team = default_team;
+        player.name = Some("smoke-client".into());
+        player.x = spawn_x;
+        player.y = spawn_y;
+
+        let world_data = NetworkWorldData {
+            map_tags: server_runtime.state.map.tags.clone(),
+            player_id: 77,
+            player: Some(player),
+            map_snapshot: Some(server_runtime.export_network_map_snapshot(&content)),
+            ..NetworkWorldData::default()
+        };
+
+        launcher.client.setup();
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.connected = true;
+            state.connect_confirm_sent = true;
+            state.last_loaded_world_data = Some(world_data);
+        }
+
+        launcher.update();
+
+        let status = launcher.playable_smoke_status();
+        assert!(status.ready(), "{status:?}, smoke={smoke:?}");
+        assert!(launcher.playable_smoke_ready());
+        assert_eq!(status.world_width, 16);
+        assert_eq!(status.world_height, 16);
+        assert_eq!(status.buildings, 1);
     }
 
     fn sample_state_snapshot() -> StateSnapshotCallPacket {

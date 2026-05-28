@@ -21,6 +21,7 @@ use crate::mindustry::{
 };
 
 pub const SAVE_HEADER: &[u8; 4] = b"MSAV";
+pub const MAP_PNG_HEADER: &[u8; 8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 pub const LATEST_SAVE_VERSION: i32 = 11;
 pub const SAVE_REGION_META: &str = "meta";
 pub const SAVE_REGION_CONTENT: &str = "content";
@@ -44,6 +45,10 @@ pub const SAVE_REGION_MANIFEST: &[&str] = &[
     SAVE_REGION_MARKERS,
     SAVE_REGION_CUSTOM,
 ];
+
+pub fn is_map_image_bytes(bytes: &[u8]) -> bool {
+    bytes.starts_with(MAP_PNG_HEADER)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavePathLayout {
@@ -602,6 +607,14 @@ impl SaveEntitiesRegion {
         }
     }
 
+    pub fn empty_modern() -> Self {
+        Self {
+            entity_mapping: vec![0, 0],
+            team_blocks: LegacyTeamBlocks::default(),
+            world_entities: vec![0, 0, 0, 0],
+        }
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         let mut cursor = Cursor::new(bytes);
         let entity_mapping = read_entity_mapping_bytes(&mut cursor)?;
@@ -622,6 +635,140 @@ impl SaveEntitiesRegion {
         bytes.extend_from_slice(&self.world_entities);
         Ok(bytes)
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SaveSnapshot {
+    pub version: i32,
+    pub meta: SaveMeta,
+    pub content_header: Option<ContentHeaderSnapshot>,
+    pub content_patches: Option<ContentPatchSet>,
+    pub map: Option<LegacyShortChunkMap>,
+    pub entities: Option<SaveEntitiesRegion>,
+    pub marker_region: Option<MarkerRegionBytes>,
+    pub custom_chunks: Option<CustomChunkSet>,
+}
+
+impl SaveSnapshot {
+    pub fn from_envelope(envelope: &RawSaveEnvelope) -> io::Result<Self> {
+        let meta_payload = envelope.get(SaveRegion::Meta).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "save envelope missing meta region",
+            )
+        })?;
+        let meta = read_meta_payload(&mut meta_payload.as_ref())?;
+
+        Ok(Self {
+            version: envelope.version,
+            meta,
+            content_header: parse_optional_region(envelope.get(SaveRegion::Content), |payload| {
+                read_content_header_snapshot(payload)
+            })?,
+            content_patches: parse_optional_region(envelope.get(SaveRegion::Patches), |payload| {
+                read_content_patches(payload)
+            })?,
+            map: parse_optional_region(envelope.get(SaveRegion::Map), |payload| {
+                read_chunk_map(payload)
+            })?,
+            entities: parse_optional_region(envelope.get(SaveRegion::Entities), |payload| {
+                let out = SaveEntitiesRegion::from_bytes(*payload)?;
+                *payload = &[];
+                Ok(out)
+            })?,
+            marker_region: envelope
+                .get(SaveRegion::Markers)
+                .filter(|payload| !payload.is_empty())
+                .map(|payload| MarkerRegionBytes {
+                    bytes: payload.to_vec(),
+                }),
+            custom_chunks: parse_optional_region(envelope.get(SaveRegion::Custom), |payload| {
+                read_custom_chunks(payload)
+            })?,
+        })
+    }
+
+    pub fn to_envelope(&self) -> io::Result<RawSaveEnvelope> {
+        let mut envelope = RawSaveEnvelope::new(self.version);
+
+        let mut meta = Vec::new();
+        write_string_map(&mut meta, &self.meta.tags)?;
+        envelope.set(SaveRegion::Meta, meta)?;
+
+        let content_header = self.content_header.clone().unwrap_or_default();
+        envelope.set_content_header_snapshot(&content_header)?;
+
+        if self.version >= 11 {
+            let content_patches = self.content_patches.clone().unwrap_or_default();
+            envelope.set_content_patches(&content_patches)?;
+        }
+
+        if let Some(map) = &self.map {
+            envelope.set_chunk_map(map)?;
+        }
+
+        let entities = self
+            .entities
+            .clone()
+            .unwrap_or_else(SaveEntitiesRegion::empty_modern);
+        envelope.set_entities_region(&entities)?;
+
+        if self.version >= 8 {
+            match &self.marker_region {
+                Some(region) => envelope.set(SaveRegion::Markers, region.bytes.clone())?,
+                None => envelope.set_markers_from_map_markers(&MapMarkers::new())?,
+            }
+        }
+
+        if self.version >= 7 {
+            let custom_chunks = self.custom_chunks.clone().unwrap_or_default();
+            envelope.set_custom_chunks(&custom_chunks)?;
+        }
+
+        Ok(envelope)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveMapInfo {
+    pub tags: BTreeMap<String, String>,
+    pub width: i32,
+    pub height: i32,
+    pub custom: bool,
+    pub version: i32,
+    pub build: i32,
+}
+
+impl SaveMapInfo {
+    pub fn from_meta(version: i32, custom: bool, meta: &SaveMeta) -> Self {
+        Self {
+            tags: meta.tags.clone(),
+            width: parse_i32(&meta.tags, "width"),
+            height: parse_i32(&meta.tags, "height"),
+            custom,
+            version,
+            build: meta.build,
+        }
+    }
+}
+
+fn parse_optional_region<T, F>(payload: Option<&[u8]>, parse: F) -> io::Result<Option<T>>
+where
+    F: FnOnce(&mut &[u8]) -> io::Result<T>,
+{
+    let Some(payload) = payload.filter(|payload| !payload.is_empty()) else {
+        return Ok(None);
+    };
+
+    let mut slice = payload;
+    let out = parse(&mut slice)?;
+    if !slice.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "structured save region reader did not consume entire payload",
+        ));
+    }
+    Ok(Some(out))
 }
 
 pub fn read_entity_mapping_bytes<R: Read>(read: &mut R) -> io::Result<Vec<u8>> {
@@ -728,6 +875,31 @@ pub fn read_deflated_raw_save_envelope_with_backup(
             }
         }
     }
+}
+
+pub fn write_save_snapshot<W: Write>(write: &mut W, snapshot: &SaveSnapshot) -> io::Result<()> {
+    write_raw_save_envelope(write, &snapshot.to_envelope()?)
+}
+
+pub fn read_save_snapshot<R: Read>(read: &mut R) -> io::Result<SaveSnapshot> {
+    let envelope = read_raw_save_envelope(read)?;
+    SaveSnapshot::from_envelope(&envelope)
+}
+
+pub fn write_deflated_save_snapshot<W: Write>(write: W, snapshot: &SaveSnapshot) -> io::Result<()> {
+    write_deflated_raw_save_envelope(write, &snapshot.to_envelope()?)
+}
+
+pub fn read_deflated_save_snapshot<R: Read>(read: R) -> io::Result<SaveSnapshot> {
+    let envelope = read_deflated_raw_save_envelope(read)?;
+    SaveSnapshot::from_envelope(&envelope)
+}
+
+pub fn read_deflated_map_info<R: Read>(read: R, custom: bool) -> io::Result<SaveMapInfo> {
+    let mut decoder = ZlibDecoder::new(read);
+    let version = read_header(&mut decoder)?;
+    let meta = read_meta_region(&mut decoder)?;
+    Ok(SaveMapInfo::from_meta(version, custom, &meta))
 }
 
 /// Reads the Java save metadata prefix from an already-inflated stream.
@@ -1786,6 +1958,29 @@ mod tests {
     }
 
     #[test]
+    fn map_info_reads_deflated_meta_prefix_like_mapio_create_map() {
+        let mut tags = BTreeMap::new();
+        tags.insert("width".into(), "64".into());
+        tags.insert("height".into(), "48".into());
+        tags.insert("build".into(), "1581".into());
+        tags.insert("mapname".into(), "io-map".into());
+
+        let mut deflated = Vec::new();
+        write_deflated_save_meta_prefix(&mut deflated, LATEST_SAVE_VERSION, &tags).unwrap();
+
+        assert!(is_map_image_bytes(MAP_PNG_HEADER));
+        assert!(!is_map_image_bytes(b"MSAV"));
+
+        let info = read_deflated_map_info(deflated.as_slice(), true).unwrap();
+        assert_eq!(info.width, 64);
+        assert_eq!(info.height, 48);
+        assert!(info.custom);
+        assert_eq!(info.version, LATEST_SAVE_VERSION);
+        assert_eq!(info.build, 1581);
+        assert_eq!(info.tags.get("mapname").map(String::as_str), Some("io-map"));
+    }
+
+    #[test]
     fn save_region_manifest_matches_java_order() {
         let names: Vec<&str> = SaveRegion::manifest()
             .iter()
@@ -2040,6 +2235,69 @@ mod tests {
                 world_entities: vec![9, 8, 7],
             })
         );
+    }
+
+    #[test]
+    fn save_snapshot_roundtrips_runtime_map_building_payload() {
+        use crate::mindustry::core::content_loader::ContentLoader;
+        use crate::mindustry::core::GameRuntime;
+        use crate::mindustry::entities::comp::building::BuildingComp;
+        use crate::mindustry::io::TeamId;
+        use crate::mindustry::world::point2_pack;
+
+        let content = ContentLoader::create_base_content().unwrap();
+        let block = content.block_by_name("mend-projector").unwrap();
+        let tile_pos = point2_pack(2, 1);
+
+        let mut saved = GameRuntime::default();
+        saved.state.world.resize(4, 4);
+        let mut building = BuildingComp::new(tile_pos, block.base().clone(), TeamId(3));
+        building.set_rotation(2);
+        building.health = 55.0;
+        saved.add_building(building);
+        let map = saved.export_network_map_snapshot(&content);
+
+        let mut tags = BTreeMap::new();
+        tags.insert("version".into(), LATEST_SAVE_VERSION.to_string());
+        tags.insert("build".into(), "1581".into());
+        tags.insert("mapname".into(), "snapshot-map".into());
+        tags.insert("width".into(), "4".into());
+        tags.insert("height".into(), "4".into());
+
+        let snapshot = SaveSnapshot {
+            version: LATEST_SAVE_VERSION,
+            meta: SaveMeta::from_tags(tags),
+            content_header: Some(ContentHeaderSnapshot::default()),
+            content_patches: Some(ContentPatchSet::default()),
+            map: Some(map.clone()),
+            entities: Some(SaveEntitiesRegion::empty_modern()),
+            marker_region: None,
+            custom_chunks: Some(CustomChunkSet::default()),
+        };
+
+        let mut deflated = Vec::new();
+        write_deflated_save_snapshot(&mut deflated, &snapshot).unwrap();
+        let decoded = read_deflated_save_snapshot(deflated.as_slice()).unwrap();
+
+        assert_eq!(decoded.version, LATEST_SAVE_VERSION);
+        assert_eq!(decoded.meta.map_name.as_deref(), Some("snapshot-map"));
+        assert_eq!(decoded.map.as_ref(), Some(&map));
+        assert!(decoded.marker_region.is_some());
+        assert_eq!(
+            decoded.entities.as_ref().unwrap().team_blocks,
+            LegacyTeamBlocks::default()
+        );
+
+        let mut loaded = GameRuntime::default();
+        let report =
+            loaded.load_network_map_with_buildings(&content, decoded.map.as_ref().unwrap());
+
+        assert_eq!(report.buildings_added, 1);
+        let loaded_building = &loaded.buildings()[0];
+        assert_eq!(loaded_building.tile_pos, tile_pos);
+        assert_eq!(loaded_building.team, TeamId(3));
+        assert_eq!(loaded_building.rotation, 2);
+        assert_eq!(loaded_building.health, 55.0);
     }
 
     #[test]

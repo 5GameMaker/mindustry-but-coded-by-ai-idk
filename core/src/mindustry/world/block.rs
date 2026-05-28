@@ -2,7 +2,10 @@ use crate::mindustry::{
     ctype::ContentId,
     io::TypeValue,
     vars::TILE_SIZE,
-    world::meta::{BlockFlag, BlockGroup, BuildVisibility, Env},
+    world::{
+        build::BuildBounds,
+        meta::{BlockFlag, BlockGroup, BuildVisibility, Env},
+    },
 };
 
 pub type BlockId = ContentId;
@@ -50,6 +53,7 @@ pub struct Block {
     pub last_config: Option<TypeValue>,
 
     pub solid: bool,
+    pub solidifies: bool,
     pub fills_tile: bool,
     pub force_dark: bool,
     pub breakable: bool,
@@ -57,15 +61,20 @@ pub struct Block {
     pub replaceable: bool,
     pub instant_deconstruct: bool,
     pub unit_move_breakable: bool,
+    pub rebuildable: bool,
+    pub privileged: bool,
+    pub no_update_disabled: bool,
     pub targetable: bool,
     pub health: i32,
 
     pub rotate: bool,
     pub rotate_draw: bool,
     pub rotate_draw_editor: bool,
+    pub visual_rotation_offset: f32,
     pub lock_rotation: bool,
     pub ignore_line_rotation: bool,
     pub invert_flip: bool,
+    pub quick_rotate: bool,
 
     pub size: i32,
     pub offset: f32,
@@ -89,6 +98,7 @@ pub struct Block {
     pub placeable_on: bool,
     pub placeable_liquid: bool,
     pub allow_rectangle_placement: bool,
+    pub swap_diagonal_placement: bool,
     pub instant_build: bool,
     pub ignore_build_darkness: bool,
     pub obstructs_light: bool,
@@ -101,6 +111,8 @@ pub struct Block {
     pub emit_light: bool,
     pub light_radius: f32,
     pub light_color_rgba: u32,
+    pub can_overdrive: bool,
+    pub suppressable: bool,
 
     pub env_required: u32,
     pub env_enabled: u32,
@@ -109,6 +121,7 @@ pub struct Block {
     pub item_drop: Option<ContentId>,
     pub map_color_rgba: u32,
     pub use_color: bool,
+    pub force_team: Option<i32>,
 }
 
 impl Block {
@@ -138,21 +151,27 @@ impl Block {
             consumes_tap: false,
             last_config: None,
             solid: false,
+            solidifies: false,
             fills_tile: true,
             force_dark: false,
             breakable: true,
             always_replace: false,
-            replaceable: false,
+            replaceable: true,
             instant_deconstruct: false,
             unit_move_breakable: true,
+            rebuildable: true,
+            privileged: false,
+            no_update_disabled: false,
             targetable: true,
             health: 40,
             rotate: false,
             rotate_draw: true,
             rotate_draw_editor: true,
+            visual_rotation_offset: 0.0,
             lock_rotation: true,
             ignore_line_rotation: false,
             invert_flip: false,
+            quick_rotate: true,
             size: 1,
             offset: 0.0,
             size_offset: 0,
@@ -173,6 +192,7 @@ impl Block {
             placeable_on: true,
             placeable_liquid: false,
             allow_rectangle_placement: false,
+            swap_diagonal_placement: false,
             instant_build: false,
             ignore_build_darkness: false,
             obstructs_light: true,
@@ -185,12 +205,15 @@ impl Block {
             emit_light: false,
             light_radius: 0.0,
             light_color_rgba: 0x00000000,
+            can_overdrive: true,
+            suppressable: false,
             env_required: Env::NONE,
             env_enabled: Env::ANY,
             env_disabled: Env::NONE,
             item_drop: None,
             map_color_rgba: 0x00000000,
             use_color: false,
+            force_team: None,
         };
         block.derive_layout_fields();
         block
@@ -227,6 +250,55 @@ impl Block {
 
     pub fn display_name(&self) -> &str {
         self.localized_name.as_deref().unwrap_or(&self.name)
+    }
+
+    pub fn can_replace(&self, other: &Block) -> bool {
+        if other.always_replace {
+            return true;
+        }
+        if other.privileged || !other.replaceable {
+            return false;
+        }
+        let same_block = self.id == other.id;
+        let same_group = self.group != BlockGroup::None && self.group == other.group;
+        let size_matches =
+            self.size == other.size || (self.size >= other.size && self.group.any_replace());
+
+        (same_block || same_group)
+            && size_matches
+            && (!same_block || (self.rotate && self.quick_rotate))
+    }
+
+    pub const fn can_be_built(&self) -> bool {
+        !matches!(
+            self.build_visibility,
+            BuildVisibility::Hidden | BuildVisibility::DebugOnly
+        )
+    }
+
+    pub fn is_darkened(&self) -> bool {
+        self.solid && ((!self.synthetic() && self.fills_tile) || self.force_dark)
+    }
+
+    pub fn update_clip_radius(&mut self, radius_in_world_units: f32) {
+        self.clip_size = self
+            .clip_size
+            .max(self.size as f32 * TILE_SIZE as f32 + radius_in_world_units * 2.0);
+        self.light_clip_size = self.light_clip_size.max(self.clip_size);
+    }
+
+    pub fn bounds(&self, x: i32, y: i32) -> BuildBounds {
+        let size = self.size.max(1) as f32 * TILE_SIZE as f32;
+        BuildBounds {
+            x: x as f32 * TILE_SIZE as f32 + self.offset - size / 2.0,
+            y: y as f32 * TILE_SIZE as f32 + self.offset - size / 2.0,
+            width: size,
+            height: size,
+        }
+    }
+
+    pub fn taken_positions(&self, x: i32, y: i32) -> Vec<(i32, i32)> {
+        crate::mindustry::world::build::footprint_tiles(x, y, self.size)
     }
 
     pub fn plan_rotation(&self, rotation: i32) -> i32 {
@@ -359,5 +431,63 @@ mod tests {
         block.rotate = false;
         block.lock_rotation = false;
         assert_eq!(block.plan_rotation(-1), 3);
+    }
+
+    #[test]
+    fn block_runtime_replacement_and_geometry_helpers_match_java_base() {
+        let mut conveyor = Block::new(10, "conveyor");
+        conveyor.group = crate::mindustry::world::meta::BlockGroup::Transportation;
+        conveyor.rotate = true;
+
+        let mut junction = Block::new(11, "junction");
+        junction.group = crate::mindustry::world::meta::BlockGroup::Transportation;
+        assert!(conveyor.can_replace(&junction));
+
+        let same = conveyor.clone();
+        assert!(conveyor.can_replace(&same));
+        conveyor.rotate = false;
+        assert!(!conveyor.can_replace(&same));
+
+        let mut core = Block::new(12, "core");
+        core.replaceable = false;
+        assert!(!conveyor.can_replace(&core));
+        core.always_replace = true;
+        assert!(conveyor.can_replace(&core));
+
+        let mut large = Block::new(13, "large");
+        large.size = 2;
+        large.derive_layout_fields();
+        assert_eq!(
+            large.taken_positions(4, 5),
+            vec![(4, 5), (4, 6), (5, 5), (5, 6)]
+        );
+        assert_eq!(
+            large.bounds(4, 5),
+            crate::mindustry::world::BuildBounds {
+                x: 28.0,
+                y: 36.0,
+                width: 16.0,
+                height: 16.0,
+            }
+        );
+        large.update_clip_radius(20.0);
+        assert_eq!(large.clip_size, 56.0);
+        assert_eq!(large.light_clip_size, 56.0);
+    }
+
+    #[test]
+    fn block_runtime_defaults_expose_building_control_flags() {
+        let block = Block::new(20, "base");
+        assert!(block.replaceable);
+        assert!(block.rebuildable);
+        assert!(!block.privileged);
+        assert!(!block.no_update_disabled);
+        assert_eq!(block.visual_rotation_offset, 0.0);
+        assert!(block.quick_rotate);
+        assert!(!block.solidifies);
+        assert!(!block.swap_diagonal_placement);
+        assert!(block.can_overdrive);
+        assert!(!block.suppressable);
+        assert!(block.force_team.is_none());
     }
 }

@@ -18,12 +18,25 @@ impl DecalColor {
         a: 1.0,
     };
 
-    pub fn from_rgba(rgba: u32) -> Self {
+    pub const fn from_rgba(rgba: u32) -> Self {
         Self {
             r: ((rgba >> 24) & 0xff) as f32 / 255.0,
             g: ((rgba >> 16) & 0xff) as f32 / 255.0,
             b: ((rgba >> 8) & 0xff) as f32 / 255.0,
             a: (rgba & 0xff) as f32 / 255.0,
+        }
+    }
+
+    pub const fn with_alpha(self, a: f32) -> Self {
+        Self { a, ..self }
+    }
+
+    pub const fn mul(self, factor: f32) -> Self {
+        Self {
+            r: self.r * factor,
+            g: self.g * factor,
+            b: self.b * factor,
+            a: self.a * factor,
         }
     }
 }

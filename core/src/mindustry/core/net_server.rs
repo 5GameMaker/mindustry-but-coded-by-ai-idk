@@ -2003,8 +2003,8 @@ impl NetServer {
 
                         Self::dispatch_packet_handlers(&packet_handlers, &packet);
                     }
-                    PacketKind::ClientPacketReliableCallPacket(custom) => {
-                        let packet = PacketKind::ClientPacketReliableCallPacket(custom.clone());
+                    PacketKind::ServerPacketReliableCallPacket(custom) => {
+                        let packet = PacketKind::ServerPacketReliableCallPacket(custom.clone());
                         {
                             let mut state = state.lock().expect("NetServerState mutex poisoned");
                             Self::record_client_custom_packet(
@@ -2019,8 +2019,8 @@ impl NetServer {
 
                         Self::dispatch_packet_handlers(&packet_handlers, &packet);
                     }
-                    PacketKind::ClientPacketUnreliableCallPacket(custom) => {
-                        let packet = PacketKind::ClientPacketUnreliableCallPacket(custom.clone());
+                    PacketKind::ServerPacketUnreliableCallPacket(custom) => {
+                        let packet = PacketKind::ServerPacketUnreliableCallPacket(custom.clone());
                         {
                             let mut state = state.lock().expect("NetServerState mutex poisoned");
                             Self::record_client_custom_packet(
@@ -2035,9 +2035,9 @@ impl NetServer {
 
                         Self::dispatch_packet_handlers(&packet_handlers, &packet);
                     }
-                    PacketKind::ClientBinaryPacketReliableCallPacket(custom) => {
+                    PacketKind::ServerBinaryPacketReliableCallPacket(custom) => {
                         let packet =
-                            PacketKind::ClientBinaryPacketReliableCallPacket(custom.clone());
+                            PacketKind::ServerBinaryPacketReliableCallPacket(custom.clone());
                         {
                             let mut state = state.lock().expect("NetServerState mutex poisoned");
                             Self::record_client_custom_binary_packet(
@@ -2052,9 +2052,9 @@ impl NetServer {
 
                         Self::dispatch_packet_handlers(&packet_handlers, &packet);
                     }
-                    PacketKind::ClientBinaryPacketUnreliableCallPacket(custom) => {
+                    PacketKind::ServerBinaryPacketUnreliableCallPacket(custom) => {
                         let packet =
-                            PacketKind::ClientBinaryPacketUnreliableCallPacket(custom.clone());
+                            PacketKind::ServerBinaryPacketUnreliableCallPacket(custom.clone());
                         {
                             let mut state = state.lock().expect("NetServerState mutex poisoned");
                             Self::record_client_custom_binary_packet(
@@ -3546,15 +3546,15 @@ mod tests {
     use crate::mindustry::entities::comp::BuildingComp;
     use crate::mindustry::io::{BuildPlanWire, BuildingRef, EntityRef, TeamId, TypeValue};
     use crate::mindustry::net::{
-        packet_ids, ActionType, ClientBinaryPacketCallPacket, ClientBinaryPacketReliableCallPacket,
-        ClientPacketCallPacket, ClientPacketReliableCallPacket, ClientPacketUnreliableCallPacket,
-        ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
+        packet_ids, ActionType, ClientPlanSnapshotCallPacket, ClientPlanSnapshotReceivedCallPacket,
         ClientSnapshotCallPacket, Connect, ConnectConfirmCallPacket, ConnectFilter, ConnectPacket,
         Disconnect, DoneCallback, EntitySnapshotCallPacket, HiddenSnapshotCallPacket, Host,
         HostCallback, KickReason, Net, NetConnection, NetProvider, PacketKind, PingCallPacket,
         PingResponseCallPacket, ProviderEvent, RequestDebugStatusCallPacket, RotateBlockCallPacket,
-        SendChatMessageCallPacket, SentPacket, StateSnapshotCallPacket, SteamAdminData,
-        TileConfigCallPacket, TileTapCallPacket, WorldReloadPlayer, WorldReloader,
+        SendChatMessageCallPacket, SentPacket, ServerBinaryPacketCallPacket,
+        ServerBinaryPacketReliableCallPacket, ServerPacketCallPacket,
+        ServerPacketReliableCallPacket, ServerPacketUnreliableCallPacket, StateSnapshotCallPacket,
+        SteamAdminData, TileConfigCallPacket, TileTapCallPacket, WorldReloadPlayer, WorldReloader,
     };
     use crate::mindustry::vars::{MAX_TCP_SIZE, MAX_TEXT_LENGTH};
     use crate::mindustry::world::block::Block;
@@ -5528,7 +5528,7 @@ mod tests {
     }
 
     #[test]
-    fn client_custom_packets_are_recorded_and_dispatched_like_java_custom_handlers() {
+    fn server_custom_packets_are_recorded_and_dispatched_like_java_custom_handlers() {
         let server = NetServer::default();
         let seen = Arc::new(Mutex::new(Vec::new()));
         {
@@ -5538,15 +5538,15 @@ mod tests {
             });
         }
 
-        let reliable = ClientPacketReliableCallPacket(ClientPacketCallPacket {
+        let reliable = ServerPacketReliableCallPacket(ServerPacketCallPacket {
             packet_type: "mod:event".into(),
             contents: "payload".into(),
         });
-        let unreliable = ClientPacketUnreliableCallPacket(ClientPacketCallPacket {
+        let unreliable = ServerPacketUnreliableCallPacket(ServerPacketCallPacket {
             packet_type: "mod:event".into(),
             contents: "payload2".into(),
         });
-        let binary = ClientBinaryPacketReliableCallPacket(ClientBinaryPacketCallPacket {
+        let binary = ServerBinaryPacketReliableCallPacket(ServerBinaryPacketCallPacket {
             packet_type: "mod:bin".into(),
             contents: vec![1, 2, 3],
         });
@@ -5556,17 +5556,17 @@ mod tests {
             net.handle_server_received_from_connection(
                 Some(44),
                 true,
-                PacketKind::ClientPacketReliableCallPacket(reliable.clone()),
+                PacketKind::ServerPacketReliableCallPacket(reliable.clone()),
             );
             net.handle_server_received_from_connection(
                 Some(44),
                 true,
-                PacketKind::ClientPacketUnreliableCallPacket(unreliable.clone()),
+                PacketKind::ServerPacketUnreliableCallPacket(unreliable.clone()),
             );
             net.handle_server_received_from_connection(
                 Some(44),
                 true,
-                PacketKind::ClientBinaryPacketReliableCallPacket(binary.clone()),
+                PacketKind::ServerBinaryPacketReliableCallPacket(binary.clone()),
             );
         }
 
@@ -5601,11 +5601,11 @@ mod tests {
         assert_eq!(seen.len(), 3);
         assert!(matches!(
             &seen[0],
-            PacketKind::ClientPacketReliableCallPacket(packet) if packet == &reliable
+            PacketKind::ServerPacketReliableCallPacket(packet) if packet == &reliable
         ));
         assert!(matches!(
             &seen[2],
-            PacketKind::ClientBinaryPacketReliableCallPacket(packet) if packet == &binary
+            PacketKind::ServerBinaryPacketReliableCallPacket(packet) if packet == &binary
         ));
     }
 

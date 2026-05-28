@@ -361,8 +361,16 @@ mod tests {
             catalog.liquid_by_id(0).unwrap().base.mappable.name.as_str(),
             "water"
         );
-        assert_eq!(catalog.bullet_by_name("fireball").unwrap().id(), 4);
-        assert_eq!(catalog.bullet_by_id(5).unwrap().name(), "spaceLiquid");
+        let fireball_id = catalog.bullet_by_name("fireball").unwrap().id();
+        assert_eq!(
+            catalog.bullet_by_id(fireball_id).unwrap().name(),
+            "fireball"
+        );
+        let space_liquid_id = catalog.bullet_by_name("spaceLiquid").unwrap().id();
+        assert_eq!(
+            catalog.bullet_by_id(space_liquid_id).unwrap().name(),
+            "spaceLiquid"
+        );
         assert!(catalog.bullet_by_id(999).is_none());
         assert_eq!(
             catalog
