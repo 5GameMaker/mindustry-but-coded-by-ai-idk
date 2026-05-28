@@ -25,6 +25,7 @@ use mindustry_core::mindustry::entities::{
     StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
+use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::{
     BlockRendererBuildingSnapshot, BlockRendererPlan, BlockRendererState,
     BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer,
@@ -32,10 +33,10 @@ use mindustry_core::mindustry::graphics::{
     FogViewport, GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState,
     LoadFrameInput, LoadFramePlan, LoadRendererState, MenuFrameInput, MenuFramePlan,
     MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
-    MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan, OverlayRendererState,
-    PixelatorCamera, PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBridge,
-    RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan, RenderPoint, RenderSize,
-    RenderViewport, TileBounds, TileCoord, Viewport as FloorViewport,
+    MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
+    OverlayRendererPlan, OverlayRendererState, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
+    PixelatorState, RenderBridge, RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan,
+    RenderPoint, RenderSize, RenderViewport, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -310,6 +311,8 @@ impl DesktopCameraShakeRenderer for HeadlessDesktopCameraShakeRenderer {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsFrame {
     pub bundle: GraphicsFrameBundle,
+    pub floor_chunk_batches: Vec<FloorChunkDrawBatch>,
+    pub minimap_texture_frame: Option<MinimapTextureFramePlan>,
 }
 
 impl DesktopGraphicsFrame {
@@ -330,6 +333,10 @@ pub struct DesktopGraphicsExecutionSummary {
     pub overlay_renderer_slots: usize,
     pub minimap_overlay_slots: usize,
     pub pixelator_slots: usize,
+    pub floor_chunk_batches: usize,
+    pub minimap_texture_frames: usize,
+    pub minimap_full_uploads: usize,
+    pub minimap_dirty_pixels: usize,
 }
 
 impl DesktopGraphicsExecutionSummary {
@@ -359,6 +366,12 @@ impl DesktopGraphicsExecutionSummary {
         summary.overlay_renderer_slots = usize::from(frame.bundle.overlay_renderer.is_some());
         summary.minimap_overlay_slots = usize::from(frame.bundle.minimap_overlay.is_some());
         summary.pixelator_slots = usize::from(frame.bundle.pixelator.is_some());
+        summary.floor_chunk_batches = frame.floor_chunk_batches.len();
+        if let Some(minimap_texture) = &frame.minimap_texture_frame {
+            summary.minimap_texture_frames = 1;
+            summary.minimap_full_uploads = usize::from(minimap_texture.full_upload.is_some());
+            summary.minimap_dirty_pixels = minimap_texture.dirty_pixels.len();
+        }
         summary
     }
 }
@@ -430,6 +443,7 @@ pub struct DesktopLauncher {
     pub light_renderer_state: LightRendererState,
     pub floor_renderer_state: FloorRendererState,
     pub fog_renderer_state: FogRendererState,
+    pub minimap_renderer_state: MinimapRendererState,
     pub menu_renderer_state: MenuRendererState,
     pub load_renderer_state: LoadRendererState,
     pub pixelator_state: PixelatorState,
@@ -628,6 +642,7 @@ impl DesktopLauncher {
             light_renderer_state: LightRendererState::default(),
             floor_renderer_state: FloorRendererState::default(),
             fog_renderer_state: FogRendererState::default(),
+            minimap_renderer_state: MinimapRendererState::new(MinimapWorldSize::new(0, 0)),
             menu_renderer_state: MenuRendererState::new(MenuRendererConfig::new(false, 7)),
             load_renderer_state: LoadRendererState::default(),
             pixelator_state: PixelatorState::default(),
@@ -1039,7 +1054,7 @@ impl DesktopLauncher {
     }
 
     pub fn minimap_overlay_plan(
-        &self,
+        &mut self,
         camera: MinimapCamera,
         input: MinimapOverlayInput,
     ) -> MinimapOverlayPlan {
@@ -1052,7 +1067,27 @@ impl DesktopLauncher {
             };
         }
 
-        MinimapRendererState::new(world).overlay_plan(camera, input)
+        if self.minimap_renderer_state.world != world {
+            self.minimap_renderer_state.reset(world);
+        }
+
+        self.minimap_renderer_state.overlay_plan(camera, input)
+    }
+
+    pub fn minimap_texture_frame_plan(&mut self) -> Option<MinimapTextureFramePlan> {
+        let world = self.current_minimap_world_size();
+        if world.width <= 0 || world.height <= 0 {
+            return None;
+        }
+        if self.minimap_renderer_state.world != world {
+            return Some(
+                self.minimap_renderer_state
+                    .reset(world)
+                    .texture_frame_plan(),
+            );
+        }
+
+        self.minimap_renderer_state.texture_frame_plan()
     }
 
     pub fn drain_overlay_renderer_plan(&mut self) -> OverlayRendererPlan {
@@ -1114,6 +1149,29 @@ impl DesktopLauncher {
             world_rect.width,
             world_rect.height,
         )))
+    }
+
+    pub fn floor_chunk_draw_batches(
+        &mut self,
+        mut camera: RenderCamera,
+        viewport: RenderViewport,
+    ) -> Vec<FloorChunkDrawBatch> {
+        let world = self.current_minimap_world_size();
+        if world.width <= 0 || world.height <= 0 {
+            return Vec::new();
+        }
+
+        self.floor_renderer_state
+            .set_world_tiles(world.width, world.height);
+        camera.viewport = viewport;
+        let world_rect = camera.world_rect();
+        self.floor_renderer_state
+            .build_chunk_draw_batches(FloorViewport::new(
+                world_rect.center().x,
+                world_rect.center().y,
+                world_rect.width,
+                world_rect.height,
+            ))
     }
 
     pub fn fog_frame_plan(
@@ -1249,9 +1307,11 @@ impl DesktopLauncher {
         }
         render_frame.sort_passes_like_java_renderer_draw();
         let floor_renderer = self.floor_render_plan(camera, viewport);
+        let floor_chunk_batches = self.floor_chunk_draw_batches(camera, viewport);
         let fog_frame = self.fog_frame_plan(camera, viewport);
         let pixelator = self.pixelator_frame_plan(camera, viewport);
         let overlay_renderer = self.drain_overlay_renderer_plan();
+        let minimap_texture_frame = self.minimap_texture_frame_plan();
         let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
 
         let mut bridge = RenderBridge::new();
@@ -1274,6 +1334,8 @@ impl DesktopLauncher {
 
         DesktopGraphicsFrame {
             bundle: bridge.finish(),
+            floor_chunk_batches,
+            minimap_texture_frame,
         }
     }
 
@@ -2118,6 +2180,7 @@ impl DesktopLauncher {
         self.light_renderer_state = LightRendererState::default();
         self.floor_renderer_state = FloorRendererState::default();
         self.fog_renderer_state = FogRendererState::default();
+        self.minimap_renderer_state = MinimapRendererState::new(MinimapWorldSize::new(0, 0));
         self.menu_renderer_state = MenuRendererState::new(MenuRendererConfig::new(false, 7));
         self.load_renderer_state = LoadRendererState::default();
         self.pixelator_state = PixelatorState::default();
@@ -3870,6 +3933,15 @@ mod tests {
         assert_eq!(frame.bundle.stats.render_passes, 1);
         assert_eq!(frame.bundle.stats.render_commands, 6);
         assert_eq!(sprite_commands, 6);
+        assert!(!frame.floor_chunk_batches.is_empty());
+        assert!(frame.minimap_texture_frame.is_some());
+        let execution = DesktopGraphicsExecutionSummary::from_frame(&frame);
+        assert_eq!(
+            execution.floor_chunk_batches,
+            frame.floor_chunk_batches.len()
+        );
+        assert_eq!(execution.minimap_texture_frames, 1);
+        assert_eq!(execution.minimap_full_uploads, 1);
     }
 
     #[test]
@@ -4143,6 +4215,8 @@ mod tests {
         );
         let frame = DesktopGraphicsFrame {
             bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
         };
 
         let summary = DesktopGraphicsExecutionSummary::from_frame(&frame);
