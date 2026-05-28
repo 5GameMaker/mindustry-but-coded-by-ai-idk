@@ -773,6 +773,22 @@ fn building_health_fraction(health: f32, max_health: f32) -> f32 {
     }
 }
 
+fn default_desktop_texture_atlas(
+    block_renderer_state: &BlockRendererState,
+    content_loader: &ContentLoader,
+) -> TextureAtlasPlan<bool> {
+    TextureAtlasPlan::from_virtual_source_paths(
+        block_renderer_state
+            .crack_atlas
+            .virtual_source_paths()
+            .into_iter()
+            .chain(content_loader.blocks().map(|block| {
+                let name = &block.base().name;
+                format!("sprites/blocks/{}.png", name)
+            })),
+    )
+}
+
 fn block_renderer_tile_snapshot_from_world(
     tile: &Tile,
     runtime_building: Option<&BuildingComp>,
@@ -810,9 +826,8 @@ impl DesktopLauncher {
     pub fn new(args: Vec<String>) -> Self {
         let connect_target = parse_connect_target(&args);
         let block_renderer_state = BlockRendererState::default();
-        let texture_atlas = TextureAtlasPlan::from_virtual_source_paths(
-            block_renderer_state.crack_atlas.virtual_source_paths(),
-        );
+        let content_loader = ContentLoader::create_base_content_or_panic();
+        let texture_atlas = default_desktop_texture_atlas(&block_renderer_state, &content_loader);
         Self {
             client: ClientLauncher::new(AppContext::new("data")),
             net_client: NetClient::with_net(Net::new(Box::new(ArcNetProvider::new()))),
@@ -849,7 +864,7 @@ impl DesktopLauncher {
             connect_error: None,
             args,
             texture_atlas,
-            content_loader: ContentLoader::create_base_content_or_panic(),
+            content_loader,
             last_applied_world_data: None,
             last_applied_state_snapshot: None,
             last_applied_block_snapshot_mirror: None,
@@ -4248,6 +4263,15 @@ mod tests {
     fn desktop_launcher_default_texture_atlas_contains_block_crack_regions() {
         let launcher = DesktopLauncher::new(Vec::new());
 
+        let router = launcher
+            .texture_atlas
+            .lookup("router")
+            .expect("default desktop atlas should expose base content block sprites");
+        assert_eq!(router.page_type, PageType::Main);
+        assert_eq!(router.region.source_path, "sprites/blocks/router.png");
+        assert_eq!(router.region.width, 1);
+        assert_eq!(router.region.height, 1);
+
         let first = launcher
             .texture_atlas
             .lookup("cracks-1-0")
@@ -4316,10 +4340,23 @@ mod tests {
             sample_minimap_overlay_input(true),
         );
         let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
-        let crack = trace
+        let sprites = trace
             .render_passes
             .iter()
             .flat_map(|pass| pass.resolved_sprites.iter())
+            .collect::<Vec<_>>();
+        let base = sprites
+            .iter()
+            .find(|sprite| sprite.symbol == "copper-wall-large")
+            .expect("damaged size-2 wall should emit its base block sprite");
+        assert_eq!(base.page_type, Some(PageType::Main));
+        assert_eq!(base.page_source_path.as_deref(), Some("sprites.png"));
+        assert_eq!(base.region_width, Some(1));
+        assert_eq!(base.region_height, Some(1));
+        assert!(!base.missing);
+
+        let crack = sprites
+            .iter()
             .find(|sprite| sprite.symbol == "cracks-2-4")
             .expect("damaged size-2 wall should emit cracks-2-4 sprite");
 

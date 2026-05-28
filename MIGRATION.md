@@ -11297,3 +11297,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 仍未执行真实文件扫描、PNG decode、bleed、pack、flush/rebind 或 GPU texture region bind；
   - 默认 atlas 目前只预置 crack region，基础 block sprites、mod sprites、icon candidates 仍需继续接 content/mod resource 主链；
   - 当前总体迁移约 19.4%，仍未达到完整可玩。
+
+### 12.352 Content block sprites seeded into default desktop atlas
+
+- 2026-05-29：继续把默认 desktop atlas 从裂纹专用预置推进到 content registry 主链。本轮 `DesktopLauncher::new(...)` 会先创建 base `ContentLoader`，再把 `content_loader.blocks()` 中的基础 block 名称与 `CrackAtlasPlan` 的 crack region source paths 合并成默认 `TextureAtlasPlan<bool>`。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ClientLauncher.java`
+    - 客户端启动后全局 `Core.atlas` 同时服务普通 block sprite 与 crack sprite；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - `block.drawBase(tile)` 和 `build.drawCracks()` 都依赖 atlas region 名称解析，而不是分离的测试占位。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `default_desktop_texture_atlas(...)`，合并：
+      - `block_renderer_state.crack_atlas.virtual_source_paths()`；
+      - `content_loader.blocks().map(|block| sprites/blocks/{block.base().name}.png)`；
+    - `DesktopLauncher::new(...)` 现在复用同一个 `content_loader` 构建默认 atlas 和后续 runtime/content 查询，避免默认 atlas 与 content registry 脱节；
+    - 默认 atlas 测试新增 `router -> sprites/blocks/router.png` 的 Main page 命中；
+    - damaged `copper-wall-large` graphics frame trace 现在同时验证基础 block sprite 与 `cracks-2-4` 都 resolved。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-desktop default_texture_atlas --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop default_block_crack_sprite --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `9 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - block sprite source path 当前仍是虚拟 registry，不代表真实 PNG 已存在或已被 decode/packed；
+  - `DrawBlock` 子类多 region、variant、team overlay、liquid/power/turret 特殊 region 仍未完整接入；
+  - mod sprites 与 icon candidates 仍需继续接入同一个默认 atlas/content 加载生命周期；
+  - 当前总体迁移约 19.5%，仍未达到完整可玩。
