@@ -6575,6 +6575,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. `UnitDeathCallPacket` / `UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 仍需按 Java `killed()` / safe death / env death 语义分别接入；
   2. 当前 `UnitDestroyCallPacket` 只覆盖客户端视觉 effect 与 snapshot 移除，尚未迁移 `UnitComp.destroy()` 的完整 explosion、weapon shoot-on-death、ability death、death sound、wreck/scorch 与 event bus；
-  3. `NetClient` 的 unit lifecycle 目前只保留最后一个 packet，后续要改为增量队列，否则同一 update 前多个 lifecycle packet 可能丢失；
+  3. `NetClient` 的 unit lifecycle 已在 `194` 节改为增量队列；后续仍需做 consumed cursor compact，避免长时间运行内存增长；
   4. `LegsDynamicExplosionEvent` 仍是 plan，未接真实 damage/explosion runtime；
   5. 当前总迁移仍约 10% 左右，远未可玩，后续必须继续把 helper/plan 收进真实 runtime/content/world/entity/network/client-server 调用链。
+
+---
+
+## 194. 最新闭环记录：unit lifecycle packet 增量队列
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：修掉 `NetClient` 只保留最后一个 unit lifecycle packet 的真实联机缺口，确保一次 `DesktopLauncher.update()` 前收到多个 `UnitDestroy/Despawn/Death/...` packet 时不会只应用尾包。
+- Rust 主改动：
+  - `core/src/mindustry/core/net_client.rs`
+    - `NetClientState` 新增 `unit_lifecycle_packets: Vec<PacketKind>`；
+    - `record_unit_lifecycle_packet(...)` 在维护 `last_unit_lifecycle_packet` / `unit_lifecycle_packets_seen` 的同时追加完整 packet 队列；
+    - `Debug` 输出新增 `unit_lifecycle_packets_len`；
+    - 新增 `update_records_multiple_unit_lifecycle_packets_without_overwriting_queue`，锁定队列顺序与 last-tail 兼容。
+  - `desktop/src/lib.rs`
+    - `sync_unit_lifecycle_to_runtime()` 改为读取 `unit_lifecycle_packets`，从 `last_applied_unit_lifecycle_packets_seen` cursor 开始逐个分发；
+    - 保留现有 `UnitBlockSpawn / AssemblerUnitSpawned / AssemblerDroneSpawned / UnitDespawn / UnitDestroy` 分支；
+    - 新增 `desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`，验证两个 `UnitDestroyCallPacket` 在同一 update 前到达时，两个单位都被移除且产生 8 个腿部 textured-line primitive。
+  - `MIGRATION.md`
+    - 新增 `12.268`。
+- 已跑验证：
+  - `cargo test -p mindustry-core update_records_multiple_unit_lifecycle_packets_without_overwriting_queue`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `unit_lifecycle_packets` 暂时增长式保存，后续需要像真正消息队列一样在所有 cursor 消费后 compact，避免长时间运行内存增长；
+  2. `UnitDeathCallPacket` / `UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 仍未按 Java `Units.java` 分支接入 typed runtime；
+  3. server 侧死亡路径仍要继续对照 Java `UnitComp.killed()/destroy()`，避免把 destroy 语义误发成 despawn；
+  4. 当前总迁移仍约 10% 左右，远未可玩，继续保证所有 helper/plan 最终落到真实 runtime/content/world/entity/network/client-server 链路。

@@ -8566,5 +8566,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `UnitDeathCallPacket` / `UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 还未细分到 Rust 本地 destroy/killed/safe death 语义；
   - `UnitDestroyCallPacket` 当前只覆盖客户端视觉/移除侧，Java `Damage.dynamicExplosion(...)`、weapon shoot-on-death、ability death、event bus 与 scorch/wreck/death sound 等真实副作用仍需继续迁移；
-  - `NetClient` 目前只保留最后一个 unit lifecycle packet，多个 lifecycle packet 在一次 desktop update 前到达时仍可能被覆盖，后续应改成增量队列；
+  - `NetClient` 已在 `12.268` 改为 unit lifecycle 增量队列；后续仍需做 consumed cursor compact，避免长时间运行内存增长；
   - `LegsDynamicExplosionEvent` 仍未接入真实 damage/explosion runtime，`TexturedLine.region` 仍需接真实 renderer atlas。
+
+### 12.268 Unit lifecycle packet 增量队列
+
+- 2026-05-28：继续收束 `12.267` 的真实联机链路缺口，把客户端 unit lifecycle 从“只保留最后一个 packet”改为可按 cursor 增量应用的队列，避免一次 desktop update 前多个 `UnitDestroy/Despawn/Death/...` packet 互相覆盖。
+- 本轮迁移：
+  - `NetClientState.unit_lifecycle_packets: Vec<PacketKind>`；
+  - `DesktopLauncher.sync_unit_lifecycle_to_runtime()` 从 last-only 改为按 `last_applied_unit_lifecycle_packets_seen` 增量遍历；
+  - 多 packet 回归覆盖。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/net_client.rs`
+    - `record_unit_lifecycle_packet(...)` 继续维护 `last_unit_lifecycle_packet` 与 `unit_lifecycle_packets_seen`，同时把 packet clone 追加到 `unit_lifecycle_packets`；
+    - `Debug` 输出新增 `unit_lifecycle_packets_len`；
+    - 新增 `update_records_multiple_unit_lifecycle_packets_without_overwriting_queue`，锁定两个 lifecycle packet 在一次 update 前到达时，last 字段保留尾包、队列保留完整顺序。
+  - `desktop/src/lib.rs`
+    - `sync_unit_lifecycle_to_runtime()` 获取 `unit_lifecycle_packets` 快照，并从上次 cursor 开始逐个分发到对应 runtime apply 函数；
+    - 新增 `desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`，验证同一 update 前两个 `UnitDestroyCallPacket` 都能移除对应 unit，并各自产生腿部 `legDestroy` primitive。
+- 已跑验证：
+  - `cargo test -p mindustry-core update_records_multiple_unit_lifecycle_packets_without_overwriting_queue`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 队列目前与 `unit_spawn_packets` 一样是增长式记录，后续如果客户端长时间运行，需要加入按 cursor 截断/compact 的内存回收策略；
+  - `UnitDeathCallPacket` / `UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 仍未分发到 Rust 的 typed killed/destroy/safe death 语义；
+  - server 侧很多死亡路径仍发 `UnitDespawnCallPacket`，未完整对齐 Java `UnitComp.killed()/destroy()` 的 packet 与副作用拆分。

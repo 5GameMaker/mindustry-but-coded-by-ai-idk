@@ -582,6 +582,7 @@ pub struct NetClientState {
     pub last_unit_lifecycle_packet: Option<PacketKind>,
     pub last_unit_lifecycle_packet_at: Option<Instant>,
     pub unit_lifecycle_packets_seen: u64,
+    pub unit_lifecycle_packets: Vec<PacketKind>,
     pub unit_spawn_packets: Vec<UnitSpawnCallPacket>,
     pub last_unit_tether_block_spawned: Option<UnitTetherBlockSpawnedCallPacket>,
     pub last_unit_tether_block_spawned_at: Option<Instant>,
@@ -877,6 +878,10 @@ impl fmt::Debug for NetClientState {
             .field(
                 "unit_lifecycle_packets_seen",
                 &self.unit_lifecycle_packets_seen,
+            )
+            .field(
+                "unit_lifecycle_packets_len",
+                &self.unit_lifecycle_packets.len(),
             )
             .field("unit_spawn_packets_len", &self.unit_spawn_packets.len())
             .field(
@@ -1177,6 +1182,7 @@ impl NetClientState {
     fn record_unit_lifecycle_packet(&mut self, packet: &PacketKind) {
         self.unit_lifecycle_packets_seen = self.unit_lifecycle_packets_seen.saturating_add(1);
         self.last_unit_lifecycle_packet = Some(packet.clone());
+        self.unit_lifecycle_packets.push(packet.clone());
         self.last_unit_lifecycle_packet_at = Some(Instant::now());
     }
 
@@ -3691,9 +3697,10 @@ mod tests {
         TraceInfoCallPacket, TransferInventoryCallPacket, TransferItemEffectCallPacket,
         TransferItemToCallPacket, TransferItemToUnitCallPacket,
         UnitBuildingControlSelectCallPacket, UnitClearCallPacket, UnitControlCallPacket,
-        UnitDeathCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
-        UnitTetherBlockSpawnedCallPacket, UpdateMarkerCallPacket, UpdateMarkerTextCallPacket,
-        UpdateMarkerTextureCallPacket, WarningToastCallPacket, WorldDataBeginCallPacket,
+        UnitDeathCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
+        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket, UpdateMarkerCallPacket,
+        UpdateMarkerTextCallPacket, UpdateMarkerTextureCallPacket, WarningToastCallPacket,
+        WorldDataBeginCallPacket,
     };
     use crate::mindustry::r#type::{ItemStack, LiquidStack, UnitType};
     use crate::mindustry::world::block::Block;
@@ -4242,6 +4249,10 @@ mod tests {
             state.last_unit_lifecycle_packet.as_ref(),
             Some(PacketKind::UnitDeathCallPacket(_))
         ));
+        assert!(matches!(
+            state.unit_lifecycle_packets.as_slice(),
+            [PacketKind::UnitDeathCallPacket(_)]
+        ));
         assert!(state.last_unit_lifecycle_packet_at.is_some());
         assert_eq!(state.marker_packets_seen, 2);
         assert!(matches!(
@@ -4278,6 +4289,10 @@ mod tests {
         let state = client.state();
         let state = state.lock().unwrap();
         assert_eq!(state.unit_lifecycle_packets_seen, 1);
+        assert!(matches!(
+            state.unit_lifecycle_packets.as_slice(),
+            [PacketKind::UnitTetherBlockSpawnedCallPacket(_)]
+        ));
         assert_eq!(state.unit_tether_block_spawned_packets_seen, 1);
         assert_eq!(state.last_unit_tether_block_spawned.as_ref(), Some(&packet));
         assert!(state.last_unit_tether_block_spawned_at.is_some());
@@ -4316,7 +4331,43 @@ mod tests {
             Some(PacketKind::AssemblerUnitSpawnedCallPacket(packet))
                 if packet == &assembler_packet
         ));
+        assert!(matches!(
+            state.unit_lifecycle_packets.as_slice(),
+            [PacketKind::AssemblerUnitSpawnedCallPacket(packet)]
+                if packet == &assembler_packet
+        ));
         assert_eq!(state.unit_spawn_packets, vec![unit_spawn]);
+    }
+
+    #[test]
+    fn update_records_multiple_unit_lifecycle_packets_without_overwriting_queue() {
+        let client = NetClient::default();
+        let death = UnitDeathCallPacket { uid: 77 };
+        let destroy = UnitDestroyCallPacket { uid: 78 };
+
+        {
+            let mut net = client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::UnitDeathCallPacket(death));
+            net.handle_client_received(PacketKind::UnitDestroyCallPacket(destroy));
+        }
+
+        client.update();
+
+        let state = client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.unit_lifecycle_packets_seen, 2);
+        assert!(matches!(
+            state.last_unit_lifecycle_packet.as_ref(),
+            Some(PacketKind::UnitDestroyCallPacket(packet)) if packet.uid == 78
+        ));
+        assert!(matches!(
+            state.unit_lifecycle_packets.as_slice(),
+            [
+                PacketKind::UnitDeathCallPacket(first),
+                PacketKind::UnitDestroyCallPacket(second)
+            ] if first.uid == 77 && second.uid == 78
+        ));
     }
 
     #[test]

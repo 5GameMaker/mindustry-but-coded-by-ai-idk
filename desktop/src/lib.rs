@@ -788,40 +788,44 @@ impl DesktopLauncher {
             return false;
         }
 
-        let (seen, packet) = {
+        let (seen, packets) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
             (
                 state.unit_lifecycle_packets_seen,
-                state.last_unit_lifecycle_packet.clone(),
+                state.unit_lifecycle_packets.clone(),
             )
         };
         if seen == self.last_applied_unit_lifecycle_packets_seen {
             return false;
         }
+        let start = self
+            .last_applied_unit_lifecycle_packets_seen
+            .min(packets.len() as u64) as usize;
         self.last_applied_unit_lifecycle_packets_seen = seen;
 
-        let Some(packet) = packet else {
-            return false;
-        };
-        match packet {
-            PacketKind::UnitBlockSpawnCallPacket(packet) => self
-                .runtime
-                .apply_client_unit_block_spawn_packet(&self.content_loader, &packet),
-            PacketKind::AssemblerUnitSpawnedCallPacket(packet) => self
-                .runtime
-                .apply_client_assembler_unit_spawned_packet(&self.content_loader, &packet),
-            PacketKind::AssemblerDroneSpawnedCallPacket(packet) => self
-                .runtime
-                .apply_client_assembler_drone_spawned_packet(&self.content_loader, &packet),
-            PacketKind::UnitDespawnCallPacket(packet) => {
-                self.runtime.apply_client_unit_despawn_packet(&packet)
-            }
-            PacketKind::UnitDestroyCallPacket(packet) => {
-                self.runtime.apply_client_unit_destroy_packet(&packet)
-            }
-            _ => false,
+        let mut applied = false;
+        for packet in packets.into_iter().skip(start) {
+            applied |= match packet {
+                PacketKind::UnitBlockSpawnCallPacket(packet) => self
+                    .runtime
+                    .apply_client_unit_block_spawn_packet(&self.content_loader, &packet),
+                PacketKind::AssemblerUnitSpawnedCallPacket(packet) => self
+                    .runtime
+                    .apply_client_assembler_unit_spawned_packet(&self.content_loader, &packet),
+                PacketKind::AssemblerDroneSpawnedCallPacket(packet) => self
+                    .runtime
+                    .apply_client_assembler_drone_spawned_packet(&self.content_loader, &packet),
+                PacketKind::UnitDespawnCallPacket(packet) => {
+                    self.runtime.apply_client_unit_despawn_packet(&packet)
+                }
+                PacketKind::UnitDestroyCallPacket(packet) => {
+                    self.runtime.apply_client_unit_destroy_packet(&packet)
+                }
+                _ => false,
+            };
         }
+        applied
     }
 
     fn sync_unit_spawn_packets_to_runtime(&mut self) -> bool {
@@ -5209,6 +5213,72 @@ mod tests {
             launcher.standard_local_effect_line_primitives.len(),
             leg_primitives + leg_base_primitives
         );
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        for unit_id in [9911_i32, 9912_i32] {
+            let mut unit_type = UnitType::new(unit_id as i16, "crawler");
+            unit_type.allow_leg_step = true;
+            unit_type.leg_count = 2;
+            unit_type.leg_length = 10.0;
+            unit_type.leg_extension = 3.0;
+            unit_type.leg_region = TextureRegionRef::with_size("crawler-leg", 16, 8);
+            unit_type.leg_base_region = TextureRegionRef::with_size("crawler-leg-base", 12, 6);
+            let mut unit = UnitComp::new(unit_id, unit_type, TeamId(4));
+            unit.add();
+            unit.set_pos(10.0 + unit_id as f32, 20.0);
+            launcher
+                .runtime
+                .client_unit_snapshot_entities
+                .insert(unit_id, unit);
+        }
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::UnitDestroyCallPacket(UnitDestroyCallPacket {
+                uid: 9911,
+            }));
+            net.handle_client_received(PacketKind::UnitDestroyCallPacket(UnitDestroyCallPacket {
+                uid: 9912,
+            }));
+        }
+        launcher.update();
+
+        assert!(!launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .contains_key(&9911));
+        assert!(!launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .contains_key(&9912));
+        assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 2);
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 8);
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 8);
+        let leg_primitives = launcher
+            .standard_local_effect_line_primitives
+            .iter()
+            .filter(|primitive| primitive.region.as_deref() == Some("crawler-leg"))
+            .count();
+        let leg_base_primitives = launcher
+            .standard_local_effect_line_primitives
+            .iter()
+            .filter(|primitive| primitive.region.as_deref() == Some("crawler-leg-base"))
+            .count();
+        assert_eq!(leg_primitives, 4);
+        assert_eq!(leg_base_primitives, 4);
     }
 
     #[test]
