@@ -6820,7 +6820,13 @@ mod tests {
 
     #[test]
     fn server_update_deposits_neoplasm_when_renale_dies() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
         let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6594).unwrap();
         launcher.runtime.state.set(GameStateState::Playing);
         launcher.runtime.state.world.resize(32, 32);
 
@@ -6844,6 +6850,7 @@ mod tests {
             .expect("renale death should deposit neoplasm on its tile");
         assert_eq!(entry.puddle.amount, 70.0);
         assert_eq!(entry.liquid.name, "neoplasm");
+        let server_puddle_id = entry.puddle.id;
         assert!(launcher
             .runtime
             .unit_ability_death_events
@@ -6856,6 +6863,45 @@ mod tests {
             launcher.runtime.unit_type_killed_events[0].unit_type_name,
             "renale"
         );
+
+        let snapshot_packet = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|(_connection_id, packet, reliable)| {
+                if !*reliable {
+                    if let PacketKind::EntitySnapshotCallPacket(packet) = packet {
+                        return Some(packet.clone());
+                    }
+                }
+                None
+            })
+            .expect("renale death puddle should be broadcast as entity snapshot");
+        let mut client_runtime = GameRuntime::default();
+        let report = client_runtime.apply_client_entity_snapshot_packet_with_content(
+            &launcher.content_loader,
+            snapshot_packet.amount,
+            &snapshot_packet.data,
+        );
+        assert_eq!(report.entity_parse_errors, 0);
+        let client_puddle = client_runtime
+            .client_puddle_snapshot_entities
+            .get(&server_puddle_id)
+            .expect("client should materialize LiquidExplodeAbility puddle snapshot");
+        assert_eq!(client_puddle.amount, 70.0);
+        assert_eq!(client_puddle.tile.unwrap().x, 10);
+        assert_eq!(client_puddle.tile.unwrap().y, 12);
+        let client_liquid = client_puddle
+            .liquid
+            .as_ref()
+            .expect("client puddle should resolve neoplasm liquid");
+        let neoplasm = launcher
+            .content_loader
+            .liquid_by_name("neoplasm")
+            .expect("v158.1 content should include neoplasm");
+        assert_eq!(client_liquid.cap_puddles, neoplasm.cap_puddles);
+        assert_eq!(client_liquid.flammability, neoplasm.flammability);
     }
 
     #[test]

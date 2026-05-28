@@ -7233,3 +7233,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. suicide trigger、wreckRegions decal、weapon bullet spawn 仍未迁移；
   4. `Damage.dynamicExplosion(...)` lightning/fire/wave damage、真实 audio/camera backend 仍需继续；
   5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 213. 最新闭环记录：LiquidExplodeAbility death puddle server→client snapshot smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 `LiquidExplodeAbility.death(Unit)` 从“server puddle 已生成”推进到“server death deposit 生成的 puddle 能进入 entity snapshot 并被 client runtime materialize”，继续避免模块孤立。
+- Rust 主改动：
+  - `server/src/lib.rs`
+    - 扩展 `server_update_deposits_neoplasm_when_renale_dies`；
+    - 测试现在启用 `CaptureProvider` + active `NetServer`；
+    - renale 死亡后从发送队列取最新非可靠 `EntitySnapshotCallPacket`；
+    - 用客户端 `GameRuntime::apply_client_entity_snapshot_packet_with_content(...)` 解码；
+    - 断言客户端 typed puddle 的 amount、tile 与 liquid properties 正确。
+  - `MIGRATION.md`
+    - 新增 `12.287`。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_update_deposits_neoplasm_when_renale_dies --lib`
+  - `cargo test -p mindustry-server server_update_spawns_renales_when_latum_dies --lib`
+  - `cargo check -p mindustry-server`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 把这条 smoke 升级到 `mindustry-tests` 的真实 server↔desktop loop；
+  2. 覆盖 puddle 扩散/删除后的连续 snapshot 和 client mirror 清理；
+  3. 继续 `UnitComp.destroy()`：suicide trigger、wreckRegions decal、weapon bullet spawn；
+  4. `Damage.dynamicExplosion(...)` lightning/fire/wave damage、真实 audio/camera backend 仍需继续；
+  5. 当前总迁移仍约 10%~11%，远未可玩。

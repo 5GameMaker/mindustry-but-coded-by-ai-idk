@@ -9140,3 +9140,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `LiquidExplodeAbility` 已写 server puddle，但后续仍需补完整 server→client puddle snapshot smoke；
   - suicide trigger、wreckRegions decal、weapon bullet spawn、`Damage.dynamicExplosion(...)` lightning/fire/wave damage 仍未完成；
   - 当前总体迁移仍约 10%~11%，远未可玩。
+
+### 12.287 LiquidExplodeAbility death puddle server→client snapshot smoke
+
+- 2026-05-28：继续收紧 `LiquidExplodeAbility.death(Unit)` 的真实联机可见性：不仅验证服务器死亡铺液体，还验证该 puddle 会进入 `EntitySnapshotCallPacket`，并能被客户端 `GameRuntime` materialize 为 typed puddle。
+- Java 依据：
+  - `LiquidExplodeAbility.death(Unit unit)` 在死亡单位 tile 上调用 `Puddles.deposit(...)`；
+  - puddle 是同步实体，客户端不应本地伪造死亡铺液，而应由服务器状态/快照同步。
+- Rust 新增/变化：
+  - `server/src/lib.rs`
+    - 扩展 `server_update_deposits_neoplasm_when_renale_dies`：
+      - 使用 `CaptureProvider` 打开 `NetServer`；
+      - renale 死亡后确认 server `server_puddles` 生成 neoplasm puddle；
+      - 从发送队列取出非可靠 `EntitySnapshotCallPacket`；
+      - 用 `GameRuntime::apply_client_entity_snapshot_packet_with_content(...)` 在客户端 runtime 解码；
+      - 断言客户端 typed puddle 的 amount、tile、liquid properties 与服务器/content 对齐。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_update_deposits_neoplasm_when_renale_dies --lib`
+  - `cargo test -p mindustry-server server_update_spawns_renales_when_latum_dies --lib`
+  - `cargo check -p mindustry-server`
+  - `git diff --check`
+- 仍未完成：
+  - 该闭环是 server packet → client runtime 的 smoke，尚未拉起完整 `mindustry-tests` real desktop/server loop；
+  - puddle 客户端粒子/渲染表现、液体扩散后的连续 snapshot、Java 客户端互通 smoke 仍需继续；
+  - suicide trigger、wreckRegions decal、weapon bullet spawn、`Damage.dynamicExplosion(...)` lightning/fire/wave damage 仍未完成；
+  - 当前总体迁移仍约 10%~11%，远未可玩。
