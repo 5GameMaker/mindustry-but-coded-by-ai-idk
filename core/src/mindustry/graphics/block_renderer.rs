@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::mindustry::{
     entities::comp::DecalColor,
-    graphics::{CacheLayer, Layer},
+    graphics::{
+        CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
+    },
 };
 
 pub const CRACK_REGION_COUNT: usize = 8;
@@ -864,6 +866,31 @@ impl BlockRendererPlan {
             && !self.draw_quadtree_debug
             && self.broken_fade <= 0.0
     }
+
+    pub fn to_sprite_render_passes(&self, tile_size_world: f32) -> Vec<RenderPass> {
+        if tile_size_world <= 0.0 {
+            return Vec::new();
+        }
+
+        let mut passes = Vec::new();
+        let mut order = RenderPassKind::Block.default_order();
+
+        for pass in &self.tile_passes {
+            if let Some(render_pass) = pass.to_sprite_render_pass(tile_size_world, order) {
+                passes.push(render_pass);
+                order += 1;
+            }
+        }
+
+        for pass in &self.building_passes {
+            if let Some(render_pass) = pass.to_sprite_render_pass(tile_size_world, order) {
+                passes.push(render_pass);
+                order += 1;
+            }
+        }
+
+        passes
+    }
 }
 
 impl Default for BlockRendererPlan {
@@ -1018,6 +1045,104 @@ where
             buildings,
         });
     }
+}
+
+const SPRITE_TINT_WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+const SPRITE_SYMBOL_BLOCK_SHADOW: &str = "block-shadow";
+const SPRITE_SYMBOL_BLOCK_CRACKS: &str = "block-cracks";
+const SPRITE_SYMBOL_BLOCK_TEAM: &str = "block-team";
+const SPRITE_SYMBOL_BLOCK_STATUS: &str = "block-status";
+const SPRITE_SYMBOL_BLOCK_LIGHT: &str = "block-light";
+
+impl TilePassPlan {
+    pub fn to_sprite_render_pass(&self, tile_size_world: f32, order: i32) -> Option<RenderPass> {
+        let mut render_pass = RenderPass::new(RenderPassKind::Block).with_order(order);
+        let mut has_commands = false;
+
+        for tile in &self.tiles {
+            let symbol = match self.stage {
+                BlockDrawStage::TileBase => tile.block.as_str(),
+                BlockDrawStage::TileShadow => SPRITE_SYMBOL_BLOCK_SHADOW,
+                BlockDrawStage::Light => SPRITE_SYMBOL_BLOCK_LIGHT,
+                _ => "",
+            };
+
+            if symbol.is_empty() {
+                continue;
+            }
+
+            render_pass.push(RenderCommand::draw_sprite(
+                symbol,
+                tile_sprite_rect(tile.coord, tile_size_world),
+                SPRITE_TINT_WHITE,
+                0.0,
+                self.layer,
+            ));
+            has_commands = true;
+        }
+
+        has_commands.then_some(render_pass)
+    }
+}
+
+impl BuildingPassPlan {
+    pub fn to_sprite_render_pass(&self, tile_size_world: f32, order: i32) -> Option<RenderPass> {
+        let mut render_pass = RenderPass::new(RenderPassKind::Block).with_order(order);
+        let mut has_commands = false;
+
+        for building in &self.buildings {
+            let symbol = match self.stage {
+                BlockDrawStage::BuildingBase => building.block.as_str(),
+                BlockDrawStage::BuildingCracks => SPRITE_SYMBOL_BLOCK_CRACKS,
+                BlockDrawStage::BuildingTeamOverlay => SPRITE_SYMBOL_BLOCK_TEAM,
+                BlockDrawStage::BuildingStatus => SPRITE_SYMBOL_BLOCK_STATUS,
+                BlockDrawStage::Light => SPRITE_SYMBOL_BLOCK_LIGHT,
+                _ => "",
+            };
+
+            if symbol.is_empty() {
+                continue;
+            }
+
+            render_pass.push(RenderCommand::draw_sprite(
+                symbol,
+                building_sprite_rect(building.coord, building.size, tile_size_world),
+                SPRITE_TINT_WHITE,
+                building_rotation_degrees(building.rotation),
+                self.layer,
+            ));
+            has_commands = true;
+        }
+
+        has_commands.then_some(render_pass)
+    }
+}
+
+fn tile_sprite_rect(coord: TileCoord, tile_size_world: f32) -> RenderRect {
+    let center_x = coord.x as f32 * tile_size_world + tile_size_world / 2.0;
+    let center_y = coord.y as f32 * tile_size_world + tile_size_world / 2.0;
+    RenderRect::from_center(
+        RenderPoint::new(center_x, center_y),
+        tile_size_world,
+        tile_size_world,
+    )
+}
+
+fn building_sprite_rect(coord: TileCoord, size: u8, tile_size_world: f32) -> RenderRect {
+    let size = size.max(1);
+    let size_world = size as f32 * tile_size_world;
+    let center_offset = if size % 2 == 1 {
+        tile_size_world / 2.0
+    } else {
+        0.0
+    };
+    let center_x = coord.x as f32 * tile_size_world + center_offset;
+    let center_y = coord.y as f32 * tile_size_world + center_offset;
+    RenderRect::from_center(RenderPoint::new(center_x, center_y), size_world, size_world)
+}
+
+fn building_rotation_degrees(rotation: i16) -> f32 {
+    rotation.rem_euclid(4) as f32 * 90.0
 }
 
 fn quadtree_debug_overlays(
@@ -1406,5 +1531,141 @@ mod tests {
             .iter()
             .flat_map(|pass| pass.buildings.iter())
             .all(|building| building.block != "hidden-core"));
+    }
+
+    #[test]
+    fn block_renderer_plan_converts_sprite_passes_with_stable_symbols_and_rotation() {
+        let mut plan = BlockRendererPlan::default();
+
+        plan.tile_passes.push(TilePassPlan {
+            stage: BlockDrawStage::TileBase,
+            layer: BlockDrawStage::TileBase.layer(),
+            tiles: vec![TileDrawPlan {
+                coord: TileCoord::new(2, 3),
+                block: "router".into(),
+                cache_layer: CacheLayer::Normal,
+                draw_custom_shadow: false,
+                emits_light: false,
+                obstructs_light: false,
+            }],
+        });
+        plan.tile_passes.push(TilePassPlan {
+            stage: BlockDrawStage::TileShadow,
+            layer: BlockDrawStage::TileShadow.layer(),
+            tiles: vec![TileDrawPlan {
+                coord: TileCoord::new(2, 3),
+                block: "ignored-shadow".into(),
+                cache_layer: CacheLayer::Normal,
+                draw_custom_shadow: false,
+                emits_light: false,
+                obstructs_light: false,
+            }],
+        });
+        plan.tile_passes.push(TilePassPlan {
+            stage: BlockDrawStage::Light,
+            layer: BlockDrawStage::Light.layer(),
+            tiles: vec![TileDrawPlan {
+                coord: TileCoord::new(2, 3),
+                block: "ignored-light".into(),
+                cache_layer: CacheLayer::Normal,
+                draw_custom_shadow: false,
+                emits_light: true,
+                obstructs_light: false,
+            }],
+        });
+
+        let building = BuildingDrawPlan {
+            coord: TileCoord::new(4, 5),
+            block: "duo".into(),
+            cache_layer: CacheLayer::Normal,
+            size: 2,
+            rotation: 1,
+            team: 7,
+            visible: true,
+            was_visible: false,
+            damaged: true,
+            draw_team_overlay: true,
+            draw_status: true,
+            emits_light: true,
+        };
+
+        for stage in [
+            BlockDrawStage::BuildingBase,
+            BlockDrawStage::BuildingCracks,
+            BlockDrawStage::BuildingTeamOverlay,
+            BlockDrawStage::BuildingStatus,
+            BlockDrawStage::Light,
+        ] {
+            plan.building_passes.push(BuildingPassPlan {
+                stage,
+                layer: stage.layer(),
+                buildings: vec![building.clone()],
+            });
+        }
+
+        let passes = plan.to_sprite_render_passes(8.0);
+        assert_eq!(passes.len(), 8);
+        assert!(passes.windows(2).all(|pair| pair[0].order < pair[1].order));
+
+        let check_sprite = |command: &RenderCommand| -> (String, RenderRect, f32, f32) {
+            match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    rotation,
+                    layer,
+                    ..
+                } => (symbol.clone(), *rect, *rotation, *layer),
+                other => panic!("expected DrawSprite, got {other:?}"),
+            }
+        };
+
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[0].commands[0]);
+        assert_eq!(symbol, "router");
+        assert_eq!(rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
+        assert_eq!(rotation, 0.0);
+        assert_eq!(layer, BlockDrawStage::TileBase.layer());
+
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[1].commands[0]);
+        assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_SHADOW);
+        assert_eq!(rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
+        assert_eq!(rotation, 0.0);
+        assert_eq!(layer, BlockDrawStage::TileShadow.layer());
+
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[2].commands[0]);
+        assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_LIGHT);
+        assert_eq!(rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
+        assert_eq!(rotation, 0.0);
+        assert_eq!(layer, BlockDrawStage::Light.layer());
+
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[3].commands[0]);
+        assert_eq!(symbol, "duo");
+        assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
+        assert_eq!(rotation, 90.0);
+        assert_eq!(layer, BlockDrawStage::BuildingBase.layer());
+
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[4].commands[0]);
+        assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_CRACKS);
+        assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
+        assert_eq!(rotation, 90.0);
+        assert_eq!(layer, BlockDrawStage::BuildingCracks.layer());
+
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[5].commands[0]);
+        assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_TEAM);
+        assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
+        assert_eq!(rotation, 90.0);
+        assert_eq!(layer, BlockDrawStage::BuildingTeamOverlay.layer());
+
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[6].commands[0]);
+        assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_STATUS);
+        assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
+        assert_eq!(rotation, 90.0);
+        assert_eq!(layer, BlockDrawStage::BuildingStatus.layer());
+
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[7].commands[0]);
+        assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_LIGHT);
+        assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
+        assert_eq!(rotation, 90.0);
+        assert_eq!(layer, BlockDrawStage::Light.layer());
     }
 }
