@@ -38,7 +38,8 @@ use mindustry_core::mindustry::graphics::{
     PixelatorInput, PixelatorState, RenderBridge, RenderCamera, RenderCommand, RenderEngineState,
     RenderFramePlan, RenderPassKind, RenderPoint, RenderSize, RenderTarget, RenderViewport,
     ShaderApplyContext, ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport,
-    TextureAtlasPlan, TileBounds, TileCoord, Viewport as FloorViewport,
+    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -49,6 +50,7 @@ use mindustry_core::mindustry::io::{
     read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
     LegacyTeamBlocks, TeamId, TypeValue, Vec2,
 };
+use mindustry_core::mindustry::modsys::ModResourcePlan;
 use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
@@ -949,6 +951,29 @@ impl DesktopLauncher {
             last_applied_client_plan_snapshot_received_count: 0,
             puddle_particle_rand_state: DESKTOP_PUDDLE_PARTICLE_RAND_DEFAULT,
         }
+    }
+
+    pub fn merge_mod_resource_plan_into_texture_atlas(&mut self, plan: &ModResourcePlan) -> usize {
+        let mod_atlas = TextureAtlasPlan::from_sprite_sources(
+            plan.sprite_requests().into_iter().map(|request| {
+                TextureAtlasSpriteSourceDescriptor::new(request.source_path, request.atlas_name)
+                    .with_page_hint(request.page_hint)
+                    .with_override(request.r#override)
+            }),
+        );
+        let mut merged = 0;
+
+        for page in mod_atlas.pages {
+            let page_type = page.page_type;
+            for region in page.regions {
+                let _ = self
+                    .texture_atlas
+                    .insert_or_replace_region(page_type, region);
+                merged += 1;
+            }
+        }
+
+        merged
     }
 
     pub fn update(&mut self) {
@@ -3109,6 +3134,7 @@ mod tests {
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
         LegacyShortChunkMap,
     };
+    use mindustry_core::mindustry::modsys::{ModResourcePlan, ModSpritePackSource};
     use mindustry_core::mindustry::net::{
         packet_ids, ConnectPacket, PacketEnvelope, PacketKind, PacketSerializer,
     };
@@ -4447,6 +4473,73 @@ mod tests {
         assert_eq!(crack.region_width, Some(1));
         assert_eq!(crack.region_height, Some(1));
         assert!(!crack.missing);
+    }
+
+    #[test]
+    fn desktop_launcher_merges_mod_resource_plan_into_texture_atlas_without_clobbering_vanilla() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let vanilla_router = launcher.texture_atlas.lookup("router").unwrap();
+        assert_eq!(
+            vanilla_router.region.source_path,
+            "sprites/blocks/router.png"
+        );
+
+        let plan = ModResourcePlan::new(false).with_sprite_sources([
+            ModSpritePackSource::sprite("example", "mods/example/sprites/router-plus.png"),
+            ModSpritePackSource::override_sprite(
+                "example",
+                "mods/example/sprites-override/router.png",
+            ),
+            ModSpritePackSource::override_sprite(
+                "example",
+                "mods/example/sprites-override/ui/block-router-ui.png",
+            ),
+        ]);
+
+        assert_eq!(
+            launcher.merge_mod_resource_plan_into_texture_atlas(&plan),
+            3
+        );
+
+        let mod_sprite = launcher
+            .texture_atlas
+            .lookup("example-router-plus")
+            .unwrap();
+        assert_eq!(mod_sprite.page_type, PageType::Main);
+        assert_eq!(
+            mod_sprite.region.source_path,
+            "mods/example/sprites/router-plus.png"
+        );
+        assert!(!mod_sprite.region.payload);
+
+        let overridden_router = launcher.texture_atlas.lookup("router").unwrap();
+        assert_eq!(overridden_router.page_type, PageType::Main);
+        assert_eq!(
+            overridden_router.region.source_path,
+            "mods/example/sprites-override/router.png"
+        );
+        assert!(overridden_router.region.payload);
+
+        let overridden_ui = launcher.texture_atlas.lookup("block-router-ui").unwrap();
+        assert_eq!(overridden_ui.page_type, PageType::Ui);
+        assert_eq!(
+            overridden_ui.region.source_path,
+            "mods/example/sprites-override/ui/block-router-ui.png"
+        );
+        assert!(overridden_ui.region.payload);
+
+        assert!(launcher.texture_atlas.lookup("item-copper-full").is_ok());
+        assert!(launcher.texture_atlas.lookup("liquid-water-ui").is_ok());
+        assert!(launcher.texture_atlas.lookup("cracks-1-0").is_ok());
+        assert!(launcher.texture_atlas.lookup("cracks-7-7").is_ok());
+        let crack_count = launcher
+            .texture_atlas
+            .page(PageType::Rubble)
+            .regions
+            .iter()
+            .filter(|region| region.name.starts_with("cracks-"))
+            .count();
+        assert_eq!(crack_count, 7 * 8);
     }
 
     #[test]

@@ -11363,3 +11363,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - icon candidate source path 当前仍是虚拟 registry，尚未真实扫描文件、decode PNG、生成 `fullIcon/uiIcon` 持久字段或绑定 GPU texture region；
   - `fullOverride`、mod override、真实 `generateIcons/createIcons` 输出和 Block 完整 UnlockableContent 继承关系仍需继续迁移；
   - 当前总体迁移约 19.6%，仍未达到完整可玩。
+
+### 12.354 Mod resource plan merged into default desktop atlas
+
+- 2026-05-29：继续把 mod resource 计划从 `modsys` 模块接入 desktop atlas 生命周期。本轮新增 `DesktopLauncher::merge_mod_resource_plan_into_texture_atlas(...)`，可将 `ModResourcePlan::sprite_requests()` 适配为 `TextureAtlasSpriteSourceDescriptor`，再增量合并进现有 `TextureAtlasPlan<bool>`，而不是重建或清空 vanilla atlas。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `packSprites(...)` 会扫描 `sprites` 与 `sprites-override`；
+    - 普通 mod sprite 使用 `mod.name + "-" + baseName` 前缀；
+    - `sprites-override` 保持原 atlas name 并替换已有 region；
+    - mod icon `icon.png -> preview.png` 仍与 sprite atlas 计划分离。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `merge_mod_resource_plan_into_texture_atlas(&mut self, plan: &ModResourcePlan) -> usize`；
+    - 使用 `TextureAtlasPlan::from_sprite_sources(...)` 复用 `SpritePackRequest` 的 `source_path/atlas_name/page_hint/override`；
+    - 按 page 增量 `insert_or_replace_region(...)`，保留 vanilla block sprites、content icon candidates 与 crack regions；
+    - 新增测试覆盖：
+      - 非 override mod sprite `example-router-plus` 被加入；
+      - `sprites-override/router.png` 覆盖 vanilla `router`；
+      - `sprites-override/ui/block-router-ui.png` 覆盖默认 icon candidate；
+      - `item-copper-full`、`liquid-water-ui`、`cracks-*` 仍可查询，rubble crack 数量仍为 56。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-desktop mod_resource_plan --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop default_texture_atlas --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `9 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - 仍未接真实 mod 目录扫描、文件存在性判断、PNG decode、MultiPacker 实际尺寸/bleed/flush；
+  - `ModIconLoadPlan` 仍只记录 `icon.png -> preview.png` 候选，尚未进入真实 icon texture upload；
+  - 当前总体迁移约 19.7%，仍未达到完整可玩。
