@@ -8405,3 +8405,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议 `zenith`，需要补 MissileBulletType 的 `weaveScale/weaveMag` 字段；
   3. Bomb/inaccuracy runtime 仍未真正接 weapon spawn 与爆炸行为；
   4. 当前总迁移约 13.5%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 247. 最新闭环记录：UnitTypes zenith MissileBulletType content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：回填 Java `zenith` 的 `zenith-missiles` weapon 与 `MissileBulletType(3f, 14)`，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1129-1176`
+  - `zenith`：`accel=0.04`、`drag=0.016`、`range=140`、`forceMultiTarget=true`、`targetFlags={launchPad,storage,battery,null}`、`engineOffset=12`、`engineSize=3`；
+  - `zenith-missiles`：`reload=40`、`x=7`、`rotate=true`、`shake=1`、`shoot.shots=2`、`inaccuracy=5`、`velocityRnd=0.2`、`shootSound=shootMissileLong`；
+  - missile bullet：`speed=3`、`damage=14`、`drag=-0.003`、`homingRange=60`、`scaleKeepVelocity=true`、`splashDamageRadius=25`、`splashDamage=15`、`lifetime=50`、`weaveScale=6`、`weaveMag=1`。
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - 新增 `BulletSpec.weave_scale` 与 `BulletSpec.weave_mag`，默认 `-1.0`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `missile_bullet(...)` helper；
+    - 新增 `zenith_missile`；
+    - 更新 bullet load order；
+    - 新增 `zenith_missile_matches_java_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `zenith` 补齐 Java 字段并注册 `zenith-missiles` weapon；
+    - 新增 `zenith_weapon_uses_java_missile_profile`。
+  - `README.md`
+    - 当前总体完成度更新为约 `13.6%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.321`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core zenith_missile_matches_java_profile --lib`
+  - `cargo test -p mindustry-core zenith_weapon_uses_java_missile_profile --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议 `antumbra`，需要 shared missile bullet、两个 `missiles-mount` 和一个 `large-bullet-mount`；
+  3. MissileBulletType weave/homing/splash runtime 仍未真正 content-driven；
+  4. 当前总迁移约 13.6%，远未可玩，goal 绝不能标记 complete。

@@ -401,6 +401,24 @@ pub fn load() -> Vec<BulletContent> {
     horizon_bomb.status_duration = 60.0;
     horizon_bomb.damage = horizon_bomb.splash_damage * 0.5;
 
+    let mut zenith_missile = missile_bullet(3.0, 14.0);
+    zenith_missile.width = 8.0;
+    zenith_missile.height = 8.0;
+    zenith_missile.shrink_y = 0.0;
+    zenith_missile.drag = -0.003;
+    zenith_missile.homing_range = 60.0;
+    zenith_missile.scale_keep_velocity = true;
+    zenith_missile.splash_damage_radius = 25.0;
+    zenith_missile.splash_damage = 15.0;
+    zenith_missile.lifetime = 50.0;
+    zenith_missile.trail_color = "unitBack".into();
+    zenith_missile.back_color = "unitBack".into();
+    zenith_missile.front_color = "unitFront".into();
+    zenith_missile.hit_effect = "blastExplosion".into();
+    zenith_missile.despawn_effect = "blastExplosion".into();
+    zenith_missile.weave_scale = 6.0;
+    zenith_missile.weave_mag = 1.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -464,6 +482,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "toxopid_cannon", toxopid_cannon),
         make_bullet(&mut next_id, "flare_basic", flare_basic),
         make_bullet(&mut next_id, "horizon_bomb", horizon_bomb),
+        make_bullet(&mut next_id, "zenith_missile", zenith_missile),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -661,6 +680,21 @@ fn bomb_bullet(splash_damage: f32, splash_damage_radius: f32) -> BulletSpec {
     bullet
 }
 
+fn missile_bullet(speed: f32, damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Missile, speed, damage);
+    bullet.sprite = "missile".into();
+    bullet.back_color = "missileYellowBack".into();
+    bullet.front_color = "missileYellow".into();
+    bullet.homing_power = 0.08;
+    bullet.shrink_y = 0.0;
+    bullet.width = 8.0;
+    bullet.height = 8.0;
+    bullet.hit_sound = "explosion".into();
+    bullet.trail_chance = 0.2;
+    bullet.lifetime = 52.0;
+    bullet
+}
+
 fn continuous_laser_bullet(damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
     bullet.length = 220.0;
@@ -736,6 +770,7 @@ mod tests {
                 "toxopid_cannon",
                 "flare_basic",
                 "horizon_bomb",
+                "zenith_missile",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1394,6 +1429,36 @@ mod tests {
         assert_eq!(bomb.drag, 0.05);
         assert!(!bomb.keep_velocity);
         assert_eq!(bomb.hit_sound, "explosion");
+    }
+
+    #[test]
+    fn zenith_missile_matches_java_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "zenith_missile").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Missile);
+        assert_eq!(bullet.speed, 3.0);
+        assert_eq!(bullet.damage, 14.0);
+        assert_eq!(bullet.sprite, "missile");
+        assert_eq!(bullet.width, 8.0);
+        assert_eq!(bullet.height, 8.0);
+        assert_eq!(bullet.shrink_y, 0.0);
+        assert_eq!(bullet.drag, -0.003);
+        assert_eq!(bullet.homing_power, 0.08);
+        assert_eq!(bullet.homing_range, 60.0);
+        assert!(bullet.scale_keep_velocity);
+        assert_eq!(bullet.splash_damage_radius, 25.0);
+        assert_eq!(bullet.splash_damage, 15.0);
+        assert_eq!(bullet.lifetime, 50.0);
+        assert_eq!(bullet.trail_color, "unitBack");
+        assert_eq!(bullet.back_color, "unitBack");
+        assert_eq!(bullet.front_color, "unitFront");
+        assert_eq!(bullet.hit_effect, "blastExplosion");
+        assert_eq!(bullet.despawn_effect, "blastExplosion");
+        assert_eq!(bullet.weave_scale, 6.0);
+        assert_eq!(bullet.weave_mag, 1.0);
+        assert_eq!(bullet.hit_sound, "explosion");
+        assert_eq!(bullet.trail_chance, 0.2);
     }
 
     #[test]

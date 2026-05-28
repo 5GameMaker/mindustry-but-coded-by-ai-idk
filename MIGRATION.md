@@ -10201,3 +10201,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - flare bullet inaccuracy 目前为 content 记录位，真实射击散布路径还需接 weapon/bullet spawn；
   - 下一步建议继续 `zenith`，需要 MissileBulletType 的 `weaveScale/weaveMag` 记录位；
   - 当前总体迁移约 13.5%，远未可玩。
+
+### 12.321 UnitTypes zenith MissileBulletType content seam
+
+- 2026-05-28：继续回填 Java `zenith` 空军导弹单位。该闭环为 `MissileBulletType` 保留 `weaveScale/weaveMag` content 记录位，并将 `zenith-missiles` weapon 接入 Rust unit content registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1129-1176`
+  - `zenith` unit：`health=700`、`speed=1.7`、`accel=0.04`、`drag=0.016`、`flying=true`、`range=140`、`hitSize=20`、`lowAltitude=true`、`forceMultiTarget=true`、`armor=5`、`targetFlags={launchPad,storage,battery,null}`、`engineOffset=12`、`engineSize=3`
+  - weapon：`new Weapon("zenith-missiles")`，`reload=40`、`x=7`、`rotate=true`、`shake=1`、`shoot.shots=2`、`inaccuracy=5`、`velocityRnd=0.2`、`shootSound=shootMissileLong`
+  - bullet：`MissileBulletType(3f, 14)`，`width=8`、`height=8`、`shrinkY=0`、`drag=-0.003`、`homingRange=60`、`scaleKeepVelocity=true`、`splashDamageRadius=25`、`splashDamage=15`、`lifetime=50`、`trailColor/backColor=unitBack`、`frontColor=unitFront`、`hitEffect/despawnEffect=blastExplosion`、`weaveScale=6`、`weaveMag=1`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `weave_scale` 与 `weave_mag`，默认值按 Java 未设置语义为 `-1.0`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `missile_bullet(...)` helper；
+    - 新增 `zenith_missile`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `zenith_missile_matches_java_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `zenith` 补齐 Java movement/target/engine 字段；
+    - 注册 `zenith-missiles` weapon；
+    - 新增 `zenith_weapon_uses_java_missile_profile`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `13.6%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core zenith_missile_matches_java_profile --lib`
+  - `cargo test -p mindustry-core zenith_weapon_uses_java_missile_profile --lib`
+- 仍未完成：
+  - MissileBulletType 的真实导弹轨迹、weave、爆炸 splash 与 homing runtime 仍需继续接入；
+  - `zenith` 已进入 registry，但 Java weapon mount runtime/targeting 细节还需后续整体接入；
+  - 下一步建议继续 `antumbra`，需要两个 missile mount 与一个 large-bullet mount；
+  - 当前总体迁移约 13.6%，远未可玩。

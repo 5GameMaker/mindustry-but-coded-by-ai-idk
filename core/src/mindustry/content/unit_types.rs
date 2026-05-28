@@ -646,12 +646,33 @@ pub fn load() -> Vec<UnitType> {
         unit(&mut next_id, "zenith", UnitKind::Standard, |u| {
             u.health = 700.0;
             u.speed = 1.7;
+            u.accel = 0.04;
+            u.drag = 0.016;
             u.flying = true;
+            u.range = 140.0;
             u.hit_size = 20.0;
             u.low_altitude = true;
+            u.force_multi_target = true;
             u.armor = 5.0;
+            u.target_flags = vec![
+                Some("launchPad".into()),
+                Some("storage".into()),
+                Some("battery".into()),
+                None,
+            ];
             u.engine_offset = 12.0;
             u.engine_size = 3.0;
+            let mut weapon = Weapon::new("zenith-missiles");
+            weapon.reload = 40.0;
+            weapon.x = 7.0;
+            weapon.rotate = true;
+            weapon.shake = 1.0;
+            weapon.shoot_shots = 2;
+            weapon.inaccuracy = 5.0;
+            weapon.velocity_rnd = 0.2;
+            weapon.shoot_sound = "shootMissileLong".into();
+            weapon.bullet = "zenith_missile".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "antumbra", UnitKind::Standard, |u| {
             u.speed = 0.8;
@@ -2316,6 +2337,48 @@ mod tests {
                 .kind,
             BulletKind::Bomb
         );
+    }
+
+    #[test]
+    fn zenith_weapon_uses_java_missile_profile() {
+        let units = load();
+        let zenith = by_name(&units, "zenith");
+        assert_eq!(zenith.accel, 0.04);
+        assert_eq!(zenith.drag, 0.016);
+        assert_eq!(zenith.range, 140.0);
+        assert!(zenith.force_multi_target);
+        assert_eq!(
+            zenith.target_flags,
+            vec![
+                Some("launchPad".to_string()),
+                Some("storage".to_string()),
+                Some("battery".to_string()),
+                None,
+            ]
+        );
+        assert_eq!(zenith.weapons.len(), 1);
+
+        let weapon = &zenith.weapons[0];
+        assert_eq!(weapon.name, "zenith-missiles");
+        assert_eq!(weapon.reload, 40.0);
+        assert_eq!(weapon.x, 7.0);
+        assert!(weapon.rotate);
+        assert_eq!(weapon.shake, 1.0);
+        assert_eq!(weapon.shoot_shots, 2);
+        assert_eq!(weapon.inaccuracy, 5.0);
+        assert_eq!(weapon.velocity_rnd, 0.2);
+        assert_eq!(weapon.shoot_sound, "shootMissileLong");
+        assert_eq!(weapon.bullet, "zenith_missile");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing zenith missile {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Missile);
+        assert_eq!(bullet.spec.splash_damage, 15.0);
+        assert_eq!(bullet.spec.weave_scale, 6.0);
+        assert_eq!(bullet.spec.weave_mag, 1.0);
     }
 
     #[test]
