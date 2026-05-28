@@ -45,6 +45,9 @@ pub struct Weapon {
     pub x_rand: f32,
     pub y_rand: f32,
     pub shoot_pattern: String,
+    pub shoot_shots: i32,
+    pub shoot_first_shot_delay: f32,
+    pub shoot_shot_delay: f32,
     pub shadow: f32,
     pub velocity_rnd: f32,
     pub extra_velocity: f32,
@@ -125,6 +128,9 @@ impl Weapon {
             x_rand: 0.0,
             y_rand: 0.0,
             shoot_pattern: String::new(),
+            shoot_shots: 1,
+            shoot_first_shot_delay: 0.0,
+            shoot_shot_delay: 0.0,
             shadow: -1.0,
             velocity_rnd: 0.0,
             extra_velocity: 0.0,
@@ -172,6 +178,10 @@ impl Weapon {
         } else {
             shots * 60.0 / self.reload
         }
+    }
+
+    pub fn shoot_shots(&self) -> i32 {
+        self.shoot_shots.max(1)
     }
 
     pub fn dps(&self, bullet_damage: f32, shots: f32) -> f32 {
@@ -235,6 +245,18 @@ mod tests {
 
         assert_eq!(weapon.range(), 175.0);
         assert!(!weapon.bullet_kill_shooter);
+    }
+
+    #[test]
+    fn weapon_shoot_shots_mirrors_java_shoot_pattern_minimum() {
+        let mut weapon = Weapon::new("burst");
+        assert_eq!(weapon.shoot_shots(), 1);
+
+        weapon.shoot_shots = 3;
+        assert_eq!(weapon.shoot_shots(), 3);
+
+        weapon.shoot_shots = 0;
+        assert_eq!(weapon.shoot_shots(), 1);
     }
 
     #[test]

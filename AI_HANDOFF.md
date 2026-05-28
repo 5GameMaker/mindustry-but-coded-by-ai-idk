@@ -7532,3 +7532,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 完整 Java `bulletRotation(...)` 与 `ShootPattern` 坐标/角度；
   3. 检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
   4. 当前总迁移约 12% 出头，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 223. 最新闭环记录：Weapon.shoot.shots 最小多发接入 server bullet snapshot
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：继续 Java `Weapon.shoot.shoot(...)`，先把基础 `ShootPattern.shots` 接入 server ready weapon shot，生成多枚 `server_bullets`。
+- Rust 主改动：
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `shoot_shots` / `shoot_first_shot_delay` / `shoot_shot_delay`；
+    - 新增 `shoot_shots()` 最小值钳制；
+    - 新增 `weapon_shoot_shots_mirrors_java_shoot_pattern_minimum`。
+  - `server/src/lib.rs`
+    - ready weapon shot 改为按 `weapon.shoot_shots()` 循环生成 bullet；
+    - 每发推进 `total_shots` / `barrel_counter` / barrel recoil；
+    - `server_update_fires_ready_unit_weapon_into_bullet_snapshot` 现在验证 3 发 server/client bullet snapshot。
+  - `MIGRATION.md`
+    - 新增 `12.297`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_shots_mirrors_java_shoot_pattern_minimum --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_ticks_unit_weapon_mount_reload_and_warmup --lib`
+  - `cargo test -p mindustry-server server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 接入 `core/src/mindustry/entities/pattern.rs` 的 Shot offset/rotation，覆盖 ShootSpread/ShootAlternate/ShootBarrel 等；
+  2. 实现 firstShotDelay/shotDelay 调度，而不是即时全发；
+  3. 完整 `bulletRotation(...)`、xRand/yRand/inaccuracy、ammo/eject、sound/effect、continuous beam；
+  4. 当前总迁移约 12% 出头，远未可玩，goal 绝不能标记 complete。

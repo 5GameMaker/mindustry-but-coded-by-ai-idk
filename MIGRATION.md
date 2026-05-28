@@ -9421,3 +9421,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shoot gate 仍是最小版：未完整实现 autoTarget、rotate cone、minShootVelocity、shoot pattern 多发/延迟、xRand/yRand/inaccuracy、ammo/eject、sound/effect、continuous beam；
   - bullet spawn 坐标/角度只覆盖基础 weapon offset，后续需完全对齐 Java `bulletRotation(...)` 与 `ShootPattern`；
   - 当前总体迁移约 12% 出头，远未可玩。
+
+### 12.297 Weapon.shoot.shots 最小多发接入 server bullet snapshot
+
+- 2026-05-28：继续推进 Java `Weapon.shoot.shoot(...)` 的最小多发行为，把 `shoot.shots` 镜像到 Rust `Weapon` 并接入 server ready weapon shot。
+- Java 依据：
+  - `ShootPattern.shots` 默认 1；
+  - `ShootPattern.shoot(...)` 会循环 `shots` 次，每次调用 bullet handler，并通过 barrel incrementer 推进 barrel counter；
+  - `Weapon.shoot(...)` 在 handler 内立即增加 `mount.totalShots`。
+- Rust 新增/变化：
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `shoot_shots: i32`、`shoot_first_shot_delay: f32`、`shoot_shot_delay: f32`；
+    - 新增 `shoot_shots()`，最小值钳制为 1；
+    - 新增 `weapon_shoot_shots_mirrors_java_shoot_pattern_minimum`。
+  - `server/src/lib.rs`
+    - `tick_server_unit_weapons(...)` ready 后按 `weapon.shoot_shots()` 生成多枚 `server_bullets`；
+    - 每枚 bullet 生成时推进 `total_shots` 与 `barrel_counter`，并设置对应 barrel recoil；
+    - `server_update_fires_ready_unit_weapon_into_bullet_snapshot` 扩展为 `shoot_shots = 3`，断言 server/client 均 materialize 3 枚 bullet。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_shots_mirrors_java_shoot_pattern_minimum --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_ticks_unit_weapon_mount_reload_and_warmup --lib`
+  - `cargo test -p mindustry-server server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 本节只覆盖基础 `ShootPattern.shots` 的即时多发；尚未实现 firstShotDelay/shotDelay 调度、ShootSpread/ShootAlternate/ShootBarrel/ShootHelix/ShootMulti/ShootSummon；
+  - 多发角度当前仍相同，后续需接入 `core/src/mindustry/entities/pattern.rs` 的 Shot offset/rotation；
+  - 当前总体迁移约 12% 出头，远未可玩。

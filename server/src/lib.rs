@@ -2480,29 +2480,34 @@ impl ServerLauncher {
                     } else {
                         weapon.base_rotation
                     };
-                spawn_plans.push(ServerWeaponBulletSpawnPlan {
-                    owner_id: unit_id,
-                    team,
-                    bullet: weapon.bullet.clone(),
-                    x: unit_x + mount_dx + shoot_dx,
-                    y: unit_y + mount_dy + shoot_dy,
-                    rotation: shoot_angle,
-                });
+                let bullet_name = weapon.bullet.clone();
+                let shot_count = weapon.shoot_shots();
+                let recoils_count = weapon.recoils;
+                for _ in 0..shot_count {
+                    spawn_plans.push(ServerWeaponBulletSpawnPlan {
+                        owner_id: unit_id,
+                        team,
+                        bullet: bullet_name.clone(),
+                        x: unit_x + mount_dx + shoot_dx,
+                        y: unit_y + mount_dy + shoot_dy,
+                        rotation: shoot_angle,
+                    });
 
-                let barrel_counter = mount.barrel_counter;
-                mount.total_shots = mount.total_shots.saturating_add(1);
+                    let barrel_counter = mount.barrel_counter;
+                    mount.total_shots = mount.total_shots.saturating_add(1);
+                    if recoils_count > 0 {
+                        let recoils = mount
+                            .recoils
+                            .get_or_insert_with(|| vec![0.0; recoils_count as usize]);
+                        if !recoils.is_empty() {
+                            let index = barrel_counter.rem_euclid(recoils.len() as i32) as usize;
+                            recoils[index] = 1.0;
+                        }
+                    }
+                    mount.barrel_counter = mount.barrel_counter.saturating_add(1);
+                }
                 mount.reload = weapon.reload;
                 mount.recoil = 1.0;
-                if weapon.recoils > 0 {
-                    let recoils = mount
-                        .recoils
-                        .get_or_insert_with(|| vec![0.0; weapon.recoils as usize]);
-                    if !recoils.is_empty() {
-                        let index = barrel_counter.rem_euclid(recoils.len() as i32) as usize;
-                        recoils[index] = 1.0;
-                    }
-                }
-                mount.barrel_counter = mount.barrel_counter.saturating_add(1);
                 mount.heat = 1.0;
             }
         }
@@ -7305,6 +7310,7 @@ mod tests {
         weapon.x = 0.0;
         weapon.y = 0.0;
         weapon.recoils = 1;
+        weapon.shoot_shots = 3;
         let mut unit_type = UnitType::new(9105, "server-shooter");
         unit_type.weapons.push(weapon);
         let mut unit = UnitComp::new(96, unit_type, TeamId(2));
@@ -7318,13 +7324,13 @@ mod tests {
 
         let unit = launcher.server_units.get(&96).unwrap();
         let mount = &unit.weapons.mounts[0];
-        assert_eq!(mount.total_shots, 1);
-        assert_eq!(mount.barrel_counter, 1);
+        assert_eq!(mount.total_shots, 3);
+        assert_eq!(mount.barrel_counter, 3);
         assert_eq!(mount.reload, 10.0);
         assert_eq!(mount.recoil, 1.0);
         assert_eq!(mount.heat, 1.0);
         assert_eq!(mount.recoils.as_ref().unwrap()[0], 1.0);
-        assert_eq!(launcher.server_bullets.len(), 1);
+        assert_eq!(launcher.server_bullets.len(), 3);
         let (&server_bullet_id, server_bullet) = launcher.server_bullets.iter().next().unwrap();
         let placeholder = launcher
             .content_loader
@@ -7350,6 +7356,7 @@ mod tests {
                 None
             })
             .expect("ready server weapon shot should be broadcast as bullet snapshot");
+        assert_eq!(snapshot_packet.amount, 3);
         let mut client_runtime = GameRuntime::default();
         let report = client_runtime.apply_client_entity_snapshot_packet_with_content(
             &launcher.content_loader,
@@ -7357,6 +7364,8 @@ mod tests {
             &snapshot_packet.data,
         );
         assert_eq!(report.entity_parse_errors, 0);
+        assert_eq!(report.entity_typed_records_applied, 3);
+        assert_eq!(client_runtime.client_bullet_snapshot_entities.len(), 3);
         let client_bullet = client_runtime
             .client_bullet_snapshot_entities
             .get(&server_bullet_id)
