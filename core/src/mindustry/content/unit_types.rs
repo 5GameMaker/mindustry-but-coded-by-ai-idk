@@ -676,6 +676,8 @@ pub fn load() -> Vec<UnitType> {
         }),
         unit(&mut next_id, "antumbra", UnitKind::Standard, |u| {
             u.speed = 0.8;
+            u.accel = 0.04;
+            u.drag = 0.04;
             u.rotate_speed = 1.9;
             u.flying = true;
             u.low_altitude = true;
@@ -684,6 +686,46 @@ pub fn load() -> Vec<UnitType> {
             u.engine_offset = 21.0;
             u.engine_size = 5.3;
             u.hit_size = 46.0;
+            u.target_flags = vec![Some("generator".into()), Some("core".into()), None];
+            u.loop_sound = "loopHover".into();
+
+            let mut front_missile = Weapon::new("missiles-mount");
+            front_missile.y = 8.0;
+            front_missile.x = 17.0;
+            front_missile.reload = 20.0;
+            front_missile.eject_effect = "casing1".into();
+            front_missile.rotate_speed = 8.0;
+            front_missile.bullet = "antumbra_missile".into();
+            front_missile.shoot_sound = "shootMissile".into();
+            front_missile.rotate = true;
+            front_missile.shadow = 6.0;
+            u.weapons.push(front_missile);
+
+            let mut rear_missile = Weapon::new("missiles-mount");
+            rear_missile.y = -8.0;
+            rear_missile.x = 17.0;
+            rear_missile.reload = 35.0;
+            rear_missile.rotate_speed = 8.0;
+            rear_missile.eject_effect = "casing1".into();
+            rear_missile.bullet = "antumbra_missile".into();
+            rear_missile.shoot_sound = "shootMissile".into();
+            rear_missile.rotate = true;
+            rear_missile.shadow = 6.0;
+            u.weapons.push(rear_missile);
+
+            let mut large_mount = Weapon::new("large-bullet-mount");
+            large_mount.y = 2.0;
+            large_mount.x = 10.0;
+            large_mount.shoot_y = 10.0;
+            large_mount.reload = 12.0;
+            large_mount.shake = 1.0;
+            large_mount.rotate_speed = 2.0;
+            large_mount.eject_effect = "casing1".into();
+            large_mount.shoot_sound = "shootSpectre".into();
+            large_mount.rotate = true;
+            large_mount.shadow = 8.0;
+            large_mount.bullet = "antumbra_large_bullet".into();
+            u.weapons.push(large_mount);
         }),
         unit(&mut next_id, "eclipse", UnitKind::Standard, |u| {
             u.speed = 0.54;
@@ -2379,6 +2421,85 @@ mod tests {
         assert_eq!(bullet.spec.splash_damage, 15.0);
         assert_eq!(bullet.spec.weave_scale, 6.0);
         assert_eq!(bullet.spec.weave_mag, 1.0);
+    }
+
+    #[test]
+    fn antumbra_weapons_match_java_mount_profiles() {
+        let units = load();
+        let antumbra = by_name(&units, "antumbra");
+        assert_eq!(antumbra.speed, 0.8);
+        assert_eq!(antumbra.accel, 0.04);
+        assert_eq!(antumbra.drag, 0.04);
+        assert_eq!(antumbra.rotate_speed, 1.9);
+        assert!(antumbra.flying);
+        assert!(antumbra.low_altitude);
+        assert_eq!(antumbra.health, 7200.0);
+        assert_eq!(antumbra.armor, 9.0);
+        assert_eq!(antumbra.engine_offset, 21.0);
+        assert_eq!(antumbra.engine_size, 5.3);
+        assert_eq!(antumbra.hit_size, 46.0);
+        assert_eq!(
+            antumbra.target_flags,
+            vec![
+                Some("generator".to_string()),
+                Some("core".to_string()),
+                None
+            ]
+        );
+        assert_eq!(antumbra.loop_sound, "loopHover");
+        assert_eq!(antumbra.weapons.len(), 3);
+
+        let front_missile = &antumbra.weapons[0];
+        assert_eq!(front_missile.name, "missiles-mount");
+        assert_eq!(front_missile.y, 8.0);
+        assert_eq!(front_missile.x, 17.0);
+        assert_eq!(front_missile.reload, 20.0);
+        assert_eq!(front_missile.eject_effect, "casing1");
+        assert_eq!(front_missile.rotate_speed, 8.0);
+        assert_eq!(front_missile.bullet, "antumbra_missile");
+        assert_eq!(front_missile.shoot_sound, "shootMissile");
+        assert!(front_missile.rotate);
+        assert_eq!(front_missile.shadow, 6.0);
+
+        let rear_missile = &antumbra.weapons[1];
+        assert_eq!(rear_missile.name, "missiles-mount");
+        assert_eq!(rear_missile.y, -8.0);
+        assert_eq!(rear_missile.x, 17.0);
+        assert_eq!(rear_missile.reload, 35.0);
+        assert_eq!(rear_missile.eject_effect, "casing1");
+        assert_eq!(rear_missile.rotate_speed, 8.0);
+        assert_eq!(rear_missile.bullet, "antumbra_missile");
+        assert_eq!(rear_missile.shoot_sound, "shootMissile");
+        assert!(rear_missile.rotate);
+        assert_eq!(rear_missile.shadow, 6.0);
+
+        let large_mount = &antumbra.weapons[2];
+        assert_eq!(large_mount.name, "large-bullet-mount");
+        assert_eq!(large_mount.y, 2.0);
+        assert_eq!(large_mount.x, 10.0);
+        assert_eq!(large_mount.shoot_y, 10.0);
+        assert_eq!(large_mount.reload, 12.0);
+        assert_eq!(large_mount.shake, 1.0);
+        assert_eq!(large_mount.rotate_speed, 2.0);
+        assert_eq!(large_mount.eject_effect, "casing1");
+        assert_eq!(large_mount.shoot_sound, "shootSpectre");
+        assert!(large_mount.rotate);
+        assert_eq!(large_mount.shadow, 8.0);
+        assert_eq!(large_mount.bullet, "antumbra_large_bullet");
+
+        let bullets = bullets::load();
+        let missile = bullets
+            .iter()
+            .find(|bullet| bullet.name() == front_missile.bullet)
+            .expect("missing antumbra_missile");
+        assert_eq!(missile.spec.kind, BulletKind::Missile);
+        assert_eq!(missile.spec.status, "blasted");
+        let large = bullets
+            .iter()
+            .find(|bullet| bullet.name() == large_mount.bullet)
+            .expect("missing antumbra_large_bullet");
+        assert_eq!(large.spec.kind, BulletKind::Basic);
+        assert_eq!(large.spec.shoot_effect, "shootBig");
     }
 
     #[test]

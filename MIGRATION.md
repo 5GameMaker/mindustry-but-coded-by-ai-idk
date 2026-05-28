@@ -10233,3 +10233,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `zenith` 已进入 registry，但 Java weapon mount runtime/targeting 细节还需后续整体接入；
   - 下一步建议继续 `antumbra`，需要两个 missile mount 与一个 large-bullet mount；
   - 当前总体迁移约 13.6%，远未可玩。
+
+### 12.322 UnitTypes antumbra missile and large bullet mounts
+
+- 2026-05-28：继续回填 Java `antumbra` 空军重型攻击单位。该闭环复用 `MissileBulletType` 与 `BasicBulletType` content seam，将两个 `missiles-mount` 和一个 `large-bullet-mount` 接入 Rust unit registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1177-1250`
+  - `antumbra` unit：`speed=0.8`、`accel=0.04`、`drag=0.04`、`rotateSpeed=1.9`、`flying=true`、`lowAltitude=true`、`health=7200`、`armor=9`、`engineOffset=21`、`engineSize=5.3`、`hitSize=46`、`targetFlags={generator,core,null}`、`loopSound=loopHover`
+  - shared missile bullet：`MissileBulletType(2.7f, 18)`，`width=8`、`height=8`、`shrinkY=0`、`drag=-0.01`、`splashDamageRadius=20`、`splashDamage=37`、`ammoMultiplier=4`、`lifetime=50`、`hitEffect/despawnEffect=blastExplosion`、`status=blasted`、`statusDuration=60`
+  - missile mounts：两个 `new Weapon("missiles-mount")`，分别 `y=8/reload=20` 与 `y=-8/reload=35`，共同 `x=17`、`rotateSpeed=8`、`ejectEffect=casing1`、`shootSound=shootMissile`、`rotate=true`、`shadow=6`
+  - large mount：`new Weapon("large-bullet-mount")`，`y=2`、`x=10`、`shootY=10`、`reload=12`、`shake=1`、`rotateSpeed=2`、`ejectEffect=casing1`、`shootSound=shootSpectre`、`rotate=true`、`shadow=8`，bullet `BasicBulletType(7f,55)` with `width=12`、`height=18`、`lifetime=25`、`shootEffect=shootBig`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `antumbra_missile` 与 `antumbra_large_bullet`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `antumbra_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `antumbra` 补齐 Java movement/target/sound 字段；
+    - 注册两个 `missiles-mount` 与一个 `large-bullet-mount`；
+    - 新增 `antumbra_weapons_match_java_mount_profiles`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `13.7%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core antumbra_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core antumbra_weapons_match_java_mount_profiles --lib`
+- 仍未完成：
+  - Java shared missile 对象身份仍以同名 content 引用表示，runtime mount 共享对象细节后续需继续收敛；
+  - Missile/BasicBulletType 的命中、splash、status 与 weapon mount runtime 仍需整体接入；
+  - 下一步建议继续 `eclipse`，需要 flak、large laser 与 large artillery mounts；
+  - 当前总体迁移约 13.7%，远未可玩。

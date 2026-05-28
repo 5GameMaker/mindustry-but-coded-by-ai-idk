@@ -8441,3 +8441,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议 `antumbra`，需要 shared missile bullet、两个 `missiles-mount` 和一个 `large-bullet-mount`；
   3. MissileBulletType weave/homing/splash runtime 仍未真正 content-driven；
   4. 当前总迁移约 13.6%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 248. 最新闭环记录：UnitTypes antumbra missile and large bullet mounts
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：回填 Java `antumbra` 的两个 `missiles-mount`、一个 `large-bullet-mount` 及对应 missile/basic bullets，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1177-1250`
+  - unit：`speed=0.8`、`accel=0.04`、`drag=0.04`、`rotateSpeed=1.9`、`flying=true`、`lowAltitude=true`、`health=7200`、`armor=9`、`engineOffset=21`、`engineSize=5.3`、`hitSize=46`、`targetFlags={generator,core,null}`、`loopSound=loopHover`；
+  - shared missile：`MissileBulletType(2.7,18)`，`drag=-0.01`、`splashDamageRadius=20`、`splashDamage=37`、`ammoMultiplier=4`、`lifetime=50`、`status=blasted`、`statusDuration=60`；
+  - mounts：`missiles-mount` 两个，`large-bullet-mount` 一个，large bullet 为 `BasicBulletType(7,55)`。
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `antumbra_missile`；
+    - 新增 `antumbra_large_bullet`；
+    - 更新 bullet load order；
+    - 新增 `antumbra_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `antumbra` 补齐 Java 字段并注册三把 weapon；
+    - 新增 `antumbra_weapons_match_java_mount_profiles`。
+  - `README.md`
+    - 当前总体完成度更新为约 `13.7%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.322`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core antumbra_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core antumbra_weapons_match_java_mount_profiles --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议 `eclipse`，需要 flak bullet、large laser mount 与两个 large artillery；
+  3. shared missile 身份、splash/status/weapon mount runtime 仍未完整 content-driven；
+  4. 当前总迁移约 13.7%，远未可玩，goal 绝不能标记 complete。

@@ -419,6 +419,26 @@ pub fn load() -> Vec<BulletContent> {
     zenith_missile.weave_scale = 6.0;
     zenith_missile.weave_mag = 1.0;
 
+    let mut antumbra_missile = missile_bullet(2.7, 18.0);
+    antumbra_missile.width = 8.0;
+    antumbra_missile.height = 8.0;
+    antumbra_missile.shrink_y = 0.0;
+    antumbra_missile.drag = -0.01;
+    antumbra_missile.splash_damage_radius = 20.0;
+    antumbra_missile.splash_damage = 37.0;
+    antumbra_missile.ammo_multiplier = 4.0;
+    antumbra_missile.lifetime = 50.0;
+    antumbra_missile.hit_effect = "blastExplosion".into();
+    antumbra_missile.despawn_effect = "blastExplosion".into();
+    antumbra_missile.status = "blasted".into();
+    antumbra_missile.status_duration = 60.0;
+
+    let mut antumbra_large_bullet = basic_bullet(7.0, 55.0);
+    antumbra_large_bullet.width = 12.0;
+    antumbra_large_bullet.height = 18.0;
+    antumbra_large_bullet.lifetime = 25.0;
+    antumbra_large_bullet.shoot_effect = "shootBig".into();
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -483,6 +503,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "flare_basic", flare_basic),
         make_bullet(&mut next_id, "horizon_bomb", horizon_bomb),
         make_bullet(&mut next_id, "zenith_missile", zenith_missile),
+        make_bullet(&mut next_id, "antumbra_missile", antumbra_missile),
+        make_bullet(&mut next_id, "antumbra_large_bullet", antumbra_large_bullet),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -771,6 +793,8 @@ mod tests {
                 "flare_basic",
                 "horizon_bomb",
                 "zenith_missile",
+                "antumbra_missile",
+                "antumbra_large_bullet",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1459,6 +1483,40 @@ mod tests {
         assert_eq!(bullet.weave_mag, 1.0);
         assert_eq!(bullet.hit_sound, "explosion");
         assert_eq!(bullet.trail_chance, 0.2);
+    }
+
+    #[test]
+    fn antumbra_bullets_match_java_profiles() {
+        let bullets = load();
+        let missile = &by_name(&bullets, "antumbra_missile").spec;
+
+        assert_eq!(missile.kind, BulletKind::Missile);
+        assert_eq!(missile.speed, 2.7);
+        assert_eq!(missile.damage, 18.0);
+        assert_eq!(missile.width, 8.0);
+        assert_eq!(missile.height, 8.0);
+        assert_eq!(missile.shrink_y, 0.0);
+        assert_eq!(missile.drag, -0.01);
+        assert_eq!(missile.splash_damage_radius, 20.0);
+        assert_eq!(missile.splash_damage, 37.0);
+        assert_eq!(missile.ammo_multiplier, 4.0);
+        assert_eq!(missile.lifetime, 50.0);
+        assert_eq!(missile.hit_effect, "blastExplosion");
+        assert_eq!(missile.despawn_effect, "blastExplosion");
+        assert_eq!(missile.status, "blasted");
+        assert_eq!(missile.status_duration, 60.0);
+        assert_eq!(missile.hit_sound, "explosion");
+        assert_eq!(missile.trail_chance, 0.2);
+
+        let large = &by_name(&bullets, "antumbra_large_bullet").spec;
+        assert_eq!(large.kind, BulletKind::Basic);
+        assert_eq!(large.speed, 7.0);
+        assert_eq!(large.damage, 55.0);
+        assert_eq!(large.width, 12.0);
+        assert_eq!(large.height, 18.0);
+        assert_eq!(large.lifetime, 25.0);
+        assert_eq!(large.shoot_effect, "shootBig");
+        assert_eq!(large.sprite, "bullet");
     }
 
     #[test]
