@@ -5557,6 +5557,11 @@ mod tests {
             launcher.runtime.unit_ability_death_events[0].ability_kind,
             "SpawnDeathAbility"
         );
+        assert_eq!(launcher.runtime.unit_type_killed_events.len(), 1);
+        assert_eq!(
+            launcher.runtime.unit_type_killed_events[0].unit_type_name,
+            "crawler"
+        );
         let leg_primitives = launcher
             .standard_local_effect_line_primitives
             .iter()

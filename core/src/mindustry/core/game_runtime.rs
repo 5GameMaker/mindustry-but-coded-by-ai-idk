@@ -1568,6 +1568,15 @@ pub struct GameRuntimeUnitAbilityDeathEvent {
     pub y: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeUnitTypeKilledEvent {
+    pub unit_id: i32,
+    pub unit_type_name: String,
+    pub team: TeamId,
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GameRuntimeTriggerEvent {
     pub trigger: Trigger,
@@ -2635,6 +2644,7 @@ pub struct GameRuntime {
     pub unit_destroy_events: Vec<GameRuntimeUnitDestroyEvent>,
     pub unit_shoot_on_death_events: Vec<GameRuntimeUnitShootOnDeathEvent>,
     pub unit_ability_death_events: Vec<GameRuntimeUnitAbilityDeathEvent>,
+    pub unit_type_killed_events: Vec<GameRuntimeUnitTypeKilledEvent>,
     pub trigger_events: Vec<GameRuntimeTriggerEvent>,
     pub server_puddles: Puddles,
     pub server_fires: Fires,
@@ -2719,6 +2729,7 @@ impl GameRuntime {
             unit_destroy_events: Vec::new(),
             unit_shoot_on_death_events: Vec::new(),
             unit_ability_death_events: Vec::new(),
+            unit_type_killed_events: Vec::new(),
             trigger_events: Vec::new(),
             server_puddles: Puddles::default(),
             server_fires: Fires::default(),
@@ -2822,6 +2833,10 @@ impl GameRuntime {
 
     pub fn drain_unit_ability_death_events(&mut self) -> Vec<GameRuntimeUnitAbilityDeathEvent> {
         std::mem::take(&mut self.unit_ability_death_events)
+    }
+
+    pub fn drain_unit_type_killed_events(&mut self) -> Vec<GameRuntimeUnitTypeKilledEvent> {
+        std::mem::take(&mut self.unit_type_killed_events)
     }
 
     pub fn note_client_block_snapshot_parse_error(
@@ -4084,6 +4099,15 @@ impl GameRuntime {
                     y,
                 });
         }
+
+        self.unit_type_killed_events
+            .push(GameRuntimeUnitTypeKilledEvent {
+                unit_id: unit.id(),
+                unit_type_name: unit.type_info.name().to_string(),
+                team: unit.team_id(),
+                x,
+                y,
+            });
 
         if unit.type_info.create_scorch {
             let size = (hit_size / 5.0).floor().clamp(0.0, 9.0) as i32;
@@ -10368,6 +10392,7 @@ impl GameRuntime {
         self.unit_destroy_events.clear();
         self.unit_shoot_on_death_events.clear();
         self.unit_ability_death_events.clear();
+        self.unit_type_killed_events.clear();
         self.trigger_events.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -26754,6 +26779,14 @@ mod tests {
         assert_eq!(ability_event.x, 10.0);
         assert_eq!(ability_event.y, 20.0);
         assert_eq!(runtime.drain_unit_ability_death_events().len(), 1);
+        assert_eq!(runtime.unit_type_killed_events.len(), 1);
+        let type_killed_event = &runtime.unit_type_killed_events[0];
+        assert_eq!(type_killed_event.unit_id, 77);
+        assert_eq!(type_killed_event.unit_type_name, "crawler");
+        assert_eq!(type_killed_event.team, TeamId(4));
+        assert_eq!(type_killed_event.x, 10.0);
+        assert_eq!(type_killed_event.y, 20.0);
+        assert_eq!(runtime.drain_unit_type_killed_events().len(), 1);
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));

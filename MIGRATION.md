@@ -9082,3 +9082,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 仍需把已存在的部分 server-side death ability runtime 与客户端 `UnitDestroyCallPacket`/真实 event bus 打通；
   - `type.killed(self())`、suicide trigger、wreckRegions decal、weapon bullet spawn、`Damage.dynamicExplosion(...)` lightning/fire/wave damage 仍未完成；
   - 当前总体迁移仍约 10%~11%，远未可玩。
+
+### 12.285 UnitDestroy UnitType.killed runtime sidecar
+
+- 2026-05-28：继续对照 Java `UnitComp.destroy()` 中 ability death 之后的 `type.killed(self())`，在 Rust runtime 中记录类型级 killed hook sidecar，为后续 modded `UnitType` override / 统一 lifecycle plan 接入保留真实调用点。
+- Java 依据：
+  - `UnitComp.destroy()` 顺序：`for(Ability a : abilities) a.death(self());` → `type.killed(self());` → `remove();`
+  - `UnitType.killed(Unit unit)` 当前参考基线默认空实现，`MissileUnitType` / `NeoplasmUnitType` / `ErekirUnitType` 等未重写；因此本轮只记录 hook，不伪造行为。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitTypeKilledEvent { unit_id, unit_type_name, team, x, y }`；
+    - `GameRuntime` 新增 `unit_type_killed_events`；
+    - reset/clear 路径清空该队列；
+    - 新增 `drain_unit_type_killed_events()`；
+    - `queue_client_unit_destroy_side_effects(...)` 在 ability death sidecar 后记录类型级 killed hook；
+    - core destroy 测试覆盖 event 字段与 drain。
+  - `desktop/src/lib.rs`
+    - unit destroy desktop 测试验证 NetClient lifecycle -> runtime 后保留 `unit_type_killed_events`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `UnitType.killed(...)` 仍未变成结构化 trait/override runtime；当前仅 sidecar 化 Java 调用点；
+  - suicide trigger、具体 ability death 执行、wreckRegions decal、weapon bullet spawn、`Damage.dynamicExplosion(...)` lightning/fire/wave damage 仍未完成；
+  - 当前总体迁移仍约 10%~11%，远未可玩。

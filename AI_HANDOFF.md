@@ -7167,3 +7167,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. `type.killed(self())`、suicide trigger、wreckRegions decal、weapon bullet spawn 仍未迁移；
   4. `Damage.dynamicExplosion(...)` lightning/fire/wave damage、真实 audio/camera backend 仍需继续；
   5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 211. 最新闭环记录：UnitDestroy UnitType.killed runtime sidecar
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 子代理只读结论：参考基线里的 `UnitType.killed(Unit unit)` 是默认空实现，未发现 `MissileUnitType` / `NeoplasmUnitType` / `ErekirUnitType` 等子类重写；死亡主行为仍集中在 `UnitComp.destroy()`、`Ability.death()` 与 weapon `shootOnDeath`。
+- 本轮目标：对照 Java `UnitComp.destroy()` 的 `type.killed(self())` 调用点，先在 Rust runtime 中记录类型级 killed sidecar，不伪造当前 Java 默认空实现之外的行为。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitTypeKilledEvent`；
+    - `GameRuntime` 新增 `unit_type_killed_events`；
+    - reset/clear 路径清空该队列；
+    - 新增 `drain_unit_type_killed_events()`；
+    - `queue_client_unit_destroy_side_effects(...)` 在 ability death sidecar 后记录 `unit_id/unit_type_name/team/x/y`；
+    - core destroy 测试覆盖字段和 drain。
+  - `desktop/src/lib.rs`
+    - unit destroy desktop 测试验证 lifecycle 后 runtime 中保留 `unit_type_killed_events`。
+  - `MIGRATION.md`
+    - 新增 `12.285`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 具体 `Ability.death(...)` 执行仍未接入客户端/统一死亡调度；
+  2. 优先打通 `SpawnDeathAbility` / `LiquidExplodeAbility` 已有 plan 到真实 runtime，而不是继续只记录 descriptor；
+  3. suicide trigger、wreckRegions decal、weapon bullet spawn 仍未迁移；
+  4. `Damage.dynamicExplosion(...)` lightning/fire/wave damage、真实 audio/camera backend 仍需继续；
+  5. 当前总迁移仍约 10%~11%，远未可玩。
