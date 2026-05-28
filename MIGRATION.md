@@ -11060,3 +11060,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - floor/minimap side-band 目前已进入 desktop frame 和 headless summary，但还不是真实 GPU/texture upload；
   - shader dispatch 仍需类似方式进入 desktop frame/summary 或真实 backend dispatch；
   - 当前总体迁移约 18.7%，仍未达到完整可玩。
+
+### 12.346 Shader dispatch desktop bridge and atlas source descriptors
+
+- 2026-05-29：继续推进渲染 side-channel 和 atlas 资源入口。本轮把 `ShaderDispatchFrame` 从 core bridge 槽位接到 desktop world frame，并补上 texture atlas 从资源路径/虚拟清单构建 descriptor/plan 的纯数据入口。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/Shaders.java`
+    - shader `apply()` 是绘制/blit 时机的 uniform/texture 操作，不是 init 阶段副作用；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - shield/buildBeam/blockbuild/light 等 shader 在 world draw 阶段被消费；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - sprites/sprites-override 资源清单进入 MultiPacker 前需要解析 region 名称、page 和 override 语义。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::shader_dispatch_frame_plan(...)`；
+    - `graphics_frame_for_render(...)` 现在通过 `RenderBridge::set_shader_dispatch(...)` 携带 shader dispatch；
+    - `DesktopGraphicsExecutionSummary` 已能在普通 world frame 中观测到 `shader_dispatch_applies`，且不污染 `GraphicsFrameStats`。
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `TextureAtlasSpriteSourceDescriptor`；
+    - 支持从 source path 推导 atlas name、按 page hint/source path 解析 page type、保留 override 语义；
+    - 新增 `TextureAtlasPlan<bool>::from_sprite_sources/from_source_paths`；
+    - 新增 `PackPlan<TextureAtlasRegionSource<bool>>::from_sprite_sources/from_source_paths`。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-core texture_atlas --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+- 仍未完成：
+  - shader dispatch 目前是 desktop frame/headless summary 可见，尚未绑定真实 GPU uniform/texture/backend operations；
+  - atlas descriptor 仍是路径/metadata 解析，尚未接真实目录扫描、PNG decode、bleed/outline、Texture upload；
+  - 当前总体迁移约 18.8%，仍未达到完整可玩。
