@@ -68,8 +68,38 @@ impl CommandRegistry {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SpritePackRequest {
+    pub source_path: String,
+    pub atlas_name: String,
+    pub page_hint: String,
+    pub r#override: bool,
+}
+
+impl SpritePackRequest {
+    pub fn new(source_path: impl Into<String>, atlas_name: impl Into<String>) -> Self {
+        Self {
+            source_path: source_path.into(),
+            atlas_name: atlas_name.into(),
+            page_hint: String::new(),
+            r#override: false,
+        }
+    }
+
+    pub fn with_page_hint(mut self, page_hint: impl Into<String>) -> Self {
+        self.page_hint = page_hint.into();
+        self
+    }
+
+    pub fn with_override(mut self, r#override: bool) -> Self {
+        self.r#override = r#override;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpritePacker {
     textures: Vec<String>,
+    requests: Vec<SpritePackRequest>,
 }
 
 impl SpritePacker {
@@ -78,11 +108,22 @@ impl SpritePacker {
     }
 
     pub fn add_texture(&mut self, path: impl Into<String>) {
-        self.textures.push(path.into());
+        let path = path.into();
+        self.textures.push(path.clone());
+        self.requests
+            .push(SpritePackRequest::new(path.clone(), path));
     }
 
     pub fn textures(&self) -> &[String] {
         &self.textures
+    }
+
+    pub fn add_request(&mut self, request: SpritePackRequest) {
+        self.requests.push(request);
+    }
+
+    pub fn requests(&self) -> &[SpritePackRequest] {
+        &self.requests
     }
 }
 
@@ -268,12 +309,69 @@ mod tests {
         assert!(module.content_loaded);
         assert_eq!(packer.textures(), &["sprites/custom.png".to_string()]);
         assert_eq!(
+            packer.requests(),
+            &[SpritePackRequest::new(
+                "sprites/custom.png",
+                "sprites/custom.png"
+            )]
+        );
+        assert_eq!(
             server.commands(),
             &[CommandSpec::new("status", "prints status")]
         );
         assert_eq!(
             client.commands(),
             &[CommandSpec::new("ping", "client ping")]
+        );
+    }
+
+    #[test]
+    fn sprite_packer_legacy_api_keeps_textures_and_builds_default_requests() {
+        let mut packer = SpritePacker::new();
+
+        packer.add_texture("sprites/custom.png");
+
+        assert_eq!(packer.textures(), &["sprites/custom.png".to_string()]);
+        assert_eq!(
+            packer.requests(),
+            &[SpritePackRequest::new(
+                "sprites/custom.png",
+                "sprites/custom.png"
+            )]
+        );
+    }
+
+    #[test]
+    fn sprite_packer_requests_can_describe_sprites_and_overrides() {
+        let mut packer = SpritePacker::new();
+
+        packer.add_request(
+            SpritePackRequest::new("sprites/block.png", "block")
+                .with_page_hint("sprites")
+                .with_override(false),
+        );
+        packer.add_request(
+            SpritePackRequest::new("sprites-override/ui/icon.png", "icon")
+                .with_page_hint("sprites-override")
+                .with_override(true),
+        );
+
+        assert_eq!(
+            packer.requests(),
+            &[
+                SpritePackRequest {
+                    source_path: "sprites/block.png".into(),
+                    atlas_name: "block".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "sprites-override/ui/icon.png".into(),
+                    atlas_name: "icon".into(),
+                    page_hint: "sprites-override".into(),
+                    r#override: true,
+                },
+            ]
         );
     }
 
