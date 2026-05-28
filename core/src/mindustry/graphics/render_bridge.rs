@@ -6,7 +6,7 @@
 #[cfg(not(test))]
 use super::{
     BlockRendererPlan, FloorRenderPlan, FogFramePlan, MinimapOverlayPlan, OverlayRendererPlan,
-    PixelatorFramePlan, RenderFramePlan,
+    PixelatorFramePlan, RenderFramePlan, ShaderDispatchFrame,
 };
 
 #[cfg(test)]
@@ -77,6 +77,9 @@ use test_support::{
     BlockRendererPlan, FloorRenderPlan, FogFramePlan, MinimapOverlayPlan, OverlayRendererPlan,
     PixelatorFramePlan, RenderFramePlan,
 };
+
+#[cfg(test)]
+use super::ShaderDispatchFrame;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphicsFrameStats {
@@ -331,6 +334,7 @@ pub struct GraphicsFrameBundle<
     O = OverlayRendererPlan,
     M = MinimapOverlayPlan,
     P = PixelatorFramePlan,
+    S = ShaderDispatchFrame,
 > {
     pub render_frame: Option<R>,
     pub block_renderer: Option<B>,
@@ -339,10 +343,11 @@ pub struct GraphicsFrameBundle<
     pub overlay_renderer: Option<O>,
     pub minimap_overlay: Option<M>,
     pub pixelator: Option<P>,
+    pub shader_dispatch: Option<S>,
     pub stats: GraphicsFrameStats,
 }
 
-impl<R, B, F, G, O, M, P> Default for GraphicsFrameBundle<R, B, F, G, O, M, P> {
+impl<R, B, F, G, O, M, P, S> Default for GraphicsFrameBundle<R, B, F, G, O, M, P, S> {
     fn default() -> Self {
         Self {
             render_frame: None,
@@ -352,18 +357,19 @@ impl<R, B, F, G, O, M, P> Default for GraphicsFrameBundle<R, B, F, G, O, M, P> {
             overlay_renderer: None,
             minimap_overlay: None,
             pixelator: None,
+            shader_dispatch: None,
             stats: GraphicsFrameStats::default(),
         }
     }
 }
 
-impl<R, B, F, G, O, M, P> GraphicsFrameBundle<R, B, F, G, O, M, P> {
+impl<R, B, F, G, O, M, P, S> GraphicsFrameBundle<R, B, F, G, O, M, P, S> {
     pub fn into_stats(self) -> GraphicsFrameStats {
         self.stats
     }
 }
 
-impl<R, B, F, G, O, M, P> GraphicsFrameBundle<R, B, F, G, O, M, P>
+impl<R, B, F, G, O, M, P, S> GraphicsFrameBundle<R, B, F, G, O, M, P, S>
 where
     R: GraphicsFrameStatsSource,
     B: GraphicsFrameStatsSource,
@@ -397,6 +403,7 @@ where
             && self.overlay_renderer.is_none()
             && self.minimap_overlay.is_none()
             && self.pixelator.is_none()
+            && self.shader_dispatch.is_none()
             && self.stats.is_empty()
     }
 }
@@ -410,11 +417,12 @@ pub struct FrameComposer<
     O = OverlayRendererPlan,
     M = MinimapOverlayPlan,
     P = PixelatorFramePlan,
+    S = ShaderDispatchFrame,
 > {
-    bundle: GraphicsFrameBundle<R, B, F, G, O, M, P>,
+    bundle: GraphicsFrameBundle<R, B, F, G, O, M, P, S>,
 }
 
-impl<R, B, F, G, O, M, P> Default for FrameComposer<R, B, F, G, O, M, P> {
+impl<R, B, F, G, O, M, P, S> Default for FrameComposer<R, B, F, G, O, M, P, S> {
     fn default() -> Self {
         Self {
             bundle: GraphicsFrameBundle::default(),
@@ -422,16 +430,16 @@ impl<R, B, F, G, O, M, P> Default for FrameComposer<R, B, F, G, O, M, P> {
     }
 }
 
-impl<R, B, F, G, O, M, P> FrameComposer<R, B, F, G, O, M, P> {
+impl<R, B, F, G, O, M, P, S> FrameComposer<R, B, F, G, O, M, P, S> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn bundle(&self) -> &GraphicsFrameBundle<R, B, F, G, O, M, P> {
+    pub fn bundle(&self) -> &GraphicsFrameBundle<R, B, F, G, O, M, P, S> {
         &self.bundle
     }
 
-    pub fn bundle_mut(&mut self) -> &mut GraphicsFrameBundle<R, B, F, G, O, M, P> {
+    pub fn bundle_mut(&mut self) -> &mut GraphicsFrameBundle<R, B, F, G, O, M, P, S> {
         &mut self.bundle
     }
 
@@ -440,7 +448,7 @@ impl<R, B, F, G, O, M, P> FrameComposer<R, B, F, G, O, M, P> {
     }
 }
 
-impl<R, B, F, G, O, M, P> FrameComposer<R, B, F, G, O, M, P>
+impl<R, B, F, G, O, M, P, S> FrameComposer<R, B, F, G, O, M, P, S>
 where
     R: GraphicsFrameStatsSource,
     B: GraphicsFrameStatsSource,
@@ -490,7 +498,12 @@ where
         self.rebuild_stats()
     }
 
-    pub fn finish(mut self) -> GraphicsFrameBundle<R, B, F, G, O, M, P> {
+    pub fn set_shader_dispatch(&mut self, plan: S) -> &mut Self {
+        self.bundle.shader_dispatch = Some(plan);
+        self.rebuild_stats()
+    }
+
+    pub fn finish(mut self) -> GraphicsFrameBundle<R, B, F, G, O, M, P, S> {
         self.bundle.rebuild_stats();
         self.bundle
     }
@@ -505,11 +518,12 @@ pub struct RenderBridge<
     O = OverlayRendererPlan,
     M = MinimapOverlayPlan,
     P = PixelatorFramePlan,
+    S = ShaderDispatchFrame,
 > {
-    composer: FrameComposer<R, B, F, G, O, M, P>,
+    composer: FrameComposer<R, B, F, G, O, M, P, S>,
 }
 
-impl<R, B, F, G, O, M, P> Default for RenderBridge<R, B, F, G, O, M, P> {
+impl<R, B, F, G, O, M, P, S> Default for RenderBridge<R, B, F, G, O, M, P, S> {
     fn default() -> Self {
         Self {
             composer: FrameComposer::default(),
@@ -517,20 +531,20 @@ impl<R, B, F, G, O, M, P> Default for RenderBridge<R, B, F, G, O, M, P> {
     }
 }
 
-impl<R, B, F, G, O, M, P> RenderBridge<R, B, F, G, O, M, P> {
+impl<R, B, F, G, O, M, P, S> RenderBridge<R, B, F, G, O, M, P, S> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn composer(&self) -> &FrameComposer<R, B, F, G, O, M, P> {
+    pub fn composer(&self) -> &FrameComposer<R, B, F, G, O, M, P, S> {
         &self.composer
     }
 
-    pub fn composer_mut(&mut self) -> &mut FrameComposer<R, B, F, G, O, M, P> {
+    pub fn composer_mut(&mut self) -> &mut FrameComposer<R, B, F, G, O, M, P, S> {
         &mut self.composer
     }
 
-    pub fn bundle(&self) -> &GraphicsFrameBundle<R, B, F, G, O, M, P> {
+    pub fn bundle(&self) -> &GraphicsFrameBundle<R, B, F, G, O, M, P, S> {
         self.composer.bundle()
     }
 
@@ -539,7 +553,7 @@ impl<R, B, F, G, O, M, P> RenderBridge<R, B, F, G, O, M, P> {
     }
 }
 
-impl<R, B, F, G, O, M, P> RenderBridge<R, B, F, G, O, M, P>
+impl<R, B, F, G, O, M, P, S> RenderBridge<R, B, F, G, O, M, P, S>
 where
     R: GraphicsFrameStatsSource,
     B: GraphicsFrameStatsSource,
@@ -589,13 +603,19 @@ where
         self
     }
 
-    pub fn finish(self) -> GraphicsFrameBundle<R, B, F, G, O, M, P> {
+    pub fn set_shader_dispatch(&mut self, plan: S) -> &mut Self {
+        self.composer.set_shader_dispatch(plan);
+        self
+    }
+
+    pub fn finish(self) -> GraphicsFrameBundle<R, B, F, G, O, M, P, S> {
         self.composer.finish()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::shaders::{ShaderApplyPlan, ShaderId};
     use super::*;
 
     fn render_frame(pass_commands: &[usize]) -> RenderFramePlan {
@@ -679,6 +699,21 @@ mod tests {
         }
     }
 
+    fn shader_dispatch(applies: usize) -> ShaderDispatchFrame {
+        ShaderDispatchFrame::new(
+            (0..applies)
+                .map(|index| {
+                    let shader = if index % 2 == 0 {
+                        ShaderId::BlockBuild
+                    } else {
+                        ShaderId::Shield
+                    };
+                    ShaderApplyPlan::new(shader)
+                })
+                .collect(),
+        )
+    }
+
     fn total_units(stats: &GraphicsFrameStats) -> usize {
         stats.present_plans
             + stats.render_passes
@@ -708,11 +743,13 @@ mod tests {
     #[test]
     fn empty_bridge_starts_with_zeroed_stats() {
         let bridge: RenderBridge = RenderBridge::new();
-        let stats = bridge.finish().into_stats();
+        let bundle = bridge.finish();
+        let stats = bundle.stats.clone();
 
         assert!(stats.is_empty());
         assert_eq!(stats.present_plans, 0);
         assert_eq!(stats.total_units, 0);
+        assert!(bundle.shader_dispatch.is_none());
     }
 
     #[test]
@@ -825,5 +862,26 @@ mod tests {
         assert_eq!(bundle.stats.pixelator_buffer_pixels, 320 * 240);
         assert_eq!(bundle.stats.render_passes, 1);
         assert_eq!(bundle.stats.render_commands, 1);
+    }
+
+    #[test]
+    fn bridge_carries_shader_dispatch_without_polluting_render_stats() {
+        let mut bridge: RenderBridge = RenderBridge::new();
+
+        bridge
+            .set_render_frame(render_frame(&[2]))
+            .set_shader_dispatch(shader_dispatch(3));
+
+        let bundle = bridge.finish();
+        let dispatch = bundle
+            .shader_dispatch
+            .as_ref()
+            .expect("shader dispatch should be carried");
+
+        assert_eq!(dispatch.applies.len(), 3);
+        assert_eq!(bundle.stats.present_plans, 1);
+        assert_eq!(bundle.stats.render_passes, 1);
+        assert_eq!(bundle.stats.render_commands, 2);
+        assert_eq!(bundle.stats.total_units, total_units(&bundle.stats));
     }
 }

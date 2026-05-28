@@ -759,6 +759,23 @@ impl ShaderApplyPlan {
     }
 }
 
+/// Side-channel frame that batches shader apply plans without folding them into
+/// the ordinary render-pass stream.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ShaderDispatchFrame {
+    pub applies: Vec<ShaderApplyPlan>,
+}
+
+impl ShaderDispatchFrame {
+    pub fn new(applies: Vec<ShaderApplyPlan>) -> Self {
+        Self { applies }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.applies.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShaderPlanError {
     pub shader: Option<ShaderId>,
