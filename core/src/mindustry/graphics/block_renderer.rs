@@ -3,7 +3,7 @@
 //! 这里不持有任何 GPU 资源，只保留 upstream `BlockRenderer` 在
 //! 缓存、绘制顺序、计划预览、暗度与覆盖层上的可序列化数据。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::mindustry::{
     entities::comp::DecalColor,
@@ -187,6 +187,48 @@ impl Default for TileDrawPlan {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BlockRendererTileSnapshot {
+    pub coord: TileCoord,
+    pub block: String,
+    pub cache_layer: CacheLayer,
+    pub draw_custom_shadow: bool,
+    pub emits_light: bool,
+    pub obstructs_light: bool,
+    pub building: Option<BlockRendererBuildingSnapshot>,
+}
+
+impl BlockRendererTileSnapshot {
+    pub fn new(coord: TileCoord, block: impl Into<String>) -> Self {
+        Self {
+            coord,
+            block: block.into(),
+            cache_layer: CacheLayer::None,
+            draw_custom_shadow: false,
+            emits_light: false,
+            obstructs_light: false,
+            building: None,
+        }
+    }
+
+    pub fn to_draw_plan(&self) -> TileDrawPlan {
+        TileDrawPlan {
+            coord: self.coord,
+            block: self.block.clone(),
+            cache_layer: self.cache_layer,
+            draw_custom_shadow: self.draw_custom_shadow,
+            emits_light: self.emits_light,
+            obstructs_light: self.obstructs_light,
+        }
+    }
+}
+
+impl Default for BlockRendererTileSnapshot {
+    fn default() -> Self {
+        Self::new(TileCoord::default(), "")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct TilePassPlan {
     pub stage: BlockDrawStage,
     pub layer: f32,
@@ -242,6 +284,83 @@ impl Default for BuildingDrawPlan {
             draw_status: false,
             emits_light: false,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockRendererBuildingSnapshot {
+    pub coord: TileCoord,
+    pub block: String,
+    pub cache_layer: CacheLayer,
+    pub size: u8,
+    pub rotation: i16,
+    pub team: u8,
+    pub visible: bool,
+    pub was_visible: bool,
+    pub damaged: bool,
+    pub draw_team_overlay: bool,
+    pub draw_status: bool,
+    pub emits_light: bool,
+}
+
+impl BlockRendererBuildingSnapshot {
+    pub fn new(coord: TileCoord, block: impl Into<String>) -> Self {
+        Self {
+            coord,
+            block: block.into(),
+            cache_layer: CacheLayer::None,
+            size: 1,
+            rotation: 0,
+            team: 0,
+            visible: false,
+            was_visible: false,
+            damaged: false,
+            draw_team_overlay: false,
+            draw_status: false,
+            emits_light: false,
+        }
+    }
+
+    pub fn should_draw_base(&self) -> bool {
+        self.visible || self.was_visible
+    }
+
+    pub fn to_draw_plan(&self) -> BuildingDrawPlan {
+        BuildingDrawPlan {
+            coord: self.coord,
+            block: self.block.clone(),
+            cache_layer: self.cache_layer,
+            size: self.size.max(1),
+            rotation: self.rotation,
+            team: self.team,
+            visible: self.visible,
+            was_visible: self.was_visible,
+            damaged: self.damaged,
+            draw_team_overlay: self.draw_team_overlay,
+            draw_status: self.draw_status,
+            emits_light: self.emits_light,
+        }
+    }
+}
+
+impl Default for BlockRendererBuildingSnapshot {
+    fn default() -> Self {
+        Self::new(TileCoord::default(), "")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BlockRendererWorldSnapshot {
+    pub tiles: Vec<BlockRendererTileSnapshot>,
+}
+
+impl BlockRendererWorldSnapshot {
+    pub fn new(tiles: Vec<BlockRendererTileSnapshot>) -> Self {
+        Self { tiles }
+    }
+
+    pub fn tile(&self, coord: TileCoord) -> Option<&BlockRendererTileSnapshot> {
+        self.tiles.iter().find(|tile| tile.coord == coord)
     }
 }
 
@@ -631,31 +750,45 @@ impl BlockRendererState {
     }
 
     pub fn build_plan(&self) -> BlockRendererPlan {
+        self.build_plan_from_snapshot(&BlockRendererWorldSnapshot::default())
+    }
+
+    pub fn build_plan_from_snapshot(
+        &self,
+        snapshot: &BlockRendererWorldSnapshot,
+    ) -> BlockRendererPlan {
         let mut plan = BlockRendererPlan::default();
+        let snapshot_tiles = snapshot_tiles_by_coord(snapshot);
 
         plan.broken_fade = self.broken_fade;
         plan.draw_quadtree_debug = self.draw_quadtree_debug;
         plan.update_floors = self.cache.update_floors.clone();
 
-        if let Some(pass) = build_tile_pass(
+        if let Some(pass) = build_tile_pass_from_snapshot(
             BlockDrawStage::TileBase,
             self.cache.tile_view.iter().copied(),
+            &snapshot_tiles,
         ) {
             plan.tile_passes.push(pass);
         }
 
-        if let Some(pass) = build_tile_pass(
+        if let Some(pass) = build_tile_pass_from_snapshot(
             BlockDrawStage::TileShadow,
             self.cache.shadow_events.iter().copied(),
+            &snapshot_tiles,
         ) {
             plan.tile_passes.push(pass);
         }
 
-        if let Some(pass) =
-            build_tile_pass(BlockDrawStage::Light, self.cache.light_view.iter().copied())
-        {
+        if let Some(pass) = build_tile_pass_from_snapshot(
+            BlockDrawStage::Light,
+            self.cache.light_view.iter().copied(),
+            &snapshot_tiles,
+        ) {
             plan.tile_passes.push(pass);
         }
+
+        append_building_passes_from_snapshot(&mut plan, self, &snapshot_tiles);
 
         if !self.cache.dark_events.is_empty() {
             plan.darkness.dirty_tiles = self.cache.dark_events.iter().copied().collect();
@@ -770,17 +903,40 @@ const fn blend_shadow_color(alpha: f32) -> DecalColor {
     }
 }
 
-fn build_tile_pass<I>(stage: BlockDrawStage, coords: I) -> Option<TilePassPlan>
+fn snapshot_tiles_by_coord(
+    snapshot: &BlockRendererWorldSnapshot,
+) -> BTreeMap<TileCoord, &BlockRendererTileSnapshot> {
+    snapshot
+        .tiles
+        .iter()
+        .map(|tile| (tile.coord, tile))
+        .collect()
+}
+
+fn tile_draw_plan_from_snapshot(
+    coord: TileCoord,
+    snapshot_tiles: &BTreeMap<TileCoord, &BlockRendererTileSnapshot>,
+) -> TileDrawPlan {
+    snapshot_tiles
+        .get(&coord)
+        .map(|tile| tile.to_draw_plan())
+        .unwrap_or_else(|| TileDrawPlan {
+            coord,
+            ..TileDrawPlan::default()
+        })
+}
+
+fn build_tile_pass_from_snapshot<I>(
+    stage: BlockDrawStage,
+    coords: I,
+    snapshot_tiles: &BTreeMap<TileCoord, &BlockRendererTileSnapshot>,
+) -> Option<TilePassPlan>
 where
     I: IntoIterator<Item = TileCoord>,
 {
     let tiles = coords
         .into_iter()
-        .map(|coord| TileDrawPlan {
-            coord,
-            // 这里仅承载坐标与阶段，不伪造具体 block 细节。
-            ..TileDrawPlan::default()
-        })
+        .map(|coord| tile_draw_plan_from_snapshot(coord, snapshot_tiles))
         .collect::<Vec<_>>();
 
     if tiles.is_empty() {
@@ -791,6 +947,76 @@ where
             layer: stage.layer(),
             tiles,
         })
+    }
+}
+
+fn append_building_passes_from_snapshot(
+    plan: &mut BlockRendererPlan,
+    state: &BlockRendererState,
+    snapshot_tiles: &BTreeMap<TileCoord, &BlockRendererTileSnapshot>,
+) {
+    let buildings = state
+        .cache
+        .tile_view
+        .iter()
+        .filter_map(|coord| snapshot_tiles.get(coord))
+        .filter_map(|tile| tile.building.as_ref())
+        .filter(|building| building.should_draw_base())
+        .map(BlockRendererBuildingSnapshot::to_draw_plan)
+        .collect::<Vec<_>>();
+
+    push_building_pass(
+        plan,
+        BlockDrawStage::BuildingBase,
+        buildings.iter().cloned(),
+    );
+    push_building_pass(
+        plan,
+        BlockDrawStage::BuildingCracks,
+        buildings
+            .iter()
+            .filter(|building| building.damaged)
+            .cloned(),
+    );
+    push_building_pass(
+        plan,
+        BlockDrawStage::BuildingTeamOverlay,
+        buildings
+            .iter()
+            .filter(|building| building.draw_team_overlay)
+            .cloned(),
+    );
+    push_building_pass(
+        plan,
+        BlockDrawStage::BuildingStatus,
+        buildings
+            .iter()
+            .filter(|building| building.draw_status)
+            .cloned(),
+    );
+
+    let light_buildings = state
+        .cache
+        .light_view
+        .iter()
+        .filter_map(|coord| snapshot_tiles.get(coord))
+        .filter_map(|tile| tile.building.as_ref())
+        .filter(|building| building.emits_light)
+        .map(BlockRendererBuildingSnapshot::to_draw_plan);
+    push_building_pass(plan, BlockDrawStage::Light, light_buildings);
+}
+
+fn push_building_pass<I>(plan: &mut BlockRendererPlan, stage: BlockDrawStage, buildings: I)
+where
+    I: IntoIterator<Item = BuildingDrawPlan>,
+{
+    let buildings = buildings.into_iter().collect::<Vec<_>>();
+    if !buildings.is_empty() {
+        plan.building_passes.push(BuildingPassPlan {
+            stage,
+            layer: stage.layer(),
+            buildings,
+        });
     }
 }
 
@@ -1010,5 +1236,175 @@ mod tests {
             .overlays
             .iter()
             .all(|overlay| overlay.kind == OverlayKind::DebugBounds));
+    }
+
+    #[test]
+    fn build_plan_from_snapshot_populates_real_tile_fields() {
+        let mut state = BlockRendererState::default();
+        state.cache.tile_view = vec![TileCoord::new(1, 1), TileCoord::new(9, 9)];
+        state.cache.light_view = vec![TileCoord::new(2, 2)];
+        state.cache.shadow_events.insert(TileCoord::new(3, 3));
+
+        let mut visible = BlockRendererTileSnapshot::new(TileCoord::new(1, 1), "router");
+        visible.cache_layer = CacheLayer::Normal;
+        visible.draw_custom_shadow = true;
+        visible.emits_light = false;
+        visible.obstructs_light = true;
+
+        let mut light = BlockRendererTileSnapshot::new(TileCoord::new(2, 2), "illuminator");
+        light.cache_layer = CacheLayer::Normal;
+        light.emits_light = true;
+        light.obstructs_light = false;
+
+        let mut shadow = BlockRendererTileSnapshot::new(TileCoord::new(3, 3), "copper-wall");
+        shadow.cache_layer = CacheLayer::Walls;
+        shadow.draw_custom_shadow = true;
+        shadow.obstructs_light = true;
+
+        let snapshot = BlockRendererWorldSnapshot::new(vec![visible, light, shadow]);
+        let plan = state.build_plan_from_snapshot(&snapshot);
+
+        let tile_base = &plan.tile_passes[0].tiles;
+        assert_eq!(tile_base[0].coord, TileCoord::new(1, 1));
+        assert_eq!(tile_base[0].block, "router");
+        assert_eq!(tile_base[0].cache_layer, CacheLayer::Normal);
+        assert!(tile_base[0].draw_custom_shadow);
+        assert!(tile_base[0].obstructs_light);
+
+        // Missing snapshot data keeps the old coord-only fallback explicit.
+        assert_eq!(tile_base[1].coord, TileCoord::new(9, 9));
+        assert_eq!(tile_base[1].block, "");
+        assert_eq!(tile_base[1].cache_layer, CacheLayer::None);
+
+        assert_eq!(plan.tile_passes[1].stage, BlockDrawStage::TileShadow);
+        assert_eq!(plan.tile_passes[1].tiles[0].block, "copper-wall");
+        assert_eq!(plan.tile_passes[1].tiles[0].cache_layer, CacheLayer::Walls);
+        assert!(plan.tile_passes[1].tiles[0].draw_custom_shadow);
+
+        assert_eq!(plan.tile_passes[2].stage, BlockDrawStage::Light);
+        assert_eq!(plan.tile_passes[2].tiles[0].block, "illuminator");
+        assert!(plan.tile_passes[2].tiles[0].emits_light);
+        assert!(!plan.tile_passes[2].tiles[0].obstructs_light);
+    }
+
+    #[test]
+    fn build_plan_from_snapshot_populates_building_pass_fields() {
+        let mut state = BlockRendererState::default();
+        state.cache.tile_view = vec![
+            TileCoord::new(4, 4),
+            TileCoord::new(5, 5),
+            TileCoord::new(6, 6),
+        ];
+        state.cache.light_view = vec![TileCoord::new(4, 4)];
+
+        let mut damaged_building = BlockRendererBuildingSnapshot::new(TileCoord::new(4, 4), "duo");
+        damaged_building.cache_layer = CacheLayer::Normal;
+        damaged_building.size = 2;
+        damaged_building.rotation = 3;
+        damaged_building.team = 7;
+        damaged_building.visible = true;
+        damaged_building.damaged = true;
+        damaged_building.draw_team_overlay = true;
+        damaged_building.draw_status = true;
+        damaged_building.emits_light = true;
+
+        let mut remembered_building =
+            BlockRendererBuildingSnapshot::new(TileCoord::new(5, 5), "mender");
+        remembered_building.rotation = 1;
+        remembered_building.team = 2;
+        remembered_building.visible = false;
+        remembered_building.was_visible = true;
+        remembered_building.draw_status = true;
+
+        let mut hidden_building =
+            BlockRendererBuildingSnapshot::new(TileCoord::new(6, 6), "hidden-core");
+        hidden_building.visible = false;
+        hidden_building.was_visible = false;
+        hidden_building.damaged = true;
+
+        let snapshot = BlockRendererWorldSnapshot::new(vec![
+            BlockRendererTileSnapshot {
+                coord: TileCoord::new(4, 4),
+                block: "duo".into(),
+                cache_layer: CacheLayer::Normal,
+                draw_custom_shadow: false,
+                emits_light: true,
+                obstructs_light: true,
+                building: Some(damaged_building),
+            },
+            BlockRendererTileSnapshot {
+                coord: TileCoord::new(5, 5),
+                block: "mender".into(),
+                cache_layer: CacheLayer::Normal,
+                draw_custom_shadow: false,
+                emits_light: false,
+                obstructs_light: true,
+                building: Some(remembered_building),
+            },
+            BlockRendererTileSnapshot {
+                coord: TileCoord::new(6, 6),
+                block: "hidden-core".into(),
+                cache_layer: CacheLayer::Normal,
+                draw_custom_shadow: false,
+                emits_light: false,
+                obstructs_light: true,
+                building: Some(hidden_building),
+            },
+        ]);
+
+        let plan = state.build_plan_from_snapshot(&snapshot);
+
+        assert_eq!(plan.building_passes.len(), 5);
+        assert_eq!(plan.building_passes[0].stage, BlockDrawStage::BuildingBase);
+        assert_eq!(plan.building_passes[0].buildings.len(), 2);
+
+        let duo = &plan.building_passes[0].buildings[0];
+        assert_eq!(duo.block, "duo");
+        assert_eq!(duo.cache_layer, CacheLayer::Normal);
+        assert_eq!(duo.size, 2);
+        assert_eq!(duo.rotation, 3);
+        assert_eq!(duo.team, 7);
+        assert!(duo.visible);
+        assert!(duo.damaged);
+        assert!(duo.draw_team_overlay);
+        assert!(duo.draw_status);
+        assert!(duo.emits_light);
+
+        let remembered = &plan.building_passes[0].buildings[1];
+        assert_eq!(remembered.block, "mender");
+        assert!(!remembered.visible);
+        assert!(remembered.was_visible);
+        assert_eq!(remembered.rotation, 1);
+        assert_eq!(remembered.team, 2);
+
+        assert_eq!(
+            plan.building_passes[1].stage,
+            BlockDrawStage::BuildingCracks
+        );
+        assert_eq!(plan.building_passes[1].buildings[0].block, "duo");
+        assert_eq!(
+            plan.building_passes[2].stage,
+            BlockDrawStage::BuildingTeamOverlay
+        );
+        assert_eq!(plan.building_passes[2].buildings[0].block, "duo");
+        assert_eq!(
+            plan.building_passes[3].stage,
+            BlockDrawStage::BuildingStatus
+        );
+        assert_eq!(
+            plan.building_passes[3]
+                .buildings
+                .iter()
+                .map(|building| building.block.as_str())
+                .collect::<Vec<_>>(),
+            vec!["duo", "mender"]
+        );
+        assert_eq!(plan.building_passes[4].stage, BlockDrawStage::Light);
+        assert_eq!(plan.building_passes[4].buildings[0].block, "duo");
+        assert!(plan
+            .building_passes
+            .iter()
+            .flat_map(|pass| pass.buildings.iter())
+            .all(|building| building.block != "hidden-core"));
     }
 }
