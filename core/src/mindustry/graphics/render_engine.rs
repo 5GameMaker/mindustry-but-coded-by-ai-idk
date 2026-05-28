@@ -463,6 +463,98 @@ impl RenderPassKind {
             Self::Custom(_) => 1_000,
         }
     }
+
+    pub const fn java_renderer_draw_stage(&self) -> RendererDrawStage {
+        match self {
+            Self::Background => RendererDrawStage::Background,
+            Self::Floor => RendererDrawStage::Floor,
+            Self::Block => RendererDrawStage::BlockShadows,
+            Self::Overlay => RendererDrawStage::Overlay,
+            Self::Minimap => RendererDrawStage::Debug,
+            Self::Lighting => RendererDrawStage::Lighting,
+            Self::Ui => RendererDrawStage::Ui,
+            Self::Custom(_) => RendererDrawStage::Debug,
+        }
+    }
+
+    pub const fn java_renderer_draw_rank(&self) -> i32 {
+        self.java_renderer_draw_stage().sort_key()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RendererDrawStage {
+    Background,
+    Floor,
+    BlockShadows,
+    BlockWalls,
+    BlockBuild,
+    Environment,
+    Lighting,
+    Darkness,
+    Overlay,
+    Fog,
+    BlockOverdraw,
+    Ui,
+    Debug,
+}
+
+impl RendererDrawStage {
+    pub const ORDERED: [Self; 13] = [
+        Self::Background,
+        Self::Floor,
+        Self::BlockShadows,
+        Self::BlockWalls,
+        Self::BlockBuild,
+        Self::Environment,
+        Self::Lighting,
+        Self::Darkness,
+        Self::Overlay,
+        Self::Fog,
+        Self::BlockOverdraw,
+        Self::Ui,
+        Self::Debug,
+    ];
+
+    pub const fn ordered() -> &'static [Self; 13] {
+        &Self::ORDERED
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Background => "background",
+            Self::Floor => "floor",
+            Self::BlockShadows => "block_shadow",
+            Self::BlockWalls => "block_walls",
+            Self::BlockBuild => "block_build",
+            Self::Environment => "env",
+            Self::Lighting => "light",
+            Self::Darkness => "darkness",
+            Self::Overlay => "overlay",
+            Self::Fog => "fog",
+            Self::BlockOverdraw => "block_overdraw",
+            Self::Ui => "ui",
+            Self::Debug => "debug",
+        }
+    }
+
+    pub const fn sort_key(self) -> i32 {
+        match self {
+            Self::Background => 0,
+            Self::Floor => 10,
+            Self::BlockShadows => 20,
+            Self::BlockWalls => 30,
+            Self::BlockBuild => 40,
+            Self::Environment => 50,
+            Self::Lighting => 60,
+            Self::Darkness => 70,
+            Self::Overlay => 80,
+            Self::Fog => 90,
+            Self::BlockOverdraw => 100,
+            Self::Ui => 110,
+            Self::Debug => 120,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -559,6 +651,11 @@ impl RenderFramePlan {
         self.passes.sort_by_key(|pass| pass.order);
     }
 
+    pub fn sort_passes_like_java_renderer_draw(&mut self) {
+        self.passes
+            .sort_by_key(|pass| (pass.kind.java_renderer_draw_rank(), pass.order));
+    }
+
     pub fn pass(&self, kind: &RenderPassKind) -> Option<&RenderPass> {
         self.passes.iter().find(|pass| &pass.kind == kind)
     }
@@ -573,6 +670,24 @@ impl RenderFramePlan {
 
     pub fn commands(&self) -> impl Iterator<Item = &RenderCommand> {
         self.passes.iter().flat_map(|pass| pass.commands.iter())
+    }
+
+    pub const fn java_renderer_draw_stages() -> &'static [RendererDrawStage; 13] {
+        RendererDrawStage::ordered()
+    }
+
+    pub fn matches_java_renderer_draw_order(&self) -> bool {
+        let mut previous_rank = i32::MIN;
+
+        for pass in &self.passes {
+            let rank = pass.kind.java_renderer_draw_rank();
+            if rank < previous_rank {
+                return false;
+            }
+            previous_rank = rank;
+        }
+
+        true
     }
 }
 
@@ -709,6 +824,122 @@ mod tests {
         assert_eq!(plan.passes[2].kind, RenderPassKind::Minimap);
         assert_eq!(plan.command_count(), 4);
         assert_eq!(plan.commands().count(), 4);
+    }
+
+    #[test]
+    fn full_frame_order_matches_java_renderer_draw() {
+        let expected = [
+            RendererDrawStage::Background,
+            RendererDrawStage::Floor,
+            RendererDrawStage::BlockShadows,
+            RendererDrawStage::BlockWalls,
+            RendererDrawStage::BlockBuild,
+            RendererDrawStage::Environment,
+            RendererDrawStage::Lighting,
+            RendererDrawStage::Darkness,
+            RendererDrawStage::Overlay,
+            RendererDrawStage::Fog,
+            RendererDrawStage::BlockOverdraw,
+            RendererDrawStage::Ui,
+            RendererDrawStage::Debug,
+        ];
+
+        assert_eq!(RendererDrawStage::ordered(), &expected);
+        assert_eq!(RenderFramePlan::java_renderer_draw_stages(), &expected);
+        assert_eq!(
+            expected
+                .iter()
+                .map(|stage| stage.label())
+                .collect::<Vec<_>>(),
+            vec![
+                "background",
+                "floor",
+                "block_shadow",
+                "block_walls",
+                "block_build",
+                "env",
+                "light",
+                "darkness",
+                "overlay",
+                "fog",
+                "block_overdraw",
+                "ui",
+                "debug",
+            ]
+        );
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 72.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 8.0), viewport);
+        let mut state = RenderEngineState::new(RenderSize::new(256.0, 256.0), camera);
+        state.begin_frame(7);
+
+        let overlay = state.push_pass(RenderPass::new(RenderPassKind::Overlay).with_order(40));
+        let floor = state.push_pass(RenderPass::new(RenderPassKind::Floor).with_order(10));
+        let block = state.push_pass(RenderPass::new(RenderPassKind::Block).with_order(20));
+        let ui = state.push_pass(RenderPass::new(RenderPassKind::Ui).with_order(50));
+        let lighting = state.push_pass(RenderPass::new(RenderPassKind::Lighting).with_order(30));
+        let background = state.push_pass(RenderPass::new(RenderPassKind::Background).with_order(0));
+
+        state
+            .pass_mut(background)
+            .unwrap()
+            .push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        state
+            .pass_mut(floor)
+            .unwrap()
+            .push(RenderCommand::fill_rect(
+                RenderRect::new(0.0, 0.0, 8.0, 8.0),
+                [0.25, 0.25, 0.25, 1.0],
+                10.0,
+            ));
+        state
+            .pass_mut(block)
+            .unwrap()
+            .push(RenderCommand::draw_sprite(
+                "block-core",
+                RenderRect::new(4.0, 4.0, 8.0, 8.0),
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                20.0,
+            ));
+        state
+            .pass_mut(lighting)
+            .unwrap()
+            .push(RenderCommand::draw_circle(
+                RenderPoint::new(8.0, 8.0),
+                2.0,
+                [1.0, 1.0, 0.8, 1.0],
+                true,
+                60.0,
+            ));
+        state
+            .pass_mut(overlay)
+            .unwrap()
+            .push(RenderCommand::draw_text(
+                "overlay",
+                RenderPoint::new(2.0, 2.0),
+                [1.0, 1.0, 1.0, 1.0],
+                12.0,
+                0.0,
+                RenderTextAlign::Start,
+                80.0,
+            ));
+        state.pass_mut(ui).unwrap().push(RenderCommand::custom(
+            "debug-ui",
+            vec![RenderProperty::new("stage", "ui")],
+        ));
+
+        let mut plan = state.finish();
+        plan.sort_passes_like_java_renderer_draw();
+
+        assert_eq!(
+            plan.passes
+                .iter()
+                .map(|pass| pass.kind.label())
+                .collect::<Vec<_>>(),
+            vec!["background", "floor", "block", "lighting", "overlay", "ui"]
+        );
+        assert!(plan.matches_java_renderer_draw_order());
     }
 
     #[test]
