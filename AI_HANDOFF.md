@@ -7764,3 +7764,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. helix mover 目前只在 server authoritative bullet lifecycle 生效，客户端本地预测层仍需补；
   3. content 方向子代理建议：先回填 dagger/mace，再处理 beta/nova/quasar 的 `collides_team` / `scale_keep_velocity` / LaserBolt 默认字段缺口；
   4. 当前总迁移约 12.55%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 230. 最新闭环记录：UnitTypes dagger large-weapon content registry seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 用户额外要求：`README.md` 已按要求完善工程说明，并保留空的 `## 作者的话` 栏目；但**本闭环不提交不推送 README**，等用户明确要求“推送 README”时再包含它。
+- 本轮目标：把 Java `UnitTypes.java` 中 `dagger` 的 `large-weapon` 和匿名 `BasicBulletType(2.5f, 9)` 回填进 Rust content registry，并确认 unit weapon 通过 bullet 名称接到真实 bullet preset。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:99-117`
+  - weapon：`large-weapon`，`reload=13`、`x=4`、`y=2`、`top=false`、`ejectEffect=Fx.casing1`
+  - bullet：`BasicBulletType(2.5f, 9)`，`width=7`、`height=9`、`lifetime=60`
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `dagger_basic`；
+    - 更新 bullet load order 测试；
+    - 新增 `dagger_basic_bullet_matches_java_basic_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `dagger` 追加 `Weapon::new("large-weapon")`；
+    - weapon 引用 `bullet = "dagger_basic"`，并设置 `reload/x/y/top/eject_effect`；
+    - 新增 `dagger_large_weapon_uses_casing1_and_basic_bullet_profile`，同时验证 unit weapon 与 bullet registry 引用链。
+  - `MIGRATION.md`
+    - 新增 `12.304`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core dagger_basic_bullet_matches_java_basic_profile --lib`
+  - `cargo test -p mindustry-core dagger_large_weapon_uses_casing1_and_basic_bullet_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一闭环建议优先回填 `mace` 的 `flamethrower` 与 `mace_flame`，该组大多可用现有 `BulletSpec` 表达；
+  2. 然后处理 `quasar` 的 `beam-weapon` / `LaserBulletType`；
+  3. `beta` / `nova` 需要补 `LaserBolt`、`scale_keep_velocity`、`heal_percent`、`collides_team` 等 schema；
+  4. README 当前有未提交改动，除非用户明确要求，否则迁移提交时继续排除它；
+  5. 当前总迁移约 12.6%，远未可玩，goal 绝不能标记 complete。

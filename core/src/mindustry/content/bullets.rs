@@ -44,6 +44,12 @@ pub fn load() -> Vec<BulletContent> {
     placeholder.lifetime = 60.0;
     placeholder.ammo_multiplier = 2.0;
 
+    let mut dagger_basic = basic_bullet(2.5, 9.0);
+    dagger_basic.width = 7.0;
+    dagger_basic.height = 9.0;
+    dagger_basic.lifetime = 60.0;
+    dagger_basic.ammo_multiplier = 2.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -84,6 +90,7 @@ pub fn load() -> Vec<BulletContent> {
 
     vec![
         make_bullet(&mut next_id, "placeholder", placeholder),
+        make_bullet(&mut next_id, "dagger_basic", dagger_basic),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -134,6 +141,7 @@ mod tests {
             names,
             vec![
                 "placeholder",
+                "dagger_basic",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -163,6 +171,26 @@ mod tests {
         assert_eq!(placeholder.ammo_multiplier, 2.0);
         assert_eq!(placeholder.hit_effect, "hitBulletSmall");
         assert_eq!(placeholder.despawn_effect, "hitBulletSmall");
+    }
+
+    #[test]
+    fn dagger_basic_bullet_matches_java_basic_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "dagger_basic").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Basic);
+        assert_eq!(bullet.speed, 2.5);
+        assert_eq!(bullet.damage, 9.0);
+        assert_eq!(bullet.sprite, "bullet");
+        assert_eq!(bullet.width, 7.0);
+        assert_eq!(bullet.height, 9.0);
+        assert_eq!(bullet.lifetime, 60.0);
+        assert_eq!(bullet.ammo_multiplier, 2.0);
+        assert_eq!(bullet.shrink_y, 0.5);
+        assert_eq!(bullet.back_color, "bulletYellowBack");
+        assert_eq!(bullet.front_color, "bulletYellow");
+        assert_eq!(bullet.hit_effect, "hitBulletSmall");
+        assert_eq!(bullet.despawn_effect, "hitBulletSmall");
     }
 
     #[test]

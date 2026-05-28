@@ -1,5 +1,5 @@
 use crate::mindustry::{
-    ctype::{Content, ContentId, ContentType},
+    ctype::ContentId,
     r#type::{
         unit::{
             erekir_unit_type::apply_erekir_unit_type_defaults,
@@ -7,7 +7,7 @@ use crate::mindustry::{
             neoplasm_unit_type::apply_neoplasm_unit_type_defaults,
             tank_unit_type::apply_tank_unit_type_defaults,
         },
-        UnitType,
+        UnitType, Weapon,
     },
     world::meta::Env,
 };
@@ -33,6 +33,14 @@ pub fn load() -> Vec<UnitType> {
             u.hit_size = 8.0;
             u.health = 150.0;
             u.step_sound_volume = 0.4;
+            let mut weapon = Weapon::new("large-weapon");
+            weapon.reload = 13.0;
+            weapon.x = 4.0;
+            weapon.y = 2.0;
+            weapon.top = false;
+            weapon.eject_effect = "casing1".into();
+            weapon.bullet = "dagger_basic".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "mace", UnitKind::Standard, |u| {
             u.speed = 0.5;
@@ -1012,6 +1020,11 @@ const LAYER_EFFECT: f32 = 110.0;
 
 #[cfg(test)]
 mod tests {
+    use crate::mindustry::{
+        content::{blocks::BulletKind, bullets},
+        ctype::{Content, ContentType},
+    };
+
     use super::*;
 
     fn names(units: &[UnitType]) -> Vec<&str> {
@@ -1189,6 +1202,34 @@ mod tests {
         }
         let evoke = by_name(&units, "evoke");
         assert_eq!(evoke.default_command.as_deref(), Some("move"));
+    }
+
+    #[test]
+    fn dagger_large_weapon_uses_casing1_and_basic_bullet_profile() {
+        let units = load();
+        let dagger = by_name(&units, "dagger");
+        assert_eq!(dagger.weapons.len(), 1);
+
+        let weapon = &dagger.weapons[0];
+        assert_eq!(weapon.name, "large-weapon");
+        assert_eq!(weapon.reload, 13.0);
+        assert_eq!(weapon.x, 4.0);
+        assert_eq!(weapon.y, 2.0);
+        assert!(!weapon.top);
+        assert_eq!(weapon.eject_effect, "casing1");
+        assert_eq!(weapon.bullet, "dagger_basic");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing dagger weapon bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Basic);
+        assert_eq!(bullet.spec.speed, 2.5);
+        assert_eq!(bullet.spec.damage, 9.0);
+        assert_eq!(bullet.spec.width, 7.0);
+        assert_eq!(bullet.spec.height, 9.0);
+        assert_eq!(bullet.spec.lifetime, 60.0);
     }
 
     #[test]

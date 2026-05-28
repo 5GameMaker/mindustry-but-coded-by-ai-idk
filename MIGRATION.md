@@ -9638,3 +9638,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - helix mover 已接 server authoritative bullet movement，但客户端本地预测/显示层尚未携带 mover；目前依赖 server EntitySnapshot 同步位置；
   - delayed branch 对 `mount.barrelCounter` 临时恢复、recoil/heat/eject/sound/effect 的精确时序仍未完全复现；
   - 当前总体迁移约 12.55%，远未可玩。
+
+### 12.304 UnitTypes dagger large-weapon content registry seam
+
+- 2026-05-28：开始把 `UnitTypes.java` 中匿名 weapon/bullet content 回填到 Rust content registry；本闭环优先完成 `dagger` 的 `large-weapon` 与对应 BasicBulletType，并让 `UnitType.weapons` 引用具名 bullet preset，避免单位、子弹数据成为互不连接的独立模块。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:99-117`
+  - `dagger`：`researchCostMultiplier = 0.5f`、`speed = 0.5f`、`hitSize = 8f`、`health = 150`、`stepSoundVolume = 0.4f`
+  - weapon：`new Weapon("large-weapon")`，`reload = 13f`、`x = 4f`、`y = 2f`、`top = false`、`ejectEffect = Fx.casing1`
+  - bullet：`new BasicBulletType(2.5f, 9)`，`width = 7f`、`height = 9f`、`lifetime = 60f`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增具名 bullet preset `dagger_basic`；
+    - 复用 `basic_bullet(2.5, 9.0)` 默认值，并覆盖 `width = 7.0`、`height = 9.0`、`lifetime = 60.0`、`ammo_multiplier = 2.0`；
+    - 更新 bullet registry 顺序测试，新增 `dagger_basic_bullet_matches_java_basic_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `dagger` 现在注册 `Weapon::new("large-weapon")`；
+    - weapon 填入 `reload/x/y/top/eject_effect/bullet`，其中 `bullet = "dagger_basic"`；
+    - 新增 `dagger_large_weapon_uses_casing1_and_basic_bullet_profile`，确认 `UnitType.weapons` 与 content bullet registry 能互相解析。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core dagger_basic_bullet_matches_java_basic_profile --lib`
+  - `cargo test -p mindustry-core dagger_large_weapon_uses_casing1_and_basic_bullet_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `mace` / `beta` / `nova` / `quasar` 等 UnitTypes weapon/bullet 仍待继续回填；
+  - `beta` / `nova` 后续需要补 `LaserBolt`、`scale_keep_velocity`、`heal_percent`、`collides_team` 等 content bullet schema；
+  - 当前只是接入 dagger 的 content registry seam，完整可玩性、客户端表现、Java 联机兼容仍远未完成；
+  - 当前总体迁移约 12.6%，远未可玩。
