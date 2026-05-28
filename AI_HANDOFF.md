@@ -7957,3 +7957,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `heal_percent/collides_team` 仍只是 content/schema/registry 层，友方治疗 collision runtime 未实现；
   3. `LaserBolt` 绘制、trail、homing、颜色特效和 `scale_keep_velocity` runtime 仍待接入；
   4. 当前总迁移约 12.8%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 235. 最新闭环记录：UnitTypes fortress artillery content registry seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `fortress` 的 `artillery` 和 `ArtilleryBulletType(2f, 20, "shell")` 回填进 Rust content registry，并补出 `BulletSpec.max_range` 记录 Java `maxRange`。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:152-186`
+  - weapon：`artillery`，`top=false`、`y=1`、`x=9`、`reload=60`、`recoil=4`、`shake=2`、`ejectEffect=Fx.casing2`、`shootSound=Sounds.shootArtillery`
+  - bullet：`ArtilleryBulletType(2, 20, "shell")`，`hitEffect=Fx.blastExplosion`、`knockback=0.8`、`lifetime=106.5`、`maxRange=240`、`width=height=14`、`collides=true`、`collidesTiles=true`、`splashDamageRadius=35`、`splashDamage=80`、`backColor=Pal.bulletYellowBack`、`frontColor=Pal.bulletYellow`
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `max_range`，默认 `-1.0`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `artillery_bullet(...)` helper；
+    - 新增 `fortress_artillery`；
+    - 更新 bullet load order 测试；
+    - 新增 `fortress_artillery_matches_java_artillery_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `fortress` 追加 `Weapon::new("artillery")`；
+    - weapon 引用 `bullet = "fortress_artillery"`，并设置 Java weapon 字段；
+    - 新增 `fortress_artillery_weapon_uses_artillery_bullet_profile`。
+  - `MIGRATION.md`
+    - 新增 `12.309`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core fortress_artillery_matches_java_artillery_profile --lib`
+  - `cargo test -p mindustry-core fortress_artillery_weapon_uses_artillery_bullet_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一闭环建议按子代理推荐做 `pulsar`，验证 `LightningBulletType + nested lightningType`；
+  2. 然后 `reign` 验证 `fragBullet` 递归分裂；
+  3. 最后 `scepter` 处理主武器 + 两个 mount + intervalBullet + 共享 smallBullet；
+  4. 当前总迁移约 12.85%，远未可玩，goal 绝不能标记 complete。

@@ -101,6 +101,20 @@ pub fn load() -> Vec<BulletContent> {
     nova_heal_bolt.back_color = "heal".into();
     nova_heal_bolt.front_color = "white".into();
 
+    let mut fortress_artillery = artillery_bullet(2.0, 20.0, "shell");
+    fortress_artillery.hit_effect = "blastExplosion".into();
+    fortress_artillery.knockback = 0.8;
+    fortress_artillery.lifetime = 120.0 - (35.0 - 8.0) / 2.0;
+    fortress_artillery.max_range = 240.0;
+    fortress_artillery.width = 14.0;
+    fortress_artillery.height = 14.0;
+    fortress_artillery.collides = true;
+    fortress_artillery.collides_tiles = true;
+    fortress_artillery.splash_damage_radius = 35.0;
+    fortress_artillery.splash_damage = 80.0;
+    fortress_artillery.back_color = "bulletYellowBack".into();
+    fortress_artillery.front_color = "bulletYellow".into();
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -146,6 +160,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "quasar_beam", quasar_beam),
         make_bullet(&mut next_id, "beta_laser_bolt", beta_laser_bolt),
         make_bullet(&mut next_id, "nova_heal_bolt", nova_heal_bolt),
+        make_bullet(&mut next_id, "fortress_artillery", fortress_artillery),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -223,6 +238,25 @@ fn laser_bolt_bullet(speed: f32, damage: f32) -> BulletSpec {
     bullet
 }
 
+fn artillery_bullet(speed: f32, damage: f32, sprite: &str) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Artillery, speed, damage);
+    bullet.sprite = sprite.into();
+    bullet.collides_tiles = false;
+    bullet.collides = false;
+    bullet.collides_air = false;
+    bullet.scale_life = true;
+    bullet.hit_shake = 1.0;
+    bullet.hit_sound = "explosionArtillery".into();
+    bullet.hit_effect = "flakExplosion".into();
+    bullet.shoot_effect = "shootBig".into();
+    bullet.trail_effect = "artilleryTrail".into();
+    bullet.shrink_x = 0.15;
+    bullet.shrink_y = 0.5;
+    bullet.back_color = "bulletYellowBack".into();
+    bullet.front_color = "bulletYellow".into();
+    bullet
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +281,7 @@ mod tests {
                 "quasar_beam",
                 "beta_laser_bolt",
                 "nova_heal_bolt",
+                "fortress_artillery",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -405,6 +440,37 @@ mod tests {
         assert!(!bullet.hittable);
         assert!(!bullet.reflectable);
         assert_eq!(bullet.light_opacity, 0.6);
+    }
+
+    #[test]
+    fn fortress_artillery_matches_java_artillery_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "fortress_artillery").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Artillery);
+        assert_eq!(bullet.speed, 2.0);
+        assert_eq!(bullet.damage, 20.0);
+        assert_eq!(bullet.sprite, "shell");
+        assert_eq!(bullet.hit_effect, "blastExplosion");
+        assert_eq!(bullet.knockback, 0.8);
+        assert_eq!(bullet.lifetime, 106.5);
+        assert_eq!(bullet.max_range, 240.0);
+        assert_eq!(bullet.width, 14.0);
+        assert_eq!(bullet.height, 14.0);
+        assert!(bullet.collides);
+        assert!(bullet.collides_tiles);
+        assert_eq!(bullet.splash_damage_radius, 35.0);
+        assert_eq!(bullet.splash_damage, 80.0);
+        assert_eq!(bullet.back_color, "bulletYellowBack");
+        assert_eq!(bullet.front_color, "bulletYellow");
+        assert!(!bullet.collides_air);
+        assert!(bullet.scale_life);
+        assert_eq!(bullet.hit_shake, 1.0);
+        assert_eq!(bullet.hit_sound, "explosionArtillery");
+        assert_eq!(bullet.shoot_effect, "shootBig");
+        assert_eq!(bullet.trail_effect, "artilleryTrail");
+        assert_eq!(bullet.shrink_x, 0.15);
+        assert_eq!(bullet.shrink_y, 0.5);
     }
 
     #[test]

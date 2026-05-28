@@ -71,6 +71,17 @@ pub fn load() -> Vec<UnitType> {
             u.step_sound = "mechStepSmall".into();
             u.step_sound_pitch = 0.8;
             u.step_sound_volume = 0.65;
+            let mut weapon = Weapon::new("artillery");
+            weapon.top = false;
+            weapon.y = 1.0;
+            weapon.x = 9.0;
+            weapon.reload = 60.0;
+            weapon.recoil = 4.0;
+            weapon.shake = 2.0;
+            weapon.eject_effect = "casing2".into();
+            weapon.shoot_sound = "shootArtillery".into();
+            weapon.bullet = "fortress_artillery".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "scepter", UnitKind::Standard, |u| {
             u.speed = 0.36;
@@ -1403,6 +1414,37 @@ mod tests {
         assert!(bullet.spec.collides_team);
         assert_eq!(bullet.spec.back_color, "heal");
         assert_eq!(bullet.spec.front_color, "white");
+    }
+
+    #[test]
+    fn fortress_artillery_weapon_uses_artillery_bullet_profile() {
+        let units = load();
+        let fortress = by_name(&units, "fortress");
+        assert_eq!(fortress.weapons.len(), 1);
+
+        let weapon = &fortress.weapons[0];
+        assert_eq!(weapon.name, "artillery");
+        assert!(!weapon.top);
+        assert_eq!(weapon.y, 1.0);
+        assert_eq!(weapon.x, 9.0);
+        assert_eq!(weapon.reload, 60.0);
+        assert_eq!(weapon.recoil, 4.0);
+        assert_eq!(weapon.shake, 2.0);
+        assert_eq!(weapon.eject_effect, "casing2");
+        assert_eq!(weapon.shoot_sound, "shootArtillery");
+        assert_eq!(weapon.bullet, "fortress_artillery");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing fortress weapon bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::Artillery);
+        assert_eq!(bullet.spec.speed, 2.0);
+        assert_eq!(bullet.spec.damage, 20.0);
+        assert_eq!(bullet.spec.max_range, 240.0);
+        assert_eq!(bullet.spec.splash_damage, 80.0);
+        assert_eq!(bullet.spec.splash_damage_radius, 35.0);
     }
 
     #[test]

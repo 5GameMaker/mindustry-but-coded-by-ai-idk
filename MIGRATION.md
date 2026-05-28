@@ -9802,3 +9802,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `shootLaser` 目前作为 content 字符串记录，完整 sound/event 发射路径仍待接入；
   - `LaserBolt` 的绘制、trail、homing、颜色特效和速度继承寿命缩放仍待 runtime/client 补全；
   - 当前总体迁移约 12.8%，远未可玩。
+
+### 12.309 UnitTypes fortress artillery content registry seam
+
+- 2026-05-28：继续按 Java UnitTypes 顺序回填 `fortress` 的 `artillery` weapon 与 `ArtilleryBulletType`；本闭环补出 content `BulletSpec.max_range`，用于记录 Java `BulletType.maxRange`，并把 artillery bullet 接入 `UnitType.weapons -> bullet registry` 引用链。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:152-186`
+  - weapon：`new Weapon("artillery")`，`top = false`、`y = 1f`、`x = 9f`、`reload = 60f`、`recoil = 4f`、`shake = 2f`、`ejectEffect = Fx.casing2`、`shootSound = Sounds.shootArtillery`
+  - bullet：`new ArtilleryBulletType(2f, 20, "shell")`，`hitEffect = Fx.blastExplosion`、`knockback = 0.8f`、`lifetime = 120f - (35f - 8f) / 2f`、`maxRange = 240f`、`width = height = 14f`、`collides = true`、`collidesTiles = true`、`splashDamageRadius = 35f`、`splashDamage = 80f`、`backColor = Pal.bulletYellowBack`、`frontColor = Pal.bulletYellow`
+  - `ArtilleryBulletType.java` 默认：`collidesTiles = false`、`collides = false`、`collidesAir = false`、`scaleLife = true`、`hitShake = 1f`、`hitSound = Sounds.explosionArtillery`、`hitEffect = Fx.flakExplosion`、`shootEffect = Fx.shootBig`、`trailEffect = Fx.artilleryTrail`、`shrinkX = 0.15f`、`shrinkY = 0.5f`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `max_range`，默认 `-1.0`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增本地 `artillery_bullet(speed, damage, sprite)` helper；
+    - 新增具名 bullet preset `fortress_artillery`；
+    - 更新 bullet registry 顺序测试，新增 `fortress_artillery_matches_java_artillery_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `fortress` 现在注册 `Weapon::new("artillery")`；
+    - weapon 引用 `bullet = "fortress_artillery"`，并设置 `top/y/x/reload/recoil/shake/eject_effect/shoot_sound`；
+    - 新增 `fortress_artillery_weapon_uses_artillery_bullet_profile`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core fortress_artillery_matches_java_artillery_profile --lib`
+  - `cargo test -p mindustry-core fortress_artillery_weapon_uses_artillery_bullet_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `ArtilleryBulletType` 的抛物线/scaleLife、splashDamage 命中、trail 实际 runtime 仍未完整实现；
+  - 后续 `pulsar` 需要验证 `LightningBulletType + lightningType` 递归 bullet；
+  - 后续 `reign/scepter` 需要接 `fragBullet` / `intervalBullet` / 多 weapon 挂点；
+  - 当前总体迁移约 12.85%，远未可玩。
