@@ -6860,3 +6860,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - input-color light 已解锁，但 `hitBulletColor=78` 仍还需要 scaled circle + radial line + light 的 multi-pass 表达；
   - 后续所有 `Drawf.light(..., e.color, ...)` 仍需逐个对照是否还有其它 primitive 阻塞；
   - renderer/backend 仍需消费 desktop frame 中的 light/circle/line/square primitives。
+
+### 12.223 Fx.fluxVapor seeded vapor particles
+
+- 2026-05-28：补齐 `steam` 与 `corrosionVapor` 之间此前缺失的 `fluxVapor=126`，该效果只需要输入色、透明度衰减和 seeded circle particles，能由现有 `SeededCircleParticles` 完整表达。
+- 本轮迁移：
+  - `fluxVapor=126`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1489` 附近：
+    - `fluxVapor = new Effect(140f, ...)`
+    - `color(e.color)`
+    - `alpha(e.fout() * 0.7f)`
+    - `randLenVectors(e.id, 2, 3f + e.finpow() * 10f, ...)`
+    - `Fill.circle(e.x + x, e.y + y, 0.6f + e.fin() * 5f)`
+    - `.layer(Layer.bullet - 1f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_FLUX_VAPOR_ID = 126` 并接入 `standard_effect_id(...)` 与 `standard_effect(...)`；
+    - metadata 使用 lifetime `140`、默认 clip、layer `Layer::BULLET - 1.0`；
+    - `standard_effect_draw_plan(...)` 使用 `SeededCircleParticles`、`input_color`、`alpha = fout * 0.7`、`count = 2`、`length = 3 + finpow * 10`、半径 `0.6 + fin * 5`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `fluxVapor` id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime 与 layer；
+  - `standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles` 覆盖 alpha、粒子数量、长度和半径公式。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `ventSteam=124` 需要表达 seeded 随机粒子数量 `rand.random(3,5)` 与每粒子随机半径；
+  - `drillSteam=125` 需要 `e.scaled(...)` 的 per-particle lifetime 语义；
+  - 后续仍需把 effect primitives 接入真实 renderer/backend，而不是只停留在 frame cache/test。

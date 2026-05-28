@@ -98,10 +98,12 @@ pub const FX_FIRE_SMOKE_ID: i32 = 121;
 pub const FX_NEOPLASM_HEAL_ID: i32 = 122;
 /// Upstream `Fx.steam` id in `mindustry.content.Fx` for v158.1.
 pub const FX_STEAM_ID: i32 = 123;
-/// Upstream `Fx.vapor` id in `mindustry.content.Fx` for v158.1.
-pub const FX_VAPOR_ID: i32 = 128;
+/// Upstream `Fx.fluxVapor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FLUX_VAPOR_ID: i32 = 126;
 /// Upstream `Fx.corrosionVapor` id in `mindustry.content.Fx` for v158.1.
 pub const FX_CORROSION_VAPOR_ID: i32 = 127;
+/// Upstream `Fx.vapor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_VAPOR_ID: i32 = 128;
 /// Upstream `Fx.vaporSmall` id in `mindustry.content.Fx` for v158.1.
 pub const FX_VAPOR_SMALL_ID: i32 = 129;
 /// Upstream `Fx.fireballsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -226,6 +228,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "fireSmoke" => Some(FX_FIRE_SMOKE_ID),
         "neoplasmHeal" => Some(FX_NEOPLASM_HEAL_ID),
         "steam" => Some(FX_STEAM_ID),
+        "fluxVapor" => Some(FX_FLUX_VAPOR_ID),
         "corrosionVapor" => Some(FX_CORROSION_VAPOR_ID),
         "vapor" => Some(FX_VAPOR_ID),
         "vaporSmall" => Some(FX_VAPOR_SMALL_ID),
@@ -372,6 +375,8 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
                 .layer(Layer::BULLET - 2.0)
         }
         FX_STEAM_ID => Effect::with_lifetime(FX_STEAM_ID, 35.0, DEFAULT_EFFECT_CLIP),
+        FX_FLUX_VAPOR_ID => Effect::with_lifetime(FX_FLUX_VAPOR_ID, 140.0, DEFAULT_EFFECT_CLIP)
+            .layer(Layer::BULLET - 1.0),
         FX_CORROSION_VAPOR_ID => {
             Effect::with_lifetime(FX_CORROSION_VAPOR_ID, 50.0, DEFAULT_EFFECT_CLIP)
         }
@@ -1749,6 +1754,45 @@ pub fn standard_effect_draw_plan(
                 radius_fin_scale: 0.0,
                 radius_fout_scale: 0.0,
                 radius_fslope_scale: 1.5,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_FLUX_VAPOR_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: fout * 0.7,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: 3.0 + finpow * 10.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.6,
+                radius_fin_scale: 5.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
                 secondary_vector_scale: 0.0,
                 secondary_radius_base: 0.0,
                 secondary_radius_fin_scale: 0.0,
@@ -4091,6 +4135,7 @@ mod tests {
             Some(FX_NEOPLASM_HEAL_ID)
         );
         assert_eq!(standard_effect_id("steam"), Some(FX_STEAM_ID));
+        assert_eq!(standard_effect_id("fluxVapor"), Some(FX_FLUX_VAPOR_ID));
         assert_eq!(
             standard_effect_id("corrosionVapor"),
             Some(FX_CORROSION_VAPOR_ID)
@@ -4284,6 +4329,9 @@ mod tests {
             standard_effect(FX_STEAM_COOL_SMOKE_ID).unwrap().lifetime,
             35.0
         );
+        let flux_vapor = standard_effect(FX_FLUX_VAPOR_ID).unwrap();
+        assert_eq!(flux_vapor.lifetime, 140.0);
+        assert_eq!(flux_vapor.layer, Layer::BULLET - 1.0);
         assert_eq!(standard_effect(FX_COLOR_TRAIL_ID).unwrap().lifetime, 50.0);
         assert_eq!(standard_effect(FX_ABSORB_ID).unwrap().lifetime, 12.0);
         assert_eq!(
@@ -5278,6 +5326,26 @@ mod tests {
         .unwrap();
         assert_eq!(steam.color_from, Some("Color.lightGray"));
         assert_eq!(steam.particles.unwrap().count, 2);
+
+        let flux_vapor = standard_effect_draw_plan(
+            Some(FX_FLUX_VAPOR_ID as u16),
+            126,
+            0.0,
+            0.0,
+            0.0,
+            70.0,
+            140.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(flux_vapor.layer, Layer::BULLET - 1.0);
+        assert_eq!(flux_vapor.input_color, Some(DecalColor::WHITE));
+        assert_eq!(flux_vapor.alpha, 0.35);
+        let flux_particles = flux_vapor.particles.unwrap();
+        assert_eq!(flux_particles.count, 2);
+        assert_eq!(flux_particles.length, 11.75);
+        assert_eq!(flux_particles.radius_base, 0.6);
+        assert_eq!(flux_particles.radius_fin_scale, 5.0);
 
         let corrosion = standard_effect_draw_plan(
             Some(FX_CORROSION_VAPOR_ID as u16),

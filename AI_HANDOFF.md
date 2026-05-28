@@ -4999,3 +4999,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 用 `Input.color` light 能力回头处理 `hitBulletColor=78`，但必须先补 multi-pass/附加 scaled circle 表达。
   2. 扫描其它 `Drawf.light(..., e.color, ...)` 候选，优先挑不需要 texture/polygon/multi-pass 的效果。
   3. 继续推进 desktop renderer/backend 真正消费 primitive frame。
+
+---
+
+## 149. 最新闭环记录：Fx.fluxVapor seeded vapor particles
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补齐 `steam=123` 与 `corrosionVapor=127` 之间缺失的 `fluxVapor=126`，避免 Fx id 序列继续出现可完整迁移但遗漏的简单 vapor 效果。
+- Java 依据：
+  - `Fx.java:1489` 附近
+  - lifetime `140`
+  - `color(e.color)`
+  - `alpha(e.fout() * 0.7f)`
+  - 2 个 seeded circle particles
+  - length `3 + finpow * 10`
+  - radius `0.6 + fin * 5`
+  - layer `Layer.bullet - 1f`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_FLUX_VAPOR_ID=126`；
+    - 接入 name lookup 与 metadata，metadata layer 为 `Layer::BULLET - 1.0`；
+    - `standard_effect_draw_plan(...)` 新增 `SeededCircleParticles` 分支，使用输入色、`fout*0.7` alpha、`count=2`、`length=3+finpow*10`、半径 `0.6+fin*5`；
+    - 扩展 ids/lifetime/draw-plan 测试。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_fire_smoke_steam_vapor_cloud_particles --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 并行探索结果：
+  - 子代理扫描 `Fx.java` id 115-140，确认大量 single-pass circle/square 效果已由现有 primitive 支撑；本轮实际补的是它漏掉但同样无阻塞的 `fluxVapor=126`。
+- 下一步建议：
+  1. 继续查漏 `Fx.java` 中可由现有 primitive 完整表达但未接入的简单 single-pass 效果；
+  2. 暂缓 `ventSteam=124` / `drillSteam=125`，除非先补随机粒子数量/随机半径/`scaled` 生命周期语义；
+  3. 继续推进 desktop renderer/backend 消费 `circle_primitives`/`line_primitives`/`square_primitives`/`light_primitives`。
