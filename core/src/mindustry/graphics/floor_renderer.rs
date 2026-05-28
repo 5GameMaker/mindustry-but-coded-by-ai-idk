@@ -43,6 +43,79 @@ impl ChunkCoord {
     pub const fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
+
+    pub fn tile_range(self, chunk_size: i32, world_tiles: Option<TileExtent>) -> TileRange {
+        assert!(chunk_size > 0, "chunk_size must be positive");
+
+        let range = TileRange::new(
+            self.x.saturating_mul(chunk_size),
+            self.y.saturating_mul(chunk_size),
+            self.x.saturating_add(1).saturating_mul(chunk_size),
+            self.y.saturating_add(1).saturating_mul(chunk_size),
+        );
+
+        if let Some(world_tiles) = world_tiles {
+            range.clamp_to_world(world_tiles)
+        } else {
+            range
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TileRange {
+    /// Inclusive lower bound.
+    pub min_x: i32,
+    /// Inclusive lower bound.
+    pub min_y: i32,
+    /// Exclusive upper bound.
+    pub max_x: i32,
+    /// Exclusive upper bound.
+    pub max_y: i32,
+}
+
+impl TileRange {
+    pub const fn new(min_x: i32, min_y: i32, max_x: i32, max_y: i32) -> Self {
+        Self {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        }
+    }
+
+    pub const fn empty() -> Self {
+        Self::new(0, 0, 0, 0)
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.min_x >= self.max_x || self.min_y >= self.max_y
+    }
+
+    pub fn width(self) -> i32 {
+        (self.max_x - self.min_x).max(0)
+    }
+
+    pub fn height(self) -> i32 {
+        (self.max_y - self.min_y).max(0)
+    }
+
+    pub fn contains(self, x: i32, y: i32) -> bool {
+        x >= self.min_x && x < self.max_x && y >= self.min_y && y < self.max_y
+    }
+
+    pub fn clamp_to_world(self, world_tiles: TileExtent) -> Self {
+        if world_tiles.is_empty() {
+            return Self::empty();
+        }
+
+        let min_x = self.min_x.clamp(0, world_tiles.width);
+        let min_y = self.min_y.clamp(0, world_tiles.height);
+        let max_x = self.max_x.clamp(0, world_tiles.width);
+        let max_y = self.max_y.clamp(0, world_tiles.height);
+
+        Self::new(min_x, min_y, max_x, max_y)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -404,6 +477,15 @@ pub struct FloorStagePlan {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FloorChunkDrawBatch {
+    pub chunk: ChunkCoord,
+    pub tile_range: TileRange,
+    pub stage_order: Vec<FloorRenderStage>,
+    pub cache_dirty: bool,
+    pub cache_invalidations: Vec<CacheInvalidation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FloorRenderPlan {
     pub viewport_tiles: ViewportTileRange,
     pub viewport_chunks: ChunkRange,
@@ -523,6 +605,39 @@ impl FloorRendererState {
             pending_invalidations: self.cache.pending.clone(),
         }
     }
+
+    pub fn build_chunk_draw_batches(&self, viewport: Viewport) -> Vec<FloorChunkDrawBatch> {
+        let plan = self.build_plan(viewport);
+        let stage_order = self.stages.clone();
+
+        plan.visible_chunks
+            .into_iter()
+            .map(|chunk| {
+                let cache_dirty = plan.full_reload || self.cache.dirty_chunks.contains(&chunk);
+                let cache_invalidations = if plan.full_reload {
+                    plan.pending_invalidations
+                        .iter()
+                        .copied()
+                        .filter(|invalidation| invalidation.chunk.is_none())
+                        .collect::<Vec<_>>()
+                } else {
+                    plan.pending_invalidations
+                        .iter()
+                        .copied()
+                        .filter(|invalidation| invalidation.chunk == Some(chunk))
+                        .collect::<Vec<_>>()
+                };
+
+                FloorChunkDrawBatch {
+                    chunk,
+                    tile_range: chunk.tile_range(self.chunk_size_tiles, self.world_tiles),
+                    stage_order: stage_order.clone(),
+                    cache_dirty,
+                    cache_invalidations,
+                }
+            })
+            .collect()
+    }
 }
 
 fn ceil_div_i32(value: i32, divisor: i32) -> i32 {
@@ -610,6 +725,17 @@ mod tests {
         assert!(!cache.full_reload);
         assert!(cache.dirty_chunks.is_empty());
         assert!(cache.pending.is_empty());
+    }
+
+    #[test]
+    fn chunk_tile_range_clamps_to_world_edges() {
+        let chunk = ChunkCoord::new(3, 1);
+
+        assert_eq!(chunk.tile_range(30, None), TileRange::new(90, 30, 120, 60));
+        assert_eq!(
+            chunk.tile_range(30, Some(TileExtent::new(100, 50))),
+            TileRange::new(90, 30, 100, 50)
+        );
     }
 
     #[test]
@@ -701,5 +827,54 @@ mod tests {
                 (FloorRenderStage::Decals, false, false, Vec::new()),
             ]
         );
+    }
+
+    #[test]
+    fn floor_renderer_builds_chunk_draw_batches_with_tile_ranges_and_cache_marks() {
+        let mut state = FloorRendererState::default().with_world_tiles(10, 10);
+        state.chunk_size_tiles = 2;
+        state.tile_size_world = 8.0;
+        state.viewport_padding_world = 4.0;
+        state.mark_tile_dirty(0, 0);
+        state.mark_tile_dirty(1, 1);
+        state.mark_chunk_dirty(1, 1);
+
+        let batches = state.build_chunk_draw_batches(Viewport::new(8.0, 8.0, 16.0, 16.0));
+
+        assert_eq!(batches.len(), 4);
+        assert_eq!(batches[0].chunk, ChunkCoord::new(0, 0));
+        assert_eq!(batches[0].tile_range, TileRange::new(0, 0, 2, 2));
+        assert!(batches[0].cache_dirty);
+        assert_eq!(batches[0].stage_order, FloorRenderStage::ordered().to_vec());
+        assert_eq!(batches[0].cache_invalidations.len(), 2);
+        assert!(matches!(
+            batches[0].cache_invalidations[0],
+            CacheInvalidation {
+                reason: CacheInvalidationReason::TileChanged,
+                tile: Some(TileCoord { x: 0, y: 0 }),
+                chunk: Some(ChunkCoord { x: 0, y: 0 }),
+            }
+        ));
+        assert!(matches!(
+            batches[0].cache_invalidations[1],
+            CacheInvalidation {
+                reason: CacheInvalidationReason::TileChanged,
+                tile: Some(TileCoord { x: 1, y: 1 }),
+                chunk: Some(ChunkCoord { x: 0, y: 0 }),
+            }
+        ));
+
+        assert_eq!(batches[3].chunk, ChunkCoord::new(1, 1));
+        assert_eq!(batches[3].tile_range, TileRange::new(2, 2, 4, 4));
+        assert!(batches[3].cache_dirty);
+        assert_eq!(batches[3].cache_invalidations.len(), 1);
+        assert!(matches!(
+            batches[3].cache_invalidations[0],
+            CacheInvalidation {
+                reason: CacheInvalidationReason::ChunkChanged,
+                tile: None,
+                chunk: Some(ChunkCoord { x: 1, y: 1 }),
+            }
+        ));
     }
 }
