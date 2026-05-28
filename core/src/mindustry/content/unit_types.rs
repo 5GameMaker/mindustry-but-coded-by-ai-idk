@@ -456,6 +456,7 @@ pub fn load() -> Vec<UnitType> {
             u.weapons.push(mount);
         }),
         unit(&mut next_id, "arkyid", UnitKind::Standard, |u| {
+            u.drag = 0.1;
             u.speed = 0.62;
             u.hit_size = 23.0;
             u.health = 8000.0;
@@ -463,14 +464,52 @@ pub fn load() -> Vec<UnitType> {
             u.rotate_speed = 2.7;
             u.leg_count = 6;
             u.leg_move_space = 1.0;
+            u.leg_pair_offset = 3.0;
             u.leg_length = 30.0;
+            u.leg_extension = -15.0;
             u.leg_base_offset = 10.0;
             u.step_shake = 1.0;
+            u.leg_length_scl = 0.96;
+            u.ripple_scale = 2.0;
+            u.leg_speed = 0.2;
+            u.step_sound = "walkerStep".into();
             u.step_sound_volume = 0.85;
             u.step_sound_pitch = 1.1;
+            u.leg_splash_damage = 32.0;
+            u.leg_splash_range = 30.0;
             u.hovering = true;
+            u.shadow_elevation = 0.65;
             u.ground_layer = LAYER_LEG_UNIT;
             u.allow_leg_step = true;
+
+            for (reload, x, y) in [(9.0, 4.0, 8.0), (14.0, 9.0, 6.0), (22.0, 14.0, 0.0)] {
+                let mut weapon = Weapon::new("spiroct-weapon");
+                weapon.reload = reload;
+                weapon.x = x;
+                weapon.y = y;
+                weapon.rotate = true;
+                weapon.bullet = "arkyid_sapper".into();
+                weapon.shoot_sound = "shootSap".into();
+                u.weapons.push(weapon);
+            }
+
+            let mut artillery = Weapon::new("large-purple-mount");
+            artillery.y = -7.0;
+            artillery.x = 9.0;
+            artillery.shoot_y = 7.0;
+            artillery.reload = 45.0;
+            artillery.shake = 3.0;
+            artillery.rotate_speed = 2.0;
+            artillery.eject_effect = "casing1".into();
+            artillery.shoot_sound = "shootArtillerySap".into();
+            artillery.rotate = true;
+            artillery.shadow = 8.0;
+            artillery.recoil = 3.0;
+            artillery.shoot_pattern = "ShootSpread".into();
+            artillery.shoot_shots = 2;
+            artillery.shoot_spread = 17.0;
+            artillery.bullet = "arkyid_artillery_sap".into();
+            u.weapons.push(artillery);
         }),
         unit(&mut next_id, "toxopid", UnitKind::Standard, |u| {
             u.speed = 0.5;
@@ -1964,6 +2003,69 @@ mod tests {
         assert_eq!(mount_bullet.spec.sap_strength, 0.8);
         assert_eq!(mount_bullet.spec.length, 40.0);
         assert_eq!(mount_bullet.spec.damage, 18.0);
+    }
+
+    #[test]
+    fn arkyid_weapons_match_java_sapper_and_artillery_profiles() {
+        let units = load();
+        let arkyid = by_name(&units, "arkyid");
+        assert_eq!(arkyid.drag, 0.1);
+        assert_eq!(arkyid.leg_pair_offset, 3.0);
+        assert_eq!(arkyid.leg_extension, -15.0);
+        assert_eq!(arkyid.leg_length_scl, 0.96);
+        assert_eq!(arkyid.ripple_scale, 2.0);
+        assert_eq!(arkyid.leg_speed, 0.2);
+        assert_eq!(arkyid.step_sound, "walkerStep");
+        assert_eq!(arkyid.leg_splash_damage, 32.0);
+        assert_eq!(arkyid.leg_splash_range, 30.0);
+        assert_eq!(arkyid.shadow_elevation, 0.65);
+        assert_eq!(arkyid.weapons.len(), 4);
+
+        for (index, (reload, x, y)) in [(9.0, 4.0, 8.0), (14.0, 9.0, 6.0), (22.0, 14.0, 0.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let weapon = &arkyid.weapons[index];
+            assert_eq!(weapon.name, "spiroct-weapon");
+            assert_eq!(weapon.reload, reload);
+            assert_eq!(weapon.x, x);
+            assert_eq!(weapon.y, y);
+            assert!(weapon.rotate);
+            assert_eq!(weapon.bullet, "arkyid_sapper");
+            assert_eq!(weapon.shoot_sound, "shootSap");
+        }
+
+        let artillery = &arkyid.weapons[3];
+        assert_eq!(artillery.name, "large-purple-mount");
+        assert_eq!(artillery.y, -7.0);
+        assert_eq!(artillery.x, 9.0);
+        assert_eq!(artillery.shoot_y, 7.0);
+        assert_eq!(artillery.reload, 45.0);
+        assert_eq!(artillery.shake, 3.0);
+        assert_eq!(artillery.rotate_speed, 2.0);
+        assert_eq!(artillery.eject_effect, "casing1");
+        assert_eq!(artillery.shoot_sound, "shootArtillerySap");
+        assert!(artillery.rotate);
+        assert_eq!(artillery.shadow, 8.0);
+        assert_eq!(artillery.recoil, 3.0);
+        assert_eq!(artillery.shoot_pattern, "ShootSpread");
+        assert_eq!(artillery.shoot_shots, 2);
+        assert_eq!(artillery.shoot_spread, 17.0);
+        assert_eq!(artillery.bullet, "arkyid_artillery_sap");
+
+        let bullets = bullets::load();
+        let sapper = bullets
+            .iter()
+            .find(|bullet| bullet.name() == "arkyid_sapper")
+            .expect("missing arkyid_sapper");
+        let artillery_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == "arkyid_artillery_sap")
+            .expect("missing arkyid_artillery_sap");
+        assert_eq!(sapper.spec.kind, BulletKind::Sap);
+        assert_eq!(sapper.spec.sap_strength, 0.85);
+        assert_eq!(artillery_bullet.spec.kind, BulletKind::Artillery);
+        assert_eq!(artillery_bullet.spec.splash_damage, 65.0);
     }
 
     #[test]

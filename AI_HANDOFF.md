@@ -8297,3 +8297,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一闭环可继续 `arkyid`，或先把 content `BulletKind::Sap` 接到真实 sap runtime；
   3. SapBulletType 的 linecast/heal/collision/draw/light runtime 仍未 content-driven；
   4. 当前总迁移约 13.25%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 244. 最新闭环记录：UnitTypes arkyid shared sapper and sap artillery content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `arkyid` 的共享 `SapBulletType`、三个 sapper weapon 和一个 sap artillery weapon 回填进 Rust content registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:800-902`
+  - 注意：只读子代理曾误判 arkyid 没有 weapon；主线程已按实时 Java 源码核对，实际存在三把共享 sapper weapon 和一把 `large-purple-mount`。
+  - shared sapper：`sapStrength=0.85`、`length=55`、`damage=40`、`width=0.55`、`lifetime=30`、`knockback=-1`；
+  - three sapper weapons：`spiroct-weapon` reload/x/y 分别为 `9/4/8`、`14/9/6`、`22/14/0`，均 `rotate=true`、`shootSound=shootSap`；
+  - artillery weapon：`large-purple-mount`，`ShootSpread(2,17)`，bullet `ArtilleryBulletType(2,12)`，`splashDamage=65`、`splashDamageRadius=70`、`lightning=3`、`lightningLength=10`、`status=sapped`。
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `arkyid_sapper`；
+    - 新增 `arkyid_artillery_sap`；
+    - 更新 bullet load order；
+    - 新增 `arkyid_sapper_and_artillery_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `arkyid` 补齐 Java leg/splash/shadow/step 字段；
+    - 注册三把共享 sapper weapon；
+    - 注册 `large-purple-mount` artillery weapon；
+    - 新增 `arkyid_weapons_match_java_sapper_and_artillery_profiles`。
+  - `README.md`
+    - 只保留迁移完成度百分比，当前约 `13.3%`。
+  - `MIGRATION.md`
+    - 新增 `12.318`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core arkyid_sapper_and_artillery_match_java_profiles --lib`
+  - `cargo test -p mindustry-core arkyid_weapons_match_java_sapper_and_artillery_profiles --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一闭环建议 `toxopid`，需要 shrapnel bullet、主 sap artillery 和 frag artillery；
+  3. shared sapper/runtime linecast/heal、artillery splash/lightning 仍未 content-driven；
+  4. 当前总迁移约 13.3%，远未可玩，goal 绝不能标记 complete。

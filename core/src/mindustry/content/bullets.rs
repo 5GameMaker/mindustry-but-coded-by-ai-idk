@@ -287,6 +287,37 @@ pub fn load() -> Vec<BulletContent> {
     spiroct_mount_sap.lifetime = 25.0;
     spiroct_mount_sap.knockback = -0.65;
 
+    let mut arkyid_sapper = sap_bullet(40.0);
+    arkyid_sapper.sap_strength = 0.85;
+    arkyid_sapper.length = 55.0;
+    arkyid_sapper.shoot_effect = "shootSmall".into();
+    arkyid_sapper.hit_color = "bf92f9".into();
+    arkyid_sapper.color = "bf92f9".into();
+    arkyid_sapper.width = 0.55;
+    arkyid_sapper.lifetime = 30.0;
+    arkyid_sapper.knockback = -1.0;
+
+    let mut arkyid_artillery_sap = artillery_bullet(2.0, 12.0, "shell");
+    arkyid_artillery_sap.hit_effect = "sapExplosion".into();
+    arkyid_artillery_sap.despawn_sound = "explosionArtilleryShock".into();
+    arkyid_artillery_sap.knockback = 0.8;
+    arkyid_artillery_sap.lifetime = 70.0;
+    arkyid_artillery_sap.width = 19.0;
+    arkyid_artillery_sap.height = 19.0;
+    arkyid_artillery_sap.collides_tiles = true;
+    arkyid_artillery_sap.ammo_multiplier = 4.0;
+    arkyid_artillery_sap.splash_damage_radius = 70.0;
+    arkyid_artillery_sap.splash_damage = 65.0;
+    arkyid_artillery_sap.back_color = "sapBulletBack".into();
+    arkyid_artillery_sap.front_color = "sapBullet".into();
+    arkyid_artillery_sap.lightning_color = "sapBullet".into();
+    arkyid_artillery_sap.lightning = 3;
+    arkyid_artillery_sap.lightning_length = 10;
+    arkyid_artillery_sap.smoke_effect = "shootBigSmoke2".into();
+    arkyid_artillery_sap.shake = 5.0;
+    arkyid_artillery_sap.status = "sapped".into();
+    arkyid_artillery_sap.status_duration = 60.0 * 10.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -344,6 +375,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "atrax_slag", atrax_slag),
         make_bullet(&mut next_id, "spiroct_sap", spiroct_sap),
         make_bullet(&mut next_id, "spiroct_mount_sap", spiroct_mount_sap),
+        make_bullet(&mut next_id, "arkyid_sapper", arkyid_sapper),
+        make_bullet(&mut next_id, "arkyid_artillery_sap", arkyid_artillery_sap),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -570,6 +603,8 @@ mod tests {
                 "atrax_slag",
                 "spiroct_sap",
                 "spiroct_mount_sap",
+                "arkyid_sapper",
+                "arkyid_artillery_sap",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1068,6 +1103,51 @@ mod tests {
         assert_eq!(mount.width, 0.4);
         assert_eq!(mount.lifetime, 25.0);
         assert_eq!(mount.knockback, -0.65);
+    }
+
+    #[test]
+    fn arkyid_sapper_and_artillery_match_java_profiles() {
+        let bullets = load();
+        let sapper = &by_name(&bullets, "arkyid_sapper").spec;
+        let artillery = &by_name(&bullets, "arkyid_artillery_sap").spec;
+
+        assert_eq!(sapper.kind, BulletKind::Sap);
+        assert_eq!(sapper.sap_strength, 0.85);
+        assert_eq!(sapper.length, 55.0);
+        assert_eq!(sapper.damage, 40.0);
+        assert_eq!(sapper.shoot_effect, "shootSmall");
+        assert_eq!(sapper.hit_color, "bf92f9");
+        assert_eq!(sapper.color, "bf92f9");
+        assert_eq!(sapper.width, 0.55);
+        assert_eq!(sapper.lifetime, 30.0);
+        assert_eq!(sapper.knockback, -1.0);
+        assert_eq!(sapper.status, "sapped");
+        assert!(!sapper.collides);
+        assert!(sapper.pierce);
+
+        assert_eq!(artillery.kind, BulletKind::Artillery);
+        assert_eq!(artillery.speed, 2.0);
+        assert_eq!(artillery.damage, 12.0);
+        assert_eq!(artillery.hit_effect, "sapExplosion");
+        assert_eq!(artillery.despawn_sound, "explosionArtilleryShock");
+        assert_eq!(artillery.knockback, 0.8);
+        assert_eq!(artillery.lifetime, 70.0);
+        assert_eq!(artillery.width, 19.0);
+        assert_eq!(artillery.height, 19.0);
+        assert!(artillery.collides_tiles);
+        assert!(!artillery.collides);
+        assert_eq!(artillery.ammo_multiplier, 4.0);
+        assert_eq!(artillery.splash_damage_radius, 70.0);
+        assert_eq!(artillery.splash_damage, 65.0);
+        assert_eq!(artillery.back_color, "sapBulletBack");
+        assert_eq!(artillery.front_color, "sapBullet");
+        assert_eq!(artillery.lightning_color, "sapBullet");
+        assert_eq!(artillery.lightning, 3);
+        assert_eq!(artillery.lightning_length, 10);
+        assert_eq!(artillery.smoke_effect, "shootBigSmoke2");
+        assert_eq!(artillery.shake, 5.0);
+        assert_eq!(artillery.status, "sapped");
+        assert_eq!(artillery.status_duration, 600.0);
     }
 
     #[test]

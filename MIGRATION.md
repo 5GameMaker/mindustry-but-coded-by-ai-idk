@@ -10097,3 +10097,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `length_rand`、`laser_region`、`laser_end_region` 未作为 content 字段泛化；本轮 Java `spiroct` 未使用这些覆盖项；
   - 下一步建议继续 `arkyid` 或先做 sap runtime/content mapping，取决于是否优先提高可玩战斗行为；
   - 当前总体迁移约 13.25%，远未可玩。
+
+### 12.318 UnitTypes arkyid shared sapper and sap artillery content seam
+
+- 2026-05-28：继续回填 `arkyid` 的共享 sapper bullet、三把 `spiroct-weapon` 与一把 `large-purple-mount` sap artillery。Java 段使用局部变量 `BulletType sapper = new SapBulletType(){...}`，三把武器共享同一个 bullet；Rust 侧用具名 `arkyid_sapper` 保持这一内容引用关系。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:800-902`
+  - unit：`drag = 0.1f`、`speed = 0.62f`、`hitSize = 23f`、`health = 8000`、`armor = 6f`、`rotateSpeed = 2.7f`、`legCount = 6`、`legMoveSpace = 1f`、`legPairOffset = 3`、`legLength = 30f`、`legExtension = -15`、`legBaseOffset = 10f`、`stepShake = 1f`、`legLengthScl = 0.96f`、`rippleScale = 2f`、`legSpeed = 0.2f`、`stepSound = Sounds.walkerStep`、`stepSoundVolume = 0.85f`、`stepSoundPitch = 1.1f`、`legSplashDamage = 32`、`legSplashRange = 30`、`hovering = true`、`shadowElevation = 0.65f`、`groundLayer = Layer.legUnit`
+  - shared sapper bullet：`SapBulletType`，`sapStrength = 0.85f`、`length = 55f`、`damage = 40`、`shootEffect = Fx.shootSmall`、`hitColor = color = bf92f9`、`width = 0.55f`、`lifetime = 30f`、`knockback = -1f`
+  - shared sapper weapons：三个 `new Weapon("spiroct-weapon")`，分别为 `(reload, x, y) = (9,4,8)`、`(14,9,6)`、`(22,14,0)`，均 `rotate = true`、`bullet = sapper`、`shootSound = Sounds.shootSap`
+  - artillery weapon：`new Weapon("large-purple-mount")`，`y = -7f`、`x = 9f`、`shootY = 7f`、`reload = 45`、`shake = 3f`、`rotateSpeed = 2f`、`ejectEffect = Fx.casing1`、`shootSound = Sounds.shootArtillerySap`、`rotate = true`、`shadow = 8f`、`recoil = 3f`、`shoot = new ShootSpread(2, 17f)`
+  - artillery bullet：`new ArtilleryBulletType(2f, 12)`，`hitEffect = Fx.sapExplosion`、`despawnSound = Sounds.explosionArtilleryShock`、`knockback = 0.8f`、`lifetime = 70f`、`width = height = 19f`、`collidesTiles = true`、`ammoMultiplier = 4f`、`splashDamageRadius = 70f`、`splashDamage = 65f`、`backColor = Pal.sapBulletBack`、`frontColor = lightningColor = Pal.sapBullet`、`lightning = 3`、`lightningLength = 10`、`smokeEffect = Fx.shootBigSmoke2`、`shake = 5f`、`status = StatusEffects.sapped`、`statusDuration = 600f`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `arkyid_sapper`；
+    - 新增 `arkyid_artillery_sap`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `arkyid_sapper_and_artillery_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `arkyid` 补齐 leg/splash/shadow/step 字段；
+    - 注册三个共享 `arkyid_sapper` 的 `spiroct-weapon`；
+    - 注册 `large-purple-mount`，并记录 `ShootSpread(2, 17)`；
+    - 新增 `arkyid_weapons_match_java_sapper_and_artillery_profiles`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `13.3%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core arkyid_sapper_and_artillery_match_java_profiles --lib`
+  - `cargo test -p mindustry-core arkyid_weapons_match_java_sapper_and_artillery_profiles --lib`
+- 仍未完成：
+  - shared sapper 目前通过同名 bullet content 引用表达，真实 Java 对象共享身份尚未在 runtime mount 层形成更细的对象语义；
+  - SapBulletType runtime 和 Artillery frag/lightning/splash runtime 仍需继续接入；
+  - 下一步建议按 Java 顺序继续 `toxopid`，该单位需要 shrapnel mount 与带 frag bullet 的 sap artillery；
+  - 当前总体迁移约 13.3%，远未可玩。
