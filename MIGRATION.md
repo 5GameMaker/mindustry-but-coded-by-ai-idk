@@ -8269,3 +8269,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前仍以多段 `LineAngle` plans 表达 Java polyline/debug line，真实 renderer/backend 尚未接入专用 polyline primitive；
   - `debugRect=265` 仍需 `Rect` data seam 或等价 typed data；
   - 本轮仍是 headless primitive seam，后续必须继续接入真实 renderer/runtime，不能把 helper/plan 当成最终可玩实现。
+
+### 12.260 Fx.debugRect
+
+- 2026-05-28：对照 `Fx.java:2977-2986`，迁移调试矩形效果 `debugRect=265`，并补一个本地 `Rect` effect data seam。
+- 本轮迁移：
+  - `debugRect=265`
+- Java 依据：
+  - `debugRect = new Effect(90f, 1000000000000f, ...)`；
+  - 要求 `e.data instanceof Rect`，否则直接 return；
+  - `Draw.color(e.color)`，`Lines.stroke(2f)`，然后 `Lines.rect(rect)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/io/type_io.rs`
+    - 新增 `TypeValue::Rect(Rect)`，用于本地 debug effect 数据；
+    - 明确不发明 Java 不存在的 TypeIO tag：`write_object(TypeValue::Rect(_))` 返回 `rect object is local-only`，避免 Rust 客户端向 Java 端写出不兼容对象 tag。
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_DEBUG_RECT_ID=265`、lookup 与 metadata，clip `1_000_000_000_000.0`；
+    - `TypeValue::Rect` 按 Java `Lines.rect(rect)` 展开为 4 条 `LineAngle` plans，stroke 固定 `2.0`，颜色使用 `Input.color`；
+    - core 测试覆盖 metadata、lookup、错误 data 返回空，以及矩形四边展开。
+  - `core/src/mindustry/core/game_state.rs`、`core/src/mindustry/entities/comp/building.rs`
+    - 让新增 `TypeValue::Rect` 在 config kind/stringification exhaustive match 中有本地等价表现。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_debug_rect_data_for_render`，验证本地 `EffectCallPacket2.data = TypeValue::Rect` 展开为 4 条 line primitives。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_debug_rect_data_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `TypeValue::Rect` 是本地 debug seam，不是 Java TypeIO wire 兼容 tag；如果后续要远程发送 debugRect，需要先确认 Java 端是否存在额外调用路径或改为双方都支持的 object convention；
+  - 当前以 4 条 `LineAngle` 表达 `Lines.rect`，真实 renderer/backend 仍未接入专用 debug rectangle 绘制；
+  - `unitShieldBreak=260`、`legDestroy=263`、`arcShieldBreak=257` 仍待 typed resolver / textured line seam。

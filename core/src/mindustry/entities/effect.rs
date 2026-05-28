@@ -394,6 +394,8 @@ pub const FX_CHAIN_LIGHTNING_ID: i32 = 261;
 pub const FX_CHAIN_EMP_ID: i32 = 262;
 /// Upstream `Fx.debugLine` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DEBUG_LINE_ID: i32 = 264;
+/// Upstream `Fx.debugRect` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DEBUG_RECT_ID: i32 = 265;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
@@ -591,6 +593,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "chainLightning" => Some(FX_CHAIN_LIGHTNING_ID),
         "chainEmp" => Some(FX_CHAIN_EMP_ID),
         "debugLine" => Some(FX_DEBUG_LINE_ID),
+        "debugRect" => Some(FX_DEBUG_RECT_ID),
         _ => None,
     }
 }
@@ -1006,6 +1009,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             .follow_parent(false)
             .rot_with_parent(false),
         FX_DEBUG_LINE_ID => Effect::with_lifetime(FX_DEBUG_LINE_ID, 90.0, 1_000_000_000_000.0),
+        FX_DEBUG_RECT_ID => Effect::with_lifetime(FX_DEBUG_RECT_ID, 90.0, 1_000_000_000_000.0),
         _ => return None,
     };
     Some(effect)
@@ -1150,6 +1154,7 @@ fn standard_effect_draw_plans_with_data(
             | FX_CHAIN_LIGHTNING_ID
             | FX_CHAIN_EMP_ID
             | FX_DEBUG_LINE_ID
+            | FX_DEBUG_RECT_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1703,6 +1708,68 @@ fn standard_effect_draw_plans_with_data(
                 layer: effect.layer,
                 kind: StandardEffectDrawKind::LineAngle,
                 center: (start.x, start.y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: length,
+                stroke: 2.0,
+                particles: Some(standard_effect_particle_spec(
+                    state_id,
+                    1,
+                    Some(dy.atan2(dx).to_degrees()),
+                    0.0,
+                    0.0,
+                    fin,
+                    fout,
+                    fslope,
+                )),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_DEBUG_RECT_ID {
+        let Some(TypeValue::Rect(rect)) = data_value else {
+            return Vec::new();
+        };
+        let segments = [
+            (rect.x, rect.y, rect.x + rect.width, rect.y),
+            (
+                rect.x + rect.width,
+                rect.y,
+                rect.x + rect.width,
+                rect.y + rect.height,
+            ),
+            (
+                rect.x + rect.width,
+                rect.y + rect.height,
+                rect.x,
+                rect.y + rect.height,
+            ),
+            (rect.x, rect.y + rect.height, rect.x, rect.y),
+        ];
+        let mut plans = Vec::with_capacity(segments.len());
+        for (start_x, start_y, end_x, end_y) in segments {
+            let dx = end_x - start_x;
+            let dy = end_y - start_y;
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= f32::EPSILON {
+                continue;
+            }
+
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::LineAngle,
+                center: (start_x, start_y),
                 color_from: None,
                 color_mid: None,
                 color_to: None,
@@ -8740,6 +8807,7 @@ mod tests {
         );
         assert_eq!(standard_effect_id("chainEmp"), Some(FX_CHAIN_EMP_ID));
         assert_eq!(standard_effect_id("debugLine"), Some(FX_DEBUG_LINE_ID));
+        assert_eq!(standard_effect_id("debugRect"), Some(FX_DEBUG_RECT_ID));
         assert_eq!(standard_effect_id("none"), None);
     }
 
@@ -9263,6 +9331,9 @@ mod tests {
         let debug_line = standard_effect(FX_DEBUG_LINE_ID).unwrap();
         assert_eq!(debug_line.lifetime, 90.0);
         assert_eq!(debug_line.clip, 1_000_000_000_000.0);
+        let debug_rect = standard_effect(FX_DEBUG_RECT_ID).unwrap();
+        assert_eq!(debug_rect.lifetime, 90.0);
+        assert_eq!(debug_rect.clip, 1_000_000_000_000.0);
         assert!(standard_effect_by_name("none").is_none());
         assert!(standard_effect(-1).is_none());
     }
@@ -10290,6 +10361,43 @@ mod tests {
         assert!(standard_effect_draw_plans_with_data_value(
             Some(FX_DEBUG_LINE_ID as u16),
             264,
+            3.0,
+            4.0,
+            0.0,
+            10.0,
+            90.0,
+            input_color,
+            Some(&TypeValue::Null),
+        )
+        .is_empty());
+
+        let debug_rect_data = TypeValue::Rect(crate::mindustry::entities::Rect::new(
+            10.0, 20.0, 30.0, 40.0,
+        ));
+        let debug_rect = standard_effect_draw_plans_with_data_value(
+            Some(FX_DEBUG_RECT_ID as u16),
+            265,
+            3.0,
+            4.0,
+            0.0,
+            10.0,
+            90.0,
+            input_color,
+            Some(&debug_rect_data),
+        );
+        assert_eq!(debug_rect.len(), 4);
+        assert!(debug_rect
+            .iter()
+            .all(|plan| plan.kind == StandardEffectDrawKind::LineAngle));
+        assert_eq!(debug_rect[0].center, (10.0, 20.0));
+        assert_eq!(debug_rect[0].radius, 30.0);
+        assert_eq!(debug_rect[0].stroke, 2.0);
+        assert_eq!(debug_rect[0].input_color, Some(input_color));
+        assert_eq!(debug_rect[1].center, (40.0, 20.0));
+        assert_eq!(debug_rect[1].radius, 40.0);
+        assert!(standard_effect_draw_plans_with_data_value(
+            Some(FX_DEBUG_RECT_ID as u16),
+            265,
             3.0,
             4.0,
             0.0,

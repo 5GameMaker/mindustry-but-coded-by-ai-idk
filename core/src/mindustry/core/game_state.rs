@@ -668,6 +668,10 @@ where
         TypeValue::Unit(value) => Some(value.to_string()),
         TypeValue::Point2(value) => Some(format!("{},{}", value.x, value.y)),
         TypeValue::Vec2(value) => Some(format!("{},{}", value.x, value.y)),
+        TypeValue::Rect(value) => Some(format!(
+            "{},{},{},{}",
+            value.x, value.y, value.width, value.height
+        )),
         TypeValue::Team(value) => Some(value.to_string()),
         TypeValue::UnitCommand(value) => {
             content_name(ContentType::UnitCommand, *value).or_else(|| Some(value.to_string()))

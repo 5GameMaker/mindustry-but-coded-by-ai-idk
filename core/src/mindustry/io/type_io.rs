@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 use crate::mindustry::content::blocks::BlockDef;
 use crate::mindustry::core::content_loader::{ContentLoader, ContentRecord};
 use crate::mindustry::ctype::{ContentId, ContentType};
+use crate::mindustry::entities::entity_group::Rect;
 use crate::mindustry::entities::units::{BuildPlan, StatusEntry, WeaponMount};
 use crate::mindustry::logic::{LAccess, LMarkerControl};
 use crate::mindustry::net::{AdminAction, KickReason, TraceInfo};
@@ -142,6 +143,12 @@ pub enum TypeValue {
     Unit(i32),
     Point2(Point2),
     Vec2(Vec2),
+    /// Local-only debug rectangle payload used by `Fx.debugRect`.
+    ///
+    /// Upstream Java v158.1 does not define a stable TypeIO wire tag for
+    /// `arc.math.geom.Rect`, so this variant is intentionally rejected by
+    /// `write_object` instead of inventing an incompatible network tag.
+    Rect(Rect),
     Team(u8),
     UnitCommand(ContentId),
     IntSeq(Vec<i32>),
@@ -446,6 +453,7 @@ pub fn write_object<W: Write>(write: &mut W, value: &TypeValue) -> io::Result<()
             write_u32(write, value.x.to_bits())?;
             write_u32(write, value.y.to_bits())
         }
+        TypeValue::Rect(_) => Err(invalid_input("rect object is local-only")),
         TypeValue::ByteArray(values) => {
             if values.len() > MAX_BYTE_ARRAY_SIZE {
                 return Err(invalid_input("byte array too large"));

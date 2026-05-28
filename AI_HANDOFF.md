@@ -6263,3 +6263,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `legDestroy=263` 需要 textured line/region seam，建议等 texture-region 抽象更明确后推进；
   3. `unitShieldBreak=260` / `arcShieldBreak=257` 需要 Unit/Ability typed resolver，不要只做孤立 helper；
   4. 当前总迁移仍约 9% 左右，距离完整可玩 Rust MDT/Mindustry 很远，不能宣称可玩。
+
+---
+
+## 186. 最新闭环记录：Fx.debugRect
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `debugRect=265`，补齐本地 `Rect` effect data seam，并避免伪造 Java 不支持的 TypeIO wire tag。
+- 本轮迁移：
+  - `debugRect=265`
+- Rust 主改动：
+  - `core/src/mindustry/io/type_io.rs`
+    - 新增 `TypeValue::Rect(Rect)`，仅用于本地 debug effect 数据；
+    - `write_object(TypeValue::Rect(_))` 返回 `rect object is local-only`，不向 Java 端写出未知 tag。
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_DEBUG_RECT_ID=265`、lookup、metadata；
+    - `TypeValue::Rect` 被展开为 4 条 `LineAngle` plans，等价表达 Java `Lines.rect(rect)`，stroke `2.0`，颜色走 `Input.color`；
+    - core 测试覆盖 ID、metadata、四边 line 展开和错误 data 空输出。
+  - `core/src/mindustry/core/game_state.rs`、`core/src/mindustry/entities/comp/building.rs`
+    - 补齐 `TypeValue::Rect` 的 config/stringification exhaustive match。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_debug_rect_data_for_render`，验证 desktop 本地 effect event 展开为 4 条 line primitives。
+  - `MIGRATION.md`
+    - 新增 `12.260` 节。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_debug_rect_data_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 `unitShieldBreak=260`：优先设计 effect render resolver，从 `TypeValue::Unit(id)` 解析到 client/runtime unit hit size，而不是硬塞 float；
+  2. `legDestroy=263` 需要 `LegDestroyData` 进入 effect data 通道，并新增 textured line/region seam；
+  3. `arcShieldBreak=257` 需要 `ShieldArcAbility` typed resolver/arc primitive；
+  4. 本轮 `Rect` 是 local-only，后续若要跨 Java/Rust 网络传输必须先设计双方兼容的 wire convention。

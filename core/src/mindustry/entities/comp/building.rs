@@ -42,6 +42,7 @@ pub enum BuildingConfigKind {
     Unit,
     Point2,
     Vec2,
+    Rect,
     Team,
     UnitCommand,
     IntSeq,
@@ -70,6 +71,7 @@ impl BuildingConfigKind {
             TypeValue::Unit(_) => Self::Unit,
             TypeValue::Point2(_) => Self::Point2,
             TypeValue::Vec2(_) => Self::Vec2,
+            TypeValue::Rect(_) => Self::Rect,
             TypeValue::Team(_) => Self::Team,
             TypeValue::UnitCommand(_) => Self::UnitCommand,
             TypeValue::IntSeq(_) => Self::IntSeq,
@@ -662,6 +664,10 @@ fn config_string(value: &TypeValue) -> Option<String> {
         TypeValue::Unit(value) => Some(value.to_string()),
         TypeValue::Point2(value) => Some(format!("{},{}", value.x, value.y)),
         TypeValue::Vec2(value) => Some(format!("{},{}", value.x, value.y)),
+        TypeValue::Rect(value) => Some(format!(
+            "{},{},{},{}",
+            value.x, value.y, value.width, value.height
+        )),
         TypeValue::Team(value) => Some(value.to_string()),
         TypeValue::UnitCommand(value) => Some(value.to_string()),
         TypeValue::IntSeq(values) | TypeValue::IntArray(values) => Some(format!("{values:?}")),
