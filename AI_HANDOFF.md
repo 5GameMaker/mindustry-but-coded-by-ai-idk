@@ -6878,5 +6878,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 真实 desktop camera/backend 还没有使用 `last_camera_shake_frame.max_offset` 生成随机 `camShakeOffset` 并应用到 camera；
   2. `screenshake` 暂时在 `update()` 以 Java 默认最大值 `4` 传入，后续要接 settings；
   3. `sync_local_camera_shake_events_for_render(...)` 暂用 `player.x/y` 作为 camera 参考，后续需要接真实 camera state；
-  4. audio 本地事件、flying wreck sound/update、完整 `UnitComp.destroy()` side effects 仍是后续主线；
+  4. flying wreck death sound 已在 `202` 节接入；audio backend、flying wreck update/renderer、完整 `UnitComp.destroy()` side effects 仍是后续主线；
   5. 当前总迁移仍约 10% 左右，远未可玩。
+
+---
+
+## 202. 最新闭环记录：UnitDeath flying wreck 分支音效
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：补齐 Java `UnitComp.killed()` 的 flying + `createWreck` 分支，让 `UnitDeathCallPacket` 不只标 dead，还能产生 `wreckSound.at(this, 1f, wreckSoundVolume)` 对应事件。
+- Java 对照：
+  - 非 flying 或不 createWreck：`destroy()`
+  - flying 且 createWreck：`type.wreckSound.at(this, 1f, type.wreckSoundVolume)`
+  - `UnitType.init()` 默认 wreck sound：`hitSize >= 22f ? wreckFallBig : wreckFall`
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `apply_client_unit_death_packet(...)` 在 flying + `create_wreck` 分支保留 unit，不走 destroy；
+    - 用 `UnitType::pure_init_plan().wreck_sound` 解析默认 `wreckFall` / `wreckFallBig`；
+    - 写入 `client_local_sound_at_events`，保留位置、`wreck_sound_volume`、pitch `1.0`；
+    - 更新 `game_runtime_applies_client_unit_death_packet_like_java_killed`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_syncs_flying_unit_death_to_wreck_sound_without_remove`，覆盖 NetClient lifecycle -> DesktopLauncher -> GameRuntime 的真实同步路径。
+  - `MIGRATION.md`
+    - 新增 `12.276`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_death_packet_like_java_killed`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_flying_unit_death_to_wreck_sound_without_remove`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. flying wreck 残骸实体/坠落 update/renderer/撞击伤害仍未迁移；
+  2. `client_local_sound_at_events` 仍需下沉到真实 desktop audio backend；
+  3. 完整 `UnitComp.destroy()` 的 `Damage.dynamicExplosion`、`Effect.shake`、scorch、weapon `shootOnDeath`、ability death、event bus 等仍未完成；
+  4. 当前总迁移仍约 10% 左右，远未可玩。

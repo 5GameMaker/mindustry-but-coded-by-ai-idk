@@ -8836,4 +8836,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `screenshake` 目前由 desktop seam 默认传 `4`，后续需要接 settings；
   - desktop 临时用 `player.x/y` 作为 camera 参考点，后续要接真实 camera state；
   - `client_local_sound_at_events` 仍需同样从 runtime 下沉到真实 audio backend；
+  - flying wreck death sound 已在 `12.276` 接入，残骸坠落 update/renderer 仍未完成；
   - 当前总体迁移仍约 10% 左右，远未可玩，继续把 helper/plan 接入真实 runtime/content/world/entity/network/client-server 调用链。
+
+### 12.276 UnitDeath flying wreck 分支音效
+
+- 2026-05-28：对照 Java `UnitComp.killed()` 中 flying + `createWreck` 分支，补齐 Rust 客户端收到 `UnitDeathCallPacket` 时的 wreck sound 副作用。
+- Java 依据：
+  - `if(!type.flying || !type.createWreck) destroy();`
+  - `else type.wreckSound.at(this, 1f, type.wreckSoundVolume);`
+  - `UnitType.init()` 中 `wreckSound == Sounds.unset` 时按 `hitSize >= 22f ? Sounds.wreckFallBig : Sounds.wreckFall` 解析。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `apply_client_unit_death_packet(...)` 对 flying + `create_wreck` 不移除 unit，保持 dead/added；
+    - 使用 `UnitType::pure_init_plan().wreck_sound` 解析默认 wreck sound；
+    - 若 `standard_sound_id(...)` 可解析，则写入 `client_local_sound_at_events`，pitch `1.0`、volume 使用 `wreck_sound_volume`；
+    - 更新 `game_runtime_applies_client_unit_death_packet_like_java_killed`，覆盖 `wreckFallBig`、位置、volume、pitch。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_syncs_flying_unit_death_to_wreck_sound_without_remove`，验证 `UnitDeathCallPacket` 经 NetClient lifecycle 队列进入 runtime 后，flying wreck unit 不被移除且产生 wreck sound event。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_death_packet_like_java_killed`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_flying_unit_death_to_wreck_sound_without_remove`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - flying wreck 的实体/残骸坠落 update、渲染、撞击/坠毁伤害仍未迁移；
+  - `client_local_sound_at_events` 还停留在 runtime 事件队列，desktop/backend 真实 audio 输出仍未接；
+  - 完整 `UnitComp.destroy()` side effects 仍需继续迁移；
+  - 当前总体迁移仍约 10% 左右，远未可玩。

@@ -4211,18 +4211,35 @@ impl GameRuntime {
         if packet.uid < 0 {
             return false;
         }
+        let mut wreck_sound_event = None;
         let destroy_immediately = {
             let Some(unit) = self.client_unit_snapshot_entities.get_mut(&packet.uid) else {
                 return false;
             };
             unit.health.health = unit.health.health.min(0.0);
             unit.health.dead = true;
-            !(unit.type_info.flying && unit.type_info.create_wreck)
+            if unit.type_info.flying && unit.type_info.create_wreck {
+                let wreck_sound = unit.type_info.pure_init_plan().wreck_sound;
+                wreck_sound_event =
+                    standard_sound_id(&wreck_sound).map(|sound_id| SoundAtCallPacket {
+                        sound_id,
+                        x: unit.x(),
+                        y: unit.y(),
+                        volume: unit.type_info.wreck_sound_volume,
+                        pitch: 1.0,
+                    });
+                false
+            } else {
+                true
+            }
         };
 
         if destroy_immediately {
             self.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: packet.uid })
         } else {
+            if let Some(event) = wreck_sound_event {
+                self.client_local_sound_at_events.push(event);
+            }
             true
         }
     }
@@ -26503,14 +26520,27 @@ mod tests {
         let mut flying_type = UnitType::new(79, "flare");
         flying_type.flying = true;
         flying_type.create_wreck = true;
+        flying_type.hit_size = 24.0;
+        flying_type.wreck_sound_volume = 0.7;
         let mut flying = UnitComp::new(79, flying_type, TeamId(4));
         flying.add();
+        flying.set_pos(33.0, 44.0);
         runtime.client_unit_snapshot_entities.insert(79, flying);
 
         assert!(runtime.apply_client_unit_death_packet(&UnitDeathCallPacket { uid: 79 }));
         let flying = runtime.client_unit_snapshot_entities.get(&79).unwrap();
         assert!(flying.health.dead);
         assert!(flying.entity.is_added());
+        assert_eq!(runtime.client_local_sound_at_events.len(), 1);
+        let wreck_sound = &runtime.client_local_sound_at_events[0];
+        assert_eq!(
+            wreck_sound.sound_id,
+            standard_sound_id("wreckFallBig").unwrap()
+        );
+        assert_eq!(wreck_sound.x, 33.0);
+        assert_eq!(wreck_sound.y, 44.0);
+        assert_eq!(wreck_sound.volume, 0.7);
+        assert_eq!(wreck_sound.pitch, 1.0);
         assert!(!runtime.apply_client_unit_death_packet(&UnitDeathCallPacket { uid: -1 }));
     }
 
