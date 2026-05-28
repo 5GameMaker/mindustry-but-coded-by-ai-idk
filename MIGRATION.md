@@ -9384,3 +9384,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 这只是 `Weapon.update(...)` 前缀/passive state；仍缺 autoTarget、rotate、shoot gate、shoot pattern、barrel counter、ammo/eject/recoil side effects、continuous beam、sound/effect、真实 bullet creation；
   - 需要后续把该 tick 与 server authoritative bullet spawn 合流，而不是死亡发弹独立路径长期存在；
   - 当前总体迁移约 12% 出头，远未可玩。
+
+### 12.296 Server Weapon.update minimal shoot gate → bullet snapshot
+
+- 2026-05-28：继续推进 Java `Weapon.update(...)` 的普通发射路径，把 server unit 的最小 ready shoot gate 接入 `server_bullets`，复用已有 EntitySnapshot 与 bullet lifecycle。
+- Java 依据：
+  - `if(mount.shoot && can && !(bullet.killShooter && mount.totalShots > 0) && ... && mount.reload <= 0.0001f ...){ shoot(...); mount.reload = reload; }`
+  - `shoot(...)` 会立即增加 `mount.totalShots`，按 barrel counter 创建 bullet；
+  - `bullet(...)` 设置 recoil/heat，并创建 bullet entity。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntime::build_unit_weapon_bullet(...)`，以 owner/team/bullet 名称/坐标/角度构建 `BulletComp`；
+    - `build_unit_shoot_on_death_bullet(...)` 改为复用该通用 helper。
+  - `server/src/lib.rs`
+    - 新增 `ServerWeaponBulletSpawnPlan` 与 `rotate_offset(...)`；
+    - `tick_server_unit_weapons(...)` 在 passive state update 后检查最小 shoot gate：
+      - `mount.shoot`
+      - `can_shoot`
+      - `!(bullet_kill_shooter && total_shots > 0)`
+      - `alternate` 默认侧 gate
+      - `warmup >= min_warmup`
+      - `reload <= 0.0001`
+      - bullet 名非空
+    - ready 后生成 `server_bullets`，设置 `total_shots/barrel_counter/reload/recoil/recoils/heat`；
+    - 新增 `server_update_fires_ready_unit_weapon_into_bullet_snapshot`，确认普通 server weapon bullet 能广播为 EntitySnapshot 并被客户端 materialize。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_ticks_unit_weapon_mount_reload_and_warmup --lib`
+  - `cargo test -p mindustry-server server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot --lib`
+  - `cargo test -p mindustry-core game_runtime_unit_shoot_on_death_spawns_bullet_and_honors_kill_shooter_gate --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - shoot gate 仍是最小版：未完整实现 autoTarget、rotate cone、minShootVelocity、shoot pattern 多发/延迟、xRand/yRand/inaccuracy、ammo/eject、sound/effect、continuous beam；
+  - bullet spawn 坐标/角度只覆盖基础 weapon offset，后续需完全对齐 Java `bulletRotation(...)` 与 `ShootPattern`；
+  - 当前总体迁移约 12% 出头，远未可玩。

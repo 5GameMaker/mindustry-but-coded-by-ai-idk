@@ -87,8 +87,24 @@ const CARGO_AI_MOVE_RANGE: f32 = 6.0;
 const CARGO_AI_MOVE_SMOOTHING: f32 = 20.0;
 const SERVER_FIRE_ENTITY_ID_BASE: i32 = -1_500_000_000;
 
+struct ServerWeaponBulletSpawnPlan {
+    owner_id: i32,
+    team: TeamId,
+    bullet: String,
+    x: f32,
+    y: f32,
+    rotation: f32,
+}
+
 fn server_fire_entity_id(x: i32, y: i32) -> i32 {
     SERVER_FIRE_ENTITY_ID_BASE.saturating_add(point2_pack(x, y))
+}
+
+fn rotate_offset(angle_degrees: f32, x: f32, y: f32) -> (f32, f32) {
+    let radians = angle_degrees.to_radians();
+    let cos = radians.cos();
+    let sin = radians.sin();
+    (x * cos - y * sin, x * sin + y * cos)
 }
 
 #[derive(Debug, Clone)]
@@ -2419,16 +2435,93 @@ impl ServerLauncher {
 
     fn tick_server_unit_weapons(&mut self, delta_ticks: f32) -> usize {
         let mut updated = 0;
+        let mut spawn_plans = Vec::new();
         for unit in self.server_units.values_mut() {
             if unit.health.dead {
                 continue;
             }
             let reload_multiplier = unit.status.reload_multiplier;
             let can_shoot = unit.can_shoot();
+            let unit_id = unit.id();
+            let team = unit.team_id();
+            let unit_x = unit.x();
+            let unit_y = unit.y();
+            let unit_rotation = unit.rotation();
             let before = unit.weapons.mount_update_calls;
             unit.weapons
                 .update_with_context(delta_ticks, reload_multiplier, can_shoot);
             updated += unit.weapons.mount_update_calls.saturating_sub(before);
+            for mount in &mut unit.weapons.mounts {
+                let weapon = &mount.weapon;
+                let ready = mount.shoot
+                    && can_shoot
+                    && !(weapon.bullet_kill_shooter && mount.total_shots > 0)
+                    && (!weapon.alternate || mount.side == weapon.flip_sprite)
+                    && mount.warmup >= weapon.min_warmup
+                    && mount.reload <= 0.0001
+                    && !weapon.bullet.is_empty();
+                if !ready {
+                    continue;
+                }
+
+                let mount_rotation = mount.rotation;
+                let weapon_rotation = unit_rotation - 90.0
+                    + if weapon.rotate {
+                        mount_rotation
+                    } else {
+                        weapon.base_rotation
+                    };
+                let (mount_dx, mount_dy) = rotate_offset(unit_rotation - 90.0, weapon.x, weapon.y);
+                let (shoot_dx, shoot_dy) =
+                    rotate_offset(weapon_rotation, weapon.shoot_x, weapon.shoot_y);
+                let shoot_angle = unit_rotation
+                    + if weapon.rotate {
+                        mount_rotation
+                    } else {
+                        weapon.base_rotation
+                    };
+                spawn_plans.push(ServerWeaponBulletSpawnPlan {
+                    owner_id: unit_id,
+                    team,
+                    bullet: weapon.bullet.clone(),
+                    x: unit_x + mount_dx + shoot_dx,
+                    y: unit_y + mount_dy + shoot_dy,
+                    rotation: shoot_angle,
+                });
+
+                let barrel_counter = mount.barrel_counter;
+                mount.total_shots = mount.total_shots.saturating_add(1);
+                mount.reload = weapon.reload;
+                mount.recoil = 1.0;
+                if weapon.recoils > 0 {
+                    let recoils = mount
+                        .recoils
+                        .get_or_insert_with(|| vec![0.0; weapon.recoils as usize]);
+                    if !recoils.is_empty() {
+                        let index = barrel_counter.rem_euclid(recoils.len() as i32) as usize;
+                        recoils[index] = 1.0;
+                    }
+                }
+                mount.barrel_counter = mount.barrel_counter.saturating_add(1);
+                mount.heat = 1.0;
+            }
+        }
+
+        for plan in spawn_plans {
+            let Some(bullet) = GameRuntime::build_unit_weapon_bullet(
+                &self.content_loader,
+                plan.owner_id,
+                plan.team,
+                &plan.bullet,
+                plan.x,
+                plan.y,
+                plan.rotation,
+            ) else {
+                continue;
+            };
+            let bullet_id = self.next_server_runtime_bullet_id();
+            self.server_bullets.insert(bullet_id, bullet);
+            updated += 1;
         }
         updated
     }
@@ -7191,6 +7284,85 @@ mod tests {
                 .mount_update_calls,
             1
         );
+    }
+
+    #[test]
+    fn server_update_fires_ready_unit_weapon_into_bullet_snapshot() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let provider = CaptureProvider {
+            sent: Arc::clone(&sent),
+        };
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.net_server = NetServer::new(Net::new(Box::new(provider)));
+        launcher.net_server.open(6599).unwrap();
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut weapon = Weapon::new("server-rifle");
+        weapon.bullet = "placeholder".into();
+        weapon.reload = 10.0;
+        weapon.shoot_x = 0.0;
+        weapon.shoot_y = 0.0;
+        weapon.x = 0.0;
+        weapon.y = 0.0;
+        weapon.recoils = 1;
+        let mut unit_type = UnitType::new(9105, "server-shooter");
+        unit_type.weapons.push(weapon);
+        let mut unit = UnitComp::new(96, unit_type, TeamId(2));
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(90.0);
+        unit.weapons.mounts[0].reload = 1.0;
+        unit.weapons.mounts[0].shoot = true;
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&96).unwrap();
+        let mount = &unit.weapons.mounts[0];
+        assert_eq!(mount.total_shots, 1);
+        assert_eq!(mount.barrel_counter, 1);
+        assert_eq!(mount.reload, 10.0);
+        assert_eq!(mount.recoil, 1.0);
+        assert_eq!(mount.heat, 1.0);
+        assert_eq!(mount.recoils.as_ref().unwrap()[0], 1.0);
+        assert_eq!(launcher.server_bullets.len(), 1);
+        let (&server_bullet_id, server_bullet) = launcher.server_bullets.iter().next().unwrap();
+        let placeholder = launcher
+            .content_loader
+            .bullet_by_name("placeholder")
+            .expect("baseline content should include placeholder bullet");
+        assert_eq!(server_bullet.bullet_type_id, placeholder.id());
+        assert_eq!(server_bullet.owner, EntityRef::new(96));
+        assert_eq!(server_bullet.team, TeamId(2));
+        assert_eq!(server_bullet.x, 40.0);
+        assert_eq!(server_bullet.y, 56.0);
+        assert_eq!(server_bullet.rotation, 90.0);
+
+        let sent_packets = sent.lock().unwrap();
+        let snapshot_packet = sent_packets
+            .iter()
+            .rev()
+            .find_map(|(_connection_id, packet, reliable)| {
+                if !*reliable {
+                    if let PacketKind::EntitySnapshotCallPacket(packet) = packet {
+                        return Some(packet.clone());
+                    }
+                }
+                None
+            })
+            .expect("ready server weapon shot should be broadcast as bullet snapshot");
+        let mut client_runtime = GameRuntime::default();
+        let report = client_runtime.apply_client_entity_snapshot_packet_with_content(
+            &launcher.content_loader,
+            snapshot_packet.amount,
+            &snapshot_packet.data,
+        );
+        assert_eq!(report.entity_parse_errors, 0);
+        let client_bullet = client_runtime
+            .client_bullet_snapshot_entities
+            .get(&server_bullet_id)
+            .expect("client should materialize server weapon bullet snapshot");
+        assert_eq!(client_bullet.owner, server_bullet.owner);
+        assert_eq!(client_bullet.bullet_type_id, server_bullet.bullet_type_id);
     }
 
     #[test]

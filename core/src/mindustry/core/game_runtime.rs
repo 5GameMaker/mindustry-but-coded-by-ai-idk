@@ -4222,15 +4222,29 @@ impl GameRuntime {
         y: f32,
         rotation: f32,
     ) -> Option<BulletComp> {
-        let bullet_content = content.bullet_by_name(bullet_name)?;
-        let spec = &bullet_content.spec;
-        let mut bullet = BulletComp::new(
-            bullet_content.id(),
+        Self::build_unit_weapon_bullet(
+            content,
+            unit.id(),
             unit.team_id(),
-            EntityRef::new(unit.id()),
+            bullet_name,
             x,
             y,
-        );
+            rotation,
+        )
+    }
+
+    pub fn build_unit_weapon_bullet(
+        content: &ContentLoader,
+        owner_id: i32,
+        team: TeamId,
+        bullet_name: &str,
+        x: f32,
+        y: f32,
+        rotation: f32,
+    ) -> Option<BulletComp> {
+        let bullet_content = content.bullet_by_name(bullet_name)?;
+        let spec = &bullet_content.spec;
+        let mut bullet = BulletComp::new(bullet_content.id(), team, EntityRef::new(owner_id), x, y);
         bullet.damage = spec.damage;
         bullet.lifetime = spec.lifetime;
         bullet.rotation = rotation;

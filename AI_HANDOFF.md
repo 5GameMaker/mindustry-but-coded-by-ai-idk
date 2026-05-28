@@ -7500,3 +7500,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 把普通 server weapon shoot 与现在的 death shootOnDeath bullet spawn 逐步合流；
   3. 检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
   4. 当前总迁移约 12% 出头，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 222. 最新闭环记录：Server Weapon.update minimal shoot gate → bullet snapshot
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：继续 Java `Weapon.update(...)`，把普通 server unit 的最小 ready shoot gate 接入 `server_bullets`，走现有 EntitySnapshot/lifecycle，而不是只服务死亡发弹。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntime::build_unit_weapon_bullet(...)`；
+    - `build_unit_shoot_on_death_bullet(...)` 改为复用该通用 helper。
+  - `server/src/lib.rs`
+    - 新增 `ServerWeaponBulletSpawnPlan` 与 `rotate_offset(...)`；
+    - `tick_server_unit_weapons(...)` 在 passive mount update 后执行最小 shoot gate；
+    - ready 时生成 `server_bullets`，并更新 `total_shots/barrel_counter/reload/recoil/recoils/heat`；
+    - 新增 `server_update_fires_ready_unit_weapon_into_bullet_snapshot`。
+  - `MIGRATION.md`
+    - 新增 `12.296`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_ticks_unit_weapon_mount_reload_and_warmup --lib`
+  - `cargo test -p mindustry-server server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot --lib`
+  - `cargo test -p mindustry-core game_runtime_unit_shoot_on_death_spawns_bullet_and_honors_kill_shooter_gate --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 完整 `Weapon.update(...)`：autoTarget、rotate cone、minShootVelocity、ShootPattern 多发/延迟、xRand/yRand/inaccuracy、ammo/eject、sound/effect、continuous beam；
+  2. 完整 Java `bulletRotation(...)` 与 `ShootPattern` 坐标/角度；
+  3. 检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
+  4. 当前总迁移约 12% 出头，远未可玩，goal 绝不能标记 complete。
