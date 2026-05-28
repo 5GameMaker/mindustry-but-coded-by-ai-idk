@@ -759,6 +759,61 @@ pub fn load() -> Vec<BulletContent> {
     aegires_point_defense.hit_effect = "pointHit".into();
     aegires_point_defense.max_range = 180.0;
 
+    let mut navanax_emp_cannon = BulletSpec::new(BulletKind::Basic, 5.0, 60.0);
+    navanax_emp_cannon.scale_life = true;
+    navanax_emp_cannon.light_opacity = 0.7;
+    navanax_emp_cannon.unit_damage_scl = 0.8;
+    navanax_emp_cannon.heal_percent = 20.0;
+    navanax_emp_cannon.time_increase = 3.0;
+    navanax_emp_cannon.time_duration = 60.0 * 20.0;
+    navanax_emp_cannon.power_damage_scl = 3.0;
+    navanax_emp_cannon.hit_color = "heal".into();
+    navanax_emp_cannon.light_color = "heal".into();
+    navanax_emp_cannon.light_radius = 70.0;
+    navanax_emp_cannon.shoot_effect = "hitEmpSpark".into();
+    navanax_emp_cannon.smoke_effect = "shootBigSmoke2".into();
+    navanax_emp_cannon.lifetime = 60.0;
+    navanax_emp_cannon.sprite = "circle-bullet".into();
+    navanax_emp_cannon.back_color = "heal".into();
+    navanax_emp_cannon.front_color = "white".into();
+    navanax_emp_cannon.width = 12.0;
+    navanax_emp_cannon.height = 12.0;
+    navanax_emp_cannon.shrink_y = 0.0;
+    navanax_emp_cannon.trail_length = 20;
+    navanax_emp_cannon.trail_width = 6.0;
+    navanax_emp_cannon.trail_color = "heal".into();
+    navanax_emp_cannon.trail_interval = 3.0;
+    navanax_emp_cannon.splash_damage = 70.0;
+    navanax_emp_cannon.splash_damage_radius = 100.0;
+    navanax_emp_cannon.hit_shake = 4.0;
+    navanax_emp_cannon.trail_rotation = true;
+    navanax_emp_cannon.status = "electrified".into();
+    navanax_emp_cannon.hit_sound = "explosionNavanax".into();
+    navanax_emp_cannon.trail_effect = "custom:navanaxEmpTrail".into();
+    navanax_emp_cannon.hit_effect = "custom:navanaxEmpHit".into();
+
+    let mut navanax_plasma_laser = continuous_laser_bullet(27.0);
+    navanax_plasma_laser.max_range = 90.0;
+    navanax_plasma_laser.length = 95.0;
+    navanax_plasma_laser.hit_effect = "hitMeltHeal".into();
+    navanax_plasma_laser.draw_size = 200.0;
+    navanax_plasma_laser.lifetime = 155.0;
+    navanax_plasma_laser.shoot_effect = "shootHeal".into();
+    navanax_plasma_laser.smoke_effect = "none".into();
+    navanax_plasma_laser.width = 4.0;
+    navanax_plasma_laser.hit_large = false;
+    navanax_plasma_laser.incend_chance = 0.03;
+    navanax_plasma_laser.incend_spread = 5.0;
+    navanax_plasma_laser.incend_amount = 1;
+    navanax_plasma_laser.heal_percent = 0.4;
+    navanax_plasma_laser.collides_team = true;
+    navanax_plasma_laser.colors = vec![
+        "heal@0.2".into(),
+        "heal@0.5".into(),
+        "heal*1.2".into(),
+        "white".into(),
+    ];
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -853,6 +908,8 @@ pub fn load() -> Vec<BulletContent> {
             cyerce_plasma_frag_missile,
         ),
         make_bullet(&mut next_id, "aegires_point_defense", aegires_point_defense),
+        make_bullet(&mut next_id, "navanax_emp_cannon", navanax_emp_cannon),
+        make_bullet(&mut next_id, "navanax_plasma_laser", navanax_plasma_laser),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -1204,6 +1261,8 @@ mod tests {
                 "cyerce_plasma_missile",
                 "cyerce_plasma_frag_missile",
                 "aegires_point_defense",
+                "navanax_emp_cannon",
+                "navanax_plasma_laser",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -2412,6 +2471,81 @@ mod tests {
         assert_eq!(point.max_range, 180.0);
         assert_eq!(point.shoot_effect, "sparkShoot");
         assert_eq!(point.hit_effect, "pointHit");
+    }
+
+    #[test]
+    fn navanax_emp_and_plasma_laser_bullets_match_java_profiles() {
+        let bullets = load();
+        let emp = &by_name(&bullets, "navanax_emp_cannon").spec;
+
+        assert_eq!(emp.kind, BulletKind::Basic);
+        assert_eq!(emp.speed, 5.0);
+        assert_eq!(emp.damage, 60.0);
+        assert!(emp.scale_life);
+        assert_eq!(emp.light_opacity, 0.7);
+        assert_eq!(emp.unit_damage_scl, 0.8);
+        assert_eq!(emp.heal_percent, 20.0);
+        assert_eq!(emp.time_increase, 3.0);
+        assert_eq!(emp.time_duration, 60.0 * 20.0);
+        assert_eq!(emp.power_damage_scl, 3.0);
+        assert_eq!(emp.power_scl_decrease, 0.2);
+        assert!(emp.hit_units);
+        assert_eq!(emp.hit_color, "heal");
+        assert_eq!(emp.light_color, "heal");
+        assert_eq!(emp.light_radius, 70.0);
+        assert_eq!(emp.shoot_effect, "hitEmpSpark");
+        assert_eq!(emp.smoke_effect, "shootBigSmoke2");
+        assert_eq!(emp.lifetime, 60.0);
+        assert_eq!(emp.sprite, "circle-bullet");
+        assert_eq!(emp.back_color, "heal");
+        assert_eq!(emp.front_color, "white");
+        assert_eq!(emp.width, 12.0);
+        assert_eq!(emp.height, 12.0);
+        assert_eq!(emp.shrink_y, 0.0);
+        assert_eq!(emp.trail_length, 20);
+        assert_eq!(emp.trail_width, 6.0);
+        assert_eq!(emp.trail_color, "heal");
+        assert_eq!(emp.trail_interval, 3.0);
+        assert_eq!(emp.splash_damage, 70.0);
+        assert_eq!(emp.splash_damage_radius, 100.0);
+        assert_eq!(emp.hit_shake, 4.0);
+        assert!(emp.trail_rotation);
+        assert_eq!(emp.status, "electrified");
+        assert_eq!(emp.hit_sound, "explosionNavanax");
+        assert_eq!(emp.trail_effect, "custom:navanaxEmpTrail");
+        assert_eq!(emp.hit_effect, "custom:navanaxEmpHit");
+
+        let laser = &by_name(&bullets, "navanax_plasma_laser").spec;
+        assert_eq!(laser.kind, BulletKind::ContinuousLaser);
+        assert_eq!(laser.damage, 27.0);
+        assert_eq!(laser.max_range, 90.0);
+        assert_eq!(laser.length, 95.0);
+        assert_eq!(laser.hit_effect, "hitMeltHeal");
+        assert_eq!(laser.draw_size, 200.0);
+        assert_eq!(laser.lifetime, 155.0);
+        assert_eq!(laser.shake, 1.0);
+        assert_eq!(laser.shoot_effect, "shootHeal");
+        assert_eq!(laser.smoke_effect, "none");
+        assert_eq!(laser.width, 4.0);
+        assert!(!laser.hit_large);
+        assert_eq!(laser.incend_chance, 0.03);
+        assert_eq!(laser.incend_spread, 5.0);
+        assert_eq!(laser.incend_amount, 1);
+        assert_eq!(laser.heal_percent, 0.4);
+        assert!(laser.collides_team);
+        assert_eq!(
+            laser.colors,
+            vec![
+                "heal@0.2".to_string(),
+                "heal@0.5".to_string(),
+                "heal*1.2".to_string(),
+                "white".to_string(),
+            ]
+        );
+        assert!(laser.continuous);
+        assert!(!laser.keep_velocity);
+        assert!(!laser.collides);
+        assert!(laser.pierce);
     }
 
     #[test]

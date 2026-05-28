@@ -1360,12 +1360,65 @@ pub fn load() -> Vec<UnitType> {
         unit(&mut next_id, "navanax", UnitKind::Naval, |u| {
             u.health = 20000.0;
             u.speed = 0.65;
+            u.drag = 0.17;
             u.hit_size = 58.0;
             u.armor = 16.0;
+            u.accel = 0.2;
             u.rotate_speed = 1.1;
+            u.face_target = false;
+            u.move_sound_volume = 1.1;
+            u.move_sound = "shipMoveBig".into();
+            u.move_sound_pitch_min = 0.9;
+            u.move_sound_pitch_max = 0.9;
+            u.trail_length = 70;
+            u.wave_trail_x = 23.0;
+            u.wave_trail_y = -32.0;
+            u.trail_scl = 3.5;
             u.build_speed = 3.5;
+            u.rotate_to_building = false;
             u.abilities
                 .push("SuppressionFieldAbility:90:90:200:0:-10:true:13".into());
+
+            let mut emp = Weapon::new("emp-cannon-mount");
+            emp.rotate = true;
+            emp.x = 70.0 / 4.0;
+            emp.y = -26.0 / 4.0;
+            emp.reload = 65.0;
+            emp.shake = 3.0;
+            emp.rotate_speed = 2.0;
+            emp.shadow = 30.0;
+            emp.shoot_y = 7.0;
+            emp.recoil = 4.0;
+            emp.cooldown_time = emp.reload - 10.0;
+            emp.shoot_sound = "shootNavanax".into();
+            emp.bullet = "navanax_emp_cannon".into();
+            u.weapons.push(emp);
+
+            for mount_y in [-117.0 / 4.0, 50.0 / 4.0] {
+                for sign in [-1.0, 1.0] {
+                    let mut laser = Weapon::new("plasma-laser-mount");
+                    laser.shadow = 20.0;
+                    laser.controllable = false;
+                    laser.auto_target = true;
+                    laser.mirror = false;
+                    laser.shake = 3.0;
+                    laser.shoot_y = 7.0;
+                    laser.rotate = true;
+                    laser.x = 84.0 / 4.0 * sign;
+                    laser.y = mount_y;
+                    laser.target_interval = 20.0;
+                    laser.target_switch_interval = 35.0;
+                    laser.rotate_speed = 3.5;
+                    laser.reload = 170.0;
+                    laser.recoil = 1.0;
+                    laser.shoot_sound = "beamPlasmaSmall".into();
+                    laser.initial_shoot_sound = "shootBeamPlasmaSmall".into();
+                    laser.continuous = true;
+                    laser.cooldown_time = laser.reload;
+                    laser.bullet = "navanax_plasma_laser".into();
+                    u.weapons.push(laser);
+                }
+            }
         }),
         unit(&mut next_id, "alpha", UnitKind::Standard, |u| {
             u.is_enemy = false;
@@ -3922,6 +3975,104 @@ mod tests {
             .expect("missing aegires_point_defense");
         assert_eq!(point.spec.damage, 30.0);
         assert_eq!(point.spec.max_range, 180.0);
+    }
+
+    #[test]
+    fn navanax_emp_cannon_and_plasma_laser_mounts_match_java() {
+        let units = load();
+        let navanax = by_name(&units, "navanax");
+
+        assert!(navanax.naval);
+        assert_eq!(navanax.health, 20000.0);
+        assert_eq!(navanax.speed, 0.65);
+        assert_eq!(navanax.drag, 0.17);
+        assert_eq!(navanax.hit_size, 58.0);
+        assert_eq!(navanax.armor, 16.0);
+        assert_eq!(navanax.accel, 0.2);
+        assert_eq!(navanax.rotate_speed, 1.1);
+        assert!(!navanax.face_target);
+        assert_eq!(navanax.move_sound_volume, 1.1);
+        assert_eq!(navanax.move_sound, "shipMoveBig");
+        assert_eq!(navanax.move_sound_pitch_min, 0.9);
+        assert_eq!(navanax.move_sound_pitch_max, 0.9);
+        assert_eq!(navanax.trail_length, 70);
+        assert_eq!(navanax.wave_trail_x, 23.0);
+        assert_eq!(navanax.wave_trail_y, -32.0);
+        assert_eq!(navanax.trail_scl, 3.5);
+        assert_eq!(navanax.build_speed, 3.5);
+        assert!(!navanax.rotate_to_building);
+        assert!(navanax
+            .abilities
+            .iter()
+            .any(|entry| entry == "SuppressionFieldAbility:90:90:200:0:-10:true:13"));
+        assert_eq!(navanax.weapons.len(), 5);
+
+        let emp = &navanax.weapons[0];
+        assert_eq!(emp.name, "emp-cannon-mount");
+        assert!(emp.rotate);
+        assert_eq!(emp.x, 70.0 / 4.0);
+        assert_eq!(emp.y, -26.0 / 4.0);
+        assert_eq!(emp.reload, 65.0);
+        assert_eq!(emp.shake, 3.0);
+        assert_eq!(emp.rotate_speed, 2.0);
+        assert_eq!(emp.shadow, 30.0);
+        assert_eq!(emp.shoot_y, 7.0);
+        assert_eq!(emp.recoil, 4.0);
+        assert_eq!(emp.cooldown_time, 55.0);
+        assert_eq!(emp.shoot_sound, "shootNavanax");
+        assert_eq!(emp.bullet, "navanax_emp_cannon");
+
+        for (laser, (expected_x, expected_y)) in navanax.weapons[1..].iter().zip([
+            (-84.0 / 4.0, -117.0 / 4.0),
+            (84.0 / 4.0, -117.0 / 4.0),
+            (-84.0 / 4.0, 50.0 / 4.0),
+            (84.0 / 4.0, 50.0 / 4.0),
+        ]) {
+            assert_eq!(laser.name, "plasma-laser-mount");
+            assert_eq!(laser.shadow, 20.0);
+            assert!(!laser.controllable);
+            assert!(laser.auto_target);
+            assert!(!laser.mirror);
+            assert_eq!(laser.shake, 3.0);
+            assert_eq!(laser.shoot_y, 7.0);
+            assert!(laser.rotate);
+            assert_eq!(laser.x, expected_x);
+            assert_eq!(laser.y, expected_y);
+            assert_eq!(laser.target_interval, 20.0);
+            assert_eq!(laser.target_switch_interval, 35.0);
+            assert_eq!(laser.rotate_speed, 3.5);
+            assert_eq!(laser.reload, 170.0);
+            assert_eq!(laser.recoil, 1.0);
+            assert_eq!(laser.shoot_sound, "beamPlasmaSmall");
+            assert_eq!(laser.initial_shoot_sound, "shootBeamPlasmaSmall");
+            assert!(laser.continuous);
+            assert_eq!(laser.cooldown_time, 170.0);
+            assert_eq!(laser.bullet, "navanax_plasma_laser");
+        }
+
+        let bullets = bullets::load();
+        let emp_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == emp.bullet)
+            .expect("missing navanax_emp_cannon");
+        assert_eq!(emp_bullet.spec.kind, BulletKind::Basic);
+        assert_eq!(emp_bullet.spec.damage, 60.0);
+        assert_eq!(emp_bullet.spec.time_increase, 3.0);
+        assert_eq!(emp_bullet.spec.time_duration, 60.0 * 20.0);
+        assert_eq!(emp_bullet.spec.power_damage_scl, 3.0);
+        assert_eq!(emp_bullet.spec.unit_damage_scl, 0.8);
+        assert!(emp_bullet.spec.hit_units);
+
+        let laser_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == navanax.weapons[1].bullet)
+            .expect("missing navanax_plasma_laser");
+        assert_eq!(laser_bullet.spec.kind, BulletKind::ContinuousLaser);
+        assert_eq!(laser_bullet.spec.damage, 27.0);
+        assert_eq!(laser_bullet.spec.max_range, 90.0);
+        assert_eq!(laser_bullet.spec.length, 95.0);
+        assert_eq!(laser_bullet.spec.heal_percent, 0.4);
+        assert!(laser_bullet.spec.collides_team);
     }
 
     #[test]
