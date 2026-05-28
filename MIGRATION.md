@@ -10826,3 +10826,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Pixelator 仅进入 bundle side-channel，desktop 尚未按该槽位真实包裹 renderer scale/camera/framebuffer；
   - Minimap 像素更新链仍需接真实 `GameState.world + content registry` 增量事件、live texture 上传和 UI HUD；
   - 当前总体迁移约 17.7%，仍未达到完整可玩。
+
+### 12.340 Menu/Load pass and renderer draw order bridge
+
+- 2026-05-29：继续推进渲染引擎总线化；本轮把菜单帧和加载帧从孤立计划层推进到可转成 `RenderPass` 的屏幕帧，并补齐 Java `Renderer.draw()` 稳定顺序描述。同时把 desktop Pixelator 从 core bundle side-channel 接到 `DesktopLauncher::graphics_frame_for_render(...)`。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/MenuRenderer.java`
+    - 菜单背景 cache/shadow/flyer/darkness 有固定屏幕绘制顺序；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/LoadRenderer.java`
+    - 加载界面按背景、logo/planet、progress、label、error/completion banner 生成屏幕绘制；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - world draw 顺序不是普通 `RenderPassKind` 默认顺序，需保留 Java draw stage 排序语义；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/Pixelator.java`
+    - Pixelator 是 renderer scale/camera/framebuffer wrapper，不是普通 pass。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuFramePlan::to_render_pass()` / `into_render_pass()`；
+    - 使用 `RenderPassKind::Custom("menu")` 保留 cache/shadow/flyer/darkness 命令顺序；
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `LoadFramePlan::to_render_pass()` / `into_render_pass()`；
+    - 将加载命令映射到 `RenderCommand::{Clear,DrawCircle,DrawSprite,DrawText,FillRect,Custom}`；
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RendererDrawStage`；
+    - `RenderPassKind` / `RenderFramePlan` 新增 Java renderer draw stage 排序 helper；
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `pixelator_state/pixelate/renderer_scale/land_scale/cutscene`；
+    - `graphics_frame_for_render(...)` 会在 pixelate 启用时把 `PixelatorFramePlan` 放入 `RenderBridge::set_pixelator(...)`。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core menu_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `4 passed`
+  - `cargo test -p mindustry-core load_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+  - `cargo test -p mindustry-core render_engine --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `5 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `6 passed`
+- 仍未完成：
+  - Menu/Load 目前可转 pass，但 desktop 仍需独立 menu/load frame wrapper，避免和 world bundle 生命周期混帧；
+  - Java renderer draw stage 现在是顺序描述与测试 helper，尚未变成真实 GPU executor；
+  - Pixelator 已进入 desktop frame bundle，但真实 framebuffer begin/end/blit 仍需后端实现；
+  - 当前总体迁移约 17.9%，仍未达到完整可玩。
