@@ -15,6 +15,7 @@ use mindustry_core::mindustry::core::{
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
+use mindustry_core::mindustry::entities::comp::BuildingComp;
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
@@ -25,15 +26,16 @@ use mindustry_core::mindustry::entities::{
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::{
-    BlockRendererPlan, BlockRendererState, FloorRenderPlan, FloorRendererState, FogColor,
-    FogFrameInput, FogFramePlan, FogRendererState, FogViewport, GraphicsFrameBundle,
-    GraphicsFrameStats, LightRendererPlan, LightRendererState, LoadFrameInput, LoadFramePlan,
-    LoadRendererState, MenuFrameInput, MenuFramePlan, MenuRendererConfig, MenuRendererState,
-    MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect, MinimapRendererState,
-    MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, PixelatorCamera,
-    PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBridge, RenderCamera,
-    RenderEngineState, RenderFramePlan, RenderPoint, RenderSize, RenderViewport, TileBounds,
-    TileCoord, Viewport as FloorViewport,
+    BlockRendererBuildingSnapshot, BlockRendererPlan, BlockRendererState,
+    BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer,
+    FloorRenderPlan, FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState,
+    FogViewport, GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState,
+    LoadFrameInput, LoadFramePlan, LoadRendererState, MenuFrameInput, MenuFramePlan,
+    MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
+    MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan, OverlayRendererState,
+    PixelatorCamera, PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBridge,
+    RenderCamera, RenderEngineState, RenderFramePlan, RenderPoint, RenderSize, RenderViewport,
+    TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -52,6 +54,7 @@ use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
+use mindustry_core::mindustry::world::{BuildingRef, CacheLayer as WorldCacheLayer, Tile};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -453,6 +456,101 @@ fn visible_block_tiles(
         }
     }
     tiles
+}
+
+fn graphics_cache_layer_from_world(layer: WorldCacheLayer) -> GraphicsCacheLayer {
+    match layer {
+        WorldCacheLayer::None => GraphicsCacheLayer::None,
+        WorldCacheLayer::Water => GraphicsCacheLayer::Water,
+        WorldCacheLayer::Mud => GraphicsCacheLayer::Mud,
+        WorldCacheLayer::Tar => GraphicsCacheLayer::Tar,
+        WorldCacheLayer::Slag => GraphicsCacheLayer::Slag,
+        WorldCacheLayer::Arkycite => GraphicsCacheLayer::Arkycite,
+        WorldCacheLayer::Cryofluid => GraphicsCacheLayer::Cryofluid,
+        WorldCacheLayer::Space => GraphicsCacheLayer::Space,
+        WorldCacheLayer::Normal => GraphicsCacheLayer::Normal,
+        WorldCacheLayer::Walls => GraphicsCacheLayer::Walls,
+    }
+}
+
+fn block_renderer_building_snapshot_from_world(
+    coord: TileCoord,
+    tile_build: Option<BuildingRef>,
+    runtime_building: Option<&BuildingComp>,
+    content_loader: &ContentLoader,
+) -> Option<BlockRendererBuildingSnapshot> {
+    let block_id = tile_build
+        .map(|build| build.block)
+        .or_else(|| runtime_building.map(|building| building.block.id))?;
+    let content_block = content_loader.block(block_id);
+    let block = runtime_building
+        .map(|building| &building.block)
+        .or_else(|| content_block.map(BlockDef::base));
+
+    let mut snapshot = BlockRendererBuildingSnapshot::new(
+        coord,
+        block.map(|block| block.name.clone()).unwrap_or_default(),
+    );
+
+    if let Some(block) = block {
+        snapshot.cache_layer = graphics_cache_layer_from_world(block.cache_layer);
+        snapshot.size = block.size.max(1).min(u8::MAX as i32) as u8;
+        snapshot.emits_light = block.emit_light;
+    }
+
+    if let Some(def) = content_block {
+        snapshot.draw_team_overlay = matches!(def, BlockDef::DefenseWall(_));
+        snapshot.draw_status =
+            matches!(def, BlockDef::Sandbox(sandbox) if sandbox.enable_draw_status);
+    }
+
+    if let Some(building) = runtime_building {
+        snapshot.rotation = building.rotation as i16;
+        snapshot.team = building.team.0;
+        snapshot.visible = true;
+        snapshot.was_visible = building.was_visible;
+        snapshot.damaged =
+            building.health + f32::EPSILON < building.max_health || building.was_damaged;
+    } else if let Some(build_ref) = tile_build {
+        snapshot.rotation = build_ref.rotation as i16;
+        snapshot.team = build_ref.team.clamp(0, u8::MAX as i32) as u8;
+        snapshot.visible = true;
+    }
+
+    Some(snapshot)
+}
+
+fn block_renderer_tile_snapshot_from_world(
+    tile: &Tile,
+    runtime_building: Option<&BuildingComp>,
+    content_loader: &ContentLoader,
+) -> BlockRendererTileSnapshot {
+    let coord = TileCoord::new(tile.x as i32, tile.y as i32);
+    let tile_build = tile.build;
+    let block_def = content_loader.block(tile.block);
+    let block = runtime_building
+        .map(|building| &building.block)
+        .or_else(|| block_def.map(BlockDef::base));
+
+    let mut snapshot = BlockRendererTileSnapshot::new(
+        coord,
+        block.map(|block| block.name.clone()).unwrap_or_default(),
+    );
+
+    if let Some(block) = block {
+        snapshot.cache_layer = graphics_cache_layer_from_world(block.cache_layer);
+        snapshot.draw_custom_shadow = block.custom_shadow;
+        snapshot.emits_light = block.emit_light;
+        snapshot.obstructs_light = block.obstructs_light;
+    }
+
+    snapshot.building = block_renderer_building_snapshot_from_world(
+        coord,
+        tile_build,
+        runtime_building,
+        content_loader,
+    );
+    snapshot
 }
 
 impl DesktopLauncher {
@@ -934,10 +1032,13 @@ impl DesktopLauncher {
         }
 
         camera.viewport = viewport;
-        self.block_renderer_state.cache.tile_view =
-            visible_block_tiles(camera, viewport, world, 8.0);
+        let visible_tiles = visible_block_tiles(camera, viewport, world, 8.0);
+        let snapshot = self.block_renderer_world_snapshot(&visible_tiles);
+        self.block_renderer_state.cache.tile_view = visible_tiles;
 
-        let plan = self.block_renderer_state.build_plan();
+        let plan = self
+            .block_renderer_state
+            .build_plan_from_snapshot(&snapshot);
         if plan.is_empty() {
             None
         } else {
@@ -1035,6 +1136,41 @@ impl DesktopLauncher {
             kind: DesktopFrameKind::Menu,
             payload: DesktopFramePayload::Menu(plan),
         }
+    }
+
+    fn block_renderer_world_snapshot(
+        &self,
+        visible_tiles: &[TileCoord],
+    ) -> BlockRendererWorldSnapshot {
+        let runtime_buildings = self
+            .runtime
+            .buildings
+            .iter()
+            .map(|building| (building.tile_pos, building))
+            .collect::<BTreeMap<_, _>>();
+        let mut tiles = Vec::with_capacity(visible_tiles.len());
+
+        for coord in visible_tiles {
+            let tile_snapshot = self
+                .game_state
+                .world
+                .tile(coord.x, coord.y)
+                .map(|tile| {
+                    let runtime_building = tile
+                        .build
+                        .and_then(|build| runtime_buildings.get(&build.tile_pos).copied())
+                        .or_else(|| runtime_buildings.get(&tile.pos()).copied());
+                    block_renderer_tile_snapshot_from_world(
+                        tile,
+                        runtime_building,
+                        &self.content_loader,
+                    )
+                })
+                .unwrap_or_else(|| BlockRendererTileSnapshot::new(*coord, ""));
+            tiles.push(tile_snapshot);
+        }
+
+        BlockRendererWorldSnapshot::new(tiles)
     }
 
     pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
@@ -2554,9 +2690,9 @@ mod tests {
     use mindustry_core::mindustry::ctype::{Content, ContentId};
     use mindustry_core::mindustry::entities::comp::DecalColor;
     use mindustry_core::mindustry::graphics::{
-        BlockDrawStage, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput, MinimapCamera,
-        MinimapOverlayInput, RenderCamera, RenderCommand, RenderPassKind, RenderPoint, RenderSize,
-        RenderViewport,
+        BlockDrawStage, CacheLayer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
+        MinimapCamera, MinimapOverlayInput, RenderCamera, RenderCommand, RenderPassKind,
+        RenderPoint, RenderSize, RenderViewport, TileCoord,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -3667,6 +3803,71 @@ mod tests {
         assert_eq!(block_plan.tile_passes[0].stage, BlockDrawStage::TileBase);
         assert_eq!(frame.bundle.stats.block_tile_passes, 1);
         assert_eq!(block_plan.tile_passes[0].tiles.len(), 6);
+    }
+
+    #[test]
+    fn desktop_launcher_block_render_plan_uses_world_tile_and_runtime_building_snapshots() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let wall_large = launcher
+            .content_loader
+            .block_by_name("copper-wall-large")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(3, 3);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = wall_large.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: wall_large.id,
+                team: 7,
+                rotation: 2,
+            });
+            tile_pos
+        };
+
+        let mut building = BuildingComp::new(tile_pos, wall_large.clone(), TeamId(7));
+        building.rotation = 2;
+        building.health = building.max_health - 12.0;
+        building.was_visible = true;
+        building.was_damaged = true;
+        building.visible_flags = 1;
+        launcher.runtime.buildings.push(building);
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let plan = launcher.block_render_plan(camera, viewport).unwrap();
+
+        assert_eq!(plan.tile_passes.len(), 1);
+        assert_eq!(plan.tile_passes[0].stage, BlockDrawStage::TileBase);
+        assert_eq!(plan.tile_passes[0].tiles.len(), 1);
+
+        let tile = &plan.tile_passes[0].tiles[0];
+        assert_eq!(tile.coord, TileCoord::new(1, 1));
+        assert_eq!(tile.block, "copper-wall-large");
+        assert_eq!(tile.cache_layer, CacheLayer::Normal);
+        assert!(!tile.draw_custom_shadow);
+        assert!(!tile.emits_light);
+        assert!(tile.obstructs_light);
+
+        assert_eq!(plan.building_passes[0].stage, BlockDrawStage::BuildingBase);
+        let building = &plan.building_passes[0].buildings[0];
+        assert_eq!(building.block, "copper-wall-large");
+        assert_eq!(building.cache_layer, CacheLayer::Normal);
+        assert_eq!(building.size, 2);
+        assert_eq!(building.rotation, 2);
+        assert_eq!(building.team, 7);
+        assert!(building.visible);
+        assert!(building.was_visible);
+        assert!(building.damaged);
+        assert!(plan
+            .building_passes
+            .iter()
+            .any(|pass| pass.stage == BlockDrawStage::BuildingCracks));
     }
 
     #[test]
