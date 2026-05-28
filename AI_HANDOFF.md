@@ -6607,6 +6607,46 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `git diff --check`
 - 当前仍需继续：
   1. `unit_lifecycle_packets` 暂时增长式保存，后续需要像真正消息队列一样在所有 cursor 消费后 compact，避免长时间运行内存增长；
-  2. `UnitDeathCallPacket` / `UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 仍未按 Java `Units.java` 分支接入 typed runtime；
+  2. `UnitDeathCallPacket` 已在 `195` 节接入 typed runtime；`UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 仍未按 Java `Units.java` 分支接入；
   3. server 侧死亡路径仍要继续对照 Java `UnitComp.killed()/destroy()`，避免把 destroy 语义误发成 despawn；
   4. 当前总迁移仍约 10% 左右，远未可玩，继续保证所有 helper/plan 最终落到真实 runtime/content/world/entity/network/client-server 链路。
+
+---
+
+## 195. 最新闭环记录：UnitDeathCallPacket 接入 UnitComp.killed 最小语义
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把已经进入增量队列的 `UnitDeathCallPacket` 从“记录但不应用”推进到 Rust typed runtime，按 Java `Units.unitDeath(uid) -> unit.killed()` 的最小语义处理。
+- Java 对照：
+  - `core/src/mindustry/entities/Units.java`
+    - `unitDeath(int uid)`：加入 removed entity，若 unit 存在则 `unit.killed()`。
+  - `core/src/mindustry/entities/comp/UnitComp.java`
+    - `killed()`：`health <= 0`、`dead = true`；
+    - 当 `!type.flying || !type.createWreck` 时立即 `destroy()`；
+    - 否则播放 wreck sound，保留 dead flying unit。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `apply_client_unit_death_packet(&UnitDeathCallPacket)`；
+    - 设置本地 unit `health.health = min(health, 0)` 与 `health.dead = true`；
+    - ground / 非 wreck 分支复用 `apply_client_unit_destroy_packet(...)`，因此会触发 legged unit 的 `legDestroy` 并移除 snapshot；
+    - flying + create_wreck 分支先只保留 dead/added 状态，不伪造尚未迁移的 wreck sound/update/renderer；
+    - 新增 `game_runtime_applies_client_unit_death_packet_like_java_killed`。
+  - `desktop/src/lib.rs`
+    - lifecycle 增量分发新增 `PacketKind::UnitDeathCallPacket`；
+    - `desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update` 改成一次 update 前混合 `UnitDeathCallPacket` 与 `UnitDestroyCallPacket`，验证两个 packet 都被应用。
+  - `MIGRATION.md`
+    - 新增 `12.269`，并更新 `12.268` 的剩余项。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_death_packet_like_java_killed`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo test -p mindustry-core update_records_multiple_unit_lifecycle_packets_without_overwriting_queue`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `UnitComp.destroy()` 的完整 explosion、death sound、weapon shoot-on-death、ability death、wreck/scorch 与 event bus 仍待迁移；
+  2. flying wreck 分支目前只是 dead/added 状态，后续要接 wreck sound、坠毁 update、残骸/renderer；
+  3. `UnitSafeDeathCallPacket`、`UnitCapDeathCallPacket`、`UnitEnvDeathCallPacket` 仍需按 Java `Units.java` 对应分支接入；
+  4. server 侧死亡路径仍需对照 Java packet 选择，不能长期用 despawn 代替 death/destroy；
+  5. 当前总迁移仍约 10% 左右，远未可玩，继续保证所有模块不是孤立 helper，而是逐步接到真实 runtime/content/world/entity/network/client-server 链路。

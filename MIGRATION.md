@@ -8594,5 +8594,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：
   - 队列目前与 `unit_spawn_packets` 一样是增长式记录，后续如果客户端长时间运行，需要加入按 cursor 截断/compact 的内存回收策略；
-  - `UnitDeathCallPacket` / `UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 仍未分发到 Rust 的 typed killed/destroy/safe death 语义；
+  - `UnitDeathCallPacket` 已在 `12.269` 分发到 Rust 的 typed killed/destroy 最小语义；`UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 仍待继续；
   - server 侧很多死亡路径仍发 `UnitDespawnCallPacket`，未完整对齐 Java `UnitComp.killed()/destroy()` 的 packet 与副作用拆分。
+
+### 12.269 UnitDeathCallPacket → UnitComp.killed 最小语义
+
+- 2026-05-28：对照 Java `Units.unitDeath(int uid)` 与 `UnitComp.killed()`，把客户端收到的 `UnitDeathCallPacket` 从“队列记录但不应用”推进到 typed runtime。
+- 本轮迁移：
+  - `GameRuntime.apply_client_unit_death_packet(...)`；
+  - `DesktopLauncher.sync_unit_lifecycle_to_runtime(...)` 分发 `UnitDeathCallPacket`；
+  - ground unit death 与 flying wreck death 的最小回归。
+- Java 依据：
+  - `Units.unitDeath(uid)`：客户端把 uid 加入 removed entity 后，若本地 unit 存在则调用 `unit.killed()`；
+  - `UnitComp.killed()`：设置 `wasPlayer`、`health <= 0`、`dead = true`；当 `!type.flying || !type.createWreck` 时立即 `destroy()`，否则只播放 wreck sound 并保留 dead unit；
+  - `UnitComp.destroy()` 最终会走腿部 `LegsComp.destroy()` 与 `remove()`。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `apply_client_unit_death_packet(&UnitDeathCallPacket)`；
+    - 对本地 unit 设置 `health.health = min(health, 0)` 与 `health.dead = true`；
+    - 当 `!(unit.type_info.flying && unit.type_info.create_wreck)` 时复用 `apply_client_unit_destroy_packet(...)`，因此 ground legged unit 会触发 `legDestroy` 并移除；
+    - flying + create_wreck unit 暂时保留为 added/dead，对齐 Java wreck 分支的最小状态，不伪造完整 wreck renderer/sound；
+    - 新增 `game_runtime_applies_client_unit_death_packet_like_java_killed`。
+  - `desktop/src/lib.rs`
+    - unit lifecycle 增量分发新增 `PacketKind::UnitDeathCallPacket`；
+    - `desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update` 改为同一 update 中混合 `UnitDeathCallPacket` 与 `UnitDestroyCallPacket`，验证两者均应用。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_death_packet_like_java_killed`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo test -p mindustry-core update_records_multiple_unit_lifecycle_packets_without_overwriting_queue`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - Java `UnitComp.destroy()` 的完整 explosion、death sound、weapon shoot-on-death、ability death、wreck/scorch、event bus 仍未迁移；
+  - flying wreck 分支目前只保留 dead/added 状态，尚未接 wreck sound、坠毁后续 update 与残骸 renderer；
+  - `UnitSafeDeathCallPacket`、`UnitCapDeathCallPacket`、`UnitEnvDeathCallPacket` 仍需按 Java `Units.java` 各自语义接入；
+  - Rust server 侧死亡 packet 选择仍需继续对照 Java，不应长期用 despawn 掩盖 destroy/death 差异。

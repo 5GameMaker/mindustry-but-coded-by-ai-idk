@@ -822,6 +822,9 @@ impl DesktopLauncher {
                 PacketKind::UnitDestroyCallPacket(packet) => {
                     self.runtime.apply_client_unit_destroy_packet(&packet)
                 }
+                PacketKind::UnitDeathCallPacket(packet) => {
+                    self.runtime.apply_client_unit_death_packet(&packet)
+                }
                 _ => false,
             };
         }
@@ -1850,8 +1853,8 @@ mod tests {
         ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, EffectCallPacket,
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
         NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
-        UnitDespawnCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
-        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UnitDeathCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
+        UnitEnteredPayloadCallPacket, UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -5247,7 +5250,7 @@ mod tests {
         {
             let mut net = launcher.net_client.net_mut();
             net.set_client_loaded(true);
-            net.handle_client_received(PacketKind::UnitDestroyCallPacket(UnitDestroyCallPacket {
+            net.handle_client_received(PacketKind::UnitDeathCallPacket(UnitDeathCallPacket {
                 uid: 9911,
             }));
             net.handle_client_received(PacketKind::UnitDestroyCallPacket(UnitDestroyCallPacket {

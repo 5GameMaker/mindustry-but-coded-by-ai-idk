@@ -47,8 +47,9 @@ use crate::mindustry::{
     net::{
         AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket, EffectCallPacket,
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerSyncData, SoundAtCallPacket,
-        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
-        UnitEnteredPayloadCallPacket, UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UnitBlockSpawnCallPacket, UnitDeathCallPacket, UnitDespawnCallPacket,
+        UnitDestroyCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -4192,6 +4193,26 @@ impl GameRuntime {
             true
         } else {
             false
+        }
+    }
+
+    pub fn apply_client_unit_death_packet(&mut self, packet: &UnitDeathCallPacket) -> bool {
+        if packet.uid < 0 {
+            return false;
+        }
+        let destroy_immediately = {
+            let Some(unit) = self.client_unit_snapshot_entities.get_mut(&packet.uid) else {
+                return false;
+            };
+            unit.health.health = unit.health.health.min(0.0);
+            unit.health.dead = true;
+            !(unit.type_info.flying && unit.type_info.create_wreck)
+        };
+
+        if destroy_immediately {
+            self.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: packet.uid })
+        } else {
+            true
         }
     }
 
@@ -26352,6 +26373,47 @@ mod tests {
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_death_packet_like_java_killed() {
+        let mut ground_type = UnitType::new(78, "crawler");
+        ground_type.allow_leg_step = true;
+        ground_type.leg_count = 2;
+        ground_type.leg_length = 10.0;
+        ground_type.leg_extension = 3.0;
+        ground_type.leg_region = TextureRegionRef::with_size("crawler-leg", 16, 8);
+        ground_type.leg_base_region = TextureRegionRef::with_size("crawler-leg-base", 12, 6);
+        let mut ground = UnitComp::new(78, ground_type, TeamId(4));
+        ground.add();
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(78, ground);
+
+        assert!(runtime.apply_client_unit_death_packet(&UnitDeathCallPacket { uid: 78 }));
+        assert!(!runtime.client_unit_snapshot_entities.contains_key(&78));
+        assert_eq!(
+            runtime
+                .client_local_effect_events
+                .iter()
+                .filter(|event| event.effect.effect_id
+                    == standard_effect_id("legDestroy").unwrap() as u16)
+                .count(),
+            4
+        );
+
+        let mut flying_type = UnitType::new(79, "flare");
+        flying_type.flying = true;
+        flying_type.create_wreck = true;
+        let mut flying = UnitComp::new(79, flying_type, TeamId(4));
+        flying.add();
+        runtime.client_unit_snapshot_entities.insert(79, flying);
+
+        assert!(runtime.apply_client_unit_death_packet(&UnitDeathCallPacket { uid: 79 }));
+        let flying = runtime.client_unit_snapshot_entities.get(&79).unwrap();
+        assert!(flying.health.dead);
+        assert!(flying.entity.is_added());
+        assert!(!runtime.apply_client_unit_death_packet(&UnitDeathCallPacket { uid: -1 }));
     }
 
     #[test]
