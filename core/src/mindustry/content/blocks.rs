@@ -5,15 +5,17 @@ use crate::mindustry::{
     r#type::{Item, Liquid, PayloadKey, UnitType},
     vars::TILE_SIZE,
     world::{
+        block::mul_color_rgb_rgba,
         blocks::environment::{
             FloorData, OreBlockData, OverlayFloorData, PropData, PropKind, SeaBushData,
             SpawnBlockData, StaticTreeData, StaticWallData, TallBlockData, TreeBlockData,
         },
+        blocks::power::light_block_minimap_color_rgba,
         blocks::MAX_CONSTRUCT_BLOCK_SIZE,
         meta::{
             build_visibility::BuildVisibilityContext, BlockFlag, BlockGroup, BuildVisibility, Env,
         },
-        Block, BlockId, CacheLayer,
+        Block, BlockId, CacheLayer, Tile,
     },
 };
 
@@ -4145,6 +4147,14 @@ impl LightBlockData {
                 default_scaled_block_health(self.base.size, &self.requirements, items);
         }
     }
+
+    pub fn minimap_color_rgba(&self, tile: Option<&Tile>, build_color_rgba: Option<u32>) -> u32 {
+        if tile.is_some_and(|tile| tile.build.is_some()) {
+            build_color_rgba.map_or(0, light_block_minimap_color_rgba)
+        } else {
+            0
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4833,6 +4843,45 @@ impl BlockDef {
             Self::Legacy(legacy) => &legacy.base,
             Self::Campaign(campaign) => &campaign.base,
             Self::Logic(logic) => &logic.base,
+        }
+    }
+
+    pub fn minimap_color_rgba_with<F>(
+        &self,
+        tile: Option<&Tile>,
+        mut floor_map_color_rgba: F,
+        light_build_color_rgba: Option<u32>,
+    ) -> u32
+    where
+        F: FnMut(BlockId) -> u32,
+    {
+        match self {
+            Self::Floor(floor) => floor.minimap_color_rgba(tile),
+            Self::Ore(ore) => ore.floor.minimap_color_rgba(tile),
+            Self::StaticWall(wall) => wall.minimap_color_rgba(tile),
+            Self::Light(light) => light.minimap_color_rgba(tile, light_build_color_rgba),
+            Self::Plain(block) if block.name == "cliff" => tile.map_or(0, |tile| {
+                mul_color_rgb_rgba(floor_map_color_rgba(tile.floor_id()), 1.2)
+            }),
+            _ => self.base().minimap_color_rgba(),
+        }
+    }
+
+    pub fn color_rgba_with<F>(
+        &self,
+        tile: Option<&Tile>,
+        floor_map_color_rgba: F,
+        light_build_color_rgba: Option<u32>,
+    ) -> u32
+    where
+        F: FnMut(BlockId) -> u32,
+    {
+        let minimap =
+            self.minimap_color_rgba_with(tile, floor_map_color_rgba, light_build_color_rgba);
+        if minimap == 0 {
+            self.base().map_color_rgba
+        } else {
+            minimap
         }
     }
 
@@ -13863,6 +13912,75 @@ mod tests {
         assert!(def.supports_env(Env::TERRESTRIAL));
         assert!(!def.supports_env(Env::SPACE));
         assert!(!def.supports_env(Env::UNDERWATER));
+    }
+
+    #[test]
+    fn block_def_tile_aware_minimap_and_get_color_dispatch_match_java_subset() {
+        let mut tile = Tile::with_blocks(2, 3, 7, Tile::AIR, 30);
+        tile.extra_data = 0x44556600;
+
+        let mut colored_floor = FloorData::new(30, "colored-floor");
+        colored_floor.colored = true;
+        colored_floor.base.map_color_rgba = 0x01020304;
+        let colored_floor = BlockDef::Floor(colored_floor);
+        assert_eq!(
+            colored_floor.minimap_color_rgba_with(Some(&tile), |_| 0, None),
+            0x445566ff
+        );
+        assert_eq!(
+            colored_floor.color_rgba_with(Some(&tile), |_| 0, None),
+            0x445566ff
+        );
+        assert_eq!(colored_floor.color_rgba_with(None, |_| 0, None), 0x01020304);
+
+        let mut colored_wall = StaticWallData::new(31, "colored-wall");
+        colored_wall.colored = true;
+        let colored_wall = BlockDef::StaticWall(colored_wall);
+        assert_eq!(
+            colored_wall.minimap_color_rgba_with(Some(&tile), |_| 0, None),
+            0x445566ff
+        );
+
+        let cliff = BlockDef::Plain(Block::new(4, "cliff"));
+        assert_eq!(
+            cliff.minimap_color_rgba_with(
+                Some(&tile),
+                |floor_id| {
+                    assert_eq!(floor_id, 7);
+                    0x102030ff
+                },
+                None,
+            ),
+            0x132639ff
+        );
+
+        let mut light = LightBlockData::new(32, "illuminator");
+        light.base.map_color_rgba = 0xaabbccdd;
+        let light = BlockDef::Light(light);
+        assert_eq!(
+            light.minimap_color_rgba_with(Some(&tile), |_| 0, Some(0x11223300)),
+            0
+        );
+        assert_eq!(
+            light.color_rgba_with(Some(&tile), |_| 0, Some(0x11223300)),
+            0xaabbccdd
+        );
+
+        tile.build = Some(crate::mindustry::world::BuildingRef {
+            tile_pos: tile.pos(),
+            block: 32,
+            team: 1,
+            rotation: 0,
+        });
+        assert_eq!(
+            light.minimap_color_rgba_with(Some(&tile), |_| 0, Some(0x11223300)),
+            0x112233ff
+        );
+        assert_eq!(
+            light.color_rgba_with(Some(&tile), |_| 0, Some(0x11223300)),
+            0x112233ff
+        );
+        assert_eq!(light.minimap_color_rgba_with(Some(&tile), |_| 0, None), 0);
     }
 
     #[test]

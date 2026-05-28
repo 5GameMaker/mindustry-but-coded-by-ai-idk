@@ -1,7 +1,7 @@
 use crate::mindustry::{
     ctype::ContentId,
     r#type::Item,
-    world::{Block, BlockId, CacheLayer},
+    world::{Block, BlockId, CacheLayer, Tile},
 };
 
 pub mod spawn_block;
@@ -49,6 +49,7 @@ pub struct FloorData {
     pub autotile_variants: i32,
     pub draw_edge_in: bool,
     pub draw_edge_out: bool,
+    pub colored: bool,
 }
 
 impl FloorData {
@@ -106,6 +107,7 @@ impl FloorData {
             autotile_variants: 1,
             draw_edge_in: true,
             draw_edge_out: true,
+            colored: false,
         }
     }
 
@@ -113,6 +115,14 @@ impl FloorData {
         self.blend_id = self.blend_group as i32;
         self.wall = wall.unwrap_or(0);
         self.decoration = decoration.unwrap_or(0);
+    }
+
+    pub fn minimap_color_rgba(&self, tile: Option<&Tile>) -> u32 {
+        if self.colored {
+            tile.map_or(0, |tile| (tile.extra_data as u32) | 0xff)
+        } else {
+            self.base.minimap_color_rgba()
+        }
     }
 }
 
@@ -161,6 +171,7 @@ pub struct StaticWallData {
     pub large_region: Option<String>,
     pub autotile: bool,
     pub autotile_mid_variants: i32,
+    pub colored: bool,
 }
 
 impl StaticWallData {
@@ -182,11 +193,20 @@ impl StaticWallData {
             large_region: None,
             autotile: false,
             autotile_mid_variants: 1,
+            colored: false,
         }
     }
 
     pub fn can_replace(&self, other: &Block) -> bool {
         other.cache_layer == CacheLayer::Walls || self.base.can_replace(other)
+    }
+
+    pub fn minimap_color_rgba(&self, tile: Option<&Tile>) -> u32 {
+        if self.colored {
+            tile.map_or(0, |tile| (tile.extra_data as u32) | 0xff)
+        } else {
+            self.base.minimap_color_rgba()
+        }
     }
 }
 
@@ -432,6 +452,7 @@ mod tests {
         assert_eq!(floor.autotile_variants, 1);
         assert!(floor.draw_edge_in);
         assert!(floor.draw_edge_out);
+        assert!(!floor.colored);
 
         let custom = FloorData::with_variants(2, "custom-floor", 0);
         assert_eq!(custom.base.variants, 0);
@@ -497,6 +518,23 @@ mod tests {
         assert!(wall.large_region.is_none());
         assert!(!wall.autotile);
         assert_eq!(wall.autotile_mid_variants, 1);
+        assert!(!wall.colored);
+    }
+
+    #[test]
+    fn colored_floor_and_wall_minimap_use_tile_extra_data_with_opaque_alpha() {
+        let mut tile = Tile::new(4, 5);
+        tile.extra_data = 0x11223300;
+
+        let mut floor = FloorData::new(10, "colored-floor");
+        floor.colored = true;
+        assert_eq!(floor.minimap_color_rgba(Some(&tile)), 0x112233ff);
+        assert_eq!(floor.minimap_color_rgba(None), 0);
+
+        let mut wall = StaticWallData::new(11, "colored-wall");
+        wall.colored = true;
+        assert_eq!(wall.minimap_color_rgba(Some(&tile)), 0x112233ff);
+        assert_eq!(wall.minimap_color_rgba(None), 0);
     }
 
     #[test]

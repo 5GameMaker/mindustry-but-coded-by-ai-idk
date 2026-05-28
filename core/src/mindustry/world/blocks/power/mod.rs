@@ -547,6 +547,10 @@ pub fn light_block_minimap_color(color: i32) -> i32 {
     color | 0xff
 }
 
+pub fn light_block_minimap_color_rgba(color: u32) -> u32 {
+    color | 0xff
+}
+
 pub fn light_block_smooth_time(smooth_time: f32, time_scale: f32) -> f32 {
     lerp_delta(smooth_time, time_scale, 0.1)
 }
@@ -1385,6 +1389,7 @@ mod tests {
 
         assert!((light_block_place_radius2(40.0, 8.0) - 36.75).abs() < 0.00001);
         assert_eq!(light_block_minimap_color(0x11223300), 0x112233ff);
+        assert_eq!(light_block_minimap_color_rgba(0x11223300), 0x112233ff);
         assert_eq!(light_block_smooth_time(0.0, 2.0), 0.2);
         assert_eq!(light_block_intensity(0.75, 0.5), 0.375);
     }

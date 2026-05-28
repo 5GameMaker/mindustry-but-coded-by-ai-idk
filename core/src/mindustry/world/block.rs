@@ -351,11 +351,19 @@ impl Default for Block {
     }
 }
 
+pub fn mul_color_rgb_rgba(color: u32, mul: f32) -> u32 {
+    let r = (((color >> 24) & 0xff) as f32 * mul).clamp(0.0, 255.0) as u32;
+    let g = (((color >> 16) & 0xff) as f32 * mul).clamp(0.0, 255.0) as u32;
+    let b = (((color >> 8) & 0xff) as f32 * mul).clamp(0.0, 255.0) as u32;
+    let a = color & 0xff;
+    (r << 24) | (g << 16) | (b << 8) | a
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mindustry::io::TypeValue;
 
-    use super::{Block, CacheLayer};
+    use super::{mul_color_rgb_rgba, Block, CacheLayer};
 
     #[test]
     fn block_layout_fields_match_upstream_formula() {
@@ -514,5 +522,11 @@ mod tests {
 
         assert_eq!(block.minimap_color_rgba(), 0);
         assert_eq!(block.color_rgba(), 0x11223344);
+    }
+
+    #[test]
+    fn color_rgb_multiplier_matches_arc_rgba_channel_clamp() {
+        assert_eq!(mul_color_rgb_rgba(0x10203040, 1.2), 0x13263940);
+        assert_eq!(mul_color_rgb_rgba(0xf0f0f080, 1.2), 0xffffff80);
     }
 }

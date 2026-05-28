@@ -216,6 +216,27 @@ impl Tile {
         floor_color(self.floor_id(), self)
     }
 
+    pub fn block_minimap_color_rgba_with<F>(&self, mut block_minimap_color: F) -> u32
+    where
+        F: FnMut(BlockId, &Tile) -> u32,
+    {
+        block_minimap_color(self.block_id(), self)
+    }
+
+    pub fn floor_minimap_color_rgba_with<F>(&self, mut floor_minimap_color: F) -> u32
+    where
+        F: FnMut(BlockId, &Tile) -> u32,
+    {
+        floor_minimap_color(self.floor_id(), self)
+    }
+
+    pub fn block_color_rgba_with<F>(&self, mut block_color: F) -> u32
+    where
+        F: FnMut(BlockId, &Tile) -> u32,
+    {
+        block_color(self.block_id(), self)
+    }
+
     pub fn set_block_ref(&mut self, block: &Block, team: i32, rotation: i32) {
         self.block = block.id;
         self.build = block.has_building().then(|| BuildingRef {
@@ -426,6 +447,36 @@ mod tests {
         });
 
         assert_eq!(color, 0xaabbccdd);
+    }
+
+    #[test]
+    fn tile_block_color_resolvers_pass_block_and_floor_ids_with_tile_context() {
+        let tile = Tile::with_blocks(7, 8, 11, Tile::AIR, 22);
+
+        assert_eq!(
+            tile.block_minimap_color_rgba_with(|block_id, tile_arg| {
+                assert_eq!(block_id, 22);
+                assert_eq!(tile_arg.pos(), tile.pos());
+                0x01020304
+            }),
+            0x01020304
+        );
+        assert_eq!(
+            tile.block_color_rgba_with(|block_id, tile_arg| {
+                assert_eq!(block_id, 22);
+                assert_eq!(tile_arg.pos(), tile.pos());
+                0x05060708
+            }),
+            0x05060708
+        );
+        assert_eq!(
+            tile.floor_minimap_color_rgba_with(|floor_id, tile_arg| {
+                assert_eq!(floor_id, 11);
+                assert_eq!(tile_arg.pos(), tile.pos());
+                0x0a0b0c0d
+            }),
+            0x0a0b0c0d
+        );
     }
 
     #[test]
