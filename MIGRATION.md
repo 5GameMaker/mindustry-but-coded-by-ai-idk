@@ -9281,3 +9281,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 需要继续防止 Java/Rust 混合联机路径下 UnitDestroy 本地 bullet 与服务端 EntitySnapshot bullet 产生重复表现；
   - flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
   - 当前总体迁移约 12%，远未可玩。
+
+### 12.292 Server death shootOnDeathEffect broadcast smoke
+
+- 2026-05-28：继续补齐 Java `UnitComp.destroy()` 中 `shootOnDeathEffect != null && !hasTarget` 的服务端侧网络表现：server death `shootOnDeath` 分支在生成 bullet snapshot 前，按标准 effect id 广播一次 `EffectCallPacket`。
+- Java 依据：
+  - `if(mount.weapon.shootOnDeathEffect != null && !hasTarget){ mount.allowShootEffects = false; mount.weapon.shootOnDeathEffect.at(x, y, rotation); }`
+  - 该效果发生在 `mount.weapon.update(self(), mount)` 前。
+- Rust 新增/变化：
+  - `server/src/lib.rs`
+    - 新增 `broadcast_server_effect(...)`，复用 `EffectCallPacket` + `standard_effect_id(...)` + 默认 color `-1`；
+    - `apply_server_unit_shoot_on_death(...)` 在存在 `override_effect` 时广播该 effect，并继续保留 `allow_shoot_effects = false`；
+    - 既有 server death bullet snapshot 测试扩展断言：捕获 `EffectCallPacket(smoke)`，位置/旋转与死亡 unit 一致。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-server server_update_spawns_death_bullet_snapshot_when_unit_shoots_on_death --lib`
+  - `cargo test -p mindustry-server server_update_skips_death_bullet_when_kill_shooter_and_total_shots_positive --lib`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 仍不是完整 Java `Weapon.update(...)`；shoot pattern、barrel counter、多枪管、ammo/eject/recoil/sound、连续武器与真实 bullet lifecycle 待迁移；
+  - 需要继续检查 Java/Rust 混合联机路径下本地 destroy bullet 与服务端 snapshot bullet 的重复表现风险；
+  - flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
+  - 当前总体迁移约 12%，远未可玩。

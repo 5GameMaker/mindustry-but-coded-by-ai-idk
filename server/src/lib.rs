@@ -2427,7 +2427,7 @@ impl ServerLauncher {
             };
             self.runtime
                 .note_unit_suicide_bomb_trigger(&self.content_loader, None, &parent);
-            self.apply_server_unit_shoot_on_death(&mut parent);
+            self.apply_server_unit_shoot_on_death(&mut parent)?;
             self.runtime.note_unit_ability_death_events(&parent);
             self.runtime.note_unit_type_killed_event(&parent);
             if self.net_server.is_active() {
@@ -2467,7 +2467,7 @@ impl ServerLauncher {
         Ok(spawned)
     }
 
-    fn apply_server_unit_shoot_on_death(&mut self, parent: &mut UnitComp) -> usize {
+    fn apply_server_unit_shoot_on_death(&mut self, parent: &mut UnitComp) -> io::Result<usize> {
         let mut spawned = 0;
         for weapon_index in 0..parent.weapons.mounts.len() {
             let mount = &mut parent.weapons.mounts[weapon_index];
@@ -2501,6 +2501,14 @@ impl ServerLauncher {
                     override_effect: override_effect.clone(),
                     allow_shoot_effects: override_effect.is_none(),
                 });
+            if let Some(effect_name) = &override_effect {
+                self.broadcast_server_effect(
+                    effect_name,
+                    parent.x(),
+                    parent.y(),
+                    parent.rotation(),
+                )?;
+            }
 
             let Some(bullet) = GameRuntime::build_unit_shoot_on_death_bullet(
                 &self.content_loader,
@@ -2516,7 +2524,7 @@ impl ServerLauncher {
             self.server_bullets.insert(bullet_id, bullet);
             spawned += 1;
         }
-        spawned
+        Ok(spawned)
     }
 
     fn apply_server_liquid_explode_deposits(
@@ -3061,6 +3069,16 @@ impl ServerLauncher {
             false,
         )?;
         Ok(true)
+    }
+
+    fn broadcast_server_effect(
+        &mut self,
+        effect: &str,
+        x: f32,
+        y: f32,
+        rotation: f32,
+    ) -> io::Result<bool> {
+        self.broadcast_server_effect_colored(effect, x, y, rotation, 0xffffffff)
     }
 
     fn broadcast_server_effect_colored(
@@ -6928,6 +6946,7 @@ mod tests {
         let mut weapon = Weapon::new("death-gun");
         weapon.bullet = "placeholder".into();
         weapon.shoot_on_death = true;
+        weapon.shoot_on_death_effect = Some("smoke".into());
         let mut unit_type = UnitType::new(9101, "death-gunner");
         unit_type.weapons.push(weapon);
         let mut unit = UnitComp::new(92, unit_type, TeamId(2));
@@ -6945,6 +6964,8 @@ mod tests {
         assert_eq!(shoot_event.unit_id, 92);
         assert_eq!(shoot_event.weapon_index, 0);
         assert_eq!(shoot_event.bullet, "placeholder");
+        assert_eq!(shoot_event.override_effect.as_deref(), Some("smoke"));
+        assert!(!shoot_event.allow_shoot_effects);
 
         let (&server_bullet_id, server_bullet) = launcher.server_bullets.iter().next().unwrap();
         assert!(server_bullet_id >= super::SERVER_RUNTIME_BULLET_ID_START);
@@ -6963,9 +6984,21 @@ mod tests {
         assert!(server_bullet.velocity.x.abs() < 0.0001);
         assert!((server_bullet.velocity.y - placeholder.spec.speed).abs() < 0.0001);
 
-        let snapshot_packet = sent
-            .lock()
-            .unwrap()
+        let sent_packets = sent.lock().unwrap();
+        assert!(sent_packets
+            .iter()
+            .any(|(_connection_id, packet, reliable)| {
+                !*reliable
+                    && matches!(
+                        packet,
+                        PacketKind::EffectCallPacket(packet)
+                            if packet.effect_id == standard_effect_id("smoke").unwrap() as u16
+                                && packet.x == 32.0
+                                && packet.y == 48.0
+                                && packet.rotation == 90.0
+                    )
+            }));
+        let snapshot_packet = sent_packets
             .iter()
             .rev()
             .find_map(|(_connection_id, packet, reliable)| {

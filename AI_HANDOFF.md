@@ -7386,3 +7386,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. 继续检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
   4. flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
   5. 当前总迁移约 12%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 218. 最新闭环记录：Server death shootOnDeathEffect broadcast smoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：补 `UnitComp.destroy()` 中 `shootOnDeathEffect != null && !hasTarget` 的服务端 effect 广播，避免上一节只生成 bullet snapshot、effect 只停留在 sidecar。
+- Rust 主改动：
+  - `server/src/lib.rs`
+    - 新增 `broadcast_server_effect(...)`，用 `EffectCallPacket` 广播标准 effect，默认 color 为 Java/Rust 现有 seam 使用的 `-1`；
+    - `apply_server_unit_shoot_on_death(...)` 在 `override_effect` 存在时先广播该 effect，再继续构建 server death bullet；
+    - `server_update_spawns_death_bullet_snapshot_when_unit_shoots_on_death` 扩展断言 `EffectCallPacket(smoke)` 的 x/y/rotation。
+  - `MIGRATION.md`
+    - 新增 `12.292`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-server server_update_spawns_death_bullet_snapshot_when_unit_shoots_on_death --lib`
+  - `cargo test -p mindustry-server server_update_skips_death_bullet_when_kill_shooter_and_total_shots_positive --lib`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 完整移植 Java `Weapon.update(...)`：shoot pattern、barrel counter、多枪管、ammo/eject/recoil/sound、连续武器、真实 bullet lifecycle；
+  2. 继续检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
+  3. flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
+  4. 当前总迁移约 12%，远未可玩，goal 绝不能标记 complete。
