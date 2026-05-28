@@ -354,7 +354,12 @@ impl MinimapRendererState {
     }
 
     pub fn update_all(&self) -> Option<MinimapFullUpdatePlan> {
-        (self.has_pixmap && self.has_texture).then_some(MinimapFullUpdatePlan {
+        if !self.has_pixmap || !self.has_texture || self.world.width <= 0 || self.world.height <= 0
+        {
+            return None;
+        }
+
+        Some(MinimapFullUpdatePlan {
             width: self.world.width,
             height: self.world.height,
         })
@@ -366,7 +371,7 @@ impl MinimapRendererState {
 
     pub fn set_zoom(&mut self, amount: f32) {
         let max_zoom = (self.world.min_side() as f32 / MINIMAP_BASE_SIZE / 2.0).max(1.0);
-        self.zoom = amount.clamp(1.0, max_zoom);
+        self.zoom = arc_clamp(amount, 1.0, max_zoom);
     }
 
     pub fn get_zoom(&self) -> f32 {
@@ -400,6 +405,12 @@ impl MinimapRendererState {
         }
 
         self.update_counter %= MINIMAP_UPDATE_INTERVAL;
+        if !self.has_pixmap || !self.has_texture || self.world.width <= 0 || self.world.height <= 0
+        {
+            self.updates.clear();
+            return None;
+        }
+
         let mut updates = Vec::new();
         for packed in &self.updates {
             let pos = MinimapTilePos::unpack(*packed);
@@ -407,7 +418,7 @@ impl MinimapRendererState {
                 updates.push(MinimapPixelUpdate {
                     pos,
                     pixmap_x: pos.x,
-                    pixmap_y: self.world.height - 1 - pos.y,
+                    pixmap_y: pixmap_y(self.world.height, pos.y),
                     rgba: color_for(*snapshot),
                 });
             }
@@ -422,12 +433,15 @@ impl MinimapRendererState {
             return None;
         }
 
-        let sz =
-            (MINIMAP_BASE_SIZE * self.zoom).clamp(MINIMAP_BASE_SIZE, self.world.min_side() as f32);
+        let sz = arc_clamp(
+            MINIMAP_BASE_SIZE * self.zoom,
+            MINIMAP_BASE_SIZE,
+            self.world.min_side() as f32,
+        );
         let mut dx = camera.tile_x(self.tile_size);
         let mut dy = camera.tile_y(self.tile_size);
-        dx = dx.clamp(sz, self.world.width as f32 - sz);
-        dy = dy.clamp(sz, self.world.height as f32 - sz);
+        dx = arc_clamp(dx, sz, self.world.width as f32 - sz);
+        dy = arc_clamp(dy, sz, self.world.height as f32 - sz);
 
         let x = dx - sz;
         let y = self.world.height as f32 - dy - sz;
@@ -455,11 +469,15 @@ impl MinimapRendererState {
             );
         }
 
+        if self.world.width <= 0 || self.world.height <= 0 {
+            return MinimapRect::new(0.0, 0.0, 0.0, 0.0);
+        }
+
         let sz = MINIMAP_BASE_SIZE * self.zoom;
         let mut dx = camera.tile_x(self.tile_size);
         let mut dy = camera.tile_y(self.tile_size);
-        dx = dx.clamp(sz, self.world.width as f32 - sz);
-        dy = dy.clamp(sz, self.world.height as f32 - sz);
+        dx = arc_clamp(dx, sz, self.world.width as f32 - sz);
+        dy = arc_clamp(dy, sz, self.world.height as f32 - sz);
         MinimapRect::new(
             (dx - sz) * self.tile_size,
             (dy - sz) * self.tile_size,
@@ -475,7 +493,14 @@ impl MinimapRendererState {
     ) -> MinimapOverlayPlan {
         let world_rect = self.visible_world_rect(camera, input.full_view);
         let scale_factor = if input.full_view {
-            input.screen_width / self.world.unit_width(self.tile_size)
+            let world_width = self.world.unit_width(self.tile_size);
+            if world_width <= 0.0 {
+                0.0
+            } else {
+                input.screen_width / world_width
+            }
+        } else if world_rect.width <= 0.0 {
+            0.0
         } else {
             input.screen_width / world_rect.width
         };
@@ -628,6 +653,14 @@ pub fn dynamic_fog_alpha(alpha: f32) -> f32 {
     }
 }
 
+fn pixmap_y(height: i32, tile_y: i32) -> i32 {
+    height - 1 - tile_y
+}
+
+fn arc_clamp(value: f32, min: f32, max: f32) -> f32 {
+    min.max(value.min(max))
+}
+
 fn mul_rgb(color: u32, r_mul: f32, g_mul: f32, b_mul: f32) -> u32 {
     let r = (((color >> 24) & 0xff) as f32 * r_mul).clamp(0.0, 255.0) as u32;
     let g = (((color >> 16) & 0xff) as f32 * g_mul).clamp(0.0, 255.0) as u32;
@@ -692,6 +725,68 @@ mod tests {
     }
 
     #[test]
+    fn update_all_returns_world_size_when_buffers_exist() {
+        let state = MinimapRendererState::new(MinimapWorldSize::new(32, 18));
+
+        assert_eq!(
+            state.update_all(),
+            Some(MinimapFullUpdatePlan {
+                width: 32,
+                height: 18,
+            })
+        );
+    }
+
+    #[test]
+    fn update_tile_batches_center_linked_and_below_tiles_like_java() {
+        let mut state = MinimapRendererState::new(MinimapWorldSize::new(12, 8));
+        let center = MinimapTilePos::new(4, 3);
+        let linked = [
+            MinimapTilePos::new(4, 3),
+            MinimapTilePos::new(5, 3),
+            MinimapTilePos::new(5, 0),
+        ];
+
+        state.update_tile(center, &linked, true);
+
+        let packed: Vec<_> = state
+            .updates
+            .iter()
+            .copied()
+            .map(MinimapTilePos::unpack)
+            .collect();
+        assert_eq!(
+            packed,
+            vec![
+                MinimapTilePos::new(4, 2),
+                MinimapTilePos::new(4, 3),
+                MinimapTilePos::new(5, 0),
+                MinimapTilePos::new(5, 2),
+                MinimapTilePos::new(5, 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn update_tick_honors_two_frame_batching_and_clears_after_flush() {
+        let mut state = MinimapRendererState::new(MinimapWorldSize::new(10, 10));
+        let pos = MinimapTilePos::new(1, 1);
+        let snapshot = MinimapTileSnapshot {
+            real_block_color: 0xabcdefff,
+            ..MinimapTileSnapshot::new(pos, 0)
+        };
+
+        state.update_pixel(pos);
+        assert!(state.update_tick(0.75, &[snapshot]).is_none());
+        assert!(state.update_tick(0.75, &[snapshot]).is_none());
+        let plan = state.update_tick(0.5, &[snapshot]).unwrap();
+
+        assert_eq!(plan.updates.len(), 1);
+        assert_eq!(plan.updates[0].pixmap_y, 8);
+        assert!(state.updates.is_empty());
+    }
+
+    #[test]
     fn region_matches_java_uv_crop_math() {
         let mut state = MinimapRendererState::new(MinimapWorldSize::new(200, 100));
         state.set_zoom(2.0);
@@ -707,6 +802,25 @@ mod tests {
         assert!((region.v - 0.18).abs() < 0.0001);
         assert!((region.u2 - 0.66).abs() < 0.0001);
         assert!((region.v2 - 0.82).abs() < 0.0001);
+    }
+
+    #[test]
+    fn region_clamps_like_java_even_when_zoom_is_overridden() {
+        let mut state = MinimapRendererState::new(MinimapWorldSize::new(192, 192));
+        state.zoom = 999.0;
+
+        let region = state
+            .region(MinimapCamera::new(768.0, 768.0, 64.0, 64.0))
+            .unwrap();
+
+        assert_eq!(
+            region.source_rect_tiles,
+            MinimapRect::new(0.0, -192.0, 384.0, 384.0)
+        );
+        assert_eq!(region.u, 0.0);
+        assert_eq!(region.v, -1.0);
+        assert_eq!(region.u2, 2.0);
+        assert_eq!(region.v2, 1.0);
     }
 
     #[test]
