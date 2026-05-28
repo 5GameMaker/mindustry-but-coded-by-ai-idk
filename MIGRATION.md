@@ -7811,3 +7811,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `randLifeSpark=185` 需要 per-particle scaled lifetime seam；
   - `shootPayloadDriver=186` 需要 line 起点 jitter 和 per-line random length/stroke seam；
   - 真实 renderer/backend 仍未接入，当前仍是局部 Fx primitive 迁移。
+
+### 12.247 Fx.shootSmallFlame/shootPyraFlame/shootLiquid
+
+- 2026-05-28：继续跳过暂需新增复杂 seam 的 `randLifeSpark=185` / `shootPayloadDriver=186`，迁移后续可由现有 circle particle primitive 准确表达的 `shootSmallFlame=187`、`shootPyraFlame=188`、`shootLiquid=189`。
+- 本轮迁移：
+  - `shootSmallFlame=187`
+  - `shootPyraFlame=188`
+  - `shootLiquid=189`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2202` 附近：
+    - `shootSmallFlame = new Effect(32f, 80f, ...)`，颜色 `Pal.lightFlame -> Pal.darkFlame -> Color.gray`，12 个 cone circle particles，`length=e.finpow()*60`，`rotation ± 10f`，radius `0.65 + e.fout()*1.5`，并 `.followParent(false)`。
+    - `shootPyraFlame = new Effect(33f, 80f, ...)`，颜色 `Pal.lightPyraFlame -> Pal.darkPyraFlame -> Color.gray`，13 个 particles，`length=e.finpow()*70`，radius `0.65 + e.fout()*1.6`，并 `.followParent(false)`。
+    - `shootLiquid = new Effect(15f, 80f, ...)`，输入色，2 个 particles，`length=e.finpow()*15`，`rotation ± 11f`，radius `0.5 + e.fout()*2.5`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三个 Fx ID 并接入 lookup/metadata；
+    - 对齐 `clip=80`，并为 flame 两项保留 `follow_parent=false`；
+    - 新增 `Pal.lightPyraFlame` / `Pal.darkPyraFlame` 颜色符号；
+    - `standard_effect_draw_plan(...)` 使用 `SeededCircleParticles` 表达三者的 cone particle circles。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_flame_circle_particles_for_render`，验证三者共 27 个 circle primitives 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_shoot_flame_circle_particles --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_flame_circle_particles_for_render --lib`
+- 仍未完成：
+  - `randLifeSpark=185` 需要 per-particle scaled lifetime seam；
+  - `shootPayloadDriver=186` 需要 line start jitter 与 per-line random length/stroke seam；
+  - 后续 casing/shoot smoke/flame 仍需继续逐项迁移；
+  - 真实 renderer/backend 仍未接入，当前仍是局部 Fx primitive 迁移。

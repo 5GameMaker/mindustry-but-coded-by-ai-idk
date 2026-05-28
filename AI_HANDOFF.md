@@ -5798,3 +5798,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `shootPayloadDriver=186` 需要 line start jitter 和 per-line random length/stroke seam；
   3. `shootSmallFlame=187` 可优先迁移，能直接复用 `SeededCircleParticles`；
   4. 继续维护 `MIGRATION.md`，每个闭环验证、中文提交并推送 `origin main`。
+
+---
+
+## 173. 最新闭环记录：Fx.shootSmallFlame/shootPyraFlame/shootLiquid
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先按 UTF-8 读取。
+- 本轮目标：跳过需要新增复杂 primitive/seam 的 `randLifeSpark=185`、`shootPayloadDriver=186`，迁移后续可直接接入 circle particle seam 的 flame/liquid shoot Fx。
+- 本轮迁移：
+  - `shootSmallFlame=187`
+  - `shootPyraFlame=188`
+  - `shootLiquid=189`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三个 Fx ID、lookup、metadata；
+    - 对齐 `clip=80`，`shootSmallFlame`/`shootPyraFlame` 保留 `.followParent(false)`；
+    - 新增 `Pal.lightPyraFlame` / `Pal.darkPyraFlame` 颜色符号；
+    - `standard_effect_draw_plan(...)` 复用 `SeededCircleParticles`，覆盖 count/angle_range/length/radius 公式。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_flame_circle_particles_for_render`，验证三项共 27 个 circle primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_shoot_flame_circle_particles --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_flame_circle_particles_for_render --lib`
+- 下一步建议：
+  1. 可继续从 `casing1=190` 起对照，但 casing 系列需要 `Fill.rect`/rotated rectangle primitive；
+  2. 如优先少造 primitive，可跳到后续仍为 circle/line 的 Fx；
+  3. 若要补 `randLifeSpark`，先给 per-particle scaled lifetime 设计明确字段；
+  4. 若要补 `shootPayloadDriver`，先给 line start jitter/per-line random length 增加字段或 concrete plan。

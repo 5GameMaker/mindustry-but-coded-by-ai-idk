@@ -240,6 +240,12 @@ pub const FX_CIRCLE_COLOR_SPARK_ID: i32 = 182;
 pub const FX_COLOR_SPARK_ID: i32 = 183;
 /// Upstream `Fx.colorSparkBig` id in `mindustry.content.Fx` for v158.1.
 pub const FX_COLOR_SPARK_BIG_ID: i32 = 184;
+/// Upstream `Fx.shootSmallFlame` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMALL_FLAME_ID: i32 = 187;
+/// Upstream `Fx.shootPyraFlame` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_PYRA_FLAME_ID: i32 = 188;
+/// Upstream `Fx.shootLiquid` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_LIQUID_ID: i32 = 189;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -385,6 +391,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "circleColorSpark" => Some(FX_CIRCLE_COLOR_SPARK_ID),
         "colorSpark" => Some(FX_COLOR_SPARK_ID),
         "colorSparkBig" => Some(FX_COLOR_SPARK_BIG_ID),
+        "shootSmallFlame" => Some(FX_SHOOT_SMALL_FLAME_ID),
+        "shootPyraFlame" => Some(FX_SHOOT_PYRA_FLAME_ID),
+        "shootLiquid" => Some(FX_SHOOT_LIQUID_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -642,6 +651,13 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_COLOR_SPARK_BIG_ID => {
             Effect::with_lifetime(FX_COLOR_SPARK_BIG_ID, 25.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SHOOT_SMALL_FLAME_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMALL_FLAME_ID, 32.0, 80.0).follow_parent(false)
+        }
+        FX_SHOOT_PYRA_FLAME_ID => {
+            Effect::with_lifetime(FX_SHOOT_PYRA_FLAME_ID, 33.0, 80.0).follow_parent(false)
+        }
+        FX_SHOOT_LIQUID_ID => Effect::with_lifetime(FX_SHOOT_LIQUID_ID, 15.0, 80.0),
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
@@ -4148,6 +4164,98 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_SHOOT_SMALL_FLAME_ID | FX_SHOOT_PYRA_FLAME_ID | FX_SHOOT_LIQUID_ID => {
+            let (
+                color_from,
+                color_mid,
+                color_to,
+                input_color,
+                color_mix,
+                count,
+                length,
+                angle_range,
+                radius_base,
+                radius_fout_scale,
+            ) = match effect_id {
+                FX_SHOOT_SMALL_FLAME_ID => (
+                    Some("Pal.lightFlame"),
+                    Some("Pal.darkFlame"),
+                    Some("Color.gray"),
+                    None,
+                    fin,
+                    12,
+                    finpow * 60.0,
+                    10.0,
+                    0.65,
+                    1.5,
+                ),
+                FX_SHOOT_PYRA_FLAME_ID => (
+                    Some("Pal.lightPyraFlame"),
+                    Some("Pal.darkPyraFlame"),
+                    Some("Color.gray"),
+                    None,
+                    fin,
+                    13,
+                    finpow * 70.0,
+                    10.0,
+                    0.65,
+                    1.6,
+                ),
+                FX_SHOOT_LIQUID_ID => (
+                    None,
+                    None,
+                    None,
+                    Some(color),
+                    0.0,
+                    2,
+                    finpow * 15.0,
+                    11.0,
+                    0.5,
+                    2.5,
+                ),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededCircleParticles,
+                center: (x, y),
+                color_from,
+                color_mid,
+                color_to,
+                color_mix,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: 0.0,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count,
+                    progress: None,
+                    angle: Some(rotation),
+                    angle_range,
+                    length,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SHOOT_SMALL_ID
         | FX_SHOOT_SMALL_COLOR_ID
         | FX_SHOOT_HEAL_ID
@@ -4826,6 +4934,8 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.neoplasmMid" => Some(DecalColor::from_rgba(0xe05438ff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
+        "Pal.lightPyraFlame" => Some(DecalColor::from_rgba(0xffb855ff)),
+        "Pal.darkPyraFlame" => Some(DecalColor::from_rgba(0xdb661cff)),
         "Pal.meltdownHit" => Some(DecalColor::from_rgba(0xffb98bff)),
         _ => None,
     }
@@ -6373,6 +6483,15 @@ mod tests {
             standard_effect_id("colorSparkBig"),
             Some(FX_COLOR_SPARK_BIG_ID)
         );
+        assert_eq!(
+            standard_effect_id("shootSmallFlame"),
+            Some(FX_SHOOT_SMALL_FLAME_ID)
+        );
+        assert_eq!(
+            standard_effect_id("shootPyraFlame"),
+            Some(FX_SHOOT_PYRA_FLAME_ID)
+        );
+        assert_eq!(standard_effect_id("shootLiquid"), Some(FX_SHOOT_LIQUID_ID));
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -6699,6 +6818,17 @@ mod tests {
             standard_effect(FX_COLOR_SPARK_BIG_ID).unwrap().lifetime,
             25.0
         );
+        let shoot_small_flame = standard_effect(FX_SHOOT_SMALL_FLAME_ID).unwrap();
+        assert_eq!(shoot_small_flame.lifetime, 32.0);
+        assert_eq!(shoot_small_flame.clip, 80.0);
+        assert!(!shoot_small_flame.follow_parent);
+        let shoot_pyra_flame = standard_effect(FX_SHOOT_PYRA_FLAME_ID).unwrap();
+        assert_eq!(shoot_pyra_flame.lifetime, 33.0);
+        assert_eq!(shoot_pyra_flame.clip, 80.0);
+        assert!(!shoot_pyra_flame.follow_parent);
+        let shoot_liquid = standard_effect(FX_SHOOT_LIQUID_ID).unwrap();
+        assert_eq!(shoot_liquid.lifetime, 15.0);
+        assert_eq!(shoot_liquid.clip, 80.0);
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
@@ -8481,6 +8611,83 @@ mod tests {
                 .count(),
             8
         );
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_shoot_flame_circle_particles() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+        let small = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMALL_FLAME_ID as u16),
+            187,
+            3.0,
+            4.0,
+            45.0,
+            16.0,
+            32.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(small.kind, StandardEffectDrawKind::SeededCircleParticles);
+        assert_eq!(small.color_from, Some("Pal.lightFlame"));
+        assert_eq!(small.color_mid, Some("Pal.darkFlame"));
+        assert_eq!(small.color_to, Some("Color.gray"));
+        assert_eq!(small.color_mix, 0.5);
+        let small_particles = small.particles.unwrap();
+        assert_eq!(small_particles.count, 12);
+        assert_eq!(small_particles.angle, Some(45.0));
+        assert_eq!(small_particles.angle_range, 10.0);
+        assert_eq!(small_particles.length, effect_finpow_from_fin(0.5) * 60.0);
+        assert_eq!(small_particles.radius_base, 0.65);
+        assert_eq!(small_particles.radius_fout_scale, 1.5);
+        assert!((small.circle_render_primitives_from_seed()[0].radius - 1.4).abs() < 0.0001);
+        assert!(small.resolved_draw_color().is_some());
+
+        let pyra = standard_effect_draw_plan(
+            Some(FX_SHOOT_PYRA_FLAME_ID as u16),
+            188,
+            3.0,
+            4.0,
+            45.0,
+            16.5,
+            33.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(pyra.color_from, Some("Pal.lightPyraFlame"));
+        assert_eq!(pyra.color_mid, Some("Pal.darkPyraFlame"));
+        assert_eq!(
+            standard_effect_color_symbol("Pal.lightPyraFlame"),
+            Some(DecalColor::from_rgba(0xffb855ff))
+        );
+        let pyra_particles = pyra.particles.unwrap();
+        assert_eq!(pyra_particles.count, 13);
+        assert_eq!(pyra_particles.length, effect_finpow_from_fin(0.5) * 70.0);
+        assert_eq!(pyra_particles.radius_base, 0.65);
+        assert_eq!(pyra_particles.radius_fout_scale, 1.6);
+        assert!((pyra.circle_render_primitives_from_seed()[0].radius - 1.45).abs() < 0.0001);
+
+        let liquid = standard_effect_draw_plan(
+            Some(FX_SHOOT_LIQUID_ID as u16),
+            189,
+            3.0,
+            4.0,
+            45.0,
+            7.5,
+            15.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(liquid.color_from, None);
+        assert_eq!(liquid.input_color, Some(input_color));
+        let liquid_particles = liquid.particles.unwrap();
+        assert_eq!(liquid_particles.count, 2);
+        assert_eq!(liquid_particles.angle, Some(45.0));
+        assert_eq!(liquid_particles.angle_range, 11.0);
+        assert_eq!(liquid_particles.length, effect_finpow_from_fin(0.5) * 15.0);
+        assert_eq!(liquid_particles.radius_base, 0.5);
+        assert_eq!(liquid_particles.radius_fout_scale, 2.5);
+        assert!((liquid.circle_render_primitives_from_seed()[0].radius - 1.75).abs() < 0.0001);
+        assert_eq!(liquid.resolved_draw_color(), Some(input_color));
     }
 
     #[test]

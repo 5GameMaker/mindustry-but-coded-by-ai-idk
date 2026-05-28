@@ -3227,6 +3227,58 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_shoot_flame_circle_particles_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        for (name, x) in [
+            ("shootSmallFlame", 24.0_f32),
+            ("shootPyraFlame", 40.0_f32),
+            ("shootLiquid", 56.0_f32),
+        ] {
+            launcher
+                .runtime
+                .client_local_effect_events
+                .push(EffectCallPacket2 {
+                    effect: EffectCallPacket {
+                        effect_id: standard_effect_id(name).unwrap() as u16,
+                        x,
+                        y: 32.0,
+                        rotation: 45.0,
+                        color: type_io::RgbaColor::new(-1),
+                    },
+                    data: TypeValue::Null,
+                });
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 3);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 27);
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let flame_circle = launcher
+            .standard_local_effect_circle_primitives
+            .iter()
+            .find(|circle| circle.center.0 != 24.0 && circle.radius > 0.0)
+            .expect("shoot flame effects should cache offset circle primitives");
+        assert_eq!(flame_circle.kind, StandardEffectDrawKind::FilledCircle);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 3);
+        assert_eq!(stats.circle_primitives, 27);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.line_primitives, 0);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_flattens_shoot_smoke_missile_scaled_circles_for_render() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         for (name, x) in [
