@@ -8006,3 +8006,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 rect 仍是 headless primitive/cache seam，真实 GPU renderer / atlas backend 尚未接入；
   - `TexturedRect.region="casing"` 只是保留 atlas 名称，后续需要真实 atlas region lookup；
   - 继续迁移 `Fx.java` 后续特效，并逐步把 primitive seam 下沉到真实 renderer。
+
+### 12.253 Fx.generatespark/fuelburn/incinerateSlag/coreBurn/plasticburn/conveyorPoof/pulverize*/producesmoke
+
+- 2026-05-28：继续对照 `Fx.java:2456-2532`，迁移 `generatespark=210` 到 `producesmoke=220` 的生成、燃烧、粉碎粒子段。
+- 本轮迁移：
+  - `generatespark=210`
+  - `fuelburn=211`
+  - `incinerateSlag=212`
+  - `coreBurn=213`
+  - `plasticburn=214`
+  - `conveyorPoof=215`
+  - `pulverize=216`
+  - `pulverizeRed=217`
+  - `pulverizeSmall=218`
+  - `pulverizeMedium=219`
+  - `producesmoke=220`
+- Java 依据：
+  - `generatespark`：`new Effect(18f, ...)`，`Pal.orangeSpark -> Color.gray`，5 个 `randLenVectors(e.id, 5, e.fin()*8f)` 小圆，半径 `e.fout()*4f/2f`。
+  - `fuelburn`：`new Effect(23f, ...)`，`Color.lightGray -> Color.gray`，5 个 `randLenVectors(..., e.fin()*9f)` 小圆，半径 `e.fout()*2f`。
+  - `incinerateSlag`：`new Effect(34f, ...)`，`Pal.slagOrange -> Color.gray`，4 个 `randLenVectors(..., e.finpow()*5f)` 小圆，半径 `e.fout()*1.7f`。
+  - `coreBurn`：`new Effect(23f, ...)`，`Pal.accent -> Color.gray`，5 个 `randLenVectors(..., e.fin()*9f)` 小圆，半径 `e.fout()*4f/2f`。
+  - `plasticburn` / `conveyorPoof`：`Pal.plasticBurn -> Color.gray`，分别 5/4 个小圆，长度 `3f + e.fin()*5f` / `3f + e.fin()*4f`。
+  - `pulverize*`：`Fill.square` 粉尘方块，颜色 `Pal.stoneGray` 或 `Pal.redDust -> Pal.stoneGray`，count/length/radius 对齐 Java 公式。
+  - `producesmoke`：`new Effect(12f, ...)`，`Color.white -> Pal.accent`，8 个方块，长度 `4f + e.fin()*18f`，半径 `1f + e.fout()*3f`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `210..220` Fx ID、`standard_effect_id(...)` lookup 与 `standard_effect(...)` metadata；
+    - 新增颜色符号 `Pal.stoneGray=0x8f8f8fff`、`Pal.redDust=0xffa480ff`、`Pal.plasticBurn=0xe9ead3ff`；
+    - `generatespark` / `fuelburn` / `incinerateSlag` / `coreBurn` / `plasticburn` / `conveyorPoof` 复用 `SeededCircleParticles`；
+    - `pulverize*` / `producesmoke` 复用 `SeededSquareParticles`，`stroke=45` 暂作为方块旋转角度传入 headless primitive seam；
+    - 新增 `standard_effect_draw_plan_covers_generate_burn_and_pulverize_particles`，覆盖 count、length、radius、颜色符号与 primitive 展开。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_generate_burn_and_pulverize_particles_for_render`，验证 11 个 event 展开为 28 个 circle primitives 与 26 个 square primitives，并进入 headless render frame stats。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_generate_burn_and_pulverize_particles --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_generate_burn_and_pulverize_particles_for_render --lib`
+- 仍未完成：
+  - 本轮仍是标准 effect 的 headless primitive seam，真实 GPU renderer / atlas backend 尚未接入；
+  - `SeededSquareParticles.stroke` 暂承载统一旋转角，后续若 Java 需要 per-particle angle，仍需扩展更精细的 square primitive 参数；
+  - 继续迁移 `artilleryTrailSmoke=221`、`smeltsmoke=223`、`formsmoke=225`、`lava=227`、`dooropen/doorclose=228..231`、`mine*` 等后续 Fx，并持续接入整体 runtime。

@@ -3556,6 +3556,75 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_generate_burn_and_pulverize_particles_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        for (name, x) in [
+            ("generatespark", 24.0_f32),
+            ("fuelburn", 40.0_f32),
+            ("incinerateSlag", 56.0_f32),
+            ("coreBurn", 72.0_f32),
+            ("plasticburn", 88.0_f32),
+            ("conveyorPoof", 104.0_f32),
+            ("pulverize", 120.0_f32),
+            ("pulverizeRed", 136.0_f32),
+            ("pulverizeSmall", 152.0_f32),
+            ("pulverizeMedium", 168.0_f32),
+            ("producesmoke", 184.0_f32),
+        ] {
+            launcher
+                .runtime
+                .client_local_effect_events
+                .push(EffectCallPacket2 {
+                    effect: EffectCallPacket {
+                        effect_id: standard_effect_id(name).unwrap() as u16,
+                        x,
+                        y: 32.0,
+                        rotation: 0.0,
+                        color: type_io::RgbaColor::new(-1),
+                    },
+                    data: TypeValue::Null,
+                });
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 11);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 28);
+        assert_eq!(launcher.standard_local_effect_square_primitives.len(), 26);
+        assert!(launcher.standard_local_effect_rect_primitives.is_empty());
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let burn_circle = launcher
+            .standard_local_effect_circle_primitives
+            .iter()
+            .find(|circle| circle.center.0 != 24.0 && circle.radius > 0.0)
+            .expect("generate/burn effects should cache offset circle particles");
+        assert_eq!(burn_circle.kind, StandardEffectDrawKind::FilledCircle);
+
+        let pulverize_square = launcher
+            .standard_local_effect_square_primitives
+            .iter()
+            .find(|square| square.center.0 != 120.0 && square.rotation == 45.0)
+            .expect("pulverize effects should cache rotated square particles");
+        assert!(pulverize_square.radius > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 11);
+        assert_eq!(stats.circle_primitives, 28);
+        assert_eq!(stats.square_primitives, 26);
+        assert_eq!(stats.rect_primitives, 0);
+        assert_eq!(stats.line_primitives, 0);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_flattens_shoot_flame_circle_particles_for_render() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         for (name, x) in [

@@ -290,6 +290,28 @@ pub const FX_REACTOR_SMOKE_ID: i32 = 207;
 pub const FX_RED_GENERATE_SPARK_ID: i32 = 208;
 /// Upstream `Fx.turbinegenerate` id in `mindustry.content.Fx` for v158.1.
 pub const FX_TURBINE_GENERATE_ID: i32 = 209;
+/// Upstream `Fx.generatespark` id in `mindustry.content.Fx` for v158.1.
+pub const FX_GENERATE_SPARK_ID: i32 = 210;
+/// Upstream `Fx.fuelburn` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FUEL_BURN_ID: i32 = 211;
+/// Upstream `Fx.incinerateSlag` id in `mindustry.content.Fx` for v158.1.
+pub const FX_INCINERATE_SLAG_ID: i32 = 212;
+/// Upstream `Fx.coreBurn` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CORE_BURN_ID: i32 = 213;
+/// Upstream `Fx.plasticburn` id in `mindustry.content.Fx` for v158.1.
+pub const FX_PLASTIC_BURN_ID: i32 = 214;
+/// Upstream `Fx.conveyorPoof` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CONVEYOR_POOF_ID: i32 = 215;
+/// Upstream `Fx.pulverize` id in `mindustry.content.Fx` for v158.1.
+pub const FX_PULVERIZE_ID: i32 = 216;
+/// Upstream `Fx.pulverizeRed` id in `mindustry.content.Fx` for v158.1.
+pub const FX_PULVERIZE_RED_ID: i32 = 217;
+/// Upstream `Fx.pulverizeSmall` id in `mindustry.content.Fx` for v158.1.
+pub const FX_PULVERIZE_SMALL_ID: i32 = 218;
+/// Upstream `Fx.pulverizeMedium` id in `mindustry.content.Fx` for v158.1.
+pub const FX_PULVERIZE_MEDIUM_ID: i32 = 219;
+/// Upstream `Fx.producesmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_PRODUCE_SMOKE_ID: i32 = 220;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -460,6 +482,17 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "reactorsmoke" => Some(FX_REACTOR_SMOKE_ID),
         "redgeneratespark" => Some(FX_RED_GENERATE_SPARK_ID),
         "turbinegenerate" => Some(FX_TURBINE_GENERATE_ID),
+        "generatespark" => Some(FX_GENERATE_SPARK_ID),
+        "fuelburn" => Some(FX_FUEL_BURN_ID),
+        "incinerateSlag" => Some(FX_INCINERATE_SLAG_ID),
+        "coreBurn" => Some(FX_CORE_BURN_ID),
+        "plasticburn" => Some(FX_PLASTIC_BURN_ID),
+        "conveyorPoof" => Some(FX_CONVEYOR_POOF_ID),
+        "pulverize" => Some(FX_PULVERIZE_ID),
+        "pulverizeRed" => Some(FX_PULVERIZE_RED_ID),
+        "pulverizeSmall" => Some(FX_PULVERIZE_SMALL_ID),
+        "pulverizeMedium" => Some(FX_PULVERIZE_MEDIUM_ID),
+        "producesmoke" => Some(FX_PRODUCE_SMOKE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -785,6 +818,31 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_TURBINE_GENERATE_ID => {
             Effect::with_lifetime(FX_TURBINE_GENERATE_ID, 100.0, DEFAULT_EFFECT_CLIP)
                 .layer(Layer::BULLET - 1.0)
+        }
+        FX_GENERATE_SPARK_ID => {
+            Effect::with_lifetime(FX_GENERATE_SPARK_ID, 18.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_FUEL_BURN_ID => Effect::with_lifetime(FX_FUEL_BURN_ID, 23.0, DEFAULT_EFFECT_CLIP),
+        FX_INCINERATE_SLAG_ID => {
+            Effect::with_lifetime(FX_INCINERATE_SLAG_ID, 34.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_CORE_BURN_ID => Effect::with_lifetime(FX_CORE_BURN_ID, 23.0, DEFAULT_EFFECT_CLIP),
+        FX_PLASTIC_BURN_ID => Effect::with_lifetime(FX_PLASTIC_BURN_ID, 40.0, DEFAULT_EFFECT_CLIP),
+        FX_CONVEYOR_POOF_ID => {
+            Effect::with_lifetime(FX_CONVEYOR_POOF_ID, 35.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_PULVERIZE_ID => Effect::with_lifetime(FX_PULVERIZE_ID, 40.0, DEFAULT_EFFECT_CLIP),
+        FX_PULVERIZE_RED_ID => {
+            Effect::with_lifetime(FX_PULVERIZE_RED_ID, 40.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_PULVERIZE_SMALL_ID => {
+            Effect::with_lifetime(FX_PULVERIZE_SMALL_ID, 30.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_PULVERIZE_MEDIUM_ID => {
+            Effect::with_lifetime(FX_PULVERIZE_MEDIUM_ID, 30.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_PRODUCE_SMOKE_ID => {
+            Effect::with_lifetime(FX_PRODUCE_SMOKE_ID, 12.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
@@ -4967,6 +5025,149 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_GENERATE_SPARK_ID
+        | FX_FUEL_BURN_ID
+        | FX_INCINERATE_SLAG_ID
+        | FX_CORE_BURN_ID
+        | FX_PLASTIC_BURN_ID
+        | FX_CONVEYOR_POOF_ID
+        | FX_PULVERIZE_ID
+        | FX_PULVERIZE_RED_ID
+        | FX_PULVERIZE_SMALL_ID
+        | FX_PULVERIZE_MEDIUM_ID
+        | FX_PRODUCE_SMOKE_ID => {
+            let (kind, color_from, color_to, count, length, radius_base, radius_fout_scale) =
+                match effect_id {
+                    FX_GENERATE_SPARK_ID => (
+                        StandardEffectDrawKind::SeededCircleParticles,
+                        "Pal.orangeSpark",
+                        Some("Color.gray"),
+                        5,
+                        fin * 8.0,
+                        0.0,
+                        2.0,
+                    ),
+                    FX_FUEL_BURN_ID => (
+                        StandardEffectDrawKind::SeededCircleParticles,
+                        "Color.lightGray",
+                        Some("Color.gray"),
+                        5,
+                        fin * 9.0,
+                        0.0,
+                        2.0,
+                    ),
+                    FX_INCINERATE_SLAG_ID => (
+                        StandardEffectDrawKind::SeededCircleParticles,
+                        "Pal.slagOrange",
+                        Some("Color.gray"),
+                        4,
+                        finpow * 5.0,
+                        0.0,
+                        1.7,
+                    ),
+                    FX_CORE_BURN_ID => (
+                        StandardEffectDrawKind::SeededCircleParticles,
+                        "Pal.accent",
+                        Some("Color.gray"),
+                        5,
+                        fin * 9.0,
+                        0.0,
+                        2.0,
+                    ),
+                    FX_PLASTIC_BURN_ID => (
+                        StandardEffectDrawKind::SeededCircleParticles,
+                        "Pal.plasticBurn",
+                        Some("Color.gray"),
+                        5,
+                        3.0 + fin * 5.0,
+                        0.0,
+                        1.0,
+                    ),
+                    FX_CONVEYOR_POOF_ID => (
+                        StandardEffectDrawKind::SeededCircleParticles,
+                        "Pal.plasticBurn",
+                        Some("Color.gray"),
+                        4,
+                        3.0 + fin * 4.0,
+                        0.0,
+                        1.11,
+                    ),
+                    FX_PULVERIZE_ID => (
+                        StandardEffectDrawKind::SeededSquareParticles,
+                        "Pal.stoneGray",
+                        None,
+                        5,
+                        3.0 + fin * 8.0,
+                        0.5,
+                        2.0,
+                    ),
+                    FX_PULVERIZE_RED_ID => (
+                        StandardEffectDrawKind::SeededSquareParticles,
+                        "Pal.redDust",
+                        Some("Pal.stoneGray"),
+                        5,
+                        3.0 + fin * 8.0,
+                        0.5,
+                        2.0,
+                    ),
+                    FX_PULVERIZE_SMALL_ID => (
+                        StandardEffectDrawKind::SeededSquareParticles,
+                        "Pal.stoneGray",
+                        None,
+                        3,
+                        fin * 5.0,
+                        0.5,
+                        1.0,
+                    ),
+                    FX_PULVERIZE_MEDIUM_ID => (
+                        StandardEffectDrawKind::SeededSquareParticles,
+                        "Pal.stoneGray",
+                        None,
+                        5,
+                        3.0 + fin * 8.0,
+                        0.5,
+                        1.0,
+                    ),
+                    FX_PRODUCE_SMOKE_ID => (
+                        StandardEffectDrawKind::SeededSquareParticles,
+                        "Color.white",
+                        Some("Pal.accent"),
+                        8,
+                        4.0 + fin * 18.0,
+                        1.0,
+                        3.0,
+                    ),
+                    _ => unreachable!(),
+                };
+            let mut particles = standard_effect_particle_spec(
+                state_id, count, None, 0.0, length, fin, fout, fslope,
+            );
+            particles.radius_base = radius_base;
+            particles.radius_fout_scale = radius_fout_scale;
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind,
+                center: (x, y),
+                color_from: Some(color_from),
+                color_mid: None,
+                color_to,
+                color_mix: fin,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: if kind == StandardEffectDrawKind::SeededSquareParticles {
+                    45.0
+                } else {
+                    0.0
+                },
+                particles: Some(particles),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SMOKE_PUFF_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -5851,6 +6052,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.muddy" => Some(DecalColor::from_rgba(0x432722ff)),
         "Pal.spore" => Some(DecalColor::from_rgba(0x7457ceff)),
         "Pal.lightishGray" => Some(DecalColor::from_rgba(0xa2a2a2ff)),
+        "Pal.stoneGray" => Some(DecalColor::from_rgba(0x8f8f8ff)),
         "Pal.lighterOrange" => Some(DecalColor::from_rgba(0xf6e096ff)),
         "Pal.lightOrange" => Some(DecalColor::from_rgba(0xf68021ff)),
         "Pal.lightTrail" => Some(DecalColor::from_rgba(0xffe2a9ff)),
@@ -5859,6 +6061,8 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.redLight" => Some(DecalColor::from_rgba(0xfeb380ff)),
         "Pal.redSpark" => Some(DecalColor::from_rgba(0xfbb97fff)),
         "Pal.orangeSpark" => Some(DecalColor::from_rgba(0xd2b29cff)),
+        "Pal.redDust" => Some(DecalColor::from_rgba(0xffa480ff)),
+        "Pal.plasticBurn" => Some(DecalColor::from_rgba(0xe9ead3ff)),
         "Pal.vent" => Some(DecalColor::from_rgba(0x6b4e4eff)),
         "Pal.regen" => Some(DecalColor::from_rgba(0xd1efffff)),
         "Pal.slagOrange" => Some(DecalColor::from_rgba(0xffa166ff)),
@@ -7487,6 +7691,38 @@ mod tests {
             standard_effect_id("turbinegenerate"),
             Some(FX_TURBINE_GENERATE_ID)
         );
+        assert_eq!(
+            standard_effect_id("generatespark"),
+            Some(FX_GENERATE_SPARK_ID)
+        );
+        assert_eq!(standard_effect_id("fuelburn"), Some(FX_FUEL_BURN_ID));
+        assert_eq!(
+            standard_effect_id("incinerateSlag"),
+            Some(FX_INCINERATE_SLAG_ID)
+        );
+        assert_eq!(standard_effect_id("coreBurn"), Some(FX_CORE_BURN_ID));
+        assert_eq!(standard_effect_id("plasticburn"), Some(FX_PLASTIC_BURN_ID));
+        assert_eq!(
+            standard_effect_id("conveyorPoof"),
+            Some(FX_CONVEYOR_POOF_ID)
+        );
+        assert_eq!(standard_effect_id("pulverize"), Some(FX_PULVERIZE_ID));
+        assert_eq!(
+            standard_effect_id("pulverizeRed"),
+            Some(FX_PULVERIZE_RED_ID)
+        );
+        assert_eq!(
+            standard_effect_id("pulverizeSmall"),
+            Some(FX_PULVERIZE_SMALL_ID)
+        );
+        assert_eq!(
+            standard_effect_id("pulverizeMedium"),
+            Some(FX_PULVERIZE_MEDIUM_ID)
+        );
+        assert_eq!(
+            standard_effect_id("producesmoke"),
+            Some(FX_PRODUCE_SMOKE_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -7894,6 +8130,29 @@ mod tests {
         let turbine = standard_effect(FX_TURBINE_GENERATE_ID).unwrap();
         assert_eq!(turbine.lifetime, 100.0);
         assert_eq!(turbine.layer, Layer::BULLET - 1.0);
+        assert_eq!(
+            standard_effect(FX_GENERATE_SPARK_ID).unwrap().lifetime,
+            18.0
+        );
+        assert_eq!(standard_effect(FX_FUEL_BURN_ID).unwrap().lifetime, 23.0);
+        assert_eq!(
+            standard_effect(FX_INCINERATE_SLAG_ID).unwrap().lifetime,
+            34.0
+        );
+        assert_eq!(standard_effect(FX_CORE_BURN_ID).unwrap().lifetime, 23.0);
+        assert_eq!(standard_effect(FX_PLASTIC_BURN_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_CONVEYOR_POOF_ID).unwrap().lifetime, 35.0);
+        assert_eq!(standard_effect(FX_PULVERIZE_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_PULVERIZE_RED_ID).unwrap().lifetime, 40.0);
+        assert_eq!(
+            standard_effect(FX_PULVERIZE_SMALL_ID).unwrap().lifetime,
+            30.0
+        );
+        assert_eq!(
+            standard_effect(FX_PULVERIZE_MEDIUM_ID).unwrap().lifetime,
+            30.0
+        );
+        assert_eq!(standard_effect(FX_PRODUCE_SMOKE_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
@@ -10257,6 +10516,209 @@ mod tests {
             standard_effect_color_symbol("Pal.vent"),
             Some(DecalColor::from_rgba(0x6b4e4eff))
         );
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_generate_burn_and_pulverize_particles() {
+        let generate = standard_effect_draw_plan(
+            Some(FX_GENERATE_SPARK_ID as u16),
+            210,
+            3.0,
+            4.0,
+            0.0,
+            9.0,
+            18.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(generate.kind, StandardEffectDrawKind::SeededCircleParticles);
+        assert_eq!(generate.color_from, Some("Pal.orangeSpark"));
+        assert_eq!(generate.color_to, Some("Color.gray"));
+        let generate_particles = generate.particles.unwrap();
+        assert_eq!(generate_particles.count, 5);
+        assert_eq!(generate_particles.length, 4.0);
+        assert_eq!(generate_particles.radius_fout_scale, 2.0);
+        assert_eq!(generate.circle_render_primitives_from_seed().len(), 5);
+
+        let fuel = standard_effect_draw_plan(
+            Some(FX_FUEL_BURN_ID as u16),
+            211,
+            3.0,
+            4.0,
+            0.0,
+            11.5,
+            23.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(fuel.color_from, Some("Color.lightGray"));
+        assert_eq!(fuel.color_to, Some("Color.gray"));
+        assert_eq!(fuel.particles.unwrap().length, 4.5);
+        assert_eq!(fuel.circle_render_primitives_from_seed()[0].radius, 1.0);
+
+        let slag = standard_effect_draw_plan(
+            Some(FX_INCINERATE_SLAG_ID as u16),
+            212,
+            3.0,
+            4.0,
+            0.0,
+            17.0,
+            34.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(slag.color_from, Some("Pal.slagOrange"));
+        assert_eq!(slag.particles.unwrap().count, 4);
+        assert_eq!(
+            slag.particles.unwrap().length,
+            effect_finpow_from_fin(0.5) * 5.0
+        );
+        assert_eq!(slag.particles.unwrap().radius_fout_scale, 1.7);
+
+        let core_burn = standard_effect_draw_plan(
+            Some(FX_CORE_BURN_ID as u16),
+            213,
+            3.0,
+            4.0,
+            0.0,
+            11.5,
+            23.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(core_burn.color_from, Some("Pal.accent"));
+        assert_eq!(core_burn.particles.unwrap().radius_fout_scale, 2.0);
+
+        let plastic = standard_effect_draw_plan(
+            Some(FX_PLASTIC_BURN_ID as u16),
+            214,
+            3.0,
+            4.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(plastic.color_from, Some("Pal.plasticBurn"));
+        assert_eq!(plastic.particles.unwrap().length, 5.5);
+        assert_eq!(plastic.circle_render_primitives_from_seed()[0].radius, 0.5);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.plasticBurn"),
+            Some(DecalColor::from_rgba(0xe9ead3ff))
+        );
+
+        let conveyor = standard_effect_draw_plan(
+            Some(FX_CONVEYOR_POOF_ID as u16),
+            215,
+            3.0,
+            4.0,
+            0.0,
+            17.5,
+            35.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(conveyor.particles.unwrap().count, 4);
+        assert_eq!(conveyor.particles.unwrap().length, 5.0);
+        assert_eq!(conveyor.particles.unwrap().radius_fout_scale, 1.11);
+
+        let pulverize = standard_effect_draw_plan(
+            Some(FX_PULVERIZE_ID as u16),
+            216,
+            3.0,
+            4.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            pulverize.kind,
+            StandardEffectDrawKind::SeededSquareParticles
+        );
+        assert_eq!(pulverize.color_from, Some("Pal.stoneGray"));
+        assert_eq!(pulverize.stroke, 45.0);
+        let pulverize_particles = pulverize.particles.unwrap();
+        assert_eq!(pulverize_particles.count, 5);
+        assert_eq!(pulverize_particles.length, 7.0);
+        assert_eq!(pulverize_particles.radius_base, 0.5);
+        assert_eq!(pulverize_particles.radius_fout_scale, 2.0);
+        let squares = pulverize.square_render_primitives_from_seed();
+        assert_eq!(squares.len(), 5);
+        assert_eq!(squares[0].rotation, 45.0);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.stoneGray"),
+            Some(DecalColor::from_rgba(0x8f8f8ff))
+        );
+
+        let pulverize_red = standard_effect_draw_plan(
+            Some(FX_PULVERIZE_RED_ID as u16),
+            217,
+            3.0,
+            4.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(pulverize_red.color_from, Some("Pal.redDust"));
+        assert_eq!(pulverize_red.color_to, Some("Pal.stoneGray"));
+        assert_eq!(
+            standard_effect_color_symbol("Pal.redDust"),
+            Some(DecalColor::from_rgba(0xffa480ff))
+        );
+
+        let small = standard_effect_draw_plan(
+            Some(FX_PULVERIZE_SMALL_ID as u16),
+            218,
+            3.0,
+            4.0,
+            0.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(small.particles.unwrap().count, 3);
+        assert_eq!(small.particles.unwrap().length, 2.5);
+        assert_eq!(small.particles.unwrap().radius_fout_scale, 1.0);
+
+        let medium = standard_effect_draw_plan(
+            Some(FX_PULVERIZE_MEDIUM_ID as u16),
+            219,
+            3.0,
+            4.0,
+            0.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(medium.particles.unwrap().count, 5);
+        assert_eq!(medium.particles.unwrap().length, 7.0);
+        assert_eq!(medium.particles.unwrap().radius_fout_scale, 1.0);
+
+        let produce = standard_effect_draw_plan(
+            Some(FX_PRODUCE_SMOKE_ID as u16),
+            220,
+            3.0,
+            4.0,
+            0.0,
+            6.0,
+            12.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(produce.kind, StandardEffectDrawKind::SeededSquareParticles);
+        assert_eq!(produce.color_from, Some("Color.white"));
+        assert_eq!(produce.color_to, Some("Pal.accent"));
+        assert_eq!(produce.particles.unwrap().count, 8);
+        assert_eq!(produce.particles.unwrap().length, 13.0);
+        assert_eq!(produce.particles.unwrap().radius_base, 1.0);
+        assert_eq!(produce.particles.unwrap().radius_fout_scale, 3.0);
     }
 
     #[test]

@@ -5987,3 +5987,51 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 本轮提交前继续跑 `standard_effect_ids_include`、`standard_effect_lookup`、casing core/desktop 定向测试、`cargo check -p mindustry-core`、`cargo check -p mindustry-desktop`、`git diff --check`；
   2. 后续继续扫描 `Fx.java` 后续区间，优先迁移可由现有 circle/line/triangle/rect primitive 表达的效果；
   3. 当前 rect 仍是 headless primitive/cache seam；`TexturedRect.region="casing"` 只是 atlas 名称保留，真实 atlas/GPU backend 仍待接入。
+
+---
+
+## 179. 最新闭环记录：Fx.generatespark/fuelburn/incinerateSlag/coreBurn/plasticburn/conveyorPoof/pulverize*/producesmoke
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `Fx.java` 中 `210..220` 的生成、燃烧、粉碎粒子段，继续把标准 Fx 接入 Rust `standard_effect_draw_plan(...)` 与 desktop headless primitive frame。
+- 本轮迁移：
+  - `generatespark=210`
+  - `fuelburn=211`
+  - `incinerateSlag=212`
+  - `coreBurn=213`
+  - `plasticburn=214`
+  - `conveyorPoof=215`
+  - `pulverize=216`
+  - `pulverizeRed=217`
+  - `pulverizeSmall=218`
+  - `pulverizeMedium=219`
+  - `producesmoke=220`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `210..220` Fx ID、lookup 与 metadata；
+    - 新增颜色符号 `Pal.stoneGray`、`Pal.redDust`、`Pal.plasticBurn`；
+    - `generatespark` / `fuelburn` / `incinerateSlag` / `coreBurn` / `plasticburn` / `conveyorPoof` 复用 `SeededCircleParticles`；
+    - `pulverize*` / `producesmoke` 复用 `SeededSquareParticles`，统一 `stroke=45` 表示 Java `Fill.square(..., 45)` 的旋转角；
+    - 新增 `standard_effect_draw_plan_covers_generate_burn_and_pulverize_particles`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_generate_burn_and_pulverize_particles_for_render`，验证 11 个 effect event 展开为 28 个 circle primitives 与 26 个 square primitives。
+  - `MIGRATION.md`
+    - 新增 `12.253` 节记录 Java 依据、Rust 接入点、验证命令与未完成项。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_generate_burn_and_pulverize_particles --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_generate_burn_and_pulverize_particles_for_render --lib`
+- 提交前仍需跑完整收尾验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_generate_burn_and_pulverize_particles --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_generate_burn_and_pulverize_particles_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 下一组优先做 `artilleryTrailSmoke=221`、`smeltsmoke=223`、`formsmoke=225`、`lava=227`、`mineWallSmall=233`、`payloadReceive=240`，这些可低风险复用现有 circle/square primitive；
+  2. `dooropen/doorclose=228..231` 可复用 `StrokedSquare`，但要注意 Java 的 tile size 与 `rotation` 含义；
+  3. `generate=232` 需要 `Lines.spikes` seam，`mineImpactWave` / `teleport*` 是复合 primitive，建议后置；
+  4. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍需继续推进，不要宣称可玩。
