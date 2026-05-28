@@ -34,8 +34,8 @@ use mindustry_core::mindustry::graphics::{
     MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
     MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan, OverlayRendererState,
     PixelatorCamera, PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBridge,
-    RenderCamera, RenderEngineState, RenderFramePlan, RenderPoint, RenderSize, RenderViewport,
-    TileBounds, TileCoord, Viewport as FloorViewport,
+    RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan, RenderPoint, RenderSize,
+    RenderViewport, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -318,6 +318,51 @@ impl DesktopGraphicsFrame {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsExecutionSummary {
+    pub render_passes_visited: usize,
+    pub render_commands_visited: usize,
+    pub draw_sprite_commands: usize,
+    pub shader_dispatch_applies: usize,
+    pub block_renderer_slots: usize,
+    pub floor_renderer_slots: usize,
+    pub fog_frame_slots: usize,
+    pub overlay_renderer_slots: usize,
+    pub minimap_overlay_slots: usize,
+    pub pixelator_slots: usize,
+}
+
+impl DesktopGraphicsExecutionSummary {
+    pub fn from_frame(frame: &DesktopGraphicsFrame) -> Self {
+        let mut summary = Self::default();
+
+        if let Some(render_frame) = &frame.bundle.render_frame {
+            summary.render_passes_visited = render_frame.passes.len();
+            for pass in &render_frame.passes {
+                summary.render_commands_visited += pass.commands.len();
+                summary.draw_sprite_commands += pass
+                    .commands
+                    .iter()
+                    .filter(|command| matches!(command, RenderCommand::DrawSprite { .. }))
+                    .count();
+            }
+        }
+
+        summary.shader_dispatch_applies = frame
+            .bundle
+            .shader_dispatch
+            .as_ref()
+            .map_or(0, |dispatch| dispatch.applies.len());
+        summary.block_renderer_slots = usize::from(frame.bundle.block_renderer.is_some());
+        summary.floor_renderer_slots = usize::from(frame.bundle.floor_renderer.is_some());
+        summary.fog_frame_slots = usize::from(frame.bundle.fog_frame.is_some());
+        summary.overlay_renderer_slots = usize::from(frame.bundle.overlay_renderer.is_some());
+        summary.minimap_overlay_slots = usize::from(frame.bundle.minimap_overlay.is_some());
+        summary.pixelator_slots = usize::from(frame.bundle.pixelator.is_some());
+        summary
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopFrameKind {
     World,
@@ -346,13 +391,16 @@ pub trait DesktopGraphicsRenderer {
 pub struct HeadlessDesktopGraphicsRenderer {
     pub frames_rendered: usize,
     pub last_stats: GraphicsFrameStats,
+    pub last_execution: DesktopGraphicsExecutionSummary,
 }
 
 impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
     fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats {
         let stats = frame.stats().clone();
+        let execution = DesktopGraphicsExecutionSummary::from_frame(frame);
         self.frames_rendered += 1;
         self.last_stats = stats.clone();
+        self.last_execution = execution;
         stats
     }
 }
@@ -2668,7 +2716,8 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 mod tests {
     use super::{
         run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopFrameKind,
-        DesktopFramePayload, DesktopLauncher, HeadlessDesktopAudioRenderer,
+        DesktopFramePayload, DesktopGraphicsExecutionSummary, DesktopGraphicsFrame,
+        DesktopGraphicsRenderer, DesktopLauncher, HeadlessDesktopAudioRenderer,
         HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
         HeadlessDesktopGraphicsRenderer,
     };
@@ -2691,8 +2740,9 @@ mod tests {
     use mindustry_core::mindustry::entities::comp::DecalColor;
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, CacheLayer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
-        MinimapCamera, MinimapOverlayInput, RenderCamera, RenderCommand, RenderPassKind,
-        RenderPoint, RenderSize, RenderViewport, TileCoord,
+        MinimapCamera, MinimapOverlayInput, RenderBridge, RenderCamera, RenderCommand,
+        RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderRect, RenderSize,
+        RenderViewport, ShaderApplyPlan, ShaderDispatchFrame, ShaderId, TileCoord,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -4034,12 +4084,63 @@ mod tests {
         assert_eq!(stats.floor_stage_plans, 0);
         assert_eq!(renderer.frames_rendered, 1);
         assert_eq!(renderer.last_stats, stats);
+        assert_eq!(renderer.last_execution.render_passes_visited, 0);
+        assert_eq!(renderer.last_execution.render_commands_visited, 0);
+        assert_eq!(renderer.last_execution.overlay_renderer_slots, 1);
+        assert_eq!(renderer.last_execution.minimap_overlay_slots, 1);
 
         launcher.overlay_renderer_state.set_build_fade(0.75);
         launcher.clear_snapshot_apply_cursors();
         let plan = launcher.drain_overlay_renderer_plan();
         assert_eq!(plan.build_fade, 0.0);
         assert!(plan.updated_cores);
+    }
+
+    #[test]
+    fn headless_graphics_renderer_records_execution_summary_without_polluting_stats() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(77, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Block);
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(8.0, 8.0, 8.0, 8.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            30.0,
+        ));
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(0.0, 0.0, 4.0, 4.0),
+            [0.0, 0.0, 0.0, 1.0],
+            1.0,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame).set_shader_dispatch(
+            ShaderDispatchFrame::from_applies([
+                ShaderApplyPlan::new(ShaderId::Mesh),
+                ShaderApplyPlan::new(ShaderId::Shield),
+            ]),
+        );
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+        };
+
+        let summary = DesktopGraphicsExecutionSummary::from_frame(&frame);
+        assert_eq!(summary.render_passes_visited, 1);
+        assert_eq!(summary.render_commands_visited, 2);
+        assert_eq!(summary.draw_sprite_commands, 1);
+        assert_eq!(summary.shader_dispatch_applies, 2);
+        assert_eq!(frame.bundle.stats.render_passes, 1);
+        assert_eq!(frame.bundle.stats.render_commands, 2);
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        let stats = renderer.render_graphics_frame(&frame);
+        assert_eq!(stats.render_passes, 1);
+        assert_eq!(renderer.last_execution, summary);
+        assert_eq!(renderer.last_stats.render_commands, 2);
     }
 
     #[test]
