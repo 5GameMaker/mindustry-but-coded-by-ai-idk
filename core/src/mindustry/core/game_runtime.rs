@@ -47,8 +47,8 @@ use crate::mindustry::{
     net::{
         AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket, EffectCallPacket,
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerSyncData, SoundAtCallPacket,
-        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitEnteredPayloadCallPacket,
-        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UnitBlockSpawnCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
+        UnitEnteredPayloadCallPacket, UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -4180,6 +4180,19 @@ impl GameRuntime {
             return false;
         };
         self.client_unit_snapshot_entities.remove(&id).is_some()
+    }
+
+    pub fn apply_client_unit_destroy_packet(&mut self, packet: &UnitDestroyCallPacket) -> bool {
+        if packet.uid < 0 || !self.client_unit_snapshot_entities.contains_key(&packet.uid) {
+            return false;
+        }
+        self.queue_client_unit_legs_destroy_effects(packet.uid, false);
+        if let Some(mut unit) = self.client_unit_snapshot_entities.remove(&packet.uid) {
+            unit.remove(true);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn apply_client_unit_entered_payload_packet(
@@ -26282,12 +26295,13 @@ mod tests {
 
     #[test]
     fn game_runtime_applies_client_unit_despawn_packet_to_materialized_unit() {
-        let content = ContentLoader::create_base_content().unwrap();
-        let flare = content.unit_by_name("flare").unwrap().clone();
+        let mut legged = UnitType::new(77, "crawler");
+        legged.allow_leg_step = true;
+        legged.leg_count = 2;
+        let mut unit = UnitComp::new(77, legged, TeamId(4));
+        unit.add();
         let mut runtime = GameRuntime::default();
-        runtime
-            .client_unit_snapshot_entities
-            .insert(77, UnitComp::new(77, flare, TeamId(4)));
+        runtime.client_unit_snapshot_entities.insert(77, unit);
 
         assert!(
             runtime.apply_client_unit_despawn_packet(&UnitDespawnCallPacket {
@@ -26296,10 +26310,48 @@ mod tests {
         );
         assert!(!runtime.client_unit_snapshot_entities.contains_key(&77));
         assert!(
+            runtime.client_local_effect_events.is_empty(),
+            "unitDespawn should mirror Java Fx.unitDespawn + remove(), not Unit.destroy() leg effects",
+        );
+        assert!(
             !runtime.apply_client_unit_despawn_packet(&UnitDespawnCallPacket {
                 unit: UnitRef::Null,
             })
         );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects() {
+        let mut unit_type = UnitType::new(77, "crawler");
+        unit_type.allow_leg_step = true;
+        unit_type.leg_count = 2;
+        unit_type.leg_length = 10.0;
+        unit_type.leg_extension = 3.0;
+        unit_type.leg_region = TextureRegionRef::with_size("crawler-leg", 16, 8);
+        unit_type.leg_base_region = TextureRegionRef::with_size("crawler-leg-base", 12, 6);
+        let mut unit = UnitComp::new(77, unit_type, TeamId(4));
+        unit.add();
+        unit.set_pos(10.0, 20.0);
+        unit.set_rotation(45.0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(77, unit);
+
+        assert!(runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
+        assert!(!runtime.client_unit_snapshot_entities.contains_key(&77));
+        assert_eq!(runtime.client_local_effect_events.len(), 4);
+        let first = &runtime.client_local_effect_events[0];
+        assert_eq!(
+            first.effect.effect_id,
+            standard_effect_id("legDestroy").unwrap() as u16
+        );
+        let TypeValue::LegDestroyData(data) = &first.data else {
+            panic!("destroyed legged unit should queue LegDestroyData");
+        };
+        assert_eq!(data.region.name, "crawler-leg");
+
+        assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
+        assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));
     }
 
     #[test]

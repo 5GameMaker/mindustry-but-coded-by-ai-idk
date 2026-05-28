@@ -6536,3 +6536,45 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. 为 `TextureRegionRef` 接真实 atlas 尺寸与 Java `legBaseRegion` fallback；
   4. 将 `LegsDynamicExplosionEvent` 接入 damage/explosion runtime；
   5. 当前总迁移约 10% 左右，仍远未可玩，继续保证 helper/plan 最终接入真实 runtime/content/world/entity/network 链路。
+
+---
+
+## 193. 最新闭环记录：UnitDestroyCallPacket 接入腿部碎裂生命周期
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把上一轮的 `GameRuntime.queue_client_unit_legs_destroy_effects(...)` 从手动 helper 推进到真实客户端单位销毁 packet 生命周期，避免腿部碎裂效果只停留在测试/外部调用层。
+- Java 对照：
+  - `core/src/mindustry/entities/Units.java`
+    - `unitDestroy(int uid)`：`netClient.addRemovedEntity(uid)` 后查 `Groups.unit.getByID(uid)`，存在则 `unit.destroy()`；
+    - `unitDespawn(Unit unit)`：`Fx.unitDespawn.at(...)` 后 `unit.remove()`，不等价于 destroy。
+  - `core/src/mindustry/entities/comp/UnitComp.java`
+    - `destroy()` 负责 explosion、death sound、ability death、`type.killed(...)` 并最终 `remove()`。
+  - `core/src/mindustry/entities/comp/LegsComp.java`
+    - `destroy()` 在 entity added 且非 headless 时触发每条腿 2 个 `Fx.legDestroy` 与 3 个 `Damage.dynamicExplosion(...)` 点。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `apply_client_unit_destroy_packet(&UnitDestroyCallPacket)`；
+    - 在删除 `client_unit_snapshot_entities` 前调用 `queue_client_unit_legs_destroy_effects(uid, false)`，随后执行 `UnitComp::remove(true)`；
+    - 新增 `game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`，覆盖 destroy packet → 4 条 `legDestroy` 本地 effect、snapshot 移除、重复/负 id 不重复触发。
+    - `game_runtime_applies_client_unit_despawn_packet_to_materialized_unit` 改为 legged unit 回归，锁定 despawn 不触发腿部 destroy 特效。
+  - `desktop/src/lib.rs`
+    - `sync_unit_lifecycle_to_runtime(...)` 新增 `PacketKind::UnitDestroyCallPacket` 分支；
+    - 新增 `desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`，覆盖 net 收包 → launcher update → runtime apply → local effect materialize → renderer-facing textured line primitive。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `set_type(...)` 保留同 type/同 leg count 的现有 legs transient 状态，防止 snapshot/类型刷新重置 `stage` 等腿部运行态；换 type/count 时才 reset。
+  - `MIGRATION.md`
+    - 新增 `12.267`，并把 `12.266` 的“死亡/移除尚未接入”更新为更精确的剩余项。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_despawn_packet_to_materialized_unit`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo test -p mindustry-core legs_destroy`
+  - `cargo test -p mindustry-core legs_comp`
+  - `cargo test -p mindustry-core unit_component_`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `UnitDeathCallPacket` / `UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 仍需按 Java `killed()` / safe death / env death 语义分别接入；
+  2. 当前 `UnitDestroyCallPacket` 只覆盖客户端视觉 effect 与 snapshot 移除，尚未迁移 `UnitComp.destroy()` 的完整 explosion、weapon shoot-on-death、ability death、death sound、wreck/scorch 与 event bus；
+  3. `NetClient` 的 unit lifecycle 目前只保留最后一个 packet，后续要改为增量队列，否则同一 update 前多个 lifecycle packet 可能丢失；
+  4. `LegsDynamicExplosionEvent` 仍是 plan，未接真实 damage/explosion runtime；
+  5. 当前总迁移仍约 10% 左右，远未可玩，后续必须继续把 helper/plan 收进真实 runtime/content/world/entity/network/client-server 调用链。

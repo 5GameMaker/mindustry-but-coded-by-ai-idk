@@ -431,12 +431,16 @@ impl UnitComp {
         let previous_legs = self.legs.take();
         self.legs = legs_type.map(|legs_type| {
             let mut legs = previous_legs.unwrap_or_else(|| LegsComp::new(legs_type));
+            let reset = legs.type_info != legs_type
+                || legs.legs.len() != legs_type.leg_count.max(0) as usize;
             legs.type_info = legs_type;
             legs.x = x;
             legs.y = y;
             legs.rotation = rotation;
             legs.speed_multiplier = speed_multiplier;
-            legs.reset_legs(legs_type.leg_length);
+            if reset {
+                legs.reset_legs(legs_type.leg_length);
+            }
             legs
         });
 
@@ -1784,6 +1788,9 @@ mod tests {
         assert_eq!(destroy.effects.len(), 12);
         assert_eq!(destroy.explosions.len(), 18);
         assert!(unit.legs_destroy_plan(true).unwrap().effects.is_empty());
+        unit.legs.as_mut().unwrap().legs[0].stage = 0.5;
+        unit.set_type(unit_type.clone());
+        assert_eq!(unit.legs.as_ref().unwrap().legs[0].stage, 0.5);
 
         let mut replacement = unit_type.clone();
         replacement.allow_leg_step = false;

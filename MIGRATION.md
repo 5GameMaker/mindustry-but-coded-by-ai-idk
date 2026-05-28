@@ -8532,4 +8532,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `UnitComp.legs` 已持久化，但尚未被真实 unit update tick 驱动；下一步应把 delta/floor/deep feet 等输入从 runtime/world 接入 `LegsComp::update(...)`；
   - `UnitSyncWire`/typed snapshot 仍未携带 legs transient 状态；Java 原生腿状态多为 transient，本端需决定客户端预测/重建策略；
   - `LegsType` 仍缺 Java `legSpeed` 对步进插值的独立语义，目前只保留连续移动总推进用 speed；
-  - unit 死亡/移除路径尚未自动调用 `queue_client_unit_legs_destroy_effects(...)`。
+  - Java `Units.unitDestroy(...)` 对应的客户端 `UnitDestroyCallPacket` 路径已在 `12.267` 接入腿部碎裂本地 effect；其他死亡/安全死亡/环境死亡/服务端真实 explosion 副作用仍需继续。
+
+### 12.267 UnitDestroyCallPacket → UnitComp legs destroy 生命周期接入
+
+- 2026-05-28：对照 Java `Units.unitDestroy(int uid)` 与 `UnitComp.destroy()` / `LegsComp.destroy()`，把上一节只能手动调用的 `GameRuntime.queue_client_unit_legs_destroy_effects(...)` 接入真实客户端单位销毁 packet 生命周期。
+- 本轮迁移：
+  - `UnitDestroyCallPacket` 客户端 runtime apply；
+  - `DesktopLauncher.sync_unit_lifecycle_to_runtime(...)` 对 `UnitDestroyCallPacket` 的真实分发；
+  - `UnitComp.set_type(...)` 在同 type/同 leg count 更新时保留现有 legs transient 状态，避免 snapshot/类型刷新无意义重置腿状态。
+- Java 依据：
+  - `Units.unitDestroy(uid)` 被服务端远程调用到客户端后，会先将 uid 加入 removed entity，再在本地找到 unit 时调用 `unit.destroy()`；
+  - `UnitComp.destroy()` 最终调用 `remove()`，而 `LegsComp.destroy()` 在非 headless 且 entity added 时触发腿部碎裂 `Fx.legDestroy`；
+  - `unitDespawn(Unit unit)` 只是 `Fx.unitDespawn.at(...) + unit.remove()`，不等价于 `unitDestroy`，因此 Rust 保持 `UnitDespawnCallPacket` 只移除 snapshot，不主动制造腿部碎裂。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `apply_client_unit_destroy_packet(...)`，校验 uid、在移除 `client_unit_snapshot_entities` 前调用 `queue_client_unit_legs_destroy_effects(uid, false)`，然后执行 `UnitComp::remove(true)` 并删除 snapshot；
+    - 新增 `game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`，覆盖 legged unit 收到 `UnitDestroyCallPacket` 后产生 4 条 `legDestroy` 本地 effect，并保证重复/负 id 不重复触发。
+    - `game_runtime_applies_client_unit_despawn_packet_to_materialized_unit` 改为 legged unit 回归，锁定 `UnitDespawnCallPacket` 只移除、不触发 `legDestroy`，避免把 Java `unitDespawn` 误接成 `unitDestroy`。
+  - `desktop/src/lib.rs`
+    - `sync_unit_lifecycle_to_runtime(...)` 新增 `PacketKind::UnitDestroyCallPacket` 分支，复用现有 `NetClient.record_unit_lifecycle_packet(...)` 队列；
+    - 新增 `desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`，验证 net client 收包、desktop update、runtime unit 移除、local effect materialize 与 renderer-facing textured line primitive 的完整链路。
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `set_type(...)` 仅在 leg type/count 改变时 reset legs，避免同一类型刷新丢失 leg stage 等 transient 状态；仍在非 legged type 时清空 `legs`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_despawn_packet_to_materialized_unit`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo test -p mindustry-core legs_destroy`
+  - `cargo test -p mindustry-core legs_comp`
+  - `cargo test -p mindustry-core unit_component_`
+  - `git diff --check`
+- 仍未完成：
+  - `UnitDeathCallPacket` / `UnitSafeDeathCallPacket` / `UnitEnvDeathCallPacket` / `UnitCapDeathCallPacket` 还未细分到 Rust 本地 destroy/killed/safe death 语义；
+  - `UnitDestroyCallPacket` 当前只覆盖客户端视觉/移除侧，Java `Damage.dynamicExplosion(...)`、weapon shoot-on-death、ability death、event bus 与 scorch/wreck/death sound 等真实副作用仍需继续迁移；
+  - `NetClient` 目前只保留最后一个 unit lifecycle packet，多个 lifecycle packet 在一次 desktop update 前到达时仍可能被覆盖，后续应改成增量队列；
+  - `LegsDynamicExplosionEvent` 仍未接入真实 damage/explosion runtime，`TexturedLine.region` 仍需接真实 renderer atlas。

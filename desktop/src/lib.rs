@@ -817,6 +817,9 @@ impl DesktopLauncher {
             PacketKind::UnitDespawnCallPacket(packet) => {
                 self.runtime.apply_client_unit_despawn_packet(&packet)
             }
+            PacketKind::UnitDestroyCallPacket(packet) => {
+                self.runtime.apply_client_unit_destroy_packet(&packet)
+            }
             _ => false,
         }
     }
@@ -1843,8 +1846,8 @@ mod tests {
         ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, EffectCallPacket,
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
         NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
-        UnitDespawnCallPacket, UnitEnteredPayloadCallPacket, UnitSpawnCallPacket,
-        UnitTetherBlockSpawnedCallPacket,
+        UnitDespawnCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
+        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -1863,7 +1866,7 @@ mod tests {
             type_io, BuildingRef, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks,
             TeamId, TypeValue, UnitRef, Vec2 as IoVec2,
         },
-        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector},
+        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector, UnitType},
         world::blocks::campaign::LandingPadState,
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
         world::blocks::units::{
@@ -5145,6 +5148,67 @@ mod tests {
             .client_unit_snapshot_entities
             .contains_key(&9902));
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let mut unit_type = UnitType::new(9903, "crawler");
+        unit_type.allow_leg_step = true;
+        unit_type.leg_count = 2;
+        unit_type.leg_length = 10.0;
+        unit_type.leg_extension = 3.0;
+        unit_type.leg_region = TextureRegionRef::with_size("crawler-leg", 16, 8);
+        unit_type.leg_base_region = TextureRegionRef::with_size("crawler-leg-base", 12, 6);
+        let mut unit = UnitComp::new(9903, unit_type, TeamId(4));
+        unit.add();
+        unit.set_pos(10.0, 20.0);
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(9903, unit);
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::UnitDestroyCallPacket(UnitDestroyCallPacket {
+                uid: 9903,
+            }));
+        }
+        launcher.update();
+
+        assert!(!launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .contains_key(&9903));
+        assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 4);
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 4);
+        let leg_primitives = launcher
+            .standard_local_effect_line_primitives
+            .iter()
+            .filter(|primitive| primitive.region.as_deref() == Some("crawler-leg"))
+            .count();
+        let leg_base_primitives = launcher
+            .standard_local_effect_line_primitives
+            .iter()
+            .filter(|primitive| primitive.region.as_deref() == Some("crawler-leg-base"))
+            .count();
+        assert_eq!(leg_primitives, 2);
+        assert_eq!(leg_base_primitives, 2);
+        assert_eq!(
+            launcher.standard_local_effect_line_primitives.len(),
+            leg_primitives + leg_base_primitives
+        );
     }
 
     #[test]
