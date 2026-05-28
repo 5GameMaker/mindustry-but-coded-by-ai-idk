@@ -5881,3 +5881,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `lancerLaserChargeBegin=202` 可用 two filled-circle concrete plans；
   3. `rail*` 可用 circle/triangle/light 多段 plan；
   4. `casing*` 需要 rect/sprite primitive，不要硬塞成 square。
+
+---
+
+## 176. 最新闭环记录：Fx.sparkShoot/lightningShoot/thoriumShoot
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `Fx.java` 中三项 shoot line particle 效果，继续把标准 Fx 接入 Rust `standard_effect_draw_plan(...)` 与 desktop headless primitive frame。
+- 本轮迁移：
+  - `sparkShoot=204`
+  - `lightningShoot=205`
+  - `thoriumShoot=206`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三项 Fx ID、lookup 与 metadata；
+    - 新增颜色符号 `Pal.lancerLaser=0xa9d8ffff`、`Pal.thoriumPink=0xf9a3c7ff`；
+    - 三者复用 `StandardEffectDrawKind::SeededRadialLineParticles`；
+    - `sparkShoot` 对齐 `Color.white -> Input.color`、stroke `fout*1.2+0.6`、7 条 `rotation±3`、offset `25*finpow`、line length `fslope*5+0.5`；
+    - `lightningShoot` 对齐 `Color.white -> Pal.lancerLaser`、stroke `fout*1.2+0.5`、7 条 `rotation±50`、line length `fin*5+2`；
+    - `thoriumShoot` 对齐 `Color.white -> Pal.thoriumPink`，其余参数同 `lightningShoot`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_spark_lightning_thorium_shoot_lines_for_render`，验证三项共 21 条 line primitives 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_spark_lightning_thorium_shoot_lines --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_spark_lightning_thorium_shoot_lines_for_render --lib`
+- 下一步建议：
+  1. 优先迁移 `railShoot=196`、`railTrail=197`、`railHit=198`、`lancerLaserShoot=199`、`lancerLaserCharge=201`、`lancerLaserChargeBegin=202`，多数可由现有 circle/line/triangle/light primitive 承载；
+  2. `lancerLaserShootSmoke=200` 需要 data Float 通道；
+  3. `lightningCharge=203` 需要 seeded triangle particles；
+  4. `casing*` 需要 rect/sprite primitive，不能硬塞成 square；
+  5. 当前仍是 headless primitive seam，真实 renderer/backend 与 gameplay runtime 接入仍待继续推进。

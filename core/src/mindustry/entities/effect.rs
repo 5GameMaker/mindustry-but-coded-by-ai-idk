@@ -250,6 +250,12 @@ pub const FX_SHOOT_SMALL_FLAME_ID: i32 = 187;
 pub const FX_SHOOT_PYRA_FLAME_ID: i32 = 188;
 /// Upstream `Fx.shootLiquid` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_LIQUID_ID: i32 = 189;
+/// Upstream `Fx.sparkShoot` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SPARK_SHOOT_ID: i32 = 204;
+/// Upstream `Fx.lightningShoot` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LIGHTNING_SHOOT_ID: i32 = 205;
+/// Upstream `Fx.thoriumShoot` id in `mindustry.content.Fx` for v158.1.
+pub const FX_THORIUM_SHOOT_ID: i32 = 206;
 /// Upstream `Fx.reactorsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_REACTOR_SMOKE_ID: i32 = 207;
 /// Upstream `Fx.redgeneratespark` id in `mindustry.content.Fx` for v158.1.
@@ -406,6 +412,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootSmallFlame" => Some(FX_SHOOT_SMALL_FLAME_ID),
         "shootPyraFlame" => Some(FX_SHOOT_PYRA_FLAME_ID),
         "shootLiquid" => Some(FX_SHOOT_LIQUID_ID),
+        "sparkShoot" => Some(FX_SPARK_SHOOT_ID),
+        "lightningShoot" => Some(FX_LIGHTNING_SHOOT_ID),
+        "thoriumShoot" => Some(FX_THORIUM_SHOOT_ID),
         "reactorsmoke" => Some(FX_REACTOR_SMOKE_ID),
         "redgeneratespark" => Some(FX_RED_GENERATE_SPARK_ID),
         "turbinegenerate" => Some(FX_TURBINE_GENERATE_ID),
@@ -679,6 +688,13 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_SHOOT_PYRA_FLAME_ID, 33.0, 80.0).follow_parent(false)
         }
         FX_SHOOT_LIQUID_ID => Effect::with_lifetime(FX_SHOOT_LIQUID_ID, 15.0, 80.0),
+        FX_SPARK_SHOOT_ID => Effect::with_lifetime(FX_SPARK_SHOOT_ID, 12.0, DEFAULT_EFFECT_CLIP),
+        FX_LIGHTNING_SHOOT_ID => {
+            Effect::with_lifetime(FX_LIGHTNING_SHOOT_ID, 12.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_THORIUM_SHOOT_ID => {
+            Effect::with_lifetime(FX_THORIUM_SHOOT_ID, 12.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_REACTOR_SMOKE_ID => {
             Effect::with_lifetime(FX_REACTOR_SMOKE_ID, 17.0, DEFAULT_EFFECT_CLIP)
         }
@@ -4489,6 +4505,86 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_SPARK_SHOOT_ID | FX_LIGHTNING_SHOOT_ID | FX_THORIUM_SHOOT_ID => {
+            let (
+                color_to,
+                input_color,
+                stroke,
+                angle_range,
+                radius_base,
+                radius_fin_scale,
+                radius_fslope_scale,
+            ) = match effect_id {
+                FX_SPARK_SHOOT_ID => (
+                    Some("Input.color"),
+                    Some(color),
+                    fout * 1.2 + 0.6,
+                    3.0,
+                    0.5,
+                    0.0,
+                    5.0,
+                ),
+                FX_LIGHTNING_SHOOT_ID => (
+                    Some("Pal.lancerLaser"),
+                    None,
+                    fout * 1.2 + 0.5,
+                    50.0,
+                    2.0,
+                    5.0,
+                    0.0,
+                ),
+                FX_THORIUM_SHOOT_ID => (
+                    Some("Pal.thoriumPink"),
+                    None,
+                    fout * 1.2 + 0.5,
+                    50.0,
+                    2.0,
+                    5.0,
+                    0.0,
+                ),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededRadialLineParticles,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to,
+                color_mix: fin,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 7,
+                    progress: None,
+                    angle: Some(rotation),
+                    angle_range,
+                    length: 25.0 * finpow,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base,
+                    radius_fin_scale,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SHOOT_SMALL_ID
         | FX_SHOOT_SMALL_COLOR_ID
         | FX_SHOOT_HEAL_ID
@@ -5147,6 +5243,8 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.command" => Some(DecalColor::from_rgba(0xeab678ff)),
         "Pal.heal" => Some(DecalColor::from_rgba(0x98ffa9ff)),
         "Pal.sap" => Some(DecalColor::from_rgba(0x665c9fff)),
+        "Pal.thoriumPink" => Some(DecalColor::from_rgba(0xf9a3c7ff)),
+        "Pal.lancerLaser" => Some(DecalColor::from_rgba(0xa9d8ffff)),
         "Pal.darkishGray" => Some(DecalColor {
             r: 0.3,
             g: 0.3,
@@ -6735,6 +6833,15 @@ mod tests {
             Some(FX_SHOOT_PYRA_FLAME_ID)
         );
         assert_eq!(standard_effect_id("shootLiquid"), Some(FX_SHOOT_LIQUID_ID));
+        assert_eq!(standard_effect_id("sparkShoot"), Some(FX_SPARK_SHOOT_ID));
+        assert_eq!(
+            standard_effect_id("lightningShoot"),
+            Some(FX_LIGHTNING_SHOOT_ID)
+        );
+        assert_eq!(
+            standard_effect_id("thoriumShoot"),
+            Some(FX_THORIUM_SHOOT_ID)
+        );
         assert_eq!(
             standard_effect_id("reactorsmoke"),
             Some(FX_REACTOR_SMOKE_ID)
@@ -7094,6 +7201,12 @@ mod tests {
         let shoot_liquid = standard_effect(FX_SHOOT_LIQUID_ID).unwrap();
         assert_eq!(shoot_liquid.lifetime, 15.0);
         assert_eq!(shoot_liquid.clip, 80.0);
+        assert_eq!(standard_effect(FX_SPARK_SHOOT_ID).unwrap().lifetime, 12.0);
+        assert_eq!(
+            standard_effect(FX_LIGHTNING_SHOOT_ID).unwrap().lifetime,
+            12.0
+        );
+        assert_eq!(standard_effect(FX_THORIUM_SHOOT_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_REACTOR_SMOKE_ID).unwrap().lifetime, 17.0);
         let red_generate = standard_effect(FX_RED_GENERATE_SPARK_ID).unwrap();
         assert_eq!(red_generate.lifetime, 90.0);
@@ -8966,6 +9079,89 @@ mod tests {
                 .count(),
             8
         );
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_spark_lightning_thorium_shoot_lines() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+        let spark = standard_effect_draw_plan(
+            Some(FX_SPARK_SHOOT_ID as u16),
+            204,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(
+            spark.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(spark.color_from, Some("Color.white"));
+        assert_eq!(spark.color_to, Some("Input.color"));
+        assert_eq!(spark.input_color, Some(input_color));
+        assert_eq!(spark.color_mix, 0.5);
+        assert!((spark.stroke - 1.2).abs() < 0.0001);
+        let spark_particles = spark.particles.unwrap();
+        assert_eq!(spark_particles.count, 7);
+        assert_eq!(spark_particles.angle, Some(30.0));
+        assert_eq!(spark_particles.angle_range, 3.0);
+        assert_eq!(spark_particles.length, effect_finpow_from_fin(0.5) * 25.0);
+        assert_eq!(spark_particles.radius_base, 0.5);
+        assert_eq!(spark_particles.radius_fslope_scale, 5.0);
+        assert_eq!(spark.line_render_primitives_from_seed().len(), 7);
+        assert_eq!(
+            spark.resolved_draw_color(),
+            Some(lerp_color(DecalColor::WHITE, input_color, 0.5))
+        );
+
+        let lightning = standard_effect_draw_plan(
+            Some(FX_LIGHTNING_SHOOT_ID as u16),
+            205,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(lightning.color_to, Some("Pal.lancerLaser"));
+        assert_eq!(lightning.input_color, None);
+        assert!((lightning.stroke - 1.1).abs() < 0.0001);
+        let lightning_particles = lightning.particles.unwrap();
+        assert_eq!(lightning_particles.angle_range, 50.0);
+        assert_eq!(lightning_particles.radius_base, 2.0);
+        assert_eq!(lightning_particles.radius_fin_scale, 5.0);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.lancerLaser"),
+            Some(DecalColor::from_rgba(0xa9d8ffff))
+        );
+        assert_eq!(lightning.line_render_primitives_from_seed().len(), 7);
+
+        let thorium = standard_effect_draw_plan(
+            Some(FX_THORIUM_SHOOT_ID as u16),
+            206,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(thorium.color_to, Some("Pal.thoriumPink"));
+        let thorium_particles = thorium.particles.unwrap();
+        assert_eq!(thorium_particles.angle_range, 50.0);
+        assert_eq!(thorium_particles.radius_base, 2.0);
+        assert_eq!(thorium_particles.radius_fin_scale, 5.0);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.thoriumPink"),
+            Some(DecalColor::from_rgba(0xf9a3c7ff))
+        );
+        assert_eq!(thorium.line_render_primitives_from_seed().len(), 7);
     }
 
     #[test]

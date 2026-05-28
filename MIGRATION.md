@@ -7897,3 +7897,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `casing*` 系列仍需 rect/sprite primitive；
   - `rail*`、`lancerLaser*`、`sparkShoot/lightningShoot/thoriumShoot` 等仍需继续迁移；
   - 真实 renderer/backend 仍未接入。
+
+### 12.250 Fx.sparkShoot/lightningShoot/thoriumShoot
+
+- 2026-05-28：继续对照 `Fx.java`，迁移三项 shoot line particle 效果：`sparkShoot=204`、`lightningShoot=205`、`thoriumShoot=206`。
+- 本轮迁移：
+  - `sparkShoot=204`
+  - `lightningShoot=205`
+  - `thoriumShoot=206`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2399` 附近：
+    - `sparkShoot = new Effect(12f, ...)`，颜色 `Color.white -> e.color`，stroke `e.fout()*1.2+0.6`，7 条 `rotation±3` line，offset `25*e.finpow()`，line length `e.fslope()*5+0.5`。
+    - `lightningShoot = new Effect(12f, ...)`，颜色 `Color.white -> Pal.lancerLaser`，stroke `e.fout()*1.2+0.5`，7 条 `rotation±50` line，line length `e.fin()*5+2`。
+    - `thoriumShoot = new Effect(12f, ...)`，颜色 `Color.white -> Pal.thoriumPink`，其余参数同 `lightningShoot`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三项 Fx ID、lookup、metadata；
+    - 新增 `Pal.lancerLaser` / `Pal.thoriumPink` 颜色符号；
+    - 三者使用 `SeededRadialLineParticles`，对齐 count/angle_range/stroke/line length 公式。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_spark_lightning_thorium_shoot_lines_for_render`，验证三项共 21 条 line primitives 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_spark_lightning_thorium_shoot_lines --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_spark_lightning_thorium_shoot_lines_for_render --lib`
+- 仍未完成：
+  - `lightningCharge=203` 需要 seeded triangle particles；
+  - `lancerLaserChargeBegin=202`、`lancerLaserCharge=201`、`rail*` 仍待迁移；
+  - 真实 renderer/backend 仍未接入。
