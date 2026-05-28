@@ -599,6 +599,32 @@ pub fn load() -> Vec<BulletContent> {
     bryde_missile.weave_scale = 8.0;
     bryde_missile.weave_mag = 1.0;
 
+    let mut sei_missile = missile_bullet(4.2, 42.0);
+    sei_missile.homing_power = 0.12;
+    sei_missile.width = 8.0;
+    sei_missile.height = 8.0;
+    sei_missile.shrink_x = 0.0;
+    sei_missile.shrink_y = 0.0;
+    sei_missile.drag = -0.003;
+    sei_missile.homing_range = 80.0;
+    sei_missile.keep_velocity = false;
+    sei_missile.splash_damage_radius = 35.0;
+    sei_missile.splash_damage = 45.0;
+    sei_missile.lifetime = 62.0;
+    sei_missile.trail_color = "bulletYellowBack".into();
+    sei_missile.back_color = "bulletYellowBack".into();
+    sei_missile.front_color = "bulletYellow".into();
+    sei_missile.hit_effect = "blastExplosion".into();
+    sei_missile.despawn_effect = "blastExplosion".into();
+    sei_missile.weave_scale = 8.0;
+    sei_missile.weave_mag = 2.0;
+
+    let mut sei_large_bullet = basic_bullet(7.0, 57.0);
+    sei_large_bullet.width = 13.0;
+    sei_large_bullet.height = 19.0;
+    sei_large_bullet.shoot_effect = "shootBig".into();
+    sei_large_bullet.lifetime = 35.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -677,6 +703,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "minke_artillery", minke_artillery),
         make_bullet(&mut next_id, "bryde_artillery", bryde_artillery),
         make_bullet(&mut next_id, "bryde_missile", bryde_missile),
+        make_bullet(&mut next_id, "sei_missile", sei_missile),
+        make_bullet(&mut next_id, "sei_large_bullet", sei_large_bullet),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -994,6 +1022,8 @@ mod tests {
                 "minke_artillery",
                 "bryde_artillery",
                 "bryde_missile",
+                "sei_missile",
+                "sei_large_bullet",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1965,6 +1995,43 @@ mod tests {
         assert_eq!(missile.despawn_effect, "blastExplosion");
         assert_eq!(missile.weave_scale, 8.0);
         assert_eq!(missile.weave_mag, 1.0);
+    }
+
+    #[test]
+    fn sei_bullets_match_java_profiles() {
+        let bullets = load();
+        let missile = &by_name(&bullets, "sei_missile").spec;
+
+        assert_eq!(missile.kind, BulletKind::Missile);
+        assert_eq!(missile.speed, 4.2);
+        assert_eq!(missile.damage, 42.0);
+        assert_eq!(missile.homing_power, 0.12);
+        assert_eq!(missile.width, 8.0);
+        assert_eq!(missile.height, 8.0);
+        assert_eq!(missile.shrink_x, 0.0);
+        assert_eq!(missile.shrink_y, 0.0);
+        assert_eq!(missile.drag, -0.003);
+        assert_eq!(missile.homing_range, 80.0);
+        assert!(!missile.keep_velocity);
+        assert_eq!(missile.splash_damage_radius, 35.0);
+        assert_eq!(missile.splash_damage, 45.0);
+        assert_eq!(missile.lifetime, 62.0);
+        assert_eq!(missile.trail_color, "bulletYellowBack");
+        assert_eq!(missile.back_color, "bulletYellowBack");
+        assert_eq!(missile.front_color, "bulletYellow");
+        assert_eq!(missile.hit_effect, "blastExplosion");
+        assert_eq!(missile.despawn_effect, "blastExplosion");
+        assert_eq!(missile.weave_scale, 8.0);
+        assert_eq!(missile.weave_mag, 2.0);
+
+        let large = &by_name(&bullets, "sei_large_bullet").spec;
+        assert_eq!(large.kind, BulletKind::Basic);
+        assert_eq!(large.speed, 7.0);
+        assert_eq!(large.damage, 57.0);
+        assert_eq!(large.width, 13.0);
+        assert_eq!(large.height, 19.0);
+        assert_eq!(large.shoot_effect, "shootBig");
+        assert_eq!(large.lifetime, 35.0);
     }
 
     #[test]

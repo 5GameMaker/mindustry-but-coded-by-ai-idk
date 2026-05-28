@@ -10498,3 +10498,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Artillery trailMult/trailSize、status/splash、missile weave/homing 和 naval wake/trail runtime 仍需整体接入；
   - 下一步建议继续 `sei`，已并行派出只读 explorer 提前提取规格；
   - 当前总体迁移约 14.5%，远未可玩。
+
+### 12.331 UnitTypes sei naval launcher and large bullet mount
+
+- 2026-05-29：继续回填 Java `sei` 舰船攻击单位。该闭环新增 `sei_missile` 与 `sei_large_bullet` bullets，并将 `sei-launcher` 的 `ShootAlternate` 与 `large-bullet-mount` 三连发接入 Rust unit content。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1785-1876`
+  - `sei`：`health=11000`、`armor=12`、`speed=0.73`、`drag=0.17`、`hitSize=39`、`accel=0.2`、`rotateSpeed=1.3`、`faceTarget=false`、`moveSoundVolume=1`、`moveSound=shipMoveBig`、`moveSoundPitchMin=moveSoundPitchMax=0.95`、`trailLength=50`、`waveTrailX=18`、`waveTrailY=-21`、`trailScl=3`
+  - `sei-launcher`：`x=0`、`y=0`、`rotate=true`、`rotateSpeed=4`、`mirror=false`、`shadow=20`、`shootY=4.5`、`recoil=4`、`reload=45`、`velocityRnd=0.4`、`inaccuracy=7`、`ejectEffect=none`、`shake=1`、`shootSound=shootMissileLong`、`ShootAlternate(shots=6,shotDelay=1.5,spread=4,barrels=3)`
+  - missile bullet：`MissileBulletType(4.2f,42)`，`homingPower=0.12`、`width=height=8`、`shrinkX=shrinkY=0`、`drag=-0.003`、`homingRange=80`、`keepVelocity=false`、`splashDamageRadius=35`、`splashDamage=45`、`lifetime=62`、`trailColor/backColor=bulletYellowBack`、`frontColor=bulletYellow`、`hitEffect/despawnEffect=blastExplosion`、`weaveScale=8`、`weaveMag=2`
+  - `large-bullet-mount`：`reload=60`、`cooldownTime=90`、`x=17.5`、`y=-16.5`、`rotateSpeed=4`、`rotate=true`、`shootY=7`、`shake=2`、`recoil=3`、`shadow=12`、`ejectEffect=casing3`、`shootSound=shootSpectre`、`shoot.shots=3`、`shoot.shotDelay=4`、`inaccuracy=1`
+  - large bullet：`BasicBulletType(7f,57)`，`width=13`、`height=19`、`shootEffect=shootBig`、`lifetime=35`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `sei_missile` 与 `sei_large_bullet`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `sei_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `sei` 补齐 Java naval movement/wake/sound 字段；
+    - 注册 `sei-launcher` 与 `large-bullet-mount`；
+    - 新增 `sei_naval_attack_profile_matches_java`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `14.6%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core sei_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core sei_naval_attack_profile_matches_java --lib`
+- 仍未完成：
+  - `ShootAlternate` 的多 barrel 射击、missile homing/weave/splash 与 naval wake/trail runtime 仍需整体接入验证；
+  - 下一步建议继续 `omura`，子代理已确认需要 Rail bullet content 与 unit weapon；
+  - 当前总体迁移约 14.6%，远未可玩。

@@ -1067,8 +1067,61 @@ pub fn load() -> Vec<UnitType> {
             u.health = 11000.0;
             u.armor = 12.0;
             u.speed = 0.73;
+            u.drag = 0.17;
             u.hit_size = 39.0;
+            u.accel = 0.2;
             u.rotate_speed = 1.3;
+            u.face_target = false;
+            u.move_sound_volume = 1.0;
+            u.move_sound = "shipMoveBig".into();
+            u.move_sound_pitch_min = 0.95;
+            u.move_sound_pitch_max = 0.95;
+            u.trail_length = 50;
+            u.wave_trail_x = 18.0;
+            u.wave_trail_y = -21.0;
+            u.trail_scl = 3.0;
+
+            let mut launcher = Weapon::new("sei-launcher");
+            launcher.x = 0.0;
+            launcher.y = 0.0;
+            launcher.rotate = true;
+            launcher.rotate_speed = 4.0;
+            launcher.mirror = false;
+            launcher.shadow = 20.0;
+            launcher.shoot_y = 4.5;
+            launcher.recoil = 4.0;
+            launcher.reload = 45.0;
+            launcher.velocity_rnd = 0.4;
+            launcher.inaccuracy = 7.0;
+            launcher.eject_effect = "none".into();
+            launcher.shake = 1.0;
+            launcher.shoot_sound = "shootMissileLong".into();
+            launcher.shoot_pattern = "ShootAlternate".into();
+            launcher.shoot_shots = 6;
+            launcher.shoot_shot_delay = 1.5;
+            launcher.shoot_alternate_spread = 4.0;
+            launcher.shoot_alternate_barrels = 3;
+            launcher.bullet = "sei_missile".into();
+            u.weapons.push(launcher);
+
+            let mut large = Weapon::new("large-bullet-mount");
+            large.reload = 60.0;
+            large.cooldown_time = 90.0;
+            large.x = 70.0 / 4.0;
+            large.y = -66.0 / 4.0;
+            large.rotate_speed = 4.0;
+            large.rotate = true;
+            large.shoot_y = 7.0;
+            large.shake = 2.0;
+            large.recoil = 3.0;
+            large.shadow = 12.0;
+            large.eject_effect = "casing3".into();
+            large.shoot_sound = "shootSpectre".into();
+            large.shoot_shots = 3;
+            large.shoot_shot_delay = 4.0;
+            large.inaccuracy = 1.0;
+            large.bullet = "sei_large_bullet".into();
+            u.weapons.push(large);
         }),
         unit(&mut next_id, "omura", UnitKind::Naval, |u| {
             u.health = 22000.0;
@@ -3231,6 +3284,87 @@ mod tests {
             .expect("missing bryde_missile");
         assert_eq!(missile_bullet.spec.kind, BulletKind::Missile);
         assert_eq!(missile_bullet.spec.weave_mag, 1.0);
+    }
+
+    #[test]
+    fn sei_naval_attack_profile_matches_java() {
+        let units = load();
+        let sei = by_name(&units, "sei");
+
+        assert!(sei.naval);
+        assert_eq!(sei.health, 11000.0);
+        assert_eq!(sei.armor, 12.0);
+        assert_eq!(sei.speed, 0.73);
+        assert_eq!(sei.drag, 0.17);
+        assert_eq!(sei.hit_size, 39.0);
+        assert_eq!(sei.accel, 0.2);
+        assert_eq!(sei.rotate_speed, 1.3);
+        assert!(!sei.face_target);
+        assert_eq!(sei.move_sound_volume, 1.0);
+        assert_eq!(sei.move_sound, "shipMoveBig");
+        assert_eq!(sei.move_sound_pitch_min, 0.95);
+        assert_eq!(sei.move_sound_pitch_max, 0.95);
+        assert_eq!(sei.trail_length, 50);
+        assert_eq!(sei.wave_trail_x, 18.0);
+        assert_eq!(sei.wave_trail_y, -21.0);
+        assert_eq!(sei.trail_scl, 3.0);
+        assert_eq!(sei.weapons.len(), 2);
+
+        let launcher = &sei.weapons[0];
+        assert_eq!(launcher.name, "sei-launcher");
+        assert_eq!(launcher.x, 0.0);
+        assert_eq!(launcher.y, 0.0);
+        assert!(launcher.rotate);
+        assert_eq!(launcher.rotate_speed, 4.0);
+        assert!(!launcher.mirror);
+        assert_eq!(launcher.shadow, 20.0);
+        assert_eq!(launcher.shoot_y, 4.5);
+        assert_eq!(launcher.recoil, 4.0);
+        assert_eq!(launcher.reload, 45.0);
+        assert_eq!(launcher.velocity_rnd, 0.4);
+        assert_eq!(launcher.inaccuracy, 7.0);
+        assert_eq!(launcher.eject_effect, "none");
+        assert_eq!(launcher.shake, 1.0);
+        assert_eq!(launcher.shoot_sound, "shootMissileLong");
+        assert_eq!(launcher.shoot_pattern, "ShootAlternate");
+        assert_eq!(launcher.shoot_shots, 6);
+        assert_eq!(launcher.shoot_shot_delay, 1.5);
+        assert_eq!(launcher.shoot_alternate_spread, 4.0);
+        assert_eq!(launcher.shoot_alternate_barrels, 3);
+        assert_eq!(launcher.bullet, "sei_missile");
+
+        let large = &sei.weapons[1];
+        assert_eq!(large.name, "large-bullet-mount");
+        assert_eq!(large.reload, 60.0);
+        assert_eq!(large.cooldown_time, 90.0);
+        assert_eq!(large.x, 70.0 / 4.0);
+        assert_eq!(large.y, -66.0 / 4.0);
+        assert_eq!(large.rotate_speed, 4.0);
+        assert!(large.rotate);
+        assert_eq!(large.shoot_y, 7.0);
+        assert_eq!(large.shake, 2.0);
+        assert_eq!(large.recoil, 3.0);
+        assert_eq!(large.shadow, 12.0);
+        assert_eq!(large.eject_effect, "casing3");
+        assert_eq!(large.shoot_sound, "shootSpectre");
+        assert_eq!(large.shoot_shots, 3);
+        assert_eq!(large.shoot_shot_delay, 4.0);
+        assert_eq!(large.inaccuracy, 1.0);
+        assert_eq!(large.bullet, "sei_large_bullet");
+
+        let bullets = bullets::load();
+        let missile = bullets
+            .iter()
+            .find(|bullet| bullet.name() == launcher.bullet)
+            .expect("missing sei_missile");
+        assert_eq!(missile.spec.kind, BulletKind::Missile);
+        assert_eq!(missile.spec.homing_power, 0.12);
+        let large_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == large.bullet)
+            .expect("missing sei_large_bullet");
+        assert_eq!(large_bullet.spec.kind, BulletKind::Basic);
+        assert_eq!(large_bullet.spec.damage, 57.0);
     }
 
     #[test]
