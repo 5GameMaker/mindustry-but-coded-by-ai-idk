@@ -7467,3 +7467,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - triangle primitive 仍需真实 renderer/backend 接入；
   - `shootQuellPulse=164` 与 `instHit=104` 需要更复杂随机三角簇，暂未迁移；
   - 当前 Fx 迁移仍只是全项目迁移中的局部闭环。
+
+### 12.238 Fx.instHit random triangles, scaled circle and seeded squares
+
+- 2026-05-28：迁移 `instHit=104`，覆盖随机三角簇、scaled circle 与 scaled seeded square pass。
+- 本轮迁移：
+  - `instHit=104`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1099` 附近：
+    - `instHit = new Effect(20f, 200f, ...)`
+    - 两组颜色 `Pal.bulletYellowBack` / `Pal.bulletYellow`，每组 5 个 `Drawf.tri` front/back pair；
+    - `rot = e.rotation + Mathf.randomSeedRange(e.id + j, 50f)`；
+    - front length `(80f + Mathf.randomSeedRange(e.id + j, 40f)) * m`；
+    - `e.scaled(10f, ...)` 输出 `Pal.bulletYellow` stroked circle；
+    - `e.scaled(12f, ...)` 输出 `Pal.bulletYellowBack` seeded square particles，长度 `5f + e.fin() * 80f`，角度范围 `e.rotation ± 60f`，方块旋转 `45f`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_INST_HIT_ID=104`；
+    - 接入 lookup/metadata，lifetime `20.0`，clip `200.0`；
+    - `standard_effect_draw_plans(...)` 对 `instHit` 输出：
+      - 10 个 `TrianglePair` pass，按 Java `mathf_random_seed_range(e.id + j, ...)` 对齐角度与长度；
+      - `time <= 10` 时输出 scaled `StrokedCircle`；
+      - `time <= 12` 时输出 `SeededSquareParticles`，count `25`，rotation `45`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_inst_hit_triangles_circle_and_squares_for_render`，验证 12 draw plans、20 triangle primitives、1 circle、25 squares。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_inst_hit_triangles_circle_and_squares --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_inst_hit_triangles_circle_and_squares_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `shootQuellPulse=164` 仍需更复杂随机三角簇、alpha 与多 circle pass；
+  - triangle/square/circle primitives 仍要接入真实 renderer/backend；
+  - 当前只是 Fx 局部闭环，仍未接近完整可游玩目标。

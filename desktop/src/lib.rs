@@ -3165,6 +3165,45 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_inst_hit_triangles_circle_and_squares_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("instHit").unwrap() as u16,
+                    x: 32.0,
+                    y: 40.0,
+                    rotation: 30.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 12);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 1);
+        assert_eq!(launcher.standard_local_effect_triangle_primitives.len(), 20);
+        assert_eq!(launcher.standard_local_effect_square_primitives.len(), 25);
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let first_square = &launcher.standard_local_effect_square_primitives[0];
+        assert_eq!(first_square.rotation, 45.0);
+        assert!(first_square.radius > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 12);
+        assert_eq!(stats.circle_primitives, 1);
+        assert_eq!(stats.triangle_primitives, 20);
+        assert_eq!(stats.square_primitives, 25);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_syncs_assembler_unit_spawned_packet_to_runtime() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let world_data = sample_network_world_data(None);

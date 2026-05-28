@@ -66,6 +66,8 @@ pub const FX_INST_BOMB_ID: i32 = 101;
 pub const FX_INST_TRAIL_ID: i32 = 102;
 /// Upstream `Fx.instShoot` id in `mindustry.content.Fx` for v158.1.
 pub const FX_INST_SHOOT_ID: i32 = 103;
+/// Upstream `Fx.instHit` id in `mindustry.content.Fx` for v158.1.
+pub const FX_INST_HIT_ID: i32 = 104;
 /// Upstream `Fx.pointHit` id in `mindustry.content.Fx` for v158.1.
 pub const FX_POINT_HIT_ID: i32 = 11;
 /// Upstream `Fx.coreBuildShockwave` id in `mindustry.content.Fx` for v158.1.
@@ -283,6 +285,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "instBomb" => Some(FX_INST_BOMB_ID),
         "instTrail" => Some(FX_INST_TRAIL_ID),
         "instShoot" => Some(FX_INST_SHOOT_ID),
+        "instHit" => Some(FX_INST_HIT_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "artilleryTrail" => Some(FX_ARTILLERY_TRAIL_ID),
         "incendTrail" => Some(FX_INCEND_TRAIL_ID),
@@ -452,6 +455,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_INST_BOMB_ID => Effect::with_lifetime(FX_INST_BOMB_ID, 15.0, 100.0),
         FX_INST_TRAIL_ID => Effect::with_lifetime(FX_INST_TRAIL_ID, 30.0, DEFAULT_EFFECT_CLIP),
         FX_INST_SHOOT_ID => Effect::with_lifetime(FX_INST_SHOOT_ID, 24.0, DEFAULT_EFFECT_CLIP),
+        FX_INST_HIT_ID => Effect::with_lifetime(FX_INST_HIT_ID, 20.0, 200.0),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_ARTILLERY_TRAIL_ID => {
             Effect::with_lifetime(FX_ARTILLERY_TRAIL_ID, 50.0, DEFAULT_EFFECT_CLIP)
@@ -615,6 +619,7 @@ pub fn standard_effect_draw_plans(
             | FX_INST_BOMB_ID
             | FX_INST_TRAIL_ID
             | FX_INST_SHOOT_ID
+            | FX_INST_HIT_ID
             | FX_SHOOT_SCEPTER_SECONDARY_ID
     ) {
         return standard_effect_draw_plan(
@@ -1053,6 +1058,131 @@ pub fn standard_effect_draw_plans(
             light_radius: 0.0,
             light_opacity: 0.0,
         });
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_INST_HIT_ID {
+        let mut plans = Vec::with_capacity(12);
+
+        for (color_name, multiplier) in [
+            ("Pal.bulletYellowBack", 1.0_f32),
+            ("Pal.bulletYellow", 0.5_f32),
+        ] {
+            for index in 0..5 {
+                let random_seed = (state_id + index) as i64;
+                let triangle_rotation = rotation + mathf_random_seed_range(random_seed, 50.0);
+                let front_length = (80.0 + mathf_random_seed_range(random_seed, 40.0)) * multiplier;
+                plans.push(StandardEffectDrawPlan {
+                    effect_id: effect_id_i32,
+                    layer: effect.layer,
+                    kind: StandardEffectDrawKind::TrianglePair,
+                    center: (x, y),
+                    color_from: Some(color_name),
+                    color_mid: None,
+                    color_to: None,
+                    color_mix: 0.0,
+                    input_color: None,
+                    color_mul: 1.0,
+                    alpha: 1.0,
+                    radius: 23.0 * fout * multiplier,
+                    stroke: front_length,
+                    particles: Some(StandardEffectParticleSpec {
+                        seed: state_id + index,
+                        count: 2,
+                        progress: None,
+                        angle: Some(triangle_rotation),
+                        angle_range: 0.0,
+                        length: 20.0 * multiplier,
+                        fin,
+                        fout,
+                        fslope,
+                        radius_base: 0.0,
+                        radius_fin_scale: 0.0,
+                        radius_fout_scale: 0.0,
+                        radius_fslope_scale: 0.0,
+                        secondary_vector_scale: 0.0,
+                        secondary_radius_base: 0.0,
+                        secondary_radius_fin_scale: 0.0,
+                        secondary_radius_fout_scale: 0.0,
+                        secondary_radius_fslope_scale: 0.0,
+                        alpha_midpoint: false,
+                    }),
+                    light_color: None,
+                    light_radius: 0.0,
+                    light_opacity: 0.0,
+                });
+            }
+        }
+
+        let circle_scaled_lifetime = 10.0;
+        if time <= circle_scaled_lifetime {
+            let scaled_fin = (time / circle_scaled_lifetime).clamp(0.0, 1.0);
+            let scaled_fout = 1.0 - scaled_fin;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some("Pal.bulletYellow"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: scaled_fin * 30.0,
+                stroke: scaled_fout * 2.0 + 0.2,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        let square_scaled_lifetime = 12.0;
+        if time <= square_scaled_lifetime {
+            let scaled_fout = 1.0 - (time / square_scaled_lifetime).clamp(0.0, 1.0);
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededSquareParticles,
+                center: (x, y),
+                color_from: Some("Pal.bulletYellowBack"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: 45.0,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 25,
+                    progress: None,
+                    angle: Some(rotation),
+                    angle_range: 60.0,
+                    length: 5.0 + fin * 80.0,
+                    fin,
+                    fout: scaled_fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 3.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
 
         return plans;
     }
@@ -5298,6 +5428,7 @@ mod tests {
         assert_eq!(standard_effect_id("instBomb"), Some(FX_INST_BOMB_ID));
         assert_eq!(standard_effect_id("instTrail"), Some(FX_INST_TRAIL_ID));
         assert_eq!(standard_effect_id("instShoot"), Some(FX_INST_SHOOT_ID));
+        assert_eq!(standard_effect_id("instHit"), Some(FX_INST_HIT_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("artilleryTrail"),
@@ -5577,6 +5708,9 @@ mod tests {
         assert_eq!(inst_bomb.clip, 100.0);
         assert_eq!(standard_effect(FX_INST_TRAIL_ID).unwrap().lifetime, 30.0);
         assert_eq!(standard_effect(FX_INST_SHOOT_ID).unwrap().lifetime, 24.0);
+        let inst_hit = standard_effect(FX_INST_HIT_ID).unwrap();
+        assert_eq!(inst_hit.lifetime, 20.0);
+        assert_eq!(inst_hit.clip, 200.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         let artillery_trail = standard_effect(FX_ARTILLERY_TRAIL_ID).unwrap();
         assert_eq!(artillery_trail.lifetime, 50.0);
@@ -7219,6 +7353,62 @@ mod tests {
         assert_eq!(pair_triangles.len(), 2);
         assert_eq!(pair_triangles[0].rotation, 30.0);
         assert_eq!(pair_triangles[1].rotation, 210.0);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_inst_hit_triangles_circle_and_squares() {
+        let plans = standard_effect_draw_plans(
+            Some(FX_INST_HIT_ID as u16),
+            104,
+            5.0,
+            6.0,
+            30.0,
+            5.0,
+            20.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(plans.len(), 12);
+
+        let first_triangle = plans[0];
+        assert_eq!(first_triangle.kind, StandardEffectDrawKind::TrianglePair);
+        assert_eq!(first_triangle.color_from, Some("Pal.bulletYellowBack"));
+        assert_eq!(first_triangle.radius, 17.25);
+        let first_rotation = 30.0 + mathf_random_seed_range(104, 50.0);
+        let first_length = 80.0 + mathf_random_seed_range(104, 40.0);
+        assert!((first_triangle.stroke - first_length).abs() < 0.0001);
+        assert!((first_triangle.particles.unwrap().angle.unwrap() - first_rotation).abs() < 0.0001);
+        assert_eq!(first_triangle.particles.unwrap().length, 20.0);
+        assert_eq!(
+            first_triangle.triangle_render_primitives_from_seed().len(),
+            2
+        );
+
+        let half_triangle = plans[5];
+        assert_eq!(half_triangle.color_from, Some("Pal.bulletYellow"));
+        assert_eq!(half_triangle.radius, 8.625);
+        assert!((half_triangle.stroke - first_length * 0.5).abs() < 0.0001);
+        assert_eq!(half_triangle.particles.unwrap().length, 10.0);
+
+        let circle = plans[10];
+        assert_eq!(circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(circle.color_from, Some("Pal.bulletYellow"));
+        assert_eq!(circle.radius, 15.0);
+        assert_eq!(circle.stroke, 1.2);
+
+        let squares = plans[11];
+        assert_eq!(squares.kind, StandardEffectDrawKind::SeededSquareParticles);
+        assert_eq!(squares.color_from, Some("Pal.bulletYellowBack"));
+        assert_eq!(squares.stroke, 45.0);
+        let square_particles = squares.particles.unwrap();
+        assert_eq!(square_particles.count, 25);
+        assert_eq!(square_particles.angle, Some(30.0));
+        assert_eq!(square_particles.angle_range, 60.0);
+        assert_eq!(square_particles.length, 25.0);
+        assert!((square_particles.fout - (1.0 - 5.0 / 12.0)).abs() < 0.0001);
+        let square_primitives = squares.square_render_primitives_from_seed();
+        assert_eq!(square_primitives.len(), 25);
+        assert!((square_primitives[0].radius - 1.75).abs() < 0.0001);
+        assert_eq!(square_primitives[0].rotation, 45.0);
     }
 
     #[test]

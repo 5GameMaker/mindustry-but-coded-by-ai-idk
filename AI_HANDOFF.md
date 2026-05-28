@@ -5510,3 +5510,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `shootQuellPulse=164` / `instHit=104` 更复杂，涉及随机三角簇与多 pass；
   2. 可考虑先把 triangle primitive 接入真实 renderer/backend，避免 headless seam 积累过多；
   3. 若继续 Fx，优先挑已有 primitive 能完整表达的效果。
+
+---
+
+## 164. 最新闭环记录：Fx.instHit random triangles, scaled circle and seeded squares
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `instHit=104`，验证 randomSeedRange triangle pair + scaled circle + seeded square 的组合表达。
+- 本轮迁移：
+  - `instHit=104`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_INST_HIT_ID=104`；
+    - 接入 lookup/metadata，clip `200.0`；
+    - `standard_effect_draw_plans(...)` 输出 10 个 `TrianglePair`，并按 Java `Mathf.randomSeedRange(e.id + j, ...)` 对齐角度与 front length；
+    - early `StrokedCircle` pass 对齐 `e.scaled(10f, ...)`；
+    - `SeededSquareParticles` pass 对齐 `e.scaled(12f, ...)`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_inst_hit_triangles_circle_and_squares_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_inst_hit_triangles_circle_and_squares --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_inst_hit_triangles_circle_and_squares_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `shootQuellPulse=164` 是相邻但复杂，涉及随机三角簇、alpha、coreRadius 和 scaled circle；
+  2. 可以先做真实 renderer/backend 的 triangle/square/circle primitive 消费，减少 headless seam 技术债；
+  3. 若继续 Fx，优先挑已有 primitive 能覆盖且不会引入 texture/polygon/data-position 的效果。
