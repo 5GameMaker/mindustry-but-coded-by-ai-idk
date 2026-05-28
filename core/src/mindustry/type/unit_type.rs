@@ -137,6 +137,7 @@ pub struct UnitType {
     pub abilities: Vec<String>,
     pub weapons: Vec<Weapon>,
     pub immunities: Vec<String>,
+    pub wreck_regions: Vec<TextureRegionRef>,
 
     pub heal_color_rgba: u32,
     pub light_color_rgba: u32,
@@ -375,6 +376,7 @@ impl UnitType {
             abilities: Vec::new(),
             weapons: Vec::new(),
             immunities: Vec::new(),
+            wreck_regions: Vec::new(),
             heal_color_rgba: 0x98ffa9ff,
             light_color_rgba: 0xfbd367ff,
             shield_color_rgba: None,
@@ -763,6 +765,18 @@ impl UnitType {
         }
     }
 
+    pub fn default_wreck_regions_for(name: &str) -> Vec<TextureRegionRef> {
+        (0..3)
+            .map(|index| TextureRegionRef::new(format!("{name}-wreck{index}")))
+            .collect()
+    }
+
+    pub fn ensure_default_wreck_regions(&mut self) {
+        if self.wreck_regions.is_empty() {
+            self.wreck_regions = Self::default_wreck_regions_for(self.name());
+        }
+    }
+
     pub fn sense(&self, sensor: LAccess, payload_capable: bool, logic_id: i32) -> f64 {
         match sensor {
             LAccess::Health | LAccess::MaxHealth => self.health as f64,
@@ -965,6 +979,7 @@ mod tests {
         assert!(unit.abilities.is_empty());
         assert!(unit.weapons.is_empty());
         assert!(unit.immunities.is_empty());
+        assert!(unit.wreck_regions.is_empty());
         assert_eq!(unit.death_sound, "unset");
         assert_eq!(unit.death_sound_volume, 1.0);
         assert_eq!(unit.wreck_sound, "unset");
@@ -997,6 +1012,23 @@ mod tests {
         assert!(unit.mine_floor);
         assert!(unit.mine_hardness_scaling);
         assert_eq!(unit.mine_sound_volume, 0.6);
+    }
+
+    #[test]
+    fn unit_type_default_wreck_regions_match_java_atlas_names() {
+        let mut unit = UnitType::new(0, "crawler");
+
+        unit.ensure_default_wreck_regions();
+        assert_eq!(
+            unit.wreck_regions,
+            vec![
+                TextureRegionRef::new("crawler-wreck0"),
+                TextureRegionRef::new("crawler-wreck1"),
+                TextureRegionRef::new("crawler-wreck2"),
+            ]
+        );
+        unit.ensure_default_wreck_regions();
+        assert_eq!(unit.wreck_regions.len(), 3);
     }
 
     #[test]

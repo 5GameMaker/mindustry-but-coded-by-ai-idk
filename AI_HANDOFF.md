@@ -7294,3 +7294,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. flying wreck crash damage、`Damage.dynamicExplosion(...)` 的真实 damage/fire/lightning 仍未完成；
   4. 完整 Java↔Rust 联机 smoke 仍未完成；
   5. 当前总迁移仍约 11%，远未可玩。
+
+---
+
+## 215. 最新闭环记录：UnitType wreckRegions 与 UnitDestroy wreck decal 接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：补 Java `UnitType.load()` 的 `wreckRegions[3] = name + "-wreck" + i` 数据面，并让 `UnitComp.destroy()` 的 wreck decal 分支进入 Rust client runtime，不再只生成 scorch。
+- Rust 主改动：
+  - `core/src/mindustry/type/unit_type.rs`
+    - 新增 `wreck_regions: Vec<TextureRegionRef>`；
+    - 新增 `default_wreck_regions_for(name)` / `ensure_default_wreck_regions()`；
+    - 构造器保持空，content load 阶段再填，贴近 Java 构造/加载分层。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `apply_low_coupling_init(...)` 填充正式 content unit 的 `name-wreck0..2`。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - destroy side-effect 在 create_scorch 分支后调用 `queue_client_unit_wreck_region_decals(...)`；
+    - decal rotation 使用 Java 的 `rotation - 90`；
+    - 当前用 deterministic offset 代替 Java `Tmp.v1.rnd(range)`，保证测试稳定；没有 atlas found 标志时以非空 region 名称作为 found。
+  - `MIGRATION.md`
+    - 新增 `12.289`。
+- 已跑验证：
+  - `cargo test -p mindustry-core unit_type_default_wreck_regions_match_java_atlas_names --lib`
+  - `cargo test -p mindustry-core vanilla_units_load_wreck_regions_like_java_unit_type_load --lib`
+  - `cargo test -p mindustry-core game_runtime_unit_destroy_materializes_wreck_region_decals_like_java --lib`
+  - `cargo fmt`
+- 当前仍需继续：
+  1. 给 atlas/asset region 增加真实 `found` 与尺寸来源，替换当前非空名称判断；
+  2. 后续接入 Java 风格随机源，替换 deterministic offset；
+  3. 继续 `UnitComp.destroy()`：shootOnDeath 真实 bullet spawn 与 `killShooter && totalShots` 门槛；
+  4. flying wreck crash damage、`Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
+  5. 当前总迁移仍约 11%，远未可玩。

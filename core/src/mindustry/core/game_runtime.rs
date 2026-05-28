@@ -1757,6 +1757,19 @@ fn read_client_player_sync_exact(sync_bytes: &[u8]) -> Option<NetworkPlayerSyncD
     NetworkPlayerSyncData::read_exact_from(sync_bytes).ok()
 }
 
+fn deterministic_wreck_decal_offset(unit_id: i32, index: usize, range: f32) -> (f32, f32) {
+    if range <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let index_i32 = index as i32;
+    let angle = (unit_id.wrapping_mul(37) + index_i32.wrapping_mul(97)).rem_euclid(360) as f32;
+    let radius_seed =
+        (unit_id.wrapping_mul(31) + index_i32.wrapping_mul(17)).rem_euclid(100) as f32;
+    let radius = range * ((radius_seed + 1.0) / 100.0);
+    let radians = angle.to_radians();
+    (radians.cos() * radius, radians.sin() * radius)
+}
+
 fn read_client_effect_state_sync_exact(sync_bytes: &[u8]) -> Option<type_io::EffectStateSyncWire> {
     if sync_bytes.is_empty() {
         return None;
@@ -4144,7 +4157,29 @@ impl GameRuntime {
             decal.color = DecalColor::from_rgba(0x1c1817ff);
             let id = self.alloc_client_local_decal_id();
             self.client_decal_snapshot_entities.insert(id, decal);
+            self.queue_client_unit_wreck_region_decals(unit, x, y);
         }
+    }
+
+    fn queue_client_unit_wreck_region_decals(&mut self, unit: &UnitComp, x: f32, y: f32) -> usize {
+        let range = unit.type_info.hit_size / 4.0;
+        let mut emitted = 0;
+        for (index, region) in unit.type_info.wreck_regions.iter().enumerate() {
+            if region.name.is_empty() {
+                continue;
+            }
+            let (offset_x, offset_y) = deterministic_wreck_decal_offset(unit.id(), index, range);
+            let region_width = (region.width.max(region.height).max(1)) as f32;
+            let mut decal = DecalComp::new(DecalRegion::new(region.name.clone(), region_width));
+            decal.x = x + offset_x;
+            decal.y = y + offset_y;
+            decal.rotation = unit.rotation() - 90.0;
+            decal.lifetime = 3600.0;
+            let id = self.alloc_client_local_decal_id();
+            self.client_decal_snapshot_entities.insert(id, decal);
+            emitted += 1;
+        }
+        emitted
     }
 
     fn unit_destroy_explosiveness(content: &ContentLoader, unit: &UnitComp) -> f32 {
@@ -26864,6 +26899,53 @@ mod tests {
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));
+    }
+
+    #[test]
+    fn game_runtime_unit_destroy_materializes_wreck_region_decals_like_java() {
+        let mut unit_type = UnitType::new(91, "crawler");
+        unit_type.hit_size = 20.0;
+        unit_type.wreck_regions = vec![
+            TextureRegionRef::with_size("crawler-wreck0", 18, 12),
+            TextureRegionRef::with_size("crawler-wreck1", 20, 14),
+            TextureRegionRef::with_size("crawler-wreck2", 22, 16),
+        ];
+        let mut unit = UnitComp::new(91, unit_type, TeamId(4));
+        unit.add();
+        unit.set_pos(80.0, 100.0);
+        unit.set_rotation(135.0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(91, unit);
+
+        assert!(runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 91 }));
+        assert_eq!(
+            runtime.client_decal_snapshot_entities.len(),
+            4,
+            "scorch plus three Java wreckRegions decals should be materialized"
+        );
+        let names = runtime
+            .client_decal_snapshot_entities
+            .values()
+            .map(|decal| decal.region.name.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(names.contains("scorch-4-1"));
+        for expected in ["crawler-wreck0", "crawler-wreck1", "crawler-wreck2"] {
+            assert!(names.contains(expected), "{expected}");
+        }
+
+        for decal in runtime
+            .client_decal_snapshot_entities
+            .values()
+            .filter(|decal| decal.region.name.starts_with("crawler-wreck"))
+        {
+            let dx = decal.x - 80.0;
+            let dy = decal.y - 100.0;
+            assert!(dx * dx + dy * dy <= 5.001 * 5.001);
+            assert!((decal.rotation - 45.0).abs() < 0.0001);
+            assert_eq!(decal.lifetime, 3600.0);
+        }
+        assert_eq!(runtime.next_client_local_decal_id, -5);
     }
 
     #[test]

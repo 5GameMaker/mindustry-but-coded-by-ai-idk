@@ -9197,3 +9197,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `shootOnDeath` 尚未严格实现 `!(bullet.killShooter && totalShots > 0)`，也尚未真正 `mount.weapon.update(...)` 生成 bullet；
   - `wreckRegions` decal、crash damage、`Damage.dynamicExplosion(...)` lightning/fire/wave damage 仍未完成；
   - 当前总体迁移仍约 11%，远未可玩。
+
+### 12.289 UnitType wreckRegions 与 UnitDestroy wreck decal 接入
+
+- 2026-05-28：继续对照 Java `UnitComp.destroy()` 的 `if(!headless && type.createScorch) for(type.wreckRegions) Effect.decal(...)`，补齐 Rust `UnitType` 的 wreck region 数据面，并在客户端 destroy runtime 里 materialize wreck decals。
+- Java 依据：
+  - `UnitType.load()` 创建 `wreckRegions = new TextureRegion[3]`，依次查找 `name + "-wreck" + i`；
+  - `UnitComp.destroy()` 在 `type.createScorch` 且非 headless 时遍历 `type.wreckRegions`，对 `found()` 的 region 在 `hitSize / 4f` 范围内随机偏移，rotation 为 `rotation - 90`。
+- Rust 新增/变化：
+  - `core/src/mindustry/type/unit_type.rs`
+    - 新增 `wreck_regions: Vec<TextureRegionRef>`；
+    - 新增 `default_wreck_regions_for(name)` / `ensure_default_wreck_regions()`；
+    - 保持 `UnitType::new(...)` 默认空，模拟 Java 构造后、load 阶段再解析 atlas region。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `apply_low_coupling_init(...)` 调用 `ensure_default_wreck_regions()`，让正式 content loader 得到 `name-wreck0..2`。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `queue_client_unit_destroy_side_effects(...)` 在已有 scorch decal 后，调用 `queue_client_unit_wreck_region_decals(...)`；
+    - 生成本地 `DecalComp`，region 取 `wreck_regions`，rotation 为 `unit.rotation() - 90.0`，lifetime 复用 3600；
+    - 由于 Rust 当前没有 atlas 随机源/region found 标志，先用非空 region 名称作为可用条件，并用 deterministic offset 保证测试稳定。
+- 已跑验证：
+  - `cargo test -p mindustry-core unit_type_default_wreck_regions_match_java_atlas_names --lib`
+  - `cargo test -p mindustry-core vanilla_units_load_wreck_regions_like_java_unit_type_load --lib`
+  - `cargo test -p mindustry-core game_runtime_unit_destroy_materializes_wreck_region_decals_like_java --lib`
+  - `cargo fmt`
+- 仍未完成：
+  - wreck decal 的 `TextureRegion.found()` 与真实 atlas 尺寸仍需后续接入 asset/atlas metadata；
+  - Java 的 `Tmp.v1.rnd(range)` 现在用 deterministic offset 代替，后续若接入随机源需恢复与 Java 更一致的分布；
+  - `shootOnDeath` 的真实 bullet spawn、`killShooter && totalShots` 门槛，以及 flying wreck crash damage 仍未完成；
+  - 当前总体迁移仍约 11%，远未可玩。

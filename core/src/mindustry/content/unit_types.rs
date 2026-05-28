@@ -936,6 +936,7 @@ fn apply_low_coupling_init(unit: &mut UnitType) {
     if unit.flying {
         unit.env_enabled |= Env::SPACE;
     }
+    unit.ensure_default_wreck_regions();
     apply_default_commands(unit);
 }
 
@@ -1115,6 +1116,21 @@ mod tests {
         assert_eq!(by_name(&units, "risso").id(), 25);
         assert_eq!(by_name(&units, "assembly-drone").id(), 60);
         assert!(units.iter().all(|unit| !unit.name().ends_with("-missile")));
+    }
+
+    #[test]
+    fn vanilla_units_load_wreck_regions_like_java_unit_type_load() {
+        let units = load();
+        let crawler = by_name(&units, "crawler");
+
+        assert_eq!(
+            crawler
+                .wreck_regions
+                .iter()
+                .map(|region| region.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["crawler-wreck0", "crawler-wreck1", "crawler-wreck2"]
+        );
     }
 
     #[test]
