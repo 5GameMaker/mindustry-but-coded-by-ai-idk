@@ -495,6 +495,7 @@ pub enum TurretBlockKind {
 pub enum BulletKind {
     Generic,
     Basic,
+    Bomb,
     Missile,
     Flak,
     Artillery,
@@ -633,6 +634,7 @@ pub struct BulletSpec {
     pub homing_delay: f32,
     pub homing_range: f32,
     pub velocity_rnd: f32,
+    pub inaccuracy: f32,
     pub point_effect: String,
     pub pierce_effect: String,
     pub line_effect: String,
@@ -797,6 +799,7 @@ impl BulletSpec {
             homing_delay: 0.0,
             homing_range: 0.0,
             velocity_rnd: 0.0,
+            inaccuracy: 0.0,
             point_effect: "none".into(),
             pierce_effect: "hitBulletSmall".into(),
             line_effect: "none".into(),

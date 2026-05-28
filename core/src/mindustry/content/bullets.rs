@@ -382,6 +382,25 @@ pub fn load() -> Vec<BulletContent> {
     toxopid_cannon.frag_bullets = 9;
     toxopid_cannon.frag_bullet = Some(Box::new(toxopid_frag_sap));
 
+    let mut flare_basic = basic_bullet(2.5, 9.0);
+    flare_basic.inaccuracy = 4.0;
+    flare_basic.width = 7.0;
+    flare_basic.height = 9.0;
+    flare_basic.lifetime = 32.0;
+    flare_basic.shoot_effect = "shootSmall".into();
+    flare_basic.smoke_effect = "shootSmallSmoke".into();
+    flare_basic.ammo_multiplier = 2.0;
+
+    let mut horizon_bomb = bomb_bullet(27.0, 25.0);
+    horizon_bomb.width = 10.0;
+    horizon_bomb.height = 14.0;
+    horizon_bomb.hit_effect = "flakExplosion".into();
+    horizon_bomb.shoot_effect = "none".into();
+    horizon_bomb.smoke_effect = "none".into();
+    horizon_bomb.status = "blasted".into();
+    horizon_bomb.status_duration = 60.0;
+    horizon_bomb.damage = horizon_bomb.splash_damage * 0.5;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -443,6 +462,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "arkyid_artillery_sap", arkyid_artillery_sap),
         make_bullet(&mut next_id, "toxopid_shrapnel", toxopid_shrapnel),
         make_bullet(&mut next_id, "toxopid_cannon", toxopid_cannon),
+        make_bullet(&mut next_id, "flare_basic", flare_basic),
+        make_bullet(&mut next_id, "horizon_bomb", horizon_bomb),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -620,6 +641,26 @@ fn shrapnel_bullet(damage: f32) -> BulletSpec {
     bullet
 }
 
+fn bomb_bullet(splash_damage: f32, splash_damage_radius: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Bomb, 0.7, 0.0);
+    bullet.sprite = "shell".into();
+    bullet.splash_damage_radius = splash_damage_radius;
+    bullet.splash_damage = splash_damage;
+    bullet.collides_tiles = false;
+    bullet.collides = false;
+    bullet.shrink_y = 0.7;
+    bullet.lifetime = 30.0;
+    bullet.drag = 0.05;
+    bullet.keep_velocity = false;
+    bullet.collides_air = false;
+    bullet.hit_sound = "explosion".into();
+    bullet.width = 5.0;
+    bullet.height = 7.0;
+    bullet.back_color = "bulletYellowBack".into();
+    bullet.front_color = "bulletYellow".into();
+    bullet
+}
+
 fn continuous_laser_bullet(damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
     bullet.length = 220.0;
@@ -693,6 +734,8 @@ mod tests {
                 "arkyid_artillery_sap",
                 "toxopid_shrapnel",
                 "toxopid_cannon",
+                "flare_basic",
+                "horizon_bomb",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1314,6 +1357,43 @@ mod tests {
         assert_eq!(frag.light_opacity, 0.5);
         assert_eq!(frag.status, "sapped");
         assert_eq!(frag.status_duration, 600.0);
+    }
+
+    #[test]
+    fn flare_basic_and_horizon_bomb_match_java_profiles() {
+        let bullets = load();
+        let flare = &by_name(&bullets, "flare_basic").spec;
+        let bomb = &by_name(&bullets, "horizon_bomb").spec;
+
+        assert_eq!(flare.kind, BulletKind::Basic);
+        assert_eq!(flare.speed, 2.5);
+        assert_eq!(flare.damage, 9.0);
+        assert_eq!(flare.inaccuracy, 4.0);
+        assert_eq!(flare.width, 7.0);
+        assert_eq!(flare.height, 9.0);
+        assert_eq!(flare.lifetime, 32.0);
+        assert_eq!(flare.shoot_effect, "shootSmall");
+        assert_eq!(flare.smoke_effect, "shootSmallSmoke");
+        assert_eq!(flare.ammo_multiplier, 2.0);
+
+        assert_eq!(bomb.kind, BulletKind::Bomb);
+        assert_eq!(bomb.speed, 0.7);
+        assert_eq!(bomb.splash_damage, 27.0);
+        assert_eq!(bomb.splash_damage_radius, 25.0);
+        assert_eq!(bomb.width, 10.0);
+        assert_eq!(bomb.height, 14.0);
+        assert_eq!(bomb.hit_effect, "flakExplosion");
+        assert_eq!(bomb.shoot_effect, "none");
+        assert_eq!(bomb.smoke_effect, "none");
+        assert_eq!(bomb.status, "blasted");
+        assert_eq!(bomb.status_duration, 60.0);
+        assert_eq!(bomb.damage, 13.5);
+        assert!(!bomb.collides_tiles);
+        assert!(!bomb.collides);
+        assert!(!bomb.collides_air);
+        assert_eq!(bomb.drag, 0.05);
+        assert!(!bomb.keep_velocity);
+        assert_eq!(bomb.hit_sound, "explosion");
     }
 
     #[test]

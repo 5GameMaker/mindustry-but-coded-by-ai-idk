@@ -10164,3 +10164,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - toxopid cannon 的 frag spawn、splash、lightning 与 status runtime 仍需继续接入；
   - 下一步建议转入空中攻击单位 `flare/horizon/zenith/...` 或先补 bullet runtime seams；
   - 当前总体迁移约 13.4%，远未可玩。
+
+### 12.320 UnitTypes flare and horizon air attack content seam
+
+- 2026-05-28：进入 Java `UnitTypes.java` air attack 段，先回填 `flare` 的三连发 BasicBulletType 与 `horizon` 的 BombBulletType。该闭环新增 `BulletKind::Bomb` 与 `BulletSpec.inaccuracy`，用于保留 `BombBulletType` 类型身份和 `flare` bullet 侧 `inaccuracy = 4f`。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1037-1128`
+  - `flare` unit：`researchCostMultiplier=0.5`、`speed=2.7`、`accel=0.08`、`drag=0.04`、`flying=true`、`health=70`、`engineOffset=5.75`、`targetFlags={generator,null}`、`hitSize=9`、`itemCapacity=10`、`circleTarget=true`、`omniMovement=false`、`rotateSpeed=5`、`circleTargetRadius=60`、`wreckSoundVolume=0.7`、`moveSound=loopThruster`、`moveSoundPitchMin=0.3`、`moveSoundPitchMax=1.5`、`moveSoundVolume=0.2`
+  - `flare` weapon：匿名 `Weapon`，`y=1`、`x=0`、`minShootVelocity=2`、`shootCone=10`、`reload=80`、`shoot.shots=3`、`shoot.shotDelay=3`、`ejectEffect=casing1`、`mirror=false`
+  - `flare` bullet：`BasicBulletType(2.5f, 9)`，`inaccuracy=4`、`width=7`、`height=9`、`lifetime=32`、`shootEffect=shootSmall`、`smokeEffect=shootSmallSmoke`、`ammoMultiplier=2`
+  - `horizon` unit：`health=340`、`speed=1.65`、`accel=0.08`、`drag=0.03`、`flying=true`、`hitSize=11`、`targetAir=false`、`engineOffset=7.8`、`range=140`、`faceTarget=false`、`autoDropBombs=true`、`armor=3`、`itemCapacity=0`、`targetFlags={factory,null}`、`circleTarget=true`、`omniMovement=false`、`rotateSpeed=4.5`、`circleTargetRadius=40`、`moveSound=loopThruster`、`moveSoundPitchMin=0.6`、`moveSoundVolume=0.4`
+  - `horizon` weapon：匿名 `Weapon`，`minShootVelocity=1`、`x=3`、`shootY=0`、`reload=12`、`shootCone=180`、`ejectEffect=none`、`inaccuracy=15`、`ignoreRotation=true`、`shootSound=shootHorizon`、`soundPitchMax=1.2`
+  - `horizon` bullet：`BombBulletType(27f, 25f)`，Bomb 默认 `speed=0.7`、`collidesTiles=false`、`collides=false`、`shrinkY=0.7`、`lifetime=30`、`drag=0.05`、`keepVelocity=false`、`collidesAir=false`、`hitSound=explosion`；覆盖 `width=10`、`height=14`、`hitEffect=flakExplosion`、`shootEffect=none`、`smokeEffect=none`、`status=blasted`、`statusDuration=60`、`damage=splashDamage*0.5=13.5`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletKind` 新增 `Bomb`；
+    - `BulletSpec` 新增 `inaccuracy: f32`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `bomb_bullet(...)` helper；
+    - 新增 `flare_basic`；
+    - 新增 `horizon_bomb`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `flare_basic_and_horizon_bomb_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `flare` 补齐 movement/target/sound 字段并注册匿名 weapon；
+    - `horizon` 补齐 movement/target/bomb 字段并注册匿名 bomb weapon；
+    - 新增 `flare_and_horizon_weapons_match_java_profiles`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `13.5%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core flare_basic_and_horizon_bomb_match_java_profiles --lib`
+  - `cargo test -p mindustry-core flare_and_horizon_weapons_match_java_profiles --lib`
+- 仍未完成：
+  - BombBulletType 的真实投弹轨迹、地面目标命中、爆炸/状态 runtime 尚未完整 content-driven；
+  - flare bullet inaccuracy 目前为 content 记录位，真实射击散布路径还需接 weapon/bullet spawn；
+  - 下一步建议继续 `zenith`，需要 MissileBulletType 的 `weaveScale/weaveMag` 记录位；
+  - 当前总体迁移约 13.5%，远未可玩。

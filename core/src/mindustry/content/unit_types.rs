@@ -577,23 +577,71 @@ pub fn load() -> Vec<UnitType> {
         unit(&mut next_id, "flare", UnitKind::Standard, |u| {
             u.research_cost_multiplier = 0.5;
             u.speed = 2.7;
+            u.accel = 0.08;
+            u.drag = 0.04;
             u.flying = true;
             u.health = 70.0;
             u.engine_offset = 5.75;
+            u.target_flags = vec![Some("generator".into()), None];
             u.hit_size = 9.0;
             u.item_capacity = 10;
+            u.circle_target = true;
+            u.omni_movement = false;
             u.rotate_speed = 5.0;
+            u.circle_target_radius = 60.0;
+            u.wreck_sound_volume = 0.7;
+            u.move_sound = "loopThruster".into();
+            u.move_sound_pitch_min = 0.3;
+            u.move_sound_pitch_max = 1.5;
+            u.move_sound_volume = 0.2;
+            let mut weapon = Weapon::new("");
+            weapon.y = 1.0;
+            weapon.x = 0.0;
+            weapon.min_shoot_velocity = 2.0;
+            weapon.shoot_cone = 10.0;
+            weapon.reload = 80.0;
+            weapon.shoot_shots = 3;
+            weapon.shoot_shot_delay = 3.0;
+            weapon.eject_effect = "casing1".into();
+            weapon.mirror = false;
+            weapon.bullet = "flare_basic".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "horizon", UnitKind::Standard, |u| {
             u.health = 340.0;
             u.speed = 1.65;
+            u.accel = 0.08;
+            u.drag = 0.03;
             u.flying = true;
             u.hit_size = 11.0;
             u.target_air = false;
             u.engine_offset = 7.8;
+            u.range = 140.0;
+            u.face_target = false;
+            u.auto_drop_bombs = true;
             u.armor = 3.0;
             u.item_capacity = 0;
+            u.target_flags = vec![Some("factory".into()), None];
+            u.circle_target = true;
+            u.omni_movement = false;
             u.rotate_speed = 4.5;
+            u.circle_target_radius = 40.0;
+            u.move_sound = "loopThruster".into();
+            u.move_sound_pitch_min = 0.6;
+            u.move_sound_volume = 0.4;
+            let mut weapon = Weapon::new("");
+            weapon.min_shoot_velocity = 1.0;
+            weapon.x = 3.0;
+            weapon.shoot_y = 0.0;
+            weapon.reload = 12.0;
+            weapon.shoot_cone = 180.0;
+            weapon.eject_effect = "none".into();
+            weapon.inaccuracy = 15.0;
+            weapon.ignore_rotation = true;
+            weapon.shoot_sound = "shootHorizon".into();
+            weapon.sound_pitch_max = 1.2;
+            weapon.bullet = "horizon_bomb".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "zenith", UnitKind::Standard, |u| {
             u.health = 700.0;
@@ -2182,6 +2230,92 @@ mod tests {
         assert_eq!(cannon_bullet.spec.kind, BulletKind::Artillery);
         assert_eq!(cannon_bullet.spec.frag_bullets, 9);
         assert!(cannon_bullet.spec.frag_bullet.is_some());
+    }
+
+    #[test]
+    fn flare_and_horizon_weapons_match_java_profiles() {
+        let units = load();
+        let flare = by_name(&units, "flare");
+        assert_eq!(flare.accel, 0.08);
+        assert_eq!(flare.drag, 0.04);
+        assert_eq!(
+            flare.target_flags,
+            vec![Some("generator".to_string()), None]
+        );
+        assert!(flare.circle_target);
+        assert!(!flare.omni_movement);
+        assert_eq!(flare.circle_target_radius, 60.0);
+        assert_eq!(flare.wreck_sound_volume, 0.7);
+        assert_eq!(flare.move_sound, "loopThruster");
+        assert_eq!(flare.move_sound_pitch_min, 0.3);
+        assert_eq!(flare.move_sound_pitch_max, 1.5);
+        assert_eq!(flare.move_sound_volume, 0.2);
+        assert_eq!(flare.weapons.len(), 1);
+
+        let flare_weapon = &flare.weapons[0];
+        assert_eq!(flare_weapon.name, "");
+        assert_eq!(flare_weapon.y, 1.0);
+        assert_eq!(flare_weapon.x, 0.0);
+        assert_eq!(flare_weapon.min_shoot_velocity, 2.0);
+        assert_eq!(flare_weapon.shoot_cone, 10.0);
+        assert_eq!(flare_weapon.reload, 80.0);
+        assert_eq!(flare_weapon.shoot_shots, 3);
+        assert_eq!(flare_weapon.shoot_shot_delay, 3.0);
+        assert_eq!(flare_weapon.eject_effect, "casing1");
+        assert!(!flare_weapon.mirror);
+        assert_eq!(flare_weapon.bullet, "flare_basic");
+
+        let horizon = by_name(&units, "horizon");
+        assert_eq!(horizon.accel, 0.08);
+        assert_eq!(horizon.drag, 0.03);
+        assert_eq!(horizon.range, 140.0);
+        assert!(!horizon.face_target);
+        assert!(horizon.auto_drop_bombs);
+        assert_eq!(
+            horizon.target_flags,
+            vec![Some("factory".to_string()), None]
+        );
+        assert!(horizon.circle_target);
+        assert!(!horizon.omni_movement);
+        assert_eq!(horizon.circle_target_radius, 40.0);
+        assert_eq!(horizon.move_sound, "loopThruster");
+        assert_eq!(horizon.move_sound_pitch_min, 0.6);
+        assert_eq!(horizon.move_sound_volume, 0.4);
+        assert_eq!(horizon.weapons.len(), 1);
+
+        let horizon_weapon = &horizon.weapons[0];
+        assert_eq!(horizon_weapon.name, "");
+        assert_eq!(horizon_weapon.min_shoot_velocity, 1.0);
+        assert_eq!(horizon_weapon.x, 3.0);
+        assert_eq!(horizon_weapon.shoot_y, 0.0);
+        assert_eq!(horizon_weapon.reload, 12.0);
+        assert_eq!(horizon_weapon.shoot_cone, 180.0);
+        assert_eq!(horizon_weapon.eject_effect, "none");
+        assert_eq!(horizon_weapon.inaccuracy, 15.0);
+        assert!(horizon_weapon.ignore_rotation);
+        assert_eq!(horizon_weapon.shoot_sound, "shootHorizon");
+        assert_eq!(horizon_weapon.sound_pitch_max, 1.2);
+        assert_eq!(horizon_weapon.bullet, "horizon_bomb");
+
+        let bullets = bullets::load();
+        assert_eq!(
+            bullets
+                .iter()
+                .find(|bullet| bullet.name() == flare_weapon.bullet)
+                .expect("missing flare_basic")
+                .spec
+                .kind,
+            BulletKind::Basic
+        );
+        assert_eq!(
+            bullets
+                .iter()
+                .find(|bullet| bullet.name() == horizon_weapon.bullet)
+                .expect("missing horizon_bomb")
+                .spec
+                .kind,
+            BulletKind::Bomb
+        );
     }
 
     #[test]

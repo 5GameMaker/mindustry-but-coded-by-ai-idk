@@ -8369,3 +8369,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步可开始空中攻击单位 `flare/horizon/zenith/antumbra/eclipse` 的 weapon/bomb/missile content seam；
   3. Shrapnel/Sap/Artillery frag/lightning runtime 仍未 content-driven；
   4. 当前总迁移约 13.4%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 246. 最新闭环记录：UnitTypes flare and horizon air attack content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：进入 air attack 段，回填 `flare` 的 BasicBulletType 三连发与 `horizon` 的 BombBulletType。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1037-1128`
+  - `flare`：匿名 weapon，`reload=80`、`shoot.shots=3`、`shoot.shotDelay=3`、`mirror=false`，bullet `BasicBulletType(2.5,9)` 并覆盖 `inaccuracy=4`、`lifetime=32` 等；
+  - `horizon`：匿名 bomb weapon，`reload=12`、`shootCone=180`、`ignoreRotation=true`、`shootSound=shootHorizon`，bullet `BombBulletType(27,25)` 并覆盖 blasted status、damage=13.5。
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - 新增 `BulletKind::Bomb`；
+    - 新增 `BulletSpec.inaccuracy`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `bomb_bullet(...)` helper；
+    - 新增 `flare_basic` 与 `horizon_bomb`；
+    - 更新 bullet load order；
+    - 新增 `flare_basic_and_horizon_bomb_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `flare` 和 `horizon` 补齐 Java 字段与 weapon；
+    - 新增 `flare_and_horizon_weapons_match_java_profiles`。
+  - `README.md`
+    - 当前总体完成度更新为约 `13.5%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.320`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core flare_basic_and_horizon_bomb_match_java_profiles --lib`
+  - `cargo test -p mindustry-core flare_and_horizon_weapons_match_java_profiles --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议 `zenith`，需要补 MissileBulletType 的 `weaveScale/weaveMag` 字段；
+  3. Bomb/inaccuracy runtime 仍未真正接 weapon spawn 与爆炸行为；
+  4. 当前总迁移约 13.5%，远未可玩，goal 绝不能标记 complete。
