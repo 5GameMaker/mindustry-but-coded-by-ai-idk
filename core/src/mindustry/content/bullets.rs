@@ -636,6 +636,44 @@ pub fn load() -> Vec<BulletContent> {
     omura_cannon.damage = 1250.0;
     omura_cannon.pierce_damage_factor = 0.5;
 
+    let mut retusa_repair_range = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+    retusa_repair_range.max_range = 120.0;
+
+    let mut retusa_heal_bolt = laser_bolt_bullet(5.2, 12.0);
+    retusa_heal_bolt.lifetime = 30.0;
+    retusa_heal_bolt.heal_percent = 5.5;
+    retusa_heal_bolt.collides_team = true;
+    retusa_heal_bolt.back_color = "heal".into();
+    retusa_heal_bolt.front_color = "white".into();
+
+    let mut retusa_mine = BulletSpec::new(BulletKind::Basic, 0.7, 1.0);
+    retusa_mine.sprite = "mine-bullet".into();
+    retusa_mine.width = 8.0;
+    retusa_mine.height = 8.0;
+    retusa_mine.layer = "Layer.scorch".into();
+    retusa_mine.max_range = 50.0;
+    retusa_mine.ignore_rotation = true;
+    retusa_mine.heal_percent = 4.0;
+    retusa_mine.underwater = true;
+    retusa_mine.hit_sound = "explosionPlasmaSmall".into();
+    retusa_mine.hit_size = 22.0;
+    retusa_mine.collides_air = false;
+    retusa_mine.lifetime = 87.0;
+    retusa_mine.keep_velocity = false;
+    retusa_mine.shrink_x = 0.0;
+    retusa_mine.shrink_y = 0.0;
+    retusa_mine.inaccuracy = 2.0;
+    retusa_mine.weave_mag = 5.0;
+    retusa_mine.weave_scale = 4.0;
+    retusa_mine.drag = -0.017;
+    retusa_mine.homing_power = 0.05;
+    retusa_mine.collides_floor = true;
+    retusa_mine.trail_color = "heal".into();
+    retusa_mine.trail_width = 3.0;
+    retusa_mine.trail_length = 8;
+    retusa_mine.splash_damage = 40.0;
+    retusa_mine.splash_damage_radius = 32.0;
+
     let mut oxynoe_plasma = BulletSpec::new(BulletKind::Generic, 3.4, 23.0);
     oxynoe_plasma.heal_percent = 1.5;
     oxynoe_plasma.collides_team = true;
@@ -744,6 +782,9 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "sei_missile", sei_missile),
         make_bullet(&mut next_id, "sei_large_bullet", sei_large_bullet),
         make_bullet(&mut next_id, "omura_cannon", omura_cannon),
+        make_bullet(&mut next_id, "retusa_repair_range", retusa_repair_range),
+        make_bullet(&mut next_id, "retusa_heal_bolt", retusa_heal_bolt),
+        make_bullet(&mut next_id, "retusa_mine", retusa_mine),
         make_bullet(&mut next_id, "oxynoe_plasma", oxynoe_plasma),
         make_bullet(&mut next_id, "oxynoe_point_defense", oxynoe_point_defense),
         make_bullet(&mut next_id, "aegires_point_defense", aegires_point_defense),
@@ -1089,6 +1130,9 @@ mod tests {
                 "sei_missile",
                 "sei_large_bullet",
                 "omura_cannon",
+                "retusa_repair_range",
+                "retusa_heal_bolt",
+                "retusa_mine",
                 "oxynoe_plasma",
                 "oxynoe_point_defense",
                 "aegires_point_defense",
@@ -1464,6 +1508,59 @@ mod tests {
         assert_eq!(bullet.speed, 0.0);
         assert_eq!(bullet.damage, 0.0);
         assert_eq!(bullet.max_range, 120.0);
+    }
+
+    #[test]
+    fn retusa_support_bullets_match_java_profiles() {
+        let bullets = load();
+
+        let repair = &by_name(&bullets, "retusa_repair_range").spec;
+        assert_eq!(repair.kind, BulletKind::Generic);
+        assert_eq!(repair.speed, 0.0);
+        assert_eq!(repair.damage, 0.0);
+        assert_eq!(repair.max_range, 120.0);
+
+        let heal = &by_name(&bullets, "retusa_heal_bolt").spec;
+        assert_eq!(heal.kind, BulletKind::LaserBolt);
+        assert_eq!(heal.speed, 5.2);
+        assert_eq!(heal.damage, 12.0);
+        assert_eq!(heal.lifetime, 30.0);
+        assert_eq!(heal.heal_percent, 5.5);
+        assert!(heal.collides_team);
+        assert_eq!(heal.back_color, "heal");
+        assert_eq!(heal.front_color, "white");
+
+        let mine = &by_name(&bullets, "retusa_mine").spec;
+        assert_eq!(mine.kind, BulletKind::Basic);
+        assert_eq!(mine.speed, 0.7);
+        assert_eq!(mine.damage, 1.0);
+        assert_eq!(mine.sprite, "mine-bullet");
+        assert_eq!(mine.width, 8.0);
+        assert_eq!(mine.height, 8.0);
+        assert_eq!(mine.layer, "Layer.scorch");
+        assert_eq!(mine.max_range, 50.0);
+        assert!(mine.ignore_rotation);
+        assert_eq!(mine.heal_percent, 4.0);
+        assert!(mine.underwater);
+        assert_eq!(mine.hit_sound, "explosionPlasmaSmall");
+        assert_eq!(mine.hit_size, 22.0);
+        assert!(!mine.collides_air);
+        assert_eq!(mine.lifetime, 87.0);
+        assert!(!mine.keep_velocity);
+        assert_eq!(mine.shrink_x, 0.0);
+        assert_eq!(mine.shrink_y, 0.0);
+        assert_eq!(mine.inaccuracy, 2.0);
+        assert_eq!(mine.weave_mag, 5.0);
+        assert_eq!(mine.weave_scale, 4.0);
+        assert_eq!(mine.speed, 0.7);
+        assert_eq!(mine.drag, -0.017);
+        assert_eq!(mine.homing_power, 0.05);
+        assert!(mine.collides_floor);
+        assert_eq!(mine.trail_color, "heal");
+        assert_eq!(mine.trail_width, 3.0);
+        assert_eq!(mine.trail_length, 8);
+        assert_eq!(mine.splash_damage, 40.0);
+        assert_eq!(mine.splash_damage_radius, 32.0);
     }
 
     #[test]

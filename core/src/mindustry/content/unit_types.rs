@@ -1160,11 +1160,67 @@ pub fn load() -> Vec<UnitType> {
         }),
         unit(&mut next_id, "retusa", UnitKind::Naval, |u| {
             u.speed = 0.9;
+            u.drag = 0.14;
             u.hit_size = 11.0;
             u.health = 270.0;
+            u.accel = 0.4;
             u.rotate_speed = 5.0;
+            u.trail_length = 20;
+            u.wave_trail_x = 5.0;
+            u.trail_scl = 1.3;
+            u.face_target = false;
+            u.range = 100.0;
             u.armor = 3.0;
+            u.move_sound_volume = 0.4;
+            u.move_sound = "shipMove".into();
             u.build_speed = 1.5;
+            u.rotate_to_building = false;
+
+            let mut repair = Weapon::new("repair-beam-weapon-center");
+            repair.x = 0.0;
+            repair.y = -5.5;
+            repair.shoot_y = 6.0;
+            repair.beam_width = 0.8;
+            repair.predict_target = false;
+            repair.auto_target = true;
+            repair.controllable = false;
+            repair.rotate = true;
+            repair.mirror = false;
+            repair.mount_type = "HealBeamMount".into();
+            repair.repair_speed = 0.75;
+            repair.recoil = 0.0;
+            repair.no_attack = true;
+            repair.use_attack_range = false;
+            repair.active_sound = "beamHeal".into();
+            repair.bullet = "retusa_repair_range".into();
+            u.weapons.push(repair);
+
+            let mut laser = Weapon::new("retusa-weapon");
+            laser.shoot_sound = "shootLaser".into();
+            laser.reload = 22.0;
+            laser.x = 4.5;
+            laser.y = -3.5;
+            laser.rotate_speed = 5.0;
+            laser.mirror = true;
+            laser.rotate = true;
+            laser.bullet = "retusa_heal_bolt".into();
+            u.weapons.push(laser);
+
+            let mut mine = Weapon::new("");
+            mine.mirror = false;
+            mine.rotate = true;
+            mine.reload = 90.0;
+            mine.x = 0.0;
+            mine.y = 0.0;
+            mine.shoot_x = 0.0;
+            mine.shoot_y = 0.0;
+            mine.shoot_sound = "shootRetusa".into();
+            mine.rotate_speed = 180.0;
+            mine.shoot_sound_volume = 0.9;
+            mine.shoot_shots = 3;
+            mine.shoot_shot_delay = 7.0;
+            mine.bullet = "retusa_mine".into();
+            u.weapons.push(mine);
         }),
         unit(&mut next_id, "oxynoe", UnitKind::Naval, |u| {
             u.health = 560.0;
@@ -3507,6 +3563,106 @@ mod tests {
         assert_eq!(rail.spec.damage, 1250.0);
         assert_eq!(rail.spec.length, 500.0);
         assert_eq!(rail.spec.pierce_damage_factor, 0.5);
+    }
+
+    #[test]
+    fn retusa_support_profile_matches_java_weapons() {
+        let units = load();
+        let retusa = by_name(&units, "retusa");
+
+        assert!(retusa.naval);
+        assert_eq!(retusa.speed, 0.9);
+        assert_eq!(retusa.drag, 0.14);
+        assert_eq!(retusa.hit_size, 11.0);
+        assert_eq!(retusa.health, 270.0);
+        assert_eq!(retusa.accel, 0.4);
+        assert_eq!(retusa.rotate_speed, 5.0);
+        assert_eq!(retusa.trail_length, 20);
+        assert_eq!(retusa.wave_trail_x, 5.0);
+        assert_eq!(retusa.trail_scl, 1.3);
+        assert!(!retusa.face_target);
+        assert_eq!(retusa.range, 100.0);
+        assert_eq!(retusa.armor, 3.0);
+        assert_eq!(retusa.move_sound, "shipMove");
+        assert_eq!(retusa.move_sound_volume, 0.4);
+        assert_eq!(retusa.build_speed, 1.5);
+        assert!(!retusa.rotate_to_building);
+        assert_eq!(retusa.weapons.len(), 3);
+
+        let repair = &retusa.weapons[0];
+        assert_eq!(repair.name, "repair-beam-weapon-center");
+        assert_eq!(repair.x, 0.0);
+        assert_eq!(repair.y, -5.5);
+        assert_eq!(repair.shoot_y, 6.0);
+        assert_eq!(repair.beam_width, 0.8);
+        assert!(!repair.predict_target);
+        assert!(repair.auto_target);
+        assert!(!repair.controllable);
+        assert!(repair.rotate);
+        assert!(!repair.mirror);
+        assert_eq!(repair.mount_type, "HealBeamMount");
+        assert_eq!(repair.repair_speed, 0.75);
+        assert_eq!(repair.recoil, 0.0);
+        assert!(repair.no_attack);
+        assert!(!repair.use_attack_range);
+        assert_eq!(repair.active_sound, "beamHeal");
+        assert_eq!(repair.bullet, "retusa_repair_range");
+
+        let laser = &retusa.weapons[1];
+        assert_eq!(laser.name, "retusa-weapon");
+        assert_eq!(laser.shoot_sound, "shootLaser");
+        assert_eq!(laser.reload, 22.0);
+        assert_eq!(laser.x, 4.5);
+        assert_eq!(laser.y, -3.5);
+        assert_eq!(laser.rotate_speed, 5.0);
+        assert!(laser.mirror);
+        assert!(laser.rotate);
+        assert_eq!(laser.bullet, "retusa_heal_bolt");
+
+        let mine = &retusa.weapons[2];
+        assert_eq!(mine.name, "");
+        assert!(!mine.mirror);
+        assert!(mine.rotate);
+        assert_eq!(mine.reload, 90.0);
+        assert_eq!(mine.x, 0.0);
+        assert_eq!(mine.y, 0.0);
+        assert_eq!(mine.shoot_x, 0.0);
+        assert_eq!(mine.shoot_y, 0.0);
+        assert_eq!(mine.shoot_sound, "shootRetusa");
+        assert_eq!(mine.rotate_speed, 180.0);
+        assert_eq!(mine.shoot_sound_volume, 0.9);
+        assert_eq!(mine.shoot_shots, 3);
+        assert_eq!(mine.shoot_shot_delay, 7.0);
+        assert_eq!(mine.bullet, "retusa_mine");
+
+        let bullets = bullets::load();
+        let repair_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == repair.bullet)
+            .expect("missing retusa_repair_range");
+        assert_eq!(repair_bullet.spec.kind, BulletKind::Generic);
+        assert_eq!(repair_bullet.spec.max_range, 120.0);
+
+        let laser_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == laser.bullet)
+            .expect("missing retusa_heal_bolt");
+        assert_eq!(laser_bullet.spec.kind, BulletKind::LaserBolt);
+        assert_eq!(laser_bullet.spec.speed, 5.2);
+        assert_eq!(laser_bullet.spec.damage, 12.0);
+        assert_eq!(laser_bullet.spec.lifetime, 30.0);
+        assert_eq!(laser_bullet.spec.heal_percent, 5.5);
+        assert!(laser_bullet.spec.collides_team);
+
+        let mine_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == mine.bullet)
+            .expect("missing retusa_mine");
+        assert_eq!(mine_bullet.spec.kind, BulletKind::Basic);
+        assert_eq!(mine_bullet.spec.speed, 0.7);
+        assert_eq!(mine_bullet.spec.damage, 1.0);
+        assert_eq!(mine_bullet.spec.splash_damage, 40.0);
+        assert_eq!(mine_bullet.spec.splash_damage_radius, 32.0);
     }
 
     #[test]
