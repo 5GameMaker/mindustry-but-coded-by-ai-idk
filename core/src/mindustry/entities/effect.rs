@@ -22,6 +22,10 @@ pub const FX_SHIELD_WAVE_ID: i32 = 74;
 pub const FX_SHIELD_APPLY_ID: i32 = 75;
 /// Upstream `Fx.disperseTrail` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DISPERSE_TRAIL_ID: i32 = 76;
+/// Upstream `Fx.hitBulletSmall` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_BULLET_SMALL_ID: i32 = 77;
+/// Upstream `Fx.hitBulletColor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_BULLET_COLOR_ID: i32 = 78;
 /// Upstream `Fx.hitBulletBig` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_BULLET_BIG_ID: i32 = 82;
 /// Upstream `Fx.hitFlameSmall` id in `mindustry.content.Fx` for v158.1.
@@ -227,6 +231,8 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shieldWave" => Some(FX_SHIELD_WAVE_ID),
         "shieldApply" => Some(FX_SHIELD_APPLY_ID),
         "disperseTrail" => Some(FX_DISPERSE_TRAIL_ID),
+        "hitBulletSmall" => Some(FX_HIT_BULLET_SMALL_ID),
+        "hitBulletColor" => Some(FX_HIT_BULLET_COLOR_ID),
         "hitBulletBig" => Some(FX_HIT_BULLET_BIG_ID),
         "hitFlameSmall" => Some(FX_HIT_FLAME_SMALL_ID),
         "hitFlamePlasma" => Some(FX_HIT_FLAME_PLASMA_ID),
@@ -354,6 +360,12 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_SHIELD_APPLY_ID => Effect::with_lifetime(FX_SHIELD_APPLY_ID, 11.0, DEFAULT_EFFECT_CLIP),
         FX_DISPERSE_TRAIL_ID => {
             Effect::with_lifetime(FX_DISPERSE_TRAIL_ID, 13.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_BULLET_SMALL_ID => {
+            Effect::with_lifetime(FX_HIT_BULLET_SMALL_ID, 14.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_BULLET_COLOR_ID => {
+            Effect::with_lifetime(FX_HIT_BULLET_COLOR_ID, 14.0, DEFAULT_EFFECT_CLIP)
         }
         FX_HIT_BULLET_BIG_ID => {
             Effect::with_lifetime(FX_HIT_BULLET_BIG_ID, 13.0, DEFAULT_EFFECT_CLIP)
@@ -522,7 +534,10 @@ pub fn standard_effect_draw_plans(
         return Vec::new();
     };
 
-    if effect_id_i32 != FX_POINT_SHOCKWAVE_ID {
+    if !matches!(
+        effect_id_i32,
+        FX_POINT_SHOCKWAVE_ID | FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID
+    ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
         )
@@ -542,6 +557,92 @@ pub fn standard_effect_draw_plans(
     let fout = 1.0 - fin;
     let finpow = effect_finpow_from_fin(fin);
     let fslope = effect_fslope_from_fin(fin);
+
+    if matches!(
+        effect_id_i32,
+        FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID
+    ) {
+        let dynamic_color = effect_id_i32 == FX_HIT_BULLET_COLOR_ID;
+        let color_to = if dynamic_color {
+            "Input.color"
+        } else {
+            "Pal.lightOrange"
+        };
+        let input_color = dynamic_color.then_some(color);
+        let light_color = if dynamic_color {
+            "Input.color"
+        } else {
+            "Pal.lightOrange"
+        };
+        let scaled_lifetime = 7.0;
+        let scaled_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
+        let scaled_fout = 1.0 - scaled_fin;
+        let mut plans = Vec::with_capacity(if time <= scaled_lifetime { 2 } else { 1 });
+
+        if time <= scaled_lifetime {
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: Some(color_to),
+                color_mix: fin,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: scaled_fin * 5.0,
+                stroke: 0.5 + scaled_fout,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: Some("Color.white"),
+            color_mid: None,
+            color_to: Some(color_to),
+            color_mix: fin,
+            input_color,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 1.0,
+            stroke: 0.5 + fout,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 5,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: fin * 15.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 3.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: Some(light_color),
+            light_radius: 20.0,
+            light_opacity: 0.6 * fout,
+        });
+
+        return plans;
+    }
 
     vec![
         StandardEffectDrawPlan {
@@ -4367,6 +4468,14 @@ mod tests {
             Some(FX_DISPERSE_TRAIL_ID)
         );
         assert_eq!(
+            standard_effect_id("hitBulletSmall"),
+            Some(FX_HIT_BULLET_SMALL_ID)
+        );
+        assert_eq!(
+            standard_effect_id("hitBulletColor"),
+            Some(FX_HIT_BULLET_COLOR_ID)
+        );
+        assert_eq!(
             standard_effect_id("hitBulletBig"),
             Some(FX_HIT_BULLET_BIG_ID)
         );
@@ -4602,6 +4711,14 @@ mod tests {
         assert_eq!(
             standard_effect(FX_DISPERSE_TRAIL_ID).unwrap().lifetime,
             13.0
+        );
+        assert_eq!(
+            standard_effect(FX_HIT_BULLET_SMALL_ID).unwrap().lifetime,
+            14.0
+        );
+        assert_eq!(
+            standard_effect(FX_HIT_BULLET_COLOR_ID).unwrap().lifetime,
+            14.0
         );
         assert_eq!(
             standard_effect(FX_HIT_BULLET_BIG_ID).unwrap().lifetime,
@@ -4891,6 +5008,64 @@ mod tests {
         let line_primitives = lines.line_render_primitives_from_seed();
         assert_eq!(line_primitives.len(), 8);
         assert!((line_primitives[0].length - 2.5).abs() < 0.0001);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light() {
+        let input_color = DecalColor::from_rgba(0xcc8844ff);
+        let plans = standard_effect_draw_plans(
+            Some(FX_HIT_BULLET_COLOR_ID as u16),
+            78,
+            10.0,
+            20.0,
+            0.0,
+            3.5,
+            14.0,
+            input_color,
+        );
+        assert_eq!(plans.len(), 2);
+        let scaled_circle = plans[0];
+        assert_eq!(scaled_circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(scaled_circle.color_from, Some("Color.white"));
+        assert_eq!(scaled_circle.color_to, Some("Input.color"));
+        assert_eq!(scaled_circle.color_mix, 0.25);
+        assert_eq!(scaled_circle.input_color, Some(input_color));
+        assert_eq!(scaled_circle.radius, 2.5);
+        assert_eq!(scaled_circle.stroke, 1.0);
+
+        let lines = plans[1];
+        assert_eq!(
+            lines.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(lines.stroke, 1.25);
+        assert_eq!(lines.light_color, Some("Input.color"));
+        assert_eq!(lines.light_radius, 20.0);
+        assert!((lines.light_opacity - 0.45).abs() < 0.0001);
+        let light = lines.light_render_primitives();
+        assert_eq!(light.len(), 1);
+        assert_eq!(light[0].color_rgba, Some(input_color));
+        let particles = lines.particles.unwrap();
+        assert_eq!(particles.count, 5);
+        assert_eq!(particles.length, 3.75);
+        assert_eq!(particles.radius_fout_scale, 3.0);
+        let line_primitives = lines.line_render_primitives_from_seed();
+        assert_eq!(line_primitives.len(), 5);
+        assert!((line_primitives[0].length - 3.25).abs() < 0.0001);
+
+        let late_small = standard_effect_draw_plans(
+            Some(FX_HIT_BULLET_SMALL_ID as u16),
+            77,
+            10.0,
+            20.0,
+            0.0,
+            8.0,
+            14.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(late_small.len(), 1);
+        assert_eq!(late_small[0].color_to, Some("Pal.lightOrange"));
+        assert_eq!(late_small[0].light_color, Some("Pal.lightOrange"));
     }
 
     #[test]

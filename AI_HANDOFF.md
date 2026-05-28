@@ -5242,3 +5242,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 用 multi-pass 接口回头迁移 `hitBulletColor=78`、`hitSquaresColor=79`、`hitFuse=81`，但仍要逐个对照 Java；
   2. `pointBeam=10` 仍需要 line-to-data-position 与 light line primitive，不属于当前接口已解决范围；
   3. renderer/backend 仍需从 headless seam 发展到真实绘制。
+
+---
+
+## 156. 最新闭环记录：Fx.hitBulletSmall / Fx.hitBulletColor multi-pass hit effects
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：用上轮新增的 multi-pass 接口回迁此前被 `scaled(...) + radial lines + light` 阻塞的 hit bullet 效果。
+- 本轮迁移：
+  - `hitBulletSmall=77`
+  - `hitBulletColor=78`
+- 关键对照：
+  - `Effect.java:317` 确认 `scaled(7f, ...)` 在 `time <= 7` 时执行；
+  - pass 1 对应 scaled circle；
+  - pass 2 对应 radial line batch，并附带 light；
+  - `hitBulletColor` 使用 `Input.color` draw/light。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 2 个 id 常量、lookup、metadata；
+    - `standard_effect_draw_plans(...)` 为两者生成 multi-pass；
+    - 新增 core 测试 `standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_hit_bullet_multi_pass_with_light_for_render`，验证 desktop flatten 后有 2 plans、1 circle、5 lines、1 light，并进入 headless backend stats。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_hit_bullet_multi_pass_with_light_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 `hitSquaresColor=79`，它与本轮结构相似，但第二 pass 是 `SeededSquareParticles`；
+  2. 继续 `hitFuse=81`，结构相似但颜色 `Pal.surge`、scaled circle 半径 `7`、line count `6`；
+  3. 之后考虑把这些 multi-pass 迁移集中抽 helper，避免重复逻辑膨胀。

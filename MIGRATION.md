@@ -7139,3 +7139,47 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 现有 `standard_effect_draw_plan(...)` 仍是单 pass 兼容口，后续复杂效果应优先走 `standard_effect_draw_plans(...)`；
   - `hitBulletColor=78` / `hitSquaresColor=79` / `hitFuse=81` 等仍需逐个基于 multi-pass 接口迁移；
   - desktop 仍是 headless 消费 seam，未真实绘制。
+
+### 12.230 Fx.hitBulletSmall / Fx.hitBulletColor multi-pass hit effects
+
+- 2026-05-28：利用 multi-pass `standard_effect_draw_plans(...)` 回迁此前因 `scaled(...) + radial lines + light` 阻塞的命中效果。
+- 本轮迁移：
+  - `hitBulletSmall=77`
+  - `hitBulletColor=78`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:854` 附近：
+    - `hitBulletSmall = new Effect(14, ...)`
+    - `color(Color.white, Pal.lightOrange, e.fin())`
+    - `e.scaled(7f, s -> { stroke(0.5f + s.fout()); Lines.circle(... s.fin() * 5f); })`
+    - `stroke(0.5f + e.fout())`
+    - `randLenVectors(e.id, 5, e.fin() * 15f, ...)`
+    - `lineAngle(..., e.fout() * 3 + 1f)`
+    - `Drawf.light(... Pal.lightOrange, 0.6f * e.fout())`
+  - `Fx.java:872` 附近：
+    - `hitBulletColor` 同结构，但目标色与 light 颜色为 `e.color`。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/entities/Effect.java:317`：
+    - `scaled(lifetime, cons)` 在 `time <= lifetime` 时执行，内部 container lifetime 为 scaled lifetime。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_BULLET_SMALL_ID=77`、`FX_HIT_BULLET_COLOR_ID=78`；
+    - `standard_effect_draw_plans(...)` 对这两个 id 输出 multi-pass：
+      - pass 1：`StrokedCircle`，仅 `time <= 7` 时生成，半径 `scaled_fin * 5`，stroke `0.5 + scaled_fout`；
+      - pass 2：`SeededRadialLineParticles`，count `5`，距离 `fin * 15`，line length `1 + fout * 3`，stroke `0.5 + fout`；
+      - light 附着在 pass 2，半径 `20`，opacity `0.6 * fout`；
+    - `hitBulletColor` 使用 `Input.color` draw/light 语义。
+  - `desktop/src/lib.rs`
+    - 新增 desktop 测试覆盖 `hitBulletColor` flatten 后进入 circle/line/light primitive 与 headless backend stats。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_hit_bullet_multi_pass_with_light_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `hitSquaresColor=79` 可沿用本轮 scaled circle + light，但第二 pass 需要 seeded square particles；
+  - `hitFuse=81` 可沿用 scaled circle + radial lines，但颜色/半径/count 不同；
+  - 真实 renderer/backend 仍未绘制这些 primitives。
