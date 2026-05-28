@@ -356,6 +356,8 @@ pub struct DarknessPlan {
     pub layer: f32,
     pub fill: DarknessFill,
     pub limited_map_area: Option<TileBounds>,
+    /// 由 `dark_events` 驱动的脏 tile，仅表示需要重绘的坐标，不伪造 darkness 数值。
+    pub dirty_tiles: Vec<TileCoord>,
     pub tiles: Vec<DarknessTilePlan>,
 }
 
@@ -371,6 +373,10 @@ impl DarknessPlan {
     pub fn push_tile(&mut self, coord: TileCoord, darkness: f32) {
         self.tiles.push(DarknessTilePlan::new(coord, darkness));
     }
+
+    pub fn push_dirty_tile(&mut self, coord: TileCoord) {
+        self.dirty_tiles.push(coord);
+    }
 }
 
 impl Default for DarknessPlan {
@@ -379,6 +385,7 @@ impl Default for DarknessPlan {
             layer: Layer::DARKNESS,
             fill: DarknessFill::White,
             limited_map_area: None,
+            dirty_tiles: Vec::new(),
             tiles: Vec::new(),
         }
     }
@@ -622,6 +629,49 @@ impl BlockRendererState {
     pub fn invalidate_camera(&mut self) {
         self.last_camera.invalidate();
     }
+
+    pub fn build_plan(&self) -> BlockRendererPlan {
+        let mut plan = BlockRendererPlan::default();
+
+        plan.broken_fade = self.broken_fade;
+        plan.draw_quadtree_debug = self.draw_quadtree_debug;
+        plan.update_floors = self.cache.update_floors.clone();
+
+        if let Some(pass) = build_tile_pass(
+            BlockDrawStage::TileBase,
+            self.cache.tile_view.iter().copied(),
+        ) {
+            plan.tile_passes.push(pass);
+        }
+
+        if let Some(pass) = build_tile_pass(
+            BlockDrawStage::TileShadow,
+            self.cache.shadow_events.iter().copied(),
+        ) {
+            plan.tile_passes.push(pass);
+        }
+
+        if let Some(pass) =
+            build_tile_pass(BlockDrawStage::Light, self.cache.light_view.iter().copied())
+        {
+            plan.tile_passes.push(pass);
+        }
+
+        if !self.cache.dark_events.is_empty() {
+            plan.darkness.dirty_tiles = self.cache.dark_events.iter().copied().collect();
+        }
+
+        if self.draw_quadtree_debug {
+            plan.overlays.extend(quadtree_debug_overlays(
+                self.cache.block_tree.bounds,
+                self.cache.block_light_tree.bounds,
+                self.cache.overlay_tree.bounds,
+                self.cache.floor_tree.bounds,
+            ));
+        }
+
+        plan
+    }
 }
 
 impl Default for BlockRendererState {
@@ -646,6 +696,9 @@ pub struct BlockRendererPlan {
     pub build_previews: Vec<BuildPlanPreview>,
     pub darkness: DarknessPlan,
     pub overlays: Vec<OverlayPlan>,
+    pub update_floors: Vec<TileCoord>,
+    pub draw_quadtree_debug: bool,
+    pub broken_fade: f32,
 }
 
 impl BlockRendererPlan {
@@ -655,9 +708,13 @@ impl BlockRendererPlan {
         self.cracks.clear();
         self.build_previews.clear();
         self.darkness.tiles.clear();
+        self.darkness.dirty_tiles.clear();
         self.darkness.limited_map_area = None;
         self.darkness.fill = DarknessFill::White;
         self.overlays.clear();
+        self.update_floors.clear();
+        self.draw_quadtree_debug = false;
+        self.broken_fade = 0.0;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -666,9 +723,13 @@ impl BlockRendererPlan {
             && self.cracks.is_empty()
             && self.build_previews.is_empty()
             && self.darkness.tiles.is_empty()
+            && self.darkness.dirty_tiles.is_empty()
             && self.darkness.limited_map_area.is_none()
             && matches!(self.darkness.fill, DarknessFill::White)
             && self.overlays.is_empty()
+            && self.update_floors.is_empty()
+            && !self.draw_quadtree_debug
+            && self.broken_fade <= 0.0
     }
 }
 
@@ -681,6 +742,9 @@ impl Default for BlockRendererPlan {
             build_previews: Vec::new(),
             darkness: DarknessPlan::default(),
             overlays: Vec::new(),
+            update_floors: Vec::new(),
+            draw_quadtree_debug: false,
+            broken_fade: 0.0,
         }
     }
 }
@@ -704,6 +768,43 @@ const fn blend_shadow_color(alpha: f32) -> DecalColor {
         b: lerp(1.0, 0.0, alpha),
         a: 1.0,
     }
+}
+
+fn build_tile_pass<I>(stage: BlockDrawStage, coords: I) -> Option<TilePassPlan>
+where
+    I: IntoIterator<Item = TileCoord>,
+{
+    let tiles = coords
+        .into_iter()
+        .map(|coord| TileDrawPlan {
+            coord,
+            // 这里仅承载坐标与阶段，不伪造具体 block 细节。
+            ..TileDrawPlan::default()
+        })
+        .collect::<Vec<_>>();
+
+    if tiles.is_empty() {
+        None
+    } else {
+        Some(TilePassPlan {
+            stage,
+            layer: stage.layer(),
+            tiles,
+        })
+    }
+}
+
+fn quadtree_debug_overlays(
+    block_tree: TileBounds,
+    block_light_tree: TileBounds,
+    overlay_tree: TileBounds,
+    floor_tree: TileBounds,
+) -> Vec<OverlayPlan> {
+    [block_tree, block_light_tree, overlay_tree, floor_tree]
+        .iter()
+        .copied()
+        .map(|bounds| OverlayPlan::debug_bounds(TileCoord::new(bounds.x, bounds.y)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -810,15 +911,30 @@ mod tests {
         state.cache.tile_view.push(TileCoord::new(1, 1));
         state.cache.light_view.push(TileCoord::new(2, 2));
         state.cache.shadow_events.insert(TileCoord::new(3, 3));
+        state.cache.dark_events.insert(TileCoord::new(4, 4));
+        state.cache.update_floors.push(TileCoord::new(5, 5));
         state.cache.proc_links.insert(44);
         state.cache.proc_lights.insert(55);
+        state.draw_quadtree_debug = true;
+        state.broken_fade = 0.5;
 
         state.cache.clear_frame_queues();
         assert!(state.cache.tile_view.is_empty());
         assert!(state.cache.light_view.is_empty());
         assert!(state.cache.shadow_events.is_empty());
+        assert!(state.cache.dark_events.is_empty());
+        assert!(state.cache.update_floors.is_empty());
         assert!(state.cache.proc_links.is_empty());
         assert!(state.cache.proc_lights.is_empty());
+
+        let empty_plan = BlockRendererState::default().build_plan();
+        assert!(empty_plan.is_empty());
+        assert!(empty_plan.tile_passes.is_empty());
+        assert!(empty_plan.building_passes.is_empty());
+        assert!(empty_plan.darkness.dirty_tiles.is_empty());
+        assert!(empty_plan.update_floors.is_empty());
+        assert!(!empty_plan.draw_quadtree_debug);
+        assert_eq!(empty_plan.broken_fade, 0.0);
 
         let mut plan = BlockRendererPlan::default();
         plan.tile_passes.push(TilePassPlan::default());
@@ -826,12 +942,73 @@ mod tests {
         plan.cracks.push(CrackPlan::default());
         plan.build_previews.push(BuildPlanPreview::default());
         plan.darkness.push_tile(TileCoord::new(1, 2), 2.0);
+        plan.darkness.push_dirty_tile(TileCoord::new(3, 4));
         plan.overlays.push(OverlayPlan::default());
+        plan.update_floors.push(TileCoord::new(5, 6));
+        plan.draw_quadtree_debug = true;
+        plan.broken_fade = 0.25;
         assert!(!plan.is_empty());
 
         plan.clear();
         assert!(plan.is_empty());
         assert_eq!(plan.darkness.fill, DarknessFill::White);
         assert!(plan.darkness.tiles.is_empty());
+        assert!(plan.darkness.dirty_tiles.is_empty());
+        assert!(plan.update_floors.is_empty());
+        assert!(!plan.draw_quadtree_debug);
+        assert_eq!(plan.broken_fade, 0.0);
+    }
+
+    #[test]
+    fn build_plan_preserves_tile_shadow_light_dark_and_debug_queues() {
+        let mut state = BlockRendererState::default();
+        state.cache.tile_view = vec![TileCoord::new(1, 1), TileCoord::new(2, 2)];
+        state.cache.light_view = vec![TileCoord::new(3, 3)];
+        state.cache.shadow_events.insert(TileCoord::new(4, 4));
+        state.cache.dark_events.insert(TileCoord::new(5, 5));
+        state.cache.update_floors.push(TileCoord::new(6, 6));
+        state.draw_quadtree_debug = true;
+        state.broken_fade = 0.75;
+
+        let plan = state.build_plan();
+
+        assert!(!plan.is_empty());
+        assert_eq!(plan.broken_fade, 0.75);
+        assert!(plan.draw_quadtree_debug);
+        assert_eq!(plan.update_floors, vec![TileCoord::new(6, 6)]);
+        assert_eq!(plan.tile_passes.len(), 3);
+        assert_eq!(plan.tile_passes[0].stage, BlockDrawStage::TileBase);
+        assert_eq!(
+            plan.tile_passes[0]
+                .tiles
+                .iter()
+                .map(|tile| tile.coord)
+                .collect::<Vec<_>>(),
+            vec![TileCoord::new(1, 1), TileCoord::new(2, 2)]
+        );
+        assert_eq!(plan.tile_passes[1].stage, BlockDrawStage::TileShadow);
+        assert_eq!(
+            plan.tile_passes[1]
+                .tiles
+                .iter()
+                .map(|tile| tile.coord)
+                .collect::<Vec<_>>(),
+            vec![TileCoord::new(4, 4)]
+        );
+        assert_eq!(plan.tile_passes[2].stage, BlockDrawStage::Light);
+        assert_eq!(
+            plan.tile_passes[2]
+                .tiles
+                .iter()
+                .map(|tile| tile.coord)
+                .collect::<Vec<_>>(),
+            vec![TileCoord::new(3, 3)]
+        );
+        assert_eq!(plan.darkness.dirty_tiles, vec![TileCoord::new(5, 5)]);
+        assert_eq!(plan.overlays.len(), 4);
+        assert!(plan
+            .overlays
+            .iter()
+            .all(|overlay| overlay.kind == OverlayKind::DebugBounds));
     }
 }

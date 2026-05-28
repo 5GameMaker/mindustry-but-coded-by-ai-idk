@@ -25,12 +25,12 @@ use mindustry_core::mindustry::entities::{
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::{
-    FloorRenderPlan, FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState,
-    FogViewport, GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState,
-    MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect, MinimapRendererState,
-    MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, RenderBridge, RenderCamera,
-    RenderEngineState, RenderFramePlan, RenderPoint, RenderSize, RenderViewport,
-    Viewport as FloorViewport,
+    BlockRendererPlan, BlockRendererState, FloorRenderPlan, FloorRendererState, FogColor,
+    FogFrameInput, FogFramePlan, FogRendererState, FogViewport, GraphicsFrameBundle,
+    GraphicsFrameStats, LightRendererPlan, LightRendererState, MinimapCamera, MinimapOverlayInput,
+    MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan,
+    OverlayRendererState, RenderBridge, RenderCamera, RenderEngineState, RenderFramePlan,
+    RenderPoint, RenderSize, RenderViewport, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -352,6 +352,7 @@ pub struct DesktopLauncher {
     pub camera_shake_state: DesktopCameraShakeState,
     pub last_camera_shake_frame: DesktopCameraShakeFrame,
     pub overlay_renderer_state: OverlayRendererState,
+    pub block_renderer_state: BlockRendererState,
     pub light_renderer_state: LightRendererState,
     pub floor_renderer_state: FloorRendererState,
     pub fog_renderer_state: FogRendererState,
@@ -389,6 +390,41 @@ pub struct DesktopLauncher {
     puddle_particle_rand_state: u64,
 }
 
+fn visible_block_tiles(
+    mut camera: RenderCamera,
+    viewport: RenderViewport,
+    world: MinimapWorldSize,
+    tile_size_world: f32,
+) -> Vec<TileCoord> {
+    if world.width <= 0 || world.height <= 0 || tile_size_world <= 0.0 {
+        return Vec::new();
+    }
+
+    camera.viewport = viewport;
+    let rect = camera.world_rect();
+    let min_x = (rect.x / tile_size_world).floor() as i32;
+    let min_y = (rect.y / tile_size_world).floor() as i32;
+    let max_x = ((rect.x + rect.width) / tile_size_world).ceil() as i32;
+    let max_y = ((rect.y + rect.height) / tile_size_world).ceil() as i32;
+
+    let min_x = min_x.clamp(0, world.width);
+    let min_y = min_y.clamp(0, world.height);
+    let max_x = max_x.clamp(0, world.width);
+    let max_y = max_y.clamp(0, world.height);
+
+    if min_x >= max_x || min_y >= max_y {
+        return Vec::new();
+    }
+
+    let mut tiles = Vec::with_capacity(((max_x - min_x) * (max_y - min_y)) as usize);
+    for y in min_y..max_y {
+        for x in min_x..max_x {
+            tiles.push(TileCoord::new(x, y));
+        }
+    }
+    tiles
+}
+
 impl DesktopLauncher {
     pub fn new(args: Vec<String>) -> Self {
         let connect_target = parse_connect_target(&args);
@@ -412,6 +448,7 @@ impl DesktopLauncher {
             camera_shake_state: DesktopCameraShakeState::default(),
             last_camera_shake_frame: DesktopCameraShakeFrame::default(),
             overlay_renderer_state: OverlayRendererState::default(),
+            block_renderer_state: BlockRendererState::default(),
             light_renderer_state: LightRendererState::default(),
             floor_renderer_state: FloorRendererState::default(),
             fog_renderer_state: FogRendererState::default(),
@@ -843,6 +880,34 @@ impl DesktopLauncher {
         self.light_renderer_state.drain_plan()
     }
 
+    pub fn block_render_plan(
+        &mut self,
+        mut camera: RenderCamera,
+        viewport: RenderViewport,
+    ) -> Option<BlockRendererPlan> {
+        let world = self.current_minimap_world_size();
+        if world.width <= 0 || world.height <= 0 {
+            return None;
+        }
+
+        let bounds = TileBounds::new(0, 0, world.width, world.height);
+        if self.block_renderer_state.cache.block_tree.bounds != bounds {
+            self.block_renderer_state =
+                BlockRendererState::reload(bounds, self.game_state.rules.limit_map_area);
+        }
+
+        camera.viewport = viewport;
+        self.block_renderer_state.cache.tile_view =
+            visible_block_tiles(camera, viewport, world, 8.0);
+
+        let plan = self.block_renderer_state.build_plan();
+        if plan.is_empty() {
+            None
+        } else {
+            Some(plan)
+        }
+    }
+
     pub fn floor_render_plan(
         &mut self,
         mut camera: RenderCamera,
@@ -917,6 +982,7 @@ impl DesktopLauncher {
             render_frame.push_pass(light_pass);
             render_frame.sort_passes();
         }
+        let block_renderer = self.block_render_plan(camera, viewport);
         let floor_renderer = self.floor_render_plan(camera, viewport);
         let fog_frame = self.fog_frame_plan(camera, viewport);
         let overlay_renderer = self.drain_overlay_renderer_plan();
@@ -927,6 +993,9 @@ impl DesktopLauncher {
             .set_render_frame(render_frame)
             .set_overlay_renderer(overlay_renderer)
             .set_minimap_overlay(minimap_overlay);
+        if let Some(block_renderer) = block_renderer {
+            bridge.set_block_renderer(block_renderer);
+        }
         if let Some(floor_renderer) = floor_renderer {
             bridge.set_floor_renderer(floor_renderer);
         }
@@ -1776,6 +1845,7 @@ impl DesktopLauncher {
         self.camera_shake_state = DesktopCameraShakeState::default();
         self.last_camera_shake_frame = DesktopCameraShakeFrame::default();
         self.overlay_renderer_state = OverlayRendererState::default();
+        self.block_renderer_state = BlockRendererState::default();
         self.light_renderer_state = LightRendererState::default();
         self.floor_renderer_state = FloorRendererState::default();
         self.fog_renderer_state = FogRendererState::default();
@@ -2400,8 +2470,8 @@ mod tests {
     use mindustry_core::mindustry::ctype::{Content, ContentId};
     use mindustry_core::mindustry::entities::comp::DecalColor;
     use mindustry_core::mindustry::graphics::{
-        LightPrimitive, MinimapCamera, MinimapOverlayInput, RenderCamera, RenderCommand,
-        RenderPassKind, RenderPoint, RenderSize, RenderViewport,
+        BlockDrawStage, LightPrimitive, MinimapCamera, MinimapOverlayInput, RenderCamera,
+        RenderCommand, RenderPassKind, RenderPoint, RenderSize, RenderViewport,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -3446,8 +3516,10 @@ mod tests {
             sample_minimap_overlay_input(true),
         );
 
-        assert_eq!(frame.bundle.stats.present_plans, 4);
+        assert_eq!(frame.bundle.stats.present_plans, 5);
         assert_eq!(frame.bundle.stats.render_passes, 0);
+        assert!(frame.bundle.block_renderer.is_some());
+        assert!(frame.bundle.stats.block_tile_passes > 0);
         assert!(frame.bundle.floor_renderer.is_some());
         assert_eq!(frame.bundle.stats.floor_visible_chunks, 1);
         assert!(frame.bundle.stats.floor_stage_plans > 0);
@@ -3474,6 +3546,42 @@ mod tests {
             floor_plan.stage_plans.len(),
             frame.bundle.stats.floor_stage_plans
         );
+
+        let block_plan = frame.bundle.block_renderer.as_ref().unwrap();
+        assert!(!block_plan.is_empty());
+        assert_eq!(block_plan.tile_passes.len(), 1);
+        assert!(!block_plan.tile_passes[0].tiles.is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_feeds_block_renderer_plan_when_world_and_camera_exist() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 16.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 8.0), viewport);
+        let minimap_camera = MinimapCamera::new(12.0, 8.0, 32.0, 16.0);
+
+        let frame = launcher.graphics_frame_for_render(
+            10,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        let block_plan = frame.bundle.block_renderer.as_ref().unwrap();
+        assert_eq!(block_plan.tile_passes.len(), 1);
+        assert_eq!(block_plan.tile_passes[0].stage, BlockDrawStage::TileBase);
+        assert_eq!(frame.bundle.stats.block_tile_passes, 1);
+        assert_eq!(block_plan.tile_passes[0].tiles.len(), 6);
     }
 
     #[test]
@@ -3576,7 +3684,7 @@ mod tests {
             sample_minimap_overlay_input(true),
         );
 
-        assert_eq!(frame.bundle.stats.present_plans, 5);
+        assert_eq!(frame.bundle.stats.present_plans, 6);
         assert_eq!(frame.bundle.stats.fog_team_changed_frames, 1);
         assert_eq!(frame.bundle.stats.fog_static_fog_enabled_frames, 1);
         assert!(frame.bundle.stats.fog_stages >= 4);
