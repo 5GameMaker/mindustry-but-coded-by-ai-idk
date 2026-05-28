@@ -1,4 +1,4 @@
-use super::multi_packer::{PackPlan, PagePlan, PageSpec, PageType, RegionRequest};
+use super::multi_packer::{MultiPackerPlan, PackPlan, PagePlan, PageSpec, PageType, RegionRequest};
 
 impl PageType {
     /// 上游 `sprites*.png` 的默认页资源路径。
@@ -32,6 +32,129 @@ impl<T> TextureAtlasRegionSource<T> {
             source_path: self.source_path,
             payload,
         }
+    }
+}
+
+/// 纯数据化的 sprite 来源描述：
+///
+/// - `source_path`：真实或虚拟文件路径
+/// - `atlas_name`：atlas 中的 region 名称
+/// - `page_hint`：可选 page 提示，空字符串时会回退到路径推断
+/// - `override`：是否覆盖已有同名条目
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TextureAtlasSpriteSourceDescriptor {
+    pub source_path: String,
+    pub atlas_name: String,
+    pub page_hint: String,
+    pub r#override: bool,
+}
+
+impl TextureAtlasSpriteSourceDescriptor {
+    pub fn new(source_path: impl Into<String>, atlas_name: impl Into<String>) -> Self {
+        Self {
+            source_path: source_path.into(),
+            atlas_name: atlas_name.into(),
+            page_hint: String::new(),
+            r#override: false,
+        }
+    }
+
+    pub fn from_source_path(source_path: impl Into<String>) -> Self {
+        let source_path = source_path.into();
+        let atlas_name = derive_atlas_name(&source_path);
+
+        Self::new(source_path, atlas_name)
+    }
+
+    pub fn with_page_hint(mut self, page_hint: impl Into<String>) -> Self {
+        self.page_hint = page_hint.into();
+        self
+    }
+
+    pub fn with_override(mut self, r#override: bool) -> Self {
+        self.r#override = r#override;
+        self
+    }
+
+    pub fn page_type(&self) -> PageType {
+        resolve_sprite_page_type(&self.page_hint, &self.source_path)
+    }
+
+    pub fn to_region_request(&self) -> RegionRequest<TextureAtlasRegionSource<bool>> {
+        self.to_region_request_with_size(1, 1)
+    }
+
+    pub fn to_region_request_with_size(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> RegionRequest<TextureAtlasRegionSource<bool>> {
+        RegionRequest::new(
+            self.atlas_name.clone(),
+            width.max(1),
+            height.max(1),
+            TextureAtlasRegionSource::new(self.source_path.clone(), self.r#override),
+        )
+    }
+}
+
+fn resolve_sprite_page_type(page_hint: &str, source_path: &str) -> PageType {
+    if let Some(page_type) = page_type_from_hint(page_hint) {
+        return page_type;
+    }
+
+    page_type_from_source_path(source_path)
+}
+
+fn page_type_from_hint(page_hint: &str) -> Option<PageType> {
+    let hint = normalize_sprite_hint(page_hint);
+
+    match hint.as_str() {
+        "" => None,
+        "main" => Some(PageType::Main),
+        "environment" => Some(PageType::Environment),
+        "ui" => Some(PageType::Ui),
+        "rubble" => Some(PageType::Rubble),
+        "sprites" | "sprites-override" => None,
+        _ if hint.contains("environment") => Some(PageType::Environment),
+        _ if hint.contains("rubble") => Some(PageType::Rubble),
+        _ if hint.contains("ui") => Some(PageType::Ui),
+        _ if hint.contains("main") => Some(PageType::Main),
+        _ => None,
+    }
+}
+
+fn page_type_from_source_path(source_path: &str) -> PageType {
+    let path = normalize_sprite_hint(source_path);
+
+    if path.contains("sprites/blocks/environment")
+        || path.contains("sprites-override/blocks/environment")
+    {
+        PageType::Environment
+    } else if path.contains("sprites/rubble") || path.contains("sprites-override/rubble") {
+        PageType::Rubble
+    } else if path.contains("sprites/ui") || path.contains("sprites-override/ui") {
+        PageType::Ui
+    } else {
+        PageType::Main
+    }
+}
+
+fn normalize_sprite_hint(value: &str) -> String {
+    value.trim().replace('\\', "/").to_ascii_lowercase()
+}
+
+fn derive_atlas_name(source_path: &str) -> String {
+    let normalized = normalize_sprite_hint(source_path);
+    let file_name = normalized.rsplit('/').next().unwrap_or_default();
+
+    if file_name.is_empty() {
+        return normalized;
+    }
+
+    match file_name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => stem.to_string(),
+        _ => file_name.to_string(),
     }
 }
 
@@ -453,6 +576,73 @@ impl<T> TextureAtlasPlan<T> {
     }
 }
 
+impl TextureAtlasPlan<bool> {
+    pub fn from_sprite_sources<I>(sources: I) -> Self
+    where
+        I: IntoIterator<Item = TextureAtlasSpriteSourceDescriptor>,
+    {
+        let mut atlas = Self::new();
+
+        for source in sources {
+            let page_type = source.page_type();
+            let region = TextureAtlasRegion::new(
+                page_type,
+                source.atlas_name,
+                source.source_path,
+                0,
+                0,
+                1,
+                1,
+                source.r#override,
+            );
+            let _ = atlas.insert_or_replace_region(page_type, region);
+        }
+
+        atlas
+    }
+
+    pub fn from_source_paths<I, S>(paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::from_sprite_sources(
+            paths
+                .into_iter()
+                .map(TextureAtlasSpriteSourceDescriptor::from_source_path),
+        )
+    }
+}
+
+impl PackPlan<TextureAtlasRegionSource<bool>> {
+    pub fn from_sprite_sources<I>(sources: I) -> Self
+    where
+        I: IntoIterator<Item = TextureAtlasSpriteSourceDescriptor>,
+    {
+        let mut plan = MultiPackerPlan::new();
+
+        for source in sources {
+            let page_type = source.page_type();
+            let request = source.to_region_request();
+            let _ = plan.insert_or_replace_request(page_type, request);
+        }
+
+        plan.into_pack_plan()
+    }
+
+    pub fn from_source_paths<I, S>(paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::from_sprite_sources(
+            paths
+                .into_iter()
+                .map(TextureAtlasSpriteSourceDescriptor::from_source_path),
+        )
+    }
+}
+
 impl<T> Default for TextureAtlasPlan<T> {
     fn default() -> Self {
         Self::new()
@@ -476,6 +666,57 @@ mod tests {
         assert_eq!(PageType::Environment.atlas_source_path(), "sprites2.png");
         assert_eq!(PageType::Ui.atlas_source_path(), "sprites3.png");
         assert_eq!(PageType::Rubble.atlas_source_path(), "sprites4.png");
+    }
+
+    #[test]
+    fn texture_atlas_sprite_source_descriptor_derives_name_and_page_type() {
+        let main =
+            TextureAtlasSpriteSourceDescriptor::from_source_path("sprites/blocks/stone-wall.png");
+        let environment =
+            TextureAtlasSpriteSourceDescriptor::new("sprites/blocks/environment/ore.png", "ore")
+                .with_page_hint("environment")
+                .with_override(true);
+        let ui = TextureAtlasSpriteSourceDescriptor::new("assets/ignored/icon.png", "icon")
+            .with_page_hint("sprites/ui");
+
+        assert_eq!(main.atlas_name, "stone-wall");
+        assert_eq!(main.page_type(), PageType::Main);
+        assert_eq!(environment.page_type(), PageType::Environment);
+        assert!(environment.r#override);
+        assert_eq!(ui.page_type(), PageType::Ui);
+
+        let request = environment.to_region_request_with_size(0, 8);
+        assert_eq!(request.name, "ore");
+        assert_eq!(request.width, 1);
+        assert_eq!(request.height, 8);
+        assert_eq!(
+            request.payload.source_path,
+            "sprites/blocks/environment/ore.png"
+        );
+        assert!(request.payload.payload);
+    }
+
+    #[test]
+    fn texture_atlas_plan_can_be_built_from_source_paths_without_image_loading() {
+        let plan = TextureAtlasPlan::from_source_paths([
+            "sprites/blocks/stone-wall.png",
+            "sprites/ui/button.png",
+            "sprites-override/rubble/crack.png",
+        ]);
+
+        let main = plan.page(PageType::Main).get("stone-wall").unwrap();
+        assert_eq!(main.source_path, "sprites/blocks/stone-wall.png");
+        assert_eq!(main.payload, false);
+        assert_eq!(main.width, 1);
+        assert_eq!(main.height, 1);
+
+        let ui = plan.page(PageType::Ui).get("button").unwrap();
+        assert_eq!(ui.source_path, "sprites/ui/button.png");
+        assert_eq!(ui.payload, false);
+
+        let rubble = plan.page(PageType::Rubble).get("crack").unwrap();
+        assert_eq!(rubble.source_path, "sprites-override/rubble/crack.png");
+        assert_eq!(rubble.payload, false);
     }
 
     #[test]
@@ -595,6 +836,34 @@ mod tests {
                 name: "missing".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn texture_atlas_pack_plan_can_be_built_from_source_descriptors() {
+        let plan = PackPlan::from_sprite_sources([
+            TextureAtlasSpriteSourceDescriptor::from_source_path("sprites/block.png")
+                .with_override(false),
+            TextureAtlasSpriteSourceDescriptor::new("sprites/ui/icon.png", "icon")
+                .with_page_hint("ui")
+                .with_override(true),
+            TextureAtlasSpriteSourceDescriptor::new("sprites-override/rubble/crack.png", "crack")
+                .with_page_hint("sprites-override"),
+        ]);
+
+        let block = plan.page(PageType::Main).unwrap().get("block").unwrap();
+        assert_eq!(block.payload.source_path, "sprites/block.png");
+        assert!(!block.payload.payload);
+
+        let icon = plan.page(PageType::Ui).unwrap().get("icon").unwrap();
+        assert_eq!(icon.payload.source_path, "sprites/ui/icon.png");
+        assert!(icon.payload.payload);
+
+        let crack = plan.page(PageType::Rubble).unwrap().get("crack").unwrap();
+        assert_eq!(
+            crack.payload.source_path,
+            "sprites-override/rubble/crack.png"
+        );
+        assert!(!crack.payload.payload);
     }
 
     #[test]
