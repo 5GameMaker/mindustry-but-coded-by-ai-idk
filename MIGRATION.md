@@ -6930,3 +6930,49 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `placeBlock=22` / `tapBlock=24` / `upgradeCoreBloom=21` 也属于早期简单描边效果，后续可继续按同类方式补齐；
   - `breakBlock=25` / `coreLaunchConstruct=23` 还包含随机粒子批次，需要确认当前 line/square particle 表达是否足够完整；
   - renderer/backend 仍需真正消费这些 circle/square/line primitives。
+
+### 12.225 Early block feedback stroked shapes
+
+- 2026-05-28：补齐 `select` 前后同一区域中可由现有描边 shape primitive 完整表达的早期方块反馈效果。
+- 本轮迁移：
+  - `upgradeCoreBloom=21`
+  - `placeBlock=22`
+  - `tapBlock=24`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:257` 附近：
+    - `upgradeCoreBloom = new Effect(80f, ...)`
+    - `color(Pal.accent)`
+    - `stroke(4f * e.fout())`
+    - `Lines.square(e.x, e.y, tilesize / 2f * e.rotation + 2f)`
+  - `Fx.java:263` 附近：
+    - `placeBlock = new Effect(16, ...)`
+    - `stroke(3f - e.fin() * 2f)`
+    - `Lines.square(e.x, e.y, tilesize / 2f * e.rotation + e.fin() * 3f)`
+  - `Fx.java:279` 附近：
+    - `tapBlock = new Effect(12, ...)`
+    - `stroke(3f - e.fin() * 2f)`
+    - `Lines.circle(e.x, e.y, 4f + (tilesize / 1.5f * e.rotation) * e.fin())`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_UPGRADE_CORE_BLOOM_ID=21`、`FX_PLACE_BLOCK_ID=22`、`FX_TAP_BLOCK_ID=24`；
+    - 接入 name lookup 与 metadata；
+    - `upgradeCoreBloom` / `placeBlock` 使用 `StrokedSquare`；
+    - `tapBlock` 使用 `StrokedCircle`；
+    - 半径公式按 Java `tilesize` 对应 Rust `TILE_SIZE as f32`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 3 个 id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖 kind、颜色、半径和 stroke。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `breakBlock=25` 和 `coreLaunchConstruct=23` 需要组合描边 shape + seeded square/line particles；
+  - `coreBuildShockwave=14` / `pointShockwave=16` 等早期 circle/square wave 还需继续逐个对照；
+  - renderer/backend 仍需真正消费这些 primitive。

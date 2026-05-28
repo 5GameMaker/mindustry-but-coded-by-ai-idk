@@ -5068,3 +5068,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续补 `placeBlock=22` / `tapBlock=24` / `upgradeCoreBloom=21` 这种单个描边 square/circle；
   2. 对 `breakBlock=25` / `coreLaunchConstruct=23` 先确认随机 square/line 批次是否无需新语义；
   3. 不要忘记中期目标是把这些 effect primitives 接入真实 desktop renderer/backend。
+
+---
+
+## 151. 最新闭环记录：Early block feedback stroked shapes
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：接续 `select=27`，补齐可由现有 `StrokedSquare` / `StrokedCircle` 完整表达的早期方块反馈效果。
+- 本轮迁移：
+  - `upgradeCoreBloom=21`
+  - `placeBlock=22`
+  - `tapBlock=24`
+- Java 依据：
+  - `Fx.java:257-266`：`upgradeCoreBloom` / `placeBlock`
+  - `Fx.java:279-283`：`tapBlock`
+  - 都使用 `Pal.accent`、简单 stroke、单个 square/circle。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 3 个 `FX_*` id 常量；
+    - 接入 `standard_effect_id(...)` / `standard_effect(...)`；
+    - draw plan 分别生成 `StrokedSquare` 或 `StrokedCircle`；
+    - 半径公式使用 `TILE_SIZE as f32` 对齐 Java `tilesize`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `breakBlock=25` / `coreLaunchConstruct=23` 需要 shape + seeded square/line 的组合表达，可能要先扩展 multi-pass 或确认当前 plan 不能只表达一个 kind；
+  2. 可继续找单 kind 的早期 wave/shockwave 类效果补迁移；
+  3. 中期应回到 renderer/backend，把这些 primitives 从测试数据真正绘制出来。

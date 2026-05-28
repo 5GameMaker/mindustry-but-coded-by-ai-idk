@@ -50,6 +50,12 @@ pub const FX_HIT_LASER_ID: i32 = 98;
 pub const FX_HIT_LASER_COLOR_ID: i32 = 99;
 /// Upstream `Fx.despawn` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DESPAWN_ID: i32 = 100;
+/// Upstream `Fx.upgradeCoreBloom` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UPGRADE_CORE_BLOOM_ID: i32 = 21;
+/// Upstream `Fx.placeBlock` id in `mindustry.content.Fx` for v158.1.
+pub const FX_PLACE_BLOCK_ID: i32 = 22;
+/// Upstream `Fx.tapBlock` id in `mindustry.content.Fx` for v158.1.
+pub const FX_TAP_BLOCK_ID: i32 = 24;
 /// Upstream `Fx.select` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SELECT_ID: i32 = 27;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
@@ -183,6 +189,9 @@ pub const FX_OVERDRIVE_BLOCK_FULL_ID: i32 = 255;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
+        "upgradeCoreBloom" => Some(FX_UPGRADE_CORE_BLOOM_ID),
+        "placeBlock" => Some(FX_PLACE_BLOCK_ID),
+        "tapBlock" => Some(FX_TAP_BLOCK_ID),
         "select" => Some(FX_SELECT_ID),
         "smoke" => Some(FX_SMOKE_ID),
         "fallSmoke" => Some(FX_FALL_SMOKE_ID),
@@ -277,6 +286,11 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
 
 pub fn standard_effect(effect_id: i32) -> Option<Effect> {
     let effect = match effect_id {
+        FX_UPGRADE_CORE_BLOOM_ID => {
+            Effect::with_lifetime(FX_UPGRADE_CORE_BLOOM_ID, 80.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_PLACE_BLOCK_ID => Effect::with_lifetime(FX_PLACE_BLOCK_ID, 16.0, DEFAULT_EFFECT_CLIP),
+        FX_TAP_BLOCK_ID => Effect::with_lifetime(FX_TAP_BLOCK_ID, 12.0, DEFAULT_EFFECT_CLIP),
         FX_SELECT_ID => Effect::with_lifetime(FX_SELECT_ID, 23.0, DEFAULT_EFFECT_CLIP),
         FX_SMOKE_ID => Effect::with_lifetime(FX_SMOKE_ID, 100.0, DEFAULT_EFFECT_CLIP),
         FX_FALL_SMOKE_ID => Effect::with_lifetime(FX_FALL_SMOKE_ID, 110.0, DEFAULT_EFFECT_CLIP),
@@ -894,6 +908,52 @@ pub fn standard_effect_draw_plan(
     let rocket_smoke_alpha = (fout * 1.6 - rotation.powi(3) * 1.2).clamp(0.0, 1.0);
 
     let plan = match effect_id {
+        FX_UPGRADE_CORE_BLOOM_ID | FX_PLACE_BLOCK_ID => {
+            let tile_size = TILE_SIZE as f32;
+            let (radius, stroke) = if effect_id == FX_UPGRADE_CORE_BLOOM_ID {
+                (tile_size / 2.0 * rotation + 2.0, 4.0 * fout)
+            } else {
+                (tile_size / 2.0 * rotation + fin * 3.0, 3.0 - fin * 2.0)
+            };
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedSquare,
+                center: (x, y),
+                color_from: Some("Pal.accent"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius,
+                stroke,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
+        FX_TAP_BLOCK_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: Some("Pal.accent"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 4.0 + (TILE_SIZE as f32 / 1.5 * rotation) * fin,
+            stroke: 3.0 - fin * 2.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_SELECT_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -4060,6 +4120,12 @@ mod tests {
 
     #[test]
     fn standard_effect_ids_include_puddle_ripple_dependencies() {
+        assert_eq!(
+            standard_effect_id("upgradeCoreBloom"),
+            Some(FX_UPGRADE_CORE_BLOOM_ID)
+        );
+        assert_eq!(standard_effect_id("placeBlock"), Some(FX_PLACE_BLOCK_ID));
+        assert_eq!(standard_effect_id("tapBlock"), Some(FX_TAP_BLOCK_ID));
         assert_eq!(standard_effect_id("select"), Some(FX_SELECT_ID));
         assert_eq!(standard_effect_id("smoke"), Some(FX_SMOKE_ID));
         assert_eq!(standard_effect_id("fallSmoke"), Some(FX_FALL_SMOKE_ID));
@@ -4258,6 +4324,13 @@ mod tests {
 
     #[test]
     fn standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers() {
+        assert_eq!(
+            standard_effect(FX_UPGRADE_CORE_BLOOM_ID).unwrap().lifetime,
+            80.0
+        );
+        assert_eq!(standard_effect(FX_PLACE_BLOCK_ID).unwrap().lifetime, 16.0);
+        assert_eq!(standard_effect(FX_TAP_BLOCK_ID).unwrap().lifetime, 12.0);
+
         let select = standard_effect_by_name("select").unwrap();
         assert_eq!(select.id, FX_SELECT_ID);
         assert_eq!(select.lifetime, 23.0);
@@ -4488,6 +4561,55 @@ mod tests {
 
     #[test]
     fn standard_effect_draw_plan_covers_smoke_trails_and_ripple() {
+        let upgrade_core_bloom = standard_effect_draw_plan(
+            Some(FX_UPGRADE_CORE_BLOOM_ID as u16),
+            21,
+            10.0,
+            20.0,
+            2.0,
+            40.0,
+            80.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(
+            upgrade_core_bloom.kind,
+            StandardEffectDrawKind::StrokedSquare
+        );
+        assert_eq!(upgrade_core_bloom.color_from, Some("Pal.accent"));
+        assert_eq!(upgrade_core_bloom.radius, 10.0);
+        assert_eq!(upgrade_core_bloom.stroke, 2.0);
+
+        let place_block = standard_effect_draw_plan(
+            Some(FX_PLACE_BLOCK_ID as u16),
+            22,
+            10.0,
+            20.0,
+            2.0,
+            8.0,
+            16.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(place_block.kind, StandardEffectDrawKind::StrokedSquare);
+        assert_eq!(place_block.radius, 9.5);
+        assert_eq!(place_block.stroke, 2.0);
+
+        let tap_block = standard_effect_draw_plan(
+            Some(FX_TAP_BLOCK_ID as u16),
+            24,
+            10.0,
+            20.0,
+            3.0,
+            6.0,
+            12.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(tap_block.kind, StandardEffectDrawKind::StrokedCircle);
+        assert!((tap_block.radius - 12.0).abs() < 0.0001);
+        assert_eq!(tap_block.stroke, 2.0);
+
         let select = standard_effect_draw_plan(
             Some(FX_SELECT_ID as u16),
             27,
