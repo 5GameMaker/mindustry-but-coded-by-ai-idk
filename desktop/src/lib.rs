@@ -35,7 +35,7 @@ use mindustry_core::mindustry::io::{
 };
 use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
-    NetworkWorldData, PacketKind, StateSnapshotCallPacket,
+    NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
@@ -195,6 +195,7 @@ pub struct DesktopLauncher {
     pub standard_local_effect_line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub standard_local_effect_triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub standard_local_effect_light_primitives: Vec<StandardEffectLightRenderPrimitive>,
+    pub pending_sound_at_events: Vec<SoundAtCallPacket>,
     pub pending_camera_shake_events: Vec<GameRuntimeClientCameraShakeEvent>,
     pub camera_shake_state: DesktopCameraShakeState,
     pub last_camera_shake_frame: DesktopCameraShakeFrame,
@@ -250,6 +251,7 @@ impl DesktopLauncher {
             standard_local_effect_line_primitives: Vec::new(),
             standard_local_effect_triangle_primitives: Vec::new(),
             standard_local_effect_light_primitives: Vec::new(),
+            pending_sound_at_events: Vec::new(),
             pending_camera_shake_events: Vec::new(),
             camera_shake_state: DesktopCameraShakeState::default(),
             last_camera_shake_frame: DesktopCameraShakeFrame::default(),
@@ -324,6 +326,7 @@ impl DesktopLauncher {
             });
         self.puddle_particle_rand_state = puddle_particle_rand_state;
         self.materialize_local_effect_events_for_render();
+        self.sync_local_sound_at_events_for_audio();
         self.sync_local_camera_shake_events_for_render(self.player.x, self.player.y);
         self.tick_camera_shake_for_render(1.0, 4);
         self.tick_local_effect_states_for_render(1.0);
@@ -532,6 +535,17 @@ impl DesktopLauncher {
 
     pub fn drain_local_effect_events_for_render(&mut self) -> Vec<EffectCallPacket2> {
         std::mem::take(&mut self.runtime.client_local_effect_events)
+    }
+
+    pub fn sync_local_sound_at_events_for_audio(&mut self) -> usize {
+        let events = std::mem::take(&mut self.runtime.client_local_sound_at_events);
+        let count = events.len();
+        self.pending_sound_at_events.extend(events);
+        count
+    }
+
+    pub fn drain_sound_at_events_for_audio(&mut self) -> Vec<SoundAtCallPacket> {
+        std::mem::take(&mut self.pending_sound_at_events)
     }
 
     pub fn sync_local_camera_shake_events_for_render(
@@ -1347,6 +1361,7 @@ impl DesktopLauncher {
         self.standard_local_effect_line_primitives.clear();
         self.standard_local_effect_triangle_primitives.clear();
         self.standard_local_effect_light_primitives.clear();
+        self.pending_sound_at_events.clear();
         self.pending_camera_shake_events.clear();
         self.camera_shake_state = DesktopCameraShakeState::default();
         self.last_camera_shake_frame = DesktopCameraShakeFrame::default();
@@ -1973,10 +1988,11 @@ mod tests {
         AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket,
         ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, EffectCallPacket,
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
-        NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
-        UnitCapDeathCallPacket, UnitDeathCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
-        UnitEnteredPayloadCallPacket, UnitEnvDeathCallPacket, UnitSafeDeathCallPacket,
-        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+        NetworkWorldData, SoundAtCallPacket, StateSnapshotCallPacket, TileConfigCallPacket,
+        UnitBlockSpawnCallPacket, UnitCapDeathCallPacket, UnitDeathCallPacket,
+        UnitDespawnCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
+        UnitEnvDeathCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -2844,6 +2860,30 @@ mod tests {
         assert_eq!(drained, vec![packet]);
         assert!(launcher.runtime.client_local_effect_events.is_empty());
         assert!(launcher.drain_local_effect_events_for_render().is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_and_drains_local_sound_at_events_for_audio() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let packet = SoundAtCallPacket {
+            sound_id: mindustry_core::mindustry::audio::standard_sound_id("unitExplode1").unwrap(),
+            x: 8.0,
+            y: 16.0,
+            volume: 0.7,
+            pitch: 1.0,
+        };
+        launcher
+            .runtime
+            .client_local_sound_at_events
+            .push(packet.clone());
+
+        assert_eq!(launcher.sync_local_sound_at_events_for_audio(), 1);
+        assert!(launcher.runtime.client_local_sound_at_events.is_empty());
+        assert_eq!(launcher.pending_sound_at_events, vec![packet.clone()]);
+
+        let drained = launcher.drain_sound_at_events_for_audio();
+        assert_eq!(drained, vec![packet]);
+        assert!(launcher.pending_sound_at_events.is_empty());
     }
 
     #[test]
@@ -4910,7 +4950,8 @@ mod tests {
         };
         assert_eq!(assembler.progress, 0.0);
         assert_eq!(assembler.blocks.total(), 0);
-        assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
+        assert!(launcher.runtime.client_local_sound_at_events.is_empty());
+        assert_eq!(launcher.pending_sound_at_events.len(), 1);
         assert!(launcher.runtime.client_local_effect_events.is_empty());
         assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
@@ -5087,7 +5128,8 @@ mod tests {
             panic!("unit assembler state should remain present");
         };
         assert_eq!(assembler.progress, 0.0);
-        assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
+        assert!(launcher.runtime.client_local_sound_at_events.is_empty());
+        assert_eq!(launcher.pending_sound_at_events.len(), 1);
         assert!(launcher.runtime.client_local_effect_events.is_empty());
         assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
         let spawned = launcher
@@ -5449,8 +5491,9 @@ mod tests {
         assert!(unit.entity.is_added());
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
         assert!(launcher.runtime.client_local_effect_entities.is_empty());
-        assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
-        let sound = &launcher.runtime.client_local_sound_at_events[0];
+        assert!(launcher.runtime.client_local_sound_at_events.is_empty());
+        assert_eq!(launcher.pending_sound_at_events.len(), 1);
+        let sound = &launcher.pending_sound_at_events[0];
         assert_eq!(
             sound.sound_id,
             mindustry_core::mindustry::audio::standard_sound_id("wreckFallBig").unwrap()
@@ -5502,9 +5545,10 @@ mod tests {
             .contains_key(&9921));
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
         assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
-        assert_eq!(launcher.runtime.client_local_sound_at_events.len(), 1);
+        assert!(launcher.runtime.client_local_sound_at_events.is_empty());
+        assert_eq!(launcher.pending_sound_at_events.len(), 1);
         assert_eq!(
-            launcher.runtime.client_local_sound_at_events[0].sound_id,
+            launcher.pending_sound_at_events[0].sound_id,
             mindustry_core::mindustry::audio::standard_sound_id("unitExplode1").unwrap()
         );
         assert!(launcher.runtime.client_local_camera_shake_events.is_empty());

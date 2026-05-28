@@ -8862,6 +8862,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-desktop`
 - 仍未完成：
   - flying wreck 的实体/残骸坠落 update、渲染、撞击/坠毁伤害仍未迁移；
-  - `client_local_sound_at_events` 还停留在 runtime 事件队列，desktop/backend 真实 audio 输出仍未接；
+  - `client_local_sound_at_events` 已在 `12.277` 下沉到 desktop pending audio seam；真实 audio backend 输出仍未接；
   - 完整 `UnitComp.destroy()` side effects 仍需继续迁移；
+  - 当前总体迁移仍约 10% 左右，远未可玩。
+
+### 12.277 本地 sound-at 事件下沉到 desktop audio seam
+
+- 2026-05-28：把 runtime 中的 `client_local_sound_at_events` 转移到 desktop launcher 的 pending audio 队列，避免单位生成、safe death、flying wreck death 等音效只停在 core runtime 临时事件上。
+- Rust 新增/变化：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `pending_sound_at_events: Vec<SoundAtCallPacket>`；
+    - `DesktopLauncher::update()` 在本地 effect materialize 后调用 `sync_local_sound_at_events_for_audio()`，把 runtime sound-at 事件转移到 desktop audio seam；
+    - 新增 `sync_local_sound_at_events_for_audio()` 和 `drain_sound_at_events_for_audio()`，为后续真实 audio backend 接入提供统一入口；
+    - reset/clear 路径会清空 pending sound 队列；
+    - 新增 `desktop_launcher_syncs_and_drains_local_sound_at_events_for_audio`；
+    - 更新 assembler spawn、unit spawn + assembler、safe death、flying wreck death 的 desktop 测试：现在验证 runtime 队列被清空，事件在 `pending_sound_at_events` 中等待 audio backend 消费。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_and_drains_local_sound_at_events_for_audio`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_flying_unit_death_to_wreck_sound_without_remove`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_assembler_unit_spawned_packet_to_runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 真实 desktop audio backend 仍未播放 `pending_sound_at_events`；
+  - 尚未做 sound event 合并、距离衰减、音量设置与 asset/backend 的完整映射；
+  - flying wreck update/renderer、完整 `UnitComp.destroy()` 仍需继续；
   - 当前总体迁移仍约 10% 左右，远未可玩。

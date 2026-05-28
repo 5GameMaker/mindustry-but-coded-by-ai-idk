@@ -6909,6 +6909,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-desktop`
 - 当前仍需继续：
   1. flying wreck 残骸实体/坠落 update/renderer/撞击伤害仍未迁移；
-  2. `client_local_sound_at_events` 仍需下沉到真实 desktop audio backend；
+  2. `client_local_sound_at_events` 已在 `203` 节下沉到 desktop pending audio seam；真实 desktop audio backend 播放仍未接；
   3. 完整 `UnitComp.destroy()` 的 `Damage.dynamicExplosion`、`Effect.shake`、scorch、weapon `shootOnDeath`、ability death、event bus 等仍未完成；
   4. 当前总迁移仍约 10% 左右，远未可玩。
+
+---
+
+## 203. 最新闭环记录：本地 sound-at 事件下沉到 desktop audio seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 core runtime 产生的本地 sound-at 事件继续下沉到 desktop launcher，给真实 audio backend 留出统一消费入口。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `pending_sound_at_events: Vec<SoundAtCallPacket>`；
+    - `update()` 调用 `sync_local_sound_at_events_for_audio()`，把 `runtime.client_local_sound_at_events` 转移到 desktop pending queue；
+    - 新增 `drain_sound_at_events_for_audio()`；
+    - reset/clear 路径清空 pending sound queue；
+    - 新增 `desktop_launcher_syncs_and_drains_local_sound_at_events_for_audio`；
+    - 更新 assembler spawn、unit spawn + assembler、safe death、flying wreck death 测试，改为验证 runtime sound 队列已清空、desktop pending 队列持有待播放事件。
+  - `MIGRATION.md`
+    - 新增 `12.277`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_and_drains_local_sound_at_events_for_audio`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_flying_unit_death_to_wreck_sound_without_remove`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_assembler_unit_spawned_packet_to_runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 真实 desktop audio backend 还没有消费 `pending_sound_at_events` 并播放；
+  2. sound asset/backend、距离衰减、音量设置、重复事件合并还没完整；
+  3. camera shake 也仍只是 pending/state seam，没有真实 camera offset；
+  4. flying wreck update/renderer、完整 `UnitComp.destroy()` 仍是后续主线；
+  5. 当前总迁移仍约 10% 左右，远未可玩。
