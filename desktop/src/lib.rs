@@ -1241,8 +1241,13 @@ impl DesktopLauncher {
         if let Some(light_pass) = self.drain_light_renderer_plan().to_render_pass() {
             render_frame.push_pass(light_pass);
         }
-        render_frame.sort_passes_like_java_renderer_draw();
         let block_renderer = self.block_render_plan(camera, viewport);
+        if let Some(block_renderer) = &block_renderer {
+            for pass in block_renderer.to_sprite_render_passes(8.0) {
+                render_frame.push_pass(pass);
+            }
+        }
+        render_frame.sort_passes_like_java_renderer_draw();
         let floor_renderer = self.floor_render_plan(camera, viewport);
         let fog_frame = self.fog_frame_plan(camera, viewport);
         let pixelator = self.pixelator_frame_plan(camera, viewport);
@@ -3788,7 +3793,8 @@ mod tests {
         );
 
         assert_eq!(frame.bundle.stats.present_plans, 5);
-        assert_eq!(frame.bundle.stats.render_passes, 0);
+        assert!(frame.bundle.stats.render_passes > 0);
+        assert!(frame.bundle.stats.render_commands > 0);
         assert!(frame.bundle.block_renderer.is_some());
         assert!(frame.bundle.stats.block_tile_passes > 0);
         assert!(frame.bundle.floor_renderer.is_some());
@@ -3853,6 +3859,17 @@ mod tests {
         assert_eq!(block_plan.tile_passes[0].stage, BlockDrawStage::TileBase);
         assert_eq!(frame.bundle.stats.block_tile_passes, 1);
         assert_eq!(block_plan.tile_passes[0].tiles.len(), 6);
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let sprite_commands = render_frame
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter(|command| matches!(command, RenderCommand::DrawSprite { .. }))
+            .count();
+        assert_eq!(frame.bundle.stats.render_passes, 1);
+        assert_eq!(frame.bundle.stats.render_commands, 6);
+        assert_eq!(sprite_commands, 6);
     }
 
     #[test]
