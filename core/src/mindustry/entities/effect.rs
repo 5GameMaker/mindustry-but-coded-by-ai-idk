@@ -28,6 +28,20 @@ pub const FX_HIT_BULLET_BIG_ID: i32 = 82;
 pub const FX_HIT_FLAME_SMALL_ID: i32 = 83;
 /// Upstream `Fx.hitFlamePlasma` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_FLAME_PLASMA_ID: i32 = 84;
+/// Upstream `Fx.hitLaserBlast` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_LASER_BLAST_ID: i32 = 86;
+/// Upstream `Fx.hitEmpSpark` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_EMP_SPARK_ID: i32 = 87;
+/// Upstream `Fx.hitLancer` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_LANCER_ID: i32 = 88;
+/// Upstream `Fx.hitLancerLow` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_LANCER_LOW_ID: i32 = 89;
+/// Upstream `Fx.hitBeam` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_BEAM_ID: i32 = 90;
+/// Upstream `Fx.hitMeltdown` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_MELTDOWN_ID: i32 = 92;
+/// Upstream `Fx.hitMeltHeal` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_MELT_HEAL_ID: i32 = 93;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_ID: i32 = 28;
 /// Upstream `Fx.fallSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -171,6 +185,13 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "hitBulletBig" => Some(FX_HIT_BULLET_BIG_ID),
         "hitFlameSmall" => Some(FX_HIT_FLAME_SMALL_ID),
         "hitFlamePlasma" => Some(FX_HIT_FLAME_PLASMA_ID),
+        "hitLaserBlast" => Some(FX_HIT_LASER_BLAST_ID),
+        "hitEmpSpark" => Some(FX_HIT_EMP_SPARK_ID),
+        "hitLancer" => Some(FX_HIT_LANCER_ID),
+        "hitLancerLow" => Some(FX_HIT_LANCER_LOW_ID),
+        "hitBeam" => Some(FX_HIT_BEAM_ID),
+        "hitMeltdown" => Some(FX_HIT_MELTDOWN_ID),
+        "hitMeltHeal" => Some(FX_HIT_MELT_HEAL_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
@@ -272,6 +293,21 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         }
         FX_HIT_FLAME_PLASMA_ID => {
             Effect::with_lifetime(FX_HIT_FLAME_PLASMA_ID, 14.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_LASER_BLAST_ID => {
+            Effect::with_lifetime(FX_HIT_LASER_BLAST_ID, 12.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_EMP_SPARK_ID => {
+            Effect::with_lifetime(FX_HIT_EMP_SPARK_ID, 40.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_LANCER_ID => Effect::with_lifetime(FX_HIT_LANCER_ID, 12.0, DEFAULT_EFFECT_CLIP),
+        FX_HIT_LANCER_LOW_ID => {
+            Effect::with_lifetime(FX_HIT_LANCER_LOW_ID, 12.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_BEAM_ID => Effect::with_lifetime(FX_HIT_BEAM_ID, 12.0, DEFAULT_EFFECT_CLIP),
+        FX_HIT_MELTDOWN_ID => Effect::with_lifetime(FX_HIT_MELTDOWN_ID, 12.0, DEFAULT_EFFECT_CLIP),
+        FX_HIT_MELT_HEAL_ID => {
+            Effect::with_lifetime(FX_HIT_MELT_HEAL_ID, 12.0, DEFAULT_EFFECT_CLIP)
         }
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
@@ -1191,6 +1227,136 @@ pub fn standard_effect_draw_plan(
                     progress: None,
                     angle: Some(rotation),
                     angle_range: 50.0,
+                    length,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: line_fout_scale,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
+        FX_HIT_LASER_BLAST_ID
+        | FX_HIT_EMP_SPARK_ID
+        | FX_HIT_LANCER_ID
+        | FX_HIT_LANCER_LOW_ID
+        | FX_HIT_BEAM_ID
+        | FX_HIT_MELTDOWN_ID
+        | FX_HIT_MELT_HEAL_ID => {
+            let (
+                color_from,
+                input_color,
+                count,
+                length,
+                angle,
+                angle_range,
+                stroke,
+                line_fout_scale,
+            ) = match effect_id {
+                FX_HIT_LASER_BLAST_ID => (
+                    None,
+                    Some(color),
+                    8,
+                    finpow * 17.0,
+                    None,
+                    0.0,
+                    fout * 1.5,
+                    4.0,
+                ),
+                FX_HIT_EMP_SPARK_ID => (
+                    Some("Pal.heal"),
+                    None,
+                    18,
+                    finpow * 27.0,
+                    Some(rotation),
+                    360.0,
+                    fout * 1.6,
+                    6.0,
+                ),
+                FX_HIT_LANCER_ID => (
+                    Some("Color.white"),
+                    None,
+                    8,
+                    finpow * 17.0,
+                    None,
+                    0.0,
+                    fout * 1.5,
+                    4.0,
+                ),
+                FX_HIT_LANCER_LOW_ID => (
+                    Some("Color.white"),
+                    None,
+                    4,
+                    finpow * 17.0,
+                    None,
+                    0.0,
+                    fout * 1.5,
+                    4.0,
+                ),
+                FX_HIT_BEAM_ID => (
+                    None,
+                    Some(color),
+                    6,
+                    finpow * 18.0,
+                    None,
+                    0.0,
+                    fout * 2.0,
+                    4.0,
+                ),
+                FX_HIT_MELTDOWN_ID => (
+                    Some("Pal.meltdownHit"),
+                    None,
+                    6,
+                    finpow * 18.0,
+                    None,
+                    0.0,
+                    fout * 2.0,
+                    4.0,
+                ),
+                FX_HIT_MELT_HEAL_ID => (
+                    Some("Pal.heal"),
+                    None,
+                    6,
+                    finpow * 18.0,
+                    None,
+                    0.0,
+                    fout * 2.0,
+                    4.0,
+                ),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededRadialLineParticles,
+                center: (x, y),
+                color_from,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 1.0,
+                stroke,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count,
+                    progress: None,
+                    angle,
+                    angle_range,
                     length,
                     fin,
                     fout,
@@ -2389,6 +2555,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.lightOrange" => Some(DecalColor::from_rgba(0xf68021ff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
+        "Pal.meltdownHit" => Some(DecalColor::from_rgba(0xffb98bff)),
         _ => None,
     }
 }
@@ -3680,6 +3847,19 @@ mod tests {
             standard_effect_id("hitFlamePlasma"),
             Some(FX_HIT_FLAME_PLASMA_ID)
         );
+        assert_eq!(
+            standard_effect_id("hitLaserBlast"),
+            Some(FX_HIT_LASER_BLAST_ID)
+        );
+        assert_eq!(standard_effect_id("hitEmpSpark"), Some(FX_HIT_EMP_SPARK_ID));
+        assert_eq!(standard_effect_id("hitLancer"), Some(FX_HIT_LANCER_ID));
+        assert_eq!(
+            standard_effect_id("hitLancerLow"),
+            Some(FX_HIT_LANCER_LOW_ID)
+        );
+        assert_eq!(standard_effect_id("hitBeam"), Some(FX_HIT_BEAM_ID));
+        assert_eq!(standard_effect_id("hitMeltdown"), Some(FX_HIT_MELTDOWN_ID));
+        assert_eq!(standard_effect_id("hitMeltHeal"), Some(FX_HIT_MELT_HEAL_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("unitAssemble"),
@@ -3861,6 +4041,19 @@ mod tests {
             standard_effect(FX_HIT_FLAME_PLASMA_ID).unwrap().lifetime,
             14.0
         );
+        assert_eq!(
+            standard_effect(FX_HIT_LASER_BLAST_ID).unwrap().lifetime,
+            12.0
+        );
+        assert_eq!(standard_effect(FX_HIT_EMP_SPARK_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_HIT_LANCER_ID).unwrap().lifetime, 12.0);
+        assert_eq!(
+            standard_effect(FX_HIT_LANCER_LOW_ID).unwrap().lifetime,
+            12.0
+        );
+        assert_eq!(standard_effect(FX_HIT_BEAM_ID).unwrap().lifetime, 12.0);
+        assert_eq!(standard_effect(FX_HIT_MELTDOWN_ID).unwrap().lifetime, 12.0);
+        assert_eq!(standard_effect(FX_HIT_MELT_HEAL_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
@@ -4523,6 +4716,121 @@ mod tests {
             standard_effect_draw_plan(None, 0, 0.0, 0.0, 0.0, 0.0, 1.0, DecalColor::WHITE)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_hit_radial_line_batch() {
+        let input_color = DecalColor::from_rgba(0xabcdefcc);
+        let hit_laser_blast = standard_effect_draw_plan(
+            Some(FX_HIT_LASER_BLAST_ID as u16),
+            86,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(
+            hit_laser_blast.kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(hit_laser_blast.input_color, Some(input_color));
+        assert_eq!(hit_laser_blast.color_from, None);
+        assert_eq!(hit_laser_blast.stroke, 0.75);
+        let hit_laser_blast_particles = hit_laser_blast.particles.unwrap();
+        assert_eq!(hit_laser_blast_particles.count, 8);
+        assert_eq!(hit_laser_blast_particles.angle, None);
+        assert_eq!(hit_laser_blast_particles.angle_range, 0.0);
+        assert_eq!(hit_laser_blast_particles.length, 14.875);
+        assert_eq!(hit_laser_blast_particles.radius_fout_scale, 4.0);
+        let hit_laser_blast_lines = hit_laser_blast.line_render_primitives_from_seed();
+        assert_eq!(hit_laser_blast_lines.len(), 8);
+        assert!((hit_laser_blast_lines[0].length - 3.0).abs() < 0.0001);
+
+        let hit_emp_spark = standard_effect_draw_plan(
+            Some(FX_HIT_EMP_SPARK_ID as u16),
+            87,
+            3.0,
+            4.0,
+            30.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(hit_emp_spark.color_from, Some("Pal.heal"));
+        assert_eq!(hit_emp_spark.stroke, 0.8);
+        let hit_emp_spark_particles = hit_emp_spark.particles.unwrap();
+        assert_eq!(hit_emp_spark_particles.count, 18);
+        assert_eq!(hit_emp_spark_particles.angle, Some(30.0));
+        assert_eq!(hit_emp_spark_particles.angle_range, 360.0);
+        assert_eq!(hit_emp_spark_particles.length, 23.625);
+        assert_eq!(hit_emp_spark_particles.radius_fout_scale, 6.0);
+        assert_eq!(hit_emp_spark.line_render_primitives_from_seed().len(), 18);
+
+        let hit_lancer_low = standard_effect_draw_plan(
+            Some(FX_HIT_LANCER_LOW_ID as u16),
+            89,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(hit_lancer_low.color_from, Some("Color.white"));
+        assert_eq!(hit_lancer_low.particles.unwrap().count, 4);
+        assert_eq!(hit_lancer_low.line_render_primitives_from_seed().len(), 4);
+
+        let hit_beam = standard_effect_draw_plan(
+            Some(FX_HIT_BEAM_ID as u16),
+            90,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(hit_beam.input_color, Some(input_color));
+        assert_eq!(hit_beam.stroke, 1.0);
+        assert_eq!(hit_beam.particles.unwrap().length, 15.75);
+        assert_eq!(hit_beam.line_render_primitives_from_seed().len(), 6);
+
+        let hit_meltdown = standard_effect_draw_plan(
+            Some(FX_HIT_MELTDOWN_ID as u16),
+            92,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(hit_meltdown.color_from, Some("Pal.meltdownHit"));
+        assert_eq!(
+            hit_meltdown.resolved_draw_color(),
+            standard_effect_color_symbol("Pal.meltdownHit")
+        );
+
+        let hit_melt_heal = standard_effect_draw_plan(
+            Some(FX_HIT_MELT_HEAL_ID as u16),
+            93,
+            3.0,
+            4.0,
+            30.0,
+            6.0,
+            12.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(hit_melt_heal.color_from, Some("Pal.heal"));
+        assert_eq!(hit_melt_heal.line_render_primitives_from_seed().len(), 6);
     }
 
     #[test]

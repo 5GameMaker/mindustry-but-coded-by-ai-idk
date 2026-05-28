@@ -6673,3 +6673,45 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - desktop 已缓存 line/square primitive，但 `desktop/src/main.rs` 仍未接真实 renderer/backend；
   - `launchPod=248` 仍需 scaled circle + seeded line 组合；
   - 后续需继续把 frame cache 下沉到真实绘制后端，避免 primitive 长期停留在快照层。
+
+### 12.218 Hit radial-line Fx batch without scaled pass
+
+- 2026-05-28：继续复用 `SeededRadialLineParticles`，迁移一组无需 `scaled(...)`/light 组合的 hit lineAngle 效果。
+- 本轮迁移：
+  - `hitLaserBlast=86`
+  - `hitEmpSpark=87`
+  - `hitLancer=88`
+  - `hitLancerLow=89`
+  - `hitBeam=90`
+  - `hitMeltdown=92`
+  - `hitMeltHeal=93`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:972` 附近：`hitLaserBlast`，输入色，stroke `fout*1.5`，8 条随机 radial line，长度 `finpow*17`，line length `fout*4+1`。
+  - `Fx.java:982` 附近：`hitEmpSpark`，`Pal.heal`，stroke `fout*1.6`，18 条 `rotation ± 360` cone line，长度 `finpow*27`，line length `fout*6+1`。
+  - `Fx.java:992` / `1002`：`hitLancer`/`hitLancerLow`，`Color.white`，stroke `fout*1.5`，分别 8/4 条 radial line。
+  - `Fx.java:1012`：`hitBeam`，输入色，stroke `fout*2`，6 条 radial line，长度 `finpow*18`。
+  - `Fx.java:1030` / `1040`：`hitMeltdown`/`hitMeltHeal`，颜色分别 `Pal.meltdownHit`/`Pal.heal`，stroke `fout*2`，6 条 radial line。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/Pal.java:41`：`Pal.meltdownHit = ff b9 8b`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 7 个 `FX_*` 常量并接入 `standard_effect_id(...)` 与 `standard_effect(...)`；
+    - `standard_effect_draw_plan(...)` 新增 hit radial-line batch 分支；
+    - `standard_effect_color_symbol(...)` 新增 `Pal.meltdownHit = 0xffb98bff`；
+    - 对输入色类效果保留 `input_color`，固定色类效果使用 `color_from` 单色解析。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 7 个 name/id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime；
+  - 新增 `standard_effect_draw_plan_covers_hit_radial_line_batch`，覆盖输入色/固定色、stroke、count、cone、length、line primitive 数量与 `Pal.meltdownHit` 解析。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_hit_radial_line_batch --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `hitBulletSmall=77`、`hitBulletColor=78`、`hitSquaresColor=79`、`hitFuse=81` 仍需要 scaled circle + radial line/square + light 的 multi-pass 表达；
+  - `hitFlameBeam=91` 是 seeded circle batch，可后续用现有 circle primitive 迁移；
+  - line/square 已进入 desktop frame cache，但仍未下沉到真实绘制 backend。

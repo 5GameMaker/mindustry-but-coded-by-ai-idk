@@ -4829,4 +4829,45 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 先补 `hitBulletSmall=77` / `hitBulletColor=78` / `hitFuse=81` 的 multi-pass 表达：需要 scaled circle + radial line + light，不能只迁移线段。
   2. 把 `desktop` frame 的 circle/square/line/light primitives 继续接到真实 renderer/backend；当前 `desktop/src/main.rs` 仍只是 launcher loop。
   3. `launchPod=248` 可在 multi-pass 表达完成后迁移，避免只做 line 部分。
-  4. 每次上下文压缩后先检查：`git -C "D:/MDT/rust-mindustry" status --short`，再读本节和 `MIGRATION.md` 的最新 12.217。
+  4. 每次上下文压缩后先检查：`git -C "D:/MDT/rust-mindustry" status --short`，再读后续最新闭环记录和 `MIGRATION.md` 最新章节。
+
+---
+
+## 144. 最新闭环记录：Hit radial-line Fx batch without scaled pass
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：继续吃掉无需 `scaled(...)` 的 hit lineAngle 类效果，避免在 multi-pass 表达未完成前迁移半截组合效果。
+- 本轮迁移：
+  - `hitLaserBlast=86`
+  - `hitEmpSpark=87`
+  - `hitLancer=88`
+  - `hitLancerLow=89`
+  - `hitBeam=90`
+  - `hitMeltdown=92`
+  - `hitMeltHeal=93`
+- Java 依据：
+  - `Fx.java:972-1048`；
+  - 这组核心形态都是 `randLenVectors(...)` 后 `lineAngle(...)`；
+  - `hitEmpSpark` 用 `rotation, 360f` cone；
+  - `hitLaserBlast`/`hitBeam` 使用输入色；
+  - `hitMeltdown` 需要 `Pal.meltdownHit`，`Pal.java:41` 值为 `ffb98b`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 7 个 `FX_*` 常量、name lookup 与 lifetime metadata；
+    - `standard_effect_draw_plan(...)` 新增 hit radial-line batch 分支；
+    - 继续复用 `SeededRadialLineParticles`；
+    - 新增颜色符号 `Pal.meltdownHit = 0xffb98bff`；
+    - 新增测试 `standard_effect_draw_plan_covers_hit_radial_line_batch`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_hit_radial_line_batch --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `hitFlameBeam=91` 可以用已有 `SeededCircleParticles` 迁移，较独立。
+  2. `hitBulletSmall=77` / `hitBulletColor=78` / `hitSquaresColor=79` / `hitFuse=81` 需要先扩展 multi-pass 或附加 scaled circle/light 表达，不要只迁移主粒子。
+  3. 继续推进 renderer/backend 消费 `DesktopStandardEffectRenderFrame.square_primitives` 与 `.line_primitives`。
