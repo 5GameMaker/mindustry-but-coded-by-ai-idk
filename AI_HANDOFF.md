@@ -7069,6 +7069,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. scorch 的 random variant/rotation 目前是 deterministic seam，后续需接真实随机/renderer；
   2. wreckRegions decal 随机散布仍未做；
-  3. `Damage.dynamicExplosion` lightning/fire/wave damage、weapon `shootOnDeath`、ability death、event bus 仍未完成；
+  3. `UnitDestroyEvent` 已在 `208` 节记录为 runtime sidecar；`Damage.dynamicExplosion` lightning/fire/wave damage、weapon `shootOnDeath`、ability death、完整 event bus 仍未完成；
+  4. 真实 audio/camera backend 仍需继续；
+  5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 208. 最新闭环记录：UnitDestroyEvent runtime sidecar
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：对照 Java `Events.fire(new UnitDestroyEvent(self()))`，在 Rust runtime 中先记录 UnitDestroyEvent sidecar，后续再接真实 event bus / service trigger。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitDestroyEvent`；
+    - `GameRuntime` 新增 `unit_destroy_events`；
+    - reset/clear 路径清空该队列；
+    - 新增 `drain_unit_destroy_events()`；
+    - `queue_client_unit_destroy_side_effects(...)` 记录 unit id/name/team/x/y；
+    - core destroy 测试覆盖事件字段与 drain。
+  - `desktop/src/lib.rs`
+    - unit destroy / 多 lifecycle 测试验证事件会经 NetClient lifecycle -> GameRuntime 保留。
+  - `MIGRATION.md`
+    - 新增 `12.282`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `UnitDestroyEvent` 还只是 runtime sidecar，未接全局 event bus；
+  2. suicide trigger、weapon `shootOnDeath`、ability `death(...)`、`type.killed(...)` 未迁移；
+  3. `Damage.dynamicExplosion` lightning/fire/wave damage 未完整；
   4. 真实 audio/camera backend 仍需继续；
   5. 当前总迁移仍约 10%~11%，远未可玩。

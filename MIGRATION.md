@@ -8997,5 +8997,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - Java scorch 的 atlas 随机 variant/rotation 目前是 deterministic seam，后续需接真实 renderer 随机；
   - wreckRegions decal 随机散布还没做；
-  - `Damage.dynamicExplosion` lightning/fire/wave damage、weapon/ability/event bus 仍未完成；
+  - `UnitDestroyEvent` 已在 `12.282` 记录为 runtime sidecar；`Damage.dynamicExplosion` lightning/fire/wave damage、weapon/ability/完整 event bus 仍未完成；
+  - 当前总体迁移仍约 10%~11%，远未可玩。
+
+### 12.282 UnitDestroyEvent runtime sidecar
+
+- 2026-05-28：继续对照 Java `UnitComp.destroy()` 的 `Events.fire(new UnitDestroyEvent(self()))`，在 Rust runtime 中记录单位销毁事件 sidecar，为后续真实 Arc event bus / service trigger 接入做准备。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitDestroyEvent { unit_id, unit_name, team, x, y }`；
+    - `GameRuntime` 新增 `unit_destroy_events`；
+    - reset/clear 路径清空 `unit_destroy_events`；
+    - 新增 `drain_unit_destroy_events()`；
+    - `queue_client_unit_destroy_side_effects(...)` 在 destroy 副作用中记录 unit destroy event；
+    - core destroy 测试覆盖事件字段与 drain。
+  - `desktop/src/lib.rs`
+    - unit destroy / 多 lifecycle 测试验证 NetClient lifecycle 路径会保留 `unit_destroy_events`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 事件目前是 runtime sidecar，尚未接真实全局 event bus / service trigger；
+  - suicide trigger、weapon `shootOnDeath`、ability `death(...)`、`type.killed(...)` 仍未迁移；
   - 当前总体迁移仍约 10%~11%，远未可玩。

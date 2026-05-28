@@ -5537,6 +5537,8 @@ mod tests {
         assert_eq!(scorch.region.name, "scorch-1-1");
         assert_eq!(scorch.x, 10.0);
         assert_eq!(scorch.y, 20.0);
+        assert_eq!(launcher.runtime.unit_destroy_events.len(), 1);
+        assert_eq!(launcher.runtime.unit_destroy_events[0].unit_id, 9903);
         let leg_primitives = launcher
             .standard_local_effect_line_primitives
             .iter()
@@ -5609,6 +5611,7 @@ mod tests {
         assert_eq!(launcher.pending_sound_at_events.len(), 2);
         assert_eq!(launcher.pending_camera_shake_events.len(), 2);
         assert_eq!(launcher.runtime.client_decal_snapshot_entities.len(), 2);
+        assert_eq!(launcher.runtime.unit_destroy_events.len(), 2);
         assert!(launcher.standard_local_effect_line_primitives.len() >= 8);
         let leg_primitives = launcher
             .standard_local_effect_line_primitives

@@ -1536,6 +1536,15 @@ pub struct GameRuntimeUnitCreateEvent {
     pub spawner_unit_id: Option<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeUnitDestroyEvent {
+    pub unit_id: i32,
+    pub unit_name: String,
+    pub team: TeamId,
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GameRuntimeTriggerEvent {
     pub trigger: Trigger,
@@ -2600,6 +2609,7 @@ pub struct GameRuntime {
     pub storage_linked_cores: BTreeMap<i32, i32>,
     pub item_taken_events: Vec<GameRuntimeItemTakenEvent>,
     pub unit_create_events: Vec<GameRuntimeUnitCreateEvent>,
+    pub unit_destroy_events: Vec<GameRuntimeUnitDestroyEvent>,
     pub trigger_events: Vec<GameRuntimeTriggerEvent>,
     pub server_puddles: Puddles,
     pub server_fires: Fires,
@@ -2681,6 +2691,7 @@ impl GameRuntime {
             storage_linked_cores: BTreeMap::new(),
             item_taken_events: Vec::new(),
             unit_create_events: Vec::new(),
+            unit_destroy_events: Vec::new(),
             trigger_events: Vec::new(),
             server_puddles: Puddles::default(),
             server_fires: Fires::default(),
@@ -2772,6 +2783,10 @@ impl GameRuntime {
 
     pub fn drain_trigger_events(&mut self) -> Vec<GameRuntimeTriggerEvent> {
         std::mem::take(&mut self.trigger_events)
+    }
+
+    pub fn drain_unit_destroy_events(&mut self) -> Vec<GameRuntimeUnitDestroyEvent> {
+        std::mem::take(&mut self.unit_destroy_events)
     }
 
     pub fn note_client_block_snapshot_parse_error(
@@ -3969,6 +3984,14 @@ impl GameRuntime {
                 pitch: 1.0,
             });
         }
+
+        self.unit_destroy_events.push(GameRuntimeUnitDestroyEvent {
+            unit_id: unit.id(),
+            unit_name: unit.type_info.name().to_string(),
+            team: unit.team_id(),
+            x,
+            y,
+        });
 
         if unit.type_info.create_scorch {
             let size = (hit_size / 5.0).floor().clamp(0.0, 9.0) as i32;
@@ -10250,6 +10273,7 @@ impl GameRuntime {
         self.storage_linked_cores.clear();
         self.item_taken_events.clear();
         self.unit_create_events.clear();
+        self.unit_destroy_events.clear();
         self.trigger_events.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -26597,6 +26621,15 @@ mod tests {
         assert_eq!(scorch.rotation, 90.0);
         assert_eq!(scorch.lifetime, 3600.0);
         assert_eq!(runtime.next_client_local_decal_id, -2);
+        assert_eq!(runtime.unit_destroy_events.len(), 1);
+        let destroy_event = &runtime.unit_destroy_events[0];
+        assert_eq!(destroy_event.unit_id, 77);
+        assert_eq!(destroy_event.unit_name, "crawler");
+        assert_eq!(destroy_event.team, TeamId(4));
+        assert_eq!(destroy_event.x, 10.0);
+        assert_eq!(destroy_event.y, 20.0);
+        assert_eq!(runtime.drain_unit_destroy_events().len(), 1);
+        assert!(runtime.unit_destroy_events.is_empty());
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));
