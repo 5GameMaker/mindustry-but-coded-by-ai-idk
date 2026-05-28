@@ -439,6 +439,25 @@ pub fn load() -> Vec<BulletContent> {
     antumbra_large_bullet.lifetime = 25.0;
     antumbra_large_bullet.shoot_effect = "shootBig".into();
 
+    let mut eclipse_flak = flak_bullet(4.0, 15.0);
+    eclipse_flak.shoot_effect = "shootBig".into();
+    eclipse_flak.ammo_multiplier = 4.0;
+    eclipse_flak.splash_damage = 65.0;
+    eclipse_flak.splash_damage_radius = 25.0;
+    eclipse_flak.collides_ground = true;
+    eclipse_flak.lifetime = 47.0;
+    eclipse_flak.status = "blasted".into();
+    eclipse_flak.status_duration = 60.0;
+
+    let mut eclipse_laser = laser_bullet(115.0);
+    eclipse_laser.side_angle = 20.0;
+    eclipse_laser.side_width = 1.5;
+    eclipse_laser.side_length = 80.0;
+    eclipse_laser.width = 25.0;
+    eclipse_laser.length = 230.0;
+    eclipse_laser.shoot_effect = "shockwave".into();
+    eclipse_laser.colors = vec!["ec7458aa".into(), "ff9c5a".into(), "white".into()];
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -505,6 +524,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "zenith_missile", zenith_missile),
         make_bullet(&mut next_id, "antumbra_missile", antumbra_missile),
         make_bullet(&mut next_id, "antumbra_large_bullet", antumbra_large_bullet),
+        make_bullet(&mut next_id, "eclipse_flak", eclipse_flak),
+        make_bullet(&mut next_id, "eclipse_laser", eclipse_laser),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -717,6 +738,21 @@ fn missile_bullet(speed: f32, damage: f32) -> BulletSpec {
     bullet
 }
 
+fn flak_bullet(speed: f32, damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Flak, speed, damage);
+    bullet.splash_damage = 15.0;
+    bullet.splash_damage_radius = 34.0;
+    bullet.hit_effect = "flakExplosionBig".into();
+    bullet.width = 8.0;
+    bullet.height = 10.0;
+    bullet.collides_ground = false;
+    bullet.explode_range = 30.0;
+    bullet.explode_delay = 5.0;
+    bullet.flak_delay = 0.0;
+    bullet.flak_interval = 6.0;
+    bullet
+}
+
 fn continuous_laser_bullet(damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
     bullet.length = 220.0;
@@ -795,6 +831,8 @@ mod tests {
                 "zenith_missile",
                 "antumbra_missile",
                 "antumbra_large_bullet",
+                "eclipse_flak",
+                "eclipse_laser",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1517,6 +1555,47 @@ mod tests {
         assert_eq!(large.lifetime, 25.0);
         assert_eq!(large.shoot_effect, "shootBig");
         assert_eq!(large.sprite, "bullet");
+    }
+
+    #[test]
+    fn eclipse_bullets_match_java_profiles() {
+        let bullets = load();
+        let flak = &by_name(&bullets, "eclipse_flak").spec;
+
+        assert_eq!(flak.kind, BulletKind::Flak);
+        assert_eq!(flak.speed, 4.0);
+        assert_eq!(flak.damage, 15.0);
+        assert_eq!(flak.shoot_effect, "shootBig");
+        assert_eq!(flak.ammo_multiplier, 4.0);
+        assert_eq!(flak.splash_damage, 65.0);
+        assert_eq!(flak.splash_damage_radius, 25.0);
+        assert!(flak.collides_ground);
+        assert_eq!(flak.lifetime, 47.0);
+        assert_eq!(flak.status, "blasted");
+        assert_eq!(flak.status_duration, 60.0);
+        assert_eq!(flak.hit_effect, "flakExplosionBig");
+        assert_eq!(flak.explode_range, 30.0);
+        assert_eq!(flak.flak_interval, 6.0);
+
+        let laser = &by_name(&bullets, "eclipse_laser").spec;
+        assert_eq!(laser.kind, BulletKind::Laser);
+        assert_eq!(laser.damage, 115.0);
+        assert_eq!(laser.side_angle, 20.0);
+        assert_eq!(laser.side_width, 1.5);
+        assert_eq!(laser.side_length, 80.0);
+        assert_eq!(laser.width, 25.0);
+        assert_eq!(laser.length, 230.0);
+        assert_eq!(laser.shoot_effect, "shockwave");
+        assert_eq!(
+            laser.colors,
+            vec![
+                "ec7458aa".to_string(),
+                "ff9c5a".to_string(),
+                "white".to_string()
+            ]
+        );
+        assert!(laser.impact);
+        assert!(laser.pierce);
     }
 
     #[test]

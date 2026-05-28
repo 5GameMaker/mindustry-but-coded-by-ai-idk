@@ -10263,3 +10263,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Missile/BasicBulletType 的命中、splash、status 与 weapon mount runtime 仍需整体接入；
   - 下一步建议继续 `eclipse`，需要 flak、large laser 与 large artillery mounts；
   - 当前总体迁移约 13.7%，远未可玩。
+
+### 12.323 UnitTypes eclipse laser and flak artillery mounts
+
+- 2026-05-28：继续回填 Java `eclipse` 空军重型攻击单位。该闭环新增 `eclipse_flak` 与 `eclipse_laser` content bullets，并将 `large-laser-mount` 与两个 `large-artillery` 挂载接入 Rust unit registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1251-1330`
+  - `eclipse` unit：`speed=0.54`、`accel=0.04`、`drag=0.04`、`rotateSpeed=1`、`flying=true`、`lowAltitude=true`、`health=22000`、`engineOffset=38`、`engineSize=7.3`、`hitSize=58`、`armor=13`、`targetFlags={reactor,battery,core,null}`、`loopSound=loopHover`
+  - shared flak bullet：`FlakBulletType(4f,15)`，`shootEffect=shootBig`、`ammoMultiplier=4`、`splashDamage=65`、`splashDamageRadius=25`、`collidesGround=true`、`lifetime=47`、`status=blasted`、`statusDuration=60`
+  - laser weapon：`new Weapon("large-laser-mount")`，`shake=4`、`shootY=9`、`x=18`、`y=5`、`rotateSpeed=2`、`reload=45`、`recoil=4`、`shootSound=shootEclipse`、`shadow=20`、`rotate=true`
+  - laser bullet：`LaserBulletType`，`damage=115`、`sideAngle=20`、`sideWidth=1.5`、`sideLength=80`、`width=25`、`length=230`、`shootEffect=shockwave`、`colors={ec7458aa,ff9c5a,white}`
+  - artillery weapons：两个 `new Weapon("large-artillery")`，分别 `x=11,y=27,reload=9,rotateSpeed=2,recoil=0.5,shadow=7` 与 `x=20,y=-13,reload=12,ejectEffect=casing1,rotateSpeed=7,shake=1,shadow=12`，共同 `shootSound=shootCyclone`、`rotate=true`、`shootY=7.25`、`bullet=fragBullet`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增本地 `flak_bullet(...)` helper；
+    - 新增 `eclipse_flak` 与 `eclipse_laser`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `eclipse_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `eclipse` 补齐 Java movement/target/sound 字段；
+    - 注册 `large-laser-mount` 与两个 `large-artillery`；
+    - 新增 `eclipse_weapons_match_java_mount_profiles`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `13.8%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core eclipse_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core eclipse_weapons_match_java_mount_profiles --lib`
+- 仍未完成：
+  - `LaserBulletType` 的真实绘制/命中线段、`FlakBulletType` 空爆与 splash/status runtime 仍需继续 content-driven；
+  - shared flak bullet 仍以同名 content 引用表示，Java 匿名对象身份后续需与 runtime mount 模型统一；
+  - 下一步建议进入 air support 段，从 `mono`/`poly` 继续回填 support 单位字段、command 与 build/mine 行为；
+  - 当前总体迁移约 13.8%，远未可玩。

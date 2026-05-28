@@ -729,6 +729,8 @@ pub fn load() -> Vec<UnitType> {
         }),
         unit(&mut next_id, "eclipse", UnitKind::Standard, |u| {
             u.speed = 0.54;
+            u.accel = 0.04;
+            u.drag = 0.04;
             u.rotate_speed = 1.0;
             u.flying = true;
             u.low_altitude = true;
@@ -737,6 +739,54 @@ pub fn load() -> Vec<UnitType> {
             u.engine_size = 7.3;
             u.hit_size = 58.0;
             u.armor = 13.0;
+            u.target_flags = vec![
+                Some("reactor".into()),
+                Some("battery".into()),
+                Some("core".into()),
+                None,
+            ];
+            u.loop_sound = "loopHover".into();
+
+            let mut laser = Weapon::new("large-laser-mount");
+            laser.shake = 4.0;
+            laser.shoot_y = 9.0;
+            laser.x = 18.0;
+            laser.y = 5.0;
+            laser.rotate_speed = 2.0;
+            laser.reload = 45.0;
+            laser.recoil = 4.0;
+            laser.shoot_sound = "shootEclipse".into();
+            laser.shadow = 20.0;
+            laser.rotate = true;
+            laser.bullet = "eclipse_laser".into();
+            u.weapons.push(laser);
+
+            let mut top_artillery = Weapon::new("large-artillery");
+            top_artillery.x = 11.0;
+            top_artillery.y = 27.0;
+            top_artillery.rotate_speed = 2.0;
+            top_artillery.reload = 9.0;
+            top_artillery.shoot_sound = "shootCyclone".into();
+            top_artillery.shadow = 7.0;
+            top_artillery.rotate = true;
+            top_artillery.recoil = 0.5;
+            top_artillery.shoot_y = 7.25;
+            top_artillery.bullet = "eclipse_flak".into();
+            u.weapons.push(top_artillery);
+
+            let mut lower_artillery = Weapon::new("large-artillery");
+            lower_artillery.y = -13.0;
+            lower_artillery.x = 20.0;
+            lower_artillery.reload = 12.0;
+            lower_artillery.eject_effect = "casing1".into();
+            lower_artillery.rotate_speed = 7.0;
+            lower_artillery.shake = 1.0;
+            lower_artillery.shoot_sound = "shootCyclone".into();
+            lower_artillery.rotate = true;
+            lower_artillery.shadow = 12.0;
+            lower_artillery.shoot_y = 7.25;
+            lower_artillery.bullet = "eclipse_flak".into();
+            u.weapons.push(lower_artillery);
         }),
         unit(&mut next_id, "mono", UnitKind::Standard, |u| {
             u.flying = true;
@@ -2500,6 +2550,89 @@ mod tests {
             .expect("missing antumbra_large_bullet");
         assert_eq!(large.spec.kind, BulletKind::Basic);
         assert_eq!(large.spec.shoot_effect, "shootBig");
+    }
+
+    #[test]
+    fn eclipse_weapons_match_java_mount_profiles() {
+        let units = load();
+        let eclipse = by_name(&units, "eclipse");
+        assert_eq!(eclipse.speed, 0.54);
+        assert_eq!(eclipse.accel, 0.04);
+        assert_eq!(eclipse.drag, 0.04);
+        assert_eq!(eclipse.rotate_speed, 1.0);
+        assert!(eclipse.flying);
+        assert!(eclipse.low_altitude);
+        assert_eq!(eclipse.health, 22000.0);
+        assert_eq!(eclipse.engine_offset, 38.0);
+        assert_eq!(eclipse.engine_size, 7.3);
+        assert_eq!(eclipse.hit_size, 58.0);
+        assert_eq!(eclipse.armor, 13.0);
+        assert_eq!(
+            eclipse.target_flags,
+            vec![
+                Some("reactor".to_string()),
+                Some("battery".to_string()),
+                Some("core".to_string()),
+                None,
+            ]
+        );
+        assert_eq!(eclipse.loop_sound, "loopHover");
+        assert_eq!(eclipse.weapons.len(), 3);
+
+        let laser = &eclipse.weapons[0];
+        assert_eq!(laser.name, "large-laser-mount");
+        assert_eq!(laser.shake, 4.0);
+        assert_eq!(laser.shoot_y, 9.0);
+        assert_eq!(laser.x, 18.0);
+        assert_eq!(laser.y, 5.0);
+        assert_eq!(laser.rotate_speed, 2.0);
+        assert_eq!(laser.reload, 45.0);
+        assert_eq!(laser.recoil, 4.0);
+        assert_eq!(laser.shoot_sound, "shootEclipse");
+        assert_eq!(laser.shadow, 20.0);
+        assert!(laser.rotate);
+        assert_eq!(laser.bullet, "eclipse_laser");
+
+        let top_artillery = &eclipse.weapons[1];
+        assert_eq!(top_artillery.name, "large-artillery");
+        assert_eq!(top_artillery.x, 11.0);
+        assert_eq!(top_artillery.y, 27.0);
+        assert_eq!(top_artillery.rotate_speed, 2.0);
+        assert_eq!(top_artillery.reload, 9.0);
+        assert_eq!(top_artillery.shoot_sound, "shootCyclone");
+        assert_eq!(top_artillery.shadow, 7.0);
+        assert!(top_artillery.rotate);
+        assert_eq!(top_artillery.recoil, 0.5);
+        assert_eq!(top_artillery.shoot_y, 7.25);
+        assert_eq!(top_artillery.bullet, "eclipse_flak");
+
+        let lower_artillery = &eclipse.weapons[2];
+        assert_eq!(lower_artillery.name, "large-artillery");
+        assert_eq!(lower_artillery.y, -13.0);
+        assert_eq!(lower_artillery.x, 20.0);
+        assert_eq!(lower_artillery.reload, 12.0);
+        assert_eq!(lower_artillery.eject_effect, "casing1");
+        assert_eq!(lower_artillery.rotate_speed, 7.0);
+        assert_eq!(lower_artillery.shake, 1.0);
+        assert_eq!(lower_artillery.shoot_sound, "shootCyclone");
+        assert!(lower_artillery.rotate);
+        assert_eq!(lower_artillery.shadow, 12.0);
+        assert_eq!(lower_artillery.shoot_y, 7.25);
+        assert_eq!(lower_artillery.bullet, "eclipse_flak");
+
+        let bullets = bullets::load();
+        let laser_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == laser.bullet)
+            .expect("missing eclipse_laser");
+        assert_eq!(laser_bullet.spec.kind, BulletKind::Laser);
+        assert_eq!(laser_bullet.spec.damage, 115.0);
+        let flak_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == top_artillery.bullet)
+            .expect("missing eclipse_flak");
+        assert_eq!(flak_bullet.spec.kind, BulletKind::Flak);
+        assert_eq!(flak_bullet.spec.splash_damage, 65.0);
     }
 
     #[test]

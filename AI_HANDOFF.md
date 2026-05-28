@@ -8475,3 +8475,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议 `eclipse`，需要 flak bullet、large laser mount 与两个 large artillery；
   3. shared missile 身份、splash/status/weapon mount runtime 仍未完整 content-driven；
   4. 当前总迁移约 13.7%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 249. 最新闭环记录：UnitTypes eclipse laser and flak artillery mounts
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：回填 Java `eclipse` 的 large laser mount、两个 large artillery mount、shared flak bullet 与 laser bullet，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1251-1330`
+  - unit：`speed=0.54`、`accel=0.04`、`drag=0.04`、`rotateSpeed=1`、`health=22000`、`armor=13`、`targetFlags={reactor,battery,core,null}`、`loopSound=loopHover`；
+  - flak：`FlakBulletType(4,15)`，`shootEffect=shootBig`、`ammoMultiplier=4`、`splashDamage=65`、`splashDamageRadius=25`、`collidesGround=true`、`lifetime=47`、`status=blasted`；
+  - laser：`LaserBulletType`，`damage=115`、`sideAngle=20`、`sideWidth=1.5`、`sideLength=80`、`width=25`、`length=230`、`shootEffect=shockwave`、`colors={ec7458aa,ff9c5a,white}`。
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `flak_bullet(...)` helper；
+    - 新增 `eclipse_flak` 与 `eclipse_laser`；
+    - 更新 bullet load order；
+    - 新增 `eclipse_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `eclipse` 补齐 Java 字段并注册三把 weapon；
+    - 新增 `eclipse_weapons_match_java_mount_profiles`。
+  - `README.md`
+    - 当前总体完成度更新为约 `13.8%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.323`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core eclipse_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core eclipse_weapons_match_java_mount_profiles --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议进入 air support 段，从 `mono`/`poly` 继续；
+  3. Laser/Flak runtime、shared bullet 身份和 weapon mount 发射路径仍未完整 content-driven；
+  4. 当前总迁移约 13.8%，远未可玩，goal 绝不能标记 complete。
