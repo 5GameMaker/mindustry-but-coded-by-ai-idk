@@ -107,8 +107,88 @@ impl WeaponsComp {
     }
 
     pub fn update(&mut self) {
+        self.update_with_context(1.0, 1.0, self.can_shoot());
+    }
+
+    pub fn update_with_context(&mut self, delta: f32, reload_multiplier: f32, can_shoot: bool) {
+        let delta = delta.max(0.0);
+        let reload_multiplier = reload_multiplier.max(0.0);
+        for mount in &mut self.mounts {
+            let weapon = &mount.weapon;
+            let reload_time = weapon.reload.max(0.0001);
+            let recoil_time = if weapon.recoil_time < 0.0 {
+                reload_time
+            } else {
+                weapon.recoil_time.max(0.0001)
+            };
+
+            mount.reload = (mount.reload - delta * reload_multiplier).max(0.0);
+            mount.recoil =
+                approach_delta(mount.recoil, 0.0, delta * reload_multiplier / recoil_time);
+
+            if weapon.recoils > 0 {
+                let recoils = mount
+                    .recoils
+                    .get_or_insert_with(|| vec![0.0; weapon.recoils as usize]);
+                for recoil in recoils.iter_mut() {
+                    *recoil = approach_delta(*recoil, 0.0, delta * reload_multiplier / recoil_time);
+                }
+            }
+
+            let smooth_target = mount.reload / reload_time;
+            mount.smooth_reload = lerp_delta(
+                mount.smooth_reload,
+                smooth_target,
+                weapon.smooth_reload_speed,
+                delta,
+            );
+
+            let warmup_target = if (can_shoot && mount.shoot)
+                || (weapon.continuous && mount.bullet.is_some())
+                || mount.charging
+            {
+                1.0
+            } else {
+                0.0
+            };
+            if weapon.linear_warmup {
+                mount.warmup = approach_delta(
+                    mount.warmup,
+                    warmup_target,
+                    delta * weapon.shoot_warmup_speed,
+                );
+            } else {
+                mount.warmup = lerp_delta(
+                    mount.warmup,
+                    warmup_target,
+                    weapon.shoot_warmup_speed,
+                    delta,
+                );
+            }
+
+            if !(weapon.continuous && mount.bullet.is_some()) {
+                mount.heat = approach_delta(
+                    mount.heat,
+                    0.0,
+                    delta * reload_multiplier / weapon.cooldown_time.max(0.0001),
+                );
+            }
+        }
         self.mount_update_calls += self.mounts.len();
     }
+}
+
+fn approach_delta(value: f32, target: f32, amount: f32) -> f32 {
+    if value < target {
+        (value + amount).min(target)
+    } else {
+        (value - amount).max(target)
+    }
+}
+
+fn lerp_delta(value: f32, target: f32, alpha: f32, delta: f32) -> f32 {
+    let t = (alpha * delta).clamp(0.0, 1.0);
+    value + (target - value) * t
 }
 
 #[cfg(test)]
@@ -171,5 +251,36 @@ mod tests {
         assert_eq!(comp.mounts[0].sound, None);
         assert_eq!(comp.mounts[1].bullet, Some("shot".into()));
         assert_eq!(comp.mounts[1].sound, None);
+    }
+
+    #[test]
+    fn weapons_component_update_ticks_mount_state_like_weapon_update_prefix() {
+        let mut weapon = weapon("rifle", true, false);
+        weapon.reload = 10.0;
+        weapon.recoils = 2;
+        weapon.recoil_time = -1.0;
+        weapon.cooldown_time = 20.0;
+        weapon.smooth_reload_speed = 0.5;
+        weapon.shoot_warmup_speed = 0.25;
+        weapon.linear_warmup = true;
+        let mut comp = WeaponsComp::new(100.0, 10.0);
+        comp.setup_weapons([weapon]);
+        comp.mounts[0].reload = 5.0;
+        comp.mounts[0].recoil = 1.0;
+        comp.mounts[0].recoils = Some(vec![1.0, 0.25]);
+        comp.mounts[0].heat = 1.0;
+        comp.mounts[0].shoot = true;
+
+        comp.update_with_context(1.0, 2.0, true);
+
+        let mount = &comp.mounts[0];
+        assert!((mount.reload - 3.0).abs() < 0.0001);
+        assert!((mount.recoil - 0.8).abs() < 0.0001);
+        assert!((mount.recoils.as_ref().unwrap()[0] - 0.8).abs() < 0.0001);
+        assert!((mount.recoils.as_ref().unwrap()[1] - 0.05).abs() < 0.0001);
+        assert!((mount.smooth_reload - 0.15).abs() < 0.0001);
+        assert!((mount.warmup - 0.25).abs() < 0.0001);
+        assert!((mount.heat - 0.9).abs() < 0.0001);
+        assert_eq!(comp.mount_update_calls, 1);
     }
 }

@@ -7469,3 +7469,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 继续补 content spec → runtime spec 更多字段，并和 `core/src/mindustry/entities/bullet.rs` 的完整 `BulletType` 结构收敛；
   3. 检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
   4. 当前总迁移约 12%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 221. 最新闭环记录：Weapon.update passive mount state server tick
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：继续 Java `Weapon.update(Unit, WeaponMount)`，先迁移不依赖完整射击模式的被动 mount 状态，并接入真实 server unit tick。
+- Rust 主改动：
+  - `core/src/mindustry/entities/comp/weapons.rs`
+    - 新增 `WeaponsComp::update_with_context(delta, reload_multiplier, can_shoot)`；
+    - 推进 mount reload、recoil、recoils、smooth_reload、warmup、heat；
+    - `WeaponsComp::update()` 复用该 context 版本；
+    - 新增 `weapons_component_update_ticks_mount_state_like_weapon_update_prefix`。
+  - `server/src/lib.rs`
+    - 新增 `tick_server_unit_weapons(delta_ticks)`；
+    - server update 在 playing report 内 tick 非 dead `server_units` 的 weapons；
+    - 新增 `server_update_ticks_unit_weapon_mount_reload_and_warmup`。
+  - `MIGRATION.md`
+    - 新增 `12.295`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapons_component_update_ticks_mount_state_like_weapon_update_prefix --lib`
+  - `cargo test -p mindustry-server server_update_ticks_unit_weapon_mount_reload_and_warmup --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. `Weapon.update(...)` 的 autoTarget、rotate、shoot gate、shoot pattern、barrel counter、ammo/eject/recoil side effects、continuous beam、sound/effect、真实 bullet creation；
+  2. 把普通 server weapon shoot 与现在的 death shootOnDeath bullet spawn 逐步合流；
+  3. 检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
+  4. 当前总迁移约 12% 出头，远未可玩，goal 绝不能标记 complete。

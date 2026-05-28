@@ -315,6 +315,7 @@ impl ServerLauncher {
             if let Err(error) = self.tick_server_unit_spawn_abilities(1.0) {
                 self.network_error = Some(error.to_string());
             }
+            self.tick_server_unit_weapons(1.0);
             self.tick_server_regen_abilities(1.0);
             if let Err(error) = self.tick_server_liquid_regen_abilities(1.0) {
                 self.network_error = Some(error.to_string());
@@ -2414,6 +2415,22 @@ impl ServerLauncher {
         }
 
         suppressed_buildings
+    }
+
+    fn tick_server_unit_weapons(&mut self, delta_ticks: f32) -> usize {
+        let mut updated = 0;
+        for unit in self.server_units.values_mut() {
+            if unit.health.dead {
+                continue;
+            }
+            let reload_multiplier = unit.status.reload_multiplier;
+            let can_shoot = unit.can_shoot();
+            let before = unit.weapons.mount_update_calls;
+            unit.weapons
+                .update_with_context(delta_ticks, reload_multiplier, can_shoot);
+            updated += unit.weapons.mount_update_calls.saturating_sub(before);
+        }
+        updated
     }
 
     fn apply_server_unit_death_abilities(&mut self) -> io::Result<usize> {
@@ -7137,11 +7154,43 @@ mod tests {
             .any(|(_connection_id, packet, reliable)| {
                 !*reliable
                     && matches!(
-                        packet,
-                        PacketKind::HiddenSnapshotCallPacket(packet)
-                            if packet.ids.contains(&server_bullet_id)
+                            packet,
+                            PacketKind::HiddenSnapshotCallPacket(packet)
+                                if packet.ids.contains(&server_bullet_id)
                     )
             }));
+    }
+
+    #[test]
+    fn server_update_ticks_unit_weapon_mount_reload_and_warmup() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut weapon = Weapon::new("server-rifle");
+        weapon.reload = 10.0;
+        weapon.shoot_warmup_speed = 0.5;
+        weapon.linear_warmup = true;
+        let mut unit_type = UnitType::new(9104, "server-gunner");
+        unit_type.weapons.push(weapon);
+        let mut unit = UnitComp::new(95, unit_type, TeamId(2));
+        unit.weapons.mounts[0].reload = 4.0;
+        unit.weapons.mounts[0].shoot = true;
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        let mount = &launcher.server_units.get(&95).unwrap().weapons.mounts[0];
+        assert!((mount.reload - 3.0).abs() < 0.0001);
+        assert!((mount.warmup - 0.5).abs() < 0.0001);
+        assert_eq!(
+            launcher
+                .server_units
+                .get(&95)
+                .unwrap()
+                .weapons
+                .mount_update_calls,
+            1
+        );
     }
 
     #[test]

@@ -9353,3 +9353,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 该转换仍是最小 motion/sync seam；完整 Java bullet runtime 还需继续迁移 `BulletType.update/hit/despawn`、碰撞、命中、伤害、frag、interval、trail/sound；
   - 后续应逐步补齐 content spec 到 runtime spec 的更多字段，并避免与 `core/src/mindustry/entities/bullet.rs` 中更完整 `BulletType` 数据结构分叉；
   - 当前总体迁移约 12%，远未可玩。
+
+### 12.295 Weapon.update passive mount state server tick
+
+- 2026-05-28：开始把 Java `Weapon.update(Unit, WeaponMount)` 从死亡发弹专用路径推进到普通 server unit tick。本节先迁移不依赖完整射击模式的被动 mount 状态：reload、recoil、barrel recoil、smoothReload、warmup、heat。
+- Java 依据：
+  - `mount.reload = Math.max(mount.reload - Time.delta * unit.reloadMultiplier, 0)`；
+  - `mount.recoil = Mathf.approachDelta(..., unit.reloadMultiplier / recoilTime)`；
+  - `mount.smoothReload = Mathf.lerpDelta(mount.smoothReload, mount.reload / reload, smoothReloadSpeed)`；
+  - `warmupTarget = (can && mount.shoot) || (continuous && mount.bullet != null) || mount.charging`；
+  - 非 continuous firing 时 heat 按 `cooldownTime` 下降。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/comp/weapons.rs`
+    - `WeaponsComp::update()` 改为调用新增 `update_with_context(delta, reload_multiplier, can_shoot)`；
+    - 新增 `approach_delta(...)` 与 `lerp_delta(...)`；
+    - `update_with_context(...)` 推进每个 `WeaponMount` 的 reload/recoil/recoils/smooth_reload/warmup/heat；
+    - 新增 `weapons_component_update_ticks_mount_state_like_weapon_update_prefix`。
+  - `server/src/lib.rs`
+    - 新增 `tick_server_unit_weapons(delta_ticks)`；
+    - server update 在 playing report 内对非 dead `server_units` 调用 `unit.weapons.update_with_context(...)`；
+    - 新增 `server_update_ticks_unit_weapon_mount_reload_and_warmup`，确认 server runtime 真正推进 weapon mount 状态。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapons_component_update_ticks_mount_state_like_weapon_update_prefix --lib`
+  - `cargo test -p mindustry-server server_update_ticks_unit_weapon_mount_reload_and_warmup --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 这只是 `Weapon.update(...)` 前缀/passive state；仍缺 autoTarget、rotate、shoot gate、shoot pattern、barrel counter、ammo/eject/recoil side effects、continuous beam、sound/effect、真实 bullet creation；
+  - 需要后续把该 tick 与 server authoritative bullet spawn 合流，而不是死亡发弹独立路径长期存在；
+  - 当前总体迁移约 12% 出头，远未可玩。
