@@ -62,6 +62,11 @@ pub struct DesktopStandardEffectRenderFrame {
     pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopSoundAtAudioFrame {
+    pub sound_at_events: Vec<SoundAtCallPacket>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct DesktopCameraShakeFrame {
     pub max_offset: f32,
@@ -154,6 +159,19 @@ impl DesktopEffectRenderStats {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopSoundAudioStats {
+    pub sound_at_events: usize,
+}
+
+impl DesktopSoundAudioStats {
+    pub fn from_sound_at_audio_frame(frame: &DesktopSoundAtAudioFrame) -> Self {
+        Self {
+            sound_at_events: frame.sound_at_events.len(),
+        }
+    }
+}
+
 pub trait DesktopEffectRenderer {
     fn render_standard_effect_frame(
         &mut self,
@@ -174,6 +192,31 @@ impl DesktopEffectRenderer for HeadlessDesktopEffectRenderer {
     ) -> DesktopEffectRenderStats {
         let stats = DesktopEffectRenderStats::from_standard_effect_frame(frame);
         self.frames_rendered += 1;
+        self.last_stats = stats;
+        stats
+    }
+}
+
+pub trait DesktopAudioRenderer {
+    fn play_sound_at_audio_frame(
+        &mut self,
+        frame: &DesktopSoundAtAudioFrame,
+    ) -> DesktopSoundAudioStats;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeadlessDesktopAudioRenderer {
+    pub frames_played: usize,
+    pub last_stats: DesktopSoundAudioStats,
+}
+
+impl DesktopAudioRenderer for HeadlessDesktopAudioRenderer {
+    fn play_sound_at_audio_frame(
+        &mut self,
+        frame: &DesktopSoundAtAudioFrame,
+    ) -> DesktopSoundAudioStats {
+        let stats = DesktopSoundAudioStats::from_sound_at_audio_frame(frame);
+        self.frames_played += 1;
         self.last_stats = stats;
         stats
     }
@@ -542,6 +585,33 @@ impl DesktopLauncher {
         let count = events.len();
         self.pending_sound_at_events.extend(events);
         count
+    }
+
+    pub fn sound_at_audio_frame(&self) -> DesktopSoundAtAudioFrame {
+        DesktopSoundAtAudioFrame {
+            sound_at_events: self.pending_sound_at_events.clone(),
+        }
+    }
+
+    pub fn play_sound_at_audio_frame_with<R>(&self, renderer: &mut R) -> DesktopSoundAudioStats
+    where
+        R: DesktopAudioRenderer,
+    {
+        let frame = self.sound_at_audio_frame();
+        renderer.play_sound_at_audio_frame(&frame)
+    }
+
+    pub fn drain_and_play_sound_at_audio_frame_with<R>(
+        &mut self,
+        renderer: &mut R,
+    ) -> DesktopSoundAudioStats
+    where
+        R: DesktopAudioRenderer,
+    {
+        let frame = DesktopSoundAtAudioFrame {
+            sound_at_events: self.drain_sound_at_events_for_audio(),
+        };
+        renderer.play_sound_at_audio_frame(&frame)
     }
 
     pub fn drain_sound_at_events_for_audio(&mut self) -> Vec<SoundAtCallPacket> {
@@ -1959,7 +2029,10 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 
 #[cfg(test)]
 mod tests {
-    use super::{run, DesktopEffectRenderStats, DesktopLauncher, HeadlessDesktopEffectRenderer};
+    use super::{
+        run, DesktopEffectRenderStats, DesktopLauncher, HeadlessDesktopAudioRenderer,
+        HeadlessDesktopEffectRenderer,
+    };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
@@ -2883,6 +2956,38 @@ mod tests {
 
         let drained = launcher.drain_sound_at_events_for_audio();
         assert_eq!(drained, vec![packet]);
+        assert!(launcher.pending_sound_at_events.is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_plays_sound_at_audio_frame_with_headless_renderer() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let packet = SoundAtCallPacket {
+            sound_id: mindustry_core::mindustry::audio::standard_sound_id("wreckFall").unwrap(),
+            x: 24.0,
+            y: 48.0,
+            volume: 0.8,
+            pitch: 1.0,
+        };
+        launcher.pending_sound_at_events.push(packet.clone());
+
+        let frame = launcher.sound_at_audio_frame();
+        assert_eq!(frame.sound_at_events, vec![packet.clone()]);
+
+        let mut renderer = HeadlessDesktopAudioRenderer::default();
+        let stats = launcher.play_sound_at_audio_frame_with(&mut renderer);
+        assert_eq!(stats.sound_at_events, 1);
+        assert_eq!(renderer.frames_played, 1);
+        assert_eq!(renderer.last_stats.sound_at_events, 1);
+        assert_eq!(
+            launcher.pending_sound_at_events.len(),
+            1,
+            "non-draining frame play should keep events pending until backend consumes them"
+        );
+
+        let stats = launcher.drain_and_play_sound_at_audio_frame_with(&mut renderer);
+        assert_eq!(stats.sound_at_events, 1);
+        assert_eq!(renderer.frames_played, 2);
         assert!(launcher.pending_sound_at_events.is_empty());
     }
 

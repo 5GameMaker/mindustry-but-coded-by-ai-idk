@@ -6937,8 +6937,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned`
   - `cargo check -p mindustry-desktop`
 - 当前仍需继续：
-  1. 真实 desktop audio backend 还没有消费 `pending_sound_at_events` 并播放；
+  1. `pending_sound_at_events` 已在 `204` 节接入 desktop audio frame/headless renderer seam；真实平台 audio backend 还没有播放；
   2. sound asset/backend、距离衰减、音量设置、重复事件合并还没完整；
   3. camera shake 也仍只是 pending/state seam，没有真实 camera offset；
   4. flying wreck update/renderer、完整 `UnitComp.destroy()` 仍是后续主线；
   5. 当前总迁移仍约 10% 左右，远未可玩。
+
+---
+
+## 204. 最新闭环记录：desktop sound-at audio frame 与 headless renderer seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：在 `pending_sound_at_events` 后补 backend 消费入口，使本地 sound-at 事件能沿 desktop audio frame/renderer seam 继续下沉。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSoundAtAudioFrame`；
+    - 新增 `DesktopSoundAudioStats`；
+    - 新增 `DesktopAudioRenderer` trait；
+    - 新增 `HeadlessDesktopAudioRenderer`；
+    - `DesktopLauncher` 新增 `sound_at_audio_frame()`、`play_sound_at_audio_frame_with(...)`、`drain_and_play_sound_at_audio_frame_with(...)`；
+    - 新增测试 `desktop_launcher_plays_sound_at_audio_frame_with_headless_renderer`。
+  - `MIGRATION.md`
+    - 新增 `12.278`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_plays_sound_at_audio_frame_with_headless_renderer`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_and_drains_local_sound_at_events_for_audio`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 真实平台 audio backend 仍需实现 `DesktopAudioRenderer` 并接 assets/device；
+  2. sound 距离衰减、音量设置、重复事件合并、完整 sound id/asset 表仍未做；
+  3. camera shake 也需要真实 camera offset renderer/backend；
+  4. flying wreck update/renderer、完整 `UnitComp.destroy()` 仍是后续主线；
+  5. 当前总迁移仍约 10%~11%，远未可玩。

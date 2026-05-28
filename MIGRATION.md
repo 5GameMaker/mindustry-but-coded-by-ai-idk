@@ -8885,7 +8885,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_spawn_packet_without_losing_assembler_spawned`
   - `cargo check -p mindustry-desktop`
 - 仍未完成：
-  - 真实 desktop audio backend 仍未播放 `pending_sound_at_events`；
+  - `pending_sound_at_events` 已在 `12.278` 接入 desktop audio frame/headless renderer seam；真实平台 audio backend 仍未播放；
   - 尚未做 sound event 合并、距离衰减、音量设置与 asset/backend 的完整映射；
   - flying wreck update/renderer、完整 `UnitComp.destroy()` 仍需继续；
   - 当前总体迁移仍约 10% 左右，远未可玩。
+
+### 12.278 desktop sound-at audio frame 与 headless renderer seam
+
+- 2026-05-28：在 `pending_sound_at_events` 后补一层 desktop audio frame/renderer seam，使本地音效事件具备 backend 消费入口，而不是只停在 pending 队列。
+- Rust 新增/变化：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSoundAtAudioFrame { sound_at_events }`；
+    - 新增 `DesktopSoundAudioStats { sound_at_events }`；
+    - 新增 `DesktopAudioRenderer` trait；
+    - 新增 `HeadlessDesktopAudioRenderer`，用于测试/无音频 backend 环境记录 audio frame 消费；
+    - `DesktopLauncher` 新增：
+      - `sound_at_audio_frame()`
+      - `play_sound_at_audio_frame_with(...)`
+      - `drain_and_play_sound_at_audio_frame_with(...)`
+    - 新增 `desktop_launcher_plays_sound_at_audio_frame_with_headless_renderer`，验证 non-draining 播放保留 pending、draining 播放会消费 pending。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_plays_sound_at_audio_frame_with_headless_renderer`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_and_drains_local_sound_at_events_for_audio`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 真实平台 audio backend 仍需实现 `DesktopAudioRenderer` 并接资源/播放设备；
+  - 距离衰减、音量设置、重复 sound 合并、asset/backend 映射仍未完整；
+  - camera shake 仍需真实 camera offset backend；
+  - 当前总体迁移仍约 10%~11%，远未可玩。
