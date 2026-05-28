@@ -2839,6 +2839,41 @@ impl GameRuntime {
         std::mem::take(&mut self.unit_type_killed_events)
     }
 
+    pub fn note_unit_ability_death_events(&mut self, unit: &UnitComp) -> usize {
+        let x = unit.x();
+        let y = unit.y();
+        let before = self.unit_ability_death_events.len();
+        for (ability_index, descriptor) in unit.type_info.abilities.iter().enumerate() {
+            let ability_kind = descriptor
+                .split([':', '('])
+                .next()
+                .unwrap_or(descriptor)
+                .trim()
+                .to_string();
+            self.unit_ability_death_events
+                .push(GameRuntimeUnitAbilityDeathEvent {
+                    unit_id: unit.id(),
+                    ability_index,
+                    ability_kind,
+                    descriptor: descriptor.clone(),
+                    x,
+                    y,
+                });
+        }
+        self.unit_ability_death_events.len() - before
+    }
+
+    pub fn note_unit_type_killed_event(&mut self, unit: &UnitComp) {
+        self.unit_type_killed_events
+            .push(GameRuntimeUnitTypeKilledEvent {
+                unit_id: unit.id(),
+                unit_type_name: unit.type_info.name().to_string(),
+                team: unit.team_id(),
+                x: unit.x(),
+                y: unit.y(),
+            });
+    }
+
     pub fn note_client_block_snapshot_parse_error(
         &mut self,
     ) -> GameRuntimeClientSnapshotApplyReport {
@@ -4082,32 +4117,8 @@ impl GameRuntime {
                 });
         }
 
-        for (ability_index, descriptor) in unit.type_info.abilities.iter().enumerate() {
-            let ability_kind = descriptor
-                .split([':', '('])
-                .next()
-                .unwrap_or(descriptor)
-                .trim()
-                .to_string();
-            self.unit_ability_death_events
-                .push(GameRuntimeUnitAbilityDeathEvent {
-                    unit_id: unit.id(),
-                    ability_index,
-                    ability_kind,
-                    descriptor: descriptor.clone(),
-                    x,
-                    y,
-                });
-        }
-
-        self.unit_type_killed_events
-            .push(GameRuntimeUnitTypeKilledEvent {
-                unit_id: unit.id(),
-                unit_type_name: unit.type_info.name().to_string(),
-                team: unit.team_id(),
-                x,
-                y,
-            });
+        self.note_unit_ability_death_events(unit);
+        self.note_unit_type_killed_event(unit);
 
         if unit.type_info.create_scorch {
             let size = (hit_size / 5.0).floor().clamp(0.0, 9.0) as i32;

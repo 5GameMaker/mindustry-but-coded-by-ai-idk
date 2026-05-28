@@ -7199,3 +7199,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. suicide trigger、wreckRegions decal、weapon bullet spawn 仍未迁移；
   4. `Damage.dynamicExplosion(...)` lightning/fire/wave damage、真实 audio/camera backend 仍需继续；
   5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 212. 最新闭环记录：Server death ability lifecycle sidecar 接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 子代理只读结论：`SpawnDeathAbility` 是当前最短真实闭环，已经存在 server 死亡处理、子单位生成、`UnitSpawnCallPacket` 广播链路；`LiquidExplodeAbility` 也已有 server puddle runtime，但后续还要补 server→client puddle snapshot smoke。不要在 client 侧执行 ability death。
+- 本轮目标：把已记录的 ability/type killed sidecar 接入服务器真实 death ability 路径，而不是只在客户端 `UnitDestroyCallPacket` 回放时记录。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 抽出 `note_unit_ability_death_events(&UnitComp)`；
+    - 抽出 `note_unit_type_killed_event(&UnitComp)`；
+    - client `queue_client_unit_destroy_side_effects(...)` 复用统一记录入口。
+  - `server/src/lib.rs`
+    - `apply_server_unit_death_abilities(...)` 移除 dead parent 后，先记录 ability death 与 type killed sidecar，再执行已有 `liquid_explode_ability_deposit_plans()` / `spawn_death_ability_plans()`；
+    - 扩展 `server_update_spawns_renales_when_latum_dies`，断言 latum 的多 ability death 都被记录，并且 `SpawnDeathAbility:renale:5:11` 确实生成 5 个 renale；
+    - 扩展 `server_update_deposits_neoplasm_when_renale_dies`，断言 `LiquidExplodeAbility:neoplasm` sidecar 与真实 `server_puddles` 写入同时成立。
+  - `MIGRATION.md`
+    - 新增 `12.286`。
+- 已跑验证：
+  - `cargo test -p mindustry-server server_update_spawns_renales_when_latum_dies --lib`
+  - `cargo test -p mindustry-server server_update_deposits_neoplasm_when_renale_dies --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update --lib`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_death_packet_like_java_killed --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `SpawnDeathAbility` 仍需更完整 Java random/rotation parity、unit cap/visibility/event bus 细节；
+  2. `LiquidExplodeAbility` 需要补 server→desktop/client puddle snapshot smoke；
+  3. suicide trigger、wreckRegions decal、weapon bullet spawn 仍未迁移；
+  4. `Damage.dynamicExplosion(...)` lightning/fire/wave damage、真实 audio/camera backend 仍需继续；
+  5. 当前总迁移仍约 10%~11%，远未可玩。

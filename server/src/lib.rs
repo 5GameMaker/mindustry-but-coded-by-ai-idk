@@ -2412,6 +2412,8 @@ impl ServerLauncher {
             let Some(parent) = self.server_units.remove(&parent_id) else {
                 continue;
             };
+            self.runtime.note_unit_ability_death_events(&parent);
+            self.runtime.note_unit_type_killed_event(&parent);
             if self.net_server.is_active() {
                 self.net_server.net_mut().send(
                     &PacketKind::UnitDespawnCallPacket(UnitDespawnCallPacket {
@@ -6776,6 +6778,19 @@ mod tests {
             let dy = unit.y() - 200.0;
             (dx * dx + dy * dy).sqrt() <= 11.001
         }));
+        assert_eq!(launcher.runtime.unit_ability_death_events.len(), 4);
+        assert!(launcher
+            .runtime
+            .unit_ability_death_events
+            .iter()
+            .any(|event| event.ability_kind == "SpawnDeathAbility"
+                && event.descriptor == "SpawnDeathAbility:renale:5:11"
+                && event.unit_id == 34));
+        assert_eq!(launcher.runtime.unit_type_killed_events.len(), 1);
+        assert_eq!(
+            launcher.runtime.unit_type_killed_events[0].unit_type_name,
+            "latum"
+        );
         assert_eq!(launcher.runtime.unit_create_events.len(), 5);
         assert_eq!(launcher.runtime.state.stats.units_created, 5);
     }
@@ -6829,6 +6844,18 @@ mod tests {
             .expect("renale death should deposit neoplasm on its tile");
         assert_eq!(entry.puddle.amount, 70.0);
         assert_eq!(entry.liquid.name, "neoplasm");
+        assert!(launcher
+            .runtime
+            .unit_ability_death_events
+            .iter()
+            .any(|event| event.ability_kind == "LiquidExplodeAbility"
+                && event.descriptor == "LiquidExplodeAbility:neoplasm"
+                && event.unit_id == 36));
+        assert_eq!(launcher.runtime.unit_type_killed_events.len(), 1);
+        assert_eq!(
+            launcher.runtime.unit_type_killed_events[0].unit_type_name,
+            "renale"
+        );
     }
 
     #[test]
