@@ -461,6 +461,13 @@ impl CrackAtlasPlan {
             })
             .collect()
     }
+
+    pub fn virtual_source_paths(&self) -> Vec<String> {
+        self.region_names()
+            .into_iter()
+            .map(|name| format!("sprites/rubble/{}.png", name))
+            .collect()
+    }
 }
 
 impl Default for CrackAtlasPlan {
@@ -1517,6 +1524,16 @@ mod tests {
         assert_eq!(names.len(), MAX_CRACK_SIZE * CRACK_REGION_COUNT);
         assert_eq!(names.first().map(String::as_str), Some("cracks-1-0"));
         assert_eq!(names.last().map(String::as_str), Some("cracks-7-7"));
+
+        let paths = atlas.virtual_source_paths();
+        assert_eq!(
+            paths.first().map(String::as_str),
+            Some("sprites/rubble/cracks-1-0.png")
+        );
+        assert_eq!(
+            paths.last().map(String::as_str),
+            Some("sprites/rubble/cracks-7-7.png")
+        );
     }
 
     #[test]

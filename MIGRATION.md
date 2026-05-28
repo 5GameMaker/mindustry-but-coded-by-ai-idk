@@ -11265,3 +11265,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java 各 `Block.drawCracks()` 子类 override 还未逐类迁移，当前只接入了默认 `Block.drawCracks` gate；
   - 后续需继续把真实 atlas 构建、sprite batch 和 `DrawBlock` 子类渲染逻辑接入整体 runtime；
   - 当前总体迁移约 19.3%，仍未达到完整可玩。
+
+### 12.351 Crack regions seeded into desktop texture atlas
+
+- 2026-05-29：继续把上一闭环的 `cracks-{size}-{index}` 从 block renderer symbol 层推进到 atlas/frame/trace 主链。本轮让 `CrackAtlasPlan` 生成 rubble 页虚拟 source path，并在 `DesktopLauncher::new(...)` 默认初始化 `TextureAtlasPlan<bool>` 时注入 7×8 个裂纹 region。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - `ClientLoadEvent` 会把 `cracks-1-0` 到 `cracks-7-7` 从全局 `Core.atlas` 查出，后续 `BuildingComp.drawCracks()` 直接按 region 引用绘制；
+  - Rust 当前仍无真实 PNG/GPU atlas，但默认 desktop frame 现在至少能通过 frame 自带 atlas registry 解析同名 crack sprite。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `CrackAtlasPlan::virtual_source_paths()` 将 Java crack region key 映射到 `sprites/rubble/cracks-{size}-{index}.png`；
+    - 这些路径走既有 `TextureAtlasPlan<bool>::from_virtual_source_paths(...)`，自动进入 `PageType::Rubble` / `sprites4.png`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::new(...)` 不再使用空 `TextureAtlasPlan::default()`，而是基于 `block_renderer_state.crack_atlas.virtual_source_paths()` 预置默认 crack atlas；
+    - `graphics_frame_for_render(...)` 已有的 `self.texture_atlas.clone()` 因此会把 crack regions 带入 `DesktopGraphicsFrame`；
+    - 新增测试验证默认 launcher atlas 含 56 个 crack region，并验证 damaged wall 的 `cracks-2-4` 在 `DesktopGraphicsExecutionTrace::from_frame(...)` 中解析为非 missing 的 rubble page sprite。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-core block_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `12 passed`
+  - `cargo test -p mindustry-desktop default_texture_atlas --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop default_block_crack_sprite --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `9 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - 仍未执行真实文件扫描、PNG decode、bleed、pack、flush/rebind 或 GPU texture region bind；
+  - 默认 atlas 目前只预置 crack region，基础 block sprites、mod sprites、icon candidates 仍需继续接 content/mod resource 主链；
+  - 当前总体迁移约 19.4%，仍未达到完整可玩。

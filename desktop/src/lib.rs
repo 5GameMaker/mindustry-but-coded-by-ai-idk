@@ -809,6 +809,10 @@ fn block_renderer_tile_snapshot_from_world(
 impl DesktopLauncher {
     pub fn new(args: Vec<String>) -> Self {
         let connect_target = parse_connect_target(&args);
+        let block_renderer_state = BlockRendererState::default();
+        let texture_atlas = TextureAtlasPlan::from_virtual_source_paths(
+            block_renderer_state.crack_atlas.virtual_source_paths(),
+        );
         Self {
             client: ClientLauncher::new(AppContext::new("data")),
             net_client: NetClient::with_net(Net::new(Box::new(ArcNetProvider::new()))),
@@ -829,7 +833,7 @@ impl DesktopLauncher {
             camera_shake_state: DesktopCameraShakeState::default(),
             last_camera_shake_frame: DesktopCameraShakeFrame::default(),
             overlay_renderer_state: OverlayRendererState::default(),
-            block_renderer_state: BlockRendererState::default(),
+            block_renderer_state,
             light_renderer_state: LightRendererState::default(),
             floor_renderer_state: FloorRendererState::default(),
             fog_renderer_state: FogRendererState::default(),
@@ -844,7 +848,7 @@ impl DesktopLauncher {
             connect_target,
             connect_error: None,
             args,
-            texture_atlas: TextureAtlasPlan::default(),
+            texture_atlas,
             content_loader: ContentLoader::create_base_content_or_panic(),
             last_applied_world_data: None,
             last_applied_state_snapshot: None,
@@ -3026,7 +3030,7 @@ mod tests {
     use mindustry_core::mindustry::entities::comp::DecalColor;
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, CacheLayer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
-        MinimapCamera, MinimapOverlayInput, RenderBridge, RenderCamera, RenderCommand,
+        MinimapCamera, MinimapOverlayInput, PageType, RenderBridge, RenderCamera, RenderCommand,
         RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderRect, RenderSize,
         RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext, ShaderApplyPlan,
         ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
@@ -4238,6 +4242,92 @@ mod tests {
             .building_passes
             .iter()
             .any(|pass| pass.stage == BlockDrawStage::BuildingCracks));
+    }
+
+    #[test]
+    fn desktop_launcher_default_texture_atlas_contains_block_crack_regions() {
+        let launcher = DesktopLauncher::new(Vec::new());
+
+        let first = launcher
+            .texture_atlas
+            .lookup("cracks-1-0")
+            .expect("default desktop atlas should expose Java crack region symbols");
+        assert_eq!(first.page_type, PageType::Rubble);
+        assert_eq!(first.region.source_path, "sprites/rubble/cracks-1-0.png");
+        assert_eq!(first.region.width, 1);
+        assert_eq!(first.region.height, 1);
+
+        let last = launcher
+            .texture_atlas
+            .lookup("cracks-7-7")
+            .expect("default desktop atlas should include all 7x8 crack regions");
+        assert_eq!(last.page_type, PageType::Rubble);
+        assert_eq!(last.region.source_path, "sprites/rubble/cracks-7-7.png");
+
+        let crack_count = launcher
+            .texture_atlas
+            .page(PageType::Rubble)
+            .regions
+            .iter()
+            .filter(|region| region.name.starts_with("cracks-"))
+            .count();
+        assert_eq!(crack_count, 7 * 8);
+    }
+
+    #[test]
+    fn desktop_graphics_frame_resolves_default_block_crack_sprite_from_atlas() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let wall_large = launcher
+            .content_loader
+            .block_by_name("copper-wall-large")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(3, 3);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = wall_large.id;
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos: tile.pos(),
+                block: wall_large.id,
+                team: 7,
+                rotation: 0,
+            });
+            tile.pos()
+        };
+
+        let mut building = BuildingComp::new(tile_pos, wall_large, TeamId(7));
+        building.health = building.max_health * 0.5;
+        building.was_damaged = true;
+        building.visible_flags = 1;
+        launcher.runtime.buildings.push(building);
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let minimap_camera = MinimapCamera::new(12.0, 12.0, 8.0, 8.0);
+
+        let frame = launcher.graphics_frame_for_render(
+            1,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        let crack = trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.resolved_sprites.iter())
+            .find(|sprite| sprite.symbol == "cracks-2-4")
+            .expect("damaged size-2 wall should emit cracks-2-4 sprite");
+
+        assert_eq!(crack.page_type, Some(PageType::Rubble));
+        assert_eq!(crack.page_source_path.as_deref(), Some("sprites4.png"));
+        assert_eq!(crack.region_width, Some(1));
+        assert_eq!(crack.region_height, Some(1));
+        assert!(!crack.missing);
     }
 
     #[test]
