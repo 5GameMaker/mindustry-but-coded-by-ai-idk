@@ -9737,3 +9737,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `beta` / `nova` 的 `LaserBoltBulletType` 仍待补 `BulletKind::LaserBolt` 或等价 schema；
   - `scale_keep_velocity` 已进入 content schema，但真实速度继承寿命缩放 runtime 仍待后续接入；
   - 当前总体迁移约 12.7%，远未可玩。
+
+### 12.307 UnitTypes beta small-mount LaserBoltBulletType content seam
+
+- 2026-05-28：继续回填核心单位 `beta` 的 `small-mount-weapon` 与 `LaserBoltBulletType`；本闭环补出 `BulletKind::LaserBolt` 与 `laser_bolt_bullet(...)` helper，为后续 `nova` 的治疗 LaserBolt 复用同一 content schema。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:2531-2579`
+  - `beta`：`targetBuildingsMobile = false`、`flying = true`、`mineSpeed = 7f`、`mineTier = 1`、`buildSpeed = 0.75f`、`drag = 0.05f`、`speed = 3.3f`、`rotateSpeed = 17f`、`accel = 0.1f`、`fogRadius = 0f`、`itemCapacity = 50`、`health = 170f`、`engineOffset = 6f`、`hitSize = 9f`、`lowAltitude = true`
+  - weapon：`new Weapon("small-mount-weapon")`，`top = false`、`reload = 20f`、`x = 3f`、`y = 1f`、`recoil = 1f`、`shoot.shots = 2`、`shoot.shotDelay = 4f`、`shootSound = Sounds.shootAlpha`
+  - bullet：`new LaserBoltBulletType(3f, 11)`，`scaleKeepVelocity = true`、`width = 1.5f`、`height = 4.5f`、`hitEffect = despawnEffect = Fx.hitBulletColor`、`trailWidth = 1.2f`、`trailLength = 3`、`shootEffect = Fx.shootSmallColor`、`smokeEffect = Fx.hitLaserColor`、`backColor = trailColor = hitColor = lightColor = Pal.yellowBoltFront`、`frontColor = Color.white`、`lifetime = 60f`、`buildingDamageMultiplier = 0.01f`、`homingPower = 0.03f`
+  - `LaserBoltBulletType.java` 默认：继承 BasicBulletType，`hittable = false`、`reflectable = false`、`lightColor = Pal.heal`、`lightOpacity = 0.6f`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletKind` 新增 `LaserBolt`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `laser_bolt_bullet(speed, damage)` helper；
+    - 新增具名 bullet preset `beta_laser_bolt`，颜色字符串按现有惯例记录为 `yellowBoltFront` / `white`；
+    - 更新 bullet registry 顺序测试，新增 `beta_laser_bolt_matches_java_laser_bolt_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `beta` 补齐 `target_buildings_mobile/drag/accel/fog_radius` 等 Java 字段；
+    - `beta` 现在注册 `Weapon::new("small-mount-weapon")`；
+    - weapon 引用 `bullet = "beta_laser_bolt"`，并设置 `shoot_shots = 2` / `shoot_shot_delay = 4.0`；
+    - 新增 `beta_small_mount_weapon_uses_laser_bolt_profile`，确认 unit weapon 与 LaserBolt bullet registry 引用链。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core beta_laser_bolt_matches_java_laser_bolt_profile --lib`
+  - `cargo test -p mindustry-core beta_small_mount_weapon_uses_laser_bolt_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `scale_keep_velocity` 已记录在 content schema，但真实继承速度/寿命缩放 runtime 还未接入；
+  - `LaserBolt` 的绘制、trail、homing 与颜色特效仍是 content 层记录，客户端显示和完整 bullet 行为还需继续接 runtime；
+  - 下一步建议回填 `nova` 的 `heal-weapon`，复用本闭环的 `LaserBolt` schema 并补 `heal_percent/collides_team`；
+  - 当前总体迁移约 12.75%，远未可玩。

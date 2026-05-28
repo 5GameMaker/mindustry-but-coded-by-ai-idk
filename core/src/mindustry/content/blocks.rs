@@ -501,6 +501,7 @@ pub enum BulletKind {
     Shrapnel,
     Liquid,
     Laser,
+    LaserBolt,
     Lightning,
     Rail,
     ContinuousLaser,

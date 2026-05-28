@@ -75,6 +75,25 @@ pub fn load() -> Vec<BulletContent> {
     quasar_beam.length = 150.0;
     quasar_beam.colors = vec!["heal@0.4".into(), "heal".into(), "white".into()];
 
+    let mut beta_laser_bolt = laser_bolt_bullet(3.0, 11.0);
+    beta_laser_bolt.scale_keep_velocity = true;
+    beta_laser_bolt.width = 1.5;
+    beta_laser_bolt.height = 4.5;
+    beta_laser_bolt.hit_effect = "hitBulletColor".into();
+    beta_laser_bolt.despawn_effect = "hitBulletColor".into();
+    beta_laser_bolt.trail_width = 1.2;
+    beta_laser_bolt.trail_length = 3;
+    beta_laser_bolt.shoot_effect = "shootSmallColor".into();
+    beta_laser_bolt.smoke_effect = "hitLaserColor".into();
+    beta_laser_bolt.back_color = "yellowBoltFront".into();
+    beta_laser_bolt.trail_color = "yellowBoltFront".into();
+    beta_laser_bolt.hit_color = "yellowBoltFront".into();
+    beta_laser_bolt.front_color = "white".into();
+    beta_laser_bolt.light_color = "yellowBoltFront".into();
+    beta_laser_bolt.lifetime = 60.0;
+    beta_laser_bolt.building_damage_multiplier = 0.01;
+    beta_laser_bolt.homing_power = 0.03;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -118,6 +137,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "dagger_basic", dagger_basic),
         make_bullet(&mut next_id, "mace_flame", mace_flame),
         make_bullet(&mut next_id, "quasar_beam", quasar_beam),
+        make_bullet(&mut next_id, "beta_laser_bolt", beta_laser_bolt),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -177,6 +197,24 @@ fn laser_bullet(damage: f32) -> BulletSpec {
     bullet
 }
 
+fn laser_bolt_bullet(speed: f32, damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::LaserBolt, speed, damage);
+    bullet.width = 2.0;
+    bullet.height = 7.0;
+    bullet.shrink_y = 0.5;
+    bullet.sprite = "bullet".into();
+    bullet.back_color = "bulletYellowBack".into();
+    bullet.front_color = "bulletYellow".into();
+    bullet.smoke_effect = "hitLaser".into();
+    bullet.hit_effect = "hitLaser".into();
+    bullet.despawn_effect = "hitLaser".into();
+    bullet.hittable = false;
+    bullet.reflectable = false;
+    bullet.light_color = "heal".into();
+    bullet.light_opacity = 0.6;
+    bullet
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +237,7 @@ mod tests {
                 "dagger_basic",
                 "mace_flame",
                 "quasar_beam",
+                "beta_laser_bolt",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -308,6 +347,36 @@ mod tests {
         assert!(bullet.pierce);
         assert!(!bullet.hittable);
         assert!(!bullet.absorbable);
+    }
+
+    #[test]
+    fn beta_laser_bolt_matches_java_laser_bolt_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "beta_laser_bolt").spec;
+
+        assert_eq!(bullet.kind, BulletKind::LaserBolt);
+        assert_eq!(bullet.speed, 3.0);
+        assert_eq!(bullet.damage, 11.0);
+        assert!(bullet.scale_keep_velocity);
+        assert_eq!(bullet.width, 1.5);
+        assert_eq!(bullet.height, 4.5);
+        assert_eq!(bullet.hit_effect, "hitBulletColor");
+        assert_eq!(bullet.despawn_effect, "hitBulletColor");
+        assert_eq!(bullet.trail_width, 1.2);
+        assert_eq!(bullet.trail_length, 3);
+        assert_eq!(bullet.shoot_effect, "shootSmallColor");
+        assert_eq!(bullet.smoke_effect, "hitLaserColor");
+        assert_eq!(bullet.back_color, "yellowBoltFront");
+        assert_eq!(bullet.trail_color, "yellowBoltFront");
+        assert_eq!(bullet.hit_color, "yellowBoltFront");
+        assert_eq!(bullet.front_color, "white");
+        assert_eq!(bullet.light_color, "yellowBoltFront");
+        assert_eq!(bullet.lifetime, 60.0);
+        assert_eq!(bullet.building_damage_multiplier, 0.01);
+        assert_eq!(bullet.homing_power, 0.03);
+        assert!(!bullet.hittable);
+        assert!(!bullet.reflectable);
+        assert_eq!(bullet.light_opacity, 0.6);
     }
 
     #[test]

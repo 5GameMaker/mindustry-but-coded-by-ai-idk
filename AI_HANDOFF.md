@@ -7879,5 +7879,45 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 下一闭环建议处理 `beta` 或 `nova` 的 `LaserBoltBulletType`，需要决定新增 `BulletKind::LaserBolt` 还是先用等价 marker；
   2. `quasar_beam` 的真实激光碰撞、治疗建筑、绘制/特效 runtime 仍未完整实现；
   3. `scale_keep_velocity` 已进入 content schema，但运行时寿命缩放仍未接入；
-  4. README 当前有未提交改动，除非用户明确要求，否则迁移提交时继续排除它；
+  4. README 已按用户要求完善并推送；
   5. 当前总迁移约 12.7%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 233. 最新闭环记录：UnitTypes beta small-mount LaserBoltBulletType content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- README 状态：已按用户要求完善工程说明并保留空的 `## 作者的话` 栏目，已单独提交推送 `9ba2966 完善 README 工程说明`。
+- 本轮目标：把 Java `UnitTypes.java` 中 `beta` 的 `small-mount-weapon` 和 `LaserBoltBulletType(3f, 11)` 回填进 Rust content registry，并为后续 `nova` 复用补出 `BulletKind::LaserBolt`。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:2531-2579`
+  - weapon：`small-mount-weapon`，`top=false`、`reload=20`、`x=3`、`y=1`、`recoil=1`、`shoot.shots=2`、`shoot.shotDelay=4`、`shootSound=Sounds.shootAlpha`
+  - bullet：`LaserBoltBulletType(3, 11)`，`scaleKeepVelocity=true`、`width=1.5`、`height=4.5`、`hitEffect=despawnEffect=Fx.hitBulletColor`、`trailWidth=1.2`、`trailLength=3`、`shootEffect=Fx.shootSmallColor`、`smokeEffect=Fx.hitLaserColor`、`backColor=trailColor=hitColor=lightColor=Pal.yellowBoltFront`、`frontColor=Color.white`、`lifetime=60`、`buildingDamageMultiplier=0.01`、`homingPower=0.03`
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletKind` 新增 `LaserBolt`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `laser_bolt_bullet(...)` helper；
+    - 新增 `beta_laser_bolt`；
+    - 更新 bullet load order 测试；
+    - 新增 `beta_laser_bolt_matches_java_laser_bolt_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `beta` 补齐 `target_buildings_mobile=false`、`drag=0.05`、`accel=0.1`、`fog_radius=0`；
+    - `beta` 追加 `Weapon::new("small-mount-weapon")`；
+    - weapon 引用 `bullet = "beta_laser_bolt"`，并设置 `shoot_shots=2` / `shoot_shot_delay=4`；
+    - 新增 `beta_small_mount_weapon_uses_laser_bolt_profile`。
+  - `MIGRATION.md`
+    - 新增 `12.307`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core beta_laser_bolt_matches_java_laser_bolt_profile --lib`
+  - `cargo test -p mindustry-core beta_small_mount_weapon_uses_laser_bolt_profile --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 下一闭环建议回填 `nova` 的 `heal-weapon` / `LaserBoltBulletType(5.2f, 13)`；
+  2. `scale_keep_velocity` 已进入 content schema，但运行时寿命缩放仍未接入；
+  3. `LaserBolt` 的绘制、trail、homing、颜色特效和治疗行为仍需接入 runtime/client；
+  4. 当前总迁移约 12.75%，远未可玩，goal 绝不能标记 complete。

@@ -513,17 +513,32 @@ pub fn load() -> Vec<UnitType> {
         }),
         unit(&mut next_id, "beta", UnitKind::Standard, |u| {
             u.is_enemy = false;
+            u.target_buildings_mobile = false;
             u.flying = true;
             u.mine_speed = 7.0;
             u.mine_tier = 1;
             u.build_speed = 0.75;
+            u.drag = 0.05;
             u.speed = 3.3;
             u.rotate_speed = 17.0;
+            u.accel = 0.1;
+            u.fog_radius = 0.0;
             u.item_capacity = 50;
             u.health = 170.0;
             u.engine_offset = 6.0;
             u.hit_size = 9.0;
             u.low_altitude = true;
+            let mut weapon = Weapon::new("small-mount-weapon");
+            weapon.top = false;
+            weapon.reload = 20.0;
+            weapon.x = 3.0;
+            weapon.y = 1.0;
+            weapon.recoil = 1.0;
+            weapon.shoot_shots = 2;
+            weapon.shoot_shot_delay = 4.0;
+            weapon.shoot_sound = "shootAlpha".into();
+            weapon.bullet = "beta_laser_bolt".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "gamma", UnitKind::Standard, |u| {
             u.is_enemy = false;
@@ -1310,6 +1325,41 @@ mod tests {
         assert_eq!(bullet.spec.heal_percent, 10.0);
         assert!(bullet.spec.collides_team);
         assert_eq!(bullet.spec.length, 150.0);
+    }
+
+    #[test]
+    fn beta_small_mount_weapon_uses_laser_bolt_profile() {
+        let units = load();
+        let beta = by_name(&units, "beta");
+        assert_eq!(beta.drag, 0.05);
+        assert_eq!(beta.accel, 0.1);
+        assert_eq!(beta.fog_radius, 0.0);
+        assert!(!beta.target_buildings_mobile);
+        assert_eq!(beta.weapons.len(), 1);
+
+        let weapon = &beta.weapons[0];
+        assert_eq!(weapon.name, "small-mount-weapon");
+        assert!(!weapon.top);
+        assert_eq!(weapon.reload, 20.0);
+        assert_eq!(weapon.x, 3.0);
+        assert_eq!(weapon.y, 1.0);
+        assert_eq!(weapon.recoil, 1.0);
+        assert_eq!(weapon.shoot_shots, 2);
+        assert_eq!(weapon.shoot_shot_delay, 4.0);
+        assert_eq!(weapon.shoot_sound, "shootAlpha");
+        assert_eq!(weapon.bullet, "beta_laser_bolt");
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing beta weapon bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.kind, BulletKind::LaserBolt);
+        assert_eq!(bullet.spec.speed, 3.0);
+        assert_eq!(bullet.spec.damage, 11.0);
+        assert!(bullet.spec.scale_keep_velocity);
+        assert_eq!(bullet.spec.homing_power, 0.03);
+        assert_eq!(bullet.spec.building_damage_multiplier, 0.01);
     }
 
     #[test]
