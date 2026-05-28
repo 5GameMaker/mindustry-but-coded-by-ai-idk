@@ -11001,3 +11001,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - atlas request/registry 还未接 mod sprite scan、PNG decode、bleed/outline、GPU upload；
   - desktop execution summary 只是 headless 遍历摘要，不是真实 GPU backend；
   - 当前总体迁移约 18.5%，仍未达到完整可玩。
+
+### 12.344 Desktop block sprite frame integration and sprite pack export
+
+- 2026-05-29：继续消除孤立 helper。本轮把 `BlockRendererPlan::to_sprite_render_passes(...)` 自动并入 desktop world `RenderFramePlan`，并把 `SpritePacker` 的请求导出到 `MultiPackerPlan<TextureAtlasRegionSource<_>>`，形成 `SpritePackRequest -> MultiPackerPlan -> TextureAtlasPlan` 的前半段纯数据链路。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - `drawBlocks()` 的 block/building 绘制最终进入 renderer draw stream；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `packSprites(...)` 收集 sprites / sprites-override 并按 page 写入 `MultiPacker`；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/MultiPacker.java`
+    - page-aware add/replace/flush 是 atlas 构建前置链路。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `graphics_frame_for_render(...)` 现在会把 `block_renderer.to_sprite_render_passes(8.0)` 推入 world `render_frame`；
+    - render frame 再按 Java `Renderer.draw()` stage 顺序排序后进入 `RenderBridge`；
+    - 回归测试验证 block plan 仍保留在 bundle，同时 render frame 中已出现对应 `DrawSprite` 命令。
+  - `core/src/mindustry/modsys/mod.rs`
+    - `SpritePackRequest` 新增 `page_type()`、`to_region_request()`、`to_region_request_with_size(...)`；
+    - `SpritePacker` 新增 `to_multi_packer_plan()`、`to_multi_packer_plan_with_size(...)`；
+    - page hint/source path 支持 main/environment/ui/rubble/sprites/sprites-override 的稳定映射；
+    - 当前导出使用占位尺寸 metadata，后续接真实 PNG decode 后替换。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-core modsys --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `10 passed`
+- 仍未完成：
+  - block sprite command 仍使用基础 block name/稳定后缀，尚未完整迁移 Java `DrawBlock` 各子类的 region/tint/mixcol/动画规则；
+  - sprite pack export 仍使用占位尺寸，尚未接真实 sprite 文件扫描、PNG decode、bleed/outline 和 GPU upload；
+  - floor chunk batch、minimap texture frame、shader dispatch 仍需接入 desktop/backend 真实消费；
+  - 当前总体迁移约 18.6%，仍未达到完整可玩。
