@@ -10912,3 +10912,52 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ShaderDispatchFrame` 已进入 core bundle，但 desktop/backend 消费路径仍未实现；
   - texture atlas / sprite backend 仍是渲染可玩化 P0 阻塞；
   - 当前总体迁移约 18.1%，仍未达到完整可玩。
+
+### 12.342 Atlas registry, world block snapshot and backend batch plans
+
+- 2026-05-29：参考目录 `D:/MDT/mindustry-upstream-v157.4` 已确认当前实际 checkout/tag 为 `v158.1`。本轮继续推进渲染 P0：补齐 texture atlas 纯数据 registry、把 desktop block renderer 接到真实 world/runtime snapshot，并为 minimap/floor 后端消费增加纹理上传帧与 chunk draw batch。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ClientLauncher.java`
+    - 启动期 blank atlas、error texture 与 `sprites.aatls`/fallback atlas 生命周期；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/MultiPacker.java`
+    - `PageType`、`PixmapPacker` page、region、split/pad 与 atlas flush；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - visible tile/building draw 需要真实 world tile、content block 与 runtime building 状态；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/MinimapRenderer.java`
+    - pixmap/texture recreate、full upload 与 dirty pixel update；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/FloorRenderer.java`
+    - chunk cache、dirty invalidation、stage order 与可见 chunk 批次。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 backend-neutral `TextureAtlasPlan` / `TextureAtlasPage` / `TextureAtlasRegion`；
+    - 支持 page source path、region source path、xy/size、split/pad、uv 计算、page/global lookup miss；
+    - 可从 `PackPlan<TextureAtlasRegionSource<_>>` 构建可查找 registry。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::block_render_plan(...)` 改为先从 `GameState.world`、`ContentLoader`、`runtime.buildings` 生成 `BlockRendererWorldSnapshot`；
+    - tile/building plan 现在能携带真实 block name、cache layer、custom shadow、light、obstructs light、size、rotation、team、damage、visibility。
+  - `core/src/mindustry/graphics/minimap_renderer.rs`
+    - 新增 `MinimapTextureSize`、`MinimapTexturePixelUpdate`、`MinimapTextureFramePlan`；
+    - reset/full/tile update plan 可转为后端纹理上传帧。
+  - `core/src/mindustry/graphics/floor_renderer.rs`
+    - 新增 `TileRange`、`FloorChunkDrawBatch`；
+    - `FloorRendererState::build_chunk_draw_batches(...)` 输出 chunk tile range、stage order、cache dirty 与 invalidation 列表。
+  - `core/src/mindustry/graphics/shaders.rs`
+    - `ShaderDispatchFrame` 增加 `Default`、`from_applies`、`with_apply`、`push`、`extend`，方便 desktop/backend 后续消费。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-core shaders --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `11 passed`
+  - `cargo test -p mindustry-core minimap_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `24 passed`
+  - `cargo test -p mindustry-core floor_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `5 passed`
+  - `cargo test -p mindustry-core texture_atlas --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `4 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+- 仍未完成：
+  - texture atlas 仍是 registry/plan，尚未接真实 PNG decode、mod sprite scan、bleed/outline、GPU texture upload；
+  - block renderer 已有真实 snapshot 输入，但还未把 block/building draw rule 解析为 `RenderCommand::DrawSprite`；
+  - minimap/floor 已有 backend plan，但 desktop/backend 仍未实际消费上传帧和 chunk batch；
+  - `ShaderDispatchFrame` 仍需接入 `DesktopGraphicsRenderer::render_graphics_frame(...)` 的真实执行通道；
+  - 当前总体迁移约 18.3%，仍未达到完整可玩。
