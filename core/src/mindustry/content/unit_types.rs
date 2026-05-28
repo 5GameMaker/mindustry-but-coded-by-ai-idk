@@ -913,13 +913,19 @@ pub fn load() -> Vec<UnitType> {
             u.health = 24000.0;
             u.speed = 0.8;
             u.rotate_speed = 1.0;
+            u.accel = 0.04;
+            u.drag = 0.018;
             u.flying = true;
             u.engine_offset = 46.0;
             u.engine_size = 7.8;
+            u.face_target = false;
             u.hit_size = 66.0;
             u.payload_capacity = 30.25 * super_tile_payload();
             u.build_speed = 4.0;
+            u.draw_shields = false;
             u.low_altitude = true;
+            u.build_beam_offset = 43.0;
+            u.loop_sound = "loopHover".into();
             u.ammo_capacity = 1;
             u.abilities
                 .push("ForceFieldAbility:140:4:7000:480:8:0".into());
@@ -2883,6 +2889,40 @@ mod tests {
         assert_eq!(bomb.spec.splash_damage, 220.0);
         assert_eq!(bomb.spec.damage, 154.0);
         assert_eq!(bomb.spec.heal_percent, 15.0);
+    }
+
+    #[test]
+    fn oct_defender_support_profile_matches_java() {
+        let units = load();
+        let oct = by_name(&units, "oct");
+
+        assert_eq!(oct.armor, 16.0);
+        assert_eq!(oct.health, 24000.0);
+        assert_eq!(oct.speed, 0.8);
+        assert_eq!(oct.rotate_speed, 1.0);
+        assert_eq!(oct.accel, 0.04);
+        assert_eq!(oct.drag, 0.018);
+        assert!(oct.flying);
+        assert_eq!(oct.engine_offset, 46.0);
+        assert_eq!(oct.engine_size, 7.8);
+        assert!(!oct.face_target);
+        assert_eq!(oct.hit_size, 66.0);
+        assert_eq!(oct.payload_capacity, 30.25 * super_tile_payload());
+        assert_eq!(oct.build_speed, 4.0);
+        assert!(!oct.draw_shields);
+        assert!(oct.low_altitude);
+        assert_eq!(oct.build_beam_offset, 43.0);
+        assert_eq!(oct.loop_sound, "loopHover");
+        assert_eq!(oct.ammo_capacity, 1);
+        assert!(oct
+            .abilities
+            .iter()
+            .any(|entry| entry == "ForceFieldAbility:140:4:7000:480:8:0"));
+        assert!(oct
+            .abilities
+            .iter()
+            .any(|entry| entry == "RepairFieldAbility:130:120:140"));
+        assert!(oct.weapons.is_empty());
     }
 
     #[test]

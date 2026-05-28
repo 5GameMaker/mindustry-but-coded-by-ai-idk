@@ -10385,3 +10385,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增 bullet 记录位目前主要用于 content parity，渲染/音量/旋转/发射锥仍需 runtime 消费；
   - 下一步建议继续 `oct`，需要 shield/repair ability 和 payload command/defender AI 字段；
   - 当前总体迁移约 14.1%，远未可玩。
+
+### 12.327 UnitTypes oct defender support fields
+
+- 2026-05-28：继续回填 Java `oct` 防御支援单位字段。该闭环补齐 `oct` 的 accel/drag/faceTarget/drawShields/buildBeamOffset/loopSound 等缺口，并确认 shield/repair ability descriptor 仍可通过现有 ability runtime 解析。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1519-1545`
+  - `oct`：`aiController=DefenderAI::new`、`armor=16`、`health=24000`、`speed=0.8`、`rotateSpeed=1`、`accel=0.04`、`drag=0.018`、`flying=true`、`engineOffset=46`、`engineSize=7.8`、`faceTarget=false`、`hitSize=66`、`payloadCapacity=(5.5*5.5)*tilePayload`、`buildSpeed=4`、`drawShields=false`、`lowAltitude=true`、`buildBeamOffset=43`、`loopSound=loopHover`
+  - abilities：`ForceFieldAbility(140,4,7000,480,8,0)` with `breakSound=shieldBreak`、`RepairFieldAbility(130,120,140)`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/unit_types.rs`
+    - `oct` 补齐 Java support/payload/shield 字段；
+    - 新增 `oct_defender_support_profile_matches_java`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `14.2%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core oct_defender_support_profile_matches_java --lib`
+- 仍未完成：
+  - `aiController=DefenderAI::new` 与 ForceField `breakSound=shieldBreak` 尚未在 UnitType/Ability descriptor 中结构化表达；
+  - payload defender AI、shield break sound 与 repair field runtime 仍需整体验证；
+  - 下一步建议进入 naval attack 段，从 `risso` 开始回填船只 weapon/bullet content；
+  - 当前总体迁移约 14.2%，远未可玩。
