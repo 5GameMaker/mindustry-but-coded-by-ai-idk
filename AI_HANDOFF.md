@@ -8705,3 +8705,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议 `bryde`；
   3. Flak/Artillery splash、naval wake/trail 与 mount runtime 仍未完整 content-driven；
   4. 当前总迁移约 14.4%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 256. 最新闭环记录：UnitTypes bryde naval artillery and missile mounts
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：回填 Java `bryde` 舰船 large artillery / missiles mount 与对应 bullets，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1687-1783`
+  - `bryde`：`accel=0.2`、`drag=0.17`、`faceTarget=false`、`moveSoundVolume=0.7`、`moveSoundPitch=0.77`、`trailLength=22`、`waveTrailX=7`、`waveTrailY=-9`、`trailScl=1.5`、`ShieldRegenFieldAbility:20:40:240:60`；
+  - `bryde_artillery`：`ArtilleryBulletType(3.2,15)`，`trailMult=0.8`、`hitEffect=massiveExplosion`、`knockback=1.5`、`lifetime=84`、`height=15.5`、`width=15`、`splashDamage=70`、`trailSize=6`、`status=blasted`；
+  - `bryde_missile`：`MissileBulletType(2.7,12)`，`keepVelocity=false`、`splashDamage=10`、`lifetime=70`、`weaveScale=8`、`weaveMag=1`。
+- Rust 主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - 新增 `BulletSpec.trail_mult` 与 `BulletSpec.trail_size`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `bryde_artillery` 与 `bryde_missile`；
+    - 更新 bullet load order；
+    - 新增 `bryde_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `bryde` 补齐 Java 字段并注册两把 weapon；
+    - 新增 `bryde_naval_attack_profile_matches_java`。
+  - `README.md`
+    - 当前总体完成度更新为约 `14.5%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.330`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core bryde_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core bryde_naval_attack_profile_matches_java --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议 `sei`；已有 explorer 子代理并行提取 `sei`，另一个 explorer 提取 `omura`；
+  3. Artillery trail/status/splash、missile weave/homing、naval wake/trail runtime 仍未完整 content-driven；
+  4. 当前总迁移约 14.5%，远未可玩，goal 绝不能标记 complete。

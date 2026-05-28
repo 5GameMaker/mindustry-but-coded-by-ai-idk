@@ -562,6 +562,43 @@ pub fn load() -> Vec<BulletContent> {
     minke_artillery.splash_damage_radius = 30.0 * 0.75;
     minke_artillery.splash_damage = 40.0;
 
+    let mut bryde_artillery = artillery_bullet(3.2, 15.0, "shell");
+    bryde_artillery.trail_mult = 0.8;
+    bryde_artillery.hit_effect = "massiveExplosion".into();
+    bryde_artillery.knockback = 1.5;
+    bryde_artillery.lifetime = 84.0;
+    bryde_artillery.height = 15.5;
+    bryde_artillery.width = 15.0;
+    bryde_artillery.collides_tiles = false;
+    bryde_artillery.splash_damage_radius = 40.0;
+    bryde_artillery.splash_damage = 70.0;
+    bryde_artillery.back_color = "missileYellowBack".into();
+    bryde_artillery.front_color = "missileYellow".into();
+    bryde_artillery.trail_effect = "artilleryTrail".into();
+    bryde_artillery.trail_size = 6.0;
+    bryde_artillery.hit_shake = 4.0;
+    bryde_artillery.shoot_effect = "shootBig2".into();
+    bryde_artillery.status = "blasted".into();
+    bryde_artillery.status_duration = 60.0;
+
+    let mut bryde_missile = missile_bullet(2.7, 12.0);
+    bryde_missile.width = 8.0;
+    bryde_missile.height = 8.0;
+    bryde_missile.shrink_y = 0.0;
+    bryde_missile.drag = -0.003;
+    bryde_missile.homing_range = 60.0;
+    bryde_missile.keep_velocity = false;
+    bryde_missile.splash_damage_radius = 25.0;
+    bryde_missile.splash_damage = 10.0;
+    bryde_missile.lifetime = 70.0;
+    bryde_missile.trail_color = "gray".into();
+    bryde_missile.back_color = "bulletYellowBack".into();
+    bryde_missile.front_color = "bulletYellow".into();
+    bryde_missile.hit_effect = "blastExplosion".into();
+    bryde_missile.despawn_effect = "blastExplosion".into();
+    bryde_missile.weave_scale = 8.0;
+    bryde_missile.weave_mag = 1.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -638,6 +675,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "risso_missile", risso_missile),
         make_bullet(&mut next_id, "minke_flak", minke_flak),
         make_bullet(&mut next_id, "minke_artillery", minke_artillery),
+        make_bullet(&mut next_id, "bryde_artillery", bryde_artillery),
+        make_bullet(&mut next_id, "bryde_missile", bryde_missile),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -953,6 +992,8 @@ mod tests {
                 "risso_missile",
                 "minke_flak",
                 "minke_artillery",
+                "bryde_artillery",
+                "bryde_missile",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1876,6 +1917,54 @@ mod tests {
         assert!(!artillery.collides_tiles);
         assert_eq!(artillery.splash_damage_radius, 22.5);
         assert_eq!(artillery.splash_damage, 40.0);
+    }
+
+    #[test]
+    fn bryde_bullets_match_java_profiles() {
+        let bullets = load();
+        let artillery = &by_name(&bullets, "bryde_artillery").spec;
+
+        assert_eq!(artillery.kind, BulletKind::Artillery);
+        assert_eq!(artillery.speed, 3.2);
+        assert_eq!(artillery.damage, 15.0);
+        assert_eq!(artillery.trail_mult, 0.8);
+        assert_eq!(artillery.hit_effect, "massiveExplosion");
+        assert_eq!(artillery.knockback, 1.5);
+        assert_eq!(artillery.lifetime, 84.0);
+        assert_eq!(artillery.height, 15.5);
+        assert_eq!(artillery.width, 15.0);
+        assert!(!artillery.collides_tiles);
+        assert_eq!(artillery.splash_damage_radius, 40.0);
+        assert_eq!(artillery.splash_damage, 70.0);
+        assert_eq!(artillery.back_color, "missileYellowBack");
+        assert_eq!(artillery.front_color, "missileYellow");
+        assert_eq!(artillery.trail_effect, "artilleryTrail");
+        assert_eq!(artillery.trail_size, 6.0);
+        assert_eq!(artillery.hit_shake, 4.0);
+        assert_eq!(artillery.shoot_effect, "shootBig2");
+        assert_eq!(artillery.status, "blasted");
+        assert_eq!(artillery.status_duration, 60.0);
+
+        let missile = &by_name(&bullets, "bryde_missile").spec;
+        assert_eq!(missile.kind, BulletKind::Missile);
+        assert_eq!(missile.speed, 2.7);
+        assert_eq!(missile.damage, 12.0);
+        assert_eq!(missile.width, 8.0);
+        assert_eq!(missile.height, 8.0);
+        assert_eq!(missile.shrink_y, 0.0);
+        assert_eq!(missile.drag, -0.003);
+        assert_eq!(missile.homing_range, 60.0);
+        assert!(!missile.keep_velocity);
+        assert_eq!(missile.splash_damage_radius, 25.0);
+        assert_eq!(missile.splash_damage, 10.0);
+        assert_eq!(missile.lifetime, 70.0);
+        assert_eq!(missile.trail_color, "gray");
+        assert_eq!(missile.back_color, "bulletYellowBack");
+        assert_eq!(missile.front_color, "bulletYellow");
+        assert_eq!(missile.hit_effect, "blastExplosion");
+        assert_eq!(missile.despawn_effect, "blastExplosion");
+        assert_eq!(missile.weave_scale, 8.0);
+        assert_eq!(missile.weave_mag, 1.0);
     }
 
     #[test]

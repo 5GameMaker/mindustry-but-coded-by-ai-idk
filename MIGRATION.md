@@ -10466,3 +10466,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Flak/Artillery splash runtime、naval wake/trail rendering 与 weapon mount runtime 仍需整体接入；
   - 下一步建议继续 `bryde`，需要 shield regen ability 字段和 large artillery weapon/bullet；
   - 当前总体迁移约 14.4%，远未可玩。
+
+### 12.330 UnitTypes bryde naval artillery and missile mounts
+
+- 2026-05-29：继续回填 Java `bryde` 舰船攻击单位。该闭环新增 `bryde_artillery` 与 `bryde_missile` bullets，并补入 `ArtilleryBulletType.trailMult/trailSize` 对应的 `BulletSpec.trail_mult/trail_size` 记录位。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1687-1783`
+  - `bryde`：`health=910`、`speed=0.85`、`accel=0.2`、`rotateSpeed=1.8`、`drag=0.17`、`hitSize=20`、`armor=7`、`faceTarget=false`、`moveSoundVolume=0.7`、`moveSoundPitchMin=moveSoundPitchMax=0.77`、`moveSound=shipMove`、`trailLength=22`、`waveTrailX=7`、`waveTrailY=-9`、`trailScl=1.5`、`ShieldRegenFieldAbility(20,40,240,60)`
+  - `large-artillery` weapon：`reload=65`、`mirror=false`、`x=0`、`y=-3.5`、`rotateSpeed=1.7`、`rotate=true`、`shootY=7`、`shake=5`、`recoil=4`、`shadow=12`、`inaccuracy=3`、`ejectEffect=casing3`、`shootSound=shootArtillery`
+  - artillery bullet：`ArtilleryBulletType(3.2f,15)`，`trailMult=0.8`、`hitEffect=massiveExplosion`、`knockback=1.5`、`lifetime=84`、`height=15.5`、`width=15`、`collidesTiles=false`、`splashDamageRadius=40`、`splashDamage=70`、`backColor=missileYellowBack`、`frontColor=missileYellow`、`trailEffect=artilleryTrail`、`trailSize=6`、`hitShake=4`、`shootEffect=shootBig2`、`status=blasted`、`statusDuration=60`
+  - `missiles-mount` weapon：`reload=20`、`x=8.5`、`y=-9`、`shadow=6`、`rotateSpeed=4`、`rotate=true`、`shoot.shots=2`、`shoot.shotDelay=3`、`inaccuracy=5`、`velocityRnd=0.1`、`shootSound=shootMissileShort`、`ejectEffect=none`
+  - missile bullet：`MissileBulletType(2.7f,12)`，`width=8`、`height=8`、`shrinkY=0`、`drag=-0.003`、`homingRange=60`、`keepVelocity=false`、`splashDamageRadius=25`、`splashDamage=10`、`lifetime=70`、`trailColor=gray`、`backColor=bulletYellowBack`、`frontColor=bulletYellow`、`hitEffect/despawnEffect=blastExplosion`、`weaveScale=8`、`weaveMag=1`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/blocks.rs`
+    - `BulletSpec` 新增 `trail_mult` 与 `trail_size`，默认分别为 Java `ArtilleryBulletType` 的 `1.0` 与 `4.0`。
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `bryde_artillery` 与 `bryde_missile`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `bryde_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `bryde` 补齐 Java naval movement/wake/sound/ability 字段；
+    - 注册 `large-artillery` 与 `missiles-mount`；
+    - 新增 `bryde_naval_attack_profile_matches_java`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `14.5%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core bryde_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core bryde_naval_attack_profile_matches_java --lib`
+- 仍未完成：
+  - Artillery trailMult/trailSize、status/splash、missile weave/homing 和 naval wake/trail runtime 仍需整体接入；
+  - 下一步建议继续 `sei`，已并行派出只读 explorer 提前提取规格；
+  - 当前总体迁移约 14.5%，远未可玩。

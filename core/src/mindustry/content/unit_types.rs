@@ -1013,11 +1013,55 @@ pub fn load() -> Vec<UnitType> {
         unit(&mut next_id, "bryde", UnitKind::Naval, |u| {
             u.health = 910.0;
             u.speed = 0.85;
+            u.accel = 0.2;
             u.rotate_speed = 1.8;
+            u.drag = 0.17;
             u.hit_size = 20.0;
             u.armor = 7.0;
+            u.face_target = false;
+            u.move_sound_volume = 0.7;
+            u.move_sound_pitch_min = 0.77;
+            u.move_sound_pitch_max = 0.77;
+            u.move_sound = "shipMove".into();
+            u.trail_length = 22;
+            u.wave_trail_x = 7.0;
+            u.wave_trail_y = -9.0;
+            u.trail_scl = 1.5;
             u.abilities
                 .push("ShieldRegenFieldAbility:20:40:240:60".into());
+
+            let mut artillery = Weapon::new("large-artillery");
+            artillery.reload = 65.0;
+            artillery.mirror = false;
+            artillery.x = 0.0;
+            artillery.y = -3.5;
+            artillery.rotate_speed = 1.7;
+            artillery.rotate = true;
+            artillery.shoot_y = 7.0;
+            artillery.shake = 5.0;
+            artillery.recoil = 4.0;
+            artillery.shadow = 12.0;
+            artillery.inaccuracy = 3.0;
+            artillery.eject_effect = "casing3".into();
+            artillery.shoot_sound = "shootArtillery".into();
+            artillery.bullet = "bryde_artillery".into();
+            u.weapons.push(artillery);
+
+            let mut missile = Weapon::new("missiles-mount");
+            missile.reload = 20.0;
+            missile.x = 8.5;
+            missile.y = -9.0;
+            missile.shadow = 6.0;
+            missile.rotate_speed = 4.0;
+            missile.rotate = true;
+            missile.shoot_shots = 2;
+            missile.shoot_shot_delay = 3.0;
+            missile.inaccuracy = 5.0;
+            missile.velocity_rnd = 0.1;
+            missile.shoot_sound = "shootMissileShort".into();
+            missile.eject_effect = "none".into();
+            missile.bullet = "bryde_missile".into();
+            u.weapons.push(missile);
         }),
         unit(&mut next_id, "sei", UnitKind::Naval, |u| {
             u.health = 11000.0;
@@ -3110,6 +3154,83 @@ mod tests {
             .expect("missing minke_artillery");
         assert_eq!(artillery_bullet.spec.kind, BulletKind::Artillery);
         assert_eq!(artillery_bullet.spec.splash_damage_radius, 22.5);
+    }
+
+    #[test]
+    fn bryde_naval_attack_profile_matches_java() {
+        let units = load();
+        let bryde = by_name(&units, "bryde");
+
+        assert!(bryde.naval);
+        assert_eq!(bryde.health, 910.0);
+        assert_eq!(bryde.speed, 0.85);
+        assert_eq!(bryde.accel, 0.2);
+        assert_eq!(bryde.rotate_speed, 1.8);
+        assert_eq!(bryde.drag, 0.17);
+        assert_eq!(bryde.hit_size, 20.0);
+        assert_eq!(bryde.armor, 7.0);
+        assert!(!bryde.face_target);
+        assert_eq!(bryde.move_sound_volume, 0.7);
+        assert_eq!(bryde.move_sound_pitch_min, 0.77);
+        assert_eq!(bryde.move_sound_pitch_max, 0.77);
+        assert_eq!(bryde.move_sound, "shipMove");
+        assert_eq!(bryde.trail_length, 22);
+        assert_eq!(bryde.wave_trail_x, 7.0);
+        assert_eq!(bryde.wave_trail_y, -9.0);
+        assert_eq!(bryde.trail_scl, 1.5);
+        assert!(bryde
+            .abilities
+            .iter()
+            .any(|entry| entry == "ShieldRegenFieldAbility:20:40:240:60"));
+        assert_eq!(bryde.weapons.len(), 2);
+
+        let artillery = &bryde.weapons[0];
+        assert_eq!(artillery.name, "large-artillery");
+        assert_eq!(artillery.reload, 65.0);
+        assert!(!artillery.mirror);
+        assert_eq!(artillery.x, 0.0);
+        assert_eq!(artillery.y, -3.5);
+        assert_eq!(artillery.rotate_speed, 1.7);
+        assert!(artillery.rotate);
+        assert_eq!(artillery.shoot_y, 7.0);
+        assert_eq!(artillery.shake, 5.0);
+        assert_eq!(artillery.recoil, 4.0);
+        assert_eq!(artillery.shadow, 12.0);
+        assert_eq!(artillery.inaccuracy, 3.0);
+        assert_eq!(artillery.eject_effect, "casing3");
+        assert_eq!(artillery.shoot_sound, "shootArtillery");
+        assert_eq!(artillery.bullet, "bryde_artillery");
+
+        let missile = &bryde.weapons[1];
+        assert_eq!(missile.name, "missiles-mount");
+        assert_eq!(missile.reload, 20.0);
+        assert_eq!(missile.x, 8.5);
+        assert_eq!(missile.y, -9.0);
+        assert_eq!(missile.shadow, 6.0);
+        assert_eq!(missile.rotate_speed, 4.0);
+        assert!(missile.rotate);
+        assert_eq!(missile.shoot_shots, 2);
+        assert_eq!(missile.shoot_shot_delay, 3.0);
+        assert_eq!(missile.inaccuracy, 5.0);
+        assert_eq!(missile.velocity_rnd, 0.1);
+        assert_eq!(missile.shoot_sound, "shootMissileShort");
+        assert_eq!(missile.eject_effect, "none");
+        assert_eq!(missile.bullet, "bryde_missile");
+
+        let bullets = bullets::load();
+        let artillery_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == artillery.bullet)
+            .expect("missing bryde_artillery");
+        assert_eq!(artillery_bullet.spec.kind, BulletKind::Artillery);
+        assert_eq!(artillery_bullet.spec.splash_damage, 70.0);
+        assert_eq!(artillery_bullet.spec.status, "blasted");
+        let missile_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == missile.bullet)
+            .expect("missing bryde_missile");
+        assert_eq!(missile_bullet.spec.kind, BulletKind::Missile);
+        assert_eq!(missile_bullet.spec.weave_mag, 1.0);
     }
 
     #[test]
