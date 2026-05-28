@@ -34,11 +34,11 @@ use mindustry_core::mindustry::graphics::{
     LoadFrameInput, LoadFramePlan, LoadRendererState, MenuFrameInput, MenuFramePlan,
     MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
     MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
-    OverlayRendererPlan, OverlayRendererState, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
-    PixelatorState, RenderBridge, RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan,
-    RenderPassKind, RenderPoint, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext,
-    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport, TileBounds,
-    TileCoord, Viewport as FloorViewport,
+    OverlayRendererPlan, OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan,
+    PixelatorInput, PixelatorState, RenderBridge, RenderCamera, RenderCommand, RenderEngineState,
+    RenderFramePlan, RenderPassKind, RenderPoint, RenderSize, RenderTarget, RenderViewport,
+    ShaderApplyContext, ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport,
+    TextureAtlasPlan, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -342,7 +342,18 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub target: RenderTarget,
     pub command_count: usize,
     pub draw_sprite_symbols: Vec<String>,
+    pub resolved_sprites: Vec<DesktopGraphicsResolvedSpriteTrace>,
     pub draw_texts: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsResolvedSpriteTrace {
+    pub symbol: String,
+    pub page_type: Option<PageType>,
+    pub page_source_path: Option<String>,
+    pub region_width: Option<u32>,
+    pub region_height: Option<u32>,
+    pub missing: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -353,6 +364,20 @@ pub struct DesktopGraphicsExecutionTrace {
 
 impl DesktopGraphicsExecutionTrace {
     pub fn from_frame(frame: &DesktopGraphicsFrame) -> Self {
+        Self::from_frame_and_atlas::<()>(frame, None)
+    }
+
+    pub fn from_frame_with_atlas<T>(
+        frame: &DesktopGraphicsFrame,
+        atlas: &TextureAtlasPlan<T>,
+    ) -> Self {
+        Self::from_frame_and_atlas(frame, Some(atlas))
+    }
+
+    fn from_frame_and_atlas<T>(
+        frame: &DesktopGraphicsFrame,
+        atlas: Option<&TextureAtlasPlan<T>>,
+    ) -> Self {
         let shader_dispatch = frame.bundle.shader_dispatch.as_ref().map_or_else(
             DesktopGraphicsShaderDispatchExecutionTrace::default,
             |dispatch| DesktopGraphicsShaderDispatchExecutionTrace {
@@ -379,11 +404,16 @@ impl DesktopGraphicsExecutionTrace {
                         .iter()
                         .map(|pass| {
                             let mut draw_sprite_symbols = Vec::new();
+                            let mut resolved_sprites = Vec::new();
                             let mut draw_texts = Vec::new();
                             for command in &pass.commands {
                                 match command {
                                     RenderCommand::DrawSprite { symbol, .. } => {
                                         draw_sprite_symbols.push(symbol.clone());
+                                        if let Some(atlas) = atlas {
+                                            resolved_sprites
+                                                .push(resolve_sprite_symbol(atlas, symbol));
+                                        }
                                     }
                                     RenderCommand::DrawText { text, .. } => {
                                         draw_texts.push(text.clone());
@@ -398,6 +428,7 @@ impl DesktopGraphicsExecutionTrace {
                                 target: pass.target.clone(),
                                 command_count: pass.commands.len(),
                                 draw_sprite_symbols,
+                                resolved_sprites,
                                 draw_texts,
                             }
                         })
@@ -408,6 +439,30 @@ impl DesktopGraphicsExecutionTrace {
             shader_dispatch,
             render_passes,
         }
+    }
+}
+
+fn resolve_sprite_symbol<T>(
+    atlas: &TextureAtlasPlan<T>,
+    symbol: &str,
+) -> DesktopGraphicsResolvedSpriteTrace {
+    match atlas.lookup(symbol) {
+        Ok(located) => DesktopGraphicsResolvedSpriteTrace {
+            symbol: symbol.to_string(),
+            page_type: Some(located.page_type),
+            page_source_path: Some(located.page_source_path.to_string()),
+            region_width: Some(located.region.width),
+            region_height: Some(located.region.height),
+            missing: false,
+        },
+        Err(miss) => DesktopGraphicsResolvedSpriteTrace {
+            symbol: symbol.to_string(),
+            page_type: miss.page_type,
+            page_source_path: miss.page_source_path,
+            region_width: None,
+            region_height: None,
+            missing: true,
+        },
     }
 }
 
@@ -423,6 +478,8 @@ pub struct DesktopGraphicsExecutionSummary {
     pub screen_target_passes: usize,
     pub texture_target_passes: usize,
     pub buffer_target_passes: usize,
+    pub atlas_resolved_sprites: usize,
+    pub atlas_missing_sprites: usize,
     pub block_renderer_slots: usize,
     pub floor_renderer_slots: usize,
     pub fog_frame_slots: usize,
@@ -448,6 +505,16 @@ impl DesktopGraphicsExecutionSummary {
         for pass in &trace.render_passes {
             summary.render_commands_visited += pass.command_count;
             summary.draw_sprite_commands += pass.draw_sprite_symbols.len();
+            summary.atlas_resolved_sprites += pass
+                .resolved_sprites
+                .iter()
+                .filter(|sprite| !sprite.missing)
+                .count();
+            summary.atlas_missing_sprites += pass
+                .resolved_sprites
+                .iter()
+                .filter(|sprite| sprite.missing)
+                .count();
             summary.draw_text_commands += pass.draw_texts.len();
             match &pass.target {
                 RenderTarget::Screen => summary.screen_target_passes += 1,
@@ -2947,7 +3014,7 @@ mod tests {
         MinimapCamera, MinimapOverlayInput, RenderBridge, RenderCamera, RenderCommand,
         RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderRect, RenderSize,
         RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext, ShaderApplyPlan,
-        ShaderCatalog, ShaderDispatchFrame, ShaderId, TileCoord,
+        ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -4461,6 +4528,28 @@ mod tests {
             renderer.last_trace.render_passes[2].target,
             RenderTarget::Screen
         );
+
+        let atlas = TextureAtlasPlan::from_virtual_source_paths([
+            "sprites/router.png",
+            "sprites/lighting-glow.png",
+        ]);
+        let resolved_trace = DesktopGraphicsExecutionTrace::from_frame_with_atlas(&frame, &atlas);
+        let resolved = &resolved_trace.render_passes[0].resolved_sprites[0];
+        assert_eq!(resolved.symbol, "router");
+        assert_eq!(
+            resolved.page_type,
+            Some(mindustry_core::mindustry::graphics::PageType::Main)
+        );
+        assert_eq!(resolved.region_width, Some(1));
+        assert!(!resolved.missing);
+
+        let missing = &resolved_trace.render_passes[1].resolved_sprites[0];
+        assert_eq!(missing.symbol, "cursor");
+        assert!(missing.missing);
+
+        let resolved_summary = DesktopGraphicsExecutionSummary::from_trace(&frame, &resolved_trace);
+        assert_eq!(resolved_summary.atlas_resolved_sprites, 2);
+        assert_eq!(resolved_summary.atlas_missing_sprites, 1);
     }
 
     #[test]

@@ -264,6 +264,63 @@ impl ModSpritePackSource {
     }
 }
 
+/// Pure-data plan for mod icons.
+///
+/// Headless runtimes never try to load an icon. Non-headless runtimes keep the
+/// v158.1 candidate order: `icon.png` first, then `preview.png`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModIconLoadPlan {
+    pub headless: bool,
+    pub candidates: Vec<String>,
+}
+
+impl ModIconLoadPlan {
+    pub fn new(headless: bool) -> Self {
+        Self {
+            headless,
+            candidates: mod_icon_candidates(headless),
+        }
+    }
+}
+
+impl Default for ModIconLoadPlan {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+
+/// Pure-data mod resource plan that keeps icon lookup and sprite packing data
+/// separate from real file system or GPU work.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ModResourcePlan {
+    pub icon: ModIconLoadPlan,
+    pub sprite_sources: Vec<ModSpritePackSource>,
+}
+
+impl ModResourcePlan {
+    pub fn new(headless: bool) -> Self {
+        Self {
+            icon: ModIconLoadPlan::new(headless),
+            sprite_sources: Vec::new(),
+        }
+    }
+
+    pub fn with_sprite_sources(
+        mut self,
+        sources: impl IntoIterator<Item = ModSpritePackSource>,
+    ) -> Self {
+        self.sprite_sources.extend(sources);
+        self
+    }
+
+    pub fn sprite_requests(&self) -> Vec<SpritePackRequest> {
+        self.sprite_sources
+            .iter()
+            .filter_map(ModSpritePackSource::to_request)
+            .collect()
+    }
+}
+
 pub fn mod_sprite_atlas_name(
     mod_name: &str,
     source_path: &str,
@@ -275,6 +332,14 @@ pub fn mod_sprite_atlas_name(
     }
 
     Some(format!("{mod_name}-{base_name}"))
+}
+
+fn mod_icon_candidates(headless: bool) -> Vec<String> {
+    if headless {
+        Vec::new()
+    } else {
+        vec!["icon.png".into(), "preview.png".into()]
+    }
 }
 
 /// Rust equivalent of the Java abstract `Mod` base class.
@@ -663,6 +728,49 @@ mod tests {
             .get("example-ore")
             .is_some());
         assert!(plan.page(PageType::Ui).get("icon").is_some());
+    }
+
+    #[test]
+    fn mod_resource_plan_skips_icons_headless_and_prefers_icon_then_preview() {
+        let headless = ModResourcePlan::new(true);
+        let desktop = ModResourcePlan::new(false);
+
+        assert!(headless.icon.headless);
+        assert!(headless.icon.candidates.is_empty());
+        assert!(!desktop.icon.headless);
+        assert_eq!(
+            desktop.icon.candidates,
+            vec!["icon.png".to_string(), "preview.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn mod_resource_plan_keeps_sprite_sources_connected_to_pack_requests() {
+        let plan = ModResourcePlan::new(false).with_sprite_sources([
+            ModSpritePackSource::sprite("example", "mods/example/sprites/router.png"),
+            ModSpritePackSource::override_sprite(
+                "example",
+                "mods/example/sprites-override/ui/icon.png",
+            ),
+        ]);
+
+        assert_eq!(
+            plan.sprite_requests(),
+            vec![
+                SpritePackRequest {
+                    source_path: "mods/example/sprites/router.png".into(),
+                    atlas_name: "example-router".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "mods/example/sprites-override/ui/icon.png".into(),
+                    atlas_name: "icon".into(),
+                    page_hint: "sprites-override".into(),
+                    r#override: true,
+                },
+            ]
+        );
     }
 
     #[test]

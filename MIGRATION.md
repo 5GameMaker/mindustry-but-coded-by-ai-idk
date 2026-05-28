@@ -11153,3 +11153,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - desktop backend trace 仍是 headless 可观测执行轨迹，尚未绑定真实 GPU shader uniform/texture/sprite batch；
   - `UnlockableContent.loadIcon/createIcons`、`Block.createIcons` 和 v158.1 mod icon `preview.png` fallback 还未接入整体内容生命周期；
   - 当前总体迁移约 19.0%，仍未达到完整可玩。
+
+### 12.348 Mod resource icon fallback and atlas-resolved desktop trace
+
+- 2026-05-29：继续把 atlas/mod 资源计划往真实 content/render 主链推进。本轮补上 v158.1 mod icon fallback 的纯数据计划、`UnlockableContent.loadIcon()` 候选名顺序，以及 desktop trace 对 `DrawSprite.symbol -> TextureAtlasPlan` 的命中/miss 诊断。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `loadIcon()` 在 headless 下直接跳过；
+    - 非 headless 先找 `icon.png`，不存在则 fallback 到 `preview.png`；
+    - `packSprites()` 的 mod 资源计划仍分离 icon 与 sprite atlas packing；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ctype/UnlockableContent.java`
+    - `loadIcon()` full icon fallback 顺序为 `fullOverride -> type-name-full -> name-full -> name -> type-name -> name1`；
+    - UI icon 先尝试 `type-name-ui`，再 fallback 到 full icon；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - sprite 绘制最终必须能在执行侧解析 atlas region，而不是只保留 symbol 字符串。
+- Rust 新增/接入：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `ModIconLoadPlan`；
+    - 新增 `ModResourcePlan`，组合 icon 计划与 `ModSpritePackSource`；
+    - `ModResourcePlan::sprite_requests()` 保持 `ModSpritePackSource -> SpritePackRequest` 的连接，暂不触碰真实 FS/PNG/GPU。
+  - `core/src/mindustry/ctype/unlockable_content.rs`
+    - 新增 `UnlockableContentIconCandidates`；
+    - 新增 `UnlockableContentBase::icon_candidates(...)`，对齐 Java full/ui icon 候选顺序并保留 `generate_icons` gate。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsResolvedSpriteTrace`；
+    - 新增 `DesktopGraphicsExecutionTrace::from_frame_with_atlas(...)`；
+    - `DesktopGraphicsExecutionSummary` 新增 atlas resolved/missing sprite 计数；
+    - headless 渲染执行测试现在能验证 `DrawSprite.symbol` 是否解析到 `TextureAtlasPlan` 中的 page/region，miss 也可观测。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-core icon_candidates --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `2 passed`
+  - `cargo test -p mindustry-core modsys --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `14 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - `ModIconLoadPlan` 还未接真实文件系统 resolver 和 texture upload；
+  - `ModResourcePlan` 还未接真实 enabled mod 扫描、PNG decode、bleed、atlas flush/rebind；
+  - `UnlockableContentIconCandidates` 目前是候选名计划，尚未把 `fullIcon/uiIcon` 持久字段与实际 atlas 查找接入内容加载生命周期；
+  - desktop atlas trace 目前只做命中/miss 诊断，还不是 GPU sprite batch 或真实纹理绑定；
+  - 当前总体迁移约 19.1%，仍未达到完整可玩。
