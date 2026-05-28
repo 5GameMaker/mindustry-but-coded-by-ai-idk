@@ -8666,7 +8666,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `standard_effect_id("dynamicExplosion")`、metadata、动态 lifetime 与线性粒子绘制 seam 已在 `12.272` 补齐；后续仍需补完整灰色爆炸圆形粒子、光照和更精确 renderer；
   - `standard_sound_id` 已在 `12.273` 覆盖 `unitExplode1/2/3` 与 `wreckFall/wreckFallBig`；更多音效仍需继续迁移；
-  - `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
+  - `Effect.shake(...)` 的 safe death 本地 camera shake 事件已在 `12.274` 接入；后续仍需下沉到真实 camera/backend；
   - `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 已在 `12.271` 接入 mark-dead + local effect 最小语义；后续仍需把 post destroy call 与完整 icon renderer 行为补齐。
 
 ### 12.271 UnitCapDeathCallPacket / UnitEnvDeathCallPacket 最小 mark-dead/effect 接入
@@ -8707,7 +8707,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - Java `Core.app.post(() -> Call.unitDestroy(unit.id))` 的后续 destroy 调用在 Rust 客户端暂不主动发出；当前依赖服务端后续同步/packet，后续要对照真实网络方向确认；
   - `Fx.unitCapKill` / `Fx.unitEnvKill` 当前只有 id/metadata 与 local effect state，真实 warning/cancel icon renderer 还没迁移；
-  - death/destroy/safeDeath 的 explosion/sound/shake/event bus 仍需要继续补完整；`Fx.dynamicExplosion` 的最小 effect seam 已在 `12.272` 补齐。
+  - death/destroy/safeDeath 的 explosion/sound/shake/event bus 仍需要继续补完整；`Fx.dynamicExplosion` 的最小 effect seam 已在 `12.272` 补齐，safeDeath camera shake seam 已在 `12.274` 补齐。
 
 ### 12.272 Fx.dynamicExplosion 最小 metadata / lifetime / line draw seam
 
@@ -8750,7 +8750,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - Java `dynamicExplosion` 的灰色圆形粒子 multi-pass、`baseLifetime` 子阶段、`Drawf.light(...)` 精确颜色/半径目前只做了主 radial line seam；
   - 真实 renderer/backend 对 dynamicExplosion 的图形还需要继续补；
-  - `unitExplode1/2/3` 与 `wreckFall/wreckFallBig` 已在 `12.273` 补入 sound id；camera shake、完整 `UnitComp.destroy()` side effects 仍需继续。
+  - `unitExplode1/2/3` 与 `wreckFall/wreckFallBig` 已在 `12.273` 补入 sound id，safeDeath camera shake 已在 `12.274` 补本地事件；完整 `UnitComp.destroy()` side effects 仍需继续。
 
 ### 12.273 unitExplode / wreckFall 死亡音效 id 映射
 
@@ -8778,5 +8778,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：
   - `standard_sound_id` 仍是窄表，不是完整 Java sounds 表；
-  - desktop/backend 真实播放层仍需继续从 `client_local_sound_at_events` 下沉到实际 audio backend；
+  - desktop/backend 真实播放层仍需继续从 `client_local_sound_at_events` 下沉到实际 audio backend；camera shake backend 已在 `12.274` 有本地事件 seam，仍需接实际 camera；
   - flying wreck 分支尚未触发 `wreckFall*`，当前只是先补可复用 id。
+
+### 12.274 UnitSafeDeath Effect.shake 本地 camera shake 事件
+
+- 2026-05-28：对照 Java `Units.unitSafeDeath(Unit unit)` 中的 `Effect.shake(shake, shake, unit)`，在 Rust 客户端 runtime 增加本地 camera shake 事件 seam。
+- 本轮迁移：
+  - `GameRuntimeClientCameraShakeEvent`；
+  - `GameRuntime.client_local_camera_shake_events`；
+  - `UnitSafeDeathCallPacket` safe death shake 入队；
+  - core/desktop 回归验证。
+- Java 依据：
+  - `float shake = unit.type.deathShake < 0 ? unit.hitSize / 3f : unit.type.deathShake;`
+  - `Effect.shake(shake, shake, unit);`
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeClientCameraShakeEvent { x, y, intensity, duration }`；
+    - `GameRuntime` 新增 `client_local_camera_shake_events`，并在 runtime reset/clear 时清理；
+    - `apply_client_unit_safe_death_packet(...)` 按 Java 公式计算 shake，写入本地 camera shake event；
+    - safe death core 测试验证 shake 位置、`hit_size / 3.0` 默认强度和 duration。
+  - `desktop/src/lib.rs`
+    - desktop safe death 测试验证 launcher update 后 runtime 保留 camera shake event。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - camera shake 目前只是 runtime 本地事件，还未接 desktop camera/backend；
+  - `UnitComp.destroy()`、flying wreck、其他 effect shake 调用仍未全面接入；
+  - 多个 shake event 的合并、衰减、视距过滤还需对照 Java/Arc 实现。

@@ -5340,6 +5340,11 @@ mod tests {
             launcher.runtime.client_local_sound_at_events[0].sound_id,
             mindustry_core::mindustry::audio::standard_sound_id("unitExplode1").unwrap()
         );
+        assert_eq!(launcher.runtime.client_local_camera_shake_events.len(), 1);
+        assert!(
+            (launcher.runtime.client_local_camera_shake_events[0].intensity - 16.0 / 3.0).abs()
+                < 0.0001
+        );
     }
 
     #[test]

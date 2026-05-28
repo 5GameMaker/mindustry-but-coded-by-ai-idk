@@ -6688,7 +6688,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. `Fx.dynamicExplosion` 已在 `198` 节进入 `standard_effect_id`/metadata/动态 lifetime/最小 line draw seam；后续仍需补完整圆形粒子、光照和真实 renderer；
   2. `standard_sound_id` 已在 `199` 节覆盖 `unitExplode1/2/3` 与 `wreckFall/wreckFallBig`；更多声音和真实 backend 播放仍需继续；
-  3. `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
+  3. `Effect.shake(...)` 的 safe death 本地 camera shake 事件已在 `200` 节接入；后续仍需接 desktop camera/backend；
   4. `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 已在 `197` 节接入 mark-dead + local effect 最小语义；后续仍需 post-destroy 与真实 icon renderer；
   5. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。
 
@@ -6736,7 +6736,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. Java 的 `Core.app.post(() -> Call.unitDestroy(unit.id))` 后续 destroy 调用尚未在 Rust 客户端主动发出；需要结合真实网络方向决定由 server 后续 packet 负责还是客户端 call；
   2. `Fx.unitCapKill` / `Fx.unitEnvKill` 当前只有 id/metadata 与 effect state，真实 warning/cancel icon renderer 还没迁移；
-  3. `Fx.dynamicExplosion` 已在 `198` 节补最小 seam；`unitExplode/wreckFall` id 已在 `199` 节补齐；camera shake、event bus、weapon shoot-on-death、ability death 仍未完整；
+  3. `Fx.dynamicExplosion` 已在 `198` 节补最小 seam；`unitExplode/wreckFall` id 已在 `199` 节补齐；safeDeath camera shake 已在 `200` 节补本地事件；event bus、weapon shoot-on-death、ability death 仍未完整；
   4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。
 
 ---
@@ -6778,7 +6778,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. Java `dynamicExplosion` 的灰色圆形粒子 multi-pass、`baseLifetime` 子阶段与 `Drawf.light(...)` 精确行为还没完整；
   2. 真实 renderer/backend 对该效果还只是 primitive seam；
-  3. `unitExplode1/2/3` 与 `wreckFall/wreckFallBig` 已在 `199` 节补入 sound id；camera shake、完整 `UnitComp.destroy()` side effects 仍需继续；
+  3. `unitExplode1/2/3` 与 `wreckFall/wreckFallBig` 已在 `199` 节补入 sound id；safeDeath camera shake 已在 `200` 节补本地事件；完整 `UnitComp.destroy()` side effects 仍需继续；
   4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。
 
 ---
@@ -6815,6 +6815,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `git diff --check`
 - 当前仍需继续：
   1. `standard_sound_id` 仍是窄表，完整 Java sounds 表尚未迁移；
-  2. desktop/backend 真实播放层仍需从 `client_local_sound_at_events` 下沉到 audio backend；
+  2. desktop/backend 真实播放层仍需从 `client_local_sound_at_events` 下沉到 audio backend；camera shake backend 已在 `200` 节有本地事件 seam，仍需接实际 camera；
   3. flying wreck 分支尚未触发 `wreckFall*`；
+  4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 接到真实 runtime/content/world/entity/network/client-server 链路。
+
+---
+
+## 200. 最新闭环记录：UnitSafeDeath Effect.shake 本地 camera shake 事件
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：补齐 `Units.unitSafeDeath(...)` 中 `Effect.shake(shake, shake, unit)` 的 runtime seam，让 safe death 不只产生 effect/sound/remove，还能记录 camera shake 副作用。
+- Java 对照：
+  - `float shake = unit.type.deathShake < 0 ? unit.hitSize / 3f : unit.type.deathShake;`
+  - `Effect.shake(shake, shake, unit);`
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeClientCameraShakeEvent { x, y, intensity, duration }`；
+    - `GameRuntime` 新增 `client_local_camera_shake_events`，并在 reset/clear 中清理；
+    - `apply_client_unit_safe_death_packet(...)` 按 Java 公式计算 shake，写入本地 camera shake event；
+    - safe death core 测试验证 x/y、`hit_size / 3.0` 默认强度、duration。
+  - `desktop/src/lib.rs`
+    - safe death desktop 测试验证 launcher update 后 runtime 保留 camera shake event。
+  - `MIGRATION.md`
+    - 新增 `12.274`，并更新 `12.270` / `12.271` / `12.272` / `12.273` 剩余项。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. camera shake 目前只是 runtime 本地事件，还未接 desktop camera/backend；
+  2. `UnitComp.destroy()`、flying wreck、其他 effect shake 调用仍未全面接入；
+  3. 多个 shake event 的合并、衰减、视距过滤还需对照 Java/Arc 实现；
   4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 接到真实 runtime/content/world/entity/network/client-server 链路。

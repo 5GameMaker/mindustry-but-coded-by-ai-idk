@@ -1348,6 +1348,14 @@ pub struct GameRuntimeClientUnitEnteredPayloadApplyReport {
     pub payload_attached: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GameRuntimeClientCameraShakeEvent {
+    pub x: f32,
+    pub y: f32,
+    pub intensity: f32,
+    pub duration: f32,
+}
+
 impl GameRuntimeClientSnapshotApplyReport {
     pub fn merge(&mut self, other: Self) {
         self.block_records_seen += other.block_records_seen;
@@ -2622,6 +2630,7 @@ pub struct GameRuntime {
     pub client_world_label_snapshot_entities: BTreeMap<i32, WorldLabelComp>,
     pub client_local_sound_at_events: Vec<SoundAtCallPacket>,
     pub client_local_effect_events: Vec<EffectCallPacket2>,
+    pub client_local_camera_shake_events: Vec<GameRuntimeClientCameraShakeEvent>,
     pub client_hidden_entity_ids: BTreeSet<i32>,
     pub client_unit_entered_payload_packets_applied: usize,
     pub client_unit_tether_block_spawned_packets_applied: usize,
@@ -2701,6 +2710,7 @@ impl GameRuntime {
             client_world_label_snapshot_entities: BTreeMap::new(),
             client_local_sound_at_events: Vec::new(),
             client_local_effect_events: Vec::new(),
+            client_local_camera_shake_events: Vec::new(),
             client_hidden_entity_ids: BTreeSet::new(),
             client_unit_entered_payload_packets_applied: 0,
             client_unit_tether_block_spawned_packets_applied: 0,
@@ -4287,6 +4297,18 @@ impl GameRuntime {
                 pitch: 1.0,
             });
         }
+        let shake = if unit.type_info.death_shake < 0.0 {
+            unit.type_info.hit_size / 3.0
+        } else {
+            unit.type_info.death_shake
+        };
+        self.client_local_camera_shake_events
+            .push(GameRuntimeClientCameraShakeEvent {
+                x: unit.x(),
+                y: unit.y(),
+                intensity: shake,
+                duration: shake,
+            });
         unit.remove(true);
         true
     }
@@ -10162,6 +10184,7 @@ impl GameRuntime {
         self.client_world_label_snapshot_entities.clear();
         self.client_local_sound_at_events.clear();
         self.client_local_effect_events.clear();
+        self.client_local_camera_shake_events.clear();
         self.client_hidden_entity_ids.clear();
     }
 
@@ -26531,6 +26554,12 @@ mod tests {
         assert_eq!(sound.x, 30.0);
         assert_eq!(sound.y, 40.0);
         assert_eq!(sound.volume, 0.7);
+        assert_eq!(runtime.client_local_camera_shake_events.len(), 1);
+        let shake = runtime.client_local_camera_shake_events[0];
+        assert_eq!(shake.x, 30.0);
+        assert_eq!(shake.y, 40.0);
+        assert!((shake.intensity - 16.0 / 3.0).abs() < 0.0001);
+        assert_eq!(shake.duration, shake.intensity);
         assert!(
             !runtime.apply_client_unit_safe_death_packet(&UnitSafeDeathCallPacket {
                 unit: UnitRef::Null,
