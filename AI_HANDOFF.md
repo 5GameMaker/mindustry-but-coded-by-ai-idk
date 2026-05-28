@@ -7441,3 +7441,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 统一 content bullet spec 与 entity runtime bullet spec，避免手工字段映射漂移；
   3. 继续检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
   4. 当前总迁移约 12%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 220. 最新闭环记录：Content bullet spec → runtime bullet spec conversion seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把上一节 server bullet tick 里的 content bullet → runtime bullet 手工字段映射下沉到 core，减少后续 server/client 多处漂移。
+- Rust 主改动：
+  - `core/src/mindustry/entities/comp/bullet.rs`
+    - 新增 `BulletSpec::from_content_spec(...)`；
+    - 映射 damage、speed、hit_size、draw_size、drag、collides、collides_air、collides_ground、collides_tiles；
+    - 新增 `bullet_runtime_spec_maps_content_motion_fields`。
+  - `server/src/lib.rs`
+    - `tick_server_bullets(...)` 改为调用 `BulletSpec::from_content_spec(...)`。
+  - `MIGRATION.md`
+    - 新增 `12.294`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core bullet_runtime_spec_maps_content_motion_fields --lib`
+  - `cargo test -p mindustry-server server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 完整 Java bullet runtime：`BulletType.update/hit/despawn`、碰撞、命中、伤害、frag、interval、trail/sound；
+  2. 继续补 content spec → runtime spec 更多字段，并和 `core/src/mindustry/entities/bullet.rs` 的完整 `BulletType` 结构收敛；
+  3. 检查 Java/Rust 联机时 UnitDestroy 本地 bullet 与 server EntitySnapshot bullet 的重复表现风险；
+  4. 当前总迁移约 12%，远未可玩，goal 绝不能标记 complete。

@@ -70,6 +70,21 @@ impl BulletSpec {
             underwater: false,
         }
     }
+
+    pub fn from_content_spec(spec: &crate::mindustry::content::blocks::BulletSpec) -> Self {
+        Self {
+            damage: spec.damage,
+            speed: spec.speed,
+            hit_size: spec.hit_size,
+            draw_size: spec.draw_size,
+            drag: spec.drag,
+            collides: spec.collides,
+            collides_air: spec.collides_air,
+            collides_ground: spec.collides_ground,
+            collides_tiles: spec.collides_tiles,
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for BulletSpec {
@@ -592,6 +607,34 @@ mod tests {
         bullet.step_motion(2.0, &BulletSpec::default());
         assert_close(bullet.time, 3.0);
         assert!(!bullet.keep_alive);
+    }
+
+    #[test]
+    fn bullet_runtime_spec_maps_content_motion_fields() {
+        let mut content_spec = crate::mindustry::content::blocks::BulletSpec::new(
+            crate::mindustry::content::blocks::BulletKind::Basic,
+            3.5,
+            18.0,
+        );
+        content_spec.hit_size = 6.0;
+        content_spec.draw_size = 24.0;
+        content_spec.drag = 0.08;
+        content_spec.collides = false;
+        content_spec.collides_air = false;
+        content_spec.collides_ground = true;
+        content_spec.collides_tiles = false;
+
+        let runtime_spec = BulletSpec::from_content_spec(&content_spec);
+
+        assert_eq!(runtime_spec.damage, 18.0);
+        assert_eq!(runtime_spec.speed, 3.5);
+        assert_eq!(runtime_spec.hit_size, 6.0);
+        assert_eq!(runtime_spec.draw_size, 24.0);
+        assert_eq!(runtime_spec.drag, 0.08);
+        assert!(!runtime_spec.collides);
+        assert!(!runtime_spec.collides_air);
+        assert!(runtime_spec.collides_ground);
+        assert!(!runtime_spec.collides_tiles);
     }
 
     #[test]

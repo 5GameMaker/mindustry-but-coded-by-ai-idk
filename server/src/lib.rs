@@ -2554,18 +2554,7 @@ impl ServerLauncher {
                 removed_ids.push(bullet_id);
                 continue;
             }
-            let motion_spec = BulletSpec {
-                damage: bullet_content.spec.damage,
-                speed: bullet_content.spec.speed,
-                hit_size: bullet_content.spec.hit_size,
-                draw_size: bullet_content.spec.draw_size,
-                drag: bullet_content.spec.drag,
-                collides: bullet_content.spec.collides,
-                collides_air: bullet_content.spec.collides_air,
-                collides_ground: bullet_content.spec.collides_ground,
-                collides_tiles: bullet_content.spec.collides_tiles,
-                ..BulletSpec::default()
-            };
+            let motion_spec = BulletSpec::from_content_spec(&bullet_content.spec);
             bullet.step_motion(delta_ticks, &motion_spec);
             updates += 1;
         }

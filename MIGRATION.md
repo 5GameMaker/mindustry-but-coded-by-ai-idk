@@ -9331,3 +9331,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - motion spec 目前只映射最小 speed/drag/collide 字段，后续应统一 content bullet spec 与 entity bullet runtime spec；
   - 需要继续检查 Java/Rust 混合联机路径下本地 destroy bullet 与服务端 snapshot bullet 的重复表现风险；
   - 当前总体迁移约 12%，远未可玩。
+
+### 12.294 Content bullet spec → runtime bullet spec conversion seam
+
+- 2026-05-28：收敛上一节 `server_bullets` tick 中的手工字段映射，把 content `BulletSpec` 到 runtime `entities::comp::BulletSpec` 的最小转换下沉到 core，避免后续 server/client 多处漂移。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/comp/bullet.rs`
+    - 新增 `BulletSpec::from_content_spec(...)`；
+    - 当前映射字段：damage、speed、hit_size、draw_size、drag、collides、collides_air、collides_ground、collides_tiles；
+    - 新增 `bullet_runtime_spec_maps_content_motion_fields` 覆盖转换字段。
+  - `server/src/lib.rs`
+    - `tick_server_bullets(...)` 改为复用 `BulletSpec::from_content_spec(...)`，不再在 server 内联手工映射。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core bullet_runtime_spec_maps_content_motion_fields --lib`
+  - `cargo test -p mindustry-server server_bullet_lifecycle_expires_death_bullet_and_hides_snapshot --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 该转换仍是最小 motion/sync seam；完整 Java bullet runtime 还需继续迁移 `BulletType.update/hit/despawn`、碰撞、命中、伤害、frag、interval、trail/sound；
+  - 后续应逐步补齐 content spec 到 runtime spec 的更多字段，并避免与 `core/src/mindustry/entities/bullet.rs` 中更完整 `BulletType` 数据结构分叉；
+  - 当前总体迁移约 12%，远未可玩。
