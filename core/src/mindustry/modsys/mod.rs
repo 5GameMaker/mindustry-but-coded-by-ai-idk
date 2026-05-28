@@ -262,6 +262,30 @@ impl ModSpritePackSource {
                 .with_override(!self.prefix_with_mod_name),
         )
     }
+
+    pub fn from_scanned_path(
+        mod_name: impl Into<String>,
+        source_path: impl Into<String>,
+    ) -> Option<Self> {
+        let mod_name = mod_name.into();
+        let source_path = normalize_mod_resource_path(source_path.into());
+        if !source_path.to_ascii_lowercase().ends_with(".png") {
+            return None;
+        }
+
+        let mut saw_sprites = false;
+        for segment in source_path.split('/') {
+            match segment {
+                "sprites-override" => {
+                    return Some(Self::override_sprite(mod_name, source_path));
+                }
+                "sprites" => saw_sprites = true,
+                _ => {}
+            }
+        }
+
+        saw_sprites.then(|| Self::sprite(mod_name, source_path))
+    }
 }
 
 /// Pure-data plan for mod icons.
@@ -311,6 +335,23 @@ impl ModResourcePlan {
     ) -> Self {
         self.sprite_sources.extend(sources);
         self
+    }
+
+    pub fn from_file_paths(
+        mod_name: impl Into<String>,
+        headless: bool,
+        paths: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let mod_name = mod_name.into();
+        let sprite_sources = paths
+            .into_iter()
+            .filter_map(|path| ModSpritePackSource::from_scanned_path(mod_name.clone(), path))
+            .collect();
+
+        Self {
+            icon: ModIconLoadPlan::new(headless),
+            sprite_sources,
+        }
     }
 
     pub fn sprite_requests(&self) -> Vec<SpritePackRequest> {
@@ -425,6 +466,13 @@ fn trim_slash(mut path: String) -> String {
     } else {
         path.replace('\\', "/")
     }
+}
+
+fn normalize_mod_resource_path(path: String) -> String {
+    path.trim()
+        .replace('\\', "/")
+        .trim_start_matches('/')
+        .to_string()
 }
 
 fn resolve_sprite_page_type(page_hint: &str, source_path: &str) -> PageType {
@@ -771,6 +819,69 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn mod_resource_plan_scans_file_paths_into_sprite_sources() {
+        let plan = ModResourcePlan::from_file_paths(
+            "example",
+            false,
+            [
+                "mods/example/sprites/router.png",
+                "mods/example/sprites/ui/badge.png",
+                "mods\\example\\sprites\\blocks\\environment\\ore.png",
+                "mods/example/sprites-override/router.png",
+                "mods/example/sprites-override/rubble/crack.png",
+                "mods/example/icon.png",
+                "mods/example/preview.png",
+                "mods/example/sprites/readme.txt",
+            ],
+        );
+
+        assert_eq!(
+            plan.icon.candidates,
+            vec!["icon.png".to_string(), "preview.png".to_string()]
+        );
+        assert_eq!(
+            plan.sprite_requests(),
+            vec![
+                SpritePackRequest {
+                    source_path: "mods/example/sprites/router.png".into(),
+                    atlas_name: "example-router".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "mods/example/sprites/ui/badge.png".into(),
+                    atlas_name: "example-badge".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "mods/example/sprites/blocks/environment/ore.png".into(),
+                    atlas_name: "example-ore".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "mods/example/sprites-override/router.png".into(),
+                    atlas_name: "router".into(),
+                    page_hint: "sprites-override".into(),
+                    r#override: true,
+                },
+                SpritePackRequest {
+                    source_path: "mods/example/sprites-override/rubble/crack.png".into(),
+                    atlas_name: "crack".into(),
+                    page_hint: "sprites-override".into(),
+                    r#override: true,
+                },
+            ]
+        );
+
+        let requests = plan.sprite_requests();
+        assert_eq!(requests[1].page_type(), PageType::Ui);
+        assert_eq!(requests[2].page_type(), PageType::Environment);
+        assert_eq!(requests[4].page_type(), PageType::Rubble);
     }
 
     #[test]

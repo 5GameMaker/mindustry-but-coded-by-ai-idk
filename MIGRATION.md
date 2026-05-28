@@ -11397,3 +11397,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 仍未接真实 mod 目录扫描、文件存在性判断、PNG decode、MultiPacker 实际尺寸/bleed/flush；
   - `ModIconLoadPlan` 仍只记录 `icon.png -> preview.png` 候选，尚未进入真实 icon texture upload；
   - 当前总体迁移约 19.7%，仍未达到完整可玩。
+
+### 12.355 Mod file tree snapshot scans into ModResourcePlan
+
+- 2026-05-29：继续把 mod 资源链路向 Java `Mods.loadAsync()/packSprites(...)` 靠近。本轮新增纯数据扫描桥：从一组已发现的 mod 文件路径生成 `ModResourcePlan`，自动区分 `sprites` 与 `sprites-override`，并保留 v158.1 mod icon `icon.png -> preview.png` 候选计划。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `loadAsync()` 分别扫描 `sprites` 和 `sprites-override`；
+    - `sprites` 进入 packer 时使用 mod name 前缀；
+    - `sprites-override` 不加前缀并覆盖同名 region；
+    - page 分类仍由路径中的 `ui`、`rubble`、`blocks/environment` 等目录决定。
+- Rust 新增/接入：
+  - `core/src/mindustry/modsys/mod.rs`
+    - `ModSpritePackSource::from_scanned_path(...)`：
+      - 只接受 `.png`；
+      - 规范化 Windows 反斜杠；
+      - 路径 segment 命中 `sprites` 时生成普通 mod sprite；
+      - 路径 segment 命中 `sprites-override` 时生成 override sprite；
+    - `ModResourcePlan::from_file_paths(mod_name, headless, paths)`：
+      - 从纯路径列表生成 `sprite_sources`；
+      - 保持 `ModIconLoadPlan::new(headless)` 的 icon/preview 候选；
+    - 新增测试覆盖普通 sprite、UI sprite、environment sprite、override main/rubble sprite、非 PNG 与 icon/preview 非 sprite 的过滤。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-core mod_resource_plan --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `3 passed`
+  - `cargo test -p mindustry-core sprite_pack_request_page_type --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop mod_resource_plan --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - 输入仍是调用方提供的文件路径快照，尚未对接真实文件系统 walker、zip/jar mod root 或 Arc `Fi.findAll` 等价实现；
+  - 仍未读取 PNG 尺寸、bleed、pack、flush 或绑定 GPU region；
+  - 当前总体迁移约 19.8%，仍未达到完整可玩。
