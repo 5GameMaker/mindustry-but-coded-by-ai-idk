@@ -8667,4 +8667,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `standard_effect_id("dynamicExplosion")` 尚未覆盖，因此默认 `UnitType.death_explosion_effect = "dynamicExplosion"` 目前只在已知 effect 名称可解析时排队；后续应迁移 `Fx.dynamicExplosion` id/metadata/renderer；
   - `standard_sound_id` 仍只覆盖极少数声音，`unitExplode1/2/3` 等死亡音效需要继续迁移；
   - `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
-  - `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 仍需接入。
+  - `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 已在 `12.271` 接入 mark-dead + local effect 最小语义；后续仍需把 post destroy call 与完整 icon renderer 行为补齐。
+
+### 12.271 UnitCapDeathCallPacket / UnitEnvDeathCallPacket 最小 mark-dead/effect 接入
+
+- 2026-05-28：对照 Java `Units.unitCapDeath(Unit unit)` 与 `Units.unitEnvDeath(Unit unit)`，把 cap/env death 两个 lifecycle packet 从队列记录推进到客户端 runtime apply。
+- 本轮迁移：
+  - `Fx.unitCapKill` / `Fx.unitEnvKill` id 与基础 metadata；
+  - `GameRuntime.apply_client_unit_cap_death_packet(...)`；
+  - `GameRuntime.apply_client_unit_env_death_packet(...)`；
+  - `DesktopLauncher.sync_unit_lifecycle_to_runtime(...)` 分发 cap/env death；
+  - cap/env death 回归测试。
+- Java 依据：
+  - `unitCapDeath(unit)`：若 unit 存在，`unit.dead = true`，触发 `Fx.unitCapKill.at(unit)`，再 `Core.app.post(() -> Call.unitDestroy(unit.id))`；
+  - `unitEnvDeath(unit)`：同上，但 effect 为 `Fx.unitEnvKill`；
+  - 两者本身不立即 remove，最终销毁来自后续 `unitDestroy` 调用。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_UNIT_CAP_KILL_ID = 4` 与 `FX_UNIT_ENV_KILL_ID = 5`；
+    - `standard_effect_id("unitCapKill"/"unitEnvKill")` 与 `standard_effect(...)` lifetime `80.0`；
+    - 更新 `standard_effect_ids_include_puddle_ripple_dependencies` 与 `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers`。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增私有 `apply_client_unit_mark_dead_effect_packet(...)`，复用 cap/env mark-dead + local effect 入队逻辑；
+    - 新增 `apply_client_unit_cap_death_packet(...)` 与 `apply_client_unit_env_death_packet(...)`；
+    - 两者将本地 unit `health.dead = true`、`health <= 0`，排入对应 local effect，但保留 unit added/snapshot，等待后续 destroy packet；
+    - 新增 `game_runtime_applies_client_unit_cap_and_env_death_packets_like_java_mark_dead`。
+  - `desktop/src/lib.rs`
+    - lifecycle 分发新增 `PacketKind::UnitCapDeathCallPacket` / `PacketKind::UnitEnvDeathCallPacket`；
+    - 新增 `desktop_launcher_syncs_unit_cap_and_env_death_packets_to_runtime_mark_dead`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_cap_and_env_death_packets_like_java_mark_dead`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_cap_and_env_death_packets_to_runtime_mark_dead`
+  - `cargo test -p mindustry-core standard_effect_ids_include`
+  - `cargo test -p mindustry-core standard_effect_lookup`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - Java `Core.app.post(() -> Call.unitDestroy(unit.id))` 的后续 destroy 调用在 Rust 客户端暂不主动发出；当前依赖服务端后续同步/packet，后续要对照真实网络方向确认；
+  - `Fx.unitCapKill` / `Fx.unitEnvKill` 当前只有 id/metadata 与 local effect state，真实 warning/cancel icon renderer 还没迁移；
+  - death/destroy/safeDeath 的 explosion/sound/shake/event bus 仍需要继续补完整。

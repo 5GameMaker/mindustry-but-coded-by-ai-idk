@@ -6689,5 +6689,52 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `Fx.dynamicExplosion` 尚未进入 `standard_effect_id`/metadata/renderer，默认 `UnitType.death_explosion_effect` 还不能完整显示；
   2. `standard_sound_id` 仍未覆盖 `unitExplode1/2/3` 等死亡音效；
   3. `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
-  4. `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 仍需接入；
+  4. `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 已在 `197` 节接入 mark-dead + local effect 最小语义；后续仍需 post-destroy 与真实 icon renderer；
   5. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。
+
+---
+
+## 197. 最新闭环记录：UnitCapDeathCallPacket / UnitEnvDeathCallPacket 接入 mark-dead + effect
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 从 lifecycle 队列记录推进到客户端 runtime apply，对齐 Java `Units.unitCapDeath/unitEnvDeath` 的最小前置语义。
+- Java 对照：
+  - `Units.unitCapDeath(Unit unit)`：
+    - `unit.dead = true`；
+    - `Fx.unitCapKill.at(unit)`；
+    - `Core.app.post(() -> Call.unitDestroy(unit.id))`。
+  - `Units.unitEnvDeath(Unit unit)`：
+    - `unit.dead = true`；
+    - `Fx.unitEnvKill.at(unit)`；
+    - `Core.app.post(() -> Call.unitDestroy(unit.id))`。
+  - 两者本身不立即 remove，最终销毁由后续 `unitDestroy` 完成。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_UNIT_CAP_KILL_ID = 4`、`FX_UNIT_ENV_KILL_ID = 5`；
+    - `standard_effect_id("unitCapKill"/"unitEnvKill")`；
+    - `standard_effect(...)` metadata lifetime `80.0`；
+    - 更新标准 effect id/metadata 测试。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增私有 `apply_client_unit_mark_dead_effect_packet(...)`；
+    - 新增 `apply_client_unit_cap_death_packet(...)` 与 `apply_client_unit_env_death_packet(...)`；
+    - 对本地 unit 设置 `health.dead = true`、`health <= 0`，排入 local effect，但保留 unit snapshot/added 状态；
+    - 新增 `game_runtime_applies_client_unit_cap_and_env_death_packets_like_java_mark_dead`。
+  - `desktop/src/lib.rs`
+    - lifecycle 分发新增 `PacketKind::UnitCapDeathCallPacket` / `PacketKind::UnitEnvDeathCallPacket`；
+    - 新增 `desktop_launcher_syncs_unit_cap_and_env_death_packets_to_runtime_mark_dead`。
+  - `MIGRATION.md`
+    - 新增 `12.271`，并更新 `12.270` 的剩余项。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_cap_and_env_death_packets_like_java_mark_dead`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_cap_and_env_death_packets_to_runtime_mark_dead`
+  - `cargo test -p mindustry-core standard_effect_ids_include`
+  - `cargo test -p mindustry-core standard_effect_lookup`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. Java 的 `Core.app.post(() -> Call.unitDestroy(unit.id))` 后续 destroy 调用尚未在 Rust 客户端主动发出；需要结合真实网络方向决定由 server 后续 packet 负责还是客户端 call；
+  2. `Fx.unitCapKill` / `Fx.unitEnvKill` 当前只有 id/metadata 与 effect state，真实 warning/cancel icon renderer 还没迁移；
+  3. `Fx.dynamicExplosion`、死亡音效、camera shake、event bus、weapon shoot-on-death、ability death 仍未完整；
+  4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。

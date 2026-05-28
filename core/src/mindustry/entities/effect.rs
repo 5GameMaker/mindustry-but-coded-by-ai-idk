@@ -11,6 +11,10 @@ pub const SHAKE_FALLOFF: f32 = 10000.0;
 pub const DEFAULT_EFFECT_LIFETIME: f32 = 50.0;
 pub const DEFAULT_EFFECT_CLIP: f32 = 50.0;
 pub const DEFAULT_EFFECT_LAYER: f32 = 110.0;
+/// Upstream `Fx.unitCapKill` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UNIT_CAP_KILL_ID: i32 = 4;
+/// Upstream `Fx.unitEnvKill` id in `mindustry.content.Fx` for v158.1.
+pub const FX_UNIT_ENV_KILL_ID: i32 = 5;
 /// Upstream `Fx.unitAssemble` id in `mindustry.content.Fx` for v158.1.
 pub const FX_UNIT_ASSEMBLE_ID: i32 = 35;
 /// Upstream `Fx.smokeAoeCloud` id in `mindustry.content.Fx` for v158.1.
@@ -417,6 +421,8 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "pointShockwave" => Some(FX_POINT_SHOCKWAVE_ID),
         "moveCommand" => Some(FX_MOVE_COMMAND_ID),
         "commandSend" => Some(FX_COMMAND_SEND_ID),
+        "unitCapKill" => Some(FX_UNIT_CAP_KILL_ID),
+        "unitEnvKill" => Some(FX_UNIT_ENV_KILL_ID),
         "upgradeCoreBloom" => Some(FX_UPGRADE_CORE_BLOOM_ID),
         "placeBlock" => Some(FX_PLACE_BLOCK_ID),
         "tapBlock" => Some(FX_TAP_BLOCK_ID),
@@ -627,6 +633,12 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_MOVE_COMMAND_ID => Effect::with_lifetime(FX_MOVE_COMMAND_ID, 20.0, DEFAULT_EFFECT_CLIP)
             .layer(Layer::OVERLAY_UI),
         FX_COMMAND_SEND_ID => Effect::with_lifetime(FX_COMMAND_SEND_ID, 28.0, DEFAULT_EFFECT_CLIP),
+        FX_UNIT_CAP_KILL_ID => {
+            Effect::with_lifetime(FX_UNIT_CAP_KILL_ID, 80.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_UNIT_ENV_KILL_ID => {
+            Effect::with_lifetime(FX_UNIT_ENV_KILL_ID, 80.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_UPGRADE_CORE_BLOOM_ID => {
             Effect::with_lifetime(FX_UPGRADE_CORE_BLOOM_ID, 80.0, DEFAULT_EFFECT_CLIP)
         }
@@ -8751,6 +8763,8 @@ mod tests {
         );
         assert_eq!(standard_effect_id("moveCommand"), Some(FX_MOVE_COMMAND_ID));
         assert_eq!(standard_effect_id("commandSend"), Some(FX_COMMAND_SEND_ID));
+        assert_eq!(standard_effect_id("unitCapKill"), Some(FX_UNIT_CAP_KILL_ID));
+        assert_eq!(standard_effect_id("unitEnvKill"), Some(FX_UNIT_ENV_KILL_ID));
         assert_eq!(
             standard_effect_id("upgradeCoreBloom"),
             Some(FX_UPGRADE_CORE_BLOOM_ID)
@@ -9267,6 +9281,8 @@ mod tests {
         assert!(smoke.follow_parent);
         assert!(!smoke.rot_with_parent);
 
+        assert_eq!(standard_effect(FX_UNIT_CAP_KILL_ID).unwrap().lifetime, 80.0);
+        assert_eq!(standard_effect(FX_UNIT_ENV_KILL_ID).unwrap().lifetime, 80.0);
         assert_eq!(standard_effect(FX_FALL_SMOKE_ID).unwrap().lifetime, 110.0);
         assert_eq!(standard_effect(FX_ROCKET_SMOKE_ID).unwrap().lifetime, 120.0);
         assert_eq!(

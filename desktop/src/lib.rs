@@ -828,6 +828,12 @@ impl DesktopLauncher {
                 PacketKind::UnitSafeDeathCallPacket(packet) => {
                     self.runtime.apply_client_unit_safe_death_packet(&packet)
                 }
+                PacketKind::UnitCapDeathCallPacket(packet) => {
+                    self.runtime.apply_client_unit_cap_death_packet(&packet)
+                }
+                PacketKind::UnitEnvDeathCallPacket(packet) => {
+                    self.runtime.apply_client_unit_env_death_packet(&packet)
+                }
                 _ => false,
             };
         }
@@ -1856,9 +1862,9 @@ mod tests {
         ClientPlanSnapshotReceivedCallPacket, CommandBuildingCallPacket, EffectCallPacket,
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerData, NetworkPlayerSyncData,
         NetworkWorldData, StateSnapshotCallPacket, TileConfigCallPacket, UnitBlockSpawnCallPacket,
-        UnitDeathCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
-        UnitEnteredPayloadCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
-        UnitTetherBlockSpawnedCallPacket,
+        UnitCapDeathCallPacket, UnitDeathCallPacket, UnitDespawnCallPacket, UnitDestroyCallPacket,
+        UnitEnteredPayloadCallPacket, UnitEnvDeathCallPacket, UnitSafeDeathCallPacket,
+        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -5328,6 +5334,61 @@ mod tests {
             .contains_key(&9921));
         assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 1);
         assert_eq!(launcher.runtime.client_local_effect_entities.len(), 1);
+    }
+
+    #[test]
+    fn desktop_launcher_syncs_unit_cap_and_env_death_packets_to_runtime_mark_dead() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        for (unit_id, x, y) in [(9931_i32, 11.0, 12.0), (9932_i32, 21.0, 22.0)] {
+            let mut unit =
+                UnitComp::new(unit_id, UnitType::new(unit_id as i16, "crawler"), TeamId(4));
+            unit.add();
+            unit.set_pos(x, y);
+            launcher
+                .runtime
+                .client_unit_snapshot_entities
+                .insert(unit_id, unit);
+        }
+
+        {
+            let mut net = launcher.net_client.net_mut();
+            net.set_client_loaded(true);
+            net.handle_client_received(PacketKind::UnitCapDeathCallPacket(
+                UnitCapDeathCallPacket {
+                    unit: UnitRef::Unit { id: 9931 },
+                },
+            ));
+            net.handle_client_received(PacketKind::UnitEnvDeathCallPacket(
+                UnitEnvDeathCallPacket {
+                    unit: UnitRef::Unit { id: 9932 },
+                },
+            ));
+        }
+        launcher.update();
+
+        let cap_unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&9931)
+            .unwrap();
+        assert!(cap_unit.health.dead);
+        let env_unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&9932)
+            .unwrap();
+        assert!(env_unit.health.dead);
+        assert_eq!(launcher.last_applied_unit_lifecycle_packets_seen, 2);
+        assert_eq!(launcher.runtime.client_local_effect_entities.len(), 2);
     }
 
     #[test]

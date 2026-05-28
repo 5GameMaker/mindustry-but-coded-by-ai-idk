@@ -47,9 +47,10 @@ use crate::mindustry::{
     net::{
         AssemblerDroneSpawnedCallPacket, AssemblerUnitSpawnedCallPacket, EffectCallPacket,
         EffectCallPacket2, LandingPadLandedCallPacket, NetworkPlayerSyncData, SoundAtCallPacket,
-        UnitBlockSpawnCallPacket, UnitDeathCallPacket, UnitDespawnCallPacket,
-        UnitDestroyCallPacket, UnitEnteredPayloadCallPacket, UnitSafeDeathCallPacket,
-        UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
+        UnitBlockSpawnCallPacket, UnitCapDeathCallPacket, UnitDeathCallPacket,
+        UnitDespawnCallPacket, UnitDestroyCallPacket, UnitEnteredPayloadCallPacket,
+        UnitEnvDeathCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
+        UnitTetherBlockSpawnedCallPacket,
     },
     r#type::{PayloadKey, PayloadSeq, UnitType, WeatherState},
     vars::TILE_SIZE,
@@ -4214,6 +4215,44 @@ impl GameRuntime {
         } else {
             true
         }
+    }
+
+    fn apply_client_unit_mark_dead_effect_packet(
+        &mut self,
+        unit: UnitRef,
+        effect_name: &str,
+    ) -> bool {
+        let UnitRef::Unit { id } = unit else {
+            return false;
+        };
+        let Some(unit) = self.client_unit_snapshot_entities.get_mut(&id) else {
+            return false;
+        };
+        unit.health.dead = true;
+        unit.health.health = unit.health.health.min(0.0);
+        let (x, y) = (unit.x(), unit.y());
+
+        if let Some(effect_id) = standard_effect_id(effect_name) {
+            self.client_local_effect_events.push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: effect_id as u16,
+                    x,
+                    y,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+        }
+        true
+    }
+
+    pub fn apply_client_unit_cap_death_packet(&mut self, packet: &UnitCapDeathCallPacket) -> bool {
+        self.apply_client_unit_mark_dead_effect_packet(packet.unit, "unitCapKill")
+    }
+
+    pub fn apply_client_unit_env_death_packet(&mut self, packet: &UnitEnvDeathCallPacket) -> bool {
+        self.apply_client_unit_mark_dead_effect_packet(packet.unit, "unitEnvKill")
     }
 
     pub fn apply_client_unit_safe_death_packet(
@@ -26487,6 +26526,54 @@ mod tests {
         ));
         assert!(
             !runtime.apply_client_unit_safe_death_packet(&UnitSafeDeathCallPacket {
+                unit: UnitRef::Null,
+            })
+        );
+    }
+
+    #[test]
+    fn game_runtime_applies_client_unit_cap_and_env_death_packets_like_java_mark_dead() {
+        let mut cap_unit = UnitComp::new(81, UnitType::new(81, "cap"), TeamId(4));
+        cap_unit.add();
+        cap_unit.set_pos(11.0, 12.0);
+        let mut env_unit = UnitComp::new(82, UnitType::new(82, "env"), TeamId(4));
+        env_unit.add();
+        env_unit.set_pos(21.0, 22.0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(81, cap_unit);
+        runtime.client_unit_snapshot_entities.insert(82, env_unit);
+
+        assert!(
+            runtime.apply_client_unit_cap_death_packet(&UnitCapDeathCallPacket {
+                unit: UnitRef::Unit { id: 81 },
+            })
+        );
+        assert!(
+            runtime.apply_client_unit_env_death_packet(&UnitEnvDeathCallPacket {
+                unit: UnitRef::Unit { id: 82 },
+            })
+        );
+
+        let cap_unit = runtime.client_unit_snapshot_entities.get(&81).unwrap();
+        assert!(cap_unit.health.dead);
+        assert!(cap_unit.entity.is_added());
+        let env_unit = runtime.client_unit_snapshot_entities.get(&82).unwrap();
+        assert!(env_unit.health.dead);
+        assert!(env_unit.entity.is_added());
+        assert_eq!(runtime.client_local_effect_events.len(), 2);
+        assert_eq!(
+            runtime.client_local_effect_events[0].effect.effect_id,
+            standard_effect_id("unitCapKill").unwrap() as u16
+        );
+        assert_eq!(runtime.client_local_effect_events[0].effect.x, 11.0);
+        assert_eq!(
+            runtime.client_local_effect_events[1].effect.effect_id,
+            standard_effect_id("unitEnvKill").unwrap() as u16
+        );
+        assert_eq!(runtime.client_local_effect_events[1].effect.y, 22.0);
+        assert!(
+            !runtime.apply_client_unit_cap_death_packet(&UnitCapDeathCallPacket {
                 unit: UnitRef::Null,
             })
         );
