@@ -6686,7 +6686,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-desktop`
   - `git diff --check`
 - 当前仍需继续：
-  1. `Fx.dynamicExplosion` 尚未进入 `standard_effect_id`/metadata/renderer，默认 `UnitType.death_explosion_effect` 还不能完整显示；
+  1. `Fx.dynamicExplosion` 已在 `198` 节进入 `standard_effect_id`/metadata/动态 lifetime/最小 line draw seam；后续仍需补完整圆形粒子、光照和真实 renderer；
   2. `standard_sound_id` 仍未覆盖 `unitExplode1/2/3` 等死亡音效；
   3. `Effect.shake(...)` 还没有客户端本地 camera shake 队列；
   4. `UnitCapDeathCallPacket` 与 `UnitEnvDeathCallPacket` 已在 `197` 节接入 mark-dead + local effect 最小语义；后续仍需 post-destroy 与真实 icon renderer；
@@ -6736,5 +6736,47 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. Java 的 `Core.app.post(() -> Call.unitDestroy(unit.id))` 后续 destroy 调用尚未在 Rust 客户端主动发出；需要结合真实网络方向决定由 server 后续 packet 负责还是客户端 call；
   2. `Fx.unitCapKill` / `Fx.unitEnvKill` 当前只有 id/metadata 与 effect state，真实 warning/cancel icon renderer 还没迁移；
-  3. `Fx.dynamicExplosion`、死亡音效、camera shake、event bus、weapon shoot-on-death、ability death 仍未完整；
+  3. `Fx.dynamicExplosion` 已在 `198` 节补最小 seam；死亡音效、camera shake、event bus、weapon shoot-on-death、ability death 仍未完整；
+  4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。
+
+---
+
+## 198. 最新闭环记录：Fx.dynamicExplosion 最小 metadata / lifetime / line draw seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：补齐默认单位死亡爆炸效果 `dynamicExplosion` 的 effect 表缺口，让 `UnitType::new(...).death_explosion_effect = "dynamicExplosion"` 能被 safe death 与本地 renderer seam 解析。
+- Java 对照：
+  - `Fx.java:1676`：`dynamicExplosion = new Effect(30, 500f, b -> ...)`；
+  - `intensity = b.rotation`；
+  - renderer 内重写 `b.lifetime = 43f + intensity * 35f`；
+  - 主线段分支使用 `(int)(9 * intensity)`、`40f * intensity`、线长 `1f + out * 4 * (3f + intensity)`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_DYNAMIC_EXPLOSION_ID = 149`；
+    - 新增 `standard_effect_id("dynamicExplosion")`；
+    - `standard_effect(...)` 返回 lifetime `30.0`、clip `500.0`；
+    - `standard_effect_render_lifetime(...)` 对 dynamicExplosion 使用 `43.0 + rotation * 35.0`；
+    - `standard_effect_draw_plan(...)` 新增 `SeededRadialLineParticles` 最小 seam，覆盖主 radial line 分支；
+    - 新增 `standard_effect_draw_plan_covers_dynamic_explosion_lines`，并更新 id/metadata/lifetime 测试。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - safe death 测试恢复使用默认 `dynamicExplosion`，不再临时改成 `despawn`。
+  - `desktop/src/lib.rs`
+    - safe death desktop 测试同样使用默认 `dynamicExplosion` materialize 本地 effect state。
+  - `MIGRATION.md`
+    - 新增 `12.272`，并更新 `12.269`、`12.270`、`12.271` 的剩余项。
+- 已跑验证：
+  - `cargo test -p mindustry-core standard_effect_ids_include`
+  - `cargo test -p mindustry-core standard_effect_lookup`
+  - `cargo test -p mindustry-core standard_effect_render_lifetime_applies`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_dynamic_explosion_lines`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_safe_death_packet_like_java_remove_with_effect`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_safe_death_packet_to_runtime_remove_effect`
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. Java `dynamicExplosion` 的灰色圆形粒子 multi-pass、`baseLifetime` 子阶段与 `Drawf.light(...)` 精确行为还没完整；
+  2. 真实 renderer/backend 对该效果还只是 primitive seam；
+  3. death sound、camera shake、完整 `UnitComp.destroy()` side effects 仍需继续；
   4. 当前总迁移仍约 10% 左右，远未可玩，继续把 helper/plan 下沉到真实 runtime/content/world/entity/network/client-server 链路。

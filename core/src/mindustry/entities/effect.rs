@@ -79,6 +79,8 @@ pub const FX_INST_TRAIL_ID: i32 = 102;
 pub const FX_INST_SHOOT_ID: i32 = 103;
 /// Upstream `Fx.instHit` id in `mindustry.content.Fx` for v158.1.
 pub const FX_INST_HIT_ID: i32 = 104;
+/// Upstream `Fx.dynamicExplosion` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DYNAMIC_EXPLOSION_ID: i32 = 149;
 /// Upstream `Fx.pointHit` id in `mindustry.content.Fx` for v158.1.
 pub const FX_POINT_HIT_ID: i32 = 11;
 /// Upstream `Fx.coreBuildShockwave` id in `mindustry.content.Fx` for v158.1.
@@ -469,6 +471,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "instTrail" => Some(FX_INST_TRAIL_ID),
         "instShoot" => Some(FX_INST_SHOOT_ID),
         "instHit" => Some(FX_INST_HIT_ID),
+        "dynamicExplosion" => Some(FX_DYNAMIC_EXPLOSION_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "artilleryTrail" => Some(FX_ARTILLERY_TRAIL_ID),
         "incendTrail" => Some(FX_INCEND_TRAIL_ID),
@@ -730,6 +733,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_INST_TRAIL_ID => Effect::with_lifetime(FX_INST_TRAIL_ID, 30.0, DEFAULT_EFFECT_CLIP),
         FX_INST_SHOOT_ID => Effect::with_lifetime(FX_INST_SHOOT_ID, 24.0, DEFAULT_EFFECT_CLIP),
         FX_INST_HIT_ID => Effect::with_lifetime(FX_INST_HIT_ID, 20.0, 200.0),
+        FX_DYNAMIC_EXPLOSION_ID => Effect::with_lifetime(FX_DYNAMIC_EXPLOSION_ID, 30.0, 500.0),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_ARTILLERY_TRAIL_ID => {
             Effect::with_lifetime(FX_ARTILLERY_TRAIL_ID, 50.0, DEFAULT_EFFECT_CLIP)
@@ -1083,6 +1087,9 @@ pub fn standard_effect_render_lifetime(effect_id: Option<u16>, rotation: f32, cu
         // before using fin/fout, so desktop/core render helpers must do the
         // same lifetime rewrite when materializing a standard draw plan.
         Some(FX_CORE_BUILD_SHOCKWAVE_ID) => rotation,
+        // Java `Fx.dynamicExplosion` treats rotation as explosion intensity and
+        // rewrites lifetime to `43f + intensity * 35f` inside the renderer.
+        Some(FX_DYNAMIC_EXPLOSION_ID) => 43.0 + rotation.max(0.0) * 35.0,
         _ => current,
     }
 }
@@ -5371,6 +5378,48 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_DYNAMIC_EXPLOSION_ID => {
+            let intensity = rotation.max(0.0);
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededRadialLineParticles,
+                center: (x, y),
+                color_from: Some("Pal.lighterOrange"),
+                color_mid: Some("Pal.lightOrange"),
+                color_to: Some("Color.gray"),
+                color_mix: fin,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 1.0,
+                stroke: (1.7 * fout) * (1.0 + (intensity - 1.0) / 2.0),
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id + 1,
+                    count: (9.0 * intensity).max(0.0) as u16,
+                    progress: Some(finpow + 0.001),
+                    angle: None,
+                    angle_range: 0.0,
+                    length: 40.0 * intensity,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 4.0 * (3.0 + intensity),
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: Some("Draw.getColor"),
+                light_radius: 14.0 * 2.0 * intensity * fin,
+                light_opacity: 0.9 * fout,
+            }
+        }
         FX_ARTILLERY_TRAIL_ID
         | FX_MISSILE_TRAIL_ID
         | FX_MISSILE_TRAIL_SHORT_ID
@@ -8862,6 +8911,10 @@ mod tests {
         assert_eq!(standard_effect_id("instTrail"), Some(FX_INST_TRAIL_ID));
         assert_eq!(standard_effect_id("instShoot"), Some(FX_INST_SHOOT_ID));
         assert_eq!(standard_effect_id("instHit"), Some(FX_INST_HIT_ID));
+        assert_eq!(
+            standard_effect_id("dynamicExplosion"),
+            Some(FX_DYNAMIC_EXPLOSION_ID)
+        );
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("artilleryTrail"),
@@ -9384,6 +9437,9 @@ mod tests {
         let inst_hit = standard_effect(FX_INST_HIT_ID).unwrap();
         assert_eq!(inst_hit.lifetime, 20.0);
         assert_eq!(inst_hit.clip, 200.0);
+        let dynamic_explosion = standard_effect(FX_DYNAMIC_EXPLOSION_ID).unwrap();
+        assert_eq!(dynamic_explosion.lifetime, 30.0);
+        assert_eq!(dynamic_explosion.clip, 500.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         let artillery_trail = standard_effect(FX_ARTILLERY_TRAIL_ID).unwrap();
         assert_eq!(artillery_trail.lifetime, 50.0);
@@ -9797,6 +9853,10 @@ mod tests {
             45.0
         );
         assert_eq!(
+            standard_effect_render_lifetime(Some(FX_DYNAMIC_EXPLOSION_ID as u16), 2.0, 30.0),
+            113.0
+        );
+        assert_eq!(
             standard_effect_render_lifetime(Some(FX_SMOKE_ID as u16), 2.5, 100.0),
             100.0
         );
@@ -10089,6 +10149,34 @@ mod tests {
         assert_eq!(lights[0].color_rgba, Some(input_color));
         assert_eq!(plan.circle_render_primitives_from_seed().len(), 0);
         assert_eq!(plan.line_render_primitives_from_seed().len(), 0);
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_dynamic_explosion_lines() {
+        let plan = standard_effect_draw_plan(
+            Some(FX_DYNAMIC_EXPLOSION_ID as u16),
+            1490,
+            10.0,
+            20.0,
+            2.0,
+            56.5,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+
+        assert_eq!(plan.kind, StandardEffectDrawKind::SeededRadialLineParticles);
+        assert_eq!(plan.center, (10.0, 20.0));
+        assert_eq!(plan.color_from, Some("Pal.lighterOrange"));
+        assert_eq!(plan.color_mid, Some("Pal.lightOrange"));
+        assert_eq!(plan.color_to, Some("Color.gray"));
+        assert_eq!(plan.particles.unwrap().count, 18);
+        assert!((plan.stroke - 1.275).abs() < 0.0001);
+        assert!((plan.light_radius - 28.0).abs() < 0.0001);
+
+        let lines = plan.line_render_primitives_from_seed();
+        assert_eq!(lines.len(), 18);
+        assert!(lines[0].length >= 1.0);
     }
 
     #[test]

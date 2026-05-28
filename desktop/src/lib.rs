@@ -5307,7 +5307,6 @@ mod tests {
         launcher.update();
 
         let mut unit_type = UnitType::new(9921, "crawler");
-        unit_type.death_explosion_effect = "despawn".into();
         unit_type.hit_size = 16.0;
         let mut unit = UnitComp::new(9921, unit_type, TeamId(4));
         unit.add();

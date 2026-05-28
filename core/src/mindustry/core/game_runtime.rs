@@ -26496,7 +26496,6 @@ mod tests {
         let mut unit_type = UnitType::new(80, "crawler");
         unit_type.allow_leg_step = true;
         unit_type.leg_count = 2;
-        unit_type.death_explosion_effect = "despawn".into();
         unit_type.hit_size = 16.0;
         let mut unit = UnitComp::new(80, unit_type, TeamId(4));
         unit.add();
@@ -26515,7 +26514,7 @@ mod tests {
         let event = &runtime.client_local_effect_events[0];
         assert_eq!(
             event.effect.effect_id,
-            standard_effect_id("despawn").unwrap() as u16
+            standard_effect_id("dynamicExplosion").unwrap() as u16
         );
         assert_eq!(event.effect.x, 30.0);
         assert_eq!(event.effect.y, 40.0);
