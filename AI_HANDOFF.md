@@ -4966,4 +4966,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `git diff --check`
 - 下一步建议：
   1. 暂避 `airBubble=101`（texture bubble）、`forceShrink=115`（polygon）、爆炸系列（multi-pass）。
-  2. 可继续找单 pass circle/line/square 效果；或优先扩展 multi-pass / input-color light / renderer backend。
+  2. 后续最新状态见 148 节；input-color light 已补，可继续找单 pass circle/line/square 效果，或优先扩展 multi-pass / renderer backend。
+
+---
+
+## 148. 最新闭环记录：Input.color draw/light semantics 与 Fx.hitLaserColor
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补动态输入色 light 表达，迁移此前暂缓的 `hitLaserColor=99`。
+- Java 依据：
+  - `Fx.java:1137-1143`
+  - lifetime `8`
+  - `Color.white -> e.color`
+  - stroked circle 半径 `fin*5`
+  - light 半径 `23`，颜色 `e.color`，opacity `fout*0.7`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_LASER_COLOR_ID=99`；
+    - `resolved_draw_color()` 支持 `color_to = "Input.color"`；
+    - `light_render_primitives()` 支持 `light_color = "Input.color"` 并输出 `input_color` 的 rgba；
+    - `hitLaser`/`hitLaserColor` 共用同形 stroked-circle 分支。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_hit_radial_line_batch --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 用 `Input.color` light 能力回头处理 `hitBulletColor=78`，但必须先补 multi-pass/附加 scaled circle 表达。
+  2. 扫描其它 `Drawf.light(..., e.color, ...)` 候选，优先挑不需要 texture/polygon/multi-pass 的效果。
+  3. 继续推进 desktop renderer/backend 真正消费 primitive frame。

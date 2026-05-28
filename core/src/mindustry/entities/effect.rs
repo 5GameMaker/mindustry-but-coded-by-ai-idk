@@ -46,6 +46,8 @@ pub const FX_HIT_MELTDOWN_ID: i32 = 92;
 pub const FX_HIT_MELT_HEAL_ID: i32 = 93;
 /// Upstream `Fx.hitLaser` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_LASER_ID: i32 = 98;
+/// Upstream `Fx.hitLaserColor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_LASER_COLOR_ID: i32 = 99;
 /// Upstream `Fx.despawn` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DESPAWN_ID: i32 = 100;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
@@ -208,6 +210,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "hitMeltdown" => Some(FX_HIT_MELTDOWN_ID),
         "hitMeltHeal" => Some(FX_HIT_MELT_HEAL_ID),
         "hitLaser" => Some(FX_HIT_LASER_ID),
+        "hitLaserColor" => Some(FX_HIT_LASER_COLOR_ID),
         "despawn" => Some(FX_DESPAWN_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "artilleryTrail" => Some(FX_ARTILLERY_TRAIL_ID),
@@ -334,6 +337,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_HIT_MELT_HEAL_ID, 12.0, DEFAULT_EFFECT_CLIP)
         }
         FX_HIT_LASER_ID => Effect::with_lifetime(FX_HIT_LASER_ID, 8.0, DEFAULT_EFFECT_CLIP),
+        FX_HIT_LASER_COLOR_ID => {
+            Effect::with_lifetime(FX_HIT_LASER_COLOR_ID, 8.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_DESPAWN_ID => Effect::with_lifetime(FX_DESPAWN_ID, 12.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_ARTILLERY_TRAIL_ID => {
@@ -780,7 +786,11 @@ impl StandardEffectDrawPlan {
                     center: self.center,
                     radius: self.light_radius,
                     color,
-                    color_rgba: standard_effect_color_symbol(color),
+                    color_rgba: if color == "Input.color" {
+                        self.input_color
+                    } else {
+                        standard_effect_color_symbol(color)
+                    },
                     opacity: self.light_opacity,
                 }]
             })
@@ -794,6 +804,9 @@ impl StandardEffectDrawPlan {
             self.color_mid,
             self.color_to,
         ) {
+            (Some(input), Some(from), None, Some("Input.color")) => {
+                lerp_color(standard_effect_color_symbol(from)?, input, self.color_mix)
+            }
             (Some(color), _, _, _) => color,
             (None, Some(from), Some(mid), Some(to)) => lerp_color_three(
                 standard_effect_color_symbol(from)?,
@@ -1449,25 +1462,33 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
-        FX_HIT_LASER_ID => StandardEffectDrawPlan {
-            effect_id,
-            layer: effect.layer,
-            kind: StandardEffectDrawKind::StrokedCircle,
-            center: (x, y),
-            color_from: Some("Color.white"),
-            color_mid: None,
-            color_to: Some("Pal.heal"),
-            color_mix: fin,
-            input_color: None,
-            color_mul: 1.0,
-            alpha: 1.0,
-            radius: fin * 5.0,
-            stroke: 0.5 + fout,
-            particles: None,
-            light_color: Some("Pal.heal"),
-            light_radius: 23.0,
-            light_opacity: fout * 0.7,
-        },
+        FX_HIT_LASER_ID | FX_HIT_LASER_COLOR_ID => {
+            let (color_to, input_color, light_color) = if effect_id == FX_HIT_LASER_COLOR_ID {
+                (Some("Input.color"), Some(color), Some("Input.color"))
+            } else {
+                (Some("Pal.heal"), None, Some("Pal.heal"))
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to,
+                color_mix: fin,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: fin * 5.0,
+                stroke: 0.5 + fout,
+                particles: None,
+                light_color,
+                light_radius: 23.0,
+                light_opacity: fout * 0.7,
+            }
+        }
         FX_DESPAWN_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -4036,6 +4057,10 @@ mod tests {
         assert_eq!(standard_effect_id("hitMeltdown"), Some(FX_HIT_MELTDOWN_ID));
         assert_eq!(standard_effect_id("hitMeltHeal"), Some(FX_HIT_MELT_HEAL_ID));
         assert_eq!(standard_effect_id("hitLaser"), Some(FX_HIT_LASER_ID));
+        assert_eq!(
+            standard_effect_id("hitLaserColor"),
+            Some(FX_HIT_LASER_COLOR_ID)
+        );
         assert_eq!(standard_effect_id("despawn"), Some(FX_DESPAWN_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
@@ -4243,6 +4268,10 @@ mod tests {
         assert_eq!(standard_effect(FX_HIT_MELTDOWN_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_MELT_HEAL_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_LASER_ID).unwrap().lifetime, 8.0);
+        assert_eq!(
+            standard_effect(FX_HIT_LASER_COLOR_ID).unwrap().lifetime,
+            8.0
+        );
         assert_eq!(standard_effect(FX_DESPAWN_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         let artillery_trail = standard_effect(FX_ARTILLERY_TRAIL_ID).unwrap();
@@ -5136,6 +5165,32 @@ mod tests {
         assert_eq!(hit_laser.light_color, Some("Pal.heal"));
         assert_eq!(hit_laser.light_radius, 23.0);
         assert_eq!(hit_laser.light_opacity, 0.35);
+
+        let hit_laser_input = DecalColor::from_rgba(0x336699cc);
+        let hit_laser_color = standard_effect_draw_plan(
+            Some(FX_HIT_LASER_COLOR_ID as u16),
+            99,
+            3.0,
+            4.0,
+            30.0,
+            4.0,
+            8.0,
+            hit_laser_input,
+        )
+        .unwrap();
+        assert_eq!(hit_laser_color.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(hit_laser_color.color_from, Some("Color.white"));
+        assert_eq!(hit_laser_color.color_to, Some("Input.color"));
+        assert_eq!(hit_laser_color.input_color, Some(hit_laser_input));
+        assert_eq!(
+            hit_laser_color.resolved_draw_color(),
+            Some(lerp_color(DecalColor::WHITE, hit_laser_input, 0.5))
+        );
+        let hit_laser_color_lights = hit_laser_color.light_render_primitives();
+        assert_eq!(hit_laser_color_lights.len(), 1);
+        assert_eq!(hit_laser_color_lights[0].color, "Input.color");
+        assert_eq!(hit_laser_color_lights[0].color_rgba, Some(hit_laser_input));
+        assert_eq!(hit_laser_color_lights[0].opacity, 0.35);
 
         let despawn = standard_effect_draw_plan(
             Some(FX_DESPAWN_ID as u16),

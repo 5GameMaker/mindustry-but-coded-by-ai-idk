@@ -6824,3 +6824,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `bulletSparkSmokeTrailSmall=112` 需要同一 effect 内烟点 + 火花线 multi-pass；
   - `forceShrink=115` 需要 polygon primitive/renderer；
   - explosion 系列仍需 multi-pass。
+
+### 12.222 Input.color draw/light semantics + Fx.hitLaserColor
+
+- 2026-05-28：补充标准效果计划中的动态输入色语义，使 `Color.white -> e.color` 与 `Drawf.light(..., e.color, ...)` 能在同一个 plan 中完整表达，并迁移 `hitLaserColor=99`。
+- 本轮迁移：
+  - `hitLaserColor=99`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1137` 附近：
+    - `hitLaserColor = new Effect(8, ...)`
+    - `color(Color.white, e.color, e.fin())`
+    - `stroke(0.5f + e.fout())`
+    - `Lines.circle(e.x, e.y, e.fin() * 5f)`
+    - `Drawf.light(e.x, e.y, 23f, e.color, e.fout() * 0.7f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_LASER_COLOR_ID = 99` 并接入 name/metadata；
+    - `resolved_draw_color()` 支持 `color_to == "Input.color"` 时以 `input_color` 作为动态目标色；
+    - `light_render_primitives()` 支持 `light_color == "Input.color"` 时把 `input_color` 写入 `StandardEffectLightRenderPrimitive.color_rgba`；
+    - `hitLaser`/`hitLaserColor` 共用 stroked-circle 分支，前者使用 `Pal.heal`，后者使用动态输入色。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `hitLaserColor`；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime `8`；
+  - `standard_effect_draw_plan_covers_hit_radial_line_batch` 覆盖 `Input.color` draw 插值、light primitive `color_rgba` 与 opacity。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_hit_radial_line_batch --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - input-color light 已解锁，但 `hitBulletColor=78` 仍还需要 scaled circle + radial line + light 的 multi-pass 表达；
+  - 后续所有 `Drawf.light(..., e.color, ...)` 仍需逐个对照是否还有其它 primitive 阻塞；
+  - renderer/backend 仍需消费 desktop frame 中的 light/circle/line/square primitives。
