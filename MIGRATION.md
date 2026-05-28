@@ -11035,3 +11035,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - sprite pack export 仍使用占位尺寸，尚未接真实 sprite 文件扫描、PNG decode、bleed/outline 和 GPU upload；
   - floor chunk batch、minimap texture frame、shader dispatch 仍需接入 desktop/backend 真实消费；
   - 当前总体迁移约 18.6%，仍未达到完整可玩。
+
+### 12.345 Floor/minimap backend side-band enters desktop frame
+
+- 2026-05-29：继续推进渲染 side-band 的整体接入。本轮把 floor chunk draw batch 与 minimap texture upload frame 放入 `DesktopGraphicsFrame`，并纳入 `DesktopGraphicsExecutionSummary`，让这些后端计划不再只停留在 core helper。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/FloorRenderer.java`
+    - chunk/cache/stage 是后端实际绘制地表的批次依据；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/MinimapRenderer.java`
+    - pixmap/texture recreate、full upload、dirty pixel upload 是 minimap 后端状态的一部分。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsFrame` 新增 `floor_chunk_batches` 与 `minimap_texture_frame` side-band；
+    - `DesktopLauncher` 新增持久 `minimap_renderer_state`；
+    - `graphics_frame_for_render(...)` 现在会构造 floor chunk batches、minimap texture frame 并随 frame 交给 renderer；
+    - `DesktopGraphicsExecutionSummary` 新增 floor batch、minimap texture frame/full upload/dirty pixel 计数。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - floor/minimap side-band 目前已进入 desktop frame 和 headless summary，但还不是真实 GPU/texture upload；
+  - shader dispatch 仍需类似方式进入 desktop frame/summary 或真实 backend dispatch；
+  - 当前总体迁移约 18.7%，仍未达到完整可玩。
