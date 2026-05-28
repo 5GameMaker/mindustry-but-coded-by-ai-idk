@@ -7223,3 +7223,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `hitSquaresColor=79` 暂未迁移，因为 Java `Fill.square(..., ang)` 要求每个 seeded square 使用自身向量角度；当前 `SeededSquareParticles` 只支持统一 rotation；
   - 需要先扩展 square primitive / particle spec 的 per-particle radial rotation 语义，再迁移 `hitSquaresColor`；
   - renderer/backend 仍未真实绘制 primitives。
+
+### 12.232 Fx.hitSquaresColor radial square particles
+
+- 2026-05-28：补齐 seeded square 粒子的逐粒子径向旋转语义，并迁移 `hitSquaresColor=79`。
+- 本轮迁移：
+  - `hitSquaresColor=79`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:890` 附近：
+    - `hitSquaresColor = new Effect(14, ...)`
+    - `color(Color.white, e.color, e.fin())`
+    - `e.scaled(7f, s -> { stroke(0.5f + s.fout()); Lines.circle(... s.fin() * 5f); })`
+    - `randLenVectors(e.id, 5, e.fin() * 17f, ...)`
+    - `float ang = Mathf.angle(x, y)`
+    - `Fill.square(e.x + x, e.y + y, e.fout() * 3.2f, ang)`
+    - `Drawf.light(... e.color, 0.6f * e.fout())`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_SQUARES_COLOR_ID=79`；
+    - 新增 `StandardEffectDrawKind::SeededRadialSquareParticles`；
+    - `square_render_primitives_from_seed()` 对该 kind 使用每个 seeded vector 的 `atan2(y, x)` 作为 square rotation；
+    - `standard_effect_draw_plans(...)` 为 `hitSquaresColor` 输出 scaled circle + radial square particles + Input.color light。
+  - `desktop/src/lib.rs`
+    - 新增 desktop 测试，验证 flatten 后得到 1 个 circle、5 个 square、1 个 light，并进入 headless backend stats。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_hit_squares_multi_pass_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `squareWaveEffect=80` 仍需要 seeded random square radius/stroke/rotation 与 light，不能直接复用本轮 deterministic radial square；
+  - 后续可以继续清理 hit bullet/fuse/square 共享逻辑，避免 `standard_effect_draw_plans(...)` 分支继续膨胀；
+  - renderer/backend 仍未真实绘制 primitives。

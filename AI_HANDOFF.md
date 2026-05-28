@@ -5309,3 +5309,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `hitSquaresColor=79` 需要先扩展 `SeededSquareParticles` 支持 per-particle radial rotation，对齐 Java `Fill.square(..., ang)`；
   2. 扩展时要验证 desktop `square_primitives` 中每个 square 的 rotation，而不是统一 rotation；
   3. 不要在缺少该语义时半迁移 `hitSquaresColor`。
+
+---
+
+## 158. 最新闭环记录：Fx.hitSquaresColor radial square particles
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补 per-particle radial square rotation 后完整迁移 `hitSquaresColor=79`。
+- 本轮迁移：
+  - `hitSquaresColor=79`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_SQUARES_COLOR_ID=79`；
+    - 新增 `StandardEffectDrawKind::SeededRadialSquareParticles`；
+    - `square_render_primitives_from_seed()` 中对该 kind 按 seeded vector 的 `atan2(y,x)` 设置每个 square rotation；
+    - `standard_effect_draw_plans(...)` 为 `hitSquaresColor` 输出 scaled circle + radial square particles + Input.color light。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_hit_squares_multi_pass_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_hit_bullet_scaled_circle_lines_and_light --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_hit_squares_multi_pass_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 暂缓 `squareWaveEffect=80`，它需要随机 radius/stroke/rotation/light，不等同于本轮径向 square；
+  2. 可继续 Fx 后续简单 single/multi-pass，或抽象 hit bullet/fuse/squares 共用 helper；
+  3. renderer/backend 仍需从 headless seam 走向真实绘制。

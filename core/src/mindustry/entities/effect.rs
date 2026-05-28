@@ -26,6 +26,8 @@ pub const FX_DISPERSE_TRAIL_ID: i32 = 76;
 pub const FX_HIT_BULLET_SMALL_ID: i32 = 77;
 /// Upstream `Fx.hitBulletColor` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_BULLET_COLOR_ID: i32 = 78;
+/// Upstream `Fx.hitSquaresColor` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_SQUARES_COLOR_ID: i32 = 79;
 /// Upstream `Fx.hitFuse` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_FUSE_ID: i32 = 81;
 /// Upstream `Fx.hitBulletBig` id in `mindustry.content.Fx` for v158.1.
@@ -235,6 +237,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "disperseTrail" => Some(FX_DISPERSE_TRAIL_ID),
         "hitBulletSmall" => Some(FX_HIT_BULLET_SMALL_ID),
         "hitBulletColor" => Some(FX_HIT_BULLET_COLOR_ID),
+        "hitSquaresColor" => Some(FX_HIT_SQUARES_COLOR_ID),
         "hitFuse" => Some(FX_HIT_FUSE_ID),
         "hitBulletBig" => Some(FX_HIT_BULLET_BIG_ID),
         "hitFlameSmall" => Some(FX_HIT_FLAME_SMALL_ID),
@@ -369,6 +372,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         }
         FX_HIT_BULLET_COLOR_ID => {
             Effect::with_lifetime(FX_HIT_BULLET_COLOR_ID, 14.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_HIT_SQUARES_COLOR_ID => {
+            Effect::with_lifetime(FX_HIT_SQUARES_COLOR_ID, 14.0, DEFAULT_EFFECT_CLIP)
         }
         FX_HIT_FUSE_ID => Effect::with_lifetime(FX_HIT_FUSE_ID, 14.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_BULLET_BIG_ID => {
@@ -540,7 +546,11 @@ pub fn standard_effect_draw_plans(
 
     if !matches!(
         effect_id_i32,
-        FX_POINT_SHOCKWAVE_ID | FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID | FX_HIT_FUSE_ID
+        FX_POINT_SHOCKWAVE_ID
+            | FX_HIT_BULLET_SMALL_ID
+            | FX_HIT_BULLET_COLOR_ID
+            | FX_HIT_SQUARES_COLOR_ID
+            | FX_HIT_FUSE_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -564,17 +574,20 @@ pub fn standard_effect_draw_plans(
 
     if matches!(
         effect_id_i32,
-        FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID | FX_HIT_FUSE_ID
+        FX_HIT_BULLET_SMALL_ID | FX_HIT_BULLET_COLOR_ID | FX_HIT_SQUARES_COLOR_ID | FX_HIT_FUSE_ID
     ) {
-        let dynamic_color = effect_id_i32 == FX_HIT_BULLET_COLOR_ID;
+        let dynamic_color = matches!(
+            effect_id_i32,
+            FX_HIT_BULLET_COLOR_ID | FX_HIT_SQUARES_COLOR_ID
+        );
         let color_to = match effect_id_i32 {
-            FX_HIT_BULLET_COLOR_ID => "Input.color",
+            FX_HIT_BULLET_COLOR_ID | FX_HIT_SQUARES_COLOR_ID => "Input.color",
             FX_HIT_FUSE_ID => "Pal.surge",
             _ => "Pal.lightOrange",
         };
         let input_color = dynamic_color.then_some(color);
         let light_color = match effect_id_i32 {
-            FX_HIT_BULLET_COLOR_ID => Some("Input.color"),
+            FX_HIT_BULLET_COLOR_ID | FX_HIT_SQUARES_COLOR_ID => Some("Input.color"),
             FX_HIT_BULLET_SMALL_ID => Some("Pal.lightOrange"),
             _ => None,
         };
@@ -587,6 +600,26 @@ pub fn standard_effect_draw_plans(
             6
         } else {
             5
+        };
+        let particle_kind = if effect_id_i32 == FX_HIT_SQUARES_COLOR_ID {
+            StandardEffectDrawKind::SeededRadialSquareParticles
+        } else {
+            StandardEffectDrawKind::SeededRadialLineParticles
+        };
+        let particle_length = if effect_id_i32 == FX_HIT_SQUARES_COLOR_ID {
+            fin * 17.0
+        } else {
+            fin * 15.0
+        };
+        let particle_radius = if effect_id_i32 == FX_HIT_SQUARES_COLOR_ID {
+            0.0
+        } else {
+            1.0
+        };
+        let particle_radius_fout_scale = if effect_id_i32 == FX_HIT_SQUARES_COLOR_ID {
+            3.2
+        } else {
+            3.0
         };
         let scaled_lifetime = 7.0;
         let scaled_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
@@ -618,7 +651,7 @@ pub fn standard_effect_draw_plans(
         plans.push(StandardEffectDrawPlan {
             effect_id: effect_id_i32,
             layer: effect.layer,
-            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            kind: particle_kind,
             center: (x, y),
             color_from: Some("Color.white"),
             color_mid: None,
@@ -627,7 +660,7 @@ pub fn standard_effect_draw_plans(
             input_color,
             color_mul: 1.0,
             alpha: 1.0,
-            radius: 1.0,
+            radius: particle_radius,
             stroke: 0.5 + fout,
             particles: Some(StandardEffectParticleSpec {
                 seed: state_id,
@@ -635,13 +668,13 @@ pub fn standard_effect_draw_plans(
                 progress: None,
                 angle: None,
                 angle_range: 0.0,
-                length: fin * 15.0,
+                length: particle_length,
                 fin,
                 fout,
                 fslope,
                 radius_base: 0.0,
                 radius_fin_scale: 0.0,
-                radius_fout_scale: 3.0,
+                radius_fout_scale: particle_radius_fout_scale,
                 radius_fslope_scale: 0.0,
                 secondary_vector_scale: 0.0,
                 secondary_radius_base: 0.0,
@@ -735,6 +768,7 @@ pub enum StandardEffectDrawKind {
     FilledSquare,
     StrokedSquare,
     SeededSquareParticles,
+    SeededRadialSquareParticles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -954,7 +988,8 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::SeededRadialLineParticles => Vec::new(),
             StandardEffectDrawKind::FilledSquare
             | StandardEffectDrawKind::StrokedSquare
-            | StandardEffectDrawKind::SeededSquareParticles => Vec::new(),
+            | StandardEffectDrawKind::SeededSquareParticles
+            | StandardEffectDrawKind::SeededRadialSquareParticles => Vec::new(),
         }
     }
 
@@ -993,6 +1028,28 @@ impl StandardEffectDrawPlan {
                     color,
                 })
                 .collect(),
+            StandardEffectDrawKind::SeededRadialSquareParticles => {
+                let Some(particles) = self.particles else {
+                    return Vec::new();
+                };
+                self.seeded_particle_vectors()
+                    .into_iter()
+                    .map(|vector| {
+                        let radius = particles.radius_base
+                            + particles.radius_fin_scale * particles.fin
+                            + particles.radius_fout_scale * particles.fout
+                            + particles.radius_fslope_scale * particles.fslope;
+                        StandardEffectSquareRenderPrimitive {
+                            center: (self.center.0 + vector.x, self.center.1 + vector.y),
+                            radius,
+                            stroke: 0.0,
+                            rotation: vector.y.atan2(vector.x).to_degrees(),
+                            alpha: self.alpha,
+                            color,
+                        }
+                    })
+                    .collect()
+            }
             StandardEffectDrawKind::FilledCircle
             | StandardEffectDrawKind::StrokedCircle
             | StandardEffectDrawKind::SeededCircleParticles
@@ -4493,6 +4550,10 @@ mod tests {
             standard_effect_id("hitBulletColor"),
             Some(FX_HIT_BULLET_COLOR_ID)
         );
+        assert_eq!(
+            standard_effect_id("hitSquaresColor"),
+            Some(FX_HIT_SQUARES_COLOR_ID)
+        );
         assert_eq!(standard_effect_id("hitFuse"), Some(FX_HIT_FUSE_ID));
         assert_eq!(
             standard_effect_id("hitBulletBig"),
@@ -4737,6 +4798,10 @@ mod tests {
         );
         assert_eq!(
             standard_effect(FX_HIT_BULLET_COLOR_ID).unwrap().lifetime,
+            14.0
+        );
+        assert_eq!(
+            standard_effect(FX_HIT_SQUARES_COLOR_ID).unwrap().lifetime,
             14.0
         );
         assert_eq!(standard_effect(FX_HIT_FUSE_ID).unwrap().lifetime, 14.0);
@@ -5110,6 +5175,39 @@ mod tests {
         assert_eq!(fuse[1].light_color, None);
         assert_eq!(fuse[1].particles.unwrap().count, 6);
         assert_eq!(fuse[1].line_render_primitives_from_seed().len(), 6);
+
+        let squares = standard_effect_draw_plans(
+            Some(FX_HIT_SQUARES_COLOR_ID as u16),
+            79,
+            10.0,
+            20.0,
+            0.0,
+            3.5,
+            14.0,
+            input_color,
+        );
+        assert_eq!(squares.len(), 2);
+        assert_eq!(squares[0].kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(squares[0].color_to, Some("Input.color"));
+        assert_eq!(
+            squares[1].kind,
+            StandardEffectDrawKind::SeededRadialSquareParticles
+        );
+        assert_eq!(squares[1].light_color, Some("Input.color"));
+        let square_particles = squares[1].particles.unwrap();
+        assert_eq!(square_particles.count, 5);
+        assert_eq!(square_particles.length, 4.25);
+        assert_eq!(square_particles.radius_fout_scale, 3.2);
+        let square_vectors = squares[1].seeded_particle_vectors();
+        let square_primitives = squares[1].square_render_primitives_from_seed();
+        assert_eq!(square_primitives.len(), 5);
+        assert!((square_primitives[0].radius - 2.4).abs() < 0.0001);
+        assert!(
+            (square_primitives[0].rotation
+                - square_vectors[0].y.atan2(square_vectors[0].x).to_degrees())
+            .abs()
+                < 0.0001
+        );
     }
 
     #[test]
