@@ -8334,3 +8334,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一闭环建议 `toxopid`，需要 shrapnel bullet、主 sap artillery 和 frag artillery；
   3. shared sapper/runtime linecast/heal、artillery splash/lightning 仍未 content-driven；
   4. 当前总迁移约 13.3%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 245. 最新闭环记录：UnitTypes toxopid shrapnel and sap artillery content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `UnitTypes.java` 中 `toxopid` 的 shrapnel mount 与 sap artillery/frag bullet tree 回填进 Rust content registry，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:904-1032`
+  - `large-purple-mount`：`ShootSpread(2,17)`，bullet `ShrapnelBulletType`，`length=90`、`damage=110`、`width=25`、serration 字段和 sap 颜色；
+  - `toxopid-cannon`：`ArtilleryBulletType(3,50)`，`splashDamage=75`、`splashDamageRadius=80`、`lightning=5`、`fragBullets=9`，frag bullet 为 `ArtilleryBulletType(2.3,30)`。
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `shrapnel_bullet(...)` helper；
+    - 新增 `toxopid_shrapnel`；
+    - 新增 `toxopid_cannon`，并内嵌 `frag_bullet`；
+    - 更新 bullet load order；
+    - 新增 `toxopid_shrapnel_and_cannon_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `toxopid` 补齐 Java leg/light/shadow/splash 字段；
+    - 注册 `large-purple-mount` 与 `toxopid-cannon`；
+    - 新增 `toxopid_weapons_match_java_shrapnel_and_cannon_profiles`。
+  - `README.md`
+    - 当前总体完成度更新为约 `13.4%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.319`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core toxopid_shrapnel_and_cannon_match_java_profiles --lib`
+  - `cargo test -p mindustry-core toxopid_weapons_match_java_shrapnel_and_cannon_profiles --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步可开始空中攻击单位 `flare/horizon/zenith/antumbra/eclipse` 的 weapon/bomb/missile content seam；
+  3. Shrapnel/Sap/Artillery frag/lightning runtime 仍未 content-driven；
+  4. 当前总迁移约 13.4%，远未可玩，goal 绝不能标记 complete。

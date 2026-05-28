@@ -512,20 +512,67 @@ pub fn load() -> Vec<UnitType> {
             u.weapons.push(artillery);
         }),
         unit(&mut next_id, "toxopid", UnitKind::Standard, |u| {
+            u.drag = 0.1;
             u.speed = 0.5;
             u.hit_size = 26.0;
             u.health = 22000.0;
             u.armor = 13.0;
+            u.light_radius = 140.0;
+            u.step_sound = "walkerStep".into();
             u.step_sound_volume = 1.1;
             u.rotate_speed = 1.9;
             u.leg_count = 8;
             u.leg_move_space = 0.8;
+            u.leg_pair_offset = 3.0;
             u.leg_length = 75.0;
+            u.leg_extension = -20.0;
             u.leg_base_offset = 8.0;
             u.step_shake = 1.0;
+            u.leg_length_scl = 0.93;
+            u.ripple_scale = 3.0;
+            u.leg_speed = 0.19;
+            u.leg_splash_damage = 80.0;
+            u.leg_splash_range = 60.0;
             u.hovering = true;
+            u.shadow_elevation = 0.95;
             u.ground_layer = LAYER_LEG_UNIT;
             u.allow_leg_step = true;
+
+            let mut shrapnel = Weapon::new("large-purple-mount");
+            shrapnel.y = -5.0;
+            shrapnel.x = 11.0;
+            shrapnel.shoot_y = 7.0;
+            shrapnel.reload = 30.0;
+            shrapnel.shake = 4.0;
+            shrapnel.rotate_speed = 2.0;
+            shrapnel.eject_effect = "casing1".into();
+            shrapnel.shoot_sound = "shootToxopidShotgun".into();
+            shrapnel.shoot_sound_volume = 0.8;
+            shrapnel.rotate = true;
+            shrapnel.shadow = 12.0;
+            shrapnel.recoil = 3.0;
+            shrapnel.shoot_pattern = "ShootSpread".into();
+            shrapnel.shoot_shots = 2;
+            shrapnel.shoot_spread = 17.0;
+            shrapnel.bullet = "toxopid_shrapnel".into();
+            u.weapons.push(shrapnel);
+
+            let mut cannon = Weapon::new("toxopid-cannon");
+            cannon.y = -14.0;
+            cannon.x = 0.0;
+            cannon.shoot_y = 22.0;
+            cannon.mirror = false;
+            cannon.reload = 210.0;
+            cannon.shake = 10.0;
+            cannon.recoil = 10.0;
+            cannon.rotate_speed = 1.0;
+            cannon.eject_effect = "casing3".into();
+            cannon.shoot_sound = "shootArtillerySapBig".into();
+            cannon.rotate = true;
+            cannon.shadow = 30.0;
+            cannon.rotation_limit = 80.0;
+            cannon.bullet = "toxopid_cannon".into();
+            u.weapons.push(cannon);
         }),
         unit(&mut next_id, "flare", UnitKind::Standard, |u| {
             u.research_cost_multiplier = 0.5;
@@ -2066,6 +2113,75 @@ mod tests {
         assert_eq!(sapper.spec.sap_strength, 0.85);
         assert_eq!(artillery_bullet.spec.kind, BulletKind::Artillery);
         assert_eq!(artillery_bullet.spec.splash_damage, 65.0);
+    }
+
+    #[test]
+    fn toxopid_weapons_match_java_shrapnel_and_cannon_profiles() {
+        let units = load();
+        let toxopid = by_name(&units, "toxopid");
+        assert_eq!(toxopid.drag, 0.1);
+        assert_eq!(toxopid.light_radius, 140.0);
+        assert_eq!(toxopid.step_sound, "walkerStep");
+        assert_eq!(toxopid.leg_pair_offset, 3.0);
+        assert_eq!(toxopid.leg_extension, -20.0);
+        assert_eq!(toxopid.leg_length_scl, 0.93);
+        assert_eq!(toxopid.ripple_scale, 3.0);
+        assert_eq!(toxopid.leg_speed, 0.19);
+        assert_eq!(toxopid.leg_splash_damage, 80.0);
+        assert_eq!(toxopid.leg_splash_range, 60.0);
+        assert_eq!(toxopid.shadow_elevation, 0.95);
+        assert_eq!(toxopid.weapons.len(), 2);
+
+        let shrapnel = &toxopid.weapons[0];
+        assert_eq!(shrapnel.name, "large-purple-mount");
+        assert_eq!(shrapnel.y, -5.0);
+        assert_eq!(shrapnel.x, 11.0);
+        assert_eq!(shrapnel.shoot_y, 7.0);
+        assert_eq!(shrapnel.reload, 30.0);
+        assert_eq!(shrapnel.shake, 4.0);
+        assert_eq!(shrapnel.rotate_speed, 2.0);
+        assert_eq!(shrapnel.eject_effect, "casing1");
+        assert_eq!(shrapnel.shoot_sound, "shootToxopidShotgun");
+        assert_eq!(shrapnel.shoot_sound_volume, 0.8);
+        assert!(shrapnel.rotate);
+        assert_eq!(shrapnel.shadow, 12.0);
+        assert_eq!(shrapnel.recoil, 3.0);
+        assert_eq!(shrapnel.shoot_pattern, "ShootSpread");
+        assert_eq!(shrapnel.shoot_shots, 2);
+        assert_eq!(shrapnel.shoot_spread, 17.0);
+        assert_eq!(shrapnel.bullet, "toxopid_shrapnel");
+
+        let cannon = &toxopid.weapons[1];
+        assert_eq!(cannon.name, "toxopid-cannon");
+        assert_eq!(cannon.y, -14.0);
+        assert_eq!(cannon.x, 0.0);
+        assert_eq!(cannon.shoot_y, 22.0);
+        assert!(!cannon.mirror);
+        assert_eq!(cannon.reload, 210.0);
+        assert_eq!(cannon.shake, 10.0);
+        assert_eq!(cannon.recoil, 10.0);
+        assert_eq!(cannon.rotate_speed, 1.0);
+        assert_eq!(cannon.eject_effect, "casing3");
+        assert_eq!(cannon.shoot_sound, "shootArtillerySapBig");
+        assert!(cannon.rotate);
+        assert_eq!(cannon.shadow, 30.0);
+        assert_eq!(cannon.rotation_limit, 80.0);
+        assert_eq!(cannon.bullet, "toxopid_cannon");
+
+        let bullets = bullets::load();
+        let shrapnel_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == shrapnel.bullet)
+            .unwrap_or_else(|| panic!("missing toxopid shrapnel {}", shrapnel.bullet));
+        let cannon_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == cannon.bullet)
+            .unwrap_or_else(|| panic!("missing toxopid cannon {}", cannon.bullet));
+        assert_eq!(shrapnel_bullet.spec.kind, BulletKind::Shrapnel);
+        assert_eq!(shrapnel_bullet.spec.damage, 110.0);
+        assert_eq!(cannon_bullet.spec.kind, BulletKind::Artillery);
+        assert_eq!(cannon_bullet.spec.frag_bullets, 9);
+        assert!(cannon_bullet.spec.frag_bullet.is_some());
     }
 
     #[test]

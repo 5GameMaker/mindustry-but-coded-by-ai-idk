@@ -10130,3 +10130,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - SapBulletType runtime 和 Artillery frag/lightning/splash runtime 仍需继续接入；
   - 下一步建议按 Java 顺序继续 `toxopid`，该单位需要 shrapnel mount 与带 frag bullet 的 sap artillery；
   - 当前总体迁移约 13.3%，远未可玩。
+
+### 12.319 UnitTypes toxopid shrapnel and sap artillery content seam
+
+- 2026-05-28：继续回填 `toxopid` 的 `large-purple-mount` shrapnel weapon 与 `toxopid-cannon` sap artillery/frag bullet 树。该闭环复用 `BulletKind::Shrapnel`、`BulletKind::Artillery`、`frag_bullet` 与 `ShootSpread` weapon 记录位，把 Java 匿名 bullet 树拆成 `toxopid_shrapnel` 与 `toxopid_cannon` content presets。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:904-1032`
+  - unit：`drag = 0.1f`、`speed = 0.5f`、`hitSize = 26f`、`health = 22000`、`armor = 13f`、`lightRadius = 140f`、`stepSound = Sounds.walkerStep`、`stepSoundVolume = 1.1f`、`rotateSpeed = 1.9f`、`legCount = 8`、`legMoveSpace = 0.8f`、`legPairOffset = 3`、`legLength = 75f`、`legExtension = -20`、`legBaseOffset = 8f`、`stepShake = 1f`、`legLengthScl = 0.93f`、`rippleScale = 3f`、`legSpeed = 0.19f`、`legSplashDamage = 80`、`legSplashRange = 60`、`hovering = true`、`shadowElevation = 0.95f`、`groundLayer = Layer.legUnit`
+  - shrapnel weapon：`new Weapon("large-purple-mount")`，`y=-5`、`x=11`、`shootY=7`、`reload=30`、`shake=4`、`rotateSpeed=2`、`ejectEffect=Fx.casing1`、`shootSound=Sounds.shootToxopidShotgun`、`shootSoundVolume=0.8`、`rotate=true`、`shadow=12`、`recoil=3`、`shoot = new ShootSpread(2, 17f)`
+  - shrapnel bullet：`ShrapnelBulletType`，`length=90`、`damage=110`、`width=25`、`serrationLenScl=7`、`serrationSpaceOffset=60`、`serrationFadeOffset=0`、`serrations=10`、`serrationWidth=6`、`fromColor=Pal.sapBullet`、`toColor=Pal.sapBulletBack`、`shootEffect=smokeEffect=Fx.sparkShoot`
+  - cannon weapon：`new Weapon("toxopid-cannon")`，`y=-14`、`x=0`、`shootY=22`、`mirror=false`、`reload=210`、`shake=10`、`recoil=10`、`rotateSpeed=1`、`ejectEffect=Fx.casing3`、`shootSound=Sounds.shootArtillerySapBig`、`rotate=true`、`shadow=30`、`rotationLimit=80`
+  - cannon bullet：`ArtilleryBulletType(3f, 50)`，`despawnSound=explosionArtilleryShockBig`、`hitEffect=sapExplosion`、`knockback=0.8`、`lifetime=80`、`width=height=25`、`collidesTiles=collides=true`、`ammoMultiplier=4`、`splashDamageRadius=80`、`splashDamage=75`、`backColor=sapBulletBack`、`frontColor=lightningColor=sapBullet`、`lightning=5`、`lightningLength=20`、`smokeEffect=shootBigSmoke2`、`hitShake=10`、`lightRadius=40`、`lightColor=sap`、`lightOpacity=0.6`、`status=sapped`、`statusDuration=600`、`fragLifeMin=0.3`、`fragBullets=9`
+  - frag bullet：`ArtilleryBulletType(2.3f, 30)`，`despawnSound=explosionArtilleryShock`、`hitEffect=sapExplosion`、`knockback=0.8`、`lifetime=90`、`width=height=20`、`collidesTiles=false`、`splashDamageRadius=70`、`splashDamage=40`、`backColor=sapBulletBack`、`frontColor=lightningColor=sapBullet`、`lightning=2`、`lightningLength=5`、`smokeEffect=shootBigSmoke2`、`hitShake=5`、`lightRadius=30`、`lightColor=sap`、`lightOpacity=0.5`、`status=sapped`、`statusDuration=600`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增本地 `shrapnel_bullet(...)` helper；
+    - 新增 `toxopid_shrapnel`；
+    - 新增 `toxopid_cannon`，其 `frag_bullet` 内嵌 toxopid frag artillery spec；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `toxopid_shrapnel_and_cannon_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `toxopid` 补齐 leg/light/shadow/splash 字段；
+    - 注册 `large-purple-mount` 与 `toxopid-cannon` 两把 weapon；
+    - 新增 `toxopid_weapons_match_java_shrapnel_and_cannon_profiles`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `13.4%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core toxopid_shrapnel_and_cannon_match_java_profiles --lib`
+  - `cargo test -p mindustry-core toxopid_weapons_match_java_shrapnel_and_cannon_profiles --lib`
+- 仍未完成：
+  - ShrapnelBulletType 的 collideLaser、serration draw/light runtime 尚未 content-driven；
+  - toxopid cannon 的 frag spawn、splash、lightning 与 status runtime 仍需继续接入；
+  - 下一步建议转入空中攻击单位 `flare/horizon/zenith/...` 或先补 bullet runtime seams；
+  - 当前总体迁移约 13.4%，远未可玩。

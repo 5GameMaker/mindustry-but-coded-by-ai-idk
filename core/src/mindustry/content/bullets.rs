@@ -318,6 +318,70 @@ pub fn load() -> Vec<BulletContent> {
     arkyid_artillery_sap.status = "sapped".into();
     arkyid_artillery_sap.status_duration = 60.0 * 10.0;
 
+    let mut toxopid_shrapnel = shrapnel_bullet(110.0);
+    toxopid_shrapnel.length = 90.0;
+    toxopid_shrapnel.width = 25.0;
+    toxopid_shrapnel.serration_len_scl = 7.0;
+    toxopid_shrapnel.serration_space_offset = 60.0;
+    toxopid_shrapnel.serration_fade_offset = 0.0;
+    toxopid_shrapnel.serrations = 10;
+    toxopid_shrapnel.serration_width = 6.0;
+    toxopid_shrapnel.from_color = "sapBullet".into();
+    toxopid_shrapnel.to_color = "sapBulletBack".into();
+    toxopid_shrapnel.shoot_effect = "sparkShoot".into();
+    toxopid_shrapnel.smoke_effect = "sparkShoot".into();
+
+    let mut toxopid_frag_sap = artillery_bullet(2.3, 30.0, "shell");
+    toxopid_frag_sap.despawn_sound = "explosionArtilleryShock".into();
+    toxopid_frag_sap.hit_effect = "sapExplosion".into();
+    toxopid_frag_sap.knockback = 0.8;
+    toxopid_frag_sap.lifetime = 90.0;
+    toxopid_frag_sap.width = 20.0;
+    toxopid_frag_sap.height = 20.0;
+    toxopid_frag_sap.collides_tiles = false;
+    toxopid_frag_sap.splash_damage_radius = 70.0;
+    toxopid_frag_sap.splash_damage = 40.0;
+    toxopid_frag_sap.back_color = "sapBulletBack".into();
+    toxopid_frag_sap.front_color = "sapBullet".into();
+    toxopid_frag_sap.lightning_color = "sapBullet".into();
+    toxopid_frag_sap.lightning = 2;
+    toxopid_frag_sap.lightning_length = 5;
+    toxopid_frag_sap.smoke_effect = "shootBigSmoke2".into();
+    toxopid_frag_sap.hit_shake = 5.0;
+    toxopid_frag_sap.light_radius = 30.0;
+    toxopid_frag_sap.light_color = "sap".into();
+    toxopid_frag_sap.light_opacity = 0.5;
+    toxopid_frag_sap.status = "sapped".into();
+    toxopid_frag_sap.status_duration = 60.0 * 10.0;
+
+    let mut toxopid_cannon = artillery_bullet(3.0, 50.0, "shell");
+    toxopid_cannon.despawn_sound = "explosionArtilleryShockBig".into();
+    toxopid_cannon.hit_effect = "sapExplosion".into();
+    toxopid_cannon.knockback = 0.8;
+    toxopid_cannon.lifetime = 80.0;
+    toxopid_cannon.width = 25.0;
+    toxopid_cannon.height = 25.0;
+    toxopid_cannon.collides_tiles = true;
+    toxopid_cannon.collides = true;
+    toxopid_cannon.ammo_multiplier = 4.0;
+    toxopid_cannon.splash_damage_radius = 80.0;
+    toxopid_cannon.splash_damage = 75.0;
+    toxopid_cannon.back_color = "sapBulletBack".into();
+    toxopid_cannon.front_color = "sapBullet".into();
+    toxopid_cannon.lightning_color = "sapBullet".into();
+    toxopid_cannon.lightning = 5;
+    toxopid_cannon.lightning_length = 20;
+    toxopid_cannon.smoke_effect = "shootBigSmoke2".into();
+    toxopid_cannon.hit_shake = 10.0;
+    toxopid_cannon.light_radius = 40.0;
+    toxopid_cannon.light_color = "sap".into();
+    toxopid_cannon.light_opacity = 0.6;
+    toxopid_cannon.status = "sapped".into();
+    toxopid_cannon.status_duration = 60.0 * 10.0;
+    toxopid_cannon.frag_life_min = 0.3;
+    toxopid_cannon.frag_bullets = 9;
+    toxopid_cannon.frag_bullet = Some(Box::new(toxopid_frag_sap));
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -377,6 +441,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "spiroct_mount_sap", spiroct_mount_sap),
         make_bullet(&mut next_id, "arkyid_sapper", arkyid_sapper),
         make_bullet(&mut next_id, "arkyid_artillery_sap", arkyid_artillery_sap),
+        make_bullet(&mut next_id, "toxopid_shrapnel", toxopid_shrapnel),
+        make_bullet(&mut next_id, "toxopid_cannon", toxopid_cannon),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -534,6 +600,26 @@ fn sap_bullet(damage: f32) -> BulletSpec {
     bullet
 }
 
+fn shrapnel_bullet(damage: f32) -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Shrapnel, 0.0, damage);
+    bullet.hit_effect = "hitLancer".into();
+    bullet.shoot_effect = "lightningShoot".into();
+    bullet.smoke_effect = "lightningShoot".into();
+    bullet.lifetime = 10.0;
+    bullet.despawn_effect = "none".into();
+    bullet.keep_velocity = false;
+    bullet.collides = false;
+    bullet.pierce = true;
+    bullet.hittable = false;
+    bullet.absorbable = false;
+    bullet.light_opacity = 0.6;
+    bullet.length = 100.0;
+    bullet.width = 20.0;
+    bullet.from_color = "white".into();
+    bullet.to_color = "lancerLaser".into();
+    bullet
+}
+
 fn continuous_laser_bullet(damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
     bullet.length = 220.0;
@@ -605,6 +691,8 @@ mod tests {
                 "spiroct_mount_sap",
                 "arkyid_sapper",
                 "arkyid_artillery_sap",
+                "toxopid_shrapnel",
+                "toxopid_cannon",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1148,6 +1236,84 @@ mod tests {
         assert_eq!(artillery.shake, 5.0);
         assert_eq!(artillery.status, "sapped");
         assert_eq!(artillery.status_duration, 600.0);
+    }
+
+    #[test]
+    fn toxopid_shrapnel_and_cannon_match_java_profiles() {
+        let bullets = load();
+        let shrapnel = &by_name(&bullets, "toxopid_shrapnel").spec;
+        let cannon = &by_name(&bullets, "toxopid_cannon").spec;
+
+        assert_eq!(shrapnel.kind, BulletKind::Shrapnel);
+        assert_eq!(shrapnel.length, 90.0);
+        assert_eq!(shrapnel.damage, 110.0);
+        assert_eq!(shrapnel.width, 25.0);
+        assert_eq!(shrapnel.serration_len_scl, 7.0);
+        assert_eq!(shrapnel.serration_space_offset, 60.0);
+        assert_eq!(shrapnel.serration_fade_offset, 0.0);
+        assert_eq!(shrapnel.serrations, 10);
+        assert_eq!(shrapnel.serration_width, 6.0);
+        assert_eq!(shrapnel.from_color, "sapBullet");
+        assert_eq!(shrapnel.to_color, "sapBulletBack");
+        assert_eq!(shrapnel.shoot_effect, "sparkShoot");
+        assert_eq!(shrapnel.smoke_effect, "sparkShoot");
+        assert!(!shrapnel.collides);
+        assert!(shrapnel.pierce);
+        assert!(!shrapnel.hittable);
+        assert!(!shrapnel.absorbable);
+
+        assert_eq!(cannon.kind, BulletKind::Artillery);
+        assert_eq!(cannon.speed, 3.0);
+        assert_eq!(cannon.damage, 50.0);
+        assert_eq!(cannon.despawn_sound, "explosionArtilleryShockBig");
+        assert_eq!(cannon.hit_effect, "sapExplosion");
+        assert_eq!(cannon.knockback, 0.8);
+        assert_eq!(cannon.lifetime, 80.0);
+        assert_eq!(cannon.width, 25.0);
+        assert_eq!(cannon.height, 25.0);
+        assert!(cannon.collides_tiles);
+        assert!(cannon.collides);
+        assert_eq!(cannon.ammo_multiplier, 4.0);
+        assert_eq!(cannon.splash_damage_radius, 80.0);
+        assert_eq!(cannon.splash_damage, 75.0);
+        assert_eq!(cannon.back_color, "sapBulletBack");
+        assert_eq!(cannon.front_color, "sapBullet");
+        assert_eq!(cannon.lightning_color, "sapBullet");
+        assert_eq!(cannon.lightning, 5);
+        assert_eq!(cannon.lightning_length, 20);
+        assert_eq!(cannon.smoke_effect, "shootBigSmoke2");
+        assert_eq!(cannon.hit_shake, 10.0);
+        assert_eq!(cannon.light_radius, 40.0);
+        assert_eq!(cannon.light_color, "sap");
+        assert_eq!(cannon.light_opacity, 0.6);
+        assert_eq!(cannon.status, "sapped");
+        assert_eq!(cannon.status_duration, 600.0);
+        assert_eq!(cannon.frag_life_min, 0.3);
+        assert_eq!(cannon.frag_bullets, 9);
+
+        let frag = cannon
+            .frag_bullet
+            .as_ref()
+            .expect("toxopid cannon should carry frag bullet");
+        assert_eq!(frag.kind, BulletKind::Artillery);
+        assert_eq!(frag.speed, 2.3);
+        assert_eq!(frag.damage, 30.0);
+        assert_eq!(frag.despawn_sound, "explosionArtilleryShock");
+        assert_eq!(frag.hit_effect, "sapExplosion");
+        assert_eq!(frag.lifetime, 90.0);
+        assert_eq!(frag.width, 20.0);
+        assert_eq!(frag.height, 20.0);
+        assert!(!frag.collides_tiles);
+        assert_eq!(frag.splash_damage_radius, 70.0);
+        assert_eq!(frag.splash_damage, 40.0);
+        assert_eq!(frag.lightning, 2);
+        assert_eq!(frag.lightning_length, 5);
+        assert_eq!(frag.hit_shake, 5.0);
+        assert_eq!(frag.light_radius, 30.0);
+        assert_eq!(frag.light_color, "sap");
+        assert_eq!(frag.light_opacity, 0.5);
+        assert_eq!(frag.status, "sapped");
+        assert_eq!(frag.status_duration, 600.0);
     }
 
     #[test]
