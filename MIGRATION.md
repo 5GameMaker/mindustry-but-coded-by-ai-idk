@@ -7968,3 +7968,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `lancerLaserShootSmoke` 已能从当前 effect state data 读取 Float，但后续仍需继续确认所有 Java effect call path 都能把 data 正确写入/同步到该 state；
   - `casing*` 仍需 rect/sprite primitive；
   - 继续按 `Fx.java` 后续段逐项迁移，不要把局部 Fx seam 误报为可玩。
+
+### 12.252 Fx.casing1/casing2/casing3/casing4/casing2Double/casing3Double
+
+- 2026-05-28：回补 `Fx.java:2226-2321` 的 casing 系列，不再把壳壳特效硬塞成 square，而是新增 rect primitive seam 表达 Java `Fill.rect(...)` / atlas `rect(Core.atlas.find("casing"), ...)`。
+- 本轮迁移：
+  - `casing1=190`
+  - `casing2=191`
+  - `casing3=192`
+  - `casing4=193`
+  - `casing2Double=194`
+  - `casing3Double=195`
+- Java 依据：
+  - `casing1 = new Effect(30f, ...)`：`Fill.rect(...)`，`Layer.bullet`，颜色 `Pal.lightOrange -> Color.lightGray -> Pal.lightishGray`，alpha `e.fout(0.3f)`，尺寸 `1x2`；
+  - `casing2 = new Effect(34f, ...)`：atlas `Core.atlas.find("casing")`，颜色 `Pal.lightOrange -> Color.lightGray -> Pal.lightishGray`，alpha `e.fout(0.5f)`，尺寸 `2x3`；
+  - `casing3 = new Effect(40f, ...)`：atlas `casing`，颜色 `Pal.lightOrange -> Pal.lightishGray -> Pal.lightishGray`，尺寸 `2.5x4`，`lr` 使用 `randomSeedRange(id+i+6, 20*fin)`；
+  - `casing4 = new Effect(45f, ...)`：atlas `casing`，尺寸 `3x6`，其余运动公式同 `casing3`；
+  - `casing2Double` / `casing3Double`：分别按 `Mathf.signs` 生成左右两片壳壳；无 `data` / 外部 `e.color` 依赖。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 6 个 Fx ID、lookup、metadata，并全部对齐 `.layer(Layer::BULLET)`；
+    - 新增 `StandardEffectDrawKind::FilledRect` / `TexturedRect`；
+    - 新增 `StandardEffectRectRenderPrimitive { width, height, rotation, alpha, color, region }`；
+    - 新增 `rect_render_primitives_from_seed(...)`，其中 `TexturedRect` 固定 `region=Some("casing")`；
+    - `standard_effect_draw_plans_with_data_float(...)` 新增 casing 分支，按 Java 的 `rot/len/lr/jitter/rotation` 公式生成 rect plan，`casing1` 用 `FilledRect`，其余用 `TexturedRect`。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `StandardEffectRectRenderPrimitive`。
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame` / `DesktopEffectRenderStats` / `DesktopLauncher` 新增 rect primitive 缓存；
+    - update/render frame/stats/clear 流程接入 `rect_render_primitives_from_seed(...)`；
+    - 新增 `desktop_launcher_flattens_casing_rect_primitives_for_render`，验证 6 个 casing event 展开为 8 个 rect primitives（1 个 filled + 7 个 atlas `casing`）。
+- 已跑验证：
+  - `cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plans_cover_casing_rects --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_casing_rect_primitives_for_render --lib`
+- 仍未完成：
+  - 当前 rect 仍是 headless primitive/cache seam，真实 GPU renderer / atlas backend 尚未接入；
+  - `TexturedRect.region="casing"` 只是保留 atlas 名称，后续需要真实 atlas region lookup；
+  - 继续迁移 `Fx.java` 后续特效，并逐步把 primitive seam 下沉到真实 renderer。

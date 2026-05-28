@@ -250,6 +250,18 @@ pub const FX_SHOOT_SMALL_FLAME_ID: i32 = 187;
 pub const FX_SHOOT_PYRA_FLAME_ID: i32 = 188;
 /// Upstream `Fx.shootLiquid` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_LIQUID_ID: i32 = 189;
+/// Upstream `Fx.casing1` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CASING1_ID: i32 = 190;
+/// Upstream `Fx.casing2` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CASING2_ID: i32 = 191;
+/// Upstream `Fx.casing3` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CASING3_ID: i32 = 192;
+/// Upstream `Fx.casing4` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CASING4_ID: i32 = 193;
+/// Upstream `Fx.casing2Double` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CASING2_DOUBLE_ID: i32 = 194;
+/// Upstream `Fx.casing3Double` id in `mindustry.content.Fx` for v158.1.
+pub const FX_CASING3_DOUBLE_ID: i32 = 195;
 /// Upstream `Fx.railShoot` id in `mindustry.content.Fx` for v158.1.
 pub const FX_RAIL_SHOOT_ID: i32 = 196;
 /// Upstream `Fx.railTrail` id in `mindustry.content.Fx` for v158.1.
@@ -428,6 +440,12 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootSmallFlame" => Some(FX_SHOOT_SMALL_FLAME_ID),
         "shootPyraFlame" => Some(FX_SHOOT_PYRA_FLAME_ID),
         "shootLiquid" => Some(FX_SHOOT_LIQUID_ID),
+        "casing1" => Some(FX_CASING1_ID),
+        "casing2" => Some(FX_CASING2_ID),
+        "casing3" => Some(FX_CASING3_ID),
+        "casing4" => Some(FX_CASING4_ID),
+        "casing2Double" => Some(FX_CASING2_DOUBLE_ID),
+        "casing3Double" => Some(FX_CASING3_DOUBLE_ID),
         "railShoot" => Some(FX_RAIL_SHOOT_ID),
         "railTrail" => Some(FX_RAIL_TRAIL_ID),
         "railHit" => Some(FX_RAIL_HIT_ID),
@@ -712,6 +730,26 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_SHOOT_PYRA_FLAME_ID, 33.0, 80.0).follow_parent(false)
         }
         FX_SHOOT_LIQUID_ID => Effect::with_lifetime(FX_SHOOT_LIQUID_ID, 15.0, 80.0),
+        FX_CASING1_ID => {
+            Effect::with_lifetime(FX_CASING1_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::BULLET)
+        }
+        FX_CASING2_ID => {
+            Effect::with_lifetime(FX_CASING2_ID, 34.0, DEFAULT_EFFECT_CLIP).layer(Layer::BULLET)
+        }
+        FX_CASING3_ID => {
+            Effect::with_lifetime(FX_CASING3_ID, 40.0, DEFAULT_EFFECT_CLIP).layer(Layer::BULLET)
+        }
+        FX_CASING4_ID => {
+            Effect::with_lifetime(FX_CASING4_ID, 45.0, DEFAULT_EFFECT_CLIP).layer(Layer::BULLET)
+        }
+        FX_CASING2_DOUBLE_ID => {
+            Effect::with_lifetime(FX_CASING2_DOUBLE_ID, 34.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::BULLET)
+        }
+        FX_CASING3_DOUBLE_ID => {
+            Effect::with_lifetime(FX_CASING3_DOUBLE_ID, 40.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::BULLET)
+        }
         FX_RAIL_SHOOT_ID => Effect::with_lifetime(FX_RAIL_SHOOT_ID, 24.0, DEFAULT_EFFECT_CLIP),
         FX_RAIL_TRAIL_ID => Effect::with_lifetime(FX_RAIL_TRAIL_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_RAIL_HIT_ID => Effect::with_lifetime(FX_RAIL_HIT_ID, 18.0, 200.0),
@@ -848,6 +886,12 @@ pub fn standard_effect_draw_plans_with_data_float(
             | FX_COLOR_SPARK_BIG_ID
             | FX_RAND_LIFE_SPARK_ID
             | FX_SHOOT_PAYLOAD_DRIVER_ID
+            | FX_CASING1_ID
+            | FX_CASING2_ID
+            | FX_CASING3_ID
+            | FX_CASING4_ID
+            | FX_CASING2_DOUBLE_ID
+            | FX_CASING3_DOUBLE_ID
             | FX_RAIL_SHOOT_ID
             | FX_RAIL_TRAIL_ID
             | FX_RAIL_HIT_ID
@@ -1028,6 +1072,84 @@ pub fn standard_effect_draw_plans_with_data_float(
                     secondary_radius_fslope_scale: 0.0,
                     alpha_midpoint: false,
                 }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        return plans;
+    }
+
+    if matches!(
+        effect_id_i32,
+        FX_CASING1_ID
+            | FX_CASING2_ID
+            | FX_CASING3_ID
+            | FX_CASING4_ID
+            | FX_CASING2_DOUBLE_ID
+            | FX_CASING3_DOUBLE_ID
+    ) {
+        let (width, height, len_base, len_scale, lr_fin_scale, random_lr, alpha_margin, color_mid) =
+            match effect_id_i32 {
+                FX_CASING1_ID => (1.0, 2.0, 2.0, 6.0, 30.0, false, 0.3, "Color.lightGray"),
+                FX_CASING2_ID | FX_CASING2_DOUBLE_ID => {
+                    (2.0, 3.0, 2.0, 10.0, 20.0, false, 0.5, "Color.lightGray")
+                }
+                FX_CASING3_ID | FX_CASING3_DOUBLE_ID => {
+                    (2.5, 4.0, 4.0, 9.0, 0.0, true, 0.5, "Pal.lightishGray")
+                }
+                FX_CASING4_ID => (3.0, 6.0, 4.0, 9.0, 0.0, true, 0.5, "Pal.lightishGray"),
+                _ => unreachable!(),
+            };
+        let signs: &[i32] = if matches!(effect_id_i32, FX_CASING2_DOUBLE_ID | FX_CASING3_DOUBLE_ID)
+        {
+            &[-1, 1]
+        } else {
+            &[(-signum_nonzero(rotation)) as i32]
+        };
+        let rot = rotation.abs() + 90.0;
+        let mut plans = Vec::with_capacity(signs.len());
+
+        for &sign in signs {
+            let sign_f = sign as f32;
+            let len = (len_base + finpow * len_scale) * sign_f;
+            let lr = if random_lr {
+                rot + mathf_random_seed_range((state_id + sign + 6) as i64, 20.0 * fin) * sign_f
+            } else {
+                rot + fin * lr_fin_scale * sign_f
+            };
+            let (offset_x, offset_y) = trns(lr, len);
+            let jitter_x = mathf_random_seed_range((state_id + sign + 7) as i64, 3.0 * fin);
+            let jitter_y = mathf_random_seed_range((state_id + sign + 8) as i64, 3.0 * fin);
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: if effect_id_i32 == FX_CASING1_ID {
+                    StandardEffectDrawKind::FilledRect
+                } else {
+                    StandardEffectDrawKind::TexturedRect
+                },
+                center: (x + offset_x + jitter_x, y + offset_y + jitter_y),
+                color_from: Some("Pal.lightOrange"),
+                color_mid: Some(color_mid),
+                color_to: Some("Pal.lightishGray"),
+                color_mix: fin,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: effect_fout_margin_from_fin(fin, alpha_margin),
+                radius: width,
+                stroke: height,
+                particles: Some(standard_effect_particle_spec(
+                    state_id,
+                    1,
+                    Some(rot + fin * 50.0 * sign_f),
+                    0.0,
+                    0.0,
+                    fin,
+                    fout,
+                    fslope,
+                )),
                 light_color: None,
                 light_radius: 0.0,
                 light_opacity: 0.0,
@@ -2513,6 +2635,8 @@ pub enum StandardEffectDrawKind {
     FilledSquare,
     StrokedSquare,
     StrokedRotatedSquare,
+    FilledRect,
+    TexturedRect,
     SeededSquareParticles,
     SeededRadialSquareParticles,
     SeededRotatedSquareParticles,
@@ -2578,6 +2702,18 @@ pub struct StandardEffectSquareRenderPrimitive {
     pub rotation: f32,
     pub alpha: f32,
     pub color: Option<DecalColor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectRectRenderPrimitive {
+    pub kind: StandardEffectDrawKind,
+    pub center: (f32, f32),
+    pub width: f32,
+    pub height: f32,
+    pub rotation: f32,
+    pub alpha: f32,
+    pub color: Option<DecalColor>,
+    pub region: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2750,6 +2886,8 @@ impl StandardEffectDrawPlan {
             StandardEffectDrawKind::FilledSquare
             | StandardEffectDrawKind::StrokedSquare
             | StandardEffectDrawKind::StrokedRotatedSquare
+            | StandardEffectDrawKind::FilledRect
+            | StandardEffectDrawKind::TexturedRect
             | StandardEffectDrawKind::SeededSquareParticles
             | StandardEffectDrawKind::SeededRadialSquareParticles
             | StandardEffectDrawKind::SeededRotatedSquareParticles
@@ -2860,12 +2998,40 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::StrokedCircle
             | StandardEffectDrawKind::SeededCircleParticles
             | StandardEffectDrawKind::SeededStrokedCircleParticles
+            | StandardEffectDrawKind::FilledRect
+            | StandardEffectDrawKind::TexturedRect
             | StandardEffectDrawKind::SeededLineParticles
             | StandardEffectDrawKind::SeededRadialLineParticles
             | StandardEffectDrawKind::LineAngle
             | StandardEffectDrawKind::TrianglePair
             | StandardEffectDrawKind::TriangleFan
             | StandardEffectDrawKind::SeededRadialTriangleParticles => Vec::new(),
+        }
+    }
+
+    pub fn rect_render_primitives_from_seed(&self) -> Vec<StandardEffectRectRenderPrimitive> {
+        let color = self.resolved_draw_color();
+        match self.kind {
+            StandardEffectDrawKind::FilledRect | StandardEffectDrawKind::TexturedRect => {
+                vec![StandardEffectRectRenderPrimitive {
+                    kind: self.kind,
+                    center: self.center,
+                    width: self.radius,
+                    height: self.stroke,
+                    rotation: self
+                        .particles
+                        .and_then(|particles| particles.angle)
+                        .unwrap_or(0.0),
+                    alpha: self.alpha,
+                    color,
+                    region: if self.kind == StandardEffectDrawKind::TexturedRect {
+                        Some("casing")
+                    } else {
+                        None
+                    },
+                }]
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -5583,6 +5749,10 @@ fn effect_finpow_from_fin(fin: f32) -> f32 {
     interp_pow3_out(fin)
 }
 
+fn effect_fout_margin_from_fin(fin: f32, margin: f32) -> f32 {
+    1.0 - curve(fin, 1.0 - margin, 1.0)
+}
+
 fn interp_smooth(value: f32) -> f32 {
     let value = value.clamp(0.0, 1.0);
     value * value * (3.0 - 2.0 * value)
@@ -7261,6 +7431,18 @@ mod tests {
             Some(FX_SHOOT_PYRA_FLAME_ID)
         );
         assert_eq!(standard_effect_id("shootLiquid"), Some(FX_SHOOT_LIQUID_ID));
+        assert_eq!(standard_effect_id("casing1"), Some(FX_CASING1_ID));
+        assert_eq!(standard_effect_id("casing2"), Some(FX_CASING2_ID));
+        assert_eq!(standard_effect_id("casing3"), Some(FX_CASING3_ID));
+        assert_eq!(standard_effect_id("casing4"), Some(FX_CASING4_ID));
+        assert_eq!(
+            standard_effect_id("casing2Double"),
+            Some(FX_CASING2_DOUBLE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("casing3Double"),
+            Some(FX_CASING3_DOUBLE_ID)
+        );
         assert_eq!(standard_effect_id("railShoot"), Some(FX_RAIL_SHOOT_ID));
         assert_eq!(standard_effect_id("railTrail"), Some(FX_RAIL_TRAIL_ID));
         assert_eq!(standard_effect_id("railHit"), Some(FX_RAIL_HIT_ID));
@@ -7652,6 +7834,21 @@ mod tests {
         let shoot_liquid = standard_effect(FX_SHOOT_LIQUID_ID).unwrap();
         assert_eq!(shoot_liquid.lifetime, 15.0);
         assert_eq!(shoot_liquid.clip, 80.0);
+        let casing1 = standard_effect(FX_CASING1_ID).unwrap();
+        assert_eq!(casing1.lifetime, 30.0);
+        assert_eq!(casing1.clip, DEFAULT_EFFECT_CLIP);
+        assert_eq!(casing1.layer, Layer::BULLET);
+        assert_eq!(standard_effect(FX_CASING2_ID).unwrap().lifetime, 34.0);
+        assert_eq!(standard_effect(FX_CASING3_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_CASING4_ID).unwrap().lifetime, 45.0);
+        assert_eq!(
+            standard_effect(FX_CASING2_DOUBLE_ID).unwrap().lifetime,
+            34.0
+        );
+        assert_eq!(
+            standard_effect(FX_CASING3_DOUBLE_ID).unwrap().lifetime,
+            40.0
+        );
         let rail_shoot = standard_effect(FX_RAIL_SHOOT_ID).unwrap();
         assert_eq!(rail_shoot.lifetime, 24.0);
         assert_eq!(rail_shoot.clip, DEFAULT_EFFECT_CLIP);
@@ -9645,6 +9842,141 @@ mod tests {
             Some(DecalColor::from_rgba(0xf9a3c7ff))
         );
         assert_eq!(thorium.line_render_primitives_from_seed().len(), 7);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_casing_rects() {
+        let casing1 = standard_effect_draw_plans(
+            Some(FX_CASING1_ID as u16),
+            190,
+            3.0,
+            4.0,
+            30.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(casing1.len(), 1);
+        let first = casing1[0];
+        assert_eq!(first.kind, StandardEffectDrawKind::FilledRect);
+        assert_eq!(first.layer, Layer::BULLET);
+        assert_eq!(first.color_from, Some("Pal.lightOrange"));
+        assert_eq!(first.color_mid, Some("Color.lightGray"));
+        assert_eq!(first.color_to, Some("Pal.lightishGray"));
+        assert_eq!(first.alpha, 1.0);
+        assert_eq!(first.radius, 1.0);
+        assert_eq!(first.stroke, 2.0);
+        let fin = 0.5;
+        let finpow = effect_finpow_from_fin(fin);
+        let sign = -1_i32;
+        let rot = 120.0;
+        let len = (2.0 + finpow * 6.0) * sign as f32;
+        let lr = rot + fin * 30.0 * sign as f32;
+        let (offset_x, offset_y) = trns(lr, len);
+        let jitter_x = mathf_random_seed_range((190 + sign + 7) as i64, 3.0 * fin);
+        let jitter_y = mathf_random_seed_range((190 + sign + 8) as i64, 3.0 * fin);
+        assert!((first.center.0 - (3.0 + offset_x + jitter_x)).abs() < 0.0001);
+        assert!((first.center.1 - (4.0 + offset_y + jitter_y)).abs() < 0.0001);
+        let first_rect = first.rect_render_primitives_from_seed();
+        assert_eq!(first_rect.len(), 1);
+        assert_eq!(first_rect[0].kind, StandardEffectDrawKind::FilledRect);
+        assert_eq!(first_rect[0].width, 1.0);
+        assert_eq!(first_rect[0].height, 2.0);
+        assert_eq!(first_rect[0].rotation, 95.0);
+        assert_eq!(first_rect[0].region, None);
+
+        let casing2 = standard_effect_draw_plans(
+            Some(FX_CASING2_ID as u16),
+            191,
+            3.0,
+            4.0,
+            30.0,
+            17.0,
+            34.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(casing2.len(), 1);
+        let casing2_rect = casing2[0].rect_render_primitives_from_seed();
+        assert_eq!(casing2[0].kind, StandardEffectDrawKind::TexturedRect);
+        assert_eq!(casing2[0].color_mid, Some("Color.lightGray"));
+        assert_eq!(casing2_rect[0].width, 2.0);
+        assert_eq!(casing2_rect[0].height, 3.0);
+        assert_eq!(casing2_rect[0].region, Some("casing"));
+        assert_eq!(casing2_rect[0].rotation, 95.0);
+
+        let casing3 = standard_effect_draw_plans(
+            Some(FX_CASING3_ID as u16),
+            192,
+            3.0,
+            4.0,
+            30.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(casing3.len(), 1);
+        assert_eq!(casing3[0].color_mid, Some("Pal.lightishGray"));
+        let casing3_rect = casing3[0].rect_render_primitives_from_seed();
+        assert_eq!(casing3_rect[0].width, 2.5);
+        assert_eq!(casing3_rect[0].height, 4.0);
+        assert_eq!(casing3_rect[0].region, Some("casing"));
+
+        let casing4 = standard_effect_draw_plans(
+            Some(FX_CASING4_ID as u16),
+            193,
+            3.0,
+            4.0,
+            30.0,
+            22.5,
+            45.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(casing4.len(), 1);
+        let casing4_rect = casing4[0].rect_render_primitives_from_seed();
+        assert_eq!(casing4_rect[0].width, 3.0);
+        assert_eq!(casing4_rect[0].height, 6.0);
+
+        let casing2_double = standard_effect_draw_plans(
+            Some(FX_CASING2_DOUBLE_ID as u16),
+            194,
+            3.0,
+            4.0,
+            30.0,
+            17.0,
+            34.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(casing2_double.len(), 2);
+        let double_rects: Vec<_> = casing2_double
+            .iter()
+            .flat_map(StandardEffectDrawPlan::rect_render_primitives_from_seed)
+            .collect();
+        assert_eq!(double_rects.len(), 2);
+        assert_eq!(double_rects[0].rotation, 95.0);
+        assert_eq!(double_rects[1].rotation, 145.0);
+        assert!(double_rects
+            .iter()
+            .all(|rect| rect.region == Some("casing")));
+
+        let casing3_double = standard_effect_draw_plans(
+            Some(FX_CASING3_DOUBLE_ID as u16),
+            195,
+            3.0,
+            4.0,
+            30.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(casing3_double.len(), 2);
+        assert_eq!(
+            casing3_double
+                .iter()
+                .flat_map(StandardEffectDrawPlan::rect_render_primitives_from_seed)
+                .count(),
+            2
+        );
+        assert!(casing3_double[0].resolved_draw_color().is_some());
     }
 
     #[test]

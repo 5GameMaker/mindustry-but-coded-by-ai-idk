@@ -19,7 +19,8 @@ use mindustry_core::mindustry::entities::{
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
     PlayerUnitSwitchContext, StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
-    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
+    StandardEffectRectRenderPrimitive, StandardEffectSquareRenderPrimitive,
+    StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -53,6 +54,7 @@ pub struct DesktopStandardEffectRenderFrame {
     pub draw_plans: Vec<StandardEffectDrawPlan>,
     pub circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
     pub square_primitives: Vec<StandardEffectSquareRenderPrimitive>,
+    pub rect_primitives: Vec<StandardEffectRectRenderPrimitive>,
     pub line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
@@ -63,6 +65,7 @@ pub struct DesktopEffectRenderStats {
     pub draw_plans: usize,
     pub circle_primitives: usize,
     pub square_primitives: usize,
+    pub rect_primitives: usize,
     pub line_primitives: usize,
     pub triangle_primitives: usize,
     pub light_primitives: usize,
@@ -74,6 +77,7 @@ impl DesktopEffectRenderStats {
             draw_plans: frame.draw_plans.len(),
             circle_primitives: frame.circle_primitives.len(),
             square_primitives: frame.square_primitives.len(),
+            rect_primitives: frame.rect_primitives.len(),
             line_primitives: frame.line_primitives.len(),
             triangle_primitives: frame.triangle_primitives.len(),
             light_primitives: frame.light_primitives.len(),
@@ -118,6 +122,7 @@ pub struct DesktopLauncher {
     pub standard_local_effect_draw_plans: Vec<StandardEffectDrawPlan>,
     pub standard_local_effect_circle_primitives: Vec<StandardEffectCircleRenderPrimitive>,
     pub standard_local_effect_square_primitives: Vec<StandardEffectSquareRenderPrimitive>,
+    pub standard_local_effect_rect_primitives: Vec<StandardEffectRectRenderPrimitive>,
     pub standard_local_effect_line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub standard_local_effect_triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub standard_local_effect_light_primitives: Vec<StandardEffectLightRenderPrimitive>,
@@ -169,6 +174,7 @@ impl DesktopLauncher {
             standard_local_effect_draw_plans: Vec::new(),
             standard_local_effect_circle_primitives: Vec::new(),
             standard_local_effect_square_primitives: Vec::new(),
+            standard_local_effect_rect_primitives: Vec::new(),
             standard_local_effect_line_primitives: Vec::new(),
             standard_local_effect_triangle_primitives: Vec::new(),
             standard_local_effect_light_primitives: Vec::new(),
@@ -253,6 +259,10 @@ impl DesktopLauncher {
         self.standard_local_effect_square_primitives = standard_local_effect_draw_plans
             .iter()
             .flat_map(StandardEffectDrawPlan::square_render_primitives_from_seed)
+            .collect();
+        self.standard_local_effect_rect_primitives = standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::rect_render_primitives_from_seed)
             .collect();
         self.standard_local_effect_line_primitives = standard_local_effect_draw_plans
             .iter()
@@ -344,6 +354,15 @@ impl DesktopLauncher {
             .collect()
     }
 
+    pub fn collect_standard_local_effect_rect_primitives_for_render(
+        &self,
+    ) -> Vec<StandardEffectRectRenderPrimitive> {
+        self.standard_local_effect_draw_plans
+            .iter()
+            .flat_map(StandardEffectDrawPlan::rect_render_primitives_from_seed)
+            .collect()
+    }
+
     pub fn collect_standard_local_effect_line_primitives_for_render(
         &self,
     ) -> Vec<StandardEffectLineRenderPrimitive> {
@@ -367,6 +386,7 @@ impl DesktopLauncher {
             draw_plans: self.standard_local_effect_draw_plans.clone(),
             circle_primitives: self.standard_local_effect_circle_primitives.clone(),
             square_primitives: self.standard_local_effect_square_primitives.clone(),
+            rect_primitives: self.standard_local_effect_rect_primitives.clone(),
             line_primitives: self.standard_local_effect_line_primitives.clone(),
             triangle_primitives: self.standard_local_effect_triangle_primitives.clone(),
             light_primitives: self.standard_local_effect_light_primitives.clone(),
@@ -439,7 +459,9 @@ impl DesktopLauncher {
                     self.standard_local_effect_draw_plans.clear();
                     self.standard_local_effect_circle_primitives.clear();
                     self.standard_local_effect_square_primitives.clear();
+                    self.standard_local_effect_rect_primitives.clear();
                     self.standard_local_effect_line_primitives.clear();
+                    self.standard_local_effect_triangle_primitives.clear();
                     self.standard_local_effect_light_primitives.clear();
                     self.content_loader.clear_temporary_mapper();
                     self.last_applied_state_snapshot = None;
@@ -1140,7 +1162,9 @@ impl DesktopLauncher {
         self.standard_local_effect_draw_plans.clear();
         self.standard_local_effect_circle_primitives.clear();
         self.standard_local_effect_square_primitives.clear();
+        self.standard_local_effect_rect_primitives.clear();
         self.standard_local_effect_line_primitives.clear();
+        self.standard_local_effect_triangle_primitives.clear();
         self.standard_local_effect_light_primitives.clear();
     }
 
@@ -2768,6 +2792,7 @@ mod tests {
                 draw_plans: 1,
                 circle_primitives: 2,
                 square_primitives: 0,
+                rect_primitives: 0,
                 line_primitives: 0,
                 triangle_primitives: 0,
                 light_primitives: 1
@@ -2969,6 +2994,7 @@ mod tests {
                 draw_plans: 1,
                 circle_primitives: 0,
                 square_primitives: 1,
+                rect_primitives: 0,
                 line_primitives: 0,
                 triangle_primitives: 0,
                 light_primitives: 1
@@ -3401,6 +3427,79 @@ mod tests {
         assert_eq!(stats.line_primitives, 21);
         assert_eq!(stats.triangle_primitives, 10);
         assert_eq!(stats.light_primitives, 1);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_flattens_casing_rect_primitives_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        for (name, x) in [
+            ("casing1", 24.0_f32),
+            ("casing2", 40.0_f32),
+            ("casing3", 56.0_f32),
+            ("casing4", 72.0_f32),
+            ("casing2Double", 88.0_f32),
+            ("casing3Double", 104.0_f32),
+        ] {
+            launcher
+                .runtime
+                .client_local_effect_events
+                .push(EffectCallPacket2 {
+                    effect: EffectCallPacket {
+                        effect_id: standard_effect_id(name).unwrap() as u16,
+                        x,
+                        y: 32.0,
+                        rotation: 30.0,
+                        color: type_io::RgbaColor::new(-1),
+                    },
+                    data: TypeValue::Null,
+                });
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 8);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_rect_primitives.len(), 8);
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let filled_rect = launcher
+            .standard_local_effect_rect_primitives
+            .iter()
+            .find(|rect| rect.kind == StandardEffectDrawKind::FilledRect)
+            .expect("casing1 should cache a filled rect primitive");
+        assert_eq!(filled_rect.region, None);
+        assert_eq!(filled_rect.width, 1.0);
+        assert_eq!(filled_rect.height, 2.0);
+        assert!(filled_rect.rotation.is_finite());
+
+        let textured_rects: Vec<_> = launcher
+            .standard_local_effect_rect_primitives
+            .iter()
+            .filter(|rect| rect.kind == StandardEffectDrawKind::TexturedRect)
+            .collect();
+        assert_eq!(textured_rects.len(), 7);
+        assert!(textured_rects
+            .iter()
+            .all(|rect| rect.region == Some("casing")));
+        assert!(textured_rects
+            .iter()
+            .any(|rect| rect.width == 3.0 && rect.height == 6.0));
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 8);
+        assert_eq!(stats.circle_primitives, 0);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.rect_primitives, 8);
+        assert_eq!(stats.line_primitives, 0);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
         assert_eq!(renderer.last_stats, stats);
     }
 

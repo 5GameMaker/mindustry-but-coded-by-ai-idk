@@ -5949,3 +5949,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续做最终收尾前需要跑 `standard_effect_ids_include`、`standard_effect_lookup`、本轮 core/desktop 定向测试、`cargo check -p mindustry-core`、`cargo check -p mindustry-desktop`、`git diff --check`；
   2. 下一批 Fx 可转向 `casing1=190` 起，但需要先设计 rect/sprite primitive；如果要继续少造 primitive，可扫描 `Fx.java` 后续可由现有 circle/line/triangle 表达的项；
   3. 真实 renderer/backend 仍未接入；当前只是标准 effect headless primitive seam，不要宣称可玩。
+
+---
+
+## 178. 最新闭环记录：Fx.casing1/casing2/casing3/casing4/casing2Double/casing3Double
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：处理之前一直提示“需要 rect/sprite primitive”的 casing 系列，避免错误复用 square，以 Java `Fill.rect` / atlas `rect(Core.atlas.find("casing"), ...)` 语义新增 rect seam。
+- 本轮迁移：
+  - `casing1=190`
+  - `casing2=191`
+  - `casing3=192`
+  - `casing4=193`
+  - `casing2Double=194`
+  - `casing3Double=195`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 6 个 casing Fx ID、lookup、metadata，layer 全部对齐 `Layer::BULLET`；
+    - 新增 `StandardEffectDrawKind::FilledRect` / `TexturedRect`；
+    - 新增 `StandardEffectRectRenderPrimitive` 与 `rect_render_primitives_from_seed(...)`；
+    - `casing1` 输出 `FilledRect`，其余输出 `TexturedRect` 且 `region=Some("casing")`；
+    - casing 分支对齐 Java `rot = abs(rotation)+90`、`i=-sign(rotation)` 或 `Mathf.signs`、`len/lr`、seed jitter、尺寸与颜色渐变；
+    - 新增 `standard_effect_draw_plans_cover_casing_rects`。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `StandardEffectRectRenderPrimitive`。
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame`、`DesktopEffectRenderStats`、`DesktopLauncher` 增加 rect primitive 缓存与统计；
+    - update/render/clear 流程接入 rect；
+    - 新增 `desktop_launcher_flattens_casing_rect_primitives_for_render`，验证 6 个 casing event 生成 8 个 rect primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plans_cover_casing_rects --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_casing_rect_primitives_for_render --lib`
+- 注意：
+  - 第一次 core 定向测试编译阶段遇到一次 `rustc-LLVM ERROR: out of memory`，随后用 `CARGO_BUILD_JOBS=1` 重跑通过；后续完整闭环仍需用低并发跑 check/test，避免 OOM 假失败。
+- 下一步建议：
+  1. 本轮提交前继续跑 `standard_effect_ids_include`、`standard_effect_lookup`、casing core/desktop 定向测试、`cargo check -p mindustry-core`、`cargo check -p mindustry-desktop`、`git diff --check`；
+  2. 后续继续扫描 `Fx.java` 后续区间，优先迁移可由现有 circle/line/triangle/rect primitive 表达的效果；
+  3. 当前 rect 仍是 headless primitive/cache seam；`TexturedRect.region="casing"` 只是 atlas 名称保留，真实 atlas/GPU backend 仍待接入。
