@@ -22,6 +22,7 @@ pub mod pixelator;
 pub mod render_bridge;
 pub mod render_engine;
 pub mod shaders;
+pub mod texture_atlas;
 pub mod trail;
 pub mod voronoi;
 
@@ -59,5 +60,6 @@ pub use pixelator::{
 pub use render_bridge::*;
 pub use render_engine::*;
 pub use shaders::*;
+pub use texture_atlas::*;
 pub use trail::{Trail, TrailPoint, TrailQuadPlan, TrailSegmentPlan};
 pub use voronoi::*;
