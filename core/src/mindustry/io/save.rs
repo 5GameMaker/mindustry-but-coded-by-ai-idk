@@ -843,13 +843,13 @@ where
 }
 
 pub fn write_string_map<W: Write>(write: &mut W, map: &BTreeMap<String, String>) -> io::Result<()> {
-    if map.len() > u16::MAX as usize {
+    if map.len() > i16::MAX as usize {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "StringMap too large",
         ));
     }
-    write_u16(write, map.len() as u16)?;
+    write_i16(write, map.len() as i16)?;
     for (key, value) in map {
         write_java_utf(write, key)?;
         write_java_utf(write, value)?;
@@ -858,7 +858,8 @@ pub fn write_string_map<W: Write>(write: &mut W, map: &BTreeMap<String, String>)
 }
 
 pub fn read_string_map<R: Read>(read: &mut R) -> io::Result<BTreeMap<String, String>> {
-    let len = read_u16(read)? as usize;
+    let len = read_i16(read)?;
+    let len = if len < 0 { 0 } else { len as usize };
     let mut out = BTreeMap::new();
     for _ in 0..len {
         let key = read_java_utf(read)?;
@@ -1773,6 +1774,15 @@ mod tests {
         assert_eq!(meta.map_name.as_deref(), Some("test-map"));
         assert_eq!(meta.wave, 12);
         assert_eq!(meta.mods, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn string_map_matches_java_signed_short_length_semantics() {
+        let bytes = vec![0xFF, 0xFF];
+
+        let map = read_string_map(&mut bytes.as_slice()).unwrap();
+
+        assert!(map.is_empty());
     }
 
     #[test]
