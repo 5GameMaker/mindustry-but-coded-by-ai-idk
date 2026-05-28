@@ -46,6 +46,7 @@ pub struct Weapon {
     pub y_rand: f32,
     pub shoot_pattern: String,
     pub shoot_shots: i32,
+    pub shoot_spread: f32,
     pub shoot_first_shot_delay: f32,
     pub shoot_shot_delay: f32,
     pub shadow: f32,
@@ -129,6 +130,7 @@ impl Weapon {
             y_rand: 0.0,
             shoot_pattern: String::new(),
             shoot_shots: 1,
+            shoot_spread: 0.0,
             shoot_first_shot_delay: 0.0,
             shoot_shot_delay: 0.0,
             shadow: -1.0,
@@ -251,9 +253,12 @@ mod tests {
     fn weapon_shoot_shots_mirrors_java_shoot_pattern_minimum() {
         let mut weapon = Weapon::new("burst");
         assert_eq!(weapon.shoot_shots(), 1);
+        assert_eq!(weapon.shoot_spread, 0.0);
 
         weapon.shoot_shots = 3;
+        weapon.shoot_spread = 12.0;
         assert_eq!(weapon.shoot_shots(), 3);
+        assert_eq!(weapon.shoot_spread, 12.0);
 
         weapon.shoot_shots = 0;
         assert_eq!(weapon.shoot_shots(), 1);

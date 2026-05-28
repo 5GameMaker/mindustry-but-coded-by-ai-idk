@@ -7564,3 +7564,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 实现 firstShotDelay/shotDelay 调度，而不是即时全发；
   3. 完整 `bulletRotation(...)`、xRand/yRand/inaccuracy、ammo/eject、sound/effect、continuous beam；
   4. 当前总迁移约 12% 出头，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 224. 最新闭环记录：Weapon ShootSpread 最小角度偏移接入
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：在 `shoot.shots` 多发基础上继续补 `ShootSpread` 的角度偏移，让 server weapon bullet snapshot 的 rotation 更接近 Java。
+- Rust 主改动：
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `shoot_spread`；
+    - 相关 weapon 测试覆盖默认值和设置值。
+  - `server/src/lib.rs`
+    - `weapon.shoot_pattern == "ShootSpread"` 时使用 Java 公式 `i * spread - (shots - 1) * spread / 2`；
+    - server 多发测试断言 3 发 rotation 为 `80/90/100`。
+  - `MIGRATION.md`
+    - 新增 `12.298`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_shots_mirrors_java_shoot_pattern_minimum --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 用 `core/src/mindustry/entities/pattern.rs` 统一驱动 ShootPattern，而不是 server 字符串特判；
+  2. ShootAlternate/ShootBarrel/ShootHelix/ShootMulti/ShootSummon、delay、x/y offset、inaccuracy、velocityRnd 仍未完成；
+  3. 完整 `bulletRotation(...)`、ammo/eject、sound/effect、continuous beam；
+  4. 当前总迁移约 12% 出头，远未可玩，goal 绝不能标记 complete。

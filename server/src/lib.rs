@@ -2483,14 +2483,21 @@ impl ServerLauncher {
                 let bullet_name = weapon.bullet.clone();
                 let shot_count = weapon.shoot_shots();
                 let recoils_count = weapon.recoils;
-                for _ in 0..shot_count {
+                let spread = weapon.shoot_spread;
+                let spread_pattern = weapon.shoot_pattern == "ShootSpread";
+                for shot_index in 0..shot_count {
+                    let angle_offset = if spread_pattern {
+                        shot_index as f32 * spread - (shot_count - 1) as f32 * spread / 2.0
+                    } else {
+                        0.0
+                    };
                     spawn_plans.push(ServerWeaponBulletSpawnPlan {
                         owner_id: unit_id,
                         team,
                         bullet: bullet_name.clone(),
                         x: unit_x + mount_dx + shoot_dx,
                         y: unit_y + mount_dy + shoot_dy,
-                        rotation: shoot_angle,
+                        rotation: shoot_angle + angle_offset,
                     });
 
                     let barrel_counter = mount.barrel_counter;
@@ -7311,6 +7318,8 @@ mod tests {
         weapon.y = 0.0;
         weapon.recoils = 1;
         weapon.shoot_shots = 3;
+        weapon.shoot_pattern = "ShootSpread".into();
+        weapon.shoot_spread = 10.0;
         let mut unit_type = UnitType::new(9105, "server-shooter");
         unit_type.weapons.push(weapon);
         let mut unit = UnitComp::new(96, unit_type, TeamId(2));
@@ -7341,7 +7350,12 @@ mod tests {
         assert_eq!(server_bullet.team, TeamId(2));
         assert_eq!(server_bullet.x, 40.0);
         assert_eq!(server_bullet.y, 56.0);
-        assert_eq!(server_bullet.rotation, 90.0);
+        let rotations: Vec<f32> = launcher
+            .server_bullets
+            .values()
+            .map(|bullet| bullet.rotation)
+            .collect();
+        assert_eq!(rotations, vec![80.0, 90.0, 100.0]);
 
         let sent_packets = sent.lock().unwrap();
         let snapshot_packet = sent_packets

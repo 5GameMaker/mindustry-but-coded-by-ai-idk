@@ -9451,3 +9451,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 本节只覆盖基础 `ShootPattern.shots` 的即时多发；尚未实现 firstShotDelay/shotDelay 调度、ShootSpread/ShootAlternate/ShootBarrel/ShootHelix/ShootMulti/ShootSummon；
   - 多发角度当前仍相同，后续需接入 `core/src/mindustry/entities/pattern.rs` 的 Shot offset/rotation；
   - 当前总体迁移约 12% 出头，远未可玩。
+
+### 12.298 Weapon ShootSpread 最小角度偏移接入
+
+- 2026-05-28：在上一节 `shoot.shots` 多发基础上，继续补 Java `ShootSpread` 的最小角度偏移，让 server weapon 多发 bullet 的 rotation 不再完全重叠。
+- Java 依据：
+  - `ShootSpread.shoot(...)` 中 `angleOffset = i * spread - (shots - 1) * spread / 2f`；
+  - 该 offset 会传入 `Weapon.bullet(...)` 并加到最终 bullet angle。
+- Rust 新增/变化：
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `shoot_spread: f32`，默认 0；
+    - `weapon_shoot_shots_mirrors_java_shoot_pattern_minimum` 扩展覆盖该字段。
+  - `server/src/lib.rs`
+    - `tick_server_unit_weapons(...)` 在 `weapon.shoot_pattern == "ShootSpread"` 时按 Java 公式给每发 bullet 加 angle offset；
+    - `server_update_fires_ready_unit_weapon_into_bullet_snapshot` 改为 `ShootSpread` 3 发，断言 rotations 为 `80/90/100`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_shots_mirrors_java_shoot_pattern_minimum --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 只覆盖 `ShootSpread` 的 rotation offset；x/y offset、delay、inaccuracy、velocityRnd、ShootAlternate/ShootBarrel/ShootHelix/ShootMulti/ShootSummon 仍未接入；
+  - 后续应统一复用 `core/src/mindustry/entities/pattern.rs` 的 Shot 生成，而不是在 server 内特判字符串；
+  - 当前总体迁移约 12% 出头，远未可玩。
