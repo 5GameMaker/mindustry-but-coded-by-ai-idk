@@ -87,6 +87,7 @@ const CARGO_AI_MOVE_RANGE: f32 = 6.0;
 const CARGO_AI_MOVE_SMOOTHING: f32 = 20.0;
 const SERVER_FIRE_ENTITY_ID_BASE: i32 = -1_500_000_000;
 
+#[derive(Debug, Clone)]
 struct ServerWeaponBulletSpawnPlan {
     owner_id: i32,
     team: TeamId,
@@ -94,6 +95,7 @@ struct ServerWeaponBulletSpawnPlan {
     x: f32,
     y: f32,
     rotation: f32,
+    delay: f32,
 }
 
 fn server_fire_entity_id(x: i32, y: i32) -> i32 {
@@ -128,6 +130,7 @@ pub struct ServerLauncher {
     pub server_preview_players: BTreeMap<i32, PlayerComp>,
     pub server_units: BTreeMap<i32, UnitComp>,
     pub server_bullets: BTreeMap<i32, BulletComp>,
+    pending_server_weapon_bullets: Vec<ServerWeaponBulletSpawnPlan>,
     pub runtime_request_item_packets_seen: usize,
     pub runtime_request_item_packets_accepted: usize,
     pub runtime_request_item_packets_rejected: usize,
@@ -200,6 +203,7 @@ impl ServerLauncher {
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             server_bullets: BTreeMap::new(),
+            pending_server_weapon_bullets: Vec::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -331,6 +335,7 @@ impl ServerLauncher {
             if let Err(error) = self.tick_server_unit_spawn_abilities(1.0) {
                 self.network_error = Some(error.to_string());
             }
+            self.tick_pending_server_weapon_bullets(1.0);
             self.tick_server_unit_weapons(1.0);
             self.tick_server_regen_abilities(1.0);
             if let Err(error) = self.tick_server_liquid_regen_abilities(1.0) {
@@ -2433,6 +2438,62 @@ impl ServerLauncher {
         suppressed_buildings
     }
 
+    fn spawn_server_weapon_bullet_plan(&mut self, plan: ServerWeaponBulletSpawnPlan) -> bool {
+        if !matches!(
+            self.server_units.get(&plan.owner_id),
+            Some(unit) if !unit.health.dead
+        ) {
+            return false;
+        }
+
+        let Some(bullet) = GameRuntime::build_unit_weapon_bullet(
+            &self.content_loader,
+            plan.owner_id,
+            plan.team,
+            &plan.bullet,
+            plan.x,
+            plan.y,
+            plan.rotation,
+        ) else {
+            return false;
+        };
+        let bullet_id = self.next_server_runtime_bullet_id();
+        self.server_bullets.insert(bullet_id, bullet);
+        true
+    }
+
+    fn spawn_server_weapon_bullet_plans<I>(&mut self, plans: I) -> usize
+    where
+        I: IntoIterator<Item = ServerWeaponBulletSpawnPlan>,
+    {
+        let mut spawned = 0;
+        for plan in plans {
+            if self.spawn_server_weapon_bullet_plan(plan) {
+                spawned += 1;
+            }
+        }
+        spawned
+    }
+
+    fn tick_pending_server_weapon_bullets(&mut self, delta_ticks: f32) -> usize {
+        let pending = std::mem::take(&mut self.pending_server_weapon_bullets);
+        let mut still_pending = Vec::new();
+        let mut ready = Vec::new();
+
+        for mut plan in pending {
+            plan.delay -= delta_ticks;
+            if plan.delay <= 0.0001 {
+                plan.delay = 0.0;
+                ready.push(plan);
+            } else {
+                still_pending.push(plan);
+            }
+        }
+
+        self.pending_server_weapon_bullets = still_pending;
+        self.spawn_server_weapon_bullet_plans(ready)
+    }
+
     fn tick_server_unit_weapons(&mut self, delta_ticks: f32) -> usize {
         let mut updated = 0;
         let mut spawn_plans = Vec::new();
@@ -2494,6 +2555,7 @@ impl ServerLauncher {
                         x: unit_x + mount_dx + shoot_dx,
                         y: unit_y + mount_dy + shoot_dy,
                         rotation: shoot_angle + shot.rotation,
+                        delay: shot.delay,
                     });
 
                     let barrel_counter = mount.barrel_counter;
@@ -2515,22 +2577,15 @@ impl ServerLauncher {
             }
         }
 
+        let mut immediate_plans = Vec::new();
         for plan in spawn_plans {
-            let Some(bullet) = GameRuntime::build_unit_weapon_bullet(
-                &self.content_loader,
-                plan.owner_id,
-                plan.team,
-                &plan.bullet,
-                plan.x,
-                plan.y,
-                plan.rotation,
-            ) else {
-                continue;
-            };
-            let bullet_id = self.next_server_runtime_bullet_id();
-            self.server_bullets.insert(bullet_id, bullet);
-            updated += 1;
+            if plan.delay > 0.0001 {
+                self.pending_server_weapon_bullets.push(plan);
+            } else {
+                immediate_plans.push(plan);
+            }
         }
+        updated += self.spawn_server_weapon_bullet_plans(immediate_plans);
         updated
     }
 
@@ -5923,6 +5978,7 @@ mod tests {
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             server_bullets: BTreeMap::new(),
+            pending_server_weapon_bullets: Vec::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -6035,6 +6091,7 @@ mod tests {
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             server_bullets: BTreeMap::new(),
+            pending_server_weapon_bullets: Vec::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -7385,6 +7442,58 @@ mod tests {
     }
 
     #[test]
+    fn server_update_queues_shoot_pattern_delays_before_spawning_weapon_bullets() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut weapon = Weapon::new("delayed-rifle");
+        weapon.bullet = "placeholder".into();
+        weapon.reload = 10.0;
+        weapon.shoot_x = 0.0;
+        weapon.shoot_y = 0.0;
+        weapon.x = 0.0;
+        weapon.y = 0.0;
+        weapon.shoot_shots = 2;
+        weapon.shoot_first_shot_delay = 1.0;
+        weapon.shoot_shot_delay = 1.0;
+        let mut unit_type = UnitType::new(9106, "server-delayed-shooter");
+        unit_type.weapons.push(weapon);
+        let mut unit = UnitComp::new(97, unit_type, TeamId(2));
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(90.0);
+        unit.weapons.mounts[0].reload = 1.0;
+        unit.weapons.mounts[0].shoot = true;
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&97).unwrap();
+        let mount = &unit.weapons.mounts[0];
+        assert_eq!(mount.total_shots, 2);
+        assert_eq!(mount.barrel_counter, 2);
+        assert_eq!(launcher.server_bullets.len(), 0);
+        assert_eq!(
+            launcher
+                .pending_server_weapon_bullets
+                .iter()
+                .map(|plan| plan.delay)
+                .collect::<Vec<_>>(),
+            vec![1.0, 2.0]
+        );
+
+        launcher.update();
+
+        assert_eq!(launcher.server_bullets.len(), 1);
+        assert_eq!(launcher.pending_server_weapon_bullets.len(), 1);
+        assert!((launcher.pending_server_weapon_bullets[0].delay - 1.0).abs() < 0.0001);
+
+        launcher.update();
+
+        assert_eq!(launcher.server_bullets.len(), 2);
+        assert!(launcher.pending_server_weapon_bullets.is_empty());
+    }
+
+    #[test]
     fn server_update_ticks_renale_neoplasm_regen() {
         let mut launcher = ServerLauncher::new(Vec::new());
         launcher.runtime.state.set(GameStateState::Playing);
@@ -8238,6 +8347,7 @@ mod tests {
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             server_bullets: BTreeMap::new(),
+            pending_server_weapon_bullets: Vec::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -8423,6 +8533,7 @@ mod tests {
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             server_bullets: BTreeMap::new(),
+            pending_server_weapon_bullets: Vec::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -8545,6 +8656,7 @@ mod tests {
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             server_bullets: BTreeMap::new(),
+            pending_server_weapon_bullets: Vec::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -8679,6 +8791,7 @@ mod tests {
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             server_bullets: BTreeMap::new(),
+            pending_server_weapon_bullets: Vec::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,
@@ -8832,6 +8945,7 @@ mod tests {
             server_preview_players: BTreeMap::new(),
             server_units: BTreeMap::new(),
             server_bullets: BTreeMap::new(),
+            pending_server_weapon_bullets: Vec::new(),
             runtime_request_item_packets_seen: 0,
             runtime_request_item_packets_accepted: 0,
             runtime_request_item_packets_rejected: 0,

@@ -7623,3 +7623,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 实现 firstShotDelay / shotDelay 调度，而不是 ready 后即时展开全部 shot；
   3. 完整 `bulletRotation(...)`、xRand/yRand、inaccuracy、velocityRnd、ammo/eject、sound/effect、continuous beam；
   4. 当前总迁移约 12.3%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 226. 最新闭环记录：Weapon ShootPattern delay server pending queue
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `ShootPattern.firstShotDelay` / `shotDelay` 的 `Time.run(delay, ...)` 语义接入真实 server weapon update，而不是让 `Shot.delay` 只停留在 core helper 输出里。
+- Rust 主改动：
+  - `core/src/mindustry/type/weapon.rs`
+    - `ShootSpread` 路径同步 `shoot_first_shot_delay` / `shoot_shot_delay`；
+    - `weapon_shoot_pattern_shots_reuses_core_spread_pattern` 现在同时断言 rotation 与 delay。
+  - `server/src/lib.rs`
+    - `ServerWeaponBulletSpawnPlan` 新增 `delay`；
+    - `ServerLauncher` 新增 `pending_server_weapon_bullets`；
+    - `ServerLauncher::update()` 在 `tick_server_unit_weapons(1.0)` 前驱动 `tick_pending_server_weapon_bullets(1.0)`；
+    - `tick_server_unit_weapons(...)` 对 delayed shot 只排队，对 immediate shot 当帧生成 bullet；
+    - 新增 `server_update_queues_shoot_pattern_delays_before_spawning_weapon_bullets`。
+  - `MIGRATION.md`
+    - 新增 `12.300`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_reuses_core_spread_pattern --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_queues_shoot_pattern_delays_before_spawning_weapon_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. delayed branch 尚未完整复现 Java 对 `mount.barrelCounter` 临时恢复、recoil/heat/eject/sound/effect 的精确时序；
+  2. 下一批建议优先接 `ShootAlternate` / `ShootBarrel` 与 `Weapon::flip()` pattern 翻转；
+  3. 然后接 `ShootHelix` mover、`ShootMulti` / `ShootSummon`；
+  4. content 方向子代理建议优先把 dagger / mace / beta / nova / quasar 的 unit weapon 注册回填到 `unit_types.rs` / `bullets.rs`；
+  5. 当前总迁移约 12.4%，远未可玩，goal 绝不能标记 complete。

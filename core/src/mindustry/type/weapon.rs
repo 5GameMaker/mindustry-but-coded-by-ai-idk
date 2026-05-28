@@ -191,7 +191,9 @@ impl Weapon {
     pub fn shoot_pattern_shots(&self, total_shots: i32) -> Vec<Shot> {
         let mut shots = Vec::new();
         if self.shoot_pattern == "ShootSpread" {
-            let pattern = ShootSpread::new(self.shoot_shots(), self.shoot_spread);
+            let mut pattern = ShootSpread::new(self.shoot_shots(), self.shoot_spread);
+            pattern.pattern.first_shot_delay = self.shoot_first_shot_delay;
+            pattern.pattern.shot_delay = self.shoot_shot_delay;
             pattern.shoot(total_shots, &mut |shot| shots.push(shot), None);
         } else {
             let mut pattern = ShootPattern::new();
@@ -287,6 +289,8 @@ mod tests {
         weapon.shoot_pattern = "ShootSpread".into();
         weapon.shoot_shots = 3;
         weapon.shoot_spread = 10.0;
+        weapon.shoot_first_shot_delay = 2.0;
+        weapon.shoot_shot_delay = 1.5;
 
         let shots = weapon.shoot_pattern_shots(0);
 
@@ -294,6 +298,10 @@ mod tests {
         assert_eq!(shots[0].rotation, -10.0);
         assert_eq!(shots[1].rotation, 0.0);
         assert_eq!(shots[2].rotation, 10.0);
+        assert_eq!(
+            shots.iter().map(|shot| shot.delay).collect::<Vec<_>>(),
+            vec![2.0, 3.5, 5.0]
+        );
     }
 
     #[test]

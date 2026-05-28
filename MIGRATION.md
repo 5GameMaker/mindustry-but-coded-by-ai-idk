@@ -9505,3 +9505,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - firstShotDelay / shotDelay 仍是即时展开，尚未按 Java 延迟调度；
   - 完整 `bulletRotation(...)`、xRand/yRand、inaccuracy、velocityRnd、ammo/eject、sound/effect、continuous beam 仍未完成；
   - 当前总体迁移约 12.3%，远未可玩。
+
+### 12.300 Weapon ShootPattern delay server pending queue
+
+- 2026-05-28：继续对照 Java `Weapon.shoot(...)` 的 `Time.run(delay, ...)` 语义，把 `Shot.delay` 从 core pattern 输出贯通到 server unit weapon 发弹路径；延迟 shot 不再在 ready 当帧直接生成 bullet，而是进入 server pending weapon bullet 队列，在后续 `ServerLauncher::update()` 中按 tick 倒计时生成真实 `server_bullets`。
+- Java 依据：
+  - `ShootPattern.shoot(...)` 传出 `firstShotDelay + shotDelay * i`；
+  - `Weapon.shoot(...)` 对 `delay > 0` 的 shot 使用 `Time.run(delay, ...)` 延迟调用 `bullet(...)`；
+  - `mount.totalShots` 会在排队时立即增加，用于 killShooter/总发射数判断。
+- Rust 新增/变化：
+  - `core/src/mindustry/type/weapon.rs`
+    - `ShootSpread` 路径现在也同步 `shoot_first_shot_delay` / `shoot_shot_delay`；
+    - `weapon_shoot_pattern_shots_reuses_core_spread_pattern` 扩展断言 delay 序列 `2.0/3.5/5.0`。
+  - `server/src/lib.rs`
+    - `ServerWeaponBulletSpawnPlan` 新增 `delay`；
+    - `ServerLauncher` 新增 `pending_server_weapon_bullets`；
+    - `ServerLauncher::update()` 在 weapon tick 前调用 `tick_pending_server_weapon_bullets(1.0)`；
+    - `tick_server_unit_weapons(...)` 对 `delay > 0` 的 shot 只排队，立即 shot 仍当帧生成 bullet；
+    - 新增 `server_update_queues_shoot_pattern_delays_before_spawning_weapon_bullets`，确认 delayed shot 在后续 update 才变成真实 server bullet，同时 `total_shots/barrel_counter` 已按 Java 在排队时推进。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_reuses_core_spread_pattern --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo test -p mindustry-server server_update_queues_shoot_pattern_delays_before_spawning_weapon_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - delayed bullet 当前只保存 bullet spawn plan，尚未完整复现 Java delayed branch 对 `mount.barrelCounter` 临时恢复、recoil/heat/eject/sound/effect 的精确时序；
+  - `Shot.mover` / `ShootHelix` 尚未进入 server bullet runtime；
+  - `ShootAlternate` / `ShootBarrel` / `ShootMulti` / `ShootSummon` 尚未接到 `Weapon::shoot_pattern_shots(...)`；
+  - 当前总体迁移约 12.4%，远未可玩。
