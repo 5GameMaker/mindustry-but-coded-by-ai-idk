@@ -636,6 +636,28 @@ pub fn load() -> Vec<BulletContent> {
     omura_cannon.damage = 1250.0;
     omura_cannon.pierce_damage_factor = 0.5;
 
+    let mut oxynoe_plasma = BulletSpec::new(BulletKind::Generic, 3.4, 23.0);
+    oxynoe_plasma.heal_percent = 1.5;
+    oxynoe_plasma.collides_team = true;
+    oxynoe_plasma.ammo_multiplier = 3.0;
+    oxynoe_plasma.hit_size = 7.0;
+    oxynoe_plasma.lifetime = 18.0;
+    oxynoe_plasma.pierce = true;
+    oxynoe_plasma.collides_air = false;
+    oxynoe_plasma.status_duration = 60.0 * 4.0;
+    oxynoe_plasma.hit_effect = "hitFlamePlasma".into();
+    oxynoe_plasma.eject_effect = "none".into();
+    oxynoe_plasma.despawn_effect = "none".into();
+    oxynoe_plasma.status = "burning".into();
+    oxynoe_plasma.keep_velocity = false;
+    oxynoe_plasma.hittable = false;
+    oxynoe_plasma.shoot_effect = "custom:oxynoePlasmaShoot".into();
+
+    let mut oxynoe_point_defense = BulletSpec::new(BulletKind::Generic, 1.0, 17.0);
+    oxynoe_point_defense.shoot_effect = "sparkShoot".into();
+    oxynoe_point_defense.hit_effect = "pointHit".into();
+    oxynoe_point_defense.max_range = 100.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -717,6 +739,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "sei_missile", sei_missile),
         make_bullet(&mut next_id, "sei_large_bullet", sei_large_bullet),
         make_bullet(&mut next_id, "omura_cannon", omura_cannon),
+        make_bullet(&mut next_id, "oxynoe_plasma", oxynoe_plasma),
+        make_bullet(&mut next_id, "oxynoe_point_defense", oxynoe_point_defense),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -1059,6 +1083,8 @@ mod tests {
                 "sei_missile",
                 "sei_large_bullet",
                 "omura_cannon",
+                "oxynoe_plasma",
+                "oxynoe_point_defense",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -2092,6 +2118,37 @@ mod tests {
         assert!(!cannon.keep_velocity);
         assert_eq!(cannon.lifetime, 1.0);
         assert!(cannon.delay_frags);
+    }
+
+    #[test]
+    fn oxynoe_support_bullets_match_java_profiles() {
+        let bullets = load();
+        let plasma = &by_name(&bullets, "oxynoe_plasma").spec;
+
+        assert_eq!(plasma.kind, BulletKind::Generic);
+        assert_eq!(plasma.speed, 3.4);
+        assert_eq!(plasma.damage, 23.0);
+        assert_eq!(plasma.heal_percent, 1.5);
+        assert!(plasma.collides_team);
+        assert_eq!(plasma.ammo_multiplier, 3.0);
+        assert_eq!(plasma.hit_size, 7.0);
+        assert_eq!(plasma.lifetime, 18.0);
+        assert!(plasma.pierce);
+        assert!(!plasma.collides_air);
+        assert_eq!(plasma.status_duration, 60.0 * 4.0);
+        assert_eq!(plasma.hit_effect, "hitFlamePlasma");
+        assert_eq!(plasma.eject_effect, "none");
+        assert_eq!(plasma.despawn_effect, "none");
+        assert_eq!(plasma.status, "burning");
+        assert!(!plasma.keep_velocity);
+        assert!(!plasma.hittable);
+        assert_eq!(plasma.shoot_effect, "custom:oxynoePlasmaShoot");
+
+        let point = &by_name(&bullets, "oxynoe_point_defense").spec;
+        assert_eq!(point.damage, 17.0);
+        assert_eq!(point.max_range, 100.0);
+        assert_eq!(point.shoot_effect, "sparkShoot");
+        assert_eq!(point.hit_effect, "pointHit");
     }
 
     #[test]

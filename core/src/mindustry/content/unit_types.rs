@@ -1169,12 +1169,48 @@ pub fn load() -> Vec<UnitType> {
         unit(&mut next_id, "oxynoe", UnitKind::Naval, |u| {
             u.health = 560.0;
             u.speed = 0.83;
+            u.drag = 0.14;
             u.hit_size = 14.0;
             u.armor = 4.0;
+            u.accel = 0.4;
             u.rotate_speed = 4.0;
+            u.face_target = false;
+            u.move_sound_volume = 0.55;
+            u.move_sound_pitch_min = 0.9;
+            u.move_sound_pitch_max = 0.9;
+            u.move_sound = "shipMove".into();
+            u.trail_length = 22;
+            u.wave_trail_x = 5.5;
+            u.wave_trail_y = -4.0;
+            u.trail_scl = 1.9;
             u.build_speed = 2.0;
+            u.rotate_to_building = false;
             u.abilities
                 .push("StatusFieldAbility:overclock:360:360:60".into());
+
+            let mut plasma = Weapon::new("plasma-mount-weapon");
+            plasma.reload = 5.0;
+            plasma.x = 4.5;
+            plasma.y = 6.5;
+            plasma.rotate = true;
+            plasma.rotate_speed = 5.0;
+            plasma.inaccuracy = 10.0;
+            plasma.eject_effect = "casing1".into();
+            plasma.shoot_sound = "shootFlamePlasma".into();
+            plasma.shoot_sound_volume = 0.9;
+            plasma.shoot_cone = 30.0;
+            plasma.bullet = "oxynoe_plasma".into();
+            u.weapons.push(plasma);
+
+            let mut point_defense = Weapon::new("point-defense-mount");
+            point_defense.mirror = false;
+            point_defense.x = 0.0;
+            point_defense.y = 1.0;
+            point_defense.reload = 9.0;
+            point_defense.target_interval = 10.0;
+            point_defense.target_switch_interval = 15.0;
+            point_defense.bullet = "oxynoe_point_defense".into();
+            u.weapons.push(point_defense);
         }),
         unit(&mut next_id, "cyerce", UnitKind::Naval, |u| {
             u.health = 870.0;
@@ -3445,6 +3481,77 @@ mod tests {
         assert_eq!(rail.spec.damage, 1250.0);
         assert_eq!(rail.spec.length, 500.0);
         assert_eq!(rail.spec.pierce_damage_factor, 0.5);
+    }
+
+    #[test]
+    fn oxynoe_support_profile_matches_java_weapons() {
+        let units = load();
+        let oxynoe = by_name(&units, "oxynoe");
+
+        assert!(oxynoe.naval);
+        assert_eq!(oxynoe.health, 560.0);
+        assert_eq!(oxynoe.speed, 0.83);
+        assert_eq!(oxynoe.drag, 0.14);
+        assert_eq!(oxynoe.hit_size, 14.0);
+        assert_eq!(oxynoe.armor, 4.0);
+        assert_eq!(oxynoe.accel, 0.4);
+        assert_eq!(oxynoe.rotate_speed, 4.0);
+        assert!(!oxynoe.face_target);
+        assert_eq!(oxynoe.move_sound_volume, 0.55);
+        assert_eq!(oxynoe.move_sound_pitch_min, 0.9);
+        assert_eq!(oxynoe.move_sound_pitch_max, 0.9);
+        assert_eq!(oxynoe.move_sound, "shipMove");
+        assert_eq!(oxynoe.trail_length, 22);
+        assert_eq!(oxynoe.wave_trail_x, 5.5);
+        assert_eq!(oxynoe.wave_trail_y, -4.0);
+        assert_eq!(oxynoe.trail_scl, 1.9);
+        assert_eq!(oxynoe.build_speed, 2.0);
+        assert!(!oxynoe.rotate_to_building);
+        assert!(oxynoe
+            .abilities
+            .iter()
+            .any(|entry| entry == "StatusFieldAbility:overclock:360:360:60"));
+        assert_eq!(oxynoe.weapons.len(), 2);
+
+        let plasma = &oxynoe.weapons[0];
+        assert_eq!(plasma.name, "plasma-mount-weapon");
+        assert_eq!(plasma.reload, 5.0);
+        assert_eq!(plasma.x, 4.5);
+        assert_eq!(plasma.y, 6.5);
+        assert!(plasma.rotate);
+        assert_eq!(plasma.rotate_speed, 5.0);
+        assert_eq!(plasma.inaccuracy, 10.0);
+        assert_eq!(plasma.eject_effect, "casing1");
+        assert_eq!(plasma.shoot_sound, "shootFlamePlasma");
+        assert_eq!(plasma.shoot_sound_volume, 0.9);
+        assert_eq!(plasma.shoot_cone, 30.0);
+        assert_eq!(plasma.bullet, "oxynoe_plasma");
+
+        let point = &oxynoe.weapons[1];
+        assert_eq!(point.name, "point-defense-mount");
+        assert!(!point.mirror);
+        assert_eq!(point.x, 0.0);
+        assert_eq!(point.y, 1.0);
+        assert_eq!(point.reload, 9.0);
+        assert_eq!(point.target_interval, 10.0);
+        assert_eq!(point.target_switch_interval, 15.0);
+        assert_eq!(point.bullet, "oxynoe_point_defense");
+
+        let bullets = bullets::load();
+        let plasma_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == plasma.bullet)
+            .expect("missing oxynoe_plasma");
+        assert_eq!(plasma_bullet.spec.heal_percent, 1.5);
+        assert!(plasma_bullet.spec.collides_team);
+        assert_eq!(plasma_bullet.spec.status, "burning");
+
+        let point_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == point.bullet)
+            .expect("missing oxynoe_point_defense");
+        assert_eq!(point_bullet.spec.damage, 17.0);
+        assert_eq!(point_bullet.spec.max_range, 100.0);
     }
 
     #[test]
