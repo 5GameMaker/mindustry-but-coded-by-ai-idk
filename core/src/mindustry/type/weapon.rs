@@ -1,6 +1,8 @@
 use core::fmt;
 
-use crate::mindustry::entities::{ShootAlternate, ShootBarrel, ShootPattern, ShootSpread, Shot};
+use crate::mindustry::entities::{
+    ShootAlternate, ShootBarrel, ShootHelix, ShootPattern, ShootSpread, Shot,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Weapon {
@@ -54,6 +56,9 @@ pub struct Weapon {
     pub shoot_barrels: Vec<f32>,
     pub shoot_barrel_offset: i32,
     pub shoot_pattern_mirror: bool,
+    pub shoot_helix_scl: f32,
+    pub shoot_helix_mag: f32,
+    pub shoot_helix_offset: f32,
     pub shoot_first_shot_delay: f32,
     pub shoot_shot_delay: f32,
     pub shadow: f32,
@@ -143,6 +148,9 @@ impl Weapon {
             shoot_barrels: vec![0.0, 0.0, 0.0],
             shoot_barrel_offset: 0,
             shoot_pattern_mirror: false,
+            shoot_helix_scl: 2.0,
+            shoot_helix_mag: 1.5,
+            shoot_helix_offset: std::f32::consts::PI * 1.25,
             shoot_first_shot_delay: 0.0,
             shoot_shot_delay: 0.0,
             shadow: -1.0,
@@ -220,6 +228,16 @@ impl Weapon {
             pattern.pattern.first_shot_delay = self.shoot_first_shot_delay;
             pattern.pattern.shot_delay = self.shoot_shot_delay;
             pattern.barrel_offset = self.shoot_barrel_offset;
+            pattern.shoot(total_shots, &mut |shot| shots.push(shot), None);
+        } else if self.shoot_pattern == "ShootHelix" {
+            let mut pattern = ShootHelix::with_offset(
+                self.shoot_helix_scl,
+                self.shoot_helix_mag,
+                self.shoot_helix_offset,
+            );
+            pattern.pattern.shots = self.shoot_shots();
+            pattern.pattern.first_shot_delay = self.shoot_first_shot_delay;
+            pattern.pattern.shot_delay = self.shoot_shot_delay;
             pattern.shoot(total_shots, &mut |shot| shots.push(shot), None);
         } else {
             let mut pattern = ShootPattern::new();
@@ -314,6 +332,9 @@ mod tests {
         assert_eq!(weapon.shoot_barrels, vec![0.0, 0.0, 0.0]);
         assert_eq!(weapon.shoot_barrel_offset, 0);
         assert!(!weapon.shoot_pattern_mirror);
+        assert_eq!(weapon.shoot_helix_scl, 2.0);
+        assert_eq!(weapon.shoot_helix_mag, 1.5);
+        assert!((weapon.shoot_helix_offset - std::f32::consts::PI * 1.25).abs() < 0.0001);
 
         weapon.shoot_shots = 3;
         weapon.shoot_spread = 12.0;
@@ -408,6 +429,30 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(-1.0, 2.0, -3.0), (4.0, -5.0, 6.0)]
         );
+    }
+
+    #[test]
+    fn weapon_shoot_pattern_shots_supports_helix_movers() {
+        let mut weapon = Weapon::new("helix");
+        weapon.shoot_pattern = "ShootHelix".into();
+        weapon.shoot_shots = 1;
+        weapon.shoot_helix_scl = 2.0;
+        weapon.shoot_helix_mag = 3.0;
+        weapon.shoot_helix_offset = 0.0;
+        weapon.shoot_first_shot_delay = 1.0;
+
+        let shots = weapon.shoot_pattern_shots(2);
+
+        assert_eq!(shots.len(), 2);
+        assert_eq!(shots[0].delay, 1.0);
+        let first = shots[0].mover.expect("helix shot should carry mover");
+        let second = shots[1]
+            .mover
+            .expect("helix shot should carry mirrored mover");
+        assert_eq!(first.x, 0.0);
+        assert_eq!(second.x, 0.0);
+        assert!((first.y + second.y).abs() < 0.0001);
+        assert!((first.y - 1.0f32.sin() * 3.0).abs() < 0.0001);
     }
 
     #[test]

@@ -1,9 +1,57 @@
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShotMoverKind {
+    Relative,
+    Helix,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShotMover {
+    pub x: f32,
+    pub y: f32,
+    pub kind: ShotMoverKind,
+    pub scl: f32,
+    pub mag: f32,
+    pub offset: f32,
+}
+
+impl ShotMover {
+    pub const fn relative(x: f32, y: f32) -> Self {
+        Self {
+            x,
+            y,
+            kind: ShotMoverKind::Relative,
+            scl: 1.0,
+            mag: 0.0,
+            offset: 0.0,
+        }
+    }
+
+    pub fn helix(time: f32, scl: f32, mag: f32, offset: f32) -> Self {
+        Self {
+            x: 0.0,
+            y: sin_scale(time + offset, scl, mag),
+            kind: ShotMoverKind::Helix,
+            scl,
+            mag,
+            offset,
+        }
+    }
+
+    pub fn relative_offset(self, time: f32) -> (f32, f32) {
+        match self.kind {
+            ShotMoverKind::Relative => (self.x, self.y),
+            ShotMoverKind::Helix => (0.0, sin_scale(time + self.offset, self.scl, self.mag)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Shot {
     pub x: f32,
     pub y: f32,
     pub rotation: f32,
     pub delay: f32,
+    pub mover: Option<ShotMover>,
 }
 
 impl Shot {
@@ -13,7 +61,13 @@ impl Shot {
             y,
             rotation,
             delay,
+            mover: None,
         }
+    }
+
+    pub const fn with_mover(mut self, mover: ShotMover) -> Self {
+        self.mover = Some(mover);
+        self
     }
 }
 
@@ -285,12 +339,6 @@ impl Default for ShootSine {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ShotMover {
-    pub x: f32,
-    pub y: f32,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct HelixShot {
     pub shot: Shot,
@@ -336,10 +384,7 @@ impl ShootHelix {
                         0.0,
                         self.pattern.first_shot_delay + self.pattern.shot_delay * i as f32,
                     ),
-                    mover: ShotMover {
-                        x: 0.0,
-                        y: sin_scale(time + self.offset, self.scl, self.mag * sign),
-                    },
+                    mover: ShotMover::helix(time, self.scl, self.mag * sign, self.offset),
                 });
             }
         }
@@ -355,7 +400,7 @@ impl ShootHelix {
         H: BulletHandler + ?Sized,
     {
         for shot in self.shoot_collect(total_shots) {
-            handler.shoot(shot.shot);
+            handler.shoot(shot.shot.with_mover(shot.mover));
         }
     }
 }

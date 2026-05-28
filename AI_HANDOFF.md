@@ -7724,3 +7724,43 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `ShootMulti` / `ShootSummon` 还没进入 `Weapon::shoot_pattern_shots(...)`；
   3. content 方向仍可并行回填 dagger/mace/beta/nova/quasar 的 unit weapon/bullet 注册；
   4. 当前总迁移约 12.5%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 229. 最新闭环记录：Weapon ShootHelix mover server bullet lifecycle seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 Java `ShootHelix` 的 mover 从 core pattern 接到真实 server bullet lifecycle，使迁移不是独立 helper，而是影响权威 bullet 位置。
+- Rust 主改动：
+  - `core/src/mindustry/entities/pattern.rs`
+    - `Shot` 新增 `mover`；
+    - `ShotMover` 新增 `Relative/Helix` kind 与 `relative_offset(time)`；
+    - `ShootHelix::shoot(...)` 不再丢弃 mover。
+  - `core/src/mindustry/entities/comp/bullet.rs`
+    - `BulletComp` 新增 `shot_mover`。
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `shoot_helix_scl` / `shoot_helix_mag` / `shoot_helix_offset`；
+    - `Weapon::shoot_pattern_shots(...)` 新增 `"ShootHelix"` 分支；
+    - 新增 `weapon_shoot_pattern_shots_supports_helix_movers`。
+  - `server/src/lib.rs`
+    - `ServerWeaponBulletSpawnPlan` 新增 `mover`；
+    - server spawn plan 写入 `BulletComp.shot_mover`；
+    - `tick_server_bullets(...)` 按 bullet time 应用 mover；
+    - 新增 `server_update_applies_shoot_helix_mover_to_weapon_bullets`。
+  - `MIGRATION.md`
+    - 新增 `12.303`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core shoot_helix_emits_mirrored_movers --lib`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_supports_helix_movers --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_helix_mover_to_weapon_bullets --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_barrel_offsets_to_weapon_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. `ShootMulti` / `ShootSummon` 仍未接入；
+  2. helix mover 目前只在 server authoritative bullet lifecycle 生效，客户端本地预测层仍需补；
+  3. content 方向子代理建议：先回填 dagger/mace，再处理 beta/nova/quasar 的 `collides_team` / `scale_keep_velocity` / LaserBolt 默认字段缺口；
+  4. 当前总迁移约 12.55%，远未可玩，goal 绝不能标记 complete。

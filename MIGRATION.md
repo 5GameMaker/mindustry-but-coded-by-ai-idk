@@ -9599,3 +9599,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ShootMulti` / `ShootSummon` 仍未接入 weapon pattern seam；
   - delayed branch 对 `mount.barrelCounter` 临时恢复、recoil/heat/eject/sound/effect 的精确时序仍未完全复现；
   - 当前总体迁移约 12.5%，远未可玩。
+
+### 12.303 Weapon ShootHelix mover server bullet lifecycle seam
+
+- 2026-05-28：继续推进 Java `ShootHelix`，把 `BulletHandler` 的 mover 语义从 core pattern 贯通到 server bullet lifecycle；helix shot 不再只是静态发弹点，而是会在 `tick_server_bullets(...)` 中按 bullet time 应用相对移动。
+- Java 依据：
+  - `ShootHelix.scl = 2f`、`mag = 1.5f`、`offset = PI * 1.25f`；
+  - `ShootHelix.shoot(...)` 对每个 shot 生成 `Mathf.signs` 两路 mover；
+  - mover 逻辑为 `b -> b.moveRelative(0f, Mathf.sin(b.time + offset, scl, mag * sign))`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/pattern.rs`
+    - `Shot` 新增 `mover: Option<ShotMover>`；
+    - `ShotMover` 新增 `Relative/Helix` kind 与 `relative_offset(time)`；
+    - `ShootHelix::shoot(...)` 现在把 `HelixShot.mover` 塞进 `Shot.mover`。
+  - `core/src/mindustry/entities/comp/bullet.rs`
+    - `BulletComp` 新增 `shot_mover: Option<ShotMover>`。
+  - `core/src/mindustry/type/weapon.rs`
+    - `Weapon` 新增 `shoot_helix_scl` / `shoot_helix_mag` / `shoot_helix_offset`；
+    - `Weapon::shoot_pattern_shots(...)` 新增 `"ShootHelix"` 分支；
+    - 新增 `weapon_shoot_pattern_shots_supports_helix_movers`。
+  - `server/src/lib.rs`
+    - `ServerWeaponBulletSpawnPlan` 新增 `mover`；
+    - `spawn_server_weapon_bullet_plan(...)` 将 mover 写入 `BulletComp.shot_mover`；
+    - `tick_server_bullets(...)` 在 `step_motion(...)` 后按 `mover.relative_offset(bullet.time)` 执行 `bullet.move_relative(...)`；
+    - 新增 `server_update_applies_shoot_helix_mover_to_weapon_bullets`，通过真实 server update 验证两路 helix mover 分别把 bullet 移到 `y=58/54`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core shoot_helix_emits_mirrored_movers --lib`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_supports_helix_movers --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_helix_mover_to_weapon_bullets --lib`
+  - `cargo test -p mindustry-server server_update_applies_shoot_barrel_offsets_to_weapon_bullets --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `ShootMulti` / `ShootSummon` 尚未接入 `Weapon::shoot_pattern_shots(...)`；
+  - helix mover 已接 server authoritative bullet movement，但客户端本地预测/显示层尚未携带 mover；目前依赖 server EntitySnapshot 同步位置；
+  - delayed branch 对 `mount.barrelCounter` 临时恢复、recoil/heat/eject/sound/effect 的精确时序仍未完全复现；
+  - 当前总体迁移约 12.55%，远未可玩。

@@ -7,6 +7,7 @@
 
 use crate::mindustry::core::world::World;
 use crate::mindustry::ctype::ContentId;
+use crate::mindustry::entities::ShotMover;
 use crate::mindustry::io::{BulletSyncWire, EntityRef, TeamId, TypeValue, Vec2};
 use crate::mindustry::logic::{rgba_u32_to_double_bits, LAccess};
 
@@ -126,6 +127,7 @@ pub struct BulletComp {
     pub sticky_offset: f32,
     pub frags: i32,
     pub building_damage_multiplier: f32,
+    pub shot_mover: Option<ShotMover>,
 }
 
 impl BulletComp {
@@ -162,6 +164,7 @@ impl BulletComp {
             sticky_offset: 0.0,
             frags: 0,
             building_damage_multiplier: 1.0,
+            shot_mover: None,
         }
     }
 

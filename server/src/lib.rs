@@ -27,8 +27,8 @@ use mindustry_core::mindustry::entities::{
     },
     entity_class_id, standard_effect_id, units_can_create, EnergyFieldAction, EnergyFieldTarget,
     FireCreateResult, FireRules, FireTile, Fires, LiquidExplodeDepositPlan, PuddleDepositContext,
-    PuddleLiquidInfo, PuddleTileView, PuddleUpdateEvent, Puddles, UnitCapRules, UnitCapTeam,
-    UnitCapType, UnitSpawnAbility, BULLET_CLASS_ID, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
+    PuddleLiquidInfo, PuddleTileView, PuddleUpdateEvent, Puddles, ShotMover, UnitCapRules,
+    UnitCapTeam, UnitCapType, UnitSpawnAbility, BULLET_CLASS_ID, FIRE_CLASS_ID, PUDDLE_CLASS_ID,
 };
 use mindustry_core::mindustry::game::{vanilla_teams, Trigger};
 use mindustry_core::mindustry::input::{
@@ -96,6 +96,7 @@ struct ServerWeaponBulletSpawnPlan {
     y: f32,
     rotation: f32,
     delay: f32,
+    mover: Option<ShotMover>,
 }
 
 fn server_fire_entity_id(x: i32, y: i32) -> i32 {
@@ -2446,7 +2447,7 @@ impl ServerLauncher {
             return false;
         }
 
-        let Some(bullet) = GameRuntime::build_unit_weapon_bullet(
+        let Some(mut bullet) = GameRuntime::build_unit_weapon_bullet(
             &self.content_loader,
             plan.owner_id,
             plan.team,
@@ -2457,6 +2458,7 @@ impl ServerLauncher {
         ) else {
             return false;
         };
+        bullet.shot_mover = plan.mover;
         let bullet_id = self.next_server_runtime_bullet_id();
         self.server_bullets.insert(bullet_id, bullet);
         true
@@ -2556,6 +2558,7 @@ impl ServerLauncher {
                         y: unit_y + mount_dy + shoot_dy,
                         rotation: shoot_angle + shot.rotation,
                         delay: shot.delay,
+                        mover: shot.mover,
                     });
 
                     let barrel_counter = mount.barrel_counter;
@@ -2729,6 +2732,10 @@ impl ServerLauncher {
             }
             let motion_spec = BulletSpec::from_content_spec(&bullet_content.spec);
             bullet.step_motion(delta_ticks, &motion_spec);
+            if let Some(mover) = bullet.shot_mover {
+                let (move_x, move_y) = mover.relative_offset(bullet.time);
+                bullet.move_relative(delta_ticks, move_x, move_y);
+            }
             updates += 1;
         }
 
@@ -7576,6 +7583,55 @@ mod tests {
             bullet_positions,
             vec![(42.0, 59.0, 95.0), (38.0, 60.0, 85.0)]
         );
+    }
+
+    #[test]
+    fn server_update_applies_shoot_helix_mover_to_weapon_bullets() {
+        let mut launcher = ServerLauncher::new(Vec::new());
+        launcher.runtime.state.set(GameStateState::Playing);
+
+        let mut weapon = Weapon::new("helix-rifle");
+        weapon.bullet = "placeholder".into();
+        weapon.reload = 10.0;
+        weapon.shoot_x = 0.0;
+        weapon.shoot_y = 0.0;
+        weapon.x = 0.0;
+        weapon.y = 0.0;
+        weapon.shoot_pattern = "ShootHelix".into();
+        weapon.shoot_shots = 1;
+        weapon.shoot_helix_scl = 1.0;
+        weapon.shoot_helix_mag = 2.0;
+        weapon.shoot_helix_offset = std::f32::consts::FRAC_PI_2 - 1.0;
+        let mut unit_type = UnitType::new(9109, "server-helix-shooter");
+        unit_type.weapons.push(weapon);
+        let mut unit = UnitComp::new(100, unit_type, TeamId(2));
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(0.0);
+        unit.weapons.mounts[0].reload = 1.0;
+        unit.weapons.mounts[0].shoot = true;
+        launcher.server_units.insert(unit.id(), unit);
+
+        launcher.update();
+
+        let unit = launcher.server_units.get(&100).unwrap();
+        let mount = &unit.weapons.mounts[0];
+        assert_eq!(mount.total_shots, 2);
+        assert_eq!(mount.barrel_counter, 2);
+        assert_eq!(launcher.server_bullets.len(), 2);
+        let bullet_positions = launcher
+            .server_bullets
+            .values()
+            .map(|bullet| {
+                assert!(bullet.shot_mover.is_some());
+                (bullet.x, bullet.y, bullet.rotation)
+            })
+            .collect::<Vec<_>>();
+        assert!((bullet_positions[0].0 - 40.0).abs() < 0.0001);
+        assert!((bullet_positions[0].1 - 58.0).abs() < 0.0001);
+        assert_eq!(bullet_positions[0].2, 0.0);
+        assert!((bullet_positions[1].0 - 40.0).abs() < 0.0001);
+        assert!((bullet_positions[1].1 - 54.0).abs() < 0.0001);
+        assert_eq!(bullet_positions[1].2, 0.0);
     }
 
     #[test]

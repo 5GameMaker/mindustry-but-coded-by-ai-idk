@@ -422,7 +422,7 @@ pub use part::{
 };
 pub use pattern::{
     BulletHandler, ShootAlternate, ShootBarrel, ShootHelix, ShootMulti, ShootPattern, ShootSine,
-    ShootSpread, ShootSummon, Shot,
+    ShootSpread, ShootSummon, Shot, ShotMover, ShotMoverKind,
 };
 pub use predict::{intercept, intercept_positions};
 pub use puddles::{
