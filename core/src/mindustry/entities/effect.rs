@@ -250,6 +250,12 @@ pub const FX_SHOOT_SMALL_FLAME_ID: i32 = 187;
 pub const FX_SHOOT_PYRA_FLAME_ID: i32 = 188;
 /// Upstream `Fx.shootLiquid` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_LIQUID_ID: i32 = 189;
+/// Upstream `Fx.reactorsmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_REACTOR_SMOKE_ID: i32 = 207;
+/// Upstream `Fx.redgeneratespark` id in `mindustry.content.Fx` for v158.1.
+pub const FX_RED_GENERATE_SPARK_ID: i32 = 208;
+/// Upstream `Fx.turbinegenerate` id in `mindustry.content.Fx` for v158.1.
+pub const FX_TURBINE_GENERATE_ID: i32 = 209;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -400,6 +406,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootSmallFlame" => Some(FX_SHOOT_SMALL_FLAME_ID),
         "shootPyraFlame" => Some(FX_SHOOT_PYRA_FLAME_ID),
         "shootLiquid" => Some(FX_SHOOT_LIQUID_ID),
+        "reactorsmoke" => Some(FX_REACTOR_SMOKE_ID),
+        "redgeneratespark" => Some(FX_RED_GENERATE_SPARK_ID),
+        "turbinegenerate" => Some(FX_TURBINE_GENERATE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -670,6 +679,17 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_SHOOT_PYRA_FLAME_ID, 33.0, 80.0).follow_parent(false)
         }
         FX_SHOOT_LIQUID_ID => Effect::with_lifetime(FX_SHOOT_LIQUID_ID, 15.0, 80.0),
+        FX_REACTOR_SMOKE_ID => {
+            Effect::with_lifetime(FX_REACTOR_SMOKE_ID, 17.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_RED_GENERATE_SPARK_ID => {
+            Effect::with_lifetime(FX_RED_GENERATE_SPARK_ID, 90.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::BULLET - 1.0)
+        }
+        FX_TURBINE_GENERATE_ID => {
+            Effect::with_lifetime(FX_TURBINE_GENERATE_ID, 100.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::BULLET - 1.0)
+        }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
@@ -754,6 +774,8 @@ pub fn standard_effect_draw_plans(
             | FX_COLOR_SPARK_BIG_ID
             | FX_RAND_LIFE_SPARK_ID
             | FX_SHOOT_PAYLOAD_DRIVER_ID
+            | FX_RED_GENERATE_SPARK_ID
+            | FX_TURBINE_GENERATE_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -774,6 +796,48 @@ pub fn standard_effect_draw_plans(
     let fout = 1.0 - fin;
     let finpow = effect_finpow_from_fin(fin);
     let fslope = effect_fslope_from_fin(fin);
+
+    if matches!(
+        effect_id_i32,
+        FX_RED_GENERATE_SPARK_ID | FX_TURBINE_GENERATE_ID
+    ) {
+        let (count, color_from, alpha, length_scale, radius_max) = match effect_id_i32 {
+            FX_RED_GENERATE_SPARK_ID => (2, "Pal.redSpark", fslope, 9.0, 2.4),
+            FX_TURBINE_GENERATE_ID => (3, "Pal.vent", fslope * 0.8, 14.0, 3.4),
+            _ => unreachable!(),
+        };
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let mut plans = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            let angle = rand.random(360.0);
+            let length = rand.random(finpow * length_scale);
+            let (offset_x, offset_y) = trns(angle, length);
+            let radius = rand.random_between(1.4, radius_max);
+
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::FilledCircle,
+                center: (x + offset_x, y + offset_y),
+                color_from: Some(color_from),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha,
+                radius,
+                stroke: 0.0,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        return plans;
+    }
 
     if effect_id_i32 == FX_RAND_LIFE_SPARK_ID {
         let mut rand = ArcRand::with_seed(state_id as i64);
@@ -4255,6 +4319,45 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_REACTOR_SMOKE_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: Some("Color.lightGray"),
+            color_mid: None,
+            color_to: Some("Color.gray"),
+            color_mix: fin,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 4,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: fin * 8.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.5,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 2.5,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_SMOKE_PUFF_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -5059,6 +5162,8 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.bulletYellow" => Some(DecalColor::from_rgba(0xfff8e8ff)),
         "Pal.bulletYellowBack" => Some(DecalColor::from_rgba(0xf9c27aff)),
         "Pal.redLight" => Some(DecalColor::from_rgba(0xfeb380ff)),
+        "Pal.redSpark" => Some(DecalColor::from_rgba(0xfbb97fff)),
+        "Pal.vent" => Some(DecalColor::from_rgba(0x6b4e4eff)),
         "Pal.regen" => Some(DecalColor::from_rgba(0xd1efffff)),
         "Pal.slagOrange" => Some(DecalColor::from_rgba(0xffa166ff)),
         "Pal.neoplasmMid" => Some(DecalColor::from_rgba(0xe05438ff)),
@@ -6630,6 +6735,18 @@ mod tests {
             Some(FX_SHOOT_PYRA_FLAME_ID)
         );
         assert_eq!(standard_effect_id("shootLiquid"), Some(FX_SHOOT_LIQUID_ID));
+        assert_eq!(
+            standard_effect_id("reactorsmoke"),
+            Some(FX_REACTOR_SMOKE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("redgeneratespark"),
+            Some(FX_RED_GENERATE_SPARK_ID)
+        );
+        assert_eq!(
+            standard_effect_id("turbinegenerate"),
+            Some(FX_TURBINE_GENERATE_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -6977,6 +7094,13 @@ mod tests {
         let shoot_liquid = standard_effect(FX_SHOOT_LIQUID_ID).unwrap();
         assert_eq!(shoot_liquid.lifetime, 15.0);
         assert_eq!(shoot_liquid.clip, 80.0);
+        assert_eq!(standard_effect(FX_REACTOR_SMOKE_ID).unwrap().lifetime, 17.0);
+        let red_generate = standard_effect(FX_RED_GENERATE_SPARK_ID).unwrap();
+        assert_eq!(red_generate.lifetime, 90.0);
+        assert_eq!(red_generate.layer, Layer::BULLET - 1.0);
+        let turbine = standard_effect(FX_TURBINE_GENERATE_ID).unwrap();
+        assert_eq!(turbine.lifetime, 100.0);
+        assert_eq!(turbine.layer, Layer::BULLET - 1.0);
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
@@ -8841,6 +8965,87 @@ mod tests {
                 .flat_map(|plan| plan.line_render_primitives_from_seed())
                 .count(),
             8
+        );
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_reactor_generation_particles() {
+        let reactor = standard_effect_draw_plan(
+            Some(FX_REACTOR_SMOKE_ID as u16),
+            207,
+            3.0,
+            4.0,
+            0.0,
+            8.5,
+            17.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(reactor.kind, StandardEffectDrawKind::SeededCircleParticles);
+        assert_eq!(reactor.color_from, Some("Color.lightGray"));
+        assert_eq!(reactor.color_to, Some("Color.gray"));
+        let reactor_particles = reactor.particles.unwrap();
+        assert_eq!(reactor_particles.count, 4);
+        assert_eq!(reactor_particles.length, 4.0);
+        assert_eq!(reactor_particles.radius_base, 0.5);
+        assert_eq!(reactor_particles.radius_fout_scale, 2.5);
+        assert_eq!(reactor.circle_render_primitives_from_seed().len(), 4);
+        assert!((reactor.circle_render_primitives_from_seed()[0].radius - 1.75).abs() < 0.0001);
+
+        let red = standard_effect_draw_plans(
+            Some(FX_RED_GENERATE_SPARK_ID as u16),
+            208,
+            3.0,
+            4.0,
+            0.0,
+            45.0,
+            90.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(red.len(), 2);
+        let mut rand = ArcRand::with_seed(208);
+        let angle = rand.random(360.0);
+        let length = rand.random(effect_finpow_from_fin(0.5) * 9.0);
+        let (offset_x, offset_y) = trns(angle, length);
+        let radius = rand.random_between(1.4, 2.4);
+        assert_eq!(red[0].kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(red[0].layer, Layer::BULLET - 1.0);
+        assert_eq!(red[0].color_from, Some("Pal.redSpark"));
+        assert_eq!(red[0].alpha, 1.0);
+        assert!((red[0].center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((red[0].center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((red[0].radius - radius).abs() < 0.0001);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.redSpark"),
+            Some(DecalColor::from_rgba(0xfbb97fff))
+        );
+
+        let turbine = standard_effect_draw_plans(
+            Some(FX_TURBINE_GENERATE_ID as u16),
+            209,
+            3.0,
+            4.0,
+            0.0,
+            50.0,
+            100.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(turbine.len(), 3);
+        let mut rand = ArcRand::with_seed(209);
+        let angle = rand.random(360.0);
+        let length = rand.random(effect_finpow_from_fin(0.5) * 14.0);
+        let (offset_x, offset_y) = trns(angle, length);
+        let radius = rand.random_between(1.4, 3.4);
+        assert_eq!(turbine[0].kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(turbine[0].layer, Layer::BULLET - 1.0);
+        assert_eq!(turbine[0].color_from, Some("Pal.vent"));
+        assert!((turbine[0].alpha - 0.8).abs() < 0.0001);
+        assert!((turbine[0].center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((turbine[0].center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((turbine[0].radius - radius).abs() < 0.0001);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.vent"),
+            Some(DecalColor::from_rgba(0x6b4e4eff))
         );
     }
 

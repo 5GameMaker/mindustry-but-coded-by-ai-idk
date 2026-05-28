@@ -7868,3 +7868,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 后续 `casing1=190` 起需要 `Fill.rect` / rotated rectangle primitive；
   - 真实 renderer/backend 仍未接入，当前仍是局部 Fx primitive 迁移。
+
+### 12.249 Fx.reactorsmoke/redgeneratespark/turbinegenerate
+
+- 2026-05-28：根据后续 Fx 扫描结果，迁移无需新增 primitive 的 generation circle effects：`reactorsmoke=207`、`redgeneratespark=208`、`turbinegenerate=209`。
+- 本轮迁移：
+  - `reactorsmoke=207`
+  - `redgeneratespark=208`
+  - `turbinegenerate=209`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:2426` 附近：
+    - `reactorsmoke = new Effect(17, ...)`，4 个随机圆，offset length `e.fin()*8`，颜色 `Color.lightGray -> Color.gray`，radius `(1 + e.fout()*5)/2`。
+    - `redgeneratespark = new Effect(90, ...)`，layer `Layer.bullet - 1`，颜色 `Pal.redSpark`，alpha `e.fslope()`，2 个随机圆，offset length `e.finpow()*9`，每粒子 radius `rand.random(1.4, 2.4)`。
+    - `turbinegenerate = new Effect(100, ...)`，layer `Layer.bullet - 1`，颜色 `Pal.vent`，alpha `e.fslope()*0.8`，3 个随机圆，offset length `e.finpow()*14`，每粒子 radius `rand.random(1.4, 3.4)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三项 Fx ID、lookup、metadata；
+    - `redgeneratespark` / `turbinegenerate` 对齐 `Layer::BULLET - 1.0`；
+    - 新增 `Pal.redSpark` / `Pal.vent` 颜色符号；
+    - `reactorsmoke` 使用 `SeededCircleParticles`，后两项用 concrete `FilledCircle` plans 保留 per-particle random radius。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_reactor_generation_particles_for_render`，验证三项共 9 个 circle primitives 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_reactor_generation_particles --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_reactor_generation_particles_for_render --lib`
+- 仍未完成：
+  - `casing*` 系列仍需 rect/sprite primitive；
+  - `rail*`、`lancerLaser*`、`sparkShoot/lightningShoot/thoriumShoot` 等仍需继续迁移；
+  - 真实 renderer/backend 仍未接入。

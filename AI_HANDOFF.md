@@ -5852,3 +5852,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `casing1=190` 及后续 casing 系列需要 `Fill.rect` / rotated rectangle primitive；
   2. 若新增 rectangle seam，应同步补 desktop flatten/cache/render stats；
   3. 继续避免只做孤立 helper，新增 primitive 必须接入 `standard_effect_draw_plan(s)` 与 desktop frame。
+
+---
+
+## 175. 最新闭环记录：Fx.reactorsmoke/redgeneratespark/turbinegenerate
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移后续无需新增 primitive 的 generation circle effects。
+- 本轮迁移：
+  - `reactorsmoke=207`
+  - `redgeneratespark=208`
+  - `turbinegenerate=209`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三项 Fx ID、lookup、metadata；
+    - `redgeneratespark` / `turbinegenerate` 对齐 `Layer::BULLET - 1.0`；
+    - 新增 `Pal.redSpark` / `Pal.vent`；
+    - `reactorsmoke` 复用 `SeededCircleParticles`；
+    - `redgeneratespark` / `turbinegenerate` 用 concrete `FilledCircle` plans 保留每粒子随机 radius。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_reactor_generation_particles_for_render`，验证 9 个 circle primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_reactor_generation_particles --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_reactor_generation_particles_for_render --lib`
+- 下一步建议：
+  1. 若继续低成本迁移，可做 `sparkShoot=204`、`lightningShoot=205`、`thoriumShoot=206`（line particles）；
+  2. `lancerLaserChargeBegin=202` 可用 two filled-circle concrete plans；
+  3. `rail*` 可用 circle/triangle/light 多段 plan；
+  4. `casing*` 需要 rect/sprite primitive，不要硬塞成 square。
