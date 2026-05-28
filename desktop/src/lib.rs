@@ -3625,6 +3625,92 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        for (name, x) in [
+            ("artilleryTrailSmoke", 24.0_f32),
+            ("smeltsmoke", 40.0_f32),
+            ("formsmoke", 56.0_f32),
+            ("lava", 72.0_f32),
+            ("dooropen", 88.0_f32),
+            ("doorclose", 104.0_f32),
+            ("dooropenlarge", 120.0_f32),
+            ("doorcloselarge", 136.0_f32),
+            ("mineWallSmall", 152.0_f32),
+            ("mineSmall", 168.0_f32),
+            ("mine", 184.0_f32),
+            ("mineBig", 200.0_f32),
+            ("mineHuge", 216.0_f32),
+            ("mineImpact", 232.0_f32),
+            ("mineImpactWave", 248.0_f32),
+            ("payloadReceive", 264.0_f32),
+            ("teleportActivate", 280.0_f32),
+            ("teleport", 296.0_f32),
+            ("teleportOut", 312.0_f32),
+        ] {
+            launcher
+                .runtime
+                .client_local_effect_events
+                .push(EffectCallPacket2 {
+                    effect: EffectCallPacket {
+                        effect_id: standard_effect_id(name).unwrap() as u16,
+                        x,
+                        y: 32.0,
+                        rotation: 32.0,
+                        color: type_io::RgbaColor::new(0x336699ff_i32),
+                    },
+                    data: TypeValue::Null,
+                });
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 35);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 22);
+        assert_eq!(launcher.standard_local_effect_square_primitives.len(), 63);
+        assert!(launcher.standard_local_effect_rect_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 82);
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let artillery_circle = launcher
+            .standard_local_effect_circle_primitives
+            .iter()
+            .find(|circle| {
+                circle.kind == StandardEffectDrawKind::FilledCircle && circle.radius > 0.0
+            })
+            .expect("artilleryTrailSmoke should cache offset circle particles");
+        assert_eq!(artillery_circle.kind, StandardEffectDrawKind::FilledCircle);
+
+        let door_square = launcher
+            .standard_local_effect_square_primitives
+            .iter()
+            .find(|square| square.center.0 == 88.0 && square.stroke > 0.0)
+            .expect("door effects should cache stroked square primitives");
+        assert_eq!(door_square.rotation, 0.0);
+
+        let teleport_line = launcher
+            .standard_local_effect_line_primitives
+            .iter()
+            .find(|line| line.length > 1.0)
+            .expect("teleport/mine wave effects should cache radial line primitives");
+        assert!(teleport_line.stroke > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 35);
+        assert_eq!(stats.circle_primitives, 22);
+        assert_eq!(stats.square_primitives, 63);
+        assert_eq!(stats.rect_primitives, 0);
+        assert_eq!(stats.line_primitives, 82);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_flattens_shoot_flame_circle_particles_for_render() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         for (name, x) in [

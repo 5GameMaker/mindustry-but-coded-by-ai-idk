@@ -6035,3 +6035,58 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `dooropen/doorclose=228..231` 可复用 `StrokedSquare`，但要注意 Java 的 tile size 与 `rotation` 含义；
   3. `generate=232` 需要 `Lines.spikes` seam，`mineImpactWave` / `teleport*` 是复合 primitive，建议后置；
   4. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍需继续推进，不要宣称可玩。
+
+---
+
+## 180. 最新闭环记录：Fx.artilleryTrailSmoke/smeltsmoke/formsmoke/lava/door*/mine*/payloadReceive/teleport*
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：继续迁移 `Fx.java:2534-2717` 中 `producesmoke=220` 后面可由现有 primitive 承载的一批 smoke/door/mine/teleport 标准 effect。
+- 本轮迁移：
+  - `artilleryTrailSmoke=221`
+  - `smeltsmoke=223`
+  - `formsmoke=225`
+  - `lava=227`
+  - `dooropen=228`
+  - `doorclose=229`
+  - `dooropenlarge=230`
+  - `doorcloselarge=231`
+  - `mineWallSmall=233`
+  - `mineSmall=234`
+  - `mine=235`
+  - `mineBig=236`
+  - `mineHuge=237`
+  - `mineImpact=238`
+  - `mineImpactWave=239`
+  - `payloadReceive=240`
+  - `teleportActivate=241`
+  - `teleport=242`
+  - `teleportOut=243`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 19 个 Fx ID、lookup、metadata；
+    - 新增颜色符号 `Color.orange`、`Color.yellow`、`Pal.plasticSmoke`、`Pal.coalBlack`；
+    - `artilleryTrailSmoke` 用 concrete `FilledCircle` plans，保留 Java 每粒子随机局部 `fin/fout/alpha/radius`；
+    - `smeltsmoke` / `formsmoke` / `mine*` / `payloadReceive` 复用 `SeededSquareParticles`；
+    - `lava` / `mineWallSmall` 复用 `SeededCircleParticles`；
+    - `door*` 复用 `StrokedSquare`；
+    - `mineImpactWave` / `teleport*` 复用 `StrokedCircle` + `SeededRadialLineParticles` 多 plan seam；
+    - 新增 `standard_effect_draw_plans_cover_smoke_door_mine_and_teleport_primitives`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render`，覆盖 35 个 draw plans、22 个 circle primitives、63 个 square primitives、82 条 line primitives。
+  - `MIGRATION.md`
+    - 新增 `12.254` 节记录 Java 依据、Rust 接入点、验证命令与未完成项。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plans_cover_smoke_door_mine_and_teleport_primitives --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 本轮提交后优先补 `coalSmeltsmoke=224` 的 fractional/progress + `finpowdown` 颜色 easing，和 `generate=232` 的 `Lines.spikes` primitive；
+  2. 也可继续推进 `ripple=244` 后已有/相邻 Fx 的缺口扫描，但不要跳过 224/232 的文档记录；
+  3. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。

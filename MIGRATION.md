@@ -8047,3 +8047,61 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 本轮仍是标准 effect 的 headless primitive seam，真实 GPU renderer / atlas backend 尚未接入；
   - `SeededSquareParticles.stroke` 暂承载统一旋转角，后续若 Java 需要 per-particle angle，仍需扩展更精细的 square primitive 参数；
   - 继续迁移 `artilleryTrailSmoke=221`、`smeltsmoke=223`、`formsmoke=225`、`lava=227`、`dooropen/doorclose=228..231`、`mine*` 等后续 Fx，并持续接入整体 runtime。
+
+### 12.254 Fx.artilleryTrailSmoke/smeltsmoke/formsmoke/lava/door*/mine*/payloadReceive/teleport*
+
+- 2026-05-28：继续对照 `Fx.java:2534-2717`，迁移 `producesmoke=220` 后面可由现有 circle/square/line primitive 承载的一组烟尘、门、采矿和传送特效。
+- 本轮迁移：
+  - `artilleryTrailSmoke=221`
+  - `smeltsmoke=223`
+  - `formsmoke=225`
+  - `lava=227`
+  - `dooropen=228`
+  - `doorclose=229`
+  - `dooropenlarge=230`
+  - `doorcloselarge=231`
+  - `mineWallSmall=233`
+  - `mineSmall=234`
+  - `mine=235`
+  - `mineBig=236`
+  - `mineHuge=237`
+  - `mineImpact=238`
+  - `mineImpactWave=239`
+  - `payloadReceive=240`
+  - `teleportActivate=241`
+  - `teleport=242`
+  - `teleportOut=243`
+- Java 依据：
+  - `artilleryTrailSmoke`：13 次固定 seed 随机，按每粒子局部 `fin/fout` 输出 `Fill.circle`，透明度中点最强；
+  - `smeltsmoke` / `formsmoke` / `payloadReceive`：`Fill.square(..., 45)` 方块粒子，颜色分别对齐 `Color.white -> e.color`、`Pal.plasticSmoke -> Color.lightGray`、`Color.white -> Pal.accent`；
+  - `lava` / `mineWallSmall`：圆形粒子，半径分别来自 `fslope` / `fout`；
+  - `dooropen*` / `doorclose*`：`Lines.square`，stroke `e.fout()*1.6`，半径按 Java 的小门 `rotation*tilesize/2` 或大门 `tilesize` 公式；
+  - `mineSmall` / `mine` / `mineBig` / `mineHuge` / `mineImpact`：`Fill.square(..., 45)` 采矿粉尘，count/length/radius 对齐 Java；
+  - `mineImpactWave`：12 条 radial `lineAngle` + 前 30 帧扩张 stroked circle；
+  - `teleportActivate` / `teleport` / `teleportOut`：stroked circle + seeded radial line primitives。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增上述 19 个 Fx ID、lookup 与 metadata；
+    - 新增颜色符号 `Color.orange`、`Color.yellow`、`Pal.plasticSmoke`、`Pal.coalBlack`（其中 `Color.yellow` / `Pal.coalBlack` 预留给后续 `generate` / `coalSmeltsmoke`）；
+    - `artilleryTrailSmoke` 用 concrete `FilledCircle` plans 保留每粒子随机局部 `fin/fout/alpha/radius`；
+    - `smeltsmoke` / `formsmoke` / `mine*` / `payloadReceive` 复用 `SeededSquareParticles`；
+    - `lava` / `mineWallSmall` 复用 `SeededCircleParticles`；
+    - `door*` 复用 `StrokedSquare`；
+    - `mineImpactWave` / `teleport*` 复用 `StrokedCircle` + `SeededRadialLineParticles` 多 plan seam；
+    - 新增 `standard_effect_draw_plans_cover_smoke_door_mine_and_teleport_primitives`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render`，验证 19 个 event 展开为 35 个 draw plans、22 个 circle primitives、63 个 square primitives 与 82 条 line primitives。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plans_cover_smoke_door_mine_and_teleport_primitives --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `coalSmeltsmoke=224` 暂未迁移，原因是 Java 使用 `randLenVectors(e.id, 0.2f + e.fin(), ...)` 与 `e.finpowdown()`，需要更精细的 fractional/progress 与颜色 easing seam；
+  - `generate=232` 暂未迁移，原因是需要 `Lines.spikes(...)` 的最小 spike primitive；
+  - 本轮仍是 headless primitive seam，真实 renderer/backend 与整体游戏 runtime 接入仍需继续推进。

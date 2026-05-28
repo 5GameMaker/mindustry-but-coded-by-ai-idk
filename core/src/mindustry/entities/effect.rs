@@ -312,10 +312,48 @@ pub const FX_PULVERIZE_SMALL_ID: i32 = 218;
 pub const FX_PULVERIZE_MEDIUM_ID: i32 = 219;
 /// Upstream `Fx.producesmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_PRODUCE_SMOKE_ID: i32 = 220;
+/// Upstream `Fx.artilleryTrailSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_ARTILLERY_TRAIL_SMOKE_ID: i32 = 221;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
+/// Upstream `Fx.smeltsmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SMELT_SMOKE_ID: i32 = 223;
+/// Upstream `Fx.formsmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_FORM_SMOKE_ID: i32 = 225;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_BLAST_SMOKE_ID: i32 = 226;
+/// Upstream `Fx.lava` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LAVA_ID: i32 = 227;
+/// Upstream `Fx.dooropen` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DOOR_OPEN_ID: i32 = 228;
+/// Upstream `Fx.doorclose` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DOOR_CLOSE_ID: i32 = 229;
+/// Upstream `Fx.dooropenlarge` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DOOR_OPEN_LARGE_ID: i32 = 230;
+/// Upstream `Fx.doorcloselarge` id in `mindustry.content.Fx` for v158.1.
+pub const FX_DOOR_CLOSE_LARGE_ID: i32 = 231;
+/// Upstream `Fx.mineWallSmall` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MINE_WALL_SMALL_ID: i32 = 233;
+/// Upstream `Fx.mineSmall` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MINE_SMALL_ID: i32 = 234;
+/// Upstream `Fx.mine` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MINE_ID: i32 = 235;
+/// Upstream `Fx.mineBig` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MINE_BIG_ID: i32 = 236;
+/// Upstream `Fx.mineHuge` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MINE_HUGE_ID: i32 = 237;
+/// Upstream `Fx.mineImpact` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MINE_IMPACT_ID: i32 = 238;
+/// Upstream `Fx.mineImpactWave` id in `mindustry.content.Fx` for v158.1.
+pub const FX_MINE_IMPACT_WAVE_ID: i32 = 239;
+/// Upstream `Fx.payloadReceive` id in `mindustry.content.Fx` for v158.1.
+pub const FX_PAYLOAD_RECEIVE_ID: i32 = 240;
+/// Upstream `Fx.teleportActivate` id in `mindustry.content.Fx` for v158.1.
+pub const FX_TELEPORT_ACTIVATE_ID: i32 = 241;
+/// Upstream `Fx.teleport` id in `mindustry.content.Fx` for v158.1.
+pub const FX_TELEPORT_ID: i32 = 242;
+/// Upstream `Fx.teleportOut` id in `mindustry.content.Fx` for v158.1.
+pub const FX_TELEPORT_OUT_ID: i32 = 243;
 /// Upstream `Fx.ripple` id in `mindustry.content.Fx` for v158.1.
 pub const FX_RIPPLE_ID: i32 = 244;
 /// Upstream `Fx.bubble` id in `mindustry.content.Fx` for v158.1.
@@ -493,8 +531,27 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "pulverizeSmall" => Some(FX_PULVERIZE_SMALL_ID),
         "pulverizeMedium" => Some(FX_PULVERIZE_MEDIUM_ID),
         "producesmoke" => Some(FX_PRODUCE_SMOKE_ID),
+        "artilleryTrailSmoke" => Some(FX_ARTILLERY_TRAIL_SMOKE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
+        "smeltsmoke" => Some(FX_SMELT_SMOKE_ID),
+        "formsmoke" => Some(FX_FORM_SMOKE_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
+        "lava" => Some(FX_LAVA_ID),
+        "dooropen" => Some(FX_DOOR_OPEN_ID),
+        "doorclose" => Some(FX_DOOR_CLOSE_ID),
+        "dooropenlarge" => Some(FX_DOOR_OPEN_LARGE_ID),
+        "doorcloselarge" => Some(FX_DOOR_CLOSE_LARGE_ID),
+        "mineWallSmall" => Some(FX_MINE_WALL_SMALL_ID),
+        "mineSmall" => Some(FX_MINE_SMALL_ID),
+        "mine" => Some(FX_MINE_ID),
+        "mineBig" => Some(FX_MINE_BIG_ID),
+        "mineHuge" => Some(FX_MINE_HUGE_ID),
+        "mineImpact" => Some(FX_MINE_IMPACT_ID),
+        "mineImpactWave" => Some(FX_MINE_IMPACT_WAVE_ID),
+        "payloadReceive" => Some(FX_PAYLOAD_RECEIVE_ID),
+        "teleportActivate" => Some(FX_TELEPORT_ACTIVATE_ID),
+        "teleport" => Some(FX_TELEPORT_ID),
+        "teleportOut" => Some(FX_TELEPORT_OUT_ID),
         "ripple" => Some(FX_RIPPLE_ID),
         "bubble" => Some(FX_BUBBLE_ID),
         "launchAccelerator" => Some(FX_LAUNCH_ACCELERATOR_ID),
@@ -844,8 +901,41 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_PRODUCE_SMOKE_ID => {
             Effect::with_lifetime(FX_PRODUCE_SMOKE_ID, 12.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_ARTILLERY_TRAIL_SMOKE_ID => {
+            Effect::with_lifetime(FX_ARTILLERY_TRAIL_SMOKE_ID, 50.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
+        FX_SMELT_SMOKE_ID => Effect::with_lifetime(FX_SMELT_SMOKE_ID, 15.0, DEFAULT_EFFECT_CLIP),
+        FX_FORM_SMOKE_ID => Effect::with_lifetime(FX_FORM_SMOKE_ID, 40.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
+        FX_LAVA_ID => Effect::with_lifetime(FX_LAVA_ID, 18.0, DEFAULT_EFFECT_CLIP),
+        FX_DOOR_OPEN_ID => Effect::with_lifetime(FX_DOOR_OPEN_ID, 10.0, DEFAULT_EFFECT_CLIP),
+        FX_DOOR_CLOSE_ID => Effect::with_lifetime(FX_DOOR_CLOSE_ID, 10.0, DEFAULT_EFFECT_CLIP),
+        FX_DOOR_OPEN_LARGE_ID => {
+            Effect::with_lifetime(FX_DOOR_OPEN_LARGE_ID, 10.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_DOOR_CLOSE_LARGE_ID => {
+            Effect::with_lifetime(FX_DOOR_CLOSE_LARGE_ID, 10.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_MINE_WALL_SMALL_ID => {
+            Effect::with_lifetime(FX_MINE_WALL_SMALL_ID, 50.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_MINE_SMALL_ID => Effect::with_lifetime(FX_MINE_SMALL_ID, 30.0, DEFAULT_EFFECT_CLIP),
+        FX_MINE_ID => Effect::with_lifetime(FX_MINE_ID, 20.0, DEFAULT_EFFECT_CLIP),
+        FX_MINE_BIG_ID => Effect::with_lifetime(FX_MINE_BIG_ID, 30.0, DEFAULT_EFFECT_CLIP),
+        FX_MINE_HUGE_ID => Effect::with_lifetime(FX_MINE_HUGE_ID, 40.0, DEFAULT_EFFECT_CLIP),
+        FX_MINE_IMPACT_ID => Effect::with_lifetime(FX_MINE_IMPACT_ID, 90.0, DEFAULT_EFFECT_CLIP),
+        FX_MINE_IMPACT_WAVE_ID => {
+            Effect::with_lifetime(FX_MINE_IMPACT_WAVE_ID, 50.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_PAYLOAD_RECEIVE_ID => {
+            Effect::with_lifetime(FX_PAYLOAD_RECEIVE_ID, 30.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_TELEPORT_ACTIVATE_ID => {
+            Effect::with_lifetime(FX_TELEPORT_ACTIVATE_ID, 50.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_TELEPORT_ID => Effect::with_lifetime(FX_TELEPORT_ID, 60.0, DEFAULT_EFFECT_CLIP),
+        FX_TELEPORT_OUT_ID => Effect::with_lifetime(FX_TELEPORT_OUT_ID, 20.0, DEFAULT_EFFECT_CLIP),
         FX_RIPPLE_ID => {
             Effect::with_lifetime(FX_RIPPLE_ID, 30.0, DEFAULT_EFFECT_CLIP).layer(Layer::DEBRIS)
         }
@@ -960,6 +1050,11 @@ pub fn standard_effect_draw_plans_with_data_float(
             | FX_LIGHTNING_CHARGE_ID
             | FX_RED_GENERATE_SPARK_ID
             | FX_TURBINE_GENERATE_ID
+            | FX_ARTILLERY_TRAIL_SMOKE_ID
+            | FX_MINE_IMPACT_WAVE_ID
+            | FX_TELEPORT_ACTIVATE_ID
+            | FX_TELEPORT_ID
+            | FX_TELEPORT_OUT_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1021,6 +1116,229 @@ pub fn standard_effect_draw_plans_with_data_float(
         }
 
         return plans;
+    }
+
+    if effect_id_i32 == FX_ARTILLERY_TRAIL_SMOKE_ID {
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let mut plans = Vec::with_capacity(13);
+
+        for _ in 0..13 {
+            let local_fin = fin / rand.random_between(0.5, 1.0);
+            let local_fout = 1.0 - local_fin;
+            let angle = rand.random(360.0);
+            let len = rand.random_between(0.5, 1.0);
+
+            if local_fin <= 1.0 {
+                let (offset_x, offset_y) = trns(angle, local_fin * 24.0 * len);
+                plans.push(StandardEffectDrawPlan {
+                    effect_id: effect_id_i32,
+                    layer: effect.layer,
+                    kind: StandardEffectDrawKind::FilledCircle,
+                    center: (x + offset_x, y + offset_y),
+                    color_from: None,
+                    color_mid: None,
+                    color_to: None,
+                    color_mix: 0.0,
+                    input_color: Some(color),
+                    color_mul: 1.0,
+                    alpha: (0.5 - (local_fin - 0.5).abs()) * 2.0,
+                    radius: 0.5 + local_fout * 4.0,
+                    stroke: 0.0,
+                    particles: None,
+                    light_color: None,
+                    light_radius: 0.0,
+                    light_opacity: 0.0,
+                });
+            }
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_MINE_IMPACT_WAVE_ID {
+        let mut plans = Vec::with_capacity(if time <= 30.0 { 2 } else { 1 });
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fout * 5.0 + 1.0,
+            stroke: fout * 1.5,
+            particles: Some(standard_effect_particle_spec(
+                state_id,
+                12,
+                None,
+                0.0,
+                4.0 + finpow * rotation,
+                fin,
+                fout,
+                fslope,
+            )),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        });
+
+        if time <= 30.0 {
+            let scaled_fin = (time / 30.0).clamp(0.0, 1.0);
+            let scaled_fout = 1.0 - scaled_fin;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: effect_finpow_from_fin(scaled_fin) * 28.0,
+                stroke: 5.0 * scaled_fout,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_TELEPORT_ACTIVATE_ID {
+        let mut plans = Vec::with_capacity(if time <= 8.0 { 2 } else { 1 });
+        if time <= 8.0 {
+            let scaled_fin = (time / 8.0).clamp(0.0, 1.0);
+            let scaled_fout = 1.0 - scaled_fin;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 4.0 + scaled_fin * 27.0,
+                stroke: scaled_fout * 4.0,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: fin * 4.0 + 1.0,
+            stroke: fout * 2.0,
+            particles: Some(standard_effect_particle_spec(
+                state_id,
+                30,
+                None,
+                0.0,
+                4.0 + 40.0 * fin,
+                fin,
+                fout,
+                fslope,
+            )),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        });
+
+        return plans;
+    }
+
+    if matches!(effect_id_i32, FX_TELEPORT_ID | FX_TELEPORT_OUT_ID) {
+        let (circle_radius, stroke, line_count, line_length, line_radius) =
+            if effect_id_i32 == FX_TELEPORT_ID {
+                (
+                    7.0 + fout * 8.0,
+                    fin * 2.0,
+                    20,
+                    6.0 + 20.0 * fout,
+                    fin * 4.0 + 1.0,
+                )
+            } else {
+                (
+                    7.0 + fin * 8.0,
+                    fout * 2.0,
+                    20,
+                    4.0 + 20.0 * fin,
+                    fslope * 4.0 + 1.0,
+                )
+            };
+        return vec![
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: circle_radius,
+                stroke,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededRadialLineParticles,
+                center: (x, y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: line_radius,
+                stroke,
+                particles: Some(standard_effect_particle_spec(
+                    state_id,
+                    line_count,
+                    None,
+                    0.0,
+                    line_length,
+                    fin,
+                    fout,
+                    fslope,
+                )),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+        ];
     }
 
     if effect_id_i32 == FX_RAND_LIFE_SPARK_ID {
@@ -5168,6 +5486,198 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_SMELT_SMOKE_ID
+        | FX_FORM_SMOKE_ID
+        | FX_LAVA_ID
+        | FX_MINE_WALL_SMALL_ID
+        | FX_MINE_SMALL_ID
+        | FX_MINE_ID
+        | FX_MINE_BIG_ID
+        | FX_MINE_HUGE_ID
+        | FX_MINE_IMPACT_ID
+        | FX_PAYLOAD_RECEIVE_ID => {
+            let (
+                kind,
+                color_from,
+                color_to,
+                input_color,
+                count,
+                length,
+                radius_base,
+                radius_fout_scale,
+                radius_fslope_scale,
+            ) = match effect_id {
+                FX_SMELT_SMOKE_ID => (
+                    StandardEffectDrawKind::SeededSquareParticles,
+                    Some("Color.white"),
+                    Some("Input.color"),
+                    Some(color),
+                    6,
+                    4.0 + fin * 5.0,
+                    0.5,
+                    2.0,
+                    0.0,
+                ),
+                FX_FORM_SMOKE_ID => (
+                    StandardEffectDrawKind::SeededSquareParticles,
+                    Some("Pal.plasticSmoke"),
+                    Some("Color.lightGray"),
+                    None,
+                    6,
+                    5.0 + fin * 8.0,
+                    0.2,
+                    2.0,
+                    0.0,
+                ),
+                FX_LAVA_ID => (
+                    StandardEffectDrawKind::SeededCircleParticles,
+                    Some("Color.orange"),
+                    Some("Color.gray"),
+                    None,
+                    3,
+                    1.0 + fin * 10.0,
+                    0.0,
+                    0.0,
+                    2.0,
+                ),
+                FX_MINE_WALL_SMALL_ID => (
+                    StandardEffectDrawKind::SeededCircleParticles,
+                    None,
+                    Some("Color.darkGray"),
+                    Some(color),
+                    2,
+                    fin * 6.0,
+                    0.5,
+                    1.0,
+                    0.0,
+                ),
+                FX_MINE_SMALL_ID => (
+                    StandardEffectDrawKind::SeededSquareParticles,
+                    None,
+                    Some("Color.lightGray"),
+                    Some(color),
+                    3,
+                    fin * 5.0,
+                    0.5,
+                    1.0,
+                    0.0,
+                ),
+                FX_MINE_ID => (
+                    StandardEffectDrawKind::SeededSquareParticles,
+                    None,
+                    Some("Color.lightGray"),
+                    Some(color),
+                    6,
+                    3.0 + fin * 6.0,
+                    0.0,
+                    2.0,
+                    0.0,
+                ),
+                FX_MINE_BIG_ID => (
+                    StandardEffectDrawKind::SeededSquareParticles,
+                    None,
+                    Some("Color.lightGray"),
+                    Some(color),
+                    6,
+                    4.0 + fin * 8.0,
+                    0.2,
+                    2.0,
+                    0.0,
+                ),
+                FX_MINE_HUGE_ID => (
+                    StandardEffectDrawKind::SeededSquareParticles,
+                    None,
+                    Some("Color.lightGray"),
+                    Some(color),
+                    8,
+                    5.0 + fin * 10.0,
+                    0.5,
+                    2.0,
+                    0.0,
+                ),
+                FX_MINE_IMPACT_ID => (
+                    StandardEffectDrawKind::SeededSquareParticles,
+                    None,
+                    Some("Color.lightGray"),
+                    Some(color),
+                    12,
+                    5.0 + finpow * 22.0,
+                    0.5,
+                    2.5,
+                    0.0,
+                ),
+                FX_PAYLOAD_RECEIVE_ID => (
+                    StandardEffectDrawKind::SeededSquareParticles,
+                    Some("Color.white"),
+                    Some("Pal.accent"),
+                    None,
+                    12,
+                    7.0 + fin * 13.0,
+                    0.5,
+                    2.1,
+                    0.0,
+                ),
+                _ => unreachable!(),
+            };
+            let mut particles = standard_effect_particle_spec(
+                state_id, count, None, 0.0, length, fin, fout, fslope,
+            );
+            particles.radius_base = radius_base;
+            particles.radius_fout_scale = radius_fout_scale;
+            particles.radius_fslope_scale = radius_fslope_scale;
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind,
+                center: (x, y),
+                color_from,
+                color_mid: None,
+                color_to,
+                color_mix: fin,
+                input_color,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: if kind == StandardEffectDrawKind::SeededSquareParticles {
+                    45.0
+                } else {
+                    0.0
+                },
+                particles: Some(particles),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
+        FX_DOOR_OPEN_ID | FX_DOOR_CLOSE_ID | FX_DOOR_OPEN_LARGE_ID | FX_DOOR_CLOSE_LARGE_ID => {
+            let tile_size = TILE_SIZE as f32;
+            let radius = match effect_id {
+                FX_DOOR_OPEN_ID => rotation * tile_size / 2.0 + fin * 2.0,
+                FX_DOOR_CLOSE_ID => rotation * tile_size / 2.0 + fout * 2.0,
+                FX_DOOR_OPEN_LARGE_ID => tile_size + fin * 2.0,
+                FX_DOOR_CLOSE_LARGE_ID => tile_size + fout * 2.0,
+                _ => unreachable!(),
+            };
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedSquare,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius,
+                stroke: fout * 1.6,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SMOKE_PUFF_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -6032,6 +6542,8 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Color.gray" => Some(DecalColor::from_rgba(0x7f7f7fff)),
         "Color.lightGray" => Some(DecalColor::from_rgba(0xbfbfbfff)),
         "Color.darkGray" => Some(DecalColor::from_rgba(0x3f3f3fff)),
+        "Color.orange" => Some(DecalColor::from_rgba(0xffa500ff)),
+        "Color.yellow" => Some(DecalColor::from_rgba(0xffff00ff)),
         "Liquids.water.color" => Some(DecalColor::from_rgba(0x596ab8ff)),
         "Liquids.cryofluid.color" => Some(DecalColor::from_rgba(0x6ecdecff)),
         "Liquids.slag.color" => Some(DecalColor::from_rgba(0xffa166ff)),
@@ -6062,7 +6574,9 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.redSpark" => Some(DecalColor::from_rgba(0xfbb97fff)),
         "Pal.orangeSpark" => Some(DecalColor::from_rgba(0xd2b29cff)),
         "Pal.redDust" => Some(DecalColor::from_rgba(0xffa480ff)),
+        "Pal.plasticSmoke" => Some(DecalColor::from_rgba(0xf1e479ff)),
         "Pal.plasticBurn" => Some(DecalColor::from_rgba(0xe9ead3ff)),
+        "Pal.coalBlack" => Some(DecalColor::from_rgba(0x272727ff)),
         "Pal.vent" => Some(DecalColor::from_rgba(0x6b4e4eff)),
         "Pal.regen" => Some(DecalColor::from_rgba(0xd1efffff)),
         "Pal.slagOrange" => Some(DecalColor::from_rgba(0xffa166ff)),
@@ -7723,8 +8237,48 @@ mod tests {
             standard_effect_id("producesmoke"),
             Some(FX_PRODUCE_SMOKE_ID)
         );
+        assert_eq!(
+            standard_effect_id("artilleryTrailSmoke"),
+            Some(FX_ARTILLERY_TRAIL_SMOKE_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
+        assert_eq!(standard_effect_id("smeltsmoke"), Some(FX_SMELT_SMOKE_ID));
+        assert_eq!(standard_effect_id("formsmoke"), Some(FX_FORM_SMOKE_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
+        assert_eq!(standard_effect_id("lava"), Some(FX_LAVA_ID));
+        assert_eq!(standard_effect_id("dooropen"), Some(FX_DOOR_OPEN_ID));
+        assert_eq!(standard_effect_id("doorclose"), Some(FX_DOOR_CLOSE_ID));
+        assert_eq!(
+            standard_effect_id("dooropenlarge"),
+            Some(FX_DOOR_OPEN_LARGE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("doorcloselarge"),
+            Some(FX_DOOR_CLOSE_LARGE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("mineWallSmall"),
+            Some(FX_MINE_WALL_SMALL_ID)
+        );
+        assert_eq!(standard_effect_id("mineSmall"), Some(FX_MINE_SMALL_ID));
+        assert_eq!(standard_effect_id("mine"), Some(FX_MINE_ID));
+        assert_eq!(standard_effect_id("mineBig"), Some(FX_MINE_BIG_ID));
+        assert_eq!(standard_effect_id("mineHuge"), Some(FX_MINE_HUGE_ID));
+        assert_eq!(standard_effect_id("mineImpact"), Some(FX_MINE_IMPACT_ID));
+        assert_eq!(
+            standard_effect_id("mineImpactWave"),
+            Some(FX_MINE_IMPACT_WAVE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("payloadReceive"),
+            Some(FX_PAYLOAD_RECEIVE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("teleportActivate"),
+            Some(FX_TELEPORT_ACTIVATE_ID)
+        );
+        assert_eq!(standard_effect_id("teleport"), Some(FX_TELEPORT_ID));
+        assert_eq!(standard_effect_id("teleportOut"), Some(FX_TELEPORT_OUT_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
         assert_eq!(standard_effect_id("bubble"), Some(FX_BUBBLE_ID));
         assert_eq!(
@@ -8153,7 +8707,49 @@ mod tests {
             30.0
         );
         assert_eq!(standard_effect(FX_PRODUCE_SMOKE_ID).unwrap().lifetime, 12.0);
+        assert_eq!(
+            standard_effect(FX_ARTILLERY_TRAIL_SMOKE_ID)
+                .unwrap()
+                .lifetime,
+            50.0
+        );
+        assert_eq!(standard_effect(FX_SMELT_SMOKE_ID).unwrap().lifetime, 15.0);
+        assert_eq!(standard_effect(FX_FORM_SMOKE_ID).unwrap().lifetime, 40.0);
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
+        assert_eq!(standard_effect(FX_LAVA_ID).unwrap().lifetime, 18.0);
+        assert_eq!(standard_effect(FX_DOOR_OPEN_ID).unwrap().lifetime, 10.0);
+        assert_eq!(standard_effect(FX_DOOR_CLOSE_ID).unwrap().lifetime, 10.0);
+        assert_eq!(
+            standard_effect(FX_DOOR_OPEN_LARGE_ID).unwrap().lifetime,
+            10.0
+        );
+        assert_eq!(
+            standard_effect(FX_DOOR_CLOSE_LARGE_ID).unwrap().lifetime,
+            10.0
+        );
+        assert_eq!(
+            standard_effect(FX_MINE_WALL_SMALL_ID).unwrap().lifetime,
+            50.0
+        );
+        assert_eq!(standard_effect(FX_MINE_SMALL_ID).unwrap().lifetime, 30.0);
+        assert_eq!(standard_effect(FX_MINE_ID).unwrap().lifetime, 20.0);
+        assert_eq!(standard_effect(FX_MINE_BIG_ID).unwrap().lifetime, 30.0);
+        assert_eq!(standard_effect(FX_MINE_HUGE_ID).unwrap().lifetime, 40.0);
+        assert_eq!(standard_effect(FX_MINE_IMPACT_ID).unwrap().lifetime, 90.0);
+        assert_eq!(
+            standard_effect(FX_MINE_IMPACT_WAVE_ID).unwrap().lifetime,
+            50.0
+        );
+        assert_eq!(
+            standard_effect(FX_PAYLOAD_RECEIVE_ID).unwrap().lifetime,
+            30.0
+        );
+        assert_eq!(
+            standard_effect(FX_TELEPORT_ACTIVATE_ID).unwrap().lifetime,
+            50.0
+        );
+        assert_eq!(standard_effect(FX_TELEPORT_ID).unwrap().lifetime, 60.0);
+        assert_eq!(standard_effect(FX_TELEPORT_OUT_ID).unwrap().lifetime, 20.0);
 
         let assemble = standard_effect(FX_UNIT_ASSEMBLE_ID).unwrap();
         assert_eq!(assemble.lifetime, 70.0);
@@ -10719,6 +11315,239 @@ mod tests {
         assert_eq!(produce.particles.unwrap().length, 13.0);
         assert_eq!(produce.particles.unwrap().radius_base, 1.0);
         assert_eq!(produce.particles.unwrap().radius_fout_scale, 3.0);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_smoke_door_mine_and_teleport_primitives() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+
+        let artillery = standard_effect_draw_plans(
+            Some(FX_ARTILLERY_TRAIL_SMOKE_ID as u16),
+            221,
+            3.0,
+            4.0,
+            0.0,
+            25.0,
+            50.0,
+            input_color,
+        );
+        assert_eq!(artillery.len(), 13);
+        assert!(artillery
+            .iter()
+            .all(|plan| plan.kind == StandardEffectDrawKind::FilledCircle));
+        assert_eq!(artillery[0].input_color, Some(input_color));
+        assert!((0.0..=1.0).contains(&artillery[0].alpha));
+
+        let smelt = standard_effect_draw_plan(
+            Some(FX_SMELT_SMOKE_ID as u16),
+            223,
+            3.0,
+            4.0,
+            0.0,
+            7.5,
+            15.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(smelt.kind, StandardEffectDrawKind::SeededSquareParticles);
+        assert_eq!(smelt.color_from, Some("Color.white"));
+        assert_eq!(smelt.color_to, Some("Input.color"));
+        assert_eq!(smelt.input_color, Some(input_color));
+        assert_eq!(smelt.particles.unwrap().count, 6);
+        assert_eq!(smelt.particles.unwrap().length, 6.5);
+        assert_eq!(smelt.square_render_primitives_from_seed().len(), 6);
+
+        let form = standard_effect_draw_plan(
+            Some(FX_FORM_SMOKE_ID as u16),
+            225,
+            3.0,
+            4.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(form.kind, StandardEffectDrawKind::SeededSquareParticles);
+        assert_eq!(form.color_from, Some("Pal.plasticSmoke"));
+        assert_eq!(form.color_to, Some("Color.lightGray"));
+        assert_eq!(form.particles.unwrap().length, 9.0);
+        assert_eq!(form.particles.unwrap().radius_base, 0.2);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.plasticSmoke"),
+            Some(DecalColor::from_rgba(0xf1e479ff))
+        );
+
+        let lava = standard_effect_draw_plan(
+            Some(FX_LAVA_ID as u16),
+            227,
+            3.0,
+            4.0,
+            0.0,
+            9.0,
+            18.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(lava.kind, StandardEffectDrawKind::SeededCircleParticles);
+        assert_eq!(lava.color_from, Some("Color.orange"));
+        assert_eq!(lava.particles.unwrap().count, 3);
+        assert_eq!(lava.particles.unwrap().length, 6.0);
+        assert_eq!(lava.particles.unwrap().radius_fslope_scale, 2.0);
+
+        let door_open = standard_effect_draw_plan(
+            Some(FX_DOOR_OPEN_ID as u16),
+            228,
+            3.0,
+            4.0,
+            2.0,
+            5.0,
+            10.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(door_open.kind, StandardEffectDrawKind::StrokedSquare);
+        assert_eq!(door_open.radius, 2.0 * TILE_SIZE as f32 / 2.0 + 1.0);
+        assert_eq!(door_open.stroke, 0.8);
+
+        let door_large = standard_effect_draw_plan(
+            Some(FX_DOOR_CLOSE_LARGE_ID as u16),
+            231,
+            3.0,
+            4.0,
+            0.0,
+            5.0,
+            10.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(door_large.radius, TILE_SIZE as f32 + 1.0);
+
+        let mine_wall = standard_effect_draw_plan(
+            Some(FX_MINE_WALL_SMALL_ID as u16),
+            233,
+            3.0,
+            4.0,
+            0.0,
+            25.0,
+            50.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(
+            mine_wall.kind,
+            StandardEffectDrawKind::SeededCircleParticles
+        );
+        assert_eq!(mine_wall.color_to, Some("Color.darkGray"));
+        assert_eq!(mine_wall.input_color, Some(input_color));
+        assert_eq!(mine_wall.particles.unwrap().count, 2);
+        assert_eq!(mine_wall.particles.unwrap().length, 3.0);
+
+        let mine_impact = standard_effect_draw_plan(
+            Some(FX_MINE_IMPACT_ID as u16),
+            238,
+            3.0,
+            4.0,
+            0.0,
+            45.0,
+            90.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(
+            mine_impact.kind,
+            StandardEffectDrawKind::SeededSquareParticles
+        );
+        assert_eq!(mine_impact.particles.unwrap().count, 12);
+        assert_eq!(
+            mine_impact.particles.unwrap().length,
+            5.0 + effect_finpow_from_fin(0.5) * 22.0
+        );
+        assert_eq!(mine_impact.particles.unwrap().radius_fout_scale, 2.5);
+
+        let payload = standard_effect_draw_plan(
+            Some(FX_PAYLOAD_RECEIVE_ID as u16),
+            240,
+            3.0,
+            4.0,
+            0.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(payload.color_from, Some("Color.white"));
+        assert_eq!(payload.color_to, Some("Pal.accent"));
+        assert_eq!(payload.particles.unwrap().count, 12);
+        assert_eq!(payload.particles.unwrap().length, 13.5);
+
+        let impact_wave = standard_effect_draw_plans(
+            Some(FX_MINE_IMPACT_WAVE_ID as u16),
+            239,
+            3.0,
+            4.0,
+            32.0,
+            10.0,
+            50.0,
+            input_color,
+        );
+        assert_eq!(impact_wave.len(), 2);
+        assert_eq!(
+            impact_wave[0].kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        assert_eq!(impact_wave[0].particles.unwrap().count, 12);
+        assert_eq!(impact_wave[1].kind, StandardEffectDrawKind::StrokedCircle);
+
+        let teleport_activate = standard_effect_draw_plans(
+            Some(FX_TELEPORT_ACTIVATE_ID as u16),
+            241,
+            3.0,
+            4.0,
+            0.0,
+            4.0,
+            50.0,
+            input_color,
+        );
+        assert_eq!(teleport_activate.len(), 2);
+        assert_eq!(
+            teleport_activate[0].kind,
+            StandardEffectDrawKind::StrokedCircle
+        );
+        assert_eq!(teleport_activate[1].particles.unwrap().count, 30);
+
+        let teleport = standard_effect_draw_plans(
+            Some(FX_TELEPORT_ID as u16),
+            242,
+            3.0,
+            4.0,
+            0.0,
+            30.0,
+            60.0,
+            input_color,
+        );
+        assert_eq!(teleport.len(), 2);
+        assert_eq!(teleport[0].kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(teleport[1].particles.unwrap().count, 20);
+        assert_eq!(teleport[1].radius, 3.0);
+
+        let teleport_out = standard_effect_draw_plans(
+            Some(FX_TELEPORT_OUT_ID as u16),
+            243,
+            3.0,
+            4.0,
+            0.0,
+            10.0,
+            20.0,
+            input_color,
+        );
+        assert_eq!(teleport_out.len(), 2);
+        assert_eq!(teleport_out[0].stroke, 1.0);
+        assert_eq!(teleport_out[1].particles.unwrap().count, 20);
+        assert_eq!(
+            teleport_out[1].radius,
+            effect_fslope_from_fin(0.5) * 4.0 + 1.0
+        );
     }
 
     #[test]
