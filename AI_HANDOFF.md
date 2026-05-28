@@ -7136,3 +7136,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. ability `death(...)`、`type.killed(...)`、suicide trigger、完整 event bus 仍未迁移；
   4. 真实 audio/camera backend 仍需继续；
   5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 210. 最新闭环记录：UnitDestroy ability death runtime sidecar
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：对照 Java `UnitComp.destroy()` 的 `for(Ability a : abilities) a.death(self())`，先在 Rust runtime 中记录单位死亡能力 sidecar，后续再接到具体 ability death 实现与真实 event bus。
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitAbilityDeathEvent`；
+    - `GameRuntime` 新增 `unit_ability_death_events`；
+    - reset/clear 路径清空该队列；
+    - 新增 `drain_unit_ability_death_events()`；
+    - `queue_client_unit_destroy_side_effects(...)` 遍历 `unit.type_info.abilities`，提取 `ability_kind` 并记录 descriptor/x/y；
+    - core destroy 测试覆盖 `SpawnDeathAbility:flare,2,8` 的 sidecar 字段与 drain。
+  - `desktop/src/lib.rs`
+    - unit destroy desktop 测试增加 ability descriptor，验证 lifecycle 后 runtime 中保留 ability death sidecar。
+  - `MIGRATION.md`
+    - 新增 `12.284`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 当前只是 sidecar，尚未真正执行具体 ability 的 `death(...)` 行为；
+  2. 优先把已有 `SpawnDeathAbility`、`LiquidExplodeAbility`、`ForceFieldAbility` 等 death runtime 与 `UnitDestroyCallPacket` / event bus 打通；
+  3. `type.killed(self())`、suicide trigger、wreckRegions decal、weapon bullet spawn 仍未迁移；
+  4. `Damage.dynamicExplosion(...)` lightning/fire/wave damage、真实 audio/camera backend 仍需继续；
+  5. 当前总迁移仍约 10%~11%，远未可玩。

@@ -1558,6 +1558,16 @@ pub struct GameRuntimeUnitShootOnDeathEvent {
     pub allow_shoot_effects: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameRuntimeUnitAbilityDeathEvent {
+    pub unit_id: i32,
+    pub ability_index: usize,
+    pub ability_kind: String,
+    pub descriptor: String,
+    pub x: f32,
+    pub y: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GameRuntimeTriggerEvent {
     pub trigger: Trigger,
@@ -2624,6 +2634,7 @@ pub struct GameRuntime {
     pub unit_create_events: Vec<GameRuntimeUnitCreateEvent>,
     pub unit_destroy_events: Vec<GameRuntimeUnitDestroyEvent>,
     pub unit_shoot_on_death_events: Vec<GameRuntimeUnitShootOnDeathEvent>,
+    pub unit_ability_death_events: Vec<GameRuntimeUnitAbilityDeathEvent>,
     pub trigger_events: Vec<GameRuntimeTriggerEvent>,
     pub server_puddles: Puddles,
     pub server_fires: Fires,
@@ -2707,6 +2718,7 @@ impl GameRuntime {
             unit_create_events: Vec::new(),
             unit_destroy_events: Vec::new(),
             unit_shoot_on_death_events: Vec::new(),
+            unit_ability_death_events: Vec::new(),
             trigger_events: Vec::new(),
             server_puddles: Puddles::default(),
             server_fires: Fires::default(),
@@ -2806,6 +2818,10 @@ impl GameRuntime {
 
     pub fn drain_unit_shoot_on_death_events(&mut self) -> Vec<GameRuntimeUnitShootOnDeathEvent> {
         std::mem::take(&mut self.unit_shoot_on_death_events)
+    }
+
+    pub fn drain_unit_ability_death_events(&mut self) -> Vec<GameRuntimeUnitAbilityDeathEvent> {
+        std::mem::take(&mut self.unit_ability_death_events)
     }
 
     pub fn note_client_block_snapshot_parse_error(
@@ -4048,6 +4064,24 @@ impl GameRuntime {
                     rotation: unit.rotation(),
                     override_effect: override_effect.clone(),
                     allow_shoot_effects: override_effect.is_none(),
+                });
+        }
+
+        for (ability_index, descriptor) in unit.type_info.abilities.iter().enumerate() {
+            let ability_kind = descriptor
+                .split([':', '('])
+                .next()
+                .unwrap_or(descriptor)
+                .trim()
+                .to_string();
+            self.unit_ability_death_events
+                .push(GameRuntimeUnitAbilityDeathEvent {
+                    unit_id: unit.id(),
+                    ability_index,
+                    ability_kind,
+                    descriptor: descriptor.clone(),
+                    x,
+                    y,
                 });
         }
 
@@ -10333,6 +10367,7 @@ impl GameRuntime {
         self.unit_create_events.clear();
         self.unit_destroy_events.clear();
         self.unit_shoot_on_death_events.clear();
+        self.unit_ability_death_events.clear();
         self.trigger_events.clear();
         self.liquid_runtime_states.clear();
         self.logic_runtime_states.clear();
@@ -26631,6 +26666,9 @@ mod tests {
         death_weapon.shoot_on_death_effect = Some("smoke".into());
         death_weapon.bullet = "death-blast".into();
         unit_type.weapons.push(death_weapon);
+        unit_type
+            .abilities
+            .push("SpawnDeathAbility:flare,2,8".into());
         let mut unit = UnitComp::new(77, unit_type, TeamId(4));
         unit.add();
         unit.set_pos(10.0, 20.0);
@@ -26707,6 +26745,15 @@ mod tests {
                 && (event.effect.rotation - 45.0).abs() < 0.0001
         }));
         assert_eq!(runtime.drain_unit_shoot_on_death_events().len(), 1);
+        assert_eq!(runtime.unit_ability_death_events.len(), 1);
+        let ability_event = &runtime.unit_ability_death_events[0];
+        assert_eq!(ability_event.unit_id, 77);
+        assert_eq!(ability_event.ability_index, 0);
+        assert_eq!(ability_event.ability_kind, "SpawnDeathAbility");
+        assert_eq!(ability_event.descriptor, "SpawnDeathAbility:flare,2,8");
+        assert_eq!(ability_event.x, 10.0);
+        assert_eq!(ability_event.y, 20.0);
+        assert_eq!(runtime.drain_unit_ability_death_events().len(), 1);
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));

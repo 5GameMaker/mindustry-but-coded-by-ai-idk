@@ -9054,3 +9054,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 尚未处理 `bullet.killShooter && totalShots > 0`，因为当前 Rust weapon 仍以 bullet 名称存储，未在该路径解析完整 BulletType；
   - ability `death(...)`、`type.killed(...)`、suicide trigger、完整 event bus 仍未迁移；
   - 当前总体迁移仍约 10%~11%，远未可玩。
+
+### 12.284 UnitDestroy ability death runtime sidecar
+
+- 2026-05-28：继续对照 Java `UnitComp.destroy()` 末尾的 `for(Ability a : abilities) a.death(self())`，在 Rust runtime 中先记录单位死亡时应触发的 ability death sidecar，避免该分支继续完全丢失。
+- Java 依据：
+  - `for(Ability a : abilities){ a.death(self()); }`
+  - 该调用位于 weapon `shootOnDeath`、wreck/scorch decal 分支之后，`type.killed(self())` 与 `remove()` 之前。
+- Rust 新增/变化：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntimeUnitAbilityDeathEvent { unit_id, ability_index, ability_kind, descriptor, x, y }`；
+    - `GameRuntime` 新增 `unit_ability_death_events`；
+    - reset/clear 路径清空该队列；
+    - 新增 `drain_unit_ability_death_events()`；
+    - `queue_client_unit_destroy_side_effects(...)` 遍历 `unit.type_info.abilities`，从 descriptor 中提取 ability kind，并记录死亡触发位置；
+    - core destroy 测试使用 `SpawnDeathAbility:flare,2,8` 覆盖事件字段与 drain。
+  - `desktop/src/lib.rs`
+    - unit destroy desktop 测试增加 ability descriptor，验证 NetClient lifecycle -> runtime 后 ability death sidecar 存在。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前只是 sidecar 记录，尚未真正分派到 `SpawnDeathAbility` / `LiquidExplodeAbility` / `ForceFieldAbility` 等具体 `death(...)` 行为；
+  - 仍需把已存在的部分 server-side death ability runtime 与客户端 `UnitDestroyCallPacket`/真实 event bus 打通；
+  - `type.killed(self())`、suicide trigger、wreckRegions decal、weapon bullet spawn、`Damage.dynamicExplosion(...)` lightning/fire/wave damage 仍未完成；
+  - 当前总体迁移仍约 10%~11%，远未可玩。
