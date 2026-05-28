@@ -696,6 +696,64 @@ pub fn load() -> Vec<BulletContent> {
     oxynoe_point_defense.hit_effect = "pointHit".into();
     oxynoe_point_defense.max_range = 100.0;
 
+    let mut cyerce_repair_range = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+    cyerce_repair_range.max_range = 130.0;
+
+    let mut cyerce_plasma_frag_missile = missile_bullet(3.9, 11.0);
+    cyerce_plasma_frag_missile.homing_power = 0.2;
+    cyerce_plasma_frag_missile.weave_mag = 4.0;
+    cyerce_plasma_frag_missile.weave_scale = 4.0;
+    cyerce_plasma_frag_missile.lifetime = 60.0;
+    cyerce_plasma_frag_missile.keep_velocity = false;
+    cyerce_plasma_frag_missile.shoot_effect = "shootHeal".into();
+    cyerce_plasma_frag_missile.smoke_effect = "hitLaser".into();
+    cyerce_plasma_frag_missile.splash_damage = 13.0;
+    cyerce_plasma_frag_missile.splash_damage_radius = 20.0;
+    cyerce_plasma_frag_missile.front_color = "white".into();
+    cyerce_plasma_frag_missile.hit_sound = "none".into();
+    cyerce_plasma_frag_missile.light_color = "heal".into();
+    cyerce_plasma_frag_missile.light_radius = 40.0;
+    cyerce_plasma_frag_missile.light_opacity = 0.7;
+    cyerce_plasma_frag_missile.trail_color = "heal".into();
+    cyerce_plasma_frag_missile.trail_width = 2.5;
+    cyerce_plasma_frag_missile.trail_length = 20;
+    cyerce_plasma_frag_missile.trail_chance = -1.0;
+    cyerce_plasma_frag_missile.heal_percent = 2.8;
+    cyerce_plasma_frag_missile.collides_team = true;
+    cyerce_plasma_frag_missile.back_color = "heal".into();
+    cyerce_plasma_frag_missile.despawn_effect = "none".into();
+    cyerce_plasma_frag_missile.hit_effect = "custom:cyercePlasmaFragHealExplosion".into();
+
+    let mut cyerce_plasma_missile = flak_bullet(2.5, 25.0);
+    cyerce_plasma_missile.sprite = "missile-large".into();
+    cyerce_plasma_missile.collides_ground = true;
+    cyerce_plasma_missile.collides_air = true;
+    cyerce_plasma_missile.explode_range = 40.0;
+    cyerce_plasma_missile.width = 12.0;
+    cyerce_plasma_missile.height = 12.0;
+    cyerce_plasma_missile.shrink_y = 0.0;
+    cyerce_plasma_missile.drag = -0.003;
+    cyerce_plasma_missile.homing_range = 60.0;
+    cyerce_plasma_missile.keep_velocity = false;
+    cyerce_plasma_missile.light_radius = 60.0;
+    cyerce_plasma_missile.light_opacity = 0.7;
+    cyerce_plasma_missile.light_color = "heal".into();
+    cyerce_plasma_missile.despawn_sound = "explosion".into();
+    cyerce_plasma_missile.splash_damage_radius = 30.0;
+    cyerce_plasma_missile.splash_damage = 25.0;
+    cyerce_plasma_missile.lifetime = 80.0;
+    cyerce_plasma_missile.back_color = "heal".into();
+    cyerce_plasma_missile.front_color = "white".into();
+    cyerce_plasma_missile.hit_effect = "custom:cyercePlasmaMissileHealExplosion".into();
+    cyerce_plasma_missile.weave_scale = 8.0;
+    cyerce_plasma_missile.weave_mag = 1.0;
+    cyerce_plasma_missile.trail_color = "heal".into();
+    cyerce_plasma_missile.trail_width = 4.5;
+    cyerce_plasma_missile.trail_length = 29;
+    cyerce_plasma_missile.frag_bullets = 7;
+    cyerce_plasma_missile.frag_velocity_min = 0.3;
+    cyerce_plasma_missile.frag_bullet = Some(Box::new(cyerce_plasma_frag_missile.clone()));
+
     let mut aegires_point_defense = BulletSpec::new(BulletKind::Generic, 1.0, 30.0);
     aegires_point_defense.shoot_effect = "sparkShoot".into();
     aegires_point_defense.hit_effect = "pointHit".into();
@@ -787,6 +845,13 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "retusa_mine", retusa_mine),
         make_bullet(&mut next_id, "oxynoe_plasma", oxynoe_plasma),
         make_bullet(&mut next_id, "oxynoe_point_defense", oxynoe_point_defense),
+        make_bullet(&mut next_id, "cyerce_repair_range", cyerce_repair_range),
+        make_bullet(&mut next_id, "cyerce_plasma_missile", cyerce_plasma_missile),
+        make_bullet(
+            &mut next_id,
+            "cyerce_plasma_frag_missile",
+            cyerce_plasma_frag_missile,
+        ),
         make_bullet(&mut next_id, "aegires_point_defense", aegires_point_defense),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
@@ -1135,6 +1200,9 @@ mod tests {
                 "retusa_mine",
                 "oxynoe_plasma",
                 "oxynoe_point_defense",
+                "cyerce_repair_range",
+                "cyerce_plasma_missile",
+                "cyerce_plasma_frag_missile",
                 "aegires_point_defense",
                 "damageLightning",
                 "damageLightningGround",
@@ -1561,6 +1629,85 @@ mod tests {
         assert_eq!(mine.trail_length, 8);
         assert_eq!(mine.splash_damage, 40.0);
         assert_eq!(mine.splash_damage_radius, 32.0);
+    }
+
+    #[test]
+    fn cyerce_support_bullets_match_java_profiles() {
+        let bullets = load();
+
+        let repair = &by_name(&bullets, "cyerce_repair_range").spec;
+        assert_eq!(repair.kind, BulletKind::Generic);
+        assert_eq!(repair.speed, 0.0);
+        assert_eq!(repair.damage, 0.0);
+        assert_eq!(repair.max_range, 130.0);
+
+        let missile = &by_name(&bullets, "cyerce_plasma_missile").spec;
+        assert_eq!(missile.kind, BulletKind::Flak);
+        assert_eq!(missile.speed, 2.5);
+        assert_eq!(missile.damage, 25.0);
+        assert_eq!(missile.sprite, "missile-large");
+        assert!(missile.collides_ground);
+        assert!(missile.collides_air);
+        assert_eq!(missile.explode_range, 40.0);
+        assert_eq!(missile.width, 12.0);
+        assert_eq!(missile.height, 12.0);
+        assert_eq!(missile.shrink_y, 0.0);
+        assert_eq!(missile.drag, -0.003);
+        assert_eq!(missile.homing_range, 60.0);
+        assert!(!missile.keep_velocity);
+        assert_eq!(missile.light_radius, 60.0);
+        assert_eq!(missile.light_opacity, 0.7);
+        assert_eq!(missile.light_color, "heal");
+        assert_eq!(missile.despawn_sound, "explosion");
+        assert_eq!(missile.splash_damage_radius, 30.0);
+        assert_eq!(missile.splash_damage, 25.0);
+        assert_eq!(missile.lifetime, 80.0);
+        assert_eq!(missile.back_color, "heal");
+        assert_eq!(missile.front_color, "white");
+        assert_eq!(
+            missile.hit_effect,
+            "custom:cyercePlasmaMissileHealExplosion"
+        );
+        assert_eq!(missile.weave_scale, 8.0);
+        assert_eq!(missile.weave_mag, 1.0);
+        assert_eq!(missile.trail_color, "heal");
+        assert_eq!(missile.trail_width, 4.5);
+        assert_eq!(missile.trail_length, 29);
+        assert_eq!(missile.frag_bullets, 7);
+        assert_eq!(missile.frag_velocity_min, 0.3);
+
+        let nested_frag = missile
+            .frag_bullet
+            .as_deref()
+            .expect("missing cyerce frag missile");
+        let frag = &by_name(&bullets, "cyerce_plasma_frag_missile").spec;
+        assert_eq!(nested_frag, frag);
+        assert_eq!(frag.kind, BulletKind::Missile);
+        assert_eq!(frag.speed, 3.9);
+        assert_eq!(frag.damage, 11.0);
+        assert_eq!(frag.homing_power, 0.2);
+        assert_eq!(frag.weave_mag, 4.0);
+        assert_eq!(frag.weave_scale, 4.0);
+        assert_eq!(frag.lifetime, 60.0);
+        assert!(!frag.keep_velocity);
+        assert_eq!(frag.shoot_effect, "shootHeal");
+        assert_eq!(frag.smoke_effect, "hitLaser");
+        assert_eq!(frag.splash_damage, 13.0);
+        assert_eq!(frag.splash_damage_radius, 20.0);
+        assert_eq!(frag.front_color, "white");
+        assert_eq!(frag.hit_sound, "none");
+        assert_eq!(frag.light_color, "heal");
+        assert_eq!(frag.light_radius, 40.0);
+        assert_eq!(frag.light_opacity, 0.7);
+        assert_eq!(frag.trail_color, "heal");
+        assert_eq!(frag.trail_width, 2.5);
+        assert_eq!(frag.trail_length, 20);
+        assert_eq!(frag.trail_chance, -1.0);
+        assert_eq!(frag.heal_percent, 2.8);
+        assert!(frag.collides_team);
+        assert_eq!(frag.back_color, "heal");
+        assert_eq!(frag.despawn_effect, "none");
+        assert_eq!(frag.hit_effect, "custom:cyercePlasmaFragHealExplosion");
     }
 
     #[test]

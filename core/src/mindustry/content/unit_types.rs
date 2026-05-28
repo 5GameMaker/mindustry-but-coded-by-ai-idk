@@ -1271,10 +1271,54 @@ pub fn load() -> Vec<UnitType> {
         unit(&mut next_id, "cyerce", UnitKind::Naval, |u| {
             u.health = 870.0;
             u.speed = 0.86;
+            u.accel = 0.22;
             u.rotate_speed = 2.6;
+            u.drag = 0.16;
             u.hit_size = 20.0;
             u.armor = 6.0;
+            u.face_target = false;
+            u.move_sound_volume = 0.7;
+            u.move_sound_pitch_min = 0.77;
+            u.move_sound_pitch_max = 0.77;
+            u.move_sound = "shipMove".into();
+            u.trail_length = 23;
+            u.wave_trail_x = 9.0;
+            u.wave_trail_y = -9.0;
+            u.trail_scl = 2.0;
             u.build_speed = 2.0;
+            u.rotate_to_building = false;
+
+            let mut repair = Weapon::new("repair-beam-weapon-center");
+            repair.x = 11.0;
+            repair.y = -10.0;
+            repair.shoot_y = 6.0;
+            repair.beam_width = 0.8;
+            repair.predict_target = false;
+            repair.auto_target = true;
+            repair.controllable = false;
+            repair.rotate = true;
+            repair.mount_type = "HealBeamMount".into();
+            repair.repair_speed = 0.7;
+            repair.recoil = 0.0;
+            repair.no_attack = true;
+            repair.use_attack_range = false;
+            repair.active_sound = "beamHeal".into();
+            repair.bullet = "cyerce_repair_range".into();
+            u.weapons.push(repair);
+
+            let mut missile = Weapon::new("plasma-missile-mount");
+            missile.reload = 60.0;
+            missile.x = 9.0;
+            missile.y = 3.0;
+            missile.shadow = 5.0;
+            missile.rotate_speed = 4.0;
+            missile.rotate = true;
+            missile.inaccuracy = 1.0;
+            missile.velocity_rnd = 0.1;
+            missile.shoot_sound = "shootMissilePlasma".into();
+            missile.eject_effect = "none".into();
+            missile.bullet = "cyerce_plasma_missile".into();
+            u.weapons.push(missile);
         }),
         unit(&mut next_id, "aegires", UnitKind::Naval, |u| {
             u.health = 12000.0;
@@ -3734,6 +3778,98 @@ mod tests {
             .expect("missing oxynoe_point_defense");
         assert_eq!(point_bullet.spec.damage, 17.0);
         assert_eq!(point_bullet.spec.max_range, 100.0);
+    }
+
+    #[test]
+    fn cyerce_support_profile_matches_java_weapons() {
+        let units = load();
+        let cyerce = by_name(&units, "cyerce");
+
+        assert!(cyerce.naval);
+        assert_eq!(cyerce.health, 870.0);
+        assert_eq!(cyerce.speed, 0.86);
+        assert_eq!(cyerce.accel, 0.22);
+        assert_eq!(cyerce.rotate_speed, 2.6);
+        assert_eq!(cyerce.drag, 0.16);
+        assert_eq!(cyerce.hit_size, 20.0);
+        assert_eq!(cyerce.armor, 6.0);
+        assert!(!cyerce.face_target);
+        assert_eq!(cyerce.move_sound, "shipMove");
+        assert_eq!(cyerce.move_sound_volume, 0.7);
+        assert_eq!(cyerce.move_sound_pitch_min, 0.77);
+        assert_eq!(cyerce.move_sound_pitch_max, 0.77);
+        assert_eq!(cyerce.trail_length, 23);
+        assert_eq!(cyerce.wave_trail_x, 9.0);
+        assert_eq!(cyerce.wave_trail_y, -9.0);
+        assert_eq!(cyerce.trail_scl, 2.0);
+        assert_eq!(cyerce.build_speed, 2.0);
+        assert!(!cyerce.rotate_to_building);
+        assert_eq!(cyerce.weapons.len(), 2);
+
+        let repair = &cyerce.weapons[0];
+        assert_eq!(repair.name, "repair-beam-weapon-center");
+        assert_eq!(repair.x, 11.0);
+        assert_eq!(repair.y, -10.0);
+        assert_eq!(repair.shoot_y, 6.0);
+        assert_eq!(repair.beam_width, 0.8);
+        assert_eq!(repair.repair_speed, 0.7);
+        assert!(!repair.predict_target);
+        assert!(repair.auto_target);
+        assert!(!repair.controllable);
+        assert!(repair.rotate);
+        assert!(repair.mirror);
+        assert_eq!(repair.mount_type, "HealBeamMount");
+        assert_eq!(repair.recoil, 0.0);
+        assert!(repair.no_attack);
+        assert!(!repair.use_attack_range);
+        assert_eq!(repair.active_sound, "beamHeal");
+        assert_eq!(repair.bullet, "cyerce_repair_range");
+
+        let missile = &cyerce.weapons[1];
+        assert_eq!(missile.name, "plasma-missile-mount");
+        assert_eq!(missile.reload, 60.0);
+        assert_eq!(missile.x, 9.0);
+        assert_eq!(missile.y, 3.0);
+        assert_eq!(missile.shadow, 5.0);
+        assert_eq!(missile.rotate_speed, 4.0);
+        assert!(missile.rotate);
+        assert_eq!(missile.inaccuracy, 1.0);
+        assert_eq!(missile.velocity_rnd, 0.1);
+        assert_eq!(missile.shoot_sound, "shootMissilePlasma");
+        assert_eq!(missile.eject_effect, "none");
+        assert_eq!(missile.bullet, "cyerce_plasma_missile");
+
+        let bullets = bullets::load();
+        let repair_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == repair.bullet)
+            .expect("missing cyerce_repair_range");
+        assert_eq!(repair_bullet.spec.kind, BulletKind::Generic);
+        assert_eq!(repair_bullet.spec.max_range, 130.0);
+
+        let missile_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == missile.bullet)
+            .expect("missing cyerce_plasma_missile");
+        assert_eq!(missile_bullet.spec.kind, BulletKind::Flak);
+        assert_eq!(missile_bullet.spec.speed, 2.5);
+        assert_eq!(missile_bullet.spec.damage, 25.0);
+        assert_eq!(missile_bullet.spec.splash_damage, 25.0);
+        assert_eq!(missile_bullet.spec.splash_damage_radius, 30.0);
+        assert_eq!(missile_bullet.spec.frag_bullets, 7);
+
+        let frag = missile_bullet
+            .spec
+            .frag_bullet
+            .as_deref()
+            .expect("missing cyerce plasma frag missile");
+        assert_eq!(frag.kind, BulletKind::Missile);
+        assert_eq!(frag.speed, 3.9);
+        assert_eq!(frag.damage, 11.0);
+        assert_eq!(frag.heal_percent, 2.8);
+        assert!(frag.collides_team);
+        assert_eq!(frag.splash_damage, 13.0);
+        assert_eq!(frag.splash_damage_radius, 20.0);
     }
 
     #[test]
