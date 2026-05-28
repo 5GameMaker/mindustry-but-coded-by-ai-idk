@@ -6715,3 +6715,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `hitBulletSmall=77`、`hitBulletColor=78`、`hitSquaresColor=79`、`hitFuse=81` 仍需要 scaled circle + radial line/square + light 的 multi-pass 表达；
   - `hitFlameBeam=91` 是 seeded circle batch，可后续用现有 circle primitive 迁移；
   - line/square 已进入 desktop frame cache，但仍未下沉到真实绘制 backend。
+
+### 12.219 Fx.hitFlameBeam seeded circle batch
+
+- 2026-05-28：迁移紧邻 hit radial-line batch 的 `hitFlameBeam=91`，该效果是纯 seeded circle particles，不需要 multi-pass。
+- 本轮迁移：
+  - `hitFlameBeam=91`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1022` 附近：
+    - `hitFlameBeam = new Effect(19, ...)`
+    - `color(e.color)`
+    - `randLenVectors(e.id, 7, e.finpow() * 11f, ...)`
+    - `Fill.circle(e.x + x, e.y + y, e.fout() * 2 + 0.5f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_FLAME_BEAM_ID = 91`，接入 name/metadata；
+    - `standard_effect_draw_plan(...)` 新增 `SeededCircleParticles` 分支；
+    - 使用输入色、7 个随机粒子、长度 `finpow*11`、半径 `0.5 + fout*2`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `hitFlameBeam`；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime `19`；
+  - `standard_effect_draw_plan_covers_hit_radial_line_batch` 扩展覆盖 `hitFlameBeam` 的 kind、输入色、count、length、半径和 circle primitive 展开。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_hit_radial_line_batch --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `hitBulletSmall=77`、`hitBulletColor=78`、`hitSquaresColor=79`、`hitFuse=81` 仍需 multi-pass/附加 scaled circle/light 表达；
+  - `inst*`/laser 后续命中特效需要继续逐个对照，避免近似硬塞；
+  - renderer/backend 仍需真实消费 desktop frame 中的 square/line primitives。

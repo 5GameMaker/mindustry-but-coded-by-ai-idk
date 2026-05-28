@@ -4868,6 +4868,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-desktop`
   - `git diff --check`
 - 下一步建议：
-  1. `hitFlameBeam=91` 可以用已有 `SeededCircleParticles` 迁移，较独立。
+  1. 后续最新状态见 145 节；`hitFlameBeam=91` 已迁移。
   2. `hitBulletSmall=77` / `hitBulletColor=78` / `hitSquaresColor=79` / `hitFuse=81` 需要先扩展 multi-pass 或附加 scaled circle/light 表达，不要只迁移主粒子。
   3. 继续推进 renderer/backend 消费 `DesktopStandardEffectRenderFrame.square_primitives` 与 `.line_primitives`。
+
+---
+
+## 145. 最新闭环记录：Fx.hitFlameBeam seeded circle batch
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `hitFlameBeam=91`，这是纯 `randLenVectors + Fill.circle`，不需要 multi-pass。
+- Java 依据：
+  - `Fx.java:1022-1028`
+  - lifetime `19`
+  - 输入色 `e.color`
+  - 7 个粒子，长度 `finpow*11`
+  - 半径 `fout*2 + 0.5`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_HIT_FLAME_BEAM_ID=91`；
+    - 接入 `standard_effect_id` / `standard_effect` / `standard_effect_draw_plan`；
+    - draw kind 使用 `SeededCircleParticles`；
+    - 扩展 `standard_effect_draw_plan_covers_hit_radial_line_batch` 覆盖 circle primitive 展开。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_hit_radial_line_batch --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 下一组如果继续 Fx，可考虑 `instTrail`/`instShoot`/`instHit` 前先对照是否需要 polygon/tri/laser primitives。
+  2. `hitBulletSmall`、`hitBulletColor`、`hitSquaresColor`、`hitFuse` 暂不要半迁移，先设计 multi-pass/附加 circle+light 表达。
+  3. 也可以转向 desktop renderer，把 frame cache 里的 square/line primitive 真正画出来。

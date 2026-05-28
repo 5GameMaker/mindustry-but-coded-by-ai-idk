@@ -38,6 +38,8 @@ pub const FX_HIT_LANCER_ID: i32 = 88;
 pub const FX_HIT_LANCER_LOW_ID: i32 = 89;
 /// Upstream `Fx.hitBeam` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_BEAM_ID: i32 = 90;
+/// Upstream `Fx.hitFlameBeam` id in `mindustry.content.Fx` for v158.1.
+pub const FX_HIT_FLAME_BEAM_ID: i32 = 91;
 /// Upstream `Fx.hitMeltdown` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_MELTDOWN_ID: i32 = 92;
 /// Upstream `Fx.hitMeltHeal` id in `mindustry.content.Fx` for v158.1.
@@ -190,6 +192,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "hitLancer" => Some(FX_HIT_LANCER_ID),
         "hitLancerLow" => Some(FX_HIT_LANCER_LOW_ID),
         "hitBeam" => Some(FX_HIT_BEAM_ID),
+        "hitFlameBeam" => Some(FX_HIT_FLAME_BEAM_ID),
         "hitMeltdown" => Some(FX_HIT_MELTDOWN_ID),
         "hitMeltHeal" => Some(FX_HIT_MELT_HEAL_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
@@ -305,6 +308,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_HIT_LANCER_LOW_ID, 12.0, DEFAULT_EFFECT_CLIP)
         }
         FX_HIT_BEAM_ID => Effect::with_lifetime(FX_HIT_BEAM_ID, 12.0, DEFAULT_EFFECT_CLIP),
+        FX_HIT_FLAME_BEAM_ID => {
+            Effect::with_lifetime(FX_HIT_FLAME_BEAM_ID, 19.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_HIT_MELTDOWN_ID => Effect::with_lifetime(FX_HIT_MELTDOWN_ID, 12.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_MELT_HEAL_ID => {
             Effect::with_lifetime(FX_HIT_MELT_HEAL_ID, 12.0, DEFAULT_EFFECT_CLIP)
@@ -1377,6 +1383,45 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_HIT_FLAME_BEAM_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededCircleParticles,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 0.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 7,
+                progress: None,
+                angle: None,
+                angle_range: 0.0,
+                length: finpow * 11.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.5,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 2.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_MISSILE_TRAIL_ID | FX_MISSILE_TRAIL_SHORT_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -3858,6 +3903,10 @@ mod tests {
             Some(FX_HIT_LANCER_LOW_ID)
         );
         assert_eq!(standard_effect_id("hitBeam"), Some(FX_HIT_BEAM_ID));
+        assert_eq!(
+            standard_effect_id("hitFlameBeam"),
+            Some(FX_HIT_FLAME_BEAM_ID)
+        );
         assert_eq!(standard_effect_id("hitMeltdown"), Some(FX_HIT_MELTDOWN_ID));
         assert_eq!(standard_effect_id("hitMeltHeal"), Some(FX_HIT_MELT_HEAL_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
@@ -4052,6 +4101,10 @@ mod tests {
             12.0
         );
         assert_eq!(standard_effect(FX_HIT_BEAM_ID).unwrap().lifetime, 12.0);
+        assert_eq!(
+            standard_effect(FX_HIT_FLAME_BEAM_ID).unwrap().lifetime,
+            19.0
+        );
         assert_eq!(standard_effect(FX_HIT_MELTDOWN_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_MELT_HEAL_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
@@ -4800,6 +4853,31 @@ mod tests {
         assert_eq!(hit_beam.stroke, 1.0);
         assert_eq!(hit_beam.particles.unwrap().length, 15.75);
         assert_eq!(hit_beam.line_render_primitives_from_seed().len(), 6);
+
+        let hit_flame_beam = standard_effect_draw_plan(
+            Some(FX_HIT_FLAME_BEAM_ID as u16),
+            91,
+            3.0,
+            4.0,
+            30.0,
+            9.5,
+            19.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(
+            hit_flame_beam.kind,
+            StandardEffectDrawKind::SeededCircleParticles
+        );
+        assert_eq!(hit_flame_beam.input_color, Some(input_color));
+        let hit_flame_beam_particles = hit_flame_beam.particles.unwrap();
+        assert_eq!(hit_flame_beam_particles.count, 7);
+        assert_eq!(hit_flame_beam_particles.length, 9.625);
+        assert_eq!(hit_flame_beam_particles.radius_base, 0.5);
+        assert_eq!(hit_flame_beam_particles.radius_fout_scale, 2.0);
+        let hit_flame_beam_circles = hit_flame_beam.circle_render_primitives_from_seed();
+        assert_eq!(hit_flame_beam_circles.len(), 7);
+        assert!((hit_flame_beam_circles[0].radius - 1.5).abs() < 0.0001);
 
         let hit_meltdown = standard_effect_draw_plan(
             Some(FX_HIT_MELTDOWN_ID as u16),
