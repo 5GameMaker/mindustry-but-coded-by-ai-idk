@@ -7925,3 +7925,46 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `lightningCharge=203` 需要 seeded triangle particles；
   - `lancerLaserChargeBegin=202`、`lancerLaserCharge=201`、`rail*` 仍待迁移；
   - 真实 renderer/backend 仍未接入。
+
+### 12.251 Fx.rail*/lancerLaser*/lightningCharge
+
+- 2026-05-28：回补 `Fx.java:2323-2412` 附近的 rail/lancer charge 段，避免 `sparkShoot=204` 前的 `196..203` 区间继续空缺。
+- 本轮迁移：
+  - `railShoot=196`
+  - `railTrail=197`
+  - `railHit=198`
+  - `lancerLaserShoot=199`
+  - `lancerLaserShootSmoke=200`
+  - `lancerLaserCharge=201`
+  - `lancerLaserChargeBegin=202`
+  - `lightningCharge=203`
+- Java 依据：
+  - `railShoot = new Effect(24f, ...)`：前 10f scaled 圆环 `Color.white -> Color.lightGray`，再绘制两枚 `Pal.orangeSpark` 三角；
+  - `railTrail = new Effect(16f, ...)`：两枚 `Pal.orangeSpark` 三角，并有 `Drawf.light(..., 60*fout, Pal.orangeSpark, 0.5)`；
+  - `railHit = new Effect(18f, 200f, ...)`：clip 200，两枚角度 `rotation±140` 的 `Pal.orangeSpark` 三角；
+  - `lancerLaserShoot = new Effect(21f, ...)`：两枚 `Pal.lancerLaser` 三角；
+  - `lancerLaserShootSmoke = new Effect(26f, ...)`：7 条 line，默认 length 70，如 `data instanceof Float` 则用 data float 覆盖；
+  - `lancerLaserCharge = new Effect(38f, ...)`：14 条 seeded radial line，offset length `1+20*fout`，line length `fslope*3+1`；
+  - `lancerLaserChargeBegin = new Effect(60f, ...)`：`min(1-curve(fin,0.9), fin)` 控制的两层 filled circle；
+  - `lightningCharge = new Effect(38f, ...)`：2 个 seeded radial triangle，宽高均 `fslope*3+1`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `196..203` Fx ID、lookup、metadata；
+    - 新增 `Pal.orangeSpark=0xd2b29cff`；
+    - 新增 `StandardEffectDrawKind::SeededRadialTriangleParticles`，用于按 seeded vector 展开 offset triangle；
+    - 新增 `standard_effect_draw_plans_with_data_float(...)`，保留 `lancerLaserShootSmoke` 的 Java `data Float` 长度语义；原 `standard_effect_draw_plans(...)` 保持兼容并以 `None` 调用；
+    - `rail*` 复用 circle/triangle/light primitive，`lancerLaserCharge`/`ShootSmoke` 复用 radial line primitive，`lancerLaserChargeBegin` 复用 filled circle primitive，`lightningCharge` 接入 radial triangle primitive。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `standard_effect_draw_plans_with_data_float(...)`。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render(...)` 从 `EffectRenderInput.data` 提取 `TypeValue::Float` 并传入标准 effect seam；
+    - 新增 `desktop_launcher_flattens_rail_and_lancer_charge_primitives_for_render`，验证 10 个 draw plans 展开为 3 个 circle、21 条 line、10 个 triangle、1 个 light。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_rail_and_lancer_charge_primitives --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_rail_and_lancer_charge_primitives_for_render --lib`
+- 仍未完成：
+  - 真实 renderer/backend 仍未接入，当前仍是 headless primitive seam；
+  - `lancerLaserShootSmoke` 已能从当前 effect state data 读取 Float，但后续仍需继续确认所有 Java effect call path 都能把 data 正确写入/同步到该 state；
+  - `casing*` 仍需 rect/sprite primitive；
+  - 继续按 `Fx.java` 后续段逐项迁移，不要把局部 Fx seam 误报为可玩。

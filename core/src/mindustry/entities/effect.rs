@@ -250,6 +250,22 @@ pub const FX_SHOOT_SMALL_FLAME_ID: i32 = 187;
 pub const FX_SHOOT_PYRA_FLAME_ID: i32 = 188;
 /// Upstream `Fx.shootLiquid` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_LIQUID_ID: i32 = 189;
+/// Upstream `Fx.railShoot` id in `mindustry.content.Fx` for v158.1.
+pub const FX_RAIL_SHOOT_ID: i32 = 196;
+/// Upstream `Fx.railTrail` id in `mindustry.content.Fx` for v158.1.
+pub const FX_RAIL_TRAIL_ID: i32 = 197;
+/// Upstream `Fx.railHit` id in `mindustry.content.Fx` for v158.1.
+pub const FX_RAIL_HIT_ID: i32 = 198;
+/// Upstream `Fx.lancerLaserShoot` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LANCER_LASER_SHOOT_ID: i32 = 199;
+/// Upstream `Fx.lancerLaserShootSmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LANCER_LASER_SHOOT_SMOKE_ID: i32 = 200;
+/// Upstream `Fx.lancerLaserCharge` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LANCER_LASER_CHARGE_ID: i32 = 201;
+/// Upstream `Fx.lancerLaserChargeBegin` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LANCER_LASER_CHARGE_BEGIN_ID: i32 = 202;
+/// Upstream `Fx.lightningCharge` id in `mindustry.content.Fx` for v158.1.
+pub const FX_LIGHTNING_CHARGE_ID: i32 = 203;
 /// Upstream `Fx.sparkShoot` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SPARK_SHOOT_ID: i32 = 204;
 /// Upstream `Fx.lightningShoot` id in `mindustry.content.Fx` for v158.1.
@@ -412,6 +428,14 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootSmallFlame" => Some(FX_SHOOT_SMALL_FLAME_ID),
         "shootPyraFlame" => Some(FX_SHOOT_PYRA_FLAME_ID),
         "shootLiquid" => Some(FX_SHOOT_LIQUID_ID),
+        "railShoot" => Some(FX_RAIL_SHOOT_ID),
+        "railTrail" => Some(FX_RAIL_TRAIL_ID),
+        "railHit" => Some(FX_RAIL_HIT_ID),
+        "lancerLaserShoot" => Some(FX_LANCER_LASER_SHOOT_ID),
+        "lancerLaserShootSmoke" => Some(FX_LANCER_LASER_SHOOT_SMOKE_ID),
+        "lancerLaserCharge" => Some(FX_LANCER_LASER_CHARGE_ID),
+        "lancerLaserChargeBegin" => Some(FX_LANCER_LASER_CHARGE_BEGIN_ID),
+        "lightningCharge" => Some(FX_LIGHTNING_CHARGE_ID),
         "sparkShoot" => Some(FX_SPARK_SHOOT_ID),
         "lightningShoot" => Some(FX_LIGHTNING_SHOOT_ID),
         "thoriumShoot" => Some(FX_THORIUM_SHOOT_ID),
@@ -688,6 +712,24 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_SHOOT_PYRA_FLAME_ID, 33.0, 80.0).follow_parent(false)
         }
         FX_SHOOT_LIQUID_ID => Effect::with_lifetime(FX_SHOOT_LIQUID_ID, 15.0, 80.0),
+        FX_RAIL_SHOOT_ID => Effect::with_lifetime(FX_RAIL_SHOOT_ID, 24.0, DEFAULT_EFFECT_CLIP),
+        FX_RAIL_TRAIL_ID => Effect::with_lifetime(FX_RAIL_TRAIL_ID, 16.0, DEFAULT_EFFECT_CLIP),
+        FX_RAIL_HIT_ID => Effect::with_lifetime(FX_RAIL_HIT_ID, 18.0, 200.0),
+        FX_LANCER_LASER_SHOOT_ID => {
+            Effect::with_lifetime(FX_LANCER_LASER_SHOOT_ID, 21.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_LANCER_LASER_SHOOT_SMOKE_ID => {
+            Effect::with_lifetime(FX_LANCER_LASER_SHOOT_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_LANCER_LASER_CHARGE_ID => {
+            Effect::with_lifetime(FX_LANCER_LASER_CHARGE_ID, 38.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_LANCER_LASER_CHARGE_BEGIN_ID => {
+            Effect::with_lifetime(FX_LANCER_LASER_CHARGE_BEGIN_ID, 60.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_LIGHTNING_CHARGE_ID => {
+            Effect::with_lifetime(FX_LIGHTNING_CHARGE_ID, 38.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SPARK_SHOOT_ID => Effect::with_lifetime(FX_SPARK_SHOOT_ID, 12.0, DEFAULT_EFFECT_CLIP),
         FX_LIGHTNING_SHOOT_ID => {
             Effect::with_lifetime(FX_LIGHTNING_SHOOT_ID, 12.0, DEFAULT_EFFECT_CLIP)
@@ -761,6 +803,22 @@ pub fn standard_effect_draw_plans(
     lifetime: f32,
     color: DecalColor,
 ) -> Vec<StandardEffectDrawPlan> {
+    standard_effect_draw_plans_with_data_float(
+        effect_id, state_id, x, y, rotation, time, lifetime, color, None,
+    )
+}
+
+pub fn standard_effect_draw_plans_with_data_float(
+    effect_id: Option<u16>,
+    state_id: i32,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    time: f32,
+    lifetime: f32,
+    color: DecalColor,
+    data_float: Option<f32>,
+) -> Vec<StandardEffectDrawPlan> {
     let Some(effect_id_i32) = effect_id.map(i32::from) else {
         return Vec::new();
     };
@@ -790,6 +848,14 @@ pub fn standard_effect_draw_plans(
             | FX_COLOR_SPARK_BIG_ID
             | FX_RAND_LIFE_SPARK_ID
             | FX_SHOOT_PAYLOAD_DRIVER_ID
+            | FX_RAIL_SHOOT_ID
+            | FX_RAIL_TRAIL_ID
+            | FX_RAIL_HIT_ID
+            | FX_LANCER_LASER_SHOOT_ID
+            | FX_LANCER_LASER_SHOOT_SMOKE_ID
+            | FX_LANCER_LASER_CHARGE_ID
+            | FX_LANCER_LASER_CHARGE_BEGIN_ID
+            | FX_LIGHTNING_CHARGE_ID
             | FX_RED_GENERATE_SPARK_ID
             | FX_TURBINE_GENERATE_ID
     ) {
@@ -969,6 +1035,303 @@ pub fn standard_effect_draw_plans(
         }
 
         return plans;
+    }
+
+    if effect_id_i32 == FX_RAIL_SHOOT_ID {
+        let mut plans = Vec::with_capacity(if time <= 10.0 { 2 } else { 1 });
+        let scaled_lifetime = 10.0;
+        if time <= scaled_lifetime {
+            let scaled_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
+            let scaled_fout = 1.0 - scaled_fin;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: Some("Color.lightGray"),
+                color_mix: scaled_fin,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: scaled_fin * 50.0,
+                stroke: scaled_fout * 3.0 + 0.2,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::TrianglePair,
+            center: (x, y),
+            color_from: Some("Pal.orangeSpark"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 13.0 * fout,
+            stroke: 85.0,
+            particles: Some(standard_effect_particle_spec(
+                state_id,
+                2,
+                Some(rotation - 90.0),
+                0.0,
+                85.0,
+                fin,
+                fout,
+                fslope,
+            )),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        });
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_RAIL_TRAIL_ID {
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::TrianglePair,
+            center: (x, y),
+            color_from: Some("Pal.orangeSpark"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 10.0 * fout,
+            stroke: 24.0,
+            particles: Some(standard_effect_particle_spec(
+                state_id,
+                2,
+                Some(rotation),
+                0.0,
+                24.0,
+                fin,
+                fout,
+                fslope,
+            )),
+            light_color: Some("Pal.orangeSpark"),
+            light_radius: 60.0 * fout,
+            light_opacity: 0.5,
+        }];
+    }
+
+    if effect_id_i32 == FX_RAIL_HIT_ID {
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::TriangleFan,
+            center: (x, y),
+            color_from: Some("Pal.orangeSpark"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 10.0 * fout,
+            stroke: 60.0,
+            particles: Some(standard_effect_particle_spec(
+                state_id,
+                2,
+                Some(rotation - 140.0),
+                280.0,
+                0.0,
+                fin,
+                fout,
+                fslope,
+            )),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        }];
+    }
+
+    if effect_id_i32 == FX_LANCER_LASER_SHOOT_ID {
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::TrianglePair,
+            center: (x, y),
+            color_from: Some("Pal.lancerLaser"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 4.0 * fout,
+            stroke: 29.0,
+            particles: Some(standard_effect_particle_spec(
+                state_id,
+                2,
+                Some(rotation - 90.0),
+                0.0,
+                29.0,
+                fin,
+                fout,
+                fslope,
+            )),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        }];
+    }
+
+    if effect_id_i32 == FX_LANCER_LASER_SHOOT_SMOKE_ID {
+        let mut particles = standard_effect_particle_spec(
+            state_id,
+            7,
+            Some(rotation),
+            0.0,
+            data_float.unwrap_or(70.0),
+            fin,
+            fout,
+            fslope,
+        );
+        particles.radius_fout_scale = 9.0;
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: Some("Color.white"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 1.0,
+            particles: Some(particles),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        }];
+    }
+
+    if effect_id_i32 == FX_LANCER_LASER_CHARGE_ID {
+        let mut particles = standard_effect_particle_spec(
+            state_id,
+            14,
+            Some(rotation),
+            120.0,
+            1.0 + 20.0 * fout,
+            fin,
+            fout,
+            fslope,
+        );
+        particles.radius_base = 1.0;
+        particles.radius_fslope_scale = 3.0;
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialLineParticles,
+            center: (x, y),
+            color_from: Some("Pal.lancerLaser"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 0.0,
+            stroke: 1.0,
+            particles: Some(particles),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        }];
+    }
+
+    if effect_id_i32 == FX_LANCER_LASER_CHARGE_BEGIN_ID {
+        let charge_fin = fin.min(1.0 - curve(fin, 0.9, 1.0));
+        return vec![
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::FilledCircle,
+                center: (x, y),
+                color_from: Some("Pal.lancerLaser"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: charge_fin * 3.0,
+                stroke: 0.0,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::FilledCircle,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: charge_fin * 2.0,
+                stroke: 0.0,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+        ];
+    }
+
+    if effect_id_i32 == FX_LIGHTNING_CHARGE_ID {
+        let mut particles = standard_effect_particle_spec(
+            state_id,
+            2,
+            Some(rotation),
+            120.0,
+            1.0 + 20.0 * fout,
+            fin,
+            fout,
+            fslope,
+        );
+        particles.radius_fslope_scale = 3.0;
+        particles.secondary_radius_fslope_scale = 3.0;
+        return vec![StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::SeededRadialTriangleParticles,
+            center: (x, y),
+            color_from: Some("Pal.lancerLaser"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 1.0,
+            stroke: 1.0,
+            particles: Some(particles),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        }];
     }
 
     if matches!(
@@ -2156,6 +2519,7 @@ pub enum StandardEffectDrawKind {
     LineAngle,
     TrianglePair,
     TriangleFan,
+    SeededRadialTriangleParticles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2391,7 +2755,8 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::SeededRotatedSquareParticles
             | StandardEffectDrawKind::LineAngle
             | StandardEffectDrawKind::TrianglePair
-            | StandardEffectDrawKind::TriangleFan => Vec::new(),
+            | StandardEffectDrawKind::TriangleFan
+            | StandardEffectDrawKind::SeededRadialTriangleParticles => Vec::new(),
         }
     }
 
@@ -2499,7 +2864,8 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::SeededRadialLineParticles
             | StandardEffectDrawKind::LineAngle
             | StandardEffectDrawKind::TrianglePair
-            | StandardEffectDrawKind::TriangleFan => Vec::new(),
+            | StandardEffectDrawKind::TriangleFan
+            | StandardEffectDrawKind::SeededRadialTriangleParticles => Vec::new(),
         }
     }
 
@@ -2606,6 +2972,34 @@ impl StandardEffectDrawPlan {
                     })
                     .collect()
             }
+            StandardEffectDrawKind::SeededRadialTriangleParticles => {
+                let Some(particles) = self.particles else {
+                    return Vec::new();
+                };
+                self.seeded_particle_vectors()
+                    .into_iter()
+                    .map(|vector| {
+                        let width = self.radius
+                            + particles.radius_base
+                            + particles.radius_fin_scale * particles.fin
+                            + particles.radius_fout_scale * particles.fout
+                            + particles.radius_fslope_scale * particles.fslope;
+                        let length = self.stroke
+                            + particles.secondary_radius_base
+                            + particles.secondary_radius_fin_scale * particles.fin
+                            + particles.secondary_radius_fout_scale * particles.fout
+                            + particles.secondary_radius_fslope_scale * particles.fslope;
+                        StandardEffectTriangleRenderPrimitive {
+                            center: (self.center.0 + vector.x, self.center.1 + vector.y),
+                            width,
+                            length,
+                            rotation: vector.y.atan2(vector.x).to_degrees(),
+                            alpha: self.alpha,
+                            color,
+                        }
+                    })
+                    .collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -2693,6 +3087,39 @@ impl StandardEffectParticleSpec {
         }
 
         vectors
+    }
+}
+
+fn standard_effect_particle_spec(
+    seed: i32,
+    count: u16,
+    angle: Option<f32>,
+    angle_range: f32,
+    length: f32,
+    fin: f32,
+    fout: f32,
+    fslope: f32,
+) -> StandardEffectParticleSpec {
+    StandardEffectParticleSpec {
+        seed,
+        count,
+        progress: None,
+        angle,
+        angle_range,
+        length,
+        fin,
+        fout,
+        fslope,
+        radius_base: 0.0,
+        radius_fin_scale: 0.0,
+        radius_fout_scale: 0.0,
+        radius_fslope_scale: 0.0,
+        secondary_vector_scale: 0.0,
+        secondary_radius_base: 0.0,
+        secondary_radius_fin_scale: 0.0,
+        secondary_radius_fout_scale: 0.0,
+        secondary_radius_fslope_scale: 0.0,
+        alpha_midpoint: false,
     }
 }
 
@@ -5261,6 +5688,7 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.bulletYellowBack" => Some(DecalColor::from_rgba(0xf9c27aff)),
         "Pal.redLight" => Some(DecalColor::from_rgba(0xfeb380ff)),
         "Pal.redSpark" => Some(DecalColor::from_rgba(0xfbb97fff)),
+        "Pal.orangeSpark" => Some(DecalColor::from_rgba(0xd2b29cff)),
         "Pal.vent" => Some(DecalColor::from_rgba(0x6b4e4eff)),
         "Pal.regen" => Some(DecalColor::from_rgba(0xd1efffff)),
         "Pal.slagOrange" => Some(DecalColor::from_rgba(0xffa166ff)),
@@ -6833,6 +7261,29 @@ mod tests {
             Some(FX_SHOOT_PYRA_FLAME_ID)
         );
         assert_eq!(standard_effect_id("shootLiquid"), Some(FX_SHOOT_LIQUID_ID));
+        assert_eq!(standard_effect_id("railShoot"), Some(FX_RAIL_SHOOT_ID));
+        assert_eq!(standard_effect_id("railTrail"), Some(FX_RAIL_TRAIL_ID));
+        assert_eq!(standard_effect_id("railHit"), Some(FX_RAIL_HIT_ID));
+        assert_eq!(
+            standard_effect_id("lancerLaserShoot"),
+            Some(FX_LANCER_LASER_SHOOT_ID)
+        );
+        assert_eq!(
+            standard_effect_id("lancerLaserShootSmoke"),
+            Some(FX_LANCER_LASER_SHOOT_SMOKE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("lancerLaserCharge"),
+            Some(FX_LANCER_LASER_CHARGE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("lancerLaserChargeBegin"),
+            Some(FX_LANCER_LASER_CHARGE_BEGIN_ID)
+        );
+        assert_eq!(
+            standard_effect_id("lightningCharge"),
+            Some(FX_LIGHTNING_CHARGE_ID)
+        );
         assert_eq!(standard_effect_id("sparkShoot"), Some(FX_SPARK_SHOOT_ID));
         assert_eq!(
             standard_effect_id("lightningShoot"),
@@ -7201,6 +7652,38 @@ mod tests {
         let shoot_liquid = standard_effect(FX_SHOOT_LIQUID_ID).unwrap();
         assert_eq!(shoot_liquid.lifetime, 15.0);
         assert_eq!(shoot_liquid.clip, 80.0);
+        let rail_shoot = standard_effect(FX_RAIL_SHOOT_ID).unwrap();
+        assert_eq!(rail_shoot.lifetime, 24.0);
+        assert_eq!(rail_shoot.clip, DEFAULT_EFFECT_CLIP);
+        assert_eq!(rail_shoot.layer, DEFAULT_EFFECT_LAYER);
+        assert_eq!(standard_effect(FX_RAIL_TRAIL_ID).unwrap().lifetime, 16.0);
+        let rail_hit = standard_effect(FX_RAIL_HIT_ID).unwrap();
+        assert_eq!(rail_hit.lifetime, 18.0);
+        assert_eq!(rail_hit.clip, 200.0);
+        assert_eq!(
+            standard_effect(FX_LANCER_LASER_SHOOT_ID).unwrap().lifetime,
+            21.0
+        );
+        assert_eq!(
+            standard_effect(FX_LANCER_LASER_SHOOT_SMOKE_ID)
+                .unwrap()
+                .lifetime,
+            26.0
+        );
+        assert_eq!(
+            standard_effect(FX_LANCER_LASER_CHARGE_ID).unwrap().lifetime,
+            38.0
+        );
+        assert_eq!(
+            standard_effect(FX_LANCER_LASER_CHARGE_BEGIN_ID)
+                .unwrap()
+                .lifetime,
+            60.0
+        );
+        assert_eq!(
+            standard_effect(FX_LIGHTNING_CHARGE_ID).unwrap().lifetime,
+            38.0
+        );
         assert_eq!(standard_effect(FX_SPARK_SHOOT_ID).unwrap().lifetime, 12.0);
         assert_eq!(
             standard_effect(FX_LIGHTNING_SHOOT_ID).unwrap().lifetime,
@@ -9162,6 +9645,205 @@ mod tests {
             Some(DecalColor::from_rgba(0xf9a3c7ff))
         );
         assert_eq!(thorium.line_render_primitives_from_seed().len(), 7);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_rail_and_lancer_charge_primitives() {
+        let rail_shoot = standard_effect_draw_plans(
+            Some(FX_RAIL_SHOOT_ID as u16),
+            196,
+            3.0,
+            4.0,
+            30.0,
+            5.0,
+            24.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(rail_shoot.len(), 2);
+        let shoot_circle = rail_shoot[0];
+        assert_eq!(shoot_circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(shoot_circle.color_from, Some("Color.white"));
+        assert_eq!(shoot_circle.color_to, Some("Color.lightGray"));
+        assert_eq!(shoot_circle.radius, 25.0);
+        assert!((shoot_circle.stroke - 1.7).abs() < 0.0001);
+        let shoot_tri = rail_shoot[1];
+        assert_eq!(shoot_tri.kind, StandardEffectDrawKind::TrianglePair);
+        assert_eq!(shoot_tri.color_from, Some("Pal.orangeSpark"));
+        assert_eq!(
+            standard_effect_color_symbol("Pal.orangeSpark"),
+            Some(DecalColor::from_rgba(0xd2b29cff))
+        );
+        let rail_shoot_triangles = shoot_tri.triangle_render_primitives_from_seed();
+        assert_eq!(rail_shoot_triangles.len(), 2);
+        assert_eq!(rail_shoot_triangles[0].rotation, -60.0);
+        assert_eq!(rail_shoot_triangles[1].rotation, 120.0);
+        assert!((rail_shoot_triangles[0].width - (13.0 * (1.0 - 5.0 / 24.0))).abs() < 0.0001);
+        assert_eq!(rail_shoot_triangles[0].length, 85.0);
+        assert_eq!(rail_shoot_triangles[1].length, 85.0);
+
+        let rail_trail = standard_effect_draw_plans(
+            Some(FX_RAIL_TRAIL_ID as u16),
+            197,
+            3.0,
+            4.0,
+            30.0,
+            8.0,
+            16.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(rail_trail.len(), 1);
+        let trail = rail_trail[0];
+        assert_eq!(trail.kind, StandardEffectDrawKind::TrianglePair);
+        assert_eq!(trail.radius, 5.0);
+        let trail_triangles = trail.triangle_render_primitives_from_seed();
+        assert_eq!(trail_triangles[0].rotation, 30.0);
+        assert_eq!(trail_triangles[1].rotation, 210.0);
+        assert_eq!(trail_triangles[0].length, 24.0);
+        let trail_light = trail.light_render_primitives();
+        assert_eq!(trail_light.len(), 1);
+        assert_eq!(trail_light[0].color, "Pal.orangeSpark");
+        assert_eq!(trail_light[0].radius, 30.0);
+        assert_eq!(trail_light[0].opacity, 0.5);
+
+        let rail_hit = standard_effect_draw_plans(
+            Some(FX_RAIL_HIT_ID as u16),
+            198,
+            3.0,
+            4.0,
+            30.0,
+            9.0,
+            18.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(rail_hit.len(), 1);
+        let hit = rail_hit[0];
+        assert_eq!(hit.kind, StandardEffectDrawKind::TriangleFan);
+        assert_eq!(hit.radius, 5.0);
+        assert_eq!(hit.stroke, 60.0);
+        let hit_triangles = hit.triangle_render_primitives_from_seed();
+        assert_eq!(hit_triangles.len(), 2);
+        assert_eq!(hit_triangles[0].rotation, -110.0);
+        assert_eq!(hit_triangles[1].rotation, 170.0);
+
+        let lancer_shoot = standard_effect_draw_plans(
+            Some(FX_LANCER_LASER_SHOOT_ID as u16),
+            199,
+            3.0,
+            4.0,
+            30.0,
+            10.5,
+            21.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(lancer_shoot.len(), 1);
+        let lancer_triangles = lancer_shoot[0].triangle_render_primitives_from_seed();
+        assert_eq!(lancer_triangles.len(), 2);
+        assert_eq!(lancer_triangles[0].width, 2.0);
+        assert_eq!(lancer_triangles[0].length, 29.0);
+        assert_eq!(lancer_triangles[0].rotation, -60.0);
+        assert_eq!(lancer_triangles[1].rotation, 120.0);
+        assert_eq!(
+            lancer_triangles[0].color,
+            standard_effect_color_symbol("Pal.lancerLaser")
+        );
+
+        let smoke_default = standard_effect_draw_plans_with_data_float(
+            Some(FX_LANCER_LASER_SHOOT_SMOKE_ID as u16),
+            200,
+            3.0,
+            4.0,
+            30.0,
+            13.0,
+            26.0,
+            DecalColor::WHITE,
+            None,
+        );
+        assert_eq!(smoke_default.len(), 1);
+        let smoke_particles = smoke_default[0].particles.unwrap();
+        assert_eq!(smoke_particles.count, 7);
+        assert_eq!(smoke_particles.length, 70.0);
+        assert_eq!(smoke_particles.radius_fout_scale, 9.0);
+        let smoke_lines = smoke_default[0].line_render_primitives_from_seed();
+        assert_eq!(smoke_lines.len(), 7);
+        assert!((smoke_lines[0].length - 4.5).abs() < 0.0001);
+        let smoke_with_data = standard_effect_draw_plans_with_data_float(
+            Some(FX_LANCER_LASER_SHOOT_SMOKE_ID as u16),
+            200,
+            3.0,
+            4.0,
+            30.0,
+            13.0,
+            26.0,
+            DecalColor::WHITE,
+            Some(42.0),
+        );
+        assert_eq!(smoke_with_data[0].particles.unwrap().length, 42.0);
+
+        let charge = standard_effect_draw_plans(
+            Some(FX_LANCER_LASER_CHARGE_ID as u16),
+            201,
+            3.0,
+            4.0,
+            30.0,
+            19.0,
+            38.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(charge.len(), 1);
+        assert_eq!(
+            charge[0].kind,
+            StandardEffectDrawKind::SeededRadialLineParticles
+        );
+        let charge_particles = charge[0].particles.unwrap();
+        assert_eq!(charge_particles.count, 14);
+        assert_eq!(charge_particles.length, 11.0);
+        assert_eq!(charge_particles.radius_base, 1.0);
+        assert_eq!(charge_particles.radius_fslope_scale, 3.0);
+        assert_eq!(charge[0].line_render_primitives_from_seed().len(), 14);
+        assert_eq!(charge[0].line_render_primitives_from_seed()[0].length, 4.0);
+
+        let begin = standard_effect_draw_plans(
+            Some(FX_LANCER_LASER_CHARGE_BEGIN_ID as u16),
+            202,
+            3.0,
+            4.0,
+            30.0,
+            30.0,
+            60.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(begin.len(), 2);
+        assert_eq!(begin[0].kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(begin[0].color_from, Some("Pal.lancerLaser"));
+        assert_eq!(begin[0].radius, 1.5);
+        assert_eq!(begin[1].color_from, Some("Color.white"));
+        assert_eq!(begin[1].radius, 1.0);
+
+        let lightning = standard_effect_draw_plans(
+            Some(FX_LIGHTNING_CHARGE_ID as u16),
+            203,
+            3.0,
+            4.0,
+            30.0,
+            19.0,
+            38.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(lightning.len(), 1);
+        assert_eq!(
+            lightning[0].kind,
+            StandardEffectDrawKind::SeededRadialTriangleParticles
+        );
+        let lightning_particles = lightning[0].particles.unwrap();
+        assert_eq!(lightning_particles.count, 2);
+        assert_eq!(lightning_particles.length, 11.0);
+        assert_eq!(lightning_particles.radius_fslope_scale, 3.0);
+        assert_eq!(lightning_particles.secondary_radius_fslope_scale, 3.0);
+        let lightning_triangles = lightning[0].triangle_render_primitives_from_seed();
+        assert_eq!(lightning_triangles.len(), 2);
+        assert_ne!(lightning_triangles[0].center, (3.0, 4.0));
+        assert_eq!(lightning_triangles[0].width, 4.0);
+        assert_eq!(lightning_triangles[0].length, 4.0);
     }
 
     #[test]

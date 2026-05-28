@@ -15,7 +15,7 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, standard_effect, standard_effect_draw_plans,
+    entity_class_kind, standard_effect, standard_effect_draw_plans_with_data_float,
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
     PlayerUnitSwitchContext, StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
@@ -297,7 +297,11 @@ impl DesktopLauncher {
     ) -> Vec<StandardEffectDrawPlan> {
         let mut plans = Vec::new();
         self.draw_local_effect_states_for_render(|input| {
-            plans.extend(standard_effect_draw_plans(
+            let data_float = match input.data {
+                TypeValue::Float(value) => Some(*value),
+                _ => None,
+            };
+            plans.extend(standard_effect_draw_plans_with_data_float(
                 input.effect_id,
                 input.id,
                 input.x,
@@ -306,6 +310,7 @@ impl DesktopLauncher {
                 input.time,
                 input.lifetime,
                 input.color,
+                data_float,
             ));
             standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
         });
@@ -3326,6 +3331,76 @@ mod tests {
         assert_eq!(stats.line_primitives, 21);
         assert_eq!(stats.triangle_primitives, 0);
         assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_flattens_rail_and_lancer_charge_primitives_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        for (name, x, data) in [
+            ("railShoot", 24.0_f32, TypeValue::Null),
+            ("railTrail", 40.0_f32, TypeValue::Null),
+            ("railHit", 56.0_f32, TypeValue::Null),
+            ("lancerLaserShoot", 72.0_f32, TypeValue::Null),
+            ("lancerLaserShootSmoke", 88.0_f32, TypeValue::Float(42.0)),
+            ("lancerLaserCharge", 104.0_f32, TypeValue::Null),
+            ("lancerLaserChargeBegin", 120.0_f32, TypeValue::Null),
+            ("lightningCharge", 136.0_f32, TypeValue::Null),
+        ] {
+            launcher
+                .runtime
+                .client_local_effect_events
+                .push(EffectCallPacket2 {
+                    effect: EffectCallPacket {
+                        effect_id: standard_effect_id(name).unwrap() as u16,
+                        x,
+                        y: 32.0,
+                        rotation: 30.0,
+                        color: type_io::RgbaColor::new(-1),
+                    },
+                    data,
+                });
+        }
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 10);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 3);
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 21);
+        assert_eq!(launcher.standard_local_effect_triangle_primitives.len(), 10);
+        assert_eq!(launcher.standard_local_effect_light_primitives.len(), 1);
+
+        let smoke_plan = launcher
+            .standard_local_effect_draw_plans
+            .iter()
+            .find(|plan| plan.effect_id == standard_effect_id("lancerLaserShootSmoke").unwrap())
+            .expect("lancerLaserShootSmoke should preserve data Float length in draw plan");
+        assert_eq!(smoke_plan.particles.unwrap().length, 42.0);
+
+        let lightning_triangle = launcher
+            .standard_local_effect_triangle_primitives
+            .iter()
+            .find(|triangle| triangle.center.0 != 136.0 && triangle.width > 1.0)
+            .expect("lightningCharge should cache offset seeded triangle primitives");
+        assert!(lightning_triangle.length > 1.0);
+
+        let trail_light = launcher
+            .standard_local_effect_light_primitives
+            .iter()
+            .find(|light| light.color == "Pal.orangeSpark")
+            .expect("railTrail should cache its orange light");
+        assert!(trail_light.radius > 0.0);
+        assert_eq!(trail_light.opacity, 0.5);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 10);
+        assert_eq!(stats.circle_primitives, 3);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.line_primitives, 21);
+        assert_eq!(stats.triangle_primitives, 10);
+        assert_eq!(stats.light_primitives, 1);
         assert_eq!(renderer.last_stats, stats);
     }
 

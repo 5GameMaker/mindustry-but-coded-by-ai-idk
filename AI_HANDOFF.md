@@ -5912,3 +5912,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. `lightningCharge=203` 需要 seeded triangle particles；
   4. `casing*` 需要 rect/sprite primitive，不能硬塞成 square；
   5. 当前仍是 headless primitive seam，真实 renderer/backend 与 gameplay runtime 接入仍待继续推进。
+
+---
+
+## 177. 最新闭环记录：Fx.rail*/lancerLaser*/lightningCharge
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：回补 `sparkShoot=204` 前面的 rail/lancer charge 段，让 `Fx.java` 的 `196..203` 标准 effect 进入 Rust effect primitive seam。
+- 本轮迁移：
+  - `railShoot=196`
+  - `railTrail=197`
+  - `railHit=198`
+  - `lancerLaserShoot=199`
+  - `lancerLaserShootSmoke=200`
+  - `lancerLaserCharge=201`
+  - `lancerLaserChargeBegin=202`
+  - `lightningCharge=203`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 8 个 Fx ID、lookup、metadata；
+    - 新增 `Pal.orangeSpark`；
+    - 新增 `StandardEffectDrawKind::SeededRadialTriangleParticles`，用于 `lightningCharge` 的 seeded vector triangle；
+    - 新增 `standard_effect_draw_plans_with_data_float(...)`，原 `standard_effect_draw_plans(...)` 兼容保留并传 `None`；
+    - `lancerLaserShootSmoke` 读取可选 data float：无 data 长度 70，有 Float data 时用该长度；
+    - `railShoot` = scaled stroked circle + triangle pair；`railTrail` = triangle pair + light；`railHit` = triangle fan；`lancerLaserShoot` = triangle pair；`lancerLaserCharge`/`Smoke` = radial lines；`lancerLaserChargeBegin` = two filled circles；`lightningCharge` = radial triangles。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `standard_effect_draw_plans_with_data_float(...)`。
+  - `desktop/src/lib.rs`
+    - 从 `EffectRenderInput.data` 提取 `TypeValue::Float`，传入标准 effect draw plan；
+    - 新增 `desktop_launcher_flattens_rail_and_lancer_charge_primitives_for_render`，覆盖 circle/line/triangle/light flatten 与 data Float。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_rail_and_lancer_charge_primitives --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_rail_and_lancer_charge_primitives_for_render --lib`
+- 下一步建议：
+  1. 继续做最终收尾前需要跑 `standard_effect_ids_include`、`standard_effect_lookup`、本轮 core/desktop 定向测试、`cargo check -p mindustry-core`、`cargo check -p mindustry-desktop`、`git diff --check`；
+  2. 下一批 Fx 可转向 `casing1=190` 起，但需要先设计 rect/sprite primitive；如果要继续少造 primitive，可扫描 `Fx.java` 后续可由现有 circle/line/triangle 表达的项；
+  3. 真实 renderer/backend 仍未接入；当前只是标准 effect headless primitive seam，不要宣称可玩。
