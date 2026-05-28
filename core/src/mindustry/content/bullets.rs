@@ -625,6 +625,17 @@ pub fn load() -> Vec<BulletContent> {
     sei_large_bullet.shoot_effect = "shootBig".into();
     sei_large_bullet.lifetime = 35.0;
 
+    let mut omura_cannon = rail_bullet();
+    omura_cannon.shoot_effect = "railShoot".into();
+    omura_cannon.length = 500.0;
+    omura_cannon.point_effect_space = 60.0;
+    omura_cannon.pierce_effect = "railHit".into();
+    omura_cannon.point_effect = "railTrail".into();
+    omura_cannon.hit_effect = "massiveExplosion".into();
+    omura_cannon.smoke_effect = "shootBig2".into();
+    omura_cannon.damage = 1250.0;
+    omura_cannon.pierce_damage_factor = 0.5;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -705,6 +716,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "bryde_missile", bryde_missile),
         make_bullet(&mut next_id, "sei_missile", sei_missile),
         make_bullet(&mut next_id, "sei_large_bullet", sei_large_bullet),
+        make_bullet(&mut next_id, "omura_cannon", omura_cannon),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -932,6 +944,28 @@ fn flak_bullet(speed: f32, damage: f32) -> BulletSpec {
     bullet
 }
 
+fn rail_bullet() -> BulletSpec {
+    let mut bullet = BulletSpec::new(BulletKind::Rail, 0.0, 0.0);
+    bullet.pierce_building = true;
+    bullet.pierce = true;
+    bullet.reflectable = false;
+    bullet.hit_effect = "none".into();
+    bullet.despawn_effect = "none".into();
+    bullet.collides = false;
+    bullet.keep_velocity = false;
+    bullet.lifetime = 1.0;
+    bullet.delay_frags = true;
+    bullet.pierce_effect = "hitBulletSmall".into();
+    bullet.point_effect = "none".into();
+    bullet.line_effect = "none".into();
+    bullet.end_effect = "none".into();
+    bullet.length = 100.0;
+    bullet.point_effect_space = 20.0;
+    bullet.shoot_effect = "shootSmall".into();
+    bullet.smoke_effect = "shootSmallSmoke".into();
+    bullet
+}
+
 fn continuous_laser_bullet(damage: f32) -> BulletSpec {
     let mut bullet = BulletSpec::new(BulletKind::ContinuousLaser, 0.0, damage);
     bullet.length = 220.0;
@@ -1024,6 +1058,7 @@ mod tests {
                 "bryde_missile",
                 "sei_missile",
                 "sei_large_bullet",
+                "omura_cannon",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -2032,6 +2067,31 @@ mod tests {
         assert_eq!(large.height, 19.0);
         assert_eq!(large.shoot_effect, "shootBig");
         assert_eq!(large.lifetime, 35.0);
+    }
+
+    #[test]
+    fn omura_cannon_matches_java_rail_profile() {
+        let bullets = load();
+        let cannon = &by_name(&bullets, "omura_cannon").spec;
+
+        assert_eq!(cannon.kind, BulletKind::Rail);
+        assert_eq!(cannon.speed, 0.0);
+        assert_eq!(cannon.damage, 1250.0);
+        assert_eq!(cannon.shoot_effect, "railShoot");
+        assert_eq!(cannon.length, 500.0);
+        assert_eq!(cannon.point_effect_space, 60.0);
+        assert_eq!(cannon.pierce_effect, "railHit");
+        assert_eq!(cannon.point_effect, "railTrail");
+        assert_eq!(cannon.hit_effect, "massiveExplosion");
+        assert_eq!(cannon.smoke_effect, "shootBig2");
+        assert_eq!(cannon.pierce_damage_factor, 0.5);
+        assert!(cannon.pierce_building);
+        assert!(cannon.pierce);
+        assert!(!cannon.reflectable);
+        assert!(!cannon.collides);
+        assert!(!cannon.keep_velocity);
+        assert_eq!(cannon.lifetime, 1.0);
+        assert!(cannon.delay_frags);
     }
 
     #[test]

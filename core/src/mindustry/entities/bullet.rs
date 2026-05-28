@@ -1446,7 +1446,9 @@ pub struct RailBulletType {
     pub end_effect: String,
     pub length: f32,
     pub point_effect_space: f32,
+    pub shoot_effect: String,
     pub hit_effect: String,
+    pub smoke_effect: String,
     pub despawn_effect: String,
     pub delay_frags: bool,
 }
@@ -1470,7 +1472,9 @@ impl Default for RailBulletType {
             end_effect: "none".into(),
             length: 100.0,
             point_effect_space: 20.0,
+            shoot_effect: "shootSmall".into(),
             hit_effect: "none".into(),
+            smoke_effect: "shootSmallSmoke".into(),
             despawn_effect: "none".into(),
             delay_frags: true,
         }
@@ -3016,7 +3020,9 @@ mod tests {
         assert!(rail.base.pierce_building);
         assert!(rail.base.pierce);
         assert!(!rail.base.reflectable);
+        assert_eq!(rail.shoot_effect, "shootSmall");
         assert_eq!(rail.hit_effect, "none");
+        assert_eq!(rail.smoke_effect, "shootSmallSmoke");
         assert_eq!(rail.despawn_effect, "none");
         assert!(!rail.base.collides);
         assert!(!rail.base.keep_velocity);

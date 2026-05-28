@@ -1126,9 +1126,37 @@ pub fn load() -> Vec<UnitType> {
         unit(&mut next_id, "omura", UnitKind::Naval, |u| {
             u.health = 22000.0;
             u.speed = 0.62;
+            u.drag = 0.18;
             u.hit_size = 58.0;
             u.armor = 16.0;
+            u.accel = 0.19;
             u.rotate_speed = 0.9;
+            u.face_target = false;
+            u.move_sound_volume = 1.1;
+            u.move_sound = "shipMoveBig".into();
+            u.move_sound_pitch_min = 0.9;
+            u.move_sound_pitch_max = 0.9;
+            u.trail_length = 70;
+            u.wave_trail_x = 23.0;
+            u.wave_trail_y = -32.0;
+            u.trail_scl = 3.5;
+
+            let mut cannon = Weapon::new("omura-cannon");
+            cannon.reload = 110.0;
+            cannon.cooldown_time = 90.0;
+            cannon.mirror = false;
+            cannon.x = 0.0;
+            cannon.y = -3.5;
+            cannon.rotate_speed = 1.4;
+            cannon.rotate = true;
+            cannon.shoot_y = 23.0;
+            cannon.shake = 6.0;
+            cannon.recoil = 10.5;
+            cannon.shadow = 50.0;
+            cannon.shoot_sound = "shootOmura".into();
+            cannon.eject_effect = "none".into();
+            cannon.bullet = "omura_cannon".into();
+            u.weapons.push(cannon);
         }),
         unit(&mut next_id, "retusa", UnitKind::Naval, |u| {
             u.speed = 0.9;
@@ -3365,6 +3393,58 @@ mod tests {
             .expect("missing sei_large_bullet");
         assert_eq!(large_bullet.spec.kind, BulletKind::Basic);
         assert_eq!(large_bullet.spec.damage, 57.0);
+    }
+
+    #[test]
+    fn omura_naval_rail_profile_matches_java() {
+        let units = load();
+        let omura = by_name(&units, "omura");
+
+        assert!(omura.naval);
+        assert_eq!(omura.health, 22000.0);
+        assert_eq!(omura.speed, 0.62);
+        assert_eq!(omura.drag, 0.18);
+        assert_eq!(omura.hit_size, 58.0);
+        assert_eq!(omura.armor, 16.0);
+        assert_eq!(omura.accel, 0.19);
+        assert_eq!(omura.rotate_speed, 0.9);
+        assert!(!omura.face_target);
+        assert_eq!(omura.move_sound_volume, 1.1);
+        assert_eq!(omura.move_sound, "shipMoveBig");
+        assert_eq!(omura.move_sound_pitch_min, 0.9);
+        assert_eq!(omura.move_sound_pitch_max, 0.9);
+        assert_eq!(omura.trail_length, 70);
+        assert_eq!(omura.wave_trail_x, 23.0);
+        assert_eq!(omura.wave_trail_y, -32.0);
+        assert_eq!(omura.trail_scl, 3.5);
+        assert_eq!(omura.weapons.len(), 1);
+
+        let cannon = &omura.weapons[0];
+        assert_eq!(cannon.name, "omura-cannon");
+        assert_eq!(cannon.reload, 110.0);
+        assert_eq!(cannon.cooldown_time, 90.0);
+        assert!(!cannon.mirror);
+        assert_eq!(cannon.x, 0.0);
+        assert_eq!(cannon.y, -3.5);
+        assert_eq!(cannon.rotate_speed, 1.4);
+        assert!(cannon.rotate);
+        assert_eq!(cannon.shoot_y, 23.0);
+        assert_eq!(cannon.shake, 6.0);
+        assert_eq!(cannon.recoil, 10.5);
+        assert_eq!(cannon.shadow, 50.0);
+        assert_eq!(cannon.shoot_sound, "shootOmura");
+        assert_eq!(cannon.eject_effect, "none");
+        assert_eq!(cannon.bullet, "omura_cannon");
+
+        let bullets = bullets::load();
+        let rail = bullets
+            .iter()
+            .find(|bullet| bullet.name() == cannon.bullet)
+            .expect("missing omura_cannon");
+        assert_eq!(rail.spec.kind, BulletKind::Rail);
+        assert_eq!(rail.spec.damage, 1250.0);
+        assert_eq!(rail.spec.length, 500.0);
+        assert_eq!(rail.spec.pierce_damage_factor, 0.5);
     }
 
     #[test]
