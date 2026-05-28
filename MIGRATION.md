@@ -7260,3 +7260,47 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `squareWaveEffect=80` 仍需要 seeded random square radius/stroke/rotation 与 light，不能直接复用本轮 deterministic radial square；
   - 后续可以继续清理 hit bullet/fuse/square 共享逻辑，避免 `standard_effect_draw_plans(...)` 分支继续膨胀；
   - renderer/backend 仍未真实绘制 primitives。
+
+### 12.233 Fx.squareWaveEffect seeded rotated square
+
+- 2026-05-28：迁移 `squareWaveEffect=80`，补齐单个 seeded 随机描边旋转方块与 `Input.color` light。
+- 本轮迁移：
+  - `squareWaveEffect=80`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:908` 附近：
+    - `squareWaveEffect = new Effect(14, 40f, e -> { ... })`
+    - `rand.setSeed(e.id)`
+    - `color(Color.white, e.color, rand.random(0.8f, 1.5f) * e.fin())`
+    - `stroke(rand.random(0.4f, 0.8f) + e.fout() * 2)`
+    - `rot = rand.random(45f, 180f) * e.fin()`，随后随机正负号；
+    - `Lines.square(..., e.fin() * rand.random(4f, 11f) + 4f, e.rotation + rand.random(360f) + rotation)`
+    - `Drawf.light(..., 23f, e.color, e.fout() * 0.7f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SQUARE_WAVE_EFFECT_ID=80`；
+    - 接入 `standard_effect_id("squareWaveEffect")` 与 `Effect::with_lifetime(80, 14.0, 40.0)`；
+    - 新增 `StandardEffectDrawKind::StrokedRotatedSquare`；
+    - `standard_effect_draw_plan(...)` 使用 `ArcRand::with_seed(state_id)` 按 Java 调用顺序生成 color mix、stroke、rot/sign、radius、rotation；
+    - `square_render_primitives_from_seed()` 为 `StrokedRotatedSquare` 输出单个 square primitive；
+    - 旋转角临时复用 `StandardEffectParticleSpec.angle` 承载，后续若引入正式 `square_rotation` 字段，应替换该过渡 seam。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_square_wave_effect_for_render`，验证 update 后进入 1 个 draw plan、1 个 square primitive、1 个 light primitive，并可被 headless backend 消费。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `squareWaveEffect` id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime/clip；
+  - `standard_effect_draw_plan_covers_square_wave_effect` 覆盖 Java 随机序列、stroke/radius/rotation/light 与 primitive 展开；
+  - `desktop_launcher_flattens_square_wave_effect_for_render` 覆盖 desktop 端事件到 primitive/headless stats 路径。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_square_wave_effect --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_square_wave_effect_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前仍是 standard effect/headless primitive seam，真实图形 backend 尚未绘制 `StrokedRotatedSquare`；
+  - `StandardEffectDrawPlan` 仍缺少正式 square rotation 字段，本轮为避免大范围 struct literal 改动暂用 `particles.angle` 过渡；
+  - 后续继续迁移 Fx 后续简单效果，或先抽象 hit bullet / squares / squareWave 共享随机与 primitive helper。

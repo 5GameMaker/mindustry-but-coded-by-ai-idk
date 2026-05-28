@@ -28,6 +28,8 @@ pub const FX_HIT_BULLET_SMALL_ID: i32 = 77;
 pub const FX_HIT_BULLET_COLOR_ID: i32 = 78;
 /// Upstream `Fx.hitSquaresColor` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_SQUARES_COLOR_ID: i32 = 79;
+/// Upstream `Fx.squareWaveEffect` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SQUARE_WAVE_EFFECT_ID: i32 = 80;
 /// Upstream `Fx.hitFuse` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_FUSE_ID: i32 = 81;
 /// Upstream `Fx.hitBulletBig` id in `mindustry.content.Fx` for v158.1.
@@ -238,6 +240,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "hitBulletSmall" => Some(FX_HIT_BULLET_SMALL_ID),
         "hitBulletColor" => Some(FX_HIT_BULLET_COLOR_ID),
         "hitSquaresColor" => Some(FX_HIT_SQUARES_COLOR_ID),
+        "squareWaveEffect" => Some(FX_SQUARE_WAVE_EFFECT_ID),
         "hitFuse" => Some(FX_HIT_FUSE_ID),
         "hitBulletBig" => Some(FX_HIT_BULLET_BIG_ID),
         "hitFlameSmall" => Some(FX_HIT_FLAME_SMALL_ID),
@@ -376,6 +379,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_HIT_SQUARES_COLOR_ID => {
             Effect::with_lifetime(FX_HIT_SQUARES_COLOR_ID, 14.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_SQUARE_WAVE_EFFECT_ID => Effect::with_lifetime(FX_SQUARE_WAVE_EFFECT_ID, 14.0, 40.0),
         FX_HIT_FUSE_ID => Effect::with_lifetime(FX_HIT_FUSE_ID, 14.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_BULLET_BIG_ID => {
             Effect::with_lifetime(FX_HIT_BULLET_BIG_ID, 13.0, DEFAULT_EFFECT_CLIP)
@@ -767,6 +771,7 @@ pub enum StandardEffectDrawKind {
     SeededRadialLineParticles,
     FilledSquare,
     StrokedSquare,
+    StrokedRotatedSquare,
     SeededSquareParticles,
     SeededRadialSquareParticles,
 }
@@ -988,6 +993,7 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::SeededRadialLineParticles => Vec::new(),
             StandardEffectDrawKind::FilledSquare
             | StandardEffectDrawKind::StrokedSquare
+            | StandardEffectDrawKind::StrokedRotatedSquare
             | StandardEffectDrawKind::SeededSquareParticles
             | StandardEffectDrawKind::SeededRadialSquareParticles => Vec::new(),
         }
@@ -1012,6 +1018,19 @@ impl StandardEffectDrawPlan {
                     radius: self.radius,
                     stroke: self.stroke,
                     rotation: 0.0,
+                    alpha: self.alpha,
+                    color,
+                }]
+            }
+            StandardEffectDrawKind::StrokedRotatedSquare => {
+                vec![StandardEffectSquareRenderPrimitive {
+                    center: self.center,
+                    radius: self.radius,
+                    stroke: self.stroke,
+                    rotation: self
+                        .particles
+                        .and_then(|particles| particles.angle)
+                        .unwrap_or(0.0),
                     alpha: self.alpha,
                     color,
                 }]
@@ -1916,6 +1935,59 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
+        FX_SQUARE_WAVE_EFFECT_ID => {
+            let mut rand = ArcRand::with_seed(state_id as i64);
+            let color_mix = rand.random_between(0.8, 1.5) * fin;
+            let stroke = rand.random_between(0.4, 0.8) + fout * 2.0;
+            let rot = rand.random_between(45.0, 180.0) * fin;
+            let signed_rot = if rand.random_between(0.0, 1.0) > 0.5 {
+                rot
+            } else {
+                -rot
+            };
+            let radius = fin * rand.random_between(4.0, 11.0) + 4.0;
+            let square_rotation = rotation + rand.random(360.0) + signed_rot;
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedRotatedSquare,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: Some("Input.color"),
+                color_mix,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius,
+                stroke,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 0,
+                    progress: None,
+                    angle: Some(square_rotation),
+                    angle_range: 0.0,
+                    length: 0.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: Some("Input.color"),
+                light_radius: 23.0,
+                light_opacity: fout * 0.7,
+            }
+        }
         FX_HIT_LASER_ID | FX_HIT_LASER_COLOR_ID => {
             let (color_to, input_color, light_color) = if effect_id == FX_HIT_LASER_COLOR_ID {
                 (Some("Input.color"), Some(color), Some("Input.color"))
@@ -4554,6 +4626,10 @@ mod tests {
             standard_effect_id("hitSquaresColor"),
             Some(FX_HIT_SQUARES_COLOR_ID)
         );
+        assert_eq!(
+            standard_effect_id("squareWaveEffect"),
+            Some(FX_SQUARE_WAVE_EFFECT_ID)
+        );
         assert_eq!(standard_effect_id("hitFuse"), Some(FX_HIT_FUSE_ID));
         assert_eq!(
             standard_effect_id("hitBulletBig"),
@@ -4804,6 +4880,9 @@ mod tests {
             standard_effect(FX_HIT_SQUARES_COLOR_ID).unwrap().lifetime,
             14.0
         );
+        let square_wave_effect = standard_effect(FX_SQUARE_WAVE_EFFECT_ID).unwrap();
+        assert_eq!(square_wave_effect.lifetime, 14.0);
+        assert_eq!(square_wave_effect.clip, 40.0);
         assert_eq!(standard_effect(FX_HIT_FUSE_ID).unwrap().lifetime, 14.0);
         assert_eq!(
             standard_effect(FX_HIT_BULLET_BIG_ID).unwrap().lifetime,
@@ -5208,6 +5287,67 @@ mod tests {
             .abs()
                 < 0.0001
         );
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_square_wave_effect() {
+        let input_color = DecalColor::from_rgba(0x336699cc);
+        let plan = standard_effect_draw_plan(
+            Some(FX_SQUARE_WAVE_EFFECT_ID as u16),
+            80,
+            10.0,
+            20.0,
+            30.0,
+            7.0,
+            14.0,
+            input_color,
+        )
+        .unwrap();
+
+        let fin = 0.5;
+        let fout = 0.5;
+        let mut rand = ArcRand::with_seed(80);
+        let color_mix = rand.random_between(0.8, 1.5) * fin;
+        let stroke = rand.random_between(0.4, 0.8) + fout * 2.0;
+        let rot = rand.random_between(45.0, 180.0) * fin;
+        let signed_rot = if rand.random_between(0.0, 1.0) > 0.5 {
+            rot
+        } else {
+            -rot
+        };
+        let radius = fin * rand.random_between(4.0, 11.0) + 4.0;
+        let square_rotation = 30.0 + rand.random(360.0) + signed_rot;
+
+        assert_eq!(plan.kind, StandardEffectDrawKind::StrokedRotatedSquare);
+        assert_eq!(plan.center, (10.0, 20.0));
+        assert_eq!(plan.color_from, Some("Color.white"));
+        assert_eq!(plan.color_to, Some("Input.color"));
+        assert_eq!(plan.input_color, Some(input_color));
+        assert!((plan.color_mix - color_mix).abs() < 0.0001);
+        assert!((plan.stroke - stroke).abs() < 0.0001);
+        assert!((plan.radius - radius).abs() < 0.0001);
+        assert_eq!(plan.light_color, Some("Input.color"));
+        assert_eq!(plan.light_radius, 23.0);
+        assert!((plan.light_opacity - 0.35).abs() < 0.0001);
+
+        let particles = plan.particles.unwrap();
+        assert_eq!(particles.count, 0);
+        assert!((particles.angle.unwrap() - square_rotation).abs() < 0.0001);
+
+        let squares = plan.square_render_primitives_from_seed();
+        assert_eq!(squares.len(), 1);
+        assert_eq!(squares[0].center, (10.0, 20.0));
+        assert!((squares[0].stroke - stroke).abs() < 0.0001);
+        assert!((squares[0].radius - radius).abs() < 0.0001);
+        assert!((squares[0].rotation - square_rotation).abs() < 0.0001);
+        assert_eq!(squares[0].color, plan.resolved_draw_color());
+
+        let lights = plan.light_render_primitives();
+        assert_eq!(lights.len(), 1);
+        assert_eq!(lights[0].color, "Input.color");
+        assert_eq!(lights[0].color_rgba, Some(input_color));
+        assert_eq!(plan.circle_render_primitives_from_seed().len(), 0);
+        assert_eq!(plan.line_render_primitives_from_seed().len(), 0);
     }
 
     #[test]

@@ -2907,6 +2907,51 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_square_wave_effect_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("squareWaveEffect").unwrap() as u16,
+                    x: 56.0,
+                    y: 72.0,
+                    rotation: 30.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 1);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_square_primitives.len(), 1);
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_light_primitives.len(), 1);
+        let square = &launcher.standard_local_effect_square_primitives[0];
+        assert_eq!(square.center, (56.0, 72.0));
+        assert!(square.radius > 4.0);
+        assert!(square.stroke > 0.0);
+        assert!(square.rotation.is_finite());
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(
+            stats,
+            DesktopEffectRenderStats {
+                draw_plans: 1,
+                circle_primitives: 0,
+                square_primitives: 1,
+                line_primitives: 0,
+                light_primitives: 1
+            }
+        );
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_syncs_assembler_unit_spawned_packet_to_runtime() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let world_data = sample_network_world_data(None);

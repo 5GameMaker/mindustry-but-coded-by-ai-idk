@@ -5340,3 +5340,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 暂缓 `squareWaveEffect=80`，它需要随机 radius/stroke/rotation/light，不等同于本轮径向 square；
   2. 可继续 Fx 后续简单 single/multi-pass，或抽象 hit bullet/fuse/squares 共用 helper；
   3. renderer/backend 仍需从 headless seam 走向真实绘制。
+
+---
+
+## 159. 最新闭环记录：Fx.squareWaveEffect seeded rotated square
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `squareWaveEffect=80` 的 seeded 随机描边旋转方块，并让 desktop standard effect frame 能消费该 primitive。
+- 本轮迁移：
+  - `squareWaveEffect=80`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SQUARE_WAVE_EFFECT_ID=80`；
+    - 接入 lookup/metadata，lifetime `14.0`、clip `40.0`；
+    - 新增 `StandardEffectDrawKind::StrokedRotatedSquare`；
+    - `standard_effect_draw_plan(...)` 按 Java `rand.setSeed(e.id)` 的调用顺序生成 color mix、stroke、rot/sign、radius、rotation；
+    - `square_render_primitives_from_seed()` 输出单个旋转描边 square；
+    - 当前临时使用 `particles.angle` 保存单 square rotation，后续可抽正式 `square_rotation` 字段。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_square_wave_effect_for_render`，验证 1 draw plan、1 square primitive、1 light primitive，并进入 `HeadlessDesktopEffectRenderer` stats。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_square_wave_effect --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_square_wave_effect_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续从 Java `Fx.java` 后续效果中挑不需要 texture/polygon/triangle/data-position 的低风险候选；
+  2. 可以优先考虑已有 primitive 能覆盖的 circle/line/square/light 效果；
+  3. 不要把 headless renderer seam 当真实渲染完成，后续仍要把 primitive 接入真实图形 backend。
