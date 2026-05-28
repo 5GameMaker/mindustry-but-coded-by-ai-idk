@@ -698,7 +698,9 @@ pub struct BulletSpec {
     pub collides_ground: bool,
     pub collides_air: bool,
     pub collides_tiles: bool,
+    pub collides_floor: bool,
     pub collides_team: bool,
+    pub underwater: bool,
     pub collides: bool,
     pub shrink_x: f32,
     pub shrink_y: f32,
@@ -873,7 +875,9 @@ impl BulletSpec {
             collides_ground: true,
             collides_air: true,
             collides_tiles: true,
+            collides_floor: false,
             collides_team: false,
+            underwater: false,
             collides: true,
             shrink_x: 0.0,
             shrink_y: 0.0,
@@ -13715,6 +13719,14 @@ mod tests {
         let all_liquids = liquids::load();
         let registry = load(&all_items, &all_liquids);
         (all_items, all_liquids, registry)
+    }
+
+    #[test]
+    fn bullet_spec_defaults_collide_floor_and_underwater_to_false() {
+        let spec = BulletSpec::new(BulletKind::Basic, 3.0, 10.0);
+
+        assert!(!spec.collides_floor);
+        assert!(!spec.underwater);
     }
 
     #[test]
