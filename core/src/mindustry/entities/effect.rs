@@ -72,10 +72,18 @@ pub const FX_UNIT_LAND_SMALL_ID: i32 = 41;
 pub const FX_CRAWL_DUST_ID: i32 = 43;
 /// Upstream `Fx.hitLiquid` id in `mindustry.content.Fx` for v158.1.
 pub const FX_HIT_LIQUID_ID: i32 = 85;
+/// Upstream `Fx.artilleryTrail` id in `mindustry.content.Fx` for v158.1.
+pub const FX_ARTILLERY_TRAIL_ID: i32 = 108;
+/// Upstream `Fx.incendTrail` id in `mindustry.content.Fx` for v158.1.
+pub const FX_INCEND_TRAIL_ID: i32 = 109;
 /// Upstream `Fx.missileTrail` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MISSILE_TRAIL_ID: i32 = 110;
 /// Upstream `Fx.missileTrailShort` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MISSILE_TRAIL_SHORT_ID: i32 = 111;
+/// Upstream `Fx.colorTrail` id in `mindustry.content.Fx` for v158.1.
+pub const FX_COLOR_TRAIL_ID: i32 = 113;
+/// Upstream `Fx.absorb` id in `mindustry.content.Fx` for v158.1.
+pub const FX_ABSORB_ID: i32 = 114;
 /// Upstream `Fx.burning` id in `mindustry.content.Fx` for v158.1.
 pub const FX_BURNING_ID: i32 = 117;
 /// Upstream `Fx.fire` id in `mindustry.content.Fx` for v158.1.
@@ -202,9 +210,13 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "hitLaser" => Some(FX_HIT_LASER_ID),
         "despawn" => Some(FX_DESPAWN_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
+        "artilleryTrail" => Some(FX_ARTILLERY_TRAIL_ID),
+        "incendTrail" => Some(FX_INCEND_TRAIL_ID),
         "unitAssemble" => Some(FX_UNIT_ASSEMBLE_ID),
         "missileTrail" => Some(FX_MISSILE_TRAIL_ID),
         "missileTrailShort" => Some(FX_MISSILE_TRAIL_SHORT_ID),
+        "colorTrail" => Some(FX_COLOR_TRAIL_ID),
+        "absorb" => Some(FX_ABSORB_ID),
         "burning" => Some(FX_BURNING_ID),
         "fire" => Some(FX_FIRE_ID),
         "fireHit" => Some(FX_FIRE_HIT_ID),
@@ -324,6 +336,11 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_HIT_LASER_ID => Effect::with_lifetime(FX_HIT_LASER_ID, 8.0, DEFAULT_EFFECT_CLIP),
         FX_DESPAWN_ID => Effect::with_lifetime(FX_DESPAWN_ID, 12.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
+        FX_ARTILLERY_TRAIL_ID => {
+            Effect::with_lifetime(FX_ARTILLERY_TRAIL_ID, 50.0, DEFAULT_EFFECT_CLIP)
+                .layer(Layer::BULLET - 0.01)
+        }
+        FX_INCEND_TRAIL_ID => Effect::with_lifetime(FX_INCEND_TRAIL_ID, 50.0, DEFAULT_EFFECT_CLIP),
         FX_UNIT_ASSEMBLE_ID => {
             Effect::with_lifetime(FX_UNIT_ASSEMBLE_ID, 70.0, DEFAULT_EFFECT_CLIP)
                 .layer(Layer::FLYING_UNIT + 5.0)
@@ -336,6 +353,8 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_MISSILE_TRAIL_SHORT_ID, 22.0, DEFAULT_EFFECT_CLIP)
                 .layer(Layer::BULLET - 0.001)
         }
+        FX_COLOR_TRAIL_ID => Effect::with_lifetime(FX_COLOR_TRAIL_ID, 50.0, DEFAULT_EFFECT_CLIP),
+        FX_ABSORB_ID => Effect::with_lifetime(FX_ABSORB_ID, 12.0, DEFAULT_EFFECT_CLIP),
         FX_BURNING_ID => Effect::with_lifetime(FX_BURNING_ID, 35.0, DEFAULT_EFFECT_CLIP),
         FX_FIRE_ID => Effect::with_lifetime(FX_FIRE_ID, 50.0, DEFAULT_EFFECT_CLIP),
         FX_FIRE_HIT_ID => Effect::with_lifetime(FX_FIRE_HIT_ID, 35.0, DEFAULT_EFFECT_CLIP),
@@ -1488,7 +1507,10 @@ pub fn standard_effect_draw_plan(
             light_radius: 0.0,
             light_opacity: 0.0,
         },
-        FX_MISSILE_TRAIL_ID | FX_MISSILE_TRAIL_SHORT_ID => StandardEffectDrawPlan {
+        FX_ARTILLERY_TRAIL_ID
+        | FX_MISSILE_TRAIL_ID
+        | FX_MISSILE_TRAIL_SHORT_ID
+        | FX_COLOR_TRAIL_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
             kind: StandardEffectDrawKind::FilledCircle,
@@ -1502,6 +1524,44 @@ pub fn standard_effect_draw_plan(
             alpha: 1.0,
             radius: rotation * fout,
             stroke: 0.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_INCEND_TRAIL_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::FilledCircle,
+            center: (x, y),
+            color_from: Some("Pal.lightOrange"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: rotation * fout,
+            stroke: 0.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
+        FX_ABSORB_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: Some("Pal.accent"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 5.0 * fout,
+            stroke: 2.0 * fout,
             particles: None,
             light_color: None,
             light_radius: 0.0,
@@ -3979,6 +4039,11 @@ mod tests {
         assert_eq!(standard_effect_id("despawn"), Some(FX_DESPAWN_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
+            standard_effect_id("artilleryTrail"),
+            Some(FX_ARTILLERY_TRAIL_ID)
+        );
+        assert_eq!(standard_effect_id("incendTrail"), Some(FX_INCEND_TRAIL_ID));
+        assert_eq!(
             standard_effect_id("unitAssemble"),
             Some(FX_UNIT_ASSEMBLE_ID)
         );
@@ -3990,6 +4055,8 @@ mod tests {
             standard_effect_id("missileTrailShort"),
             Some(FX_MISSILE_TRAIL_SHORT_ID)
         );
+        assert_eq!(standard_effect_id("colorTrail"), Some(FX_COLOR_TRAIL_ID));
+        assert_eq!(standard_effect_id("absorb"), Some(FX_ABSORB_ID));
         assert_eq!(standard_effect_id("burning"), Some(FX_BURNING_ID));
         assert_eq!(standard_effect_id("fire"), Some(FX_FIRE_ID));
         assert_eq!(standard_effect_id("fireHit"), Some(FX_FIRE_HIT_ID));
@@ -4178,12 +4245,18 @@ mod tests {
         assert_eq!(standard_effect(FX_HIT_LASER_ID).unwrap().lifetime, 8.0);
         assert_eq!(standard_effect(FX_DESPAWN_ID).unwrap().lifetime, 12.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
+        let artillery_trail = standard_effect(FX_ARTILLERY_TRAIL_ID).unwrap();
+        assert_eq!(artillery_trail.lifetime, 50.0);
+        assert_eq!(artillery_trail.layer, Layer::BULLET - 0.01);
+        assert_eq!(standard_effect(FX_INCEND_TRAIL_ID).unwrap().lifetime, 50.0);
         assert_eq!(standard_effect(FX_BURNING_ID).unwrap().lifetime, 35.0);
         assert_eq!(standard_effect(FX_FIRE_HIT_ID).unwrap().lifetime, 35.0);
         assert_eq!(
             standard_effect(FX_STEAM_COOL_SMOKE_ID).unwrap().lifetime,
             35.0
         );
+        assert_eq!(standard_effect(FX_COLOR_TRAIL_ID).unwrap().lifetime, 50.0);
+        assert_eq!(standard_effect(FX_ABSORB_ID).unwrap().lifetime, 12.0);
         assert_eq!(
             standard_effect(FX_CORROSION_VAPOR_ID).unwrap().lifetime,
             50.0
@@ -4342,6 +4415,69 @@ mod tests {
         assert_eq!(trail.input_color, Some(DecalColor::WHITE));
         assert_eq!(trail.radius, 2.0);
         assert_eq!(trail.layer, Layer::BULLET - 0.001);
+
+        let artillery_trail = standard_effect_draw_plan(
+            Some(FX_ARTILLERY_TRAIL_ID as u16),
+            108,
+            1.0,
+            2.0,
+            4.0,
+            25.0,
+            50.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(artillery_trail.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(artillery_trail.input_color, Some(DecalColor::WHITE));
+        assert_eq!(artillery_trail.radius, 2.0);
+        assert_eq!(artillery_trail.layer, Layer::BULLET - 0.01);
+
+        let incend_trail = standard_effect_draw_plan(
+            Some(FX_INCEND_TRAIL_ID as u16),
+            109,
+            1.0,
+            2.0,
+            4.0,
+            25.0,
+            50.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(incend_trail.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(incend_trail.color_from, Some("Pal.lightOrange"));
+        assert_eq!(incend_trail.radius, 2.0);
+
+        let trail_color = DecalColor::from_rgba(0xabcdefcc);
+        let color_trail = standard_effect_draw_plan(
+            Some(FX_COLOR_TRAIL_ID as u16),
+            113,
+            1.0,
+            2.0,
+            6.0,
+            25.0,
+            50.0,
+            trail_color,
+        )
+        .unwrap();
+        assert_eq!(color_trail.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(color_trail.input_color, Some(trail_color));
+        assert_eq!(color_trail.radius, 3.0);
+
+        let absorb = standard_effect_draw_plan(
+            Some(FX_ABSORB_ID as u16),
+            114,
+            1.0,
+            2.0,
+            0.0,
+            6.0,
+            12.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(absorb.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(absorb.color_from, Some("Pal.accent"));
+        assert_eq!(absorb.radius, 2.5);
+        assert_eq!(absorb.stroke, 1.0);
 
         let heal_wave_dynamic = standard_effect_draw_plan(
             Some(FX_HEAL_WAVE_DYNAMIC_ID as u16),

@@ -6789,3 +6789,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `hitBulletSmall=77`、`hitBulletColor=78`、`hitSquaresColor=79`、`hitFuse=81` 需要 scaled circle + particle + light 的组合表达；
   - `airBubble=101` 需要 texture/renderer bubble primitive；
   - flak/plastic/blast/sap/massive explosion 系列需要 multi-pass。
+
+### 12.221 Simple trail + absorb Fx batch
+
+- 2026-05-28：根据只读扫描结果，迁移能由现有 circle/stroked-circle primitive 完整表达的简单 trail/absorb 批次。
+- 本轮迁移：
+  - `artilleryTrail=108`
+  - `incendTrail=109`
+  - `colorTrail=113`
+  - `absorb=114`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1304`：`artilleryTrail = new Effect(50, ...)`，输入色，`Fill.circle(... e.rotation * e.fout())`，layer `Layer.bullet - 0.01f`。
+  - `Fx.java:1309`：`incendTrail = new Effect(50, ...)`，`Pal.lightOrange`，同半径公式。
+  - `Fx.java:1351`：`colorTrail = new Effect(50, ...)`，输入色，半径 `rotation*fout`。
+  - `Fx.java:1356`：`absorb = new Effect(12, ...)`，`Pal.accent`，stroke `2*fout`，圆环半径 `5*fout`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增并接入 `FX_ARTILLERY_TRAIL_ID=108`、`FX_INCEND_TRAIL_ID=109`、`FX_COLOR_TRAIL_ID=113`、`FX_ABSORB_ID=114`；
+    - `artilleryTrail` / `colorTrail` 使用输入色 `FilledCircle`；
+    - `incendTrail` 使用 `Pal.lightOrange` `FilledCircle`；
+    - `absorb` 使用 `Pal.accent` `StrokedCircle`；
+    - 扩展 `standard_effect_draw_plan_covers_smoke_trails_and_ripple`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `airBubble=101` 需要 texture/renderer bubble primitive；
+  - `bulletSparkSmokeTrailSmall=112` 需要同一 effect 内烟点 + 火花线 multi-pass；
+  - `forceShrink=115` 需要 polygon primitive/renderer；
+  - explosion 系列仍需 multi-pass。

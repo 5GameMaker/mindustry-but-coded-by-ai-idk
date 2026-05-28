@@ -4931,5 +4931,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `git diff --check`
 - 下一步建议：
   1. 若要迁移 `hitLaserColor=99`，先扩展 light primitive 支持输入色，而不是丢掉 light。
-  2. 根据只读探索结果：`artilleryTrail`、`incendTrail`、`colorTrail`、`absorb` 可用现有 primitive 完整迁移；`airBubble` 需要 texture，爆炸系列需要 multi-pass。
+  2. 后续最新状态见 147 节；`artilleryTrail`、`incendTrail`、`colorTrail`、`absorb` 已迁移；`airBubble` 需要 texture，爆炸系列需要 multi-pass。
   3. `hitBulletSmall`/`hitBulletColor`/`hitSquaresColor`/`hitFuse` 仍应等 multi-pass 表达。
+
+---
+
+## 147. 最新闭环记录：Simple trail + absorb Fx batch
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：按只读探索结果迁移现有 primitive 能完整覆盖的简单 trail/absorb 批次。
+- 本轮迁移：
+  - `artilleryTrail=108`
+  - `incendTrail=109`
+  - `colorTrail=113`
+  - `absorb=114`
+- Java 依据：
+  - `Fx.java:1304-1307`：`artilleryTrail`，输入色 filled circle，半径 `rotation*fout`，layer `Layer.bullet - 0.01`。
+  - `Fx.java:1309-1312`：`incendTrail`，`Pal.lightOrange` filled circle。
+  - `Fx.java:1351-1354`：`colorTrail`，输入色 filled circle。
+  - `Fx.java:1356-1360`：`absorb`，`Pal.accent` stroked circle，半径 `5*fout`，stroke `2*fout`。
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 4 个 `FX_*` 常量、id lookup、metadata；
+    - 复用 `FilledCircle` / `StrokedCircle` draw plan；
+    - 扩展 `standard_effect_draw_plan_covers_smoke_trails_and_ripple`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 暂避 `airBubble=101`（texture bubble）、`forceShrink=115`（polygon）、爆炸系列（multi-pass）。
+  2. 可继续找单 pass circle/line/square 效果；或优先扩展 multi-pass / input-color light / renderer backend。
