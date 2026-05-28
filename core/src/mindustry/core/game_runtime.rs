@@ -28,10 +28,10 @@ use crate::mindustry::{
         bullet::{BulletType, MassDriverBolt, MassDriverDropPlan, MassDriverExplosionPlan},
         comp::{
             BuildingComp, BuildingTetherComp, BuildingTetherRef, BulletComp, CargoAiRuntimeState,
-            ChildParent, DecalComp, DecalRegion, EffectRenderInput, EffectStateComp, FireComp,
-            LaunchCoreBlock, LaunchCoreComp, LegsComp, LegsDestroyPlan, LegsDestroyRegions,
-            PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile, UnitComp,
-            UnitControllerState, WorldLabelComp,
+            ChildParent, DecalColor, DecalComp, DecalRegion, EffectRenderInput, EffectStateComp,
+            FireComp, LaunchCoreBlock, LaunchCoreComp, LegsComp, LegsDestroyPlan,
+            LegsDestroyRegions, PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile,
+            UnitComp, UnitControllerState, WorldLabelComp,
         },
         entity_class_id, entity_class_kind, standard_effect, standard_effect_id, Effect,
         EntityClassKind, Fires, PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent,
@@ -2621,6 +2621,7 @@ pub struct GameRuntime {
     pub client_effect_snapshot_entities: BTreeMap<i32, EffectStateComp>,
     pub client_local_effect_entities: BTreeMap<i32, EffectStateComp>,
     pub next_client_local_effect_id: i32,
+    pub next_client_local_decal_id: i32,
     pub client_fire_snapshot_entities: BTreeMap<i32, FireComp>,
     pub client_player_snapshot_entities: BTreeMap<i32, NetworkPlayerSyncData>,
     pub client_puddle_snapshot_entities: BTreeMap<i32, PuddleComp>,
@@ -2701,6 +2702,7 @@ impl GameRuntime {
             client_effect_snapshot_entities: BTreeMap::new(),
             client_local_effect_entities: BTreeMap::new(),
             next_client_local_effect_id: -1,
+            next_client_local_decal_id: -1,
             client_fire_snapshot_entities: BTreeMap::new(),
             client_player_snapshot_entities: BTreeMap::new(),
             client_puddle_snapshot_entities: BTreeMap::new(),
@@ -3967,6 +3969,30 @@ impl GameRuntime {
                 pitch: 1.0,
             });
         }
+
+        if unit.type_info.create_scorch {
+            let size = (hit_size / 5.0).floor().clamp(0.0, 9.0) as i32;
+            let variant = unit.id().rem_euclid(2);
+            let rotation = unit.id().rem_euclid(4) as f32 * 90.0;
+            let region_width = (8.0 + size as f32 * 4.0).max(1.0);
+            let mut decal = DecalComp::new(DecalRegion::new(
+                format!("scorch-{size}-{variant}"),
+                region_width,
+            ));
+            decal.x = x;
+            decal.y = y;
+            decal.rotation = rotation;
+            decal.lifetime = 3600.0;
+            decal.color = DecalColor::from_rgba(0x1c1817ff);
+            let id = self.alloc_client_local_decal_id();
+            self.client_decal_snapshot_entities.insert(id, decal);
+        }
+    }
+
+    fn alloc_client_local_decal_id(&mut self) -> i32 {
+        let id = self.next_client_local_decal_id;
+        self.next_client_local_decal_id = self.next_client_local_decal_id.saturating_sub(1);
+        id
     }
 
     fn alloc_client_local_effect_id(&mut self) -> i32 {
@@ -10243,6 +10269,7 @@ impl GameRuntime {
         self.client_effect_snapshot_entities.clear();
         self.client_local_effect_entities.clear();
         self.next_client_local_effect_id = -1;
+        self.next_client_local_decal_id = -1;
         self.client_fire_snapshot_entities.clear();
         self.client_player_snapshot_entities.clear();
         self.client_puddle_snapshot_entities.clear();
@@ -26562,6 +26589,14 @@ mod tests {
         );
         assert_eq!(runtime.client_local_camera_shake_events.len(), 1);
         assert_eq!(runtime.client_local_camera_shake_events[0].intensity, 5.0);
+        assert_eq!(runtime.client_decal_snapshot_entities.len(), 1);
+        let scorch = runtime.client_decal_snapshot_entities.get(&-1).unwrap();
+        assert_eq!(scorch.region.name, "scorch-1-1");
+        assert_eq!(scorch.x, 10.0);
+        assert_eq!(scorch.y, 20.0);
+        assert_eq!(scorch.rotation, 90.0);
+        assert_eq!(scorch.lifetime, 3600.0);
+        assert_eq!(runtime.next_client_local_decal_id, -2);
 
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: 77 }));
         assert!(!runtime.apply_client_unit_destroy_packet(&UnitDestroyCallPacket { uid: -1 }));

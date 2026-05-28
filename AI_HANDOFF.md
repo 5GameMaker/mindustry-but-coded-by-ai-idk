@@ -7030,7 +7030,45 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-desktop`
 - 当前仍需继续：
   1. `Damage.dynamicExplosion(...)` 的 lightning/fire/wave damage/shockwave 仍未完整；
-  2. `createScorch`、wreck decal、weapon `shootOnDeath`、ability `death(...)`、`type.killed(...)`、event bus、suicide trigger 仍未接；
+  2. `createScorch -> Effect.scorch(...)` 已在 `207` 节接入本地 decal seam；wreck decal、weapon `shootOnDeath`、ability `death(...)`、`type.killed(...)`、event bus、suicide trigger 仍未接；
   3. 真实 audio/camera backend 仍需继续；
   4. flying wreck update/renderer/坠毁伤害仍需继续；
+  5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 207. 最新闭环记录：UnitDestroy createScorch 本地 decal seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：补 Java `UnitComp.destroy()` 中 `createScorch -> Effect.scorch(...)`，让单位销毁能产生本地 scorch decal。
+- Java 对照：
+  - `Effect.scorch(x, y, (int)(hitSize / 5))`
+  - size clamp `0..9`
+  - region `scorch-{size}-{random(2)}`
+  - rotation `random(4) * 90`
+  - lifetime `3600`
+  - color `Pal.rubble`
+- Rust 主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `GameRuntime` 新增 `next_client_local_decal_id`；
+    - reset/clear 路径重置本地 decal id；
+    - `queue_client_unit_destroy_side_effects(...)` 在 `create_scorch` 时创建本地 `DecalComp`，插入 `client_decal_snapshot_entities` 负 id；
+    - 使用 `DecalColor::from_rgba(0x1c1817ff)` 对齐 `Pal.rubble`；
+    - 更新 core destroy 测试。
+  - `desktop/src/lib.rs`
+    - 更新 unit destroy 和多 lifecycle 测试，验证 scorch decal 经过 NetClient lifecycle 路径进入 runtime decal map。
+  - `MIGRATION.md`
+    - 新增 `12.281`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_applies_client_unit_destroy_packet_to_legged_unit_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_unit_destroy_packet_to_leg_destroy_effects`
+  - `cargo test -p mindustry-desktop desktop_launcher_syncs_multiple_unit_lifecycle_packets_in_one_update`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. scorch 的 random variant/rotation 目前是 deterministic seam，后续需接真实随机/renderer；
+  2. wreckRegions decal 随机散布仍未做；
+  3. `Damage.dynamicExplosion` lightning/fire/wave damage、weapon `shootOnDeath`、ability death、event bus 仍未完成；
+  4. 真实 audio/camera backend 仍需继续；
   5. 当前总迁移仍约 10%~11%，远未可玩。
