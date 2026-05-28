@@ -6966,6 +6966,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 当前仍需继续：
   1. 真实平台 audio backend 仍需实现 `DesktopAudioRenderer` 并接 assets/device；
   2. sound 距离衰减、音量设置、重复事件合并、完整 sound id/asset 表仍未做；
-  3. camera shake 也需要真实 camera offset renderer/backend；
+  3. camera shake 已在 `205` 节接入 renderer/headless seam；真实 camera offset backend 仍未做；
+  4. flying wreck update/renderer、完整 `UnitComp.destroy()` 仍是后续主线；
+  5. 当前总迁移仍约 10%~11%，远未可玩。
+
+---
+
+## 205. 最新闭环记录：desktop camera shake renderer 与 headless seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 `DesktopCameraShakeFrame` 接到 renderer/backend seam，给真实 camera offset 应用留出明确入口。
+- Rust 主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopCameraShakeRenderStats`；
+    - 新增 `DesktopCameraShakeRenderer` trait；
+    - 新增 `HeadlessDesktopCameraShakeRenderer`；
+    - `DesktopLauncher` 新增 `apply_camera_shake_frame_with(...)`；
+    - 新增测试 `desktop_launcher_applies_camera_shake_frame_with_headless_renderer`。
+  - `MIGRATION.md`
+    - 新增 `12.279`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_camera_shake_frame_with_headless_renderer`
+  - `cargo test -p mindustry-desktop desktop_launcher_resolves_camera_shake_events_for_render_like_java_effect_shake`
+  - `cargo check -p mindustry-desktop`
+- 当前仍需继续：
+  1. 真实 camera backend 仍需按 Java `Renderer` 随机方向 offset 应用/回退 camera position；
+  2. `screenshake` setting、真实 camera 坐标、真实 delta 仍需接；
+  3. audio backend 仍需真实播放；
   4. flying wreck update/renderer、完整 `UnitComp.destroy()` 仍是后续主线；
   5. 当前总迁移仍约 10%~11%，远未可玩。

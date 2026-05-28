@@ -8911,5 +8911,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 真实平台 audio backend 仍需实现 `DesktopAudioRenderer` 并接资源/播放设备；
   - 距离衰减、音量设置、重复 sound 合并、asset/backend 映射仍未完整；
-  - camera shake 仍需真实 camera offset backend；
+  - camera shake 已在 `12.279` 接入 desktop camera shake renderer/headless seam；真实 camera offset backend 仍未完成；
+  - 当前总体迁移仍约 10%~11%，远未可玩。
+
+### 12.279 desktop camera shake renderer 与 headless seam
+
+- 2026-05-28：在 `DesktopCameraShakeFrame` 后补 camera shake renderer seam，使 `UnitSafeDeath` 等产生的 shake frame 能被 desktop backend 消费，而不是只停在 `last_camera_shake_frame` 字段。
+- Rust 新增/变化：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopCameraShakeRenderStats`；
+    - 新增 `DesktopCameraShakeRenderer` trait；
+    - 新增 `HeadlessDesktopCameraShakeRenderer`；
+    - `DesktopLauncher` 新增 `apply_camera_shake_frame_with(...)`；
+    - 新增 `desktop_launcher_applies_camera_shake_frame_with_headless_renderer`，验证 frame 可被 backend seam 消费并记录 stats。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_applies_camera_shake_frame_with_headless_renderer`
+  - `cargo test -p mindustry-desktop desktop_launcher_resolves_camera_shake_events_for_render_like_java_effect_shake`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 真实 camera backend 仍需根据 `max_offset` 生成 Java 风格随机方向 `camShakeOffset` 并应用/回退 camera position；
+  - `screenshake` setting、真实 camera 坐标、Time.delta 仍需接入；
   - 当前总体迁移仍约 10%~11%，远未可玩。

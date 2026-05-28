@@ -75,6 +75,23 @@ pub struct DesktopCameraShakeFrame {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DesktopCameraShakeRenderStats {
+    pub max_offset: f32,
+    pub remaining_intensity: f32,
+    pub remaining_time: f32,
+}
+
+impl DesktopCameraShakeRenderStats {
+    pub fn from_camera_shake_frame(frame: &DesktopCameraShakeFrame) -> Self {
+        Self {
+            max_offset: frame.max_offset,
+            remaining_intensity: frame.remaining_intensity,
+            remaining_time: frame.remaining_time,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct DesktopCameraShakeState {
     pub intensity: f32,
     pub time: f32,
@@ -204,6 +221,13 @@ pub trait DesktopAudioRenderer {
     ) -> DesktopSoundAudioStats;
 }
 
+pub trait DesktopCameraShakeRenderer {
+    fn apply_camera_shake_frame(
+        &mut self,
+        frame: &DesktopCameraShakeFrame,
+    ) -> DesktopCameraShakeRenderStats;
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HeadlessDesktopAudioRenderer {
     pub frames_played: usize,
@@ -217,6 +241,24 @@ impl DesktopAudioRenderer for HeadlessDesktopAudioRenderer {
     ) -> DesktopSoundAudioStats {
         let stats = DesktopSoundAudioStats::from_sound_at_audio_frame(frame);
         self.frames_played += 1;
+        self.last_stats = stats;
+        stats
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HeadlessDesktopCameraShakeRenderer {
+    pub frames_applied: usize,
+    pub last_stats: DesktopCameraShakeRenderStats,
+}
+
+impl DesktopCameraShakeRenderer for HeadlessDesktopCameraShakeRenderer {
+    fn apply_camera_shake_frame(
+        &mut self,
+        frame: &DesktopCameraShakeFrame,
+    ) -> DesktopCameraShakeRenderStats {
+        let stats = DesktopCameraShakeRenderStats::from_camera_shake_frame(frame);
+        self.frames_applied += 1;
         self.last_stats = stats;
         stats
     }
@@ -643,6 +685,16 @@ impl DesktopLauncher {
         let frame = self.camera_shake_state.tick(delta, screen_shake_setting);
         self.last_camera_shake_frame = frame;
         frame
+    }
+
+    pub fn apply_camera_shake_frame_with<R>(
+        &self,
+        renderer: &mut R,
+    ) -> DesktopCameraShakeRenderStats
+    where
+        R: DesktopCameraShakeRenderer,
+    {
+        renderer.apply_camera_shake_frame(&self.last_camera_shake_frame)
     }
 
     pub fn drain_camera_shake_events_for_render(
@@ -2030,7 +2082,8 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 #[cfg(test)]
 mod tests {
     use super::{
-        run, DesktopEffectRenderStats, DesktopLauncher, HeadlessDesktopAudioRenderer,
+        run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopLauncher,
+        HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
         HeadlessDesktopEffectRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
@@ -5696,6 +5749,25 @@ mod tests {
         let drained = launcher.drain_camera_shake_events_for_render();
         assert_eq!(drained.len(), 1);
         assert!(launcher.pending_camera_shake_events.is_empty());
+    }
+
+    #[test]
+    fn desktop_launcher_applies_camera_shake_frame_with_headless_renderer() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.last_camera_shake_frame = DesktopCameraShakeFrame {
+            max_offset: 2.5,
+            remaining_intensity: 1.25,
+            remaining_time: 3.0,
+        };
+
+        let mut renderer = HeadlessDesktopCameraShakeRenderer::default();
+        let stats = launcher.apply_camera_shake_frame_with(&mut renderer);
+
+        assert_eq!(stats.max_offset, 2.5);
+        assert_eq!(stats.remaining_intensity, 1.25);
+        assert_eq!(stats.remaining_time, 3.0);
+        assert_eq!(renderer.frames_applied, 1);
+        assert_eq!(renderer.last_stats, stats);
     }
 
     #[test]
