@@ -64,6 +64,8 @@ pub const FX_DESPAWN_ID: i32 = 100;
 pub const FX_INST_BOMB_ID: i32 = 101;
 /// Upstream `Fx.instTrail` id in `mindustry.content.Fx` for v158.1.
 pub const FX_INST_TRAIL_ID: i32 = 102;
+/// Upstream `Fx.instShoot` id in `mindustry.content.Fx` for v158.1.
+pub const FX_INST_SHOOT_ID: i32 = 103;
 /// Upstream `Fx.pointHit` id in `mindustry.content.Fx` for v158.1.
 pub const FX_POINT_HIT_ID: i32 = 11;
 /// Upstream `Fx.coreBuildShockwave` id in `mindustry.content.Fx` for v158.1.
@@ -278,6 +280,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "despawn" => Some(FX_DESPAWN_ID),
         "instBomb" => Some(FX_INST_BOMB_ID),
         "instTrail" => Some(FX_INST_TRAIL_ID),
+        "instShoot" => Some(FX_INST_SHOOT_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "artilleryTrail" => Some(FX_ARTILLERY_TRAIL_ID),
         "incendTrail" => Some(FX_INCEND_TRAIL_ID),
@@ -445,6 +448,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_DESPAWN_ID => Effect::with_lifetime(FX_DESPAWN_ID, 12.0, DEFAULT_EFFECT_CLIP),
         FX_INST_BOMB_ID => Effect::with_lifetime(FX_INST_BOMB_ID, 15.0, 100.0),
         FX_INST_TRAIL_ID => Effect::with_lifetime(FX_INST_TRAIL_ID, 30.0, DEFAULT_EFFECT_CLIP),
+        FX_INST_SHOOT_ID => Effect::with_lifetime(FX_INST_SHOOT_ID, 24.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_ARTILLERY_TRAIL_ID => {
             Effect::with_lifetime(FX_ARTILLERY_TRAIL_ID, 50.0, DEFAULT_EFFECT_CLIP)
@@ -603,6 +607,7 @@ pub fn standard_effect_draw_plans(
             | FX_HIT_FUSE_ID
             | FX_INST_BOMB_ID
             | FX_INST_TRAIL_ID
+            | FX_INST_SHOOT_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -931,6 +936,117 @@ pub fn standard_effect_draw_plans(
                 light_opacity: 0.0,
             },
         ];
+    }
+
+    if effect_id_i32 == FX_INST_SHOOT_ID {
+        let scaled_lifetime = 10.0;
+        let scaled_fin = (time / scaled_lifetime).clamp(0.0, 1.0);
+        let scaled_fout = 1.0 - scaled_fin;
+        let mut plans = Vec::with_capacity(if time <= scaled_lifetime { 3 } else { 2 });
+
+        if time <= scaled_lifetime {
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: Some("Pal.bulletYellowBack"),
+                color_mix: scaled_fin,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: scaled_fin * 50.0,
+                stroke: scaled_fout * 3.0 + 0.2,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::TriangleFan,
+            center: (x, y),
+            color_from: Some("Pal.bulletYellowBack"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 13.0 * fout,
+            stroke: 85.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                angle: Some(rotation - 90.0),
+                angle_range: 180.0,
+                length: 0.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: Some("Pal.bulletYellowBack"),
+            light_radius: 180.0,
+            light_opacity: 0.9 * fout,
+        });
+
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::TriangleFan,
+            center: (x, y),
+            color_from: Some("Pal.bulletYellowBack"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 13.0 * fout,
+            stroke: 50.0,
+            particles: Some(StandardEffectParticleSpec {
+                seed: state_id,
+                count: 2,
+                progress: None,
+                angle: Some(rotation - 20.0),
+                angle_range: 40.0,
+                length: 0.0,
+                fin,
+                fout,
+                fslope,
+                radius_base: 0.0,
+                radius_fin_scale: 0.0,
+                radius_fout_scale: 0.0,
+                radius_fslope_scale: 0.0,
+                secondary_vector_scale: 0.0,
+                secondary_radius_base: 0.0,
+                secondary_radius_fin_scale: 0.0,
+                secondary_radius_fout_scale: 0.0,
+                secondary_radius_fslope_scale: 0.0,
+                alpha_midpoint: false,
+            }),
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        });
+
+        return plans;
     }
 
     vec![
@@ -5089,6 +5205,7 @@ mod tests {
         assert_eq!(standard_effect_id("despawn"), Some(FX_DESPAWN_ID));
         assert_eq!(standard_effect_id("instBomb"), Some(FX_INST_BOMB_ID));
         assert_eq!(standard_effect_id("instTrail"), Some(FX_INST_TRAIL_ID));
+        assert_eq!(standard_effect_id("instShoot"), Some(FX_INST_SHOOT_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("artilleryTrail"),
@@ -5363,6 +5480,7 @@ mod tests {
         assert_eq!(inst_bomb.lifetime, 15.0);
         assert_eq!(inst_bomb.clip, 100.0);
         assert_eq!(standard_effect(FX_INST_TRAIL_ID).unwrap().lifetime, 30.0);
+        assert_eq!(standard_effect(FX_INST_SHOOT_ID).unwrap().lifetime, 24.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         let artillery_trail = standard_effect(FX_ARTILLERY_TRAIL_ID).unwrap();
         assert_eq!(artillery_trail.lifetime, 50.0);
@@ -6907,6 +7025,62 @@ mod tests {
         assert_eq!(front.radius, 3.75);
         assert!((front.stroke - front_length * 0.5).abs() < 0.0001);
         assert_eq!(front.particles.unwrap().length, 5.0);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_inst_shoot_scaled_circle_and_triangles() {
+        let plans = standard_effect_draw_plans(
+            Some(FX_INST_SHOOT_ID as u16),
+            103,
+            5.0,
+            6.0,
+            30.0,
+            6.0,
+            24.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(plans.len(), 3);
+        let scaled_circle = plans[0];
+        assert_eq!(scaled_circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(scaled_circle.color_from, Some("Color.white"));
+        assert_eq!(scaled_circle.color_to, Some("Pal.bulletYellowBack"));
+        assert_eq!(scaled_circle.color_mix, 0.6);
+        assert_eq!(scaled_circle.radius, 30.000002);
+        assert!((scaled_circle.stroke - 1.4).abs() < 0.0001);
+
+        let side_fan = plans[1];
+        assert_eq!(side_fan.kind, StandardEffectDrawKind::TriangleFan);
+        assert_eq!(side_fan.color_from, Some("Pal.bulletYellowBack"));
+        assert_eq!(side_fan.radius, 9.75);
+        assert_eq!(side_fan.stroke, 85.0);
+        assert_eq!(side_fan.light_color, Some("Pal.bulletYellowBack"));
+        assert_eq!(side_fan.light_radius, 180.0);
+        assert!((side_fan.light_opacity - 0.675).abs() < 0.0001);
+        let side_triangles = side_fan.triangle_render_primitives_from_seed();
+        assert_eq!(side_triangles.len(), 2);
+        assert_eq!(side_triangles[0].rotation, -60.0);
+        assert_eq!(side_triangles[1].rotation, 120.0);
+
+        let core_fan = plans[2];
+        assert_eq!(core_fan.kind, StandardEffectDrawKind::TriangleFan);
+        assert_eq!(core_fan.stroke, 50.0);
+        let core_triangles = core_fan.triangle_render_primitives_from_seed();
+        assert_eq!(core_triangles.len(), 2);
+        assert_eq!(core_triangles[0].rotation, 10.0);
+        assert_eq!(core_triangles[1].rotation, 50.0);
+
+        let late = standard_effect_draw_plans(
+            Some(FX_INST_SHOOT_ID as u16),
+            103,
+            5.0,
+            6.0,
+            30.0,
+            12.0,
+            24.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(late.len(), 2);
+        assert_eq!(late[0].kind, StandardEffectDrawKind::TriangleFan);
     }
 
     #[test]

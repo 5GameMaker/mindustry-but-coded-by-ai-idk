@@ -7394,3 +7394,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `instShoot=103`、`instHit=104` 仍需要 scaled circle + multi triangle + seeded square/line 组合；
   - 当前 triangle primitive 仍是 headless frame seam，真实图形 backend 尚未绘制；
   - 后续可继续扩展 triangle group，或优先迁移已有 primitive 能完整表达的 Fx。
+
+### 12.236 Fx.instShoot scaled circle and triangle fans
+
+- 2026-05-28：复用 `TriangleFan` seam 迁移 `instShoot=103`。
+- 本轮迁移：
+  - `instShoot=103`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1082` 附近：
+    - `instShoot = new Effect(24f, ...)`
+    - `e.scaled(10f, b -> { color(Color.white, Pal.bulletYellowBack, b.fin()); stroke(b.fout() * 3f + 0.2f); Lines.circle(... b.fin() * 50f); })`
+    - `for(int i : Mathf.signs)` 输出两组 `Drawf.tri`：`rotation ± 90` 长度 `85`，`rotation ± 20` 长度 `50`；
+    - `Drawf.light(..., 180f, Pal.bulletYellowBack, 0.9f * e.fout())`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_INST_SHOOT_ID=103`；
+    - 接入 lookup/metadata；
+    - `standard_effect_draw_plans(...)` 为 `instShoot` 输出：
+      - early scaled circle pass（`time <= 10`）；
+      - side triangle fan（2 个 triangle，角度 `rotation - 90` 与 `rotation + 90`）并携带 light；
+      - core triangle fan（2 个 triangle，角度 `rotation - 20` 与 `rotation + 20`）。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_inst_shoot_scaled_circle_and_triangles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_inst_shoot_scaled_circle_and_triangles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_inst_shoot_scaled_circle_and_triangles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `instHit=104` 仍更复杂，需要 randomSeedRange 多组 triangle、scaled circle、seeded square；
+  - `shootScepterSecondary=163` 也需要 multi-pass/multi-color triangle 组合；
+  - 真实 renderer/backend 仍未绘制 triangle primitive。

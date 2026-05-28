@@ -5450,3 +5450,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 可继续 `instShoot=103`，需要 scaled circle + 4 个固定方向 triangle + light；
   2. `instHit=104` 更复杂，涉及随机多 triangle、scaled circle、seeded square；
   3. 真实 renderer/backend 仍需接入 triangle primitive 绘制。
+
+---
+
+## 162. 最新闭环记录：Fx.instShoot scaled circle and triangle fans
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：继续 inst 系列，迁移可由 scaled circle + triangle fan 表达的 `instShoot=103`。
+- 本轮迁移：
+  - `instShoot=103`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_INST_SHOOT_ID=103`；
+    - 接入 lookup/metadata；
+    - `standard_effect_draw_plans(...)` 输出 early scaled circle、side triangle fan、core triangle fan，并在 side fan 上携带 light。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_inst_shoot_scaled_circle_and_triangles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_inst_shoot_scaled_circle_and_triangles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_inst_shoot_scaled_circle_and_triangles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `instHit=104` 是相邻目标，但复杂度明显更高：randomSeedRange 多 triangle、scaled circle、seeded square；
+  2. 若要保守推进，可先迁移 `shootScepterSecondary=163` 的 multi triangle pass；
+  3. triangle primitive 仍要接入真实 renderer/backend。
