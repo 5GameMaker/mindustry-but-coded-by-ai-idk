@@ -50,6 +50,8 @@ pub const FX_HIT_LASER_ID: i32 = 98;
 pub const FX_HIT_LASER_COLOR_ID: i32 = 99;
 /// Upstream `Fx.despawn` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DESPAWN_ID: i32 = 100;
+/// Upstream `Fx.select` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SELECT_ID: i32 = 27;
 /// Upstream `Fx.smoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_ID: i32 = 28;
 /// Upstream `Fx.fallSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -181,6 +183,7 @@ pub const FX_OVERDRIVE_BLOCK_FULL_ID: i32 = 255;
 
 pub fn standard_effect_id(name: &str) -> Option<i32> {
     match name {
+        "select" => Some(FX_SELECT_ID),
         "smoke" => Some(FX_SMOKE_ID),
         "fallSmoke" => Some(FX_FALL_SMOKE_ID),
         "rocketSmoke" => Some(FX_ROCKET_SMOKE_ID),
@@ -274,6 +277,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
 
 pub fn standard_effect(effect_id: i32) -> Option<Effect> {
     let effect = match effect_id {
+        FX_SELECT_ID => Effect::with_lifetime(FX_SELECT_ID, 23.0, DEFAULT_EFFECT_CLIP),
         FX_SMOKE_ID => Effect::with_lifetime(FX_SMOKE_ID, 100.0, DEFAULT_EFFECT_CLIP),
         FX_FALL_SMOKE_ID => Effect::with_lifetime(FX_FALL_SMOKE_ID, 110.0, DEFAULT_EFFECT_CLIP),
         FX_ROCKET_SMOKE_ID => Effect::with_lifetime(FX_ROCKET_SMOKE_ID, 120.0, DEFAULT_EFFECT_CLIP),
@@ -890,6 +894,25 @@ pub fn standard_effect_draw_plan(
     let rocket_smoke_alpha = (fout * 1.6 - rotation.powi(3) * 1.2).clamp(0.0, 1.0);
 
     let plan = match effect_id {
+        FX_SELECT_ID => StandardEffectDrawPlan {
+            effect_id,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: Some("Pal.accent"),
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: None,
+            color_mul: 1.0,
+            alpha: 1.0,
+            radius: 3.0 + fin * 14.0,
+            stroke: fout * 3.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        },
         FX_SMOKE_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -4037,6 +4060,7 @@ mod tests {
 
     #[test]
     fn standard_effect_ids_include_puddle_ripple_dependencies() {
+        assert_eq!(standard_effect_id("select"), Some(FX_SELECT_ID));
         assert_eq!(standard_effect_id("smoke"), Some(FX_SMOKE_ID));
         assert_eq!(standard_effect_id("fallSmoke"), Some(FX_FALL_SMOKE_ID));
         assert_eq!(standard_effect_id("rocketSmoke"), Some(FX_ROCKET_SMOKE_ID));
@@ -4234,6 +4258,11 @@ mod tests {
 
     #[test]
     fn standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers() {
+        let select = standard_effect_by_name("select").unwrap();
+        assert_eq!(select.id, FX_SELECT_ID);
+        assert_eq!(select.lifetime, 23.0);
+        assert_eq!(select.clip, 50.0);
+
         let smoke = standard_effect_by_name("smoke").unwrap();
         assert_eq!(smoke.id, FX_SMOKE_ID);
         assert_eq!(smoke.lifetime, 100.0);
@@ -4459,6 +4488,23 @@ mod tests {
 
     #[test]
     fn standard_effect_draw_plan_covers_smoke_trails_and_ripple() {
+        let select = standard_effect_draw_plan(
+            Some(FX_SELECT_ID as u16),
+            27,
+            10.0,
+            20.0,
+            0.0,
+            11.5,
+            23.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(select.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(select.center, (10.0, 20.0));
+        assert_eq!(select.color_from, Some("Pal.accent"));
+        assert_eq!(select.radius, 10.0);
+        assert_eq!(select.stroke, 1.5);
+
         let smoke = standard_effect_draw_plan(
             Some(FX_SMOKE_ID as u16),
             7,

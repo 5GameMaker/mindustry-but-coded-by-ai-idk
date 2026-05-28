@@ -5036,3 +5036,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续查漏 `Fx.java` 中可由现有 primitive 完整表达但未接入的简单 single-pass 效果；
   2. 暂缓 `ventSteam=124` / `drillSteam=125`，除非先补随机粒子数量/随机半径/`scaled` 生命周期语义；
   3. 继续推进 desktop renderer/backend 消费 `circle_primitives`/`line_primitives`/`square_primitives`/`light_primitives`。
+
+---
+
+## 150. 最新闭环记录：Fx.select selection ring
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补齐早期 `Fx.select=27`，减少 `smoke=28` 前的可完整迁移缺口。
+- Java 依据：
+  - `Fx.java:311-315`
+  - lifetime `23`
+  - `Pal.accent`
+  - stroke `fout * 3`
+  - circle radius `3 + fin * 14`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SELECT_ID=27`；
+    - 接入 `standard_effect_id(...)` / `standard_effect(...)`；
+    - `standard_effect_draw_plan(...)` 使用 `StrokedCircle`，输出 `Pal.accent`、`radius=3+fin*14`、`stroke=fout*3`；
+    - 扩展 id、metadata、draw-plan 测试。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续补 `placeBlock=22` / `tapBlock=24` / `upgradeCoreBloom=21` 这种单个描边 square/circle；
+  2. 对 `breakBlock=25` / `coreLaunchConstruct=23` 先确认随机 square/line 批次是否无需新语义；
+  3. 不要忘记中期目标是把这些 effect primitives 接入真实 desktop renderer/backend。

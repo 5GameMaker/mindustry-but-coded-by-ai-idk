@@ -6896,3 +6896,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ventSteam=124` 需要表达 seeded 随机粒子数量 `rand.random(3,5)` 与每粒子随机半径；
   - `drillSteam=125` 需要 `e.scaled(...)` 的 per-particle lifetime 语义；
   - 后续仍需把 effect primitives 接入真实 renderer/backend，而不是只停留在 frame cache/test。
+
+### 12.224 Fx.select selection ring
+
+- 2026-05-28：补齐早期 UI/选择反馈效果 `select=27`，该效果是单个 `Pal.accent` 描边圆环，可由现有 `StrokedCircle` 完整表达。
+- 本轮迁移：
+  - `select=27`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:311` 附近：
+    - `select = new Effect(23, ...)`
+    - `color(Pal.accent)`
+    - `stroke(e.fout() * 3f)`
+    - `Lines.circle(e.x, e.y, 3f + e.fin() * 14f)`
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SELECT_ID = 27` 并接入 `standard_effect_id(...)` 与 `standard_effect(...)`；
+    - metadata 使用 lifetime `23` 与默认 clip；
+    - `standard_effect_draw_plan(...)` 使用 `StrokedCircle`、`color_from = Pal.accent`、半径 `3 + fin * 14`、stroke `fout * 3`。
+- 新增/更新验证：
+  - `standard_effect_ids_include_puddle_ripple_dependencies` 覆盖 `select` id；
+  - `standard_effect_lookup_matches_java_fx_lifetime_clip_and_layers` 覆盖 lifetime/clip；
+  - `standard_effect_draw_plan_covers_smoke_trails_and_ripple` 覆盖圆心、颜色、半径和 stroke。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `placeBlock=22` / `tapBlock=24` / `upgradeCoreBloom=21` 也属于早期简单描边效果，后续可继续按同类方式补齐；
+  - `breakBlock=25` / `coreLaunchConstruct=23` 还包含随机粒子批次，需要确认当前 line/square particle 表达是否足够完整；
+  - renderer/backend 仍需真正消费这些 circle/square/line primitives。
