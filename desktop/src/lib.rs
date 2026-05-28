@@ -18,10 +18,10 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, standard_effect,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
-    PlayerUnitSwitchContext, StandardEffectCircleRenderPrimitive, StandardEffectDrawPlan,
-    StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
-    StandardEffectRectRenderPrimitive, StandardEffectSquareRenderPrimitive,
-    StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
+    PlayerUnitSwitchContext, ShieldArcAbility, StandardEffectCircleRenderPrimitive,
+    StandardEffectDrawPlan, StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
+    StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
+    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -313,6 +313,32 @@ impl DesktopLauncher {
             .iter()
             .map(|(id, unit)| (*id, unit.hitbox.hit_size))
             .collect();
+        let unit_shield_arcs: BTreeMap<i32, StandardEffectShieldArcBreak> = self
+            .runtime
+            .client_unit_snapshot_entities
+            .iter()
+            .filter_map(|(id, unit)| {
+                let ability = unit
+                    .type_info
+                    .abilities
+                    .iter()
+                    .find_map(|descriptor| ShieldArcAbility::from_descriptor(descriptor))?;
+                Some((
+                    *id,
+                    StandardEffectShieldArcBreak {
+                        unit_x: unit.x(),
+                        unit_y: unit.y(),
+                        unit_rotation: unit.rotation(),
+                        ability_x: ability.x,
+                        ability_y: ability.y,
+                        radius: ability.radius,
+                        width: ability.width,
+                        angle: ability.angle,
+                        angle_offset: ability.angle_offset,
+                    },
+                ))
+            })
+            .collect();
         let block_full_icon_sizes: BTreeMap<ContentId, i32> = self
             .content_loader
             .blocks()
@@ -329,6 +355,10 @@ impl DesktopLauncher {
                 }
                 _ => None,
             };
+            let resolved_shield_arc_break = match input.data {
+                TypeValue::Unit(id) => unit_shield_arcs.get(id).copied(),
+                _ => None,
+            };
             plans.extend(
                 standard_effect_draw_plans_with_data_value_and_resolved_context(
                     input.effect_id,
@@ -342,6 +372,7 @@ impl DesktopLauncher {
                     Some(input.data),
                     resolved_unit_hit_size,
                     resolved_block_full_icon_size,
+                    resolved_shield_arc_break,
                 ),
             );
             standard_effect_render_lifetime(input.effect_id, input.rotation, input.lifetime)
@@ -4054,6 +4085,65 @@ mod tests {
         assert_eq!(stats.square_primitives, 0);
         assert_eq!(stats.rect_primitives, 1);
         assert_eq!(stats.line_primitives, 0);
+        assert_eq!(stats.triangle_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_resolves_arc_shield_break_ability_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let tecta = launcher
+            .content_loader
+            .unit_by_name("tecta")
+            .expect("base content should include tecta")
+            .clone();
+        let mut unit = UnitComp::new(778, tecta, TeamId(TEAM_SHARDED));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(90.0);
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(778, unit);
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("arcShieldBreak").unwrap() as u16,
+                    x: 100.0,
+                    y: 200.0,
+                    rotation: 90.0,
+                    color: type_io::RgbaColor::new(0x66ccffff_i32),
+                },
+                data: TypeValue::Unit(778),
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 16);
+        assert!(launcher.standard_local_effect_circle_primitives.is_empty());
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_rect_primitives.is_empty());
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 16);
+        assert!(launcher
+            .standard_local_effect_triangle_primitives
+            .is_empty());
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let line = &launcher.standard_local_effect_line_primitives[0];
+        assert!(line.start.0.is_finite());
+        assert!(line.start.1.is_finite());
+        assert!(line.length > 0.0);
+        assert!(line.stroke > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 16);
+        assert_eq!(stats.circle_primitives, 0);
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.rect_primitives, 0);
+        assert_eq!(stats.line_primitives, 16);
         assert_eq!(stats.triangle_primitives, 0);
         assert_eq!(stats.light_primitives, 0);
         assert_eq!(renderer.last_stats, stats);

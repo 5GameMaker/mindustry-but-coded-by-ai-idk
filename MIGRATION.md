@@ -8380,5 +8380,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：
   - 当前 `block-fullIcon:<id>` 是 renderer-facing region 约定，真实图形 renderer 后续必须把该约定接到 atlas/content registry 的 `Block.fullIcon`；
-  - `arcShieldBreak=257` 仍需要 `ShieldArcAbility` typed resolver / arc primitive；
+  - `legDestroy=263` 仍需要 `LegDestroyData` 与 textured line/region seam。
+
+### 12.263 Fx.arcShieldBreak
+
+- 2026-05-28：对照 `Fx.java:2818-2836`，迁移弧形护盾破裂效果 `arcShieldBreak=257`，并把 Java `Unit` effect data 接到 Rust `ShieldArcAbility` descriptor 解析路径。
+- 本轮迁移：
+  - `arcShieldBreak=257`
+- Java 依据：
+  - `arcShieldBreak = new Effect(40, ...)`，默认 `followParent(true)`；
+  - `Lines.stroke(3 * e.fout(), e.color)`；
+  - 要求 `e.data instanceof Unit u`，然后从 `u.abilities` 中查找第一个 `ShieldArcAbility`；
+  - `pos = Tmp.v1.set(ab.x, ab.y).rotate(u.rotation - 90f).add(u)`；
+  - 绘制外/内两条 `Lines.arc(...)`，并在两端绘制连接外半径和内半径的边线。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_ARC_SHIELD_BREAK_ID=257`、lookup 与 metadata，lifetime `40.0`；
+    - 新增 `StandardEffectShieldArcBreak`，承载 desktop/runtime 已解析出的 unit position/rotation 与 shield arc ability 参数；
+    - `standard_effect_draw_plans_with_data_value_and_resolved_context(...)` 增加 `resolved_shield_arc_break`；
+    - 当 data 是 `TypeValue::Unit(_)` 且能解析 shield arc 时，用多段 `LineAngle` 近似 Java 两条 arc，并输出两条端点连接线，stroke `3 * fout`，颜色使用输入 color；
+    - core 测试覆盖 ID、metadata、解析缺失返回空、arc/端点线展开为 line plans。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `StandardEffectShieldArcBreak`。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render(...)` 从 `runtime.client_unit_snapshot_entities` 中读取单位位置/旋转，并从 `unit.type_info.abilities` 解析第一个 `ShieldArcAbility` descriptor；
+    - 对 `EffectCallPacket2.data = TypeValue::Unit(id)` 传入 shield arc resolved context；
+    - 新增 `desktop_launcher_resolves_arc_shield_break_ability_for_render`，验证本地 effect event → client unit snapshot → shield arc ability descriptor → line primitives → headless renderer stats。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_resolves_arc_shield_break_ability_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前用多段 `LineAngle` 近似 `Lines.arc(...)`，真实 renderer/backend 后续可补专用 arc primitive 减少线段误差；
+  - 当前只取第一个 `ShieldArcAbility` descriptor，符合 Java `Structs.find(...)` 的 first-match 语义；若后续 ability runtime state 与 descriptor 分离，需要保持该顺序；
   - `legDestroy=263` 仍需要 `LegDestroyData` 与 textured line/region seam。

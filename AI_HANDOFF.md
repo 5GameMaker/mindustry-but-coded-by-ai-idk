@@ -6375,7 +6375,45 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
   - `git diff --check`
 - 下一步建议：
-  1. 继续 `arcShieldBreak=257`：需要为 `ShieldArcAbility` 建 typed resolver，并补 arc primitive/desktop stats；
-  2. 或继续 `legDestroy=263`：需要 `LegDestroyData` effect data seam 与 textured line primitive；
+  1. `arcShieldBreak=257` 已在后续 `189` 节继续闭环；如回看本节点，关键遗留是专用 arc primitive/真实 renderer；
+  2. 继续 `legDestroy=263`：需要 `LegDestroyData` effect data seam 与 textured line primitive；
   3. 当前 `block-fullIcon:<id>` 仍只是 renderer-facing region 约定，真实图形 renderer 后续必须把它解析到 content atlas 的 `Block.fullIcon`；
   4. 当前总迁移仍约 9% 左右，远未可玩，不能把 headless primitive seam 当成最终渲染完成。
+
+---
+
+## 189. 最新闭环记录：Fx.arcShieldBreak
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `arcShieldBreak=257`，让 Java `Unit` effect data 在 Rust 端通过 `TypeValue::Unit(id)` 接入客户端单位快照，并从 `unit.type_info.abilities` 解析第一个 `ShieldArcAbility` descriptor，生成弧盾破裂线段。
+- 本轮迁移：
+  - `arcShieldBreak=257`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_ARC_SHIELD_BREAK_ID=257`、lookup、metadata，lifetime `40.0`；
+    - 新增 `StandardEffectShieldArcBreak`，承载 unit position/rotation 与 shield arc ability 的 `x/y/radius/width/angle/angle_offset`；
+    - `standard_effect_draw_plans_with_data_value_and_resolved_context(...)` 新增 `resolved_shield_arc_break`；
+    - `TypeValue::Unit(_) + ShieldArcAbility` 时，用多段 `LineAngle` 近似 Java 的外/内两条 `Lines.arc(...)`，再补两条端点连接线；缺少 unit data 或 ability resolver 时返回空，保持 Java guard/first-match 语义；
+    - core 测试覆盖 ID、metadata、line plan 数量、stroke、颜色、缺 resolver 返回空。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `StandardEffectShieldArcBreak`。
+  - `desktop/src/lib.rs`
+    - `collect_standard_local_effect_draw_plans_for_render(...)` 从 `runtime.client_unit_snapshot_entities` 建立 `unit_id -> StandardEffectShieldArcBreak` 映射；
+    - 每个单位按 Java `Structs.find(...)` 等价语义取第一个可解析的 `ShieldArcAbility` descriptor；
+    - 新增 `desktop_launcher_resolves_arc_shield_break_ability_for_render`，验证 effect event、client unit snapshot、ability descriptor、line primitives 与 headless renderer stats 的完整接线。
+  - `MIGRATION.md`
+    - 新增 `12.263` 节，并更新 `12.262` 剩余项。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plan_covers_smoke_trails_and_ripple --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_resolves_arc_shield_break_ability_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续 `legDestroy=263`：需要 `LegDestroyData` effect data seam 与 textured line primitive/region；
+  2. 或先把 `Lines.arc` 从多段 `LineAngle` 升级为专用 arc primitive，并接 desktop stats/renderer seam；
+  3. 当前 total 仍约 9% 左右，远未可玩；继续避免让 helper/plan 停留为孤立模块。

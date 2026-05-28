@@ -386,6 +386,8 @@ pub const FX_LIGHT_BLOCK_ID: i32 = 254;
 pub const FX_OVERDRIVE_BLOCK_FULL_ID: i32 = 255;
 /// Upstream `Fx.shieldBreak` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHIELD_BREAK_ID: i32 = 256;
+/// Upstream `Fx.arcShieldBreak` id in `mindustry.content.Fx` for v158.1.
+pub const FX_ARC_SHIELD_BREAK_ID: i32 = 257;
 /// Upstream `Fx.coreLandDust` id in `mindustry.content.Fx` for v158.1.
 pub const FX_CORE_LAND_DUST_ID: i32 = 258;
 /// Upstream `Fx.podLandDust` id in `mindustry.content.Fx` for v158.1.
@@ -593,6 +595,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "lightBlock" => Some(FX_LIGHT_BLOCK_ID),
         "overdriveBlockFull" => Some(FX_OVERDRIVE_BLOCK_FULL_ID),
         "shieldBreak" => Some(FX_SHIELD_BREAK_ID),
+        "arcShieldBreak" => Some(FX_ARC_SHIELD_BREAK_ID),
         "coreLandDust" => Some(FX_CORE_LAND_DUST_ID),
         "podLandDust" => Some(FX_POD_LAND_DUST_ID),
         "unitShieldBreak" => Some(FX_UNIT_SHIELD_BREAK_ID),
@@ -1003,6 +1006,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_OVERDRIVE_BLOCK_FULL_ID, 60.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SHIELD_BREAK_ID => Effect::with_lifetime(FX_SHIELD_BREAK_ID, 40.0, DEFAULT_EFFECT_CLIP),
+        FX_ARC_SHIELD_BREAK_ID => {
+            Effect::with_lifetime(FX_ARC_SHIELD_BREAK_ID, 40.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_CORE_LAND_DUST_ID => {
             Effect::with_lifetime(FX_CORE_LAND_DUST_ID, 100.0, DEFAULT_EFFECT_CLIP)
                 .layer(Layer::GROUND_UNIT + 1.0)
@@ -1029,6 +1035,19 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
 
 pub fn standard_effect_by_name(name: &str) -> Option<Effect> {
     standard_effect_id(name).and_then(standard_effect)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StandardEffectShieldArcBreak {
+    pub unit_x: f32,
+    pub unit_y: f32,
+    pub unit_rotation: f32,
+    pub ability_x: f32,
+    pub ability_y: f32,
+    pub radius: f32,
+    pub width: f32,
+    pub angle: f32,
+    pub angle_offset: f32,
 }
 
 pub fn standard_effect_render_lifetime(effect_id: Option<u16>, rotation: f32, current: f32) -> f32 {
@@ -1073,6 +1092,7 @@ pub fn standard_effect_draw_plans_with_data_float(
 ) -> Vec<StandardEffectDrawPlan> {
     standard_effect_draw_plans_with_data(
         effect_id, state_id, x, y, rotation, time, lifetime, color, data_float, None, None, None,
+        None,
     )
 }
 
@@ -1116,6 +1136,7 @@ pub fn standard_effect_draw_plans_with_data_value_and_unit_hit_size(
         data_value,
         resolved_unit_hit_size,
         None,
+        None,
     )
 }
 
@@ -1131,6 +1152,7 @@ pub fn standard_effect_draw_plans_with_data_value_and_resolved_context(
     data_value: Option<&TypeValue>,
     resolved_unit_hit_size: Option<f32>,
     resolved_block_full_icon_size: Option<i32>,
+    resolved_shield_arc_break: Option<StandardEffectShieldArcBreak>,
 ) -> Vec<StandardEffectDrawPlan> {
     let data_float = match data_value {
         Some(TypeValue::Float(value)) => Some(*value),
@@ -1149,6 +1171,7 @@ pub fn standard_effect_draw_plans_with_data_value_and_resolved_context(
         data_value,
         resolved_unit_hit_size,
         resolved_block_full_icon_size,
+        resolved_shield_arc_break,
     )
 }
 
@@ -1165,6 +1188,7 @@ fn standard_effect_draw_plans_with_data(
     data_value: Option<&TypeValue>,
     resolved_unit_hit_size: Option<f32>,
     resolved_block_full_icon_size: Option<i32>,
+    resolved_shield_arc_break: Option<StandardEffectShieldArcBreak>,
 ) -> Vec<StandardEffectDrawPlan> {
     let Some(effect_id_i32) = effect_id.map(i32::from) else {
         return Vec::new();
@@ -1220,6 +1244,7 @@ fn standard_effect_draw_plans_with_data(
             | FX_LAUNCH_POD_ID
             | FX_HEAL_BLOCK_FULL_ID
             | FX_SHIELD_BREAK_ID
+            | FX_ARC_SHIELD_BREAK_ID
             | FX_CORE_LAND_DUST_ID
             | FX_POD_LAND_DUST_ID
             | FX_UNIT_SHIELD_BREAK_ID
@@ -1650,6 +1675,93 @@ fn standard_effect_draw_plans_with_data(
                 light_radius: 0.0,
                 light_opacity: 0.0,
             });
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_ARC_SHIELD_BREAK_ID {
+        let Some(TypeValue::Unit(_unit_id)) = data_value else {
+            return Vec::new();
+        };
+        let Some(arc) = resolved_shield_arc_break else {
+            return Vec::new();
+        };
+
+        let stroke = 3.0 * fout;
+        let (offset_x, offset_y) =
+            rotate_offset(arc.unit_rotation - 90.0, arc.ability_x, arc.ability_y);
+        let center = (arc.unit_x + offset_x, arc.unit_y + offset_y);
+        let start_angle = arc.unit_rotation + arc.angle_offset - arc.angle / 2.0;
+        let sweep = arc.angle;
+        let segments = ((sweep.abs() / 12.0).ceil() as i32).max(3);
+        let mut plans = Vec::with_capacity((segments as usize) * 2 + 2);
+
+        let push_line =
+            |plans: &mut Vec<StandardEffectDrawPlan>, start: (f32, f32), end: (f32, f32)| {
+                let dx = end.0 - start.0;
+                let dy = end.1 - start.1;
+                plans.push(StandardEffectDrawPlan {
+                    effect_id: effect_id_i32,
+                    layer: effect.layer,
+                    kind: StandardEffectDrawKind::LineAngle,
+                    center: start,
+                    color_from: None,
+                    color_mid: None,
+                    color_to: None,
+                    color_mix: 0.0,
+                    input_color: Some(color),
+                    color_mul: 1.0,
+                    alpha: 1.0,
+                    radius: (dx * dx + dy * dy).sqrt(),
+                    stroke,
+                    particles: Some(standard_effect_particle_spec(
+                        state_id,
+                        1,
+                        Some(dy.atan2(dx).to_degrees()),
+                        0.0,
+                        0.0,
+                        fin,
+                        fout,
+                        fslope,
+                    )),
+                    light_color: None,
+                    light_radius: 0.0,
+                    light_opacity: 0.0,
+                });
+            };
+
+        for radius in [
+            arc.radius + arc.width / 2.0,
+            (arc.radius - arc.width / 2.0).max(0.0),
+        ] {
+            if radius <= 0.0 {
+                continue;
+            }
+            for index in 0..segments {
+                let a = start_angle + sweep * index as f32 / segments as f32;
+                let b = start_angle + sweep * (index + 1) as f32 / segments as f32;
+                let (ax, ay) = trns(a, radius);
+                let (bx, by) = trns(b, radius);
+                push_line(
+                    &mut plans,
+                    (center.0 + ax, center.1 + ay),
+                    (center.0 + bx, center.1 + by),
+                );
+            }
+        }
+
+        for sign in [-1.0_f32, 1.0_f32] {
+            let angle = arc.unit_rotation + arc.angle_offset - arc.angle / 2.0 * sign;
+            let outer = arc.radius + arc.width / 2.0;
+            let inner = (arc.radius - arc.width / 2.0).max(0.0);
+            let (ox, oy) = trns(angle, outer);
+            let (ix, iy) = trns(angle, inner);
+            push_line(
+                &mut plans,
+                (center.0 + ox, center.1 + oy),
+                (center.0 + ix, center.1 + iy),
+            );
         }
 
         return plans;
@@ -9002,6 +9114,10 @@ mod tests {
         );
         assert_eq!(standard_effect_id("shieldBreak"), Some(FX_SHIELD_BREAK_ID));
         assert_eq!(
+            standard_effect_id("arcShieldBreak"),
+            Some(FX_ARC_SHIELD_BREAK_ID)
+        );
+        assert_eq!(
             standard_effect_id("coreLandDust"),
             Some(FX_CORE_LAND_DUST_ID)
         );
@@ -9525,6 +9641,10 @@ mod tests {
             60.0
         );
         assert_eq!(standard_effect(FX_SHIELD_BREAK_ID).unwrap().lifetime, 40.0);
+        assert_eq!(
+            standard_effect(FX_ARC_SHIELD_BREAK_ID).unwrap().lifetime,
+            40.0
+        );
         let core_land_dust = standard_effect(FX_CORE_LAND_DUST_ID).unwrap();
         assert_eq!(core_land_dust.lifetime, 100.0);
         assert_eq!(core_land_dust.layer, Layer::GROUND_UNIT + 1.0);
@@ -10500,6 +10620,59 @@ mod tests {
         assert_eq!(shield_break[0].stroke, 1.5);
         assert!(shield_break[0].radius > 0.0);
 
+        let arc_shield_data = TypeValue::Unit(77);
+        let arc_shield = standard_effect_draw_plans_with_data_value_and_resolved_context(
+            Some(FX_ARC_SHIELD_BREAK_ID as u16),
+            257,
+            3.0,
+            4.0,
+            0.0,
+            20.0,
+            40.0,
+            input_color,
+            Some(&arc_shield_data),
+            None,
+            None,
+            Some(StandardEffectShieldArcBreak {
+                unit_x: 3.0,
+                unit_y: 4.0,
+                unit_rotation: 90.0,
+                ability_x: 0.0,
+                ability_y: -20.0,
+                radius: 45.0,
+                width: 8.0,
+                angle: 82.0,
+                angle_offset: 0.0,
+            }),
+        );
+        assert_eq!(arc_shield.len(), 16);
+        assert!(arc_shield
+            .iter()
+            .all(|plan| plan.kind == StandardEffectDrawKind::LineAngle));
+        assert!(arc_shield
+            .iter()
+            .all(|plan| plan.input_color == Some(input_color)));
+        assert_eq!(arc_shield[0].stroke, 1.5);
+        assert!(arc_shield[0].radius > 0.0);
+        assert_eq!(arc_shield[0].center.0.is_finite(), true);
+        assert!(
+            standard_effect_draw_plans_with_data_value_and_resolved_context(
+                Some(FX_ARC_SHIELD_BREAK_ID as u16),
+                257,
+                3.0,
+                4.0,
+                0.0,
+                20.0,
+                40.0,
+                input_color,
+                Some(&arc_shield_data),
+                None,
+                None,
+                None,
+            )
+            .is_empty()
+        );
+
         let unit_shield_data = TypeValue::Unit(77);
         let unit_shield = standard_effect_draw_plans_with_data_value_and_unit_hit_size(
             Some(FX_UNIT_SHIELD_BREAK_ID as u16),
@@ -10729,6 +10902,7 @@ mod tests {
             Some(&heal_block_full_data),
             None,
             Some(2),
+            None,
         );
         assert_eq!(heal_block_full.len(), 1);
         assert_eq!(
@@ -10763,6 +10937,7 @@ mod tests {
                 20.0,
                 input_color,
                 Some(&heal_block_full_data),
+                None,
                 None,
                 None,
             )
