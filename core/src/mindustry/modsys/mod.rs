@@ -343,14 +343,27 @@ impl ModResourcePlan {
         paths: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         let mod_name = mod_name.into();
-        let sprite_sources = paths
+        let mut regular_sources = Vec::new();
+        let mut override_sources = Vec::new();
+
+        for source in paths
             .into_iter()
             .filter_map(|path| ModSpritePackSource::from_scanned_path(mod_name.clone(), path))
-            .collect();
+        {
+            if source.prefix_with_mod_name {
+                regular_sources.push(source);
+            } else {
+                override_sources.push(source);
+            }
+        }
+
+        regular_sources.sort_by(|left, right| left.source_path.cmp(&right.source_path));
+        override_sources.sort_by(|left, right| left.source_path.cmp(&right.source_path));
+        regular_sources.extend(override_sources);
 
         Self {
             icon: ModIconLoadPlan::new(headless),
-            sprite_sources,
+            sprite_sources: regular_sources,
         }
     }
 
@@ -846,6 +859,12 @@ mod tests {
             plan.sprite_requests(),
             vec![
                 SpritePackRequest {
+                    source_path: "mods/example/sprites/blocks/environment/ore.png".into(),
+                    atlas_name: "example-ore".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
                     source_path: "mods/example/sprites/router.png".into(),
                     atlas_name: "example-router".into(),
                     page_hint: "sprites".into(),
@@ -854,12 +873,6 @@ mod tests {
                 SpritePackRequest {
                     source_path: "mods/example/sprites/ui/badge.png".into(),
                     atlas_name: "example-badge".into(),
-                    page_hint: "sprites".into(),
-                    r#override: false,
-                },
-                SpritePackRequest {
-                    source_path: "mods/example/sprites/blocks/environment/ore.png".into(),
-                    atlas_name: "example-ore".into(),
                     page_hint: "sprites".into(),
                     r#override: false,
                 },
@@ -879,8 +892,8 @@ mod tests {
         );
 
         let requests = plan.sprite_requests();
-        assert_eq!(requests[1].page_type(), PageType::Ui);
-        assert_eq!(requests[2].page_type(), PageType::Environment);
+        assert_eq!(requests[0].page_type(), PageType::Environment);
+        assert_eq!(requests[2].page_type(), PageType::Ui);
         assert_eq!(requests[4].page_type(), PageType::Rubble);
     }
 

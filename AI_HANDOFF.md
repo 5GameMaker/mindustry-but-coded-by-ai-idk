@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **19.8%**。
+- 当前总体迁移完成度：约 **19.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -8777,3 +8777,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议 `omura`；
   3. ShootAlternate barrel runtime、missile homing/weave/splash、naval wake/trail runtime 仍未完整 content-driven；
   4. 当前总迁移约 14.6%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 258. 最新闭环记录：ModResourcePlan 扫描顺序稳定化
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 `ModResourcePlan::from_file_paths(...)` 的扫描结果稳定成 Java `Mods.loadAsync()` 风格：普通 `sprites` 资源先进入计划，`sprites-override` 后进入计划，确保后续 atlas merge/override 顺序不会随文件系统遍历顺序漂移。
+- Rust 主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - `ModResourcePlan::from_file_paths(...)` 分开收集 regular sources 与 override sources；
+    - 两类 source 各自按规范化后的 `source_path` 排序；
+    - 再按 `regular -> override` 拼接，保留 `ModIconLoadPlan::new(headless)` 的 icon/preview 候选；
+    - 同步更新 `mod_resource_plan_scans_file_paths_into_sprite_sources` 的期望顺序与 page type 断言。
+  - `README.md`
+    - 当前总体完成度更新为约 `19.9%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.356`。
+- 已跑验证：
+  - `cargo test -p mindustry-core mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core sprite_pack_request_page_type --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+- 当前仍需继续：
+  1. 接真实 filesystem walker / zip-jar mod root / Arc `Fi.findAll` 等价路径发现；
+  2. 做 `resolve_mod_icon(icon.png -> preview.png)` 的真实存在性判断；
+  3. 继续推进 PNG decode、MultiPacker 实际尺寸/bleed/flush、GPU texture region；
+  4. 当前总迁移约 19.9%，仍未达到完整可玩，goal 绝不能标记 complete。

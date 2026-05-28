@@ -11430,3 +11430,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 输入仍是调用方提供的文件路径快照，尚未对接真实文件系统 walker、zip/jar mod root 或 Arc `Fi.findAll` 等价实现；
   - 仍未读取 PNG 尺寸、bleed、pack、flush 或绑定 GPU region；
   - 当前总体迁移约 19.8%，仍未达到完整可玩。
+
+### 12.356 ModResourcePlan scan order stabilized for override overlay
+
+- 2026-05-29：继续收紧 mod resource 扫描计划与 Java `Mods.loadAsync()/packSprites(...)` 的顺序语义。本轮把 `ModResourcePlan::from_file_paths(...)` 从“按输入遍历顺序收集”改为“regular `sprites` 与 `sprites-override` 分桶、各自按规范化 `source_path` 排序、最后 regular 在前 override 在后”，避免真实文件系统 walker 接入后因为枚举顺序不稳定导致 atlas overlay 行为漂移。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `loadAsync()` 分别扫描 `sprites` 与 `sprites-override`；
+    - 普通 `sprites` 使用 mod name 前缀进入 packer；
+    - `sprites-override` 后续以无前缀同名 region 覆盖；
+    - page 分类仍由 source path 推断，不把 `page_hint` 当成唯一权威来源。
+- Rust 新增/接入：
+  - `core/src/mindustry/modsys/mod.rs`
+    - `ModResourcePlan::from_file_paths(...)` 分开收集 `prefix_with_mod_name=true` 的 regular sources 与 override sources；
+    - regular/override 各自排序后再合并，锁定 `sprites/...` 在 `sprites-override/...` 前；
+    - `mod_resource_plan_scans_file_paths_into_sprite_sources` 更新为断言 `environment -> router -> ui -> override main -> override rubble` 的稳定顺序；
+    - 同步断言 page type index：environment、ui、rubble 在排序后仍正确。
+- 已跑验证：
+  - `cargo test -p mindustry-core mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `3 passed`
+  - `cargo test -p mindustry-core sprite_pack_request_page_type --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-desktop mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+- 仍未完成：
+  - 仍未接真实 filesystem walker、zip/jar mod root、Arc `Fi.findAll` 等价实现；
+  - 仍未做真实文件存在性判断、PNG decode、MultiPacker 实际尺寸/bleed/flush 或 GPU texture region；
+  - 当前总体迁移约 19.9%，仍未达到完整可玩。
