@@ -10325,3 +10325,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `mono` mining/rebuild command runtime 仍需与 AI/command 系统整体联动验证；
   - 下一步建议继续 `mega`，需要两个 `heal-weapon-mount` LaserBoltBulletType 与 payload/build 字段；
   - 当前总体迁移约 13.9%，远未可玩。
+
+### 12.325 UnitTypes mega heal laser bolt mounts
+
+- 2026-05-28：继续回填 Java `mega` 支援单位字段与两个 `heal-weapon-mount`。该闭环新增两枚 `LaserBoltBulletType` 治疗弹 content，并将 `mega` 的 repair command、payload/build 和 heal weapon 接入 Rust unit registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1404-1451`
+  - `mega`：`defaultCommand=repairCommand`、`mineTier=3`、`mineSpeed=4`、`health=460`、`armor=3`、`speed=2.5`、`accel=0.06`、`drag=0.017`、`lowAltitude=true`、`flying=true`、`engineOffset=10.5`、`faceTarget=false`、`hitSize=16.05`、`engineSize=3`、`payloadCapacity=(2*2)*tilePayload`、`buildSpeed=2.6`、`isEnemy=false`
+  - first `heal-weapon-mount`：`shootSound=shootLaser`、`reload=24`、`x=8`、`y=-6`、`rotate=true`，bullet `LaserBoltBulletType(5.2f,10)` with `lifetime=35`、`healPercent=5.5`、`collidesTeam=true`、`backColor=heal`、`frontColor=white`
+  - second `heal-weapon-mount`：`shootSound=shootLaser`、`reload=15`、`x=4`、`y=5`、`rotate=true`，bullet `LaserBoltBulletType(5.2f,8)` with `lifetime=35`、`healPercent=3`、`collidesTeam=true`、`backColor=heal`、`frontColor=white`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `mega_heal_bolt_large` 与 `mega_heal_bolt_small`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `mega_heal_bolts_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `mega` 补齐 Java accel/drag/faceTarget/payload/build 字段；
+    - 注册两个 `heal-weapon-mount`；
+    - 新增 `mega_support_profile_matches_java_heal_mounts`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `14.0%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core mega_heal_bolts_match_java_profiles --lib`
+  - `cargo test -p mindustry-core mega_support_profile_matches_java_heal_mounts --lib`
+- 仍未完成：
+  - LaserBolt heal/team collision runtime 仍需接 projectile 命中和治疗路径；
+  - payload command、repair command 与 build AI 还需整体 runtime smoke test；
+  - 下一步建议继续 `quad`，需要 BasicBulletType 大炸弹、status/frag/lightning/fire 效果与 payload bomb 行为记录位；
+  - 当前总体迁移约 14.0%，远未可玩。

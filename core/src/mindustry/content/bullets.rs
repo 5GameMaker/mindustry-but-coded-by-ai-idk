@@ -476,6 +476,20 @@ pub fn load() -> Vec<BulletContent> {
     poly_missile.back_color = "heal".into();
     poly_missile.trail_color = "heal".into();
 
+    let mut mega_heal_bolt_large = laser_bolt_bullet(5.2, 10.0);
+    mega_heal_bolt_large.lifetime = 35.0;
+    mega_heal_bolt_large.heal_percent = 5.5;
+    mega_heal_bolt_large.collides_team = true;
+    mega_heal_bolt_large.back_color = "heal".into();
+    mega_heal_bolt_large.front_color = "white".into();
+
+    let mut mega_heal_bolt_small = laser_bolt_bullet(5.2, 8.0);
+    mega_heal_bolt_small.lifetime = 35.0;
+    mega_heal_bolt_small.heal_percent = 3.0;
+    mega_heal_bolt_small.collides_team = true;
+    mega_heal_bolt_small.back_color = "heal".into();
+    mega_heal_bolt_small.front_color = "white".into();
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -545,6 +559,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "eclipse_flak", eclipse_flak),
         make_bullet(&mut next_id, "eclipse_laser", eclipse_laser),
         make_bullet(&mut next_id, "poly_missile", poly_missile),
+        make_bullet(&mut next_id, "mega_heal_bolt_large", mega_heal_bolt_large),
+        make_bullet(&mut next_id, "mega_heal_bolt_small", mega_heal_bolt_small),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -853,6 +869,8 @@ mod tests {
                 "eclipse_flak",
                 "eclipse_laser",
                 "poly_missile",
+                "mega_heal_bolt_large",
+                "mega_heal_bolt_small",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1642,6 +1660,37 @@ mod tests {
         assert!(!missile.reflectable);
         assert_eq!(missile.back_color, "heal");
         assert_eq!(missile.trail_color, "heal");
+    }
+
+    #[test]
+    fn mega_heal_bolts_match_java_profiles() {
+        let bullets = load();
+        let large = &by_name(&bullets, "mega_heal_bolt_large").spec;
+
+        assert_eq!(large.kind, BulletKind::LaserBolt);
+        assert_eq!(large.speed, 5.2);
+        assert_eq!(large.damage, 10.0);
+        assert_eq!(large.lifetime, 35.0);
+        assert_eq!(large.heal_percent, 5.5);
+        assert!(large.collides_team);
+        assert_eq!(large.back_color, "heal");
+        assert_eq!(large.front_color, "white");
+        assert_eq!(large.light_color, "heal");
+        assert!(!large.hittable);
+        assert!(!large.reflectable);
+
+        let small = &by_name(&bullets, "mega_heal_bolt_small").spec;
+        assert_eq!(small.kind, BulletKind::LaserBolt);
+        assert_eq!(small.speed, 5.2);
+        assert_eq!(small.damage, 8.0);
+        assert_eq!(small.lifetime, 35.0);
+        assert_eq!(small.heal_percent, 3.0);
+        assert!(small.collides_team);
+        assert_eq!(small.back_color, "heal");
+        assert_eq!(small.front_color, "white");
+        assert_eq!(small.light_color, "heal");
+        assert!(!small.hittable);
+        assert!(!small.reflectable);
     }
 
     #[test]

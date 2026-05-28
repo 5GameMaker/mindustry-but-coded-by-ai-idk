@@ -843,15 +843,36 @@ pub fn load() -> Vec<UnitType> {
             u.health = 460.0;
             u.armor = 3.0;
             u.speed = 2.5;
+            u.accel = 0.06;
+            u.drag = 0.017;
             u.low_altitude = true;
             u.flying = true;
             u.engine_offset = 10.5;
+            u.face_target = false;
             u.hit_size = 16.05;
             u.engine_size = 3.0;
             u.payload_capacity = 4.0 * super_tile_payload();
             u.build_speed = 2.6;
             u.is_enemy = false;
             u.default_command = Some("repair".into());
+
+            let mut large = Weapon::new("heal-weapon-mount");
+            large.shoot_sound = "shootLaser".into();
+            large.reload = 24.0;
+            large.x = 8.0;
+            large.y = -6.0;
+            large.rotate = true;
+            large.bullet = "mega_heal_bolt_large".into();
+            u.weapons.push(large);
+
+            let mut small = Weapon::new("heal-weapon-mount");
+            small.shoot_sound = "shootLaser".into();
+            small.reload = 15.0;
+            small.x = 4.0;
+            small.y = 5.0;
+            small.rotate = true;
+            small.bullet = "mega_heal_bolt_small".into();
+            u.weapons.push(small);
         }),
         unit(&mut next_id, "quad", UnitKind::Standard, |u| {
             u.armor = 8.0;
@@ -2725,6 +2746,65 @@ mod tests {
         assert_eq!(missile.spec.kind, BulletKind::Missile);
         assert_eq!(missile.spec.heal_percent, 5.5);
         assert!(missile.spec.collides_team);
+    }
+
+    #[test]
+    fn mega_support_profile_matches_java_heal_mounts() {
+        let units = load();
+        let mega = by_name(&units, "mega");
+
+        assert_eq!(mega.default_command.as_deref(), Some("repair"));
+        assert_eq!(mega.mine_tier, 3);
+        assert_eq!(mega.mine_speed, 4.0);
+        assert_eq!(mega.health, 460.0);
+        assert_eq!(mega.armor, 3.0);
+        assert_eq!(mega.speed, 2.5);
+        assert_eq!(mega.accel, 0.06);
+        assert_eq!(mega.drag, 0.017);
+        assert!(mega.low_altitude);
+        assert!(mega.flying);
+        assert_eq!(mega.engine_offset, 10.5);
+        assert!(!mega.face_target);
+        assert_eq!(mega.hit_size, 16.05);
+        assert_eq!(mega.engine_size, 3.0);
+        assert_eq!(mega.payload_capacity, 4.0 * super_tile_payload());
+        assert_eq!(mega.build_speed, 2.6);
+        assert!(!mega.is_enemy);
+        assert_eq!(mega.weapons.len(), 2);
+
+        let large = &mega.weapons[0];
+        assert_eq!(large.name, "heal-weapon-mount");
+        assert_eq!(large.shoot_sound, "shootLaser");
+        assert_eq!(large.reload, 24.0);
+        assert_eq!(large.x, 8.0);
+        assert_eq!(large.y, -6.0);
+        assert!(large.rotate);
+        assert_eq!(large.bullet, "mega_heal_bolt_large");
+
+        let small = &mega.weapons[1];
+        assert_eq!(small.name, "heal-weapon-mount");
+        assert_eq!(small.shoot_sound, "shootLaser");
+        assert_eq!(small.reload, 15.0);
+        assert_eq!(small.x, 4.0);
+        assert_eq!(small.y, 5.0);
+        assert!(small.rotate);
+        assert_eq!(small.bullet, "mega_heal_bolt_small");
+
+        let bullets = bullets::load();
+        let large_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == large.bullet)
+            .expect("missing mega_heal_bolt_large");
+        assert_eq!(large_bullet.spec.kind, BulletKind::LaserBolt);
+        assert_eq!(large_bullet.spec.damage, 10.0);
+        assert_eq!(large_bullet.spec.heal_percent, 5.5);
+        let small_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == small.bullet)
+            .expect("missing mega_heal_bolt_small");
+        assert_eq!(small_bullet.spec.kind, BulletKind::LaserBolt);
+        assert_eq!(small_bullet.spec.damage, 8.0);
+        assert_eq!(small_bullet.spec.heal_percent, 3.0);
     }
 
     #[test]
