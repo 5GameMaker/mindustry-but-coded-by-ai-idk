@@ -658,6 +658,11 @@ pub fn load() -> Vec<BulletContent> {
     oxynoe_point_defense.hit_effect = "pointHit".into();
     oxynoe_point_defense.max_range = 100.0;
 
+    let mut aegires_point_defense = BulletSpec::new(BulletKind::Generic, 1.0, 30.0);
+    aegires_point_defense.shoot_effect = "sparkShoot".into();
+    aegires_point_defense.hit_effect = "pointHit".into();
+    aegires_point_defense.max_range = 180.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -741,6 +746,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "omura_cannon", omura_cannon),
         make_bullet(&mut next_id, "oxynoe_plasma", oxynoe_plasma),
         make_bullet(&mut next_id, "oxynoe_point_defense", oxynoe_point_defense),
+        make_bullet(&mut next_id, "aegires_point_defense", aegires_point_defense),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -1085,6 +1091,7 @@ mod tests {
                 "omura_cannon",
                 "oxynoe_plasma",
                 "oxynoe_point_defense",
+                "aegires_point_defense",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -2147,6 +2154,18 @@ mod tests {
         let point = &by_name(&bullets, "oxynoe_point_defense").spec;
         assert_eq!(point.damage, 17.0);
         assert_eq!(point.max_range, 100.0);
+        assert_eq!(point.shoot_effect, "sparkShoot");
+        assert_eq!(point.hit_effect, "pointHit");
+    }
+
+    #[test]
+    fn aegires_point_defense_bullet_matches_java_profile() {
+        let bullets = load();
+        let point = &by_name(&bullets, "aegires_point_defense").spec;
+
+        assert_eq!(point.kind, BulletKind::Generic);
+        assert_eq!(point.damage, 30.0);
+        assert_eq!(point.max_range, 180.0);
         assert_eq!(point.shoot_effect, "sparkShoot");
         assert_eq!(point.hit_effect, "pointHit");
     }

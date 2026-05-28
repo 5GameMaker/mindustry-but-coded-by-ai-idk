@@ -1224,12 +1224,38 @@ pub fn load() -> Vec<UnitType> {
             u.health = 12000.0;
             u.armor = 12.0;
             u.speed = 0.7;
+            u.drag = 0.17;
             u.hit_size = 44.0;
+            u.accel = 0.2;
             u.rotate_speed = 1.4;
+            u.face_target = false;
+            u.move_sound_volume = 1.0;
+            u.move_sound = "shipMoveBig".into();
+            u.move_sound_pitch_min = 0.95;
+            u.move_sound_pitch_max = 0.95;
+            u.clip_size = 250.0;
+            u.trail_length = 50;
+            u.wave_trail_x = 18.0;
+            u.wave_trail_y = -17.0;
+            u.trail_scl = 3.2;
             u.ammo_capacity = 40;
             u.build_speed = 3.0;
+            u.rotate_to_building = false;
+            u.range = 180.0;
+            u.max_range = 180.0;
             u.abilities
                 .push("EnergyFieldAbility:40:65:180:1.5:0.5:25".into());
+
+            for mount_y in [-18.0, 14.0] {
+                let mut point_defense = Weapon::new("point-defense-mount");
+                point_defense.x = 12.5;
+                point_defense.y = mount_y;
+                point_defense.reload = 4.0;
+                point_defense.target_interval = 8.0;
+                point_defense.target_switch_interval = 8.0;
+                point_defense.bullet = "aegires_point_defense".into();
+                u.weapons.push(point_defense);
+            }
         }),
         unit(&mut next_id, "navanax", UnitKind::Naval, |u| {
             u.health = 20000.0;
@@ -3552,6 +3578,58 @@ mod tests {
             .expect("missing oxynoe_point_defense");
         assert_eq!(point_bullet.spec.damage, 17.0);
         assert_eq!(point_bullet.spec.max_range, 100.0);
+    }
+
+    #[test]
+    fn aegires_energy_field_and_point_defense_match_java() {
+        let units = load();
+        let aegires = by_name(&units, "aegires");
+
+        assert!(aegires.naval);
+        assert_eq!(aegires.health, 12000.0);
+        assert_eq!(aegires.armor, 12.0);
+        assert_eq!(aegires.speed, 0.7);
+        assert_eq!(aegires.drag, 0.17);
+        assert_eq!(aegires.hit_size, 44.0);
+        assert_eq!(aegires.accel, 0.2);
+        assert_eq!(aegires.rotate_speed, 1.4);
+        assert!(!aegires.face_target);
+        assert_eq!(aegires.move_sound_volume, 1.0);
+        assert_eq!(aegires.move_sound, "shipMoveBig");
+        assert_eq!(aegires.move_sound_pitch_min, 0.95);
+        assert_eq!(aegires.move_sound_pitch_max, 0.95);
+        assert_eq!(aegires.clip_size, 250.0);
+        assert_eq!(aegires.trail_length, 50);
+        assert_eq!(aegires.wave_trail_x, 18.0);
+        assert_eq!(aegires.wave_trail_y, -17.0);
+        assert_eq!(aegires.trail_scl, 3.2);
+        assert_eq!(aegires.build_speed, 3.0);
+        assert!(!aegires.rotate_to_building);
+        assert_eq!(aegires.range, 180.0);
+        assert_eq!(aegires.max_range, 180.0);
+        assert!(aegires
+            .abilities
+            .iter()
+            .any(|entry| entry == "EnergyFieldAbility:40:65:180:1.5:0.5:25"));
+        assert_eq!(aegires.weapons.len(), 2);
+
+        for (weapon, expected_y) in aegires.weapons.iter().zip([-18.0, 14.0]) {
+            assert_eq!(weapon.name, "point-defense-mount");
+            assert_eq!(weapon.x, 12.5);
+            assert_eq!(weapon.y, expected_y);
+            assert_eq!(weapon.reload, 4.0);
+            assert_eq!(weapon.target_interval, 8.0);
+            assert_eq!(weapon.target_switch_interval, 8.0);
+            assert_eq!(weapon.bullet, "aegires_point_defense");
+        }
+
+        let bullets = bullets::load();
+        let point = bullets
+            .iter()
+            .find(|bullet| bullet.name() == "aegires_point_defense")
+            .expect("missing aegires_point_defense");
+        assert_eq!(point.spec.damage, 30.0);
+        assert_eq!(point.spec.max_range, 180.0);
     }
 
     #[test]
