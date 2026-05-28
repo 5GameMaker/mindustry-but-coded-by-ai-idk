@@ -11547,3 +11547,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java `Pixmap.bleed(...)`、texture scale、flush/updateTextureAtlas、GPU texture upload 仍未接入；
   - atlas trace 仍未暴露 page 内 x/y/UV；
   - 当前总体迁移约 20.2%，仍未达到完整可玩。
+
+### 12.360 ModResourcePlan → SpritePacker → TextureAtlasPlan 传递真实 PNG 尺寸
+
+- 2026-05-29：继续把上一闭环的 PNG IHDR 宽高读取从 `TextureAtlasSpriteSourceDescriptor` 下沉/复用到 mod 资源链主路径。本轮让 `SpritePackRequest::to_region_request()` 读取真实 PNG 文件尺寸，并让默认 `SpritePacker::to_multi_packer_plan()` 调用该路径；因此 `ModResourcePlan::from_file_paths(...) -> sprite_requests() -> SpritePacker -> MultiPackerPlan -> TextureAtlasPlan` 不再在真实文件场景中固定落成 `1x1`。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `packSprites(...)` 用 `Pixmap` 读取 mod sprite 的真实图片宽高后进入 `MultiPacker`；
+    - `sprites-override` 与普通 `sprites` 仍沿用上一闭环锁定的顺序与覆盖语义。
+- Rust 新增/接入：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 复用 `png_dimensions_from_path(...)`；
+    - `SpritePackRequest::to_region_request()` 在真实 PNG 存在时读取 IHDR 宽高，失败/虚拟路径回退 `1x1`；
+    - `SpritePacker::to_multi_packer_plan()` 改为逐 request 调用 `to_region_request()`；
+    - `to_multi_packer_plan_with_size(...)` 保持显式尺寸覆盖语义不变，继续用于需要占位/强制尺寸的测试与过渡调用；
+    - 新增 `mod_resource_plan_to_texture_atlas_pipeline_reads_real_png_dimensions`，用临时最小 PNG 验证 `48x24` 从 mod resource 计划一路传到 `MultiPackerPlan` 与 `TextureAtlasPlan`，并验证缺失文件仍回退 `1x1`。
+- 已跑验证：
+  - `cargo test -p mindustry-core mod_resource_plan_to_texture_atlas_pipeline_reads_real_png_dimensions --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+  - `cargo test -p mindustry-core mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `4 passed`
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `14 passed`
+  - `cargo test -p mindustry-desktop mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - 仍缺真实 filesystem walker / zip-jar mod root / Arc `Fi.findAll` 等价路径发现；
+  - 仍只读取 PNG 宽高，未解码像素、bleed、duplicate border、flush、packing x/y/UV 或 GPU texture upload；
+  - live graphics backend 仍未执行真实 window/surface/GPU 绘制；
+  - 当前总体迁移约 20.3%，仍未达到完整可玩。

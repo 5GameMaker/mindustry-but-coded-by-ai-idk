@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **20.2%**。
+- 当前总体迁移完成度：约 **20.3%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -8893,3 +8893,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. MultiPacker 仍未按真实图片面积做完整 packing/flush；
   3. desktop trace 还需要暴露/验证 atlas x/y/UV；
   4. 当前总迁移约 20.2%，仍未达到完整可玩，goal 绝不能标记 complete。
+
+---
+
+## 262. 最新闭环记录：ModResourcePlan/SpritePacker 传递真实 PNG 尺寸
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把真实 PNG IHDR 宽高从 `TextureAtlasSpriteSourceDescriptor` 的直接 atlas 构建路径继续接入 mod 资源主链，确保 `ModResourcePlan -> SpritePacker -> MultiPackerPlan -> TextureAtlasPlan` 不再把真实 PNG 固定成 `1x1`。
+- Rust 主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - `SpritePackRequest::to_region_request()` 复用 `png_dimensions_from_path(...)`，真实 PNG 存在时读取宽高，失败/虚拟路径回退 `1x1`；
+    - `SpritePacker::to_multi_packer_plan()` 改为逐 request 使用 `to_region_request()`；
+    - `to_multi_packer_plan_with_size(...)` 保持显式尺寸覆盖语义不变；
+    - 新增 `mod_resource_plan_to_texture_atlas_pipeline_reads_real_png_dimensions`，验证临时 PNG `48x24` 能一路进入 `MultiPackerPlan` 与 `TextureAtlasPlan`，缺失文件仍回退 `1x1`。
+  - `README.md`
+    - 当前总体完成度更新为约 `20.3%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.360`。
+- 已跑验证：
+  - `cargo test -p mindustry-core mod_resource_plan_to_texture_atlas_pipeline_reads_real_png_dimensions --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core texture_atlas --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop mod_resource_plan --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前仍需继续：
+  1. 接真实 filesystem walker / zip-jar mod root / Arc `Fi.findAll` 等价路径发现；
+  2. PNG 仍只读宽高，未解码像素、bleed、duplicate border、packing x/y/UV、flush 或 GPU texture upload；
+  3. 渲染引擎下一步优先做 desktop live graphics executor，只消费现有 `DesktopGraphicsFrame`，不要把 backend 逻辑塞回 core；
+  4. 当前总迁移约 20.3%，仍未达到完整可玩，goal 绝不能标记 complete。

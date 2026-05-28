@@ -5,7 +5,7 @@
 //! `NoPatch` marker annotation.
 
 use crate::mindustry::graphics::{
-    MultiPackerPlan, PageType, RegionRequest, TextureAtlasRegionSource,
+    png_dimensions_from_path, MultiPackerPlan, PageType, RegionRequest, TextureAtlasRegionSource,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,7 +112,8 @@ impl SpritePackRequest {
     /// 当没有真实图片尺寸时，`width` / `height` 可以作为占位 metadata，
     /// 默认值为 `1x1`。
     pub fn to_region_request(&self) -> RegionRequest<TextureAtlasRegionSource<bool>> {
-        self.to_region_request_with_size(1, 1)
+        let (width, height) = png_dimensions_from_path(&self.source_path).unwrap_or((1, 1));
+        self.to_region_request_with_size(width, height)
     }
 
     /// 把请求转换成纯数据 region 请求，并显式提供占位尺寸。
@@ -184,9 +185,18 @@ impl SpritePacker {
 
     /// 导出纯数据 atlas 计划。
     ///
-    /// 没有真实图片尺寸时，默认使用 `1x1` 作为占位 metadata。
+    /// 真实 PNG 文件会读取 IHDR 宽高；虚拟路径或读取失败时回退到 `1x1`
+    /// 占位 metadata。
     pub fn to_multi_packer_plan(&self) -> MultiPackerPlan<TextureAtlasRegionSource<bool>> {
-        self.to_multi_packer_plan_with_size(1, 1)
+        let mut plan = MultiPackerPlan::new();
+
+        for request in &self.requests {
+            let page_type = request.page_type();
+            let region = request.to_region_request();
+            let _ = plan.insert_or_replace_request(page_type, region);
+        }
+
+        plan
     }
 
     /// 导出纯数据 atlas 计划，并显式指定占位尺寸。
@@ -553,6 +563,8 @@ fn mod_sprite_name_is_category_prefixed(base_name: &str, mod_name: &str) -> bool
 
 #[cfg(test)]
 mod tests {
+    use crate::mindustry::graphics::TextureAtlasPlan;
+
     use super::*;
 
     #[derive(Default)]
@@ -895,6 +907,71 @@ mod tests {
         assert_eq!(requests[0].page_type(), PageType::Environment);
         assert_eq!(requests[2].page_type(), PageType::Ui);
         assert_eq!(requests[4].page_type(), PageType::Rubble);
+    }
+
+    fn minimal_png_bytes(width: u32, height: u32) -> Vec<u8> {
+        const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&PNG_SIGNATURE);
+        bytes.extend_from_slice(&13u32.to_be_bytes());
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+        bytes.extend_from_slice(&0u32.to_be_bytes());
+        bytes
+    }
+
+    fn temp_png_path(stem: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!(
+                "mindustry-rust-{stem}-{}-{nanos}",
+                std::process::id()
+            ))
+            .join("sprites")
+            .join(format!("{stem}.png"))
+    }
+
+    #[test]
+    fn mod_resource_plan_to_texture_atlas_pipeline_reads_real_png_dimensions() {
+        let path = temp_png_path("mod-resource-plan");
+        let temp_root = path.parent().unwrap().parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, minimal_png_bytes(48, 24)).unwrap();
+        let source_path = path.to_string_lossy().replace('\\', "/");
+
+        let plan = ModResourcePlan::from_file_paths("example", false, [source_path.clone()]);
+        let mut packer = SpritePacker::new();
+        for request in plan.sprite_requests() {
+            packer.add_request(request);
+        }
+
+        let multi_plan = packer.to_multi_packer_plan();
+        let multi_region = multi_plan
+            .page(PageType::Main)
+            .get("example-mod-resource-plan")
+            .unwrap();
+        assert_eq!(multi_region.width, 48);
+        assert_eq!(multi_region.height, 24);
+        assert_eq!(multi_region.payload.source_path, source_path);
+
+        let atlas = TextureAtlasPlan::from_pack_plan(multi_plan.into_pack_plan());
+        let atlas_region = atlas.lookup("example-mod-resource-plan").unwrap().region;
+        assert_eq!(atlas_region.width, 48);
+        assert_eq!(atlas_region.height, 24);
+        assert_eq!(atlas_region.source_path, source_path);
+
+        let missing_region = SpritePackRequest::new("mods/example/sprites/missing.png", "missing")
+            .to_region_request();
+        assert_eq!(missing_region.width, 1);
+        assert_eq!(missing_region.height, 1);
+
+        std::fs::remove_dir_all(temp_root).unwrap();
     }
 
     #[test]
