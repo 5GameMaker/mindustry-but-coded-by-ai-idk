@@ -8082,7 +8082,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - Rust 新增/变化：
   - `core/src/mindustry/entities/effect.rs`
     - 新增上述 19 个 Fx ID、lookup 与 metadata；
-    - 新增颜色符号 `Color.orange`、`Color.yellow`、`Pal.plasticSmoke`、`Pal.coalBlack`（其中 `Color.yellow` / `Pal.coalBlack` 预留给后续 `generate` / `coalSmeltsmoke`）；
+    - 新增颜色符号 `Color.orange`、`Color.yellow`、`Pal.plasticSmoke`、`Pal.coalBlack`（其中 `Color.yellow` / `Pal.coalBlack` 后续由 `generate` / `coalSmeltsmoke` 小闭环正式使用）；
     - `artilleryTrailSmoke` 用 concrete `FilledCircle` plans 保留每粒子随机局部 `fin/fout/alpha/radius`；
     - `smeltsmoke` / `formsmoke` / `mine*` / `payloadReceive` 复用 `SeededSquareParticles`；
     - `lava` / `mineWallSmall` 复用 `SeededCircleParticles`；
@@ -8102,6 +8102,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
   - `git diff --check`
 - 仍未完成：
-  - `coalSmeltsmoke=224` 暂未迁移，原因是 Java 使用 `randLenVectors(e.id, 0.2f + e.fin(), ...)` 与 `e.finpowdown()`，需要更精细的 fractional/progress 与颜色 easing seam；
-  - `generate=232` 暂未迁移，原因是需要 `Lines.spikes(...)` 的最小 spike primitive；
+  - `coalSmeltsmoke=224` 与 `generate=232` 在本小节提交时暂留，当前已由 `12.255` 补齐；
+  - 本轮仍是 headless primitive seam，真实 renderer/backend 与整体游戏 runtime 接入仍需继续推进。
+
+### 12.255 Fx.coalSmeltsmoke/generate
+
+- 2026-05-28：回补 `Fx.java:2564-2568` 与 `Fx.java:2614-2618`，补齐上一小节暂留的 `coalSmeltsmoke=224` 与 `generate=232`。
+- 本轮迁移：
+  - `coalSmeltsmoke=224`
+  - `generate=232`
+- Java 依据：
+  - `coalSmeltsmoke = new Effect(40f, ...)`：`randLenVectors(e.id, 0.2f + e.fin(), 4, 6.3f, ...)`，颜色 `Color.darkGray -> Pal.coalBlack`，mix 使用 `e.finpowdown()`，圆半径 `out * 2f + 0.35f`；
+  - `generate = new Effect(11, ...)`：`Color.orange -> Color.yellow`，stroke `1f`，`Lines.spikes(e.x, e.y, e.fin()*5f, 2, 8)`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_COAL_SMELT_SMOKE_ID=224`、`FX_GENERATE_ID=232`、lookup 与 metadata；
+    - 新增 `effect_finpowdown_from_fin(...)`，对齐 Arc `Scaled.finpowdown()` / `Interp.pow3In`；
+    - `coalSmeltsmoke` 复用 `SeededCircleParticles`，使用 `particles.progress=Some(0.2 + fin)` 保留 Java fractional progress 语义，`color_mix=fin^3`；
+    - `generate` 不新增独立 spike primitive，而是展开为 8 个 deterministic `LineAngle` plans：起点位于 `fin*5` 半径，线长 `2`，stroke `1`，颜色 `Color.orange -> Color.yellow`。
+  - `desktop/src/lib.rs`
+    - 扩展 `desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render`，覆盖 `coalSmeltsmoke` 与 `generate` 后，统计变为 44 个 draw plans、26 个 circle primitives、63 个 square primitives、90 条 line primitives。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plans_cover_smoke_door_mine_and_teleport_primitives --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `generate` 当前用 8 条 `LineAngle` 表达 `Lines.spikes`，几何语义已保留但尚未接入真实 GPU `Lines.spikes` backend；
   - 本轮仍是 headless primitive seam，真实 renderer/backend 与整体游戏 runtime 接入仍需继续推进。

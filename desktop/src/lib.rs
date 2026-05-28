@@ -3630,23 +3630,25 @@ mod tests {
         for (name, x) in [
             ("artilleryTrailSmoke", 24.0_f32),
             ("smeltsmoke", 40.0_f32),
-            ("formsmoke", 56.0_f32),
-            ("lava", 72.0_f32),
-            ("dooropen", 88.0_f32),
-            ("doorclose", 104.0_f32),
-            ("dooropenlarge", 120.0_f32),
-            ("doorcloselarge", 136.0_f32),
-            ("mineWallSmall", 152.0_f32),
-            ("mineSmall", 168.0_f32),
-            ("mine", 184.0_f32),
-            ("mineBig", 200.0_f32),
-            ("mineHuge", 216.0_f32),
-            ("mineImpact", 232.0_f32),
-            ("mineImpactWave", 248.0_f32),
-            ("payloadReceive", 264.0_f32),
-            ("teleportActivate", 280.0_f32),
-            ("teleport", 296.0_f32),
-            ("teleportOut", 312.0_f32),
+            ("coalSmeltsmoke", 56.0_f32),
+            ("formsmoke", 72.0_f32),
+            ("lava", 88.0_f32),
+            ("dooropen", 104.0_f32),
+            ("doorclose", 120.0_f32),
+            ("dooropenlarge", 136.0_f32),
+            ("doorcloselarge", 152.0_f32),
+            ("generate", 168.0_f32),
+            ("mineWallSmall", 184.0_f32),
+            ("mineSmall", 200.0_f32),
+            ("mine", 216.0_f32),
+            ("mineBig", 232.0_f32),
+            ("mineHuge", 248.0_f32),
+            ("mineImpact", 264.0_f32),
+            ("mineImpactWave", 280.0_f32),
+            ("payloadReceive", 296.0_f32),
+            ("teleportActivate", 312.0_f32),
+            ("teleport", 328.0_f32),
+            ("teleportOut", 344.0_f32),
         ] {
             launcher
                 .runtime
@@ -3665,11 +3667,11 @@ mod tests {
 
         launcher.update();
 
-        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 35);
-        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 22);
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 44);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 26);
         assert_eq!(launcher.standard_local_effect_square_primitives.len(), 63);
         assert!(launcher.standard_local_effect_rect_primitives.is_empty());
-        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 82);
+        assert_eq!(launcher.standard_local_effect_line_primitives.len(), 90);
         assert!(launcher
             .standard_local_effect_triangle_primitives
             .is_empty());
@@ -3687,7 +3689,7 @@ mod tests {
         let door_square = launcher
             .standard_local_effect_square_primitives
             .iter()
-            .find(|square| square.center.0 == 88.0 && square.stroke > 0.0)
+            .find(|square| square.center.0 == 104.0 && square.stroke > 0.0)
             .expect("door effects should cache stroked square primitives");
         assert_eq!(door_square.rotation, 0.0);
 
@@ -3700,11 +3702,11 @@ mod tests {
 
         let mut renderer = HeadlessDesktopEffectRenderer::default();
         let stats = launcher.render_standard_effect_frame_with(&mut renderer);
-        assert_eq!(stats.draw_plans, 35);
-        assert_eq!(stats.circle_primitives, 22);
+        assert_eq!(stats.draw_plans, 44);
+        assert_eq!(stats.circle_primitives, 26);
         assert_eq!(stats.square_primitives, 63);
         assert_eq!(stats.rect_primitives, 0);
-        assert_eq!(stats.line_primitives, 82);
+        assert_eq!(stats.line_primitives, 90);
         assert_eq!(stats.triangle_primitives, 0);
         assert_eq!(stats.light_primitives, 0);
         assert_eq!(renderer.last_stats, stats);

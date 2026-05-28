@@ -318,6 +318,8 @@ pub const FX_ARTILLERY_TRAIL_SMOKE_ID: i32 = 221;
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.smeltsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMELT_SMOKE_ID: i32 = 223;
+/// Upstream `Fx.coalSmeltsmoke` id in `mindustry.content.Fx` for v158.1.
+pub const FX_COAL_SMELT_SMOKE_ID: i32 = 224;
 /// Upstream `Fx.formsmoke` id in `mindustry.content.Fx` for v158.1.
 pub const FX_FORM_SMOKE_ID: i32 = 225;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -332,6 +334,8 @@ pub const FX_DOOR_CLOSE_ID: i32 = 229;
 pub const FX_DOOR_OPEN_LARGE_ID: i32 = 230;
 /// Upstream `Fx.doorcloselarge` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DOOR_CLOSE_LARGE_ID: i32 = 231;
+/// Upstream `Fx.generate` id in `mindustry.content.Fx` for v158.1.
+pub const FX_GENERATE_ID: i32 = 232;
 /// Upstream `Fx.mineWallSmall` id in `mindustry.content.Fx` for v158.1.
 pub const FX_MINE_WALL_SMALL_ID: i32 = 233;
 /// Upstream `Fx.mineSmall` id in `mindustry.content.Fx` for v158.1.
@@ -534,6 +538,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "artilleryTrailSmoke" => Some(FX_ARTILLERY_TRAIL_SMOKE_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "smeltsmoke" => Some(FX_SMELT_SMOKE_ID),
+        "coalSmeltsmoke" => Some(FX_COAL_SMELT_SMOKE_ID),
         "formsmoke" => Some(FX_FORM_SMOKE_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "lava" => Some(FX_LAVA_ID),
@@ -541,6 +546,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "doorclose" => Some(FX_DOOR_CLOSE_ID),
         "dooropenlarge" => Some(FX_DOOR_OPEN_LARGE_ID),
         "doorcloselarge" => Some(FX_DOOR_CLOSE_LARGE_ID),
+        "generate" => Some(FX_GENERATE_ID),
         "mineWallSmall" => Some(FX_MINE_WALL_SMALL_ID),
         "mineSmall" => Some(FX_MINE_SMALL_ID),
         "mine" => Some(FX_MINE_ID),
@@ -906,6 +912,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_SMELT_SMOKE_ID => Effect::with_lifetime(FX_SMELT_SMOKE_ID, 15.0, DEFAULT_EFFECT_CLIP),
+        FX_COAL_SMELT_SMOKE_ID => {
+            Effect::with_lifetime(FX_COAL_SMELT_SMOKE_ID, 40.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_FORM_SMOKE_ID => Effect::with_lifetime(FX_FORM_SMOKE_ID, 40.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
         FX_LAVA_ID => Effect::with_lifetime(FX_LAVA_ID, 18.0, DEFAULT_EFFECT_CLIP),
@@ -917,6 +926,7 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         FX_DOOR_CLOSE_LARGE_ID => {
             Effect::with_lifetime(FX_DOOR_CLOSE_LARGE_ID, 10.0, DEFAULT_EFFECT_CLIP)
         }
+        FX_GENERATE_ID => Effect::with_lifetime(FX_GENERATE_ID, 11.0, DEFAULT_EFFECT_CLIP),
         FX_MINE_WALL_SMALL_ID => {
             Effect::with_lifetime(FX_MINE_WALL_SMALL_ID, 50.0, DEFAULT_EFFECT_CLIP)
         }
@@ -1051,6 +1061,7 @@ pub fn standard_effect_draw_plans_with_data_float(
             | FX_RED_GENERATE_SPARK_ID
             | FX_TURBINE_GENERATE_ID
             | FX_ARTILLERY_TRAIL_SMOKE_ID
+            | FX_GENERATE_ID
             | FX_MINE_IMPACT_WAVE_ID
             | FX_TELEPORT_ACTIVATE_ID
             | FX_TELEPORT_ID
@@ -1150,6 +1161,45 @@ pub fn standard_effect_draw_plans_with_data_float(
                     light_opacity: 0.0,
                 });
             }
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_GENERATE_ID {
+        let mut plans = Vec::with_capacity(8);
+        let radius = fin * 5.0;
+        for i in 0..8 {
+            let angle = i as f32 * 45.0;
+            let (offset_x, offset_y) = trns(angle, radius);
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::LineAngle,
+                center: (x + offset_x, y + offset_y),
+                color_from: Some("Color.orange"),
+                color_mid: None,
+                color_to: Some("Color.yellow"),
+                color_mix: fin,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 2.0,
+                stroke: 1.0,
+                particles: Some(standard_effect_particle_spec(
+                    state_id,
+                    1,
+                    Some(angle),
+                    0.0,
+                    0.0,
+                    fin,
+                    fout,
+                    fslope,
+                )),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
         }
 
         return plans;
@@ -5486,6 +5536,32 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_COAL_SMELT_SMOKE_ID => {
+            let mut particles =
+                standard_effect_particle_spec(state_id, 4, None, 0.0, 6.3, fin, fout, fslope);
+            particles.progress = Some(0.2 + fin);
+            particles.radius_base = 0.35;
+            particles.radius_fout_scale = 2.0;
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededCircleParticles,
+                center: (x, y),
+                color_from: Some("Color.darkGray"),
+                color_mid: None,
+                color_to: Some("Pal.coalBlack"),
+                color_mix: effect_finpowdown_from_fin(fin),
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: 0.0,
+                particles: Some(particles),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SMELT_SMOKE_ID
         | FX_FORM_SMOKE_ID
         | FX_LAVA_ID
@@ -6458,6 +6534,10 @@ fn effect_fslope_from_fin(fin: f32) -> f32 {
 
 fn effect_finpow_from_fin(fin: f32) -> f32 {
     interp_pow3_out(fin)
+}
+
+fn effect_finpowdown_from_fin(fin: f32) -> f32 {
+    fin.clamp(0.0, 1.0).powi(3)
 }
 
 fn effect_fout_margin_from_fin(fin: f32, margin: f32) -> f32 {
@@ -8243,6 +8323,10 @@ mod tests {
         );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("smeltsmoke"), Some(FX_SMELT_SMOKE_ID));
+        assert_eq!(
+            standard_effect_id("coalSmeltsmoke"),
+            Some(FX_COAL_SMELT_SMOKE_ID)
+        );
         assert_eq!(standard_effect_id("formsmoke"), Some(FX_FORM_SMOKE_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("lava"), Some(FX_LAVA_ID));
@@ -8256,6 +8340,7 @@ mod tests {
             standard_effect_id("doorcloselarge"),
             Some(FX_DOOR_CLOSE_LARGE_ID)
         );
+        assert_eq!(standard_effect_id("generate"), Some(FX_GENERATE_ID));
         assert_eq!(
             standard_effect_id("mineWallSmall"),
             Some(FX_MINE_WALL_SMALL_ID)
@@ -8714,6 +8799,10 @@ mod tests {
             50.0
         );
         assert_eq!(standard_effect(FX_SMELT_SMOKE_ID).unwrap().lifetime, 15.0);
+        assert_eq!(
+            standard_effect(FX_COAL_SMELT_SMOKE_ID).unwrap().lifetime,
+            40.0
+        );
         assert_eq!(standard_effect(FX_FORM_SMOKE_ID).unwrap().lifetime, 40.0);
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
         assert_eq!(standard_effect(FX_LAVA_ID).unwrap().lifetime, 18.0);
@@ -8727,6 +8816,7 @@ mod tests {
             standard_effect(FX_DOOR_CLOSE_LARGE_ID).unwrap().lifetime,
             10.0
         );
+        assert_eq!(standard_effect(FX_GENERATE_ID).unwrap().lifetime, 11.0);
         assert_eq!(
             standard_effect(FX_MINE_WALL_SMALL_ID).unwrap().lifetime,
             50.0
@@ -11357,6 +11447,30 @@ mod tests {
         assert_eq!(smelt.particles.unwrap().length, 6.5);
         assert_eq!(smelt.square_render_primitives_from_seed().len(), 6);
 
+        let coal = standard_effect_draw_plan(
+            Some(FX_COAL_SMELT_SMOKE_ID as u16),
+            224,
+            3.0,
+            4.0,
+            0.0,
+            20.0,
+            40.0,
+            DecalColor::WHITE,
+        )
+        .unwrap();
+        assert_eq!(coal.kind, StandardEffectDrawKind::SeededCircleParticles);
+        assert_eq!(coal.color_from, Some("Color.darkGray"));
+        assert_eq!(coal.color_to, Some("Pal.coalBlack"));
+        assert_eq!(coal.color_mix, effect_finpowdown_from_fin(0.5));
+        assert_eq!(coal.particles.unwrap().count, 4);
+        assert_eq!(coal.particles.unwrap().progress, Some(0.7));
+        assert_eq!(coal.particles.unwrap().length, 6.3);
+        assert_eq!(coal.particles.unwrap().radius_base, 0.35);
+        assert_eq!(
+            standard_effect_color_symbol("Pal.coalBlack"),
+            Some(DecalColor::from_rgba(0x272727ff))
+        );
+
         let form = standard_effect_draw_plan(
             Some(FX_FORM_SMOKE_ID as u16),
             225,
@@ -11422,6 +11536,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(door_large.radius, TILE_SIZE as f32 + 1.0);
+
+        let generate = standard_effect_draw_plans(
+            Some(FX_GENERATE_ID as u16),
+            232,
+            3.0,
+            4.0,
+            0.0,
+            5.5,
+            11.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(generate.len(), 8);
+        assert!(generate
+            .iter()
+            .all(|plan| plan.kind == StandardEffectDrawKind::LineAngle));
+        assert_eq!(generate[0].color_from, Some("Color.orange"));
+        assert_eq!(generate[0].color_to, Some("Color.yellow"));
+        assert_eq!(generate[0].radius, 2.0);
+        assert_eq!(generate[0].stroke, 1.0);
+        assert_eq!(
+            standard_effect_color_symbol("Color.yellow"),
+            Some(DecalColor::from_rgba(0xffff00ff))
+        );
 
         let mine_wall = standard_effect_draw_plan(
             Some(FX_MINE_WALL_SMALL_ID as u16),

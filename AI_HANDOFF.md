@@ -6087,6 +6087,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
   - `git diff --check`
 - 下一步建议：
-  1. 本轮提交后优先补 `coalSmeltsmoke=224` 的 fractional/progress + `finpowdown` 颜色 easing，和 `generate=232` 的 `Lines.spikes` primitive；
+  1. 本轮提交后优先补 `coalSmeltsmoke=224` 的 fractional/progress + `finpowdown` 颜色 easing，和 `generate=232` 的 `Lines.spikes` primitive（当前已由第 181 节补齐）；
   2. 也可继续推进 `ripple=244` 后已有/相邻 Fx 的缺口扫描，但不要跳过 224/232 的文档记录；
+  3. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。
+
+---
+
+## 181. 最新闭环记录：Fx.coalSmeltsmoke/generate
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：补齐上一闭环暂留的 `coalSmeltsmoke=224` 与 `generate=232`，避免 `Fx.java:2534-2717` 中出现明显空洞。
+- 本轮迁移：
+  - `coalSmeltsmoke=224`
+  - `generate=232`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_COAL_SMELT_SMOKE_ID` / `FX_GENERATE_ID`、lookup、metadata；
+    - 新增 `effect_finpowdown_from_fin(...)`，对齐 Arc `Scaled.finpowdown()` / `Interp.pow3In`；
+    - `coalSmeltsmoke` 使用 `SeededCircleParticles`，`progress=Some(0.2 + fin)`，半径 `0.35 + out*2`，颜色 `Color.darkGray -> Pal.coalBlack` 且 mix `fin^3`；
+    - `generate` 使用 8 个 deterministic `LineAngle` plans 表达 `Lines.spikes(e.x, e.y, e.fin()*5f, 2, 8)`，颜色 `Color.orange -> Color.yellow`，stroke `1`。
+  - `desktop/src/lib.rs`
+    - 扩展 `desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render`，加入 `coalSmeltsmoke` / `generate` 后，统计为 44 draw plans、26 circle primitives、63 square primitives、90 line primitives。
+  - `MIGRATION.md`
+    - 新增 `12.255` 节，并把 `12.254` 中“暂留 224/232”说明改为已由 `12.255` 补齐。
+- 已跑验证：
+  - `CARGO_BUILD_JOBS=1 cargo fmt`
+  - `CARGO_BUILD_JOBS=1 cargo fmt --check`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-core standard_effect_draw_plans_cover_smoke_door_mine_and_teleport_primitives --lib`
+  - `CARGO_BUILD_JOBS=1 cargo test -p mindustry-desktop desktop_launcher_flattens_smoke_door_mine_and_teleport_primitives_for_render --lib`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-core`
+  - `CARGO_BUILD_JOBS=1 cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 继续从 `ripple=244` / `bubble=245` 附近向后扫描；其中部分已有 Rust 支持，要优先补缺口而不是重复迁移；
+  2. `generate` 当前是 `LineAngle` seam，不是独立 GPU `Lines.spikes` backend，后续真实 renderer 接入时需要合并到 renderer 的 spike/line 绘制层；
   3. 当前仍是 headless primitive seam，真实 renderer/backend 与整体可玩 runtime 仍待继续推进，不要宣称可玩。
