@@ -246,6 +246,19 @@ pub fn load() -> Vec<BulletContent> {
     corvus_laser.side_length = 0.0;
     corvus_laser.colors = vec!["heal@0.4".into(), "heal".into(), "white".into()];
 
+    let mut crawler_explosion = BulletSpec::new(BulletKind::Generic, 0.0, 0.0);
+    crawler_explosion.collides_tiles = false;
+    crawler_explosion.collides = false;
+    crawler_explosion.range_override = 25.0;
+    crawler_explosion.hit_effect = "pulverize".into();
+    crawler_explosion.splash_damage_radius = 44.0;
+    crawler_explosion.instant_disappear = true;
+    crawler_explosion.splash_damage = 80.0;
+    crawler_explosion.building_damage_multiplier = 0.68;
+    crawler_explosion.kill_shooter = true;
+    crawler_explosion.hittable = false;
+    crawler_explosion.collides_air = true;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -299,6 +312,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "vela_continuous_laser", vela_continuous_laser),
         make_bullet(&mut next_id, "vela_repair_range", vela_repair_range),
         make_bullet(&mut next_id, "corvus_laser", corvus_laser),
+        make_bullet(&mut next_id, "crawler_explosion", crawler_explosion),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -474,6 +488,7 @@ mod tests {
                 "vela_continuous_laser",
                 "vela_repair_range",
                 "corvus_laser",
+                "crawler_explosion",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -881,6 +896,27 @@ mod tests {
                 "white".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn crawler_explosion_matches_java_death_bullet_profile() {
+        let bullets = load();
+        let bullet = &by_name(&bullets, "crawler_explosion").spec;
+
+        assert_eq!(bullet.kind, BulletKind::Generic);
+        assert_eq!(bullet.speed, 0.0);
+        assert_eq!(bullet.damage, 0.0);
+        assert!(!bullet.collides_tiles);
+        assert!(!bullet.collides);
+        assert_eq!(bullet.range_override, 25.0);
+        assert_eq!(bullet.hit_effect, "pulverize");
+        assert_eq!(bullet.splash_damage_radius, 44.0);
+        assert!(bullet.instant_disappear);
+        assert_eq!(bullet.splash_damage, 80.0);
+        assert_eq!(bullet.building_damage_multiplier, 0.68);
+        assert!(bullet.kill_shooter);
+        assert!(!bullet.hittable);
+        assert!(bullet.collides_air);
     }
 
     #[test]

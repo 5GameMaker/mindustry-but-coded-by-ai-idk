@@ -10003,3 +10003,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `shoot_status = unmoving` 已记录，但真实状态应用时序还需接 weapon runtime；
   - 下一步建议按子代理推荐做 `crawler`，验证 `shoot_on_death` / `kill_shooter` / 爆炸弹；
   - 当前总体迁移约 13.1%，远未可玩。
+
+### 12.315 UnitTypes crawler suicide explosion content seam
+
+- 2026-05-28：继续回填 `crawler` 的 SuicideAI/死亡触发爆炸武器 content seam，把 Java 匿名 `Weapon` 与匿名 `BulletType` 拆成 Rust content registry 中的具名 `crawler_explosion`，并让 `crawler` 的 weapon 引用该 bullet。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:651-689`
+  - unit：`crawler = new UnitType("crawler")`，`researchCostMultiplier = 0.5f`、`aiController = SuicideAI::new`、`speed = 1f`、`hitSize = 8f`、`health = 150`、`mechSideSway = 0.25f`、`range = 40f`、`stepSound = Sounds.walkerStepTiny`、`stepSoundVolume = 0.2f`
+  - weapon：匿名 `new Weapon()`，`shootOnDeath = true`、`targetUnderBlocks = false`、`reload = 24f`、`shootCone = 180f`、`ejectEffect = Fx.none`、`shootSound = Sounds.explosionCrawler`、`shootSoundVolume = 0.4f`、`x = shootY = 0f`、`mirror = false`
+  - bullet：匿名 `new BulletType()`，`collidesTiles = false`、`collides = false`、`rangeOverride = 25f`、`hitEffect = Fx.pulverize`、`speed = 0f`、`splashDamageRadius = 44f`、`instantDisappear = true`、`splashDamage = 80f`、`buildingDamageMultiplier = 0.68f`、`killShooter = true`、`hittable = false`、`collidesAir = true`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增具名 bullet preset `crawler_explosion`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `crawler_explosion_matches_java_death_bullet_profile`，锁定死亡爆炸 bullet 的碰撞、范围、伤害、kill shooter 与 effect 字段。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `crawler` 补齐 `mech_side_sway`、`range`、`target_under_blocks`、`step_sound`；
+    - `crawler` 追加匿名名称 `Weapon::new("")`，记录 `shoot_on_death`、`reload`、`shoot_cone`、`shoot_sound`、`shoot_sound_volume`、坐标、`mirror=false` 与 `bullet="crawler_explosion"`；
+    - 新增 `crawler_death_weapon_uses_suicide_explosion_profile`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core crawler_explosion_matches_java_death_bullet_profile --lib`
+  - `cargo test -p mindustry-core crawler_death_weapon_uses_suicide_explosion_profile --lib`
+- 仍未完成：
+  - `SuicideAI`、死亡触发 weapon、`kill_shooter` 和 splash damage 的真实 runtime 行为仍需继续接入实体/武器系统；
+  - `crawler_explosion` 目前已作为 content preset 进入 registry，但爆炸伤害、建筑倍率、命中特效和死亡触发时序仍是后续 runtime 闭环；
+  - 下一步建议继续 `atrax`，先补 `LiquidBulletType(Liquids.slag)` 的 liquid 记录位，再回填 atrax weapon；
+  - 当前总体迁移约 13.15%，远未可玩。

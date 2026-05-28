@@ -363,8 +363,25 @@ pub fn load() -> Vec<UnitType> {
             u.speed = 1.0;
             u.hit_size = 8.0;
             u.health = 150.0;
+            u.mech_side_sway = 0.25;
+            u.range = 40.0;
+            u.target_under_blocks = false;
+            u.step_sound = "walkerStepTiny".into();
             u.step_sound_volume = 0.2;
             u.allow_leg_step = true;
+            let mut weapon = Weapon::new("");
+            weapon.shoot_on_death = true;
+            weapon.reload = 24.0;
+            weapon.shoot_cone = 180.0;
+            weapon.eject_effect = "none".into();
+            weapon.shoot_sound = "explosionCrawler".into();
+            weapon.shoot_sound_volume = 0.4;
+            weapon.x = 0.0;
+            weapon.shoot_y = 0.0;
+            weapon.mirror = false;
+            weapon.bullet = "crawler_explosion".into();
+            weapon.bullet_kill_shooter = true;
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "atrax", UnitKind::Standard, |u| {
             u.speed = 0.6;
@@ -1787,6 +1804,41 @@ mod tests {
         assert_eq!(bullet.spec.length, 460.0);
         assert_eq!(bullet.spec.heal_percent, 25.0);
         assert!(bullet.spec.collides_team);
+    }
+
+    #[test]
+    fn crawler_death_weapon_uses_suicide_explosion_profile() {
+        let units = load();
+        let crawler = by_name(&units, "crawler");
+        assert_eq!(crawler.mech_side_sway, 0.25);
+        assert_eq!(crawler.range, 40.0);
+        assert!(!crawler.target_under_blocks);
+        assert_eq!(crawler.step_sound, "walkerStepTiny");
+        assert_eq!(crawler.weapons.len(), 1);
+
+        let weapon = &crawler.weapons[0];
+        assert_eq!(weapon.name, "");
+        assert!(weapon.shoot_on_death);
+        assert_eq!(weapon.reload, 24.0);
+        assert_eq!(weapon.shoot_cone, 180.0);
+        assert_eq!(weapon.eject_effect, "none");
+        assert_eq!(weapon.shoot_sound, "explosionCrawler");
+        assert_eq!(weapon.shoot_sound_volume, 0.4);
+        assert_eq!(weapon.x, 0.0);
+        assert_eq!(weapon.shoot_y, 0.0);
+        assert!(!weapon.mirror);
+        assert_eq!(weapon.bullet, "crawler_explosion");
+        assert!(weapon.bullet_kill_shooter);
+
+        let bullets = bullets::load();
+        let bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .unwrap_or_else(|| panic!("missing crawler bullet {}", weapon.bullet));
+        assert_eq!(bullet.spec.range_override, 25.0);
+        assert_eq!(bullet.spec.splash_damage, 80.0);
+        assert!(bullet.spec.kill_shooter);
+        assert!(!bullet.spec.collides);
     }
 
     #[test]
