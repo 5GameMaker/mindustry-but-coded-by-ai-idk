@@ -7505,3 +7505,46 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `shootQuellPulse=164` 仍需更复杂随机三角簇、alpha 与多 circle pass；
   - triangle/square/circle primitives 仍要接入真实 renderer/backend；
   - 当前只是 Fx 局部闭环，仍未接近完整可游玩目标。
+
+### 12.239 Fx.shootQuellPulse circle layers and offset triangle clusters
+
+- 2026-05-28：迁移 `shootQuellPulse=164`，覆盖其多层圆环、输入色 alpha/mul、seeded 随机三角簇与 desktop headless primitive 展开。
+- 本轮迁移：
+  - `shootQuellPulse=164`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1894` 附近：
+    - `shootQuellPulse = new Effect(40f, ...)`
+    - `rand.setSeed(e.id)` 后先消费 `fout/fin` 的 `rand.random(0.9f, 1f)` 抖动；
+    - `coreRadius = 30f * e.fout(Interp.smooth2)`；
+    - `e.scaled(10, ...)` 输出外扩 `Lines.circle`；
+    - 8 层 `Fill.circle` 使用 `Tmp.c1.set(e.color).mul(0.8f)` 与 `pow(1f - t, 2.5f) * fout * 0.5f`；
+    - edge/core `Lines.circle` 使用 `Interp.smooth`、`Interp.pow2InInverse`；
+    - 9 组环上偏移的 `Drawf.tri` 成对三角，以及 `rand.random(8, 13)` 组外侧随机位置/宽高三角簇。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_QUELL_PULSE_ID=164`；
+    - 接入 `standard_effect_id(...)` 与 metadata，lifetime `40.0`；
+    - 新增/复用插值 helper：`interp_smooth`、`interp_smooth2`、`interp_pow2_in_inverse`；
+    - `ArcRand` 增加 Java `Rand.random(int, int)` 等价的 bounded integer helper；
+    - `standard_effect_draw_plans(...)` 对 `shootQuellPulse` 输出：
+      - early `StrokedCircle`；
+      - 8 个 `FilledCircle` 同心层；
+      - core `StrokedCircle`；
+      - 9 个带偏移中心的 `TriangleFan`；
+      - 8~13 个外侧随机偏移 `TriangleFan`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_quell_pulse_circles_and_triangle_clusters_for_render`，验证 circle/triangle primitive 进入 headless render frame。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_quell_pulse_circles_and_triangle_clusters --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_quell_pulse_circles_and_triangle_clusters_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 当前仍是 standard effect/headless primitive seam，triangle/circle 真实 GPU/window renderer 尚未接入；
+  - `shootQuellPulse` 用多条具体 `TriangleFan` plan 表达偏移簇，后续若做批量 renderer 可再抽通用 seeded offset triangle primitive；
+  - 当前只是 Fx 局部闭环，仍未接近完整可游玩目标。

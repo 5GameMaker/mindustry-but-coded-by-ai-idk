@@ -3165,6 +3165,65 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_shoot_quell_pulse_circles_and_triangle_clusters_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("shootQuellPulse").unwrap() as u16,
+                    x: 32.0,
+                    y: 40.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert!((27..=32).contains(&launcher.standard_local_effect_draw_plans.len()));
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 10);
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+        assert!((34..=44).contains(&launcher.standard_local_effect_triangle_primitives.len()));
+        assert!(launcher.standard_local_effect_light_primitives.is_empty());
+
+        let core_circle = launcher
+            .standard_local_effect_circle_primitives
+            .iter()
+            .find(|circle| circle.center == (32.0, 40.0) && circle.stroke > 2.5)
+            .expect("shootQuellPulse core circle should be cached");
+        assert!(core_circle.radius > 0.0);
+        assert!(core_circle.alpha > 0.8);
+
+        let offset_triangle = launcher
+            .standard_local_effect_triangle_primitives
+            .iter()
+            .find(|triangle| triangle.center != (32.0, 40.0))
+            .expect("shootQuellPulse should cache offset triangle clusters");
+        assert!(offset_triangle.width > 0.0);
+        assert!(offset_triangle.length > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(
+            stats.draw_plans,
+            launcher.standard_local_effect_draw_plans.len()
+        );
+        assert_eq!(stats.circle_primitives, 10);
+        assert_eq!(
+            stats.triangle_primitives,
+            launcher.standard_local_effect_triangle_primitives.len()
+        );
+        assert_eq!(stats.square_primitives, 0);
+        assert_eq!(stats.line_primitives, 0);
+        assert_eq!(stats.light_primitives, 0);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_flattens_inst_hit_triangles_circle_and_squares_for_render() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher

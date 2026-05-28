@@ -5542,3 +5542,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `shootQuellPulse=164` 是相邻但复杂，涉及随机三角簇、alpha、coreRadius 和 scaled circle；
   2. 可以先做真实 renderer/backend 的 triangle/square/circle primitive 消费，减少 headless seam 技术债；
   3. 若继续 Fx，优先挑已有 primitive 能覆盖且不会引入 texture/polygon/data-position 的效果。
+
+---
+
+## 165. 最新闭环记录：Fx.shootQuellPulse circle layers and offset triangle clusters
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `shootQuellPulse=164`，验证多层 circle + seeded 偏移 triangle cluster 能进入 core plan 与 desktop headless primitive frame。
+- 本轮迁移：
+  - `shootQuellPulse=164`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_QUELL_PULSE_ID=164`；
+    - 接入 lookup/metadata，lifetime `40.0`；
+    - 新增 `interp_smooth`、`interp_smooth2`、`interp_pow2_in_inverse`；
+    - `ArcRand` 新增 bounded integer helper，用于对齐 Java `rand.random(8, 13)`；
+    - `standard_effect_draw_plans(...)` 输出 early circle、8 层 fill circle、core circle、9 组环上偏移 `TriangleFan`、8~13 组外侧随机 `TriangleFan`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_quell_pulse_circles_and_triangle_clusters_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_shoot_quell_pulse_circles_and_triangle_clusters --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_quell_pulse_circles_and_triangle_clusters_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. `shootSmokeSquare=169`、`shootSmokeSquareSparse=170`、`shootSmokeSquareBig=171` 是相邻 Fx，但需要四边形/rotated square 随机粒子；已有 `SeededSquareParticles` 可部分复用，需核对随机旋转与角度范围；
+  2. 也可转向真实 desktop renderer/backend，把当前 headless circle/square/line/triangle primitive 接入可见窗口；
+  3. 无论继续 Fx 还是 renderer，都必须保持最终目标：整体可玩 Rust MDT，而不是独立 helper。

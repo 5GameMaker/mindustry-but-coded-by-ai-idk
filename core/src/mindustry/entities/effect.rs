@@ -200,6 +200,8 @@ pub const FX_SHOOT_BIG2_ID: i32 = 161;
 pub const FX_SHOOT_BIG_COLOR_ID: i32 = 162;
 /// Upstream `Fx.shootScepterSecondary` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_SCEPTER_SECONDARY_ID: i32 = 163;
+/// Upstream `Fx.shootQuellPulse` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_QUELL_PULSE_ID: i32 = 164;
 /// Upstream `Fx.shootTitan` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_TITAN_ID: i32 = 165;
 /// Upstream `Fx.shootBigSmoke` id in `mindustry.content.Fx` for v158.1.
@@ -333,6 +335,7 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootBig2" => Some(FX_SHOOT_BIG2_ID),
         "shootBigColor" => Some(FX_SHOOT_BIG_COLOR_ID),
         "shootScepterSecondary" => Some(FX_SHOOT_SCEPTER_SECONDARY_ID),
+        "shootQuellPulse" => Some(FX_SHOOT_QUELL_PULSE_ID),
         "shootTitan" => Some(FX_SHOOT_TITAN_ID),
         "shootBigSmoke" => Some(FX_SHOOT_BIG_SMOKE_ID),
         "shootBigSmoke2" => Some(FX_SHOOT_BIG_SMOKE2_ID),
@@ -540,6 +543,9 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_SHOOT_SCEPTER_SECONDARY_ID, 4.0, DEFAULT_EFFECT_CLIP)
                 .layer(Layer::EFFECT + 1.0)
         }
+        FX_SHOOT_QUELL_PULSE_ID => {
+            Effect::with_lifetime(FX_SHOOT_QUELL_PULSE_ID, 40.0, DEFAULT_EFFECT_CLIP)
+        }
         FX_SHOOT_TITAN_ID => Effect::with_lifetime(FX_SHOOT_TITAN_ID, 10.0, DEFAULT_EFFECT_CLIP),
         FX_SHOOT_BIG_SMOKE_ID => {
             Effect::with_lifetime(FX_SHOOT_BIG_SMOKE_ID, 17.0, DEFAULT_EFFECT_CLIP)
@@ -621,6 +627,7 @@ pub fn standard_effect_draw_plans(
             | FX_INST_SHOOT_ID
             | FX_INST_HIT_ID
             | FX_SHOOT_SCEPTER_SECONDARY_ID
+            | FX_SHOOT_QUELL_PULSE_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -1170,6 +1177,213 @@ pub fn standard_effect_draw_plans(
                     radius_base: 0.0,
                     radius_fin_scale: 0.0,
                     radius_fout_scale: 3.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        return plans;
+    }
+
+    if effect_id_i32 == FX_SHOOT_QUELL_PULSE_ID {
+        let mut rand = ArcRand::with_seed(state_id as i64);
+        let rand_size = 0.1;
+        let randomized_fout = fout * rand.random_between(1.0 - rand_size, 1.0);
+        let _randomized_fin = fin * rand.random_between(1.0 - rand_size, 1.0);
+        let core_radius = 30.0 * interp_smooth2(fout);
+        let core_color_mul = 0.8;
+        let circle_radius = finpow * 28.0;
+        let core_alpha = 0.5 * interp_smooth(fout) + 0.8;
+        let mut plans = Vec::with_capacity(32);
+
+        let scaled_circle_lifetime = 10.0;
+        if time <= scaled_circle_lifetime {
+            let scaled_fin = (time / scaled_circle_lifetime).clamp(0.0, 1.0);
+            let scaled_fout = 1.0 - scaled_fin;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 2.0 + scaled_fin * 40.0,
+                stroke: 4.0 * scaled_fout,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        for index in 0..8 {
+            let t = (index as f32 + 1.0) / 8.0;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::FilledCircle,
+                center: (x, y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: core_color_mul * (1.0 + randomized_fout / 8.0),
+                alpha: (1.0 - t).powf(2.5) * randomized_fout * 0.5,
+                radius: lerp(core_radius * 0.6, core_radius * 1.7, t),
+                stroke: 0.0,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        let edge_scaled_lifetime = randomized_fout * 0.8;
+        if edge_scaled_lifetime > f32::EPSILON && time <= edge_scaled_lifetime {
+            let scaled_fin = (time / edge_scaled_lifetime).clamp(0.0, 1.0);
+            let scaled_fout = 1.0 - scaled_fin;
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.2,
+                alpha: 1.0,
+                radius: core_radius * 0.6,
+                stroke: 3.0 * scaled_fout,
+                particles: None,
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        plans.push(StandardEffectDrawPlan {
+            effect_id: effect_id_i32,
+            layer: effect.layer,
+            kind: StandardEffectDrawKind::StrokedCircle,
+            center: (x, y),
+            color_from: None,
+            color_mid: None,
+            color_to: None,
+            color_mix: 0.0,
+            input_color: Some(color),
+            color_mul: core_color_mul,
+            alpha: core_alpha,
+            radius: circle_radius,
+            stroke: interp_pow2_in_inverse(fout) * 3.0,
+            particles: None,
+            light_color: None,
+            light_radius: 0.0,
+            light_opacity: 0.0,
+        });
+
+        for _ in 0..9 {
+            let angle = rand.random(360.0);
+            let len_rand = rand.random_between(0.5, 1.2);
+            let (vx, vy) = trns(angle, circle_radius);
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TriangleFan,
+                center: (x + vx, y + vy),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: core_color_mul,
+                alpha: core_alpha,
+                radius: fout * 10.0,
+                stroke: fout * 10.0 * len_rand + 8.0,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: Some(angle),
+                    angle_range: 180.0,
+                    length: 0.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            });
+        }
+
+        let edge_alpha = interp_pow2_in_inverse(fout) + 0.5;
+        let edge_count = rand.random_int_between(8, 13);
+        for _ in 0..edge_count {
+            let random_pos = rand.random_between(0.9, 1.1);
+            let angle = rand.random(360.0);
+            let len = rand.random_between(0.7, 1.3) * 10.0 + randomized_fout * 2.0;
+            let width = rand.random_between(1.0, 4.0) * 1.5 * randomized_fout + 1.0;
+            let dist = 8.0 + core_radius * rand.random_between(0.8, 1.4);
+            let (circle_x, circle_y) = trns(angle, circle_radius);
+            let (dist_x, dist_y) = trns(angle, dist);
+
+            plans.push(StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TriangleFan,
+                center: (
+                    x + dist_x - circle_x / 2.0,
+                    y + dist_y * random_pos - circle_y * random_pos / 2.0,
+                ),
+                color_from: None,
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: edge_alpha,
+                radius: width,
+                stroke: len,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: Some(angle),
+                    angle_range: 180.0,
+                    length: 0.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
                     radius_fslope_scale: 0.0,
                     secondary_vector_scale: 0.0,
                     secondary_radius_base: 0.0,
@@ -3986,8 +4200,22 @@ fn effect_finpow_from_fin(fin: f32) -> f32 {
     interp_pow3_out(fin)
 }
 
+fn interp_smooth(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    value * value * (3.0 - 2.0 * value)
+}
+
+fn interp_smooth2(value: f32) -> f32 {
+    let value = interp_smooth(value);
+    interp_smooth(value)
+}
+
 fn interp_pow2_out(value: f32) -> f32 {
     1.0 - (1.0 - value.clamp(0.0, 1.0)).powi(2)
+}
+
+fn interp_pow2_in_inverse(value: f32) -> f32 {
+    value.clamp(0.0, 1.0).sqrt()
 }
 
 fn interp_pow3_out(value: f32) -> f32 {
@@ -4157,6 +4385,17 @@ impl ArcRand {
         self.seed1.wrapping_add(seed1)
     }
 
+    fn next_long_bound(&mut self, bound: u64) -> u64 {
+        assert!(bound > 0, "bound must be positive");
+        loop {
+            let bits = self.next_long() >> 1;
+            let value = bits % bound;
+            if bits.wrapping_sub(value).wrapping_add(bound - 1) <= i64::MAX as u64 {
+                return value;
+            }
+        }
+    }
+
     fn next_float(&mut self) -> f32 {
         ((self.next_long() >> 40) as f64 * (1.0 / (1u64 << 24) as f64)) as f32
     }
@@ -4167,6 +4406,13 @@ impl ArcRand {
 
     fn random_between(&mut self, min: f32, max: f32) -> f32 {
         min + self.next_float() * (max - min)
+    }
+
+    fn random_int_between(&mut self, min: i32, max: i32) -> i32 {
+        if min >= max {
+            return min;
+        }
+        min + self.next_long_bound((max - min + 1) as u64) as i32
     }
 
     fn range(&mut self, range: f32) -> f32 {
@@ -5530,6 +5776,10 @@ mod tests {
             standard_effect_id("shootScepterSecondary"),
             Some(FX_SHOOT_SCEPTER_SECONDARY_ID)
         );
+        assert_eq!(
+            standard_effect_id("shootQuellPulse"),
+            Some(FX_SHOOT_QUELL_PULSE_ID)
+        );
         assert_eq!(standard_effect_id("shootTitan"), Some(FX_SHOOT_TITAN_ID));
         assert_eq!(
             standard_effect_id("shootBigSmoke"),
@@ -5789,6 +6039,10 @@ mod tests {
         let shoot_scepter_secondary = standard_effect(FX_SHOOT_SCEPTER_SECONDARY_ID).unwrap();
         assert_eq!(shoot_scepter_secondary.lifetime, 4.0);
         assert_eq!(shoot_scepter_secondary.layer, Layer::EFFECT + 1.0);
+        assert_eq!(
+            standard_effect(FX_SHOOT_QUELL_PULSE_ID).unwrap().lifetime,
+            40.0
+        );
         assert_eq!(standard_effect(FX_SHOOT_TITAN_ID).unwrap().lifetime, 10.0);
         assert_eq!(
             standard_effect(FX_SHOOT_BIG_SMOKE_ID).unwrap().lifetime,
@@ -7353,6 +7607,87 @@ mod tests {
         assert_eq!(pair_triangles.len(), 2);
         assert_eq!(pair_triangles[0].rotation, 30.0);
         assert_eq!(pair_triangles[1].rotation, 210.0);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_shoot_quell_pulse_circles_and_triangle_clusters() {
+        let input_color = DecalColor::from_rgba(0x80a0c0ff);
+        let plans = standard_effect_draw_plans(
+            Some(FX_SHOOT_QUELL_PULSE_ID as u16),
+            164,
+            5.0,
+            6.0,
+            0.0,
+            5.0,
+            40.0,
+            input_color,
+        );
+
+        let fin = 5.0 / 40.0;
+        let fout = 1.0 - fin;
+        let mut rand = ArcRand::with_seed(164);
+        let randomized_fout = fout * rand.random_between(0.9, 1.0);
+        let _randomized_fin = fin * rand.random_between(0.9, 1.0);
+        for _ in 0..9 {
+            let _angle = rand.random(360.0);
+            let _len_rand = rand.random_between(0.5, 1.2);
+        }
+        let edge_count = rand.random_int_between(8, 13);
+
+        assert_eq!(plans.len(), 19 + edge_count as usize);
+        let scaled_circle = plans[0];
+        assert_eq!(scaled_circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(scaled_circle.input_color, Some(input_color));
+        assert_eq!(scaled_circle.radius, 22.0);
+        assert_eq!(scaled_circle.stroke, 2.0);
+
+        let first_fill = plans[1];
+        assert_eq!(first_fill.kind, StandardEffectDrawKind::FilledCircle);
+        assert_eq!(first_fill.input_color, Some(input_color));
+        assert!((first_fill.color_mul - 0.8 * (1.0 + randomized_fout / 8.0)).abs() < 0.0001);
+        assert!(
+            (first_fill.alpha - (1.0_f32 - 1.0 / 8.0).powf(2.5) * randomized_fout * 0.5).abs()
+                < 0.0001
+        );
+
+        let core_circle = plans[9];
+        assert_eq!(core_circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(core_circle.color_mul, 0.8);
+        assert!((core_circle.alpha - (0.5 * interp_smooth(fout) + 0.8)).abs() < 0.0001);
+        assert!((core_circle.radius - effect_finpow_from_fin(fin) * 28.0).abs() < 0.0001);
+        assert!((core_circle.stroke - interp_pow2_in_inverse(fout) * 3.0).abs() < 0.0001);
+
+        let mut rand = ArcRand::with_seed(164);
+        let _randomized_fout = fout * rand.random_between(0.9, 1.0);
+        let _randomized_fin = fin * rand.random_between(0.9, 1.0);
+        let first_angle = rand.random(360.0);
+        let first_len_rand = rand.random_between(0.5, 1.2);
+        let circle_rad = effect_finpow_from_fin(fin) * 28.0;
+        let (offset_x, offset_y) = trns(first_angle, circle_rad);
+        let first_cluster = plans[10];
+        assert_eq!(first_cluster.kind, StandardEffectDrawKind::TriangleFan);
+        assert!((first_cluster.center.0 - (5.0 + offset_x)).abs() < 0.0001);
+        assert!((first_cluster.center.1 - (6.0 + offset_y)).abs() < 0.0001);
+        assert_eq!(first_cluster.particles.unwrap().count, 2);
+        assert!((first_cluster.particles.unwrap().angle.unwrap() - first_angle).abs() < 0.0001);
+        assert_eq!(first_cluster.particles.unwrap().angle_range, 180.0);
+        assert!((first_cluster.radius - fout * 10.0).abs() < 0.0001);
+        assert!((first_cluster.stroke - (fout * 10.0 * first_len_rand + 8.0)).abs() < 0.0001);
+        assert_eq!(
+            first_cluster.triangle_render_primitives_from_seed().len(),
+            2
+        );
+
+        let first_edge_cluster = plans[19];
+        assert_eq!(first_edge_cluster.kind, StandardEffectDrawKind::TriangleFan);
+        assert_eq!(first_edge_cluster.input_color, Some(input_color));
+        assert!((first_edge_cluster.alpha - (interp_pow2_in_inverse(fout) + 0.5)).abs() < 0.0001);
+        assert_eq!(
+            first_edge_cluster
+                .triangle_render_primitives_from_seed()
+                .len(),
+            2
+        );
     }
 
     #[test]
