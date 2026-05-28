@@ -7325,3 +7325,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. 继续 `UnitComp.destroy()`：shootOnDeath 真实 bullet spawn 与 `killShooter && totalShots` 门槛；
   4. flying wreck crash damage、`Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
   5. 当前总迁移仍约 11%，远未可玩。
+
+---
+
+## 216. 最新闭环记录：UnitDestroy shootOnDeath killShooter gate 与本地 bullet materialize
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：继续 `UnitComp.destroy()` 的死亡武器分支，至少让 `shootOnDeath` 在 content-aware client destroy 路径里真正生成本地 bullet runtime，并保留 Java 的 `!(bullet.killShooter && totalShots > 0)`。
+- Rust 主改动：
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `bullet_kill_shooter`，默认 false，作为当前 string bullet shell 阶段的 Java `bullet.killShooter` 镜像。
+  - `core/src/mindustry/core/content_loader.rs`
+    - 新增 `bullet_by_name(...)`。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `next_client_local_bullet_id`；
+    - `queue_client_unit_destroy_side_effects(...)` 遇到 `bullet_kill_shooter && mount.total_shots > 0` 时跳过死亡发射；
+    - 新增 `spawn_client_unit_shoot_on_death_bullet(...)`，从 `ContentLoader` 解析 bullet spec，并写入 `client_bullet_snapshot_entities`；
+    - 填充 owner/team/x/y/rotation/damage/lifetime/velocity/building_damage_multiplier。
+  - `MIGRATION.md`
+    - 新增 `12.290`。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_unit_shoot_on_death_spawns_bullet_and_honors_kill_shooter_gate --lib`
+  - `cargo test -p mindustry-core weapon_range_uses_bullet_range_not_shoot_cone_like_java --lib`
+  - `cargo fmt`
+- 当前仍需继续：
+  1. 该实现仍不是完整 Java `Weapon.update(...)`：缺 shoot pattern、barrel counter、ammo/eject/recoil、sounds、server authoritative bullet broadcast；
+  2. `bullet_kill_shooter` 后续应从真实 BulletType/Weapon bullet 引用导出；
+  3. 需要补 server-side death bullet spawn 与 network packet/snapshot smoke；
+  4. flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
+  5. 当前总迁移仍约 11%，远未可玩。

@@ -40,8 +40,8 @@ use crate::mindustry::{
     game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo, Trigger},
     input::input_handler::ItemRemoveStackPlan,
     io::{
-        type_io, BuildingRef, LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyMapTileData,
-        LegacyShortChunkMap, TeamId, TypeValue, UnitRef,
+        type_io, BuildingRef, EntityRef, LegacyMapBlockRecord, LegacyMapFloorRecord,
+        LegacyMapTileData, LegacyShortChunkMap, TeamId, TypeValue, UnitRef, Vec2 as IoVec2,
     },
     logic::{LAccess, LVarValue},
     net::{
@@ -2675,6 +2675,7 @@ pub struct GameRuntime {
     pub client_block_snapshot_records: BTreeMap<i32, GameRuntimeClientBlockSnapshotRecord>,
     pub client_entity_snapshot_records: BTreeMap<i32, GameRuntimeClientEntitySnapshotRecord>,
     pub client_bullet_snapshot_entities: BTreeMap<i32, BulletComp>,
+    pub next_client_local_bullet_id: i32,
     pub client_decal_snapshot_entities: BTreeMap<i32, DecalComp>,
     pub client_effect_snapshot_entities: BTreeMap<i32, EffectStateComp>,
     pub client_local_effect_entities: BTreeMap<i32, EffectStateComp>,
@@ -2760,6 +2761,7 @@ impl GameRuntime {
             client_block_snapshot_records: BTreeMap::new(),
             client_entity_snapshot_records: BTreeMap::new(),
             client_bullet_snapshot_entities: BTreeMap::new(),
+            next_client_local_bullet_id: -1,
             client_decal_snapshot_entities: BTreeMap::new(),
             client_effect_snapshot_entities: BTreeMap::new(),
             client_local_effect_entities: BTreeMap::new(),
@@ -4103,6 +4105,9 @@ impl GameRuntime {
             if !mount.weapon.shoot_on_death {
                 continue;
             }
+            if mount.weapon.bullet_kill_shooter && mount.total_shots > 0 {
+                continue;
+            }
 
             let override_effect = if !unit.has_target {
                 mount.weapon.shoot_on_death_effect.clone()
@@ -4136,6 +4141,16 @@ impl GameRuntime {
                     override_effect: override_effect.clone(),
                     allow_shoot_effects: override_effect.is_none(),
                 });
+            if let Some(content) = content {
+                self.spawn_client_unit_shoot_on_death_bullet(
+                    content,
+                    unit,
+                    &mount.weapon.bullet,
+                    x,
+                    y,
+                    unit.rotation(),
+                );
+            }
         }
 
         self.note_unit_ability_death_events(unit);
@@ -4182,6 +4197,39 @@ impl GameRuntime {
         emitted
     }
 
+    fn spawn_client_unit_shoot_on_death_bullet(
+        &mut self,
+        content: &ContentLoader,
+        unit: &UnitComp,
+        bullet_name: &str,
+        x: f32,
+        y: f32,
+        rotation: f32,
+    ) -> Option<i32> {
+        let bullet_content = content.bullet_by_name(bullet_name)?;
+        let spec = &bullet_content.spec;
+        let bullet_id = self.alloc_client_local_bullet_id();
+        let mut bullet = BulletComp::new(
+            bullet_content.id(),
+            unit.team_id(),
+            EntityRef::new(unit.id()),
+            x,
+            y,
+        );
+        bullet.damage = spec.damage;
+        bullet.lifetime = spec.lifetime;
+        bullet.rotation = rotation;
+        let radians = rotation.to_radians();
+        bullet.velocity = IoVec2 {
+            x: radians.cos() * spec.speed,
+            y: radians.sin() * spec.speed,
+        };
+        bullet.building_damage_multiplier = spec.building_damage_multiplier;
+        self.client_bullet_snapshot_entities
+            .insert(bullet_id, bullet);
+        Some(bullet_id)
+    }
+
     fn unit_destroy_explosiveness(content: &ContentLoader, unit: &UnitComp) -> f32 {
         let carried_item_explosiveness = unit
             .items
@@ -4222,6 +4270,12 @@ impl GameRuntime {
     fn alloc_client_local_decal_id(&mut self) -> i32 {
         let id = self.next_client_local_decal_id;
         self.next_client_local_decal_id = self.next_client_local_decal_id.saturating_sub(1);
+        id
+    }
+
+    fn alloc_client_local_bullet_id(&mut self) -> i32 {
+        let id = self.next_client_local_bullet_id;
+        self.next_client_local_bullet_id = self.next_client_local_bullet_id.saturating_sub(1);
         id
     }
 
@@ -10517,6 +10571,7 @@ impl GameRuntime {
         self.client_block_snapshot_records.clear();
         self.client_entity_snapshot_records.clear();
         self.client_bullet_snapshot_entities.clear();
+        self.next_client_local_bullet_id = -1;
         self.client_decal_snapshot_entities.clear();
         self.client_effect_snapshot_entities.clear();
         self.client_local_effect_entities.clear();
@@ -26946,6 +27001,60 @@ mod tests {
             assert_eq!(decal.lifetime, 3600.0);
         }
         assert_eq!(runtime.next_client_local_decal_id, -5);
+    }
+
+    #[test]
+    fn game_runtime_unit_shoot_on_death_spawns_bullet_and_honors_kill_shooter_gate() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let placeholder = content.bullet_by_name("placeholder").unwrap();
+        let mut unit_type = UnitType::new(101, "death-gunner");
+        let mut weapon = Weapon::new("death-gun");
+        weapon.shoot_on_death = true;
+        weapon.bullet = "placeholder".into();
+        unit_type.weapons.push(weapon.clone());
+        let mut unit = UnitComp::new(101, unit_type, TeamId(2));
+        unit.add();
+        unit.set_pos(32.0, 48.0);
+        unit.set_rotation(90.0);
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(101, unit);
+        assert!(runtime.apply_client_unit_destroy_packet_with_content(
+            &content,
+            None,
+            &UnitDestroyCallPacket { uid: 101 },
+        ));
+        assert_eq!(runtime.unit_shoot_on_death_events.len(), 1);
+        let bullet = runtime.client_bullet_snapshot_entities.get(&-1).unwrap();
+        assert_eq!(bullet.bullet_type_id, placeholder.id());
+        assert_eq!(bullet.owner, EntityRef::new(101));
+        assert_eq!(bullet.team, TeamId(2));
+        assert_eq!((bullet.x, bullet.y), (32.0, 48.0));
+        assert!((bullet.rotation - 90.0).abs() < 0.0001);
+        assert!((bullet.damage - placeholder.spec.damage).abs() < 0.0001);
+        assert!((bullet.lifetime - placeholder.spec.lifetime).abs() < 0.0001);
+        assert!(bullet.velocity.x.abs() < 0.0001);
+        assert!((bullet.velocity.y - placeholder.spec.speed).abs() < 0.0001);
+        assert_eq!(runtime.next_client_local_bullet_id, -2);
+
+        let mut gated_type = UnitType::new(102, "single-shot-missile");
+        weapon.bullet_kill_shooter = true;
+        gated_type.weapons.push(weapon);
+        let mut gated = UnitComp::new(102, gated_type, TeamId(2));
+        gated.add();
+        gated.weapons.mounts[0].total_shots = 1;
+        let mut gated_runtime = GameRuntime::default();
+        gated_runtime
+            .client_unit_snapshot_entities
+            .insert(102, gated);
+        assert!(gated_runtime.apply_client_unit_destroy_packet_with_content(
+            &content,
+            None,
+            &UnitDestroyCallPacket { uid: 102 },
+        ));
+        assert!(gated_runtime.unit_shoot_on_death_events.is_empty());
+        assert!(gated_runtime.client_bullet_snapshot_entities.is_empty());
+        assert_eq!(gated_runtime.next_client_local_bullet_id, -1);
     }
 
     #[test]

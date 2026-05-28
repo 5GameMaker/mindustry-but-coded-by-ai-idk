@@ -322,6 +322,13 @@ impl ContentLoader {
         &self.catalog.liquids
     }
 
+    pub fn bullet_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&crate::mindustry::content::bullets::BulletContent> {
+        self.catalog.bullet_by_name(name)
+    }
+
     pub fn status_effect_by_name(&self, name: &str) -> Option<&StatusEffect> {
         self.catalog.status_effect_by_name(name)
     }

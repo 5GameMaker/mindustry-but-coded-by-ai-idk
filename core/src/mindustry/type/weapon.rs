@@ -4,6 +4,7 @@ use core::fmt;
 pub struct Weapon {
     pub name: String,
     pub bullet: String,
+    pub bullet_kill_shooter: bool,
     /// Mirrors Java `bullet.range` while the Rust shell still stores the
     /// projectile by name instead of an owned `BulletType`.
     pub bullet_range: f32,
@@ -85,6 +86,7 @@ impl Weapon {
         Self {
             name: name.into(),
             bullet: String::new(),
+            bullet_kill_shooter: false,
             bullet_range: 0.0,
             eject_effect: String::new(),
             display: true,
@@ -232,6 +234,7 @@ mod tests {
         weapon.shoot_cone = 12.0;
 
         assert_eq!(weapon.range(), 175.0);
+        assert!(!weapon.bullet_kill_shooter);
     }
 
     #[test]

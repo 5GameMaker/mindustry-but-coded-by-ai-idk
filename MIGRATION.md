@@ -9225,3 +9225,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java 的 `Tmp.v1.rnd(range)` 现在用 deterministic offset 代替，后续若接入随机源需恢复与 Java 更一致的分布；
   - `shootOnDeath` 的真实 bullet spawn、`killShooter && totalShots` 门槛，以及 flying wreck crash damage 仍未完成；
   - 当前总体迁移仍约 11%，远未可玩。
+
+### 12.290 UnitDestroy shootOnDeath killShooter gate 与本地 bullet materialize
+
+- 2026-05-28：继续对照 Java `UnitComp.destroy()` 的死亡武器分支，把 `shootOnDeath` 从“只记录 sidecar”推进到在 content-aware client destroy 路径中 materialize 本地 bullet snapshot，并保留 Java 的 `!(bullet.killShooter && mount.totalShots > 0)` 门槛。
+- Java 依据：
+  - `if(mount.weapon.shootOnDeath && !(mount.weapon.bullet.killShooter && mount.totalShots > 0))`；
+  - 满足条件时设置 `mount.reload = 0f; mount.shoot = true; mount.weapon.update(self(), mount);`，由 weapon update 创建 bullet。
+- Rust 新增/变化：
+  - `core/src/mindustry/type/weapon.rs`
+    - 新增 `bullet_kill_shooter: bool`，在当前 Rust `Weapon` 仍以 bullet 名称字符串保存的阶段承载 Java `bullet.killShooter` 门槛；
+    - 默认 false，避免未知 bullet 时误跳过死亡发射。
+  - `core/src/mindustry/core/content_loader.rs`
+    - 新增 `bullet_by_name(...)`，让 runtime 可解析 content bullet spec。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `next_client_local_bullet_id` 与 `alloc_client_local_bullet_id()`；
+    - `queue_client_unit_destroy_side_effects(...)` 在 `shoot_on_death` 后先检查 `bullet_kill_shooter && total_shots > 0`；
+    - content-aware destroy 路径中新增 `spawn_client_unit_shoot_on_death_bullet(...)`，把 bullet content spec materialize 到 `client_bullet_snapshot_entities`，填入 owner/team/x/y/rotation/damage/lifetime/velocity/building damage multiplier；
+    - 旧无 content fallback 仍只保留 sidecar，不伪造未知 bullet。
+- 已跑验证：
+  - `cargo test -p mindustry-core game_runtime_unit_shoot_on_death_spawns_bullet_and_honors_kill_shooter_gate --lib`
+  - `cargo test -p mindustry-core weapon_range_uses_bullet_range_not_shoot_cone_like_java --lib`
+  - `cargo fmt`
+- 仍未完成：
+  - 这仍是死亡发射的最小 materialize，不是完整 `Weapon.update(...)`；尚未覆盖多枪管、shoot pattern、ammo/eject/recoil、真实服务端 bullet 广播；
+  - `bullet_kill_shooter` 后续应由真实 BulletType/Weapon bullet 引用自动导出，而不是手动镜像字段；
+  - flying wreck crash damage、完整 `Damage.dynamicExplosion(...)` damage/fire/lightning 仍未完成；
+  - 当前总体迁移仍约 11% 左右，远未可玩。
