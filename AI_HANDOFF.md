@@ -5415,3 +5415,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 可以继续迁移 `shootScepterSecondary=163`，但它需要 multi-pass/multi-color triangle group，不等同于本轮简单 pair；
   2. `instBomb=101` / `instTrail=102` 也可借用 triangle primitive，但需要 circle/light 或 seed range；
   3. renderer/backend 仍需真实绘制 triangle primitive，当前只是 headless frame seam。
+
+---
+
+## 161. 最新闭环记录：Fx.instBomb / Fx.instTrail triangle fan and trail pairs
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：在 triangle pair 基础上补固定角度 triangle fan，并迁移 `instBomb=101`、`instTrail=102`。
+- 本轮迁移：
+  - `instBomb=101`
+  - `instTrail=102`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_INST_BOMB_ID=101`、`FX_INST_TRAIL_ID=102`；
+    - 接入 lookup/metadata；
+    - 新增 `StandardEffectDrawKind::TriangleFan`；
+    - `standard_effect_draw_plans(...)`：
+      - `instBomb` 输出 circle + 4 个大 triangle fan + 4 个小 triangle fan + light；
+      - `instTrail` 输出两组 `TrianglePair`，第一组携带 light，并复用 `mathf_random_seed_range(e.id, 15f)`；
+    - 新增颜色符号 `Pal.bulletYellow` / `Pal.bulletYellowBack`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_inst_bomb_and_trail_triangles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_inst_bomb_and_trail_triangles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_inst_bomb_and_trail_triangles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 可继续 `instShoot=103`，需要 scaled circle + 4 个固定方向 triangle + light；
+  2. `instHit=104` 更复杂，涉及随机多 triangle、scaled circle、seeded square；
+  3. 真实 renderer/backend 仍需接入 triangle primitive 绘制。

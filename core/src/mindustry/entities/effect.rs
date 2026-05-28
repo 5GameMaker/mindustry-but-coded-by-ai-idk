@@ -60,6 +60,10 @@ pub const FX_HIT_LASER_ID: i32 = 98;
 pub const FX_HIT_LASER_COLOR_ID: i32 = 99;
 /// Upstream `Fx.despawn` id in `mindustry.content.Fx` for v158.1.
 pub const FX_DESPAWN_ID: i32 = 100;
+/// Upstream `Fx.instBomb` id in `mindustry.content.Fx` for v158.1.
+pub const FX_INST_BOMB_ID: i32 = 101;
+/// Upstream `Fx.instTrail` id in `mindustry.content.Fx` for v158.1.
+pub const FX_INST_TRAIL_ID: i32 = 102;
 /// Upstream `Fx.pointHit` id in `mindustry.content.Fx` for v158.1.
 pub const FX_POINT_HIT_ID: i32 = 11;
 /// Upstream `Fx.coreBuildShockwave` id in `mindustry.content.Fx` for v158.1.
@@ -272,6 +276,8 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "hitLaser" => Some(FX_HIT_LASER_ID),
         "hitLaserColor" => Some(FX_HIT_LASER_COLOR_ID),
         "despawn" => Some(FX_DESPAWN_ID),
+        "instBomb" => Some(FX_INST_BOMB_ID),
+        "instTrail" => Some(FX_INST_TRAIL_ID),
         "hitLiquid" => Some(FX_HIT_LIQUID_ID),
         "artilleryTrail" => Some(FX_ARTILLERY_TRAIL_ID),
         "incendTrail" => Some(FX_INCEND_TRAIL_ID),
@@ -437,6 +443,8 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
             Effect::with_lifetime(FX_HIT_LASER_COLOR_ID, 8.0, DEFAULT_EFFECT_CLIP)
         }
         FX_DESPAWN_ID => Effect::with_lifetime(FX_DESPAWN_ID, 12.0, DEFAULT_EFFECT_CLIP),
+        FX_INST_BOMB_ID => Effect::with_lifetime(FX_INST_BOMB_ID, 15.0, 100.0),
+        FX_INST_TRAIL_ID => Effect::with_lifetime(FX_INST_TRAIL_ID, 30.0, DEFAULT_EFFECT_CLIP),
         FX_HIT_LIQUID_ID => Effect::with_lifetime(FX_HIT_LIQUID_ID, 16.0, DEFAULT_EFFECT_CLIP),
         FX_ARTILLERY_TRAIL_ID => {
             Effect::with_lifetime(FX_ARTILLERY_TRAIL_ID, 50.0, DEFAULT_EFFECT_CLIP)
@@ -593,6 +601,8 @@ pub fn standard_effect_draw_plans(
             | FX_HIT_BULLET_COLOR_ID
             | FX_HIT_SQUARES_COLOR_ID
             | FX_HIT_FUSE_ID
+            | FX_INST_BOMB_ID
+            | FX_INST_TRAIL_ID
     ) {
         return standard_effect_draw_plan(
             effect_id, state_id, x, y, rotation, time, lifetime, color,
@@ -737,6 +747,192 @@ pub fn standard_effect_draw_plans(
         return plans;
     }
 
+    if effect_id_i32 == FX_INST_BOMB_ID {
+        return vec![
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::StrokedCircle,
+                center: (x, y),
+                color_from: Some("Pal.bulletYellowBack"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 4.0 + finpow * 20.0,
+                stroke: fout * 4.0,
+                particles: None,
+                light_color: Some("Pal.bulletYellowBack"),
+                light_radius: 150.0,
+                light_opacity: 0.9 * fout,
+            },
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TriangleFan,
+                center: (x, y),
+                color_from: Some("Pal.bulletYellowBack"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 6.0,
+                stroke: 80.0 * fout,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 4,
+                    progress: None,
+                    angle: Some(45.0),
+                    angle_range: 90.0,
+                    length: 0.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TriangleFan,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 3.0,
+                stroke: 30.0 * fout,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 4,
+                    progress: None,
+                    angle: Some(45.0),
+                    angle_range: 90.0,
+                    length: 0.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+        ];
+    }
+
+    if effect_id_i32 == FX_INST_TRAIL_ID {
+        let front_length = 30.0 + mathf_random_seed_range(state_id as i64, 15.0);
+        return vec![
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TrianglePair,
+                center: (x, y),
+                color_from: Some("Pal.bulletYellowBack"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 15.0 * fout,
+                stroke: front_length,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: Some(rotation + 180.0),
+                    angle_range: 0.0,
+                    length: 10.0,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: Some("Pal.bulletYellowBack"),
+                light_radius: 60.0,
+                light_opacity: 0.6 * fout,
+            },
+            StandardEffectDrawPlan {
+                effect_id: effect_id_i32,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::TrianglePair,
+                center: (x, y),
+                color_from: Some("Pal.bulletYellow"),
+                color_mid: None,
+                color_to: None,
+                color_mix: 0.0,
+                input_color: None,
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 15.0 * fout * 0.5,
+                stroke: front_length * 0.5,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count: 2,
+                    progress: None,
+                    angle: Some(rotation + 180.0),
+                    angle_range: 0.0,
+                    length: 10.0 * 0.5,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.0,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale: 0.0,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            },
+        ];
+    }
+
     vec![
         StandardEffectDrawPlan {
             effect_id: effect_id_i32,
@@ -813,6 +1009,7 @@ pub enum StandardEffectDrawKind {
     SeededSquareParticles,
     SeededRadialSquareParticles,
     TrianglePair,
+    TriangleFan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1045,7 +1242,8 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::StrokedRotatedSquare
             | StandardEffectDrawKind::SeededSquareParticles
             | StandardEffectDrawKind::SeededRadialSquareParticles
-            | StandardEffectDrawKind::TrianglePair => Vec::new(),
+            | StandardEffectDrawKind::TrianglePair
+            | StandardEffectDrawKind::TriangleFan => Vec::new(),
         }
     }
 
@@ -1125,7 +1323,8 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::SeededStrokedCircleParticles
             | StandardEffectDrawKind::SeededLineParticles
             | StandardEffectDrawKind::SeededRadialLineParticles
-            | StandardEffectDrawKind::TrianglePair => Vec::new(),
+            | StandardEffectDrawKind::TrianglePair
+            | StandardEffectDrawKind::TriangleFan => Vec::new(),
         }
     }
 
@@ -1201,6 +1400,22 @@ impl StandardEffectDrawPlan {
                         color,
                     },
                 ]
+            }
+            StandardEffectDrawKind::TriangleFan => {
+                let Some(particles) = self.particles else {
+                    return Vec::new();
+                };
+                let start = particles.angle.unwrap_or(0.0);
+                (0..particles.count)
+                    .map(|index| StandardEffectTriangleRenderPrimitive {
+                        center: self.center,
+                        width: self.radius,
+                        length: self.stroke,
+                        rotation: start + particles.angle_range * index as f32,
+                        alpha: self.alpha,
+                        color,
+                    })
+                    .collect()
             }
             _ => Vec::new(),
         }
@@ -3518,6 +3733,8 @@ pub fn standard_effect_color_symbol(name: &str) -> Option<DecalColor> {
         "Pal.lighterOrange" => Some(DecalColor::from_rgba(0xf6e096ff)),
         "Pal.lightOrange" => Some(DecalColor::from_rgba(0xf68021ff)),
         "Pal.lightTrail" => Some(DecalColor::from_rgba(0xffe2a9ff)),
+        "Pal.bulletYellow" => Some(DecalColor::from_rgba(0xfff8e8ff)),
+        "Pal.bulletYellowBack" => Some(DecalColor::from_rgba(0xf9c27aff)),
         "Pal.lightFlame" => Some(DecalColor::from_rgba(0xffdd55ff)),
         "Pal.darkFlame" => Some(DecalColor::from_rgba(0xdb401cff)),
         "Pal.meltdownHit" => Some(DecalColor::from_rgba(0xffb98bff)),
@@ -4870,6 +5087,8 @@ mod tests {
             Some(FX_HIT_LASER_COLOR_ID)
         );
         assert_eq!(standard_effect_id("despawn"), Some(FX_DESPAWN_ID));
+        assert_eq!(standard_effect_id("instBomb"), Some(FX_INST_BOMB_ID));
+        assert_eq!(standard_effect_id("instTrail"), Some(FX_INST_TRAIL_ID));
         assert_eq!(standard_effect_id("hitLiquid"), Some(FX_HIT_LIQUID_ID));
         assert_eq!(
             standard_effect_id("artilleryTrail"),
@@ -5140,6 +5359,10 @@ mod tests {
             8.0
         );
         assert_eq!(standard_effect(FX_DESPAWN_ID).unwrap().lifetime, 12.0);
+        let inst_bomb = standard_effect(FX_INST_BOMB_ID).unwrap();
+        assert_eq!(inst_bomb.lifetime, 15.0);
+        assert_eq!(inst_bomb.clip, 100.0);
+        assert_eq!(standard_effect(FX_INST_TRAIL_ID).unwrap().lifetime, 30.0);
         assert_eq!(standard_effect(FX_HIT_LIQUID_ID).unwrap().lifetime, 16.0);
         let artillery_trail = standard_effect(FX_ARTILLERY_TRAIL_ID).unwrap();
         assert_eq!(artillery_trail.lifetime, 50.0);
@@ -6614,6 +6837,76 @@ mod tests {
         assert_eq!(shoot_titan.stroke, 17.5);
         assert_eq!(shoot_titan.particles.unwrap().length, 3.0);
         assert_eq!(shoot_titan.triangle_render_primitives_from_seed().len(), 2);
+    }
+
+    #[test]
+    fn standard_effect_draw_plans_cover_inst_bomb_and_trail_triangles() {
+        let inst_bomb = standard_effect_draw_plans(
+            Some(FX_INST_BOMB_ID as u16),
+            101,
+            5.0,
+            6.0,
+            0.0,
+            7.5,
+            15.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(inst_bomb.len(), 3);
+        let circle = inst_bomb[0];
+        assert_eq!(circle.kind, StandardEffectDrawKind::StrokedCircle);
+        assert_eq!(circle.color_from, Some("Pal.bulletYellowBack"));
+        assert_eq!(circle.radius, 21.5);
+        assert_eq!(circle.stroke, 2.0);
+        assert_eq!(circle.light_color, Some("Pal.bulletYellowBack"));
+        assert_eq!(circle.light_radius, 150.0);
+        assert!((circle.light_opacity - 0.45).abs() < 0.0001);
+
+        let outer = inst_bomb[1];
+        assert_eq!(outer.kind, StandardEffectDrawKind::TriangleFan);
+        assert_eq!(outer.color_from, Some("Pal.bulletYellowBack"));
+        assert_eq!(outer.radius, 6.0);
+        assert_eq!(outer.stroke, 40.0);
+        let outer_triangles = outer.triangle_render_primitives_from_seed();
+        assert_eq!(outer_triangles.len(), 4);
+        assert_eq!(outer_triangles[0].rotation, 45.0);
+        assert_eq!(outer_triangles[1].rotation, 135.0);
+        assert_eq!(outer_triangles[3].rotation, 315.0);
+
+        let inner = inst_bomb[2];
+        assert_eq!(inner.color_from, Some("Color.white"));
+        assert_eq!(inner.radius, 3.0);
+        assert_eq!(inner.stroke, 15.0);
+        assert_eq!(inner.triangle_render_primitives_from_seed().len(), 4);
+
+        let inst_trail = standard_effect_draw_plans(
+            Some(FX_INST_TRAIL_ID as u16),
+            102,
+            5.0,
+            6.0,
+            30.0,
+            15.0,
+            30.0,
+            DecalColor::WHITE,
+        );
+        assert_eq!(inst_trail.len(), 2);
+        let front_length = 30.0 + mathf_random_seed_range(102, 15.0);
+        let back = inst_trail[0];
+        assert_eq!(back.kind, StandardEffectDrawKind::TrianglePair);
+        assert_eq!(back.color_from, Some("Pal.bulletYellowBack"));
+        assert_eq!(back.radius, 7.5);
+        assert!((back.stroke - front_length).abs() < 0.0001);
+        assert_eq!(back.particles.unwrap().angle, Some(210.0));
+        assert_eq!(back.particles.unwrap().length, 10.0);
+        assert_eq!(back.light_color, Some("Pal.bulletYellowBack"));
+        assert_eq!(back.light_radius, 60.0);
+        assert!((back.light_opacity - 0.3).abs() < 0.0001);
+        assert_eq!(back.triangle_render_primitives_from_seed().len(), 2);
+
+        let front = inst_trail[1];
+        assert_eq!(front.color_from, Some("Pal.bulletYellow"));
+        assert_eq!(front.radius, 3.75);
+        assert!((front.stroke - front_length * 0.5).abs() < 0.0001);
+        assert_eq!(front.particles.unwrap().length, 5.0);
     }
 
     #[test]

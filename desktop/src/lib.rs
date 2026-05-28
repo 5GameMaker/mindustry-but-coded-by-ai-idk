@@ -3027,6 +3027,62 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_flattens_inst_bomb_and_trail_triangles_for_render() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("instBomb").unwrap() as u16,
+                    x: 20.0,
+                    y: 28.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("instTrail").unwrap() as u16,
+                    x: 40.0,
+                    y: 48.0,
+                    rotation: 30.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+
+        assert_eq!(launcher.standard_local_effect_draw_plans.len(), 5);
+        assert_eq!(launcher.standard_local_effect_circle_primitives.len(), 1);
+        assert_eq!(launcher.standard_local_effect_triangle_primitives.len(), 12);
+        assert_eq!(launcher.standard_local_effect_light_primitives.len(), 2);
+        assert!(launcher.standard_local_effect_square_primitives.is_empty());
+        assert!(launcher.standard_local_effect_line_primitives.is_empty());
+
+        let inst_bomb_triangle = launcher
+            .standard_local_effect_triangle_primitives
+            .iter()
+            .find(|triangle| triangle.center == (20.0, 28.0) && triangle.rotation == 45.0)
+            .expect("instBomb fan triangle should be cached");
+        assert_eq!(inst_bomb_triangle.width, 6.0);
+        assert!(inst_bomb_triangle.length > 0.0);
+
+        let mut renderer = HeadlessDesktopEffectRenderer::default();
+        let stats = launcher.render_standard_effect_frame_with(&mut renderer);
+        assert_eq!(stats.draw_plans, 5);
+        assert_eq!(stats.circle_primitives, 1);
+        assert_eq!(stats.triangle_primitives, 12);
+        assert_eq!(stats.light_primitives, 2);
+        assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
     fn desktop_launcher_syncs_assembler_unit_spawned_packet_to_runtime() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let world_data = sample_network_world_data(None);

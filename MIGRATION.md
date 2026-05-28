@@ -7352,3 +7352,45 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 renderer/backend 仍需绘制 `StandardEffectTriangleRenderPrimitive`；
   - `shootScepterSecondary=163`、`instBomb=101` 等需要多 triangle pass / 多颜色 / light，尚未迁移；
   - `shootQuellPulse=164` 需要更复杂的随机三角簇与 circle pass，不能强塞进当前简单 `TrianglePair`。
+
+### 12.235 Fx.instBomb / Fx.instTrail triangle fan and trail pairs
+
+- 2026-05-28：复用 triangle primitive，新增固定角度 triangle fan 语义，并迁移 `instBomb=101`、`instTrail=102`。
+- 本轮迁移：
+  - `instBomb=101`
+  - `instTrail=102`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1050` 附近：
+    - `instBomb = new Effect(15f, 100f, ...)`
+    - `Lines.circle(..., 4f + e.finpow() * 20f)`，stroke `e.fout() * 4f`；
+    - 两组固定角 `Drawf.tri` fan：4 个 `Pal.bulletYellowBack` 大三角与 4 个白色小三角；
+    - `Drawf.light(..., 150f, Pal.bulletYellowBack, 0.9f * e.fout())`。
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1067` 附近：
+    - `instTrail = new Effect(30, ...)`
+    - 两组 front/back `Drawf.tri`，颜色 `Pal.bulletYellowBack` / `Pal.bulletYellow`，长度含 `Mathf.randomSeedRange(e.id, 15f)`；
+    - `Drawf.light(..., 60f, Pal.bulletYellowBack, 0.6f * e.fout())`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_INST_BOMB_ID=101`、`FX_INST_TRAIL_ID=102`；
+    - 接入 lookup/metadata，`instBomb` clip `100.0`；
+    - 新增 `StandardEffectDrawKind::TriangleFan`；
+    - `triangle_render_primitives_from_seed()` 支持 fan：按 `angle + angle_range * index` 展开固定数量 triangle；
+    - `standard_effect_draw_plans(...)` 对 `instBomb` 输出 circle + outer fan + inner fan 三个 pass；
+    - `standard_effect_draw_plans(...)` 对 `instTrail` 输出两组 `TrianglePair`，第一组携带 light；
+    - `standard_effect_color_symbol()` 新增 `Pal.bulletYellow`、`Pal.bulletYellowBack`。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_inst_bomb_and_trail_triangles_for_render`，验证 desktop frame 可缓存 circle、triangle、light primitive。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plans_cover_inst_bomb_and_trail_triangles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_inst_bomb_and_trail_triangles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `instShoot=103`、`instHit=104` 仍需要 scaled circle + multi triangle + seeded square/line 组合；
+  - 当前 triangle primitive 仍是 headless frame seam，真实图形 backend 尚未绘制；
+  - 后续可继续扩展 triangle group，或优先迁移已有 primitive 能完整表达的 Fx。
