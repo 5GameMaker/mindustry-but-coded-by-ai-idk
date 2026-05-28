@@ -458,6 +458,24 @@ pub fn load() -> Vec<BulletContent> {
     eclipse_laser.shoot_effect = "shockwave".into();
     eclipse_laser.colors = vec!["ec7458aa".into(), "ff9c5a".into(), "white".into()];
 
+    let mut poly_missile = missile_bullet(4.0, 12.0);
+    poly_missile.homing_power = 0.08;
+    poly_missile.weave_mag = 4.0;
+    poly_missile.weave_scale = 4.0;
+    poly_missile.lifetime = 50.0;
+    poly_missile.scale_keep_velocity = true;
+    poly_missile.shoot_effect = "shootHeal".into();
+    poly_missile.smoke_effect = "hitLaser".into();
+    poly_missile.hit_effect = "hitLaser".into();
+    poly_missile.despawn_effect = "hitLaser".into();
+    poly_missile.front_color = "white".into();
+    poly_missile.hit_sound = "none".into();
+    poly_missile.heal_percent = 5.5;
+    poly_missile.collides_team = true;
+    poly_missile.reflectable = false;
+    poly_missile.back_color = "heal".into();
+    poly_missile.trail_color = "heal".into();
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -526,6 +544,7 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "antumbra_large_bullet", antumbra_large_bullet),
         make_bullet(&mut next_id, "eclipse_flak", eclipse_flak),
         make_bullet(&mut next_id, "eclipse_laser", eclipse_laser),
+        make_bullet(&mut next_id, "poly_missile", poly_missile),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -833,6 +852,7 @@ mod tests {
                 "antumbra_large_bullet",
                 "eclipse_flak",
                 "eclipse_laser",
+                "poly_missile",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1596,6 +1616,32 @@ mod tests {
         );
         assert!(laser.impact);
         assert!(laser.pierce);
+    }
+
+    #[test]
+    fn poly_missile_matches_java_heal_profile() {
+        let bullets = load();
+        let missile = &by_name(&bullets, "poly_missile").spec;
+
+        assert_eq!(missile.kind, BulletKind::Missile);
+        assert_eq!(missile.speed, 4.0);
+        assert_eq!(missile.damage, 12.0);
+        assert_eq!(missile.homing_power, 0.08);
+        assert_eq!(missile.weave_mag, 4.0);
+        assert_eq!(missile.weave_scale, 4.0);
+        assert_eq!(missile.lifetime, 50.0);
+        assert!(missile.scale_keep_velocity);
+        assert_eq!(missile.shoot_effect, "shootHeal");
+        assert_eq!(missile.smoke_effect, "hitLaser");
+        assert_eq!(missile.hit_effect, "hitLaser");
+        assert_eq!(missile.despawn_effect, "hitLaser");
+        assert_eq!(missile.front_color, "white");
+        assert_eq!(missile.hit_sound, "none");
+        assert_eq!(missile.heal_percent, 5.5);
+        assert!(missile.collides_team);
+        assert!(!missile.reflectable);
+        assert_eq!(missile.back_color, "heal");
+        assert_eq!(missile.trail_color, "heal");
     }
 
     #[test]

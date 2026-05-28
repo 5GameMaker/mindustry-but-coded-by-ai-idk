@@ -10295,3 +10295,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shared flak bullet 仍以同名 content 引用表示，Java 匿名对象身份后续需与 runtime mount 模型统一；
   - 下一步建议进入 air support 段，从 `mono`/`poly` 继续回填 support 单位字段、command 与 build/mine 行为；
   - 当前总体迁移约 13.8%，远未可玩。
+
+### 12.324 UnitTypes mono and poly air support content seam
+
+- 2026-05-28：进入 Java air support 段，回填 `mono` 采矿支援单位字段与 `poly` rebuild 支援单位/治疗导弹 weapon。该闭环保留 `poly` 的 `MissileBulletType` 治疗弹 content，并继续让 command/defaultCommand 进入 Rust unit registry。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1334-1402`
+  - `mono`：`defaultCommand=mineCommand`、`flying=true`、`drag=0.06`、`accel=0.12`、`speed=1.5`、`health=100`、`engineSize=1.8`、`engineOffset=5.7`、`range=50`、`isEnemy=false`、`controlSelectGlobal=false`、`wreckSoundVolume=deathSoundVolume=0.7`、`mineTier=1`、`mineSpeed=2.5`
+  - `poly`：`defaultCommand=rebuildCommand`、`flying=true`、`drag=0.05`、`speed=2.6`、`rotateSpeed=15`、`accel=0.1`、`range=130`、`health=400`、`buildSpeed=0.5`、`engineOffset=6.5`、`hitSize=9`、`lowAltitude=true`、`mineTier=2`、`mineSpeed=3.5`、`wreckSoundVolume=0.9`、`RepairFieldAbility(5,480,50)`
+  - `poly-weapon`：`top=false`、`y=-2.5`、`x=3.75`、`reload=30`、`ejectEffect=none`、`recoil=2`、`shootSound=shootMissilePlasmaShort`、`velocityRnd=0.5`、`inaccuracy=15`、`alternate=true`
+  - `poly` bullet：`MissileBulletType(4f,12)`，`homingPower=0.08`、`weaveMag=4`、`weaveScale=4`、`lifetime=50`、`scaleKeepVelocity=true`、`shootEffect=shootHeal`、`smokeEffect=hitLaser`、`hitEffect/despawnEffect=hitLaser`、`frontColor=white`、`hitSound=none`、`healPercent=5.5`、`collidesTeam=true`、`reflectable=false`、`backColor/trailColor=heal`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `poly_missile`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `poly_missile_matches_java_heal_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `mono` 补齐 Java mining/default command/sound/selection 字段；
+    - `poly` 补齐 Java movement/build/mining/ability 字段并注册 `poly-weapon`；
+    - 新增 `mono_and_poly_support_profiles_match_java`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `13.9%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core poly_missile_matches_java_heal_profile --lib`
+  - `cargo test -p mindustry-core mono_and_poly_support_profiles_match_java --lib`
+- 仍未完成：
+  - `poly` 治疗导弹的 heal/collidesTeam/homing/weave runtime 仍需接入真实 projectile 与 team heal 路径；
+  - `mono` mining/rebuild command runtime 仍需与 AI/command 系统整体联动验证；
+  - 下一步建议继续 `mega`，需要两个 `heal-weapon-mount` LaserBoltBulletType 与 payload/build 字段；
+  - 当前总体迁移约 13.9%，远未可玩。

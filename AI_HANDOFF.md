@@ -8509,3 +8509,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议进入 air support 段，从 `mono`/`poly` 继续；
   3. Laser/Flak runtime、shared bullet 身份和 weapon mount 发射路径仍未完整 content-driven；
   4. 当前总迁移约 13.8%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 250. 最新闭环记录：UnitTypes mono and poly air support content seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：回填 Java air support 段的 `mono` 与 `poly`，包括 `poly-weapon` 治疗导弹，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1334-1402`
+  - `mono`：mine command、`drag=0.06`、`accel=0.12`、`range=50`、`isEnemy=false`、`controlSelectGlobal=false`、`wreck/deathSoundVolume=0.7`、`mineTier=1`、`mineSpeed=2.5`；
+  - `poly`：rebuild command、`drag=0.05`、`accel=0.1`、`range=130`、`wreckSoundVolume=0.9`、`RepairFieldAbility:5:480:50`；
+  - `poly-weapon`：`top=false`、`y=-2.5`、`x=3.75`、`reload=30`、`recoil=2`、`velocityRnd=0.5`、`inaccuracy=15`、`bullet=MissileBulletType(4,12)`；
+  - `poly_missile`：`weaveMag/weaveScale=4`、`scaleKeepVelocity=true`、`healPercent=5.5`、`collidesTeam=true`、`reflectable=false`、heal colors/effects。
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `poly_missile`；
+    - 更新 bullet load order；
+    - 新增 `poly_missile_matches_java_heal_profile`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `mono`/`poly` 补齐 Java 字段；
+    - `poly` 注册 `poly-weapon`；
+    - 新增 `mono_and_poly_support_profiles_match_java`。
+  - `README.md`
+    - 当前总体完成度更新为约 `13.9%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.324`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core poly_missile_matches_java_heal_profile --lib`
+  - `cargo test -p mindustry-core mono_and_poly_support_profiles_match_java --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议 `mega`，需要两个 heal laser bolt mounts；
+  3. heal projectile、mining/rebuild command runtime 仍未完整 content-driven；
+  4. 当前总迁移约 13.9%，远未可玩，goal 绝不能标记 complete。

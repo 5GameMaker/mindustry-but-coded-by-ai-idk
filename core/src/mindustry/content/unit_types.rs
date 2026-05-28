@@ -790,19 +790,28 @@ pub fn load() -> Vec<UnitType> {
         }),
         unit(&mut next_id, "mono", UnitKind::Standard, |u| {
             u.flying = true;
+            u.drag = 0.06;
+            u.accel = 0.12;
             u.speed = 1.5;
             u.health = 100.0;
             u.engine_size = 1.8;
             u.engine_offset = 5.7;
+            u.range = 50.0;
             u.is_enemy = false;
+            u.control_select_global = false;
+            u.wreck_sound_volume = 0.7;
+            u.death_sound_volume = 0.7;
             u.mine_tier = 1;
             u.mine_speed = 2.5;
             u.default_command = Some("mine".into());
         }),
         unit(&mut next_id, "poly", UnitKind::Standard, |u| {
             u.flying = true;
+            u.drag = 0.05;
             u.speed = 2.6;
             u.rotate_speed = 15.0;
+            u.accel = 0.1;
+            u.range = 130.0;
             u.health = 400.0;
             u.build_speed = 0.5;
             u.engine_offset = 6.5;
@@ -810,8 +819,23 @@ pub fn load() -> Vec<UnitType> {
             u.low_altitude = true;
             u.mine_tier = 2;
             u.mine_speed = 3.5;
+            u.wreck_sound_volume = 0.9;
             u.default_command = Some("rebuild".into());
             u.abilities.push("RepairFieldAbility:5:480:50".into());
+
+            let mut weapon = Weapon::new("poly-weapon");
+            weapon.top = false;
+            weapon.y = -2.5;
+            weapon.x = 3.75;
+            weapon.reload = 30.0;
+            weapon.eject_effect = "none".into();
+            weapon.recoil = 2.0;
+            weapon.shoot_sound = "shootMissilePlasmaShort".into();
+            weapon.velocity_rnd = 0.5;
+            weapon.inaccuracy = 15.0;
+            weapon.alternate = true;
+            weapon.bullet = "poly_missile".into();
+            u.weapons.push(weapon);
         }),
         unit(&mut next_id, "mega", UnitKind::Standard, |u| {
             u.mine_tier = 3;
@@ -2633,6 +2657,74 @@ mod tests {
             .expect("missing eclipse_flak");
         assert_eq!(flak_bullet.spec.kind, BulletKind::Flak);
         assert_eq!(flak_bullet.spec.splash_damage, 65.0);
+    }
+
+    #[test]
+    fn mono_and_poly_support_profiles_match_java() {
+        let units = load();
+
+        let mono = by_name(&units, "mono");
+        assert_eq!(mono.default_command.as_deref(), Some("mine"));
+        assert!(mono.flying);
+        assert_eq!(mono.drag, 0.06);
+        assert_eq!(mono.accel, 0.12);
+        assert_eq!(mono.speed, 1.5);
+        assert_eq!(mono.health, 100.0);
+        assert_eq!(mono.engine_size, 1.8);
+        assert_eq!(mono.engine_offset, 5.7);
+        assert_eq!(mono.range, 50.0);
+        assert!(!mono.is_enemy);
+        assert!(!mono.control_select_global);
+        assert_eq!(mono.wreck_sound_volume, 0.7);
+        assert_eq!(mono.death_sound_volume, 0.7);
+        assert_eq!(mono.mine_tier, 1);
+        assert_eq!(mono.mine_speed, 2.5);
+        assert!(mono.weapons.is_empty());
+
+        let poly = by_name(&units, "poly");
+        assert_eq!(poly.default_command.as_deref(), Some("rebuild"));
+        assert!(poly.flying);
+        assert_eq!(poly.drag, 0.05);
+        assert_eq!(poly.speed, 2.6);
+        assert_eq!(poly.rotate_speed, 15.0);
+        assert_eq!(poly.accel, 0.1);
+        assert_eq!(poly.range, 130.0);
+        assert_eq!(poly.health, 400.0);
+        assert_eq!(poly.build_speed, 0.5);
+        assert_eq!(poly.engine_offset, 6.5);
+        assert_eq!(poly.hit_size, 9.0);
+        assert!(poly.low_altitude);
+        assert_eq!(poly.mine_tier, 2);
+        assert_eq!(poly.mine_speed, 3.5);
+        assert_eq!(poly.wreck_sound_volume, 0.9);
+        assert!(poly
+            .abilities
+            .iter()
+            .any(|entry| entry == "RepairFieldAbility:5:480:50"));
+        assert_eq!(poly.weapons.len(), 1);
+
+        let weapon = &poly.weapons[0];
+        assert_eq!(weapon.name, "poly-weapon");
+        assert!(!weapon.top);
+        assert_eq!(weapon.y, -2.5);
+        assert_eq!(weapon.x, 3.75);
+        assert_eq!(weapon.reload, 30.0);
+        assert_eq!(weapon.eject_effect, "none");
+        assert_eq!(weapon.recoil, 2.0);
+        assert_eq!(weapon.shoot_sound, "shootMissilePlasmaShort");
+        assert_eq!(weapon.velocity_rnd, 0.5);
+        assert_eq!(weapon.inaccuracy, 15.0);
+        assert!(weapon.alternate);
+        assert_eq!(weapon.bullet, "poly_missile");
+
+        let bullets = bullets::load();
+        let missile = bullets
+            .iter()
+            .find(|bullet| bullet.name() == weapon.bullet)
+            .expect("missing poly_missile");
+        assert_eq!(missile.spec.kind, BulletKind::Missile);
+        assert_eq!(missile.spec.heal_percent, 5.5);
+        assert!(missile.spec.collides_team);
     }
 
     #[test]
