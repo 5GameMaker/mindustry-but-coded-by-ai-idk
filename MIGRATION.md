@@ -11093,3 +11093,63 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shader dispatch 目前是 desktop frame/headless summary 可见，尚未绑定真实 GPU uniform/texture/backend operations；
   - atlas descriptor 仍是路径/metadata 解析，尚未接真实目录扫描、PNG decode、bleed/outline、Texture upload；
   - 当前总体迁移约 18.8%，仍未达到完整可玩。
+
+### 12.347 Block sprite op, mod sprite routing, atlas virtual sources and backend trace
+
+- 2026-05-29：继续优先推进渲染引擎主链路。本轮把 block renderer 的 sprite 输出从固定白色符号 pass 升级为可组合 `BlockSpriteOp`，同时补上 mod sprite 文件输入到 pack request 的纯数据桥、atlas 虚拟清单路径入口，以及 desktop/headless backend trace。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/BlockRenderer.java`
+    - block/building 可见项最终要落到 sprite draw；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/draw/DrawDefault.java`
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/draw/DrawRegion.java`
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/draw/DrawMulti.java`
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/world/draw/DrawPower.java`
+    - region/symbol、tint、rotation、layer/order 必须逐步成为一等数据，而不是只在 helper 内隐式拼接；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/mod/Mods.java`
+    - `sprites` 需要按 Java 规则加 mod name 前缀，`sprites-override` 需要保留 override 语义；
+    - v158.1 的 mod icon 加载从 `icon.png` 增加了 `preview.png` 兜底，后续资产生命周期迁移时需要补齐；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/MultiPacker.java`
+    - page 路由仍按 `main/environment/ui/rubble` 对齐；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - desktop frame 排序继续按 Java draw stage 校验。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `BlockSpriteRegion` / `BlockSpriteOp`；
+    - `BlockRendererPlan` 新增 `sprite_ops`，并纳入 `Default` / `clear()` / `is_empty()`；
+    - 新增 `BlockRendererPlan::to_block_sprite_ops(...)`，再由 `to_sprite_render_passes(...)` 统一生成 `RenderCommand::DrawSprite`；
+    - 现有 tile/building pass 不再直接构造 render pass，而是先扁平化为 sprite op，保持接入 `BlockRendererPlan -> RenderFramePlan -> DrawSprite` 主链。
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `ModSpritePackSource`；
+    - 新增 `mod_sprite_atlas_name(...)`，对齐 Java `Mods.packSprites(...)` 的 mod name 前缀和 category-prefix 规则；
+    - `SpritePacker` 新增 `add_mod_sprite_source(...)` / `extend_mod_sprite_sources(...)`，将扫描到的 `sprites` / `sprites-override` 文件转为 page-aware `SpritePackRequest`。
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `TextureAtlasSpriteSourceDescriptor::from_virtual_source_path(...)`；
+    - 新增 `TextureAtlasPlan<bool>::from_virtual_source_paths(...)`；
+    - 新增 `PackPlan<TextureAtlasRegionSource<bool>>::from_virtual_source_paths(...)`；
+    - 该入口只处理虚拟目录/清单路径，不触发 PNG decode 或 GPU upload。
+  - `desktop/src/lib.rs`
+    - 新增 desktop 渲染执行 trace：
+      - `DesktopGraphicsExecutionTrace`
+      - `DesktopGraphicsPassExecutionTrace`
+      - `DesktopGraphicsShaderDispatchExecutionTrace`
+      - `DesktopGraphicsShaderApplyExecutionTrace`
+    - `HeadlessDesktopGraphicsRenderer` 现在保存 `last_trace`，可观测消费 `shader_dispatch`、`render_frame.passes`、`DrawSprite`、`DrawText` 和 `RenderTarget`；
+    - world graphics frame 测试补强了多 pass 场景，继续断言 `matches_java_renderer_draw_order()`。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --check`
+  - `cargo test -p mindustry-core block_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `9 passed`
+  - `cargo test -p mindustry-core texture_atlas --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `10 passed`
+  - `cargo test -p mindustry-core modsys --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `12 passed`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `7 passed`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `1 passed`
+- 仍未完成：
+  - `BlockSpriteOp` 只是 sprite draw 的统一数据入口，尚未完整迁移所有 Java `DrawBlock` 子类；
+  - atlas/mod sprite 链路仍是文件清单与计划层，尚未接真实目录扫描、PNG decode、bleed/outline、atlas flush/rebind；
+  - desktop backend trace 仍是 headless 可观测执行轨迹，尚未绑定真实 GPU shader uniform/texture/sprite batch；
+  - `UnlockableContent.loadIcon/createIcons`、`Block.createIcons` 和 v158.1 mod icon `preview.png` fallback 还未接入整体内容生命周期；
+  - 当前总体迁移约 19.0%，仍未达到完整可玩。

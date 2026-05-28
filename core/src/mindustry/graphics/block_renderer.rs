@@ -824,7 +824,82 @@ impl Default for BlockRendererState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum BlockSpriteRegion {
+    Symbol(String),
+}
+
+impl BlockSpriteRegion {
+    pub fn symbol(&self) -> &str {
+        match self {
+            Self::Symbol(symbol) => symbol,
+        }
+    }
+}
+
+impl From<&str> for BlockSpriteRegion {
+    fn from(value: &str) -> Self {
+        Self::Symbol(value.into())
+    }
+}
+
+impl From<String> for BlockSpriteRegion {
+    fn from(value: String) -> Self {
+        Self::Symbol(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockSpriteOp {
+    pub order: i32,
+    pub region: BlockSpriteRegion,
+    pub rect: RenderRect,
+    pub tint: [f32; 4],
+    pub rotation: f32,
+    pub layer: f32,
+}
+
+impl BlockSpriteOp {
+    pub fn new(
+        order: i32,
+        region: impl Into<BlockSpriteRegion>,
+        rect: RenderRect,
+        tint: [f32; 4],
+        rotation: f32,
+        layer: f32,
+    ) -> Self {
+        Self {
+            order,
+            region: region.into(),
+            rect,
+            tint,
+            rotation,
+            layer,
+        }
+    }
+
+    pub fn symbol(&self) -> &str {
+        self.region.symbol()
+    }
+
+    pub fn to_draw_sprite_command(&self) -> Option<RenderCommand> {
+        let symbol = self.symbol();
+        if symbol.is_empty() {
+            None
+        } else {
+            Some(RenderCommand::draw_sprite(
+                symbol,
+                self.rect,
+                self.tint,
+                self.rotation,
+                self.layer,
+            ))
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockRendererPlan {
+    pub sprite_ops: Vec<BlockSpriteOp>,
     pub tile_passes: Vec<TilePassPlan>,
     pub building_passes: Vec<BuildingPassPlan>,
     pub cracks: Vec<CrackPlan>,
@@ -838,6 +913,7 @@ pub struct BlockRendererPlan {
 
 impl BlockRendererPlan {
     pub fn clear(&mut self) {
+        self.sprite_ops.clear();
         self.tile_passes.clear();
         self.building_passes.clear();
         self.cracks.clear();
@@ -853,7 +929,8 @@ impl BlockRendererPlan {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tile_passes.is_empty()
+        self.sprite_ops.is_empty()
+            && self.tile_passes.is_empty()
             && self.building_passes.is_empty()
             && self.cracks.is_empty()
             && self.build_previews.is_empty()
@@ -868,34 +945,56 @@ impl BlockRendererPlan {
     }
 
     pub fn to_sprite_render_passes(&self, tile_size_world: f32) -> Vec<RenderPass> {
+        let ops = self.to_block_sprite_ops(tile_size_world);
+        let mut passes: Vec<RenderPass> = Vec::new();
+
+        for op in ops {
+            let Some(command) = op.to_draw_sprite_command() else {
+                continue;
+            };
+
+            match passes.last_mut() {
+                Some(pass) if pass.order == op.order => pass.push(command),
+                _ => {
+                    let mut pass = RenderPass::new(RenderPassKind::Block).with_order(op.order);
+                    pass.push(command);
+                    passes.push(pass);
+                }
+            }
+        }
+
+        passes
+    }
+
+    pub fn to_block_sprite_ops(&self, tile_size_world: f32) -> Vec<BlockSpriteOp> {
         if tile_size_world <= 0.0 {
             return Vec::new();
         }
 
-        let mut passes = Vec::new();
+        let mut ops = self.sprite_ops.clone();
         let mut order = RenderPassKind::Block.default_order();
 
         for pass in &self.tile_passes {
-            if let Some(render_pass) = pass.to_sprite_render_pass(tile_size_world, order) {
-                passes.push(render_pass);
+            if pass.append_sprite_ops(tile_size_world, order, &mut ops) {
                 order += 1;
             }
         }
 
         for pass in &self.building_passes {
-            if let Some(render_pass) = pass.to_sprite_render_pass(tile_size_world, order) {
-                passes.push(render_pass);
+            if pass.append_sprite_ops(tile_size_world, order, &mut ops) {
                 order += 1;
             }
         }
 
-        passes
+        ops.sort_by_key(|op| op.order);
+        ops
     }
 }
 
 impl Default for BlockRendererPlan {
     fn default() -> Self {
         Self {
+            sprite_ops: Vec::new(),
             tile_passes: Vec::new(),
             building_passes: Vec::new(),
             cracks: Vec::new(),
@@ -1055,8 +1154,12 @@ const SPRITE_SYMBOL_BLOCK_STATUS: &str = "block-status";
 const SPRITE_SYMBOL_BLOCK_LIGHT: &str = "block-light";
 
 impl TilePassPlan {
-    pub fn to_sprite_render_pass(&self, tile_size_world: f32, order: i32) -> Option<RenderPass> {
-        let mut render_pass = RenderPass::new(RenderPassKind::Block).with_order(order);
+    pub fn append_sprite_ops(
+        &self,
+        tile_size_world: f32,
+        order: i32,
+        ops: &mut Vec<BlockSpriteOp>,
+    ) -> bool {
         let mut has_commands = false;
 
         for tile in &self.tiles {
@@ -1071,7 +1174,8 @@ impl TilePassPlan {
                 continue;
             }
 
-            render_pass.push(RenderCommand::draw_sprite(
+            ops.push(BlockSpriteOp::new(
+                order,
                 symbol,
                 tile_sprite_rect(tile.coord, tile_size_world),
                 SPRITE_TINT_WHITE,
@@ -1081,13 +1185,17 @@ impl TilePassPlan {
             has_commands = true;
         }
 
-        has_commands.then_some(render_pass)
+        has_commands
     }
 }
 
 impl BuildingPassPlan {
-    pub fn to_sprite_render_pass(&self, tile_size_world: f32, order: i32) -> Option<RenderPass> {
-        let mut render_pass = RenderPass::new(RenderPassKind::Block).with_order(order);
+    pub fn append_sprite_ops(
+        &self,
+        tile_size_world: f32,
+        order: i32,
+        ops: &mut Vec<BlockSpriteOp>,
+    ) -> bool {
         let mut has_commands = false;
 
         for building in &self.buildings {
@@ -1104,7 +1212,8 @@ impl BuildingPassPlan {
                 continue;
             }
 
-            render_pass.push(RenderCommand::draw_sprite(
+            ops.push(BlockSpriteOp::new(
+                order,
                 symbol,
                 building_sprite_rect(building.coord, building.size, tile_size_world),
                 SPRITE_TINT_WHITE,
@@ -1114,7 +1223,7 @@ impl BuildingPassPlan {
             has_commands = true;
         }
 
-        has_commands.then_some(render_pass)
+        has_commands
     }
 }
 
@@ -1288,6 +1397,14 @@ mod tests {
         assert_eq!(empty_plan.broken_fade, 0.0);
 
         let mut plan = BlockRendererPlan::default();
+        plan.sprite_ops.push(BlockSpriteOp::new(
+            7,
+            "custom-region",
+            RenderRect::new(1.0, 2.0, 3.0, 4.0),
+            [0.25, 0.5, 0.75, 0.8],
+            45.0,
+            Layer::BLOCK + 0.5,
+        ));
         plan.tile_passes.push(TilePassPlan::default());
         plan.building_passes.push(BuildingPassPlan::default());
         plan.cracks.push(CrackPlan::default());
@@ -1302,6 +1419,7 @@ mod tests {
 
         plan.clear();
         assert!(plan.is_empty());
+        assert!(plan.sprite_ops.is_empty());
         assert_eq!(plan.darkness.fill, DarknessFill::White);
         assert!(plan.darkness.tiles.is_empty());
         assert!(plan.darkness.dirty_tiles.is_empty());
@@ -1534,6 +1652,45 @@ mod tests {
     }
 
     #[test]
+    fn explicit_block_sprite_ops_preserve_region_tint_layer_order_into_draw_sprite() {
+        let mut plan = BlockRendererPlan::default();
+        let op = BlockSpriteOp::new(
+            42,
+            BlockSpriteRegion::from("surge-wall-glow"),
+            RenderRect::new(10.0, 20.0, 30.0, 40.0),
+            [0.2, 0.4, 0.6, 0.8],
+            37.0,
+            Layer::BLOCK + 0.25,
+        );
+        plan.sprite_ops.push(op.clone());
+
+        assert_eq!(op.symbol(), "surge-wall-glow");
+        assert_eq!(plan.to_block_sprite_ops(8.0), vec![op.clone()]);
+
+        let passes = plan.to_sprite_render_passes(8.0);
+        assert_eq!(passes.len(), 1);
+        assert_eq!(passes[0].order, 42);
+        assert_eq!(passes[0].commands.len(), 1);
+
+        match &passes[0].commands[0] {
+            RenderCommand::DrawSprite {
+                symbol,
+                rect,
+                tint,
+                rotation,
+                layer,
+            } => {
+                assert_eq!(symbol, "surge-wall-glow");
+                assert_eq!(*rect, op.rect);
+                assert_eq!(*tint, op.tint);
+                assert_eq!(*rotation, op.rotation);
+                assert_eq!(*layer, op.layer);
+            }
+            other => panic!("expected DrawSprite, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn block_renderer_plan_converts_sprite_passes_with_stable_symbols_and_rotation() {
         let mut plan = BlockRendererPlan::default();
 
@@ -1602,6 +1759,19 @@ mod tests {
                 buildings: vec![building.clone()],
             });
         }
+
+        let ops = plan.to_block_sprite_ops(8.0);
+        assert_eq!(ops.len(), 8);
+        assert!(ops.windows(2).all(|pair| pair[0].order <= pair[1].order));
+        assert!(ops.iter().all(|op| op.tint == SPRITE_TINT_WHITE));
+        assert_eq!(ops[0].symbol(), "router");
+        assert_eq!(ops[0].rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
+        assert_eq!(ops[0].rotation, 0.0);
+        assert_eq!(ops[0].layer, BlockDrawStage::TileBase.layer());
+        assert_eq!(ops[3].symbol(), "duo");
+        assert_eq!(ops[3].rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
+        assert_eq!(ops[3].rotation, 90.0);
+        assert_eq!(ops[3].layer, BlockDrawStage::BuildingBase.layer());
 
         let passes = plan.to_sprite_render_passes(8.0);
         assert_eq!(passes.len(), 8);

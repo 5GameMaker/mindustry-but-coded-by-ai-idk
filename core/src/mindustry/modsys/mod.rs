@@ -156,6 +156,28 @@ impl SpritePacker {
         self.requests.push(request);
     }
 
+    pub fn add_mod_sprite_source(&mut self, source: ModSpritePackSource) -> bool {
+        if let Some(request) = source.to_request() {
+            self.add_request(request);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn extend_mod_sprite_sources<I>(&mut self, sources: I) -> usize
+    where
+        I: IntoIterator<Item = ModSpritePackSource>,
+    {
+        let mut imported = 0;
+        for source in sources {
+            if self.add_mod_sprite_source(source) {
+                imported += 1;
+            }
+        }
+        imported
+    }
+
     pub fn requests(&self) -> &[SpritePackRequest] {
         &self.requests
     }
@@ -183,6 +205,76 @@ impl SpritePacker {
 
         plan
     }
+}
+
+/// Pure-data mirror of one file discovered by Java `Mods.packSprites(...)`.
+///
+/// Upstream scans both `sprites` and `sprites-override`; the former prefixes
+/// atlas names with the mod name, while the latter keeps the original name and
+/// replaces an existing atlas region. This struct is intentionally filesystem
+/// agnostic so the real directory scanner can feed it later without forcing PNG
+/// decoding or GPU texture upload into the planning layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModSpritePackSource {
+    pub mod_name: String,
+    pub source_path: String,
+    pub prefix_with_mod_name: bool,
+}
+
+impl ModSpritePackSource {
+    pub fn new(
+        mod_name: impl Into<String>,
+        source_path: impl Into<String>,
+        prefix_with_mod_name: bool,
+    ) -> Self {
+        Self {
+            mod_name: mod_name.into(),
+            source_path: source_path.into(),
+            prefix_with_mod_name,
+        }
+    }
+
+    pub fn sprite(mod_name: impl Into<String>, source_path: impl Into<String>) -> Self {
+        Self::new(mod_name, source_path, true)
+    }
+
+    pub fn override_sprite(mod_name: impl Into<String>, source_path: impl Into<String>) -> Self {
+        Self::new(mod_name, source_path, false)
+    }
+
+    pub fn atlas_name(&self) -> Option<String> {
+        mod_sprite_atlas_name(&self.mod_name, &self.source_path, self.prefix_with_mod_name)
+    }
+
+    pub fn page_hint(&self) -> &'static str {
+        if self.prefix_with_mod_name {
+            "sprites"
+        } else {
+            "sprites-override"
+        }
+    }
+
+    pub fn to_request(&self) -> Option<SpritePackRequest> {
+        let atlas_name = self.atlas_name()?;
+        Some(
+            SpritePackRequest::new(self.source_path.clone(), atlas_name)
+                .with_page_hint(self.page_hint())
+                .with_override(!self.prefix_with_mod_name),
+        )
+    }
+}
+
+pub fn mod_sprite_atlas_name(
+    mod_name: &str,
+    source_path: &str,
+    prefix_with_mod_name: bool,
+) -> Option<String> {
+    let base_name = sprite_file_base_name(source_path)?;
+    if !prefix_with_mod_name || mod_sprite_name_is_category_prefixed(&base_name, mod_name) {
+        return Some(base_name);
+    }
+
+    Some(format!("{mod_name}-{base_name}"))
 }
 
 /// Rust equivalent of the Java abstract `Mod` base class.
@@ -314,6 +406,23 @@ fn page_type_from_source_path(source_path: &str) -> PageType {
 
 fn normalize_sprite_hint(value: &str) -> String {
     value.trim().replace('\\', "/").to_ascii_lowercase()
+}
+
+fn sprite_file_base_name(source_path: &str) -> Option<String> {
+    let normalized = source_path.trim().replace('\\', "/");
+    let file_name = normalized.rsplit('/').next().unwrap_or_default();
+    let base_name = file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(base, _extension)| base)
+        .trim();
+
+    (!base_name.is_empty()).then(|| base_name.to_string())
+}
+
+fn mod_sprite_name_is_category_prefixed(base_name: &str, mod_name: &str) -> bool {
+    base_name
+        .split_once('-')
+        .is_some_and(|(_category, rest)| rest.starts_with(&format!("{mod_name}-")))
 }
 
 #[cfg(test)]
@@ -487,6 +596,73 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn mod_sprite_sources_follow_java_pack_sprites_naming_rules() {
+        assert_eq!(
+            mod_sprite_atlas_name("example", "sprites/blocks/router.png", true),
+            Some("example-router".into())
+        );
+        assert_eq!(
+            mod_sprite_atlas_name("example", "sprites/block-example-router.png", true),
+            Some("block-example-router".into())
+        );
+        assert_eq!(
+            mod_sprite_atlas_name("example", "sprites-override/router.png", false),
+            Some("router".into())
+        );
+        assert_eq!(mod_sprite_atlas_name("example", "sprites/.png", true), None);
+    }
+
+    #[test]
+    fn sprite_packer_imports_mod_sprite_sources_into_page_aware_requests() {
+        let mut packer = SpritePacker::new();
+
+        let imported = packer.extend_mod_sprite_sources([
+            ModSpritePackSource::sprite("example", "mods/example/sprites/router.png"),
+            ModSpritePackSource::sprite(
+                "example",
+                "mods/example/sprites/blocks/environment/ore.png",
+            ),
+            ModSpritePackSource::override_sprite(
+                "example",
+                "mods/example/sprites-override/ui/icon.png",
+            ),
+        ]);
+
+        assert_eq!(imported, 3);
+        assert_eq!(
+            packer.requests(),
+            &[
+                SpritePackRequest {
+                    source_path: "mods/example/sprites/router.png".into(),
+                    atlas_name: "example-router".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "mods/example/sprites/blocks/environment/ore.png".into(),
+                    atlas_name: "example-ore".into(),
+                    page_hint: "sprites".into(),
+                    r#override: false,
+                },
+                SpritePackRequest {
+                    source_path: "mods/example/sprites-override/ui/icon.png".into(),
+                    atlas_name: "icon".into(),
+                    page_hint: "sprites-override".into(),
+                    r#override: true,
+                },
+            ]
+        );
+
+        let plan = packer.to_multi_packer_plan();
+        assert!(plan.page(PageType::Main).get("example-router").is_some());
+        assert!(plan
+            .page(PageType::Environment)
+            .get("example-ore")
+            .is_some());
+        assert!(plan.page(PageType::Ui).get("icon").is_some());
     }
 
     #[test]
