@@ -354,6 +354,8 @@ mod tests {
         let directional = DirectionLiquidBridge::new("duct-liquid-bridge");
         assert_eq!(directional.speed, 5.0);
         assert_eq!(directional.liquid_padding, 1.0);
+        assert_eq!(directional.region_rotated1, 2);
+        assert_eq!(directional.bridge.block.group, BlockGroup::Liquids);
     }
 
     #[test]
@@ -369,5 +371,6 @@ mod tests {
         assert!(dir.outputs_liquid);
         assert!(!dir.can_overdrive);
         assert_eq!(dir.liquid_capacity, 20.0);
+        assert_eq!(dir.region_rotated1, 2);
     }
 }

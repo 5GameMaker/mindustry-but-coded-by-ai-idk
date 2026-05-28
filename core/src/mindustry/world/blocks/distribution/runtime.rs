@@ -640,6 +640,7 @@ impl Duct {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DuctJunction {
     pub block: Block,
+    pub floating: bool,
     pub transparent_color_rgba: u32,
     pub speed: f32,
     pub capacity: i32,
@@ -655,12 +656,12 @@ impl DuctJunction {
         block.solid = false;
         block.has_items = true;
         block.item_capacity = 4;
-        block.floating = true;
         block.group = BlockGroup::Transportation;
         block.priority = 1;
         block.env_enabled = Env::SPACE | Env::TERRESTRIAL | Env::UNDERWATER;
         Self {
             block,
+            floating: true,
             transparent_color_rgba: 0x6666661a,
             speed: 5.0,
             capacity: 4,
@@ -673,6 +674,7 @@ impl DuctJunction {
     pub fn from_data(data: &DistributionBlockData) -> Option<Self> {
         (matches!(data.kind, DistributionBlockKind::Junction)).then(|| Self {
             block: data.base.clone(),
+            floating: true,
             transparent_color_rgba: 0x6666661a,
             speed: data.speed,
             capacity: data.capacity,

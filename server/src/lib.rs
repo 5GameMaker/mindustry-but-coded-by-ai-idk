@@ -11888,4 +11888,5 @@ mod tests {
         else {
             panic!("payload void sidecar should remain present");
         };
-    }
+    }
+}
