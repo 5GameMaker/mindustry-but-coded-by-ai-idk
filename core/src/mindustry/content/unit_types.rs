@@ -970,9 +970,45 @@ pub fn load() -> Vec<UnitType> {
         unit(&mut next_id, "minke", UnitKind::Naval, |u| {
             u.health = 600.0;
             u.speed = 0.9;
+            u.drag = 0.15;
             u.hit_size = 13.0;
             u.armor = 4.0;
+            u.accel = 0.3;
             u.rotate_speed = 2.6;
+            u.face_target = false;
+            u.move_sound_volume = 0.55;
+            u.move_sound_pitch_min = 0.9;
+            u.move_sound_pitch_max = 0.9;
+            u.move_sound = "shipMove".into();
+            u.trail_length = 20;
+            u.wave_trail_x = 5.5;
+            u.wave_trail_y = -4.0;
+            u.trail_scl = 1.9;
+
+            let mut flak = Weapon::new("mount-weapon");
+            flak.reload = 10.0;
+            flak.x = 5.0;
+            flak.y = 3.5;
+            flak.rotate = true;
+            flak.rotate_speed = 5.0;
+            flak.inaccuracy = 8.0;
+            flak.eject_effect = "casing1".into();
+            flak.shoot_sound = "shootDuo".into();
+            flak.bullet = "minke_flak".into();
+            u.weapons.push(flak);
+
+            let mut artillery = Weapon::new("artillery-mount");
+            artillery.reload = 30.0;
+            artillery.x = 5.0;
+            artillery.y = -5.0;
+            artillery.rotate = true;
+            artillery.inaccuracy = 2.0;
+            artillery.rotate_speed = 2.0;
+            artillery.shake = 1.5;
+            artillery.eject_effect = "casing2".into();
+            artillery.shoot_sound = "shootArtillerySmall".into();
+            artillery.bullet = "minke_artillery".into();
+            u.weapons.push(artillery);
         }),
         unit(&mut next_id, "bryde", UnitKind::Naval, |u| {
             u.health = 910.0;
@@ -3010,6 +3046,70 @@ mod tests {
         assert_eq!(missile_bullet.spec.kind, BulletKind::Missile);
         assert_eq!(missile_bullet.spec.splash_damage, 10.0);
         assert_eq!(missile_bullet.spec.weave_scale, 8.0);
+    }
+
+    #[test]
+    fn minke_naval_attack_profile_matches_java() {
+        let units = load();
+        let minke = by_name(&units, "minke");
+
+        assert!(minke.naval);
+        assert_eq!(minke.health, 600.0);
+        assert_eq!(minke.speed, 0.9);
+        assert_eq!(minke.drag, 0.15);
+        assert_eq!(minke.hit_size, 13.0);
+        assert_eq!(minke.armor, 4.0);
+        assert_eq!(minke.accel, 0.3);
+        assert_eq!(minke.rotate_speed, 2.6);
+        assert!(!minke.face_target);
+        assert_eq!(minke.move_sound_volume, 0.55);
+        assert_eq!(minke.move_sound_pitch_min, 0.9);
+        assert_eq!(minke.move_sound_pitch_max, 0.9);
+        assert_eq!(minke.move_sound, "shipMove");
+        assert_eq!(minke.trail_length, 20);
+        assert_eq!(minke.wave_trail_x, 5.5);
+        assert_eq!(minke.wave_trail_y, -4.0);
+        assert_eq!(minke.trail_scl, 1.9);
+        assert_eq!(minke.weapons.len(), 2);
+
+        let flak = &minke.weapons[0];
+        assert_eq!(flak.name, "mount-weapon");
+        assert_eq!(flak.reload, 10.0);
+        assert_eq!(flak.x, 5.0);
+        assert_eq!(flak.y, 3.5);
+        assert!(flak.rotate);
+        assert_eq!(flak.rotate_speed, 5.0);
+        assert_eq!(flak.inaccuracy, 8.0);
+        assert_eq!(flak.eject_effect, "casing1");
+        assert_eq!(flak.shoot_sound, "shootDuo");
+        assert_eq!(flak.bullet, "minke_flak");
+
+        let artillery = &minke.weapons[1];
+        assert_eq!(artillery.name, "artillery-mount");
+        assert_eq!(artillery.reload, 30.0);
+        assert_eq!(artillery.x, 5.0);
+        assert_eq!(artillery.y, -5.0);
+        assert!(artillery.rotate);
+        assert_eq!(artillery.inaccuracy, 2.0);
+        assert_eq!(artillery.rotate_speed, 2.0);
+        assert_eq!(artillery.shake, 1.5);
+        assert_eq!(artillery.eject_effect, "casing2");
+        assert_eq!(artillery.shoot_sound, "shootArtillerySmall");
+        assert_eq!(artillery.bullet, "minke_artillery");
+
+        let bullets = bullets::load();
+        let flak_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == flak.bullet)
+            .expect("missing minke_flak");
+        assert_eq!(flak_bullet.spec.kind, BulletKind::Flak);
+        assert_eq!(flak_bullet.spec.splash_damage, 40.5);
+        let artillery_bullet = bullets
+            .iter()
+            .find(|bullet| bullet.name() == artillery.bullet)
+            .expect("missing minke_artillery");
+        assert_eq!(artillery_bullet.spec.kind, BulletKind::Artillery);
+        assert_eq!(artillery_bullet.spec.splash_damage_radius, 22.5);
     }
 
     #[test]

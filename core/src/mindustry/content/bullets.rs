@@ -542,6 +542,26 @@ pub fn load() -> Vec<BulletContent> {
     risso_missile.weave_scale = 8.0;
     risso_missile.weave_mag = 2.0;
 
+    let mut minke_flak = flak_bullet(4.2, 3.0);
+    minke_flak.lifetime = 52.5;
+    minke_flak.ammo_multiplier = 4.0;
+    minke_flak.shoot_effect = "shootSmall".into();
+    minke_flak.width = 6.0;
+    minke_flak.height = 8.0;
+    minke_flak.hit_effect = "flakExplosion".into();
+    minke_flak.splash_damage = 27.0 * 1.5;
+    minke_flak.splash_damage_radius = 15.0;
+
+    let mut minke_artillery = artillery_bullet(3.0, 20.0, "shell");
+    minke_artillery.hit_effect = "flakExplosion".into();
+    minke_artillery.knockback = 0.8;
+    minke_artillery.lifetime = 73.5;
+    minke_artillery.width = 11.0;
+    minke_artillery.height = 11.0;
+    minke_artillery.collides_tiles = false;
+    minke_artillery.splash_damage_radius = 30.0 * 0.75;
+    minke_artillery.splash_damage = 40.0;
+
     let mut damage_lightning = BulletSpec::new(BulletKind::Generic, 0.0001, 0.0);
     damage_lightning.lifetime = 10.0;
     damage_lightning.hit_effect = "hitLancer".into();
@@ -616,6 +636,8 @@ pub fn load() -> Vec<BulletContent> {
         make_bullet(&mut next_id, "quad_bomb", quad_bomb),
         make_bullet(&mut next_id, "risso_basic", risso_basic),
         make_bullet(&mut next_id, "risso_missile", risso_missile),
+        make_bullet(&mut next_id, "minke_flak", minke_flak),
+        make_bullet(&mut next_id, "minke_artillery", minke_artillery),
         make_bullet(&mut next_id, "damageLightning", damage_lightning),
         make_bullet(
             &mut next_id,
@@ -929,6 +951,8 @@ mod tests {
                 "quad_bomb",
                 "risso_basic",
                 "risso_missile",
+                "minke_flak",
+                "minke_artillery",
                 "damageLightning",
                 "damageLightningGround",
                 "damageLightningAir",
@@ -1819,6 +1843,39 @@ mod tests {
         assert_eq!(missile.despawn_effect, "blastExplosion");
         assert_eq!(missile.weave_scale, 8.0);
         assert_eq!(missile.weave_mag, 2.0);
+    }
+
+    #[test]
+    fn minke_bullets_match_java_profiles() {
+        let bullets = load();
+        let flak = &by_name(&bullets, "minke_flak").spec;
+
+        assert_eq!(flak.kind, BulletKind::Flak);
+        assert_eq!(flak.speed, 4.2);
+        assert_eq!(flak.damage, 3.0);
+        assert_eq!(flak.lifetime, 52.5);
+        assert_eq!(flak.ammo_multiplier, 4.0);
+        assert_eq!(flak.shoot_effect, "shootSmall");
+        assert_eq!(flak.width, 6.0);
+        assert_eq!(flak.height, 8.0);
+        assert_eq!(flak.hit_effect, "flakExplosion");
+        assert_eq!(flak.splash_damage, 40.5);
+        assert_eq!(flak.splash_damage_radius, 15.0);
+        assert!(!flak.collides_ground);
+
+        let artillery = &by_name(&bullets, "minke_artillery").spec;
+        assert_eq!(artillery.kind, BulletKind::Artillery);
+        assert_eq!(artillery.speed, 3.0);
+        assert_eq!(artillery.damage, 20.0);
+        assert_eq!(artillery.sprite, "shell");
+        assert_eq!(artillery.hit_effect, "flakExplosion");
+        assert_eq!(artillery.knockback, 0.8);
+        assert_eq!(artillery.lifetime, 73.5);
+        assert_eq!(artillery.width, 11.0);
+        assert_eq!(artillery.height, 11.0);
+        assert!(!artillery.collides_tiles);
+        assert_eq!(artillery.splash_damage_radius, 22.5);
+        assert_eq!(artillery.splash_damage, 40.0);
     }
 
     #[test]

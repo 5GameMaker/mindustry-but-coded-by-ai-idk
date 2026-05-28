@@ -10436,3 +10436,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java 匿名 bullet 对象仍以命名 content 表达；
   - 下一步建议继续 `minke`，需要双 bullet/mount weapon 与 naval movement 字段；
   - 当前总体迁移约 14.3%，远未可玩。
+
+### 12.329 UnitTypes minke naval flak and artillery mounts
+
+- 2026-05-28：继续回填 Java `minke` 舰船攻击单位。该闭环新增 `minke_flak` 与 `minke_artillery` bullets，并将 `mount-weapon` 与 `artillery-mount` 注册到 Rust unit content。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1620-1692`
+  - `minke`：`health=600`、`speed=0.9`、`drag=0.15`、`hitSize=13`、`armor=4`、`accel=0.3`、`rotateSpeed=2.6`、`faceTarget=false`、`moveSoundVolume=0.55`、`moveSoundPitchMin=moveSoundPitchMax=0.9`、`moveSound=shipMove`、`trailLength=20`、`waveTrailX=5.5`、`waveTrailY=-4`、`trailScl=1.9`
+  - flak weapon：`new Weapon("mount-weapon")`，`reload=10`、`x=5`、`y=3.5`、`rotate=true`、`rotateSpeed=5`、`inaccuracy=8`、`ejectEffect=casing1`、`shootSound=shootDuo`
+  - flak bullet：`FlakBulletType(4.2f,3)`，`lifetime=52.5`、`ammoMultiplier=4`、`shootEffect=shootSmall`、`width=6`、`height=8`、`hitEffect=flakExplosion`、`splashDamage=40.5`、`splashDamageRadius=15`
+  - artillery weapon：`new Weapon("artillery-mount")`，`reload=30`、`x=5`、`y=-5`、`rotate=true`、`inaccuracy=2`、`rotateSpeed=2`、`shake=1.5`、`ejectEffect=casing2`、`shootSound=shootArtillerySmall`
+  - artillery bullet：`ArtilleryBulletType(3f,20,"shell")`，`hitEffect=flakExplosion`、`knockback=0.8`、`lifetime=73.5`、`width=height=11`、`collidesTiles=false`、`splashDamageRadius=22.5`、`splashDamage=40`
+- Rust 新增/变化：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `minke_flak` 与 `minke_artillery`；
+    - 更新 bullet registry 顺序测试；
+    - 新增 `minke_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `minke` 补齐 Java naval movement/wake/sound 字段；
+    - 注册 `mount-weapon` 与 `artillery-mount`；
+    - 新增 `minke_naval_attack_profile_matches_java`。
+  - `README.md`
+    - 迁移进度百分比更新为约 `14.4%`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core minke_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core minke_naval_attack_profile_matches_java --lib`
+- 仍未完成：
+  - Flak/Artillery splash runtime、naval wake/trail rendering 与 weapon mount runtime 仍需整体接入；
+  - 下一步建议继续 `bryde`，需要 shield regen ability 字段和 large artillery weapon/bullet；
+  - 当前总体迁移约 14.4%，远未可玩。

@@ -8672,3 +8672,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 下一步建议 `minke`；
   3. naval wake/trail、ship movement、missile runtime 仍未完整 content-driven；
   4. 当前总迁移约 14.3%，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 255. 最新闭环记录：UnitTypes minke naval flak and artillery mounts
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（用户称当前已覆盖至 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：回填 Java `minke` 舰船 flak/artillery weapon 与 movement/wake 字段，并同步 README 进度百分比。
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/UnitTypes.java:1620-1692`
+  - `minke`：`drag=0.15`、`accel=0.3`、`faceTarget=false`、`moveSoundVolume=0.55`、`moveSoundPitch=0.9`、`trailLength=20`、`waveTrailX=5.5`、`waveTrailY=-4`、`trailScl=1.9`；
+  - `minke_flak`：`FlakBulletType(4.2,3)`，`lifetime=52.5`、`ammoMultiplier=4`、`shootEffect=shootSmall`、`splashDamage=40.5`；
+  - `minke_artillery`：`ArtilleryBulletType(3,20,"shell")`，`knockback=0.8`、`lifetime=73.5`、`width=height=11`、`splashDamageRadius=22.5`、`splashDamage=40`。
+- Rust 主改动：
+  - `core/src/mindustry/content/bullets.rs`
+    - 新增 `minke_flak` 与 `minke_artillery`；
+    - 更新 bullet load order；
+    - 新增 `minke_bullets_match_java_profiles`。
+  - `core/src/mindustry/content/unit_types.rs`
+    - `minke` 补齐 Java 字段并注册两把 weapon；
+    - 新增 `minke_naval_attack_profile_matches_java`。
+  - `README.md`
+    - 当前总体完成度更新为约 `14.4%`，仅保留百分比。
+  - `MIGRATION.md`
+    - 新增 `12.329`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core minke_bullets_match_java_profiles --lib`
+  - `cargo test -p mindustry-core minke_naval_attack_profile_matches_java --lib`
+- 当前仍需继续：
+  1. 跑完整 `cargo check -p mindustry-core/server/desktop` 与 `git diff --check` 后提交；
+  2. 下一步建议 `bryde`；
+  3. Flak/Artillery splash、naval wake/trail 与 mount runtime 仍未完整 content-driven；
+  4. 当前总迁移约 14.4%，远未可玩，goal 绝不能标记 complete。
