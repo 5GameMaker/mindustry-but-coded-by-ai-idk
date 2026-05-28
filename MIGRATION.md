@@ -9476,3 +9476,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 只覆盖 `ShootSpread` 的 rotation offset；x/y offset、delay、inaccuracy、velocityRnd、ShootAlternate/ShootBarrel/ShootHelix/ShootMulti/ShootSummon 仍未接入；
   - 后续应统一复用 `core/src/mindustry/entities/pattern.rs` 的 Shot 生成，而不是在 server 内特判字符串；
   - 当前总体迁移约 12% 出头，远未可玩。
+
+### 12.299 Weapon shoot pattern core Shot generator seam
+
+- 2026-05-28：把上一节 server 内部的 `ShootSpread` 字符串特判下沉到 core weapon 层，形成可复用的 `Weapon::shoot_pattern_shots(...)` seam，后续继续接入 `ShootAlternate` / `ShootBarrel` / `ShootHelix` / `ShootMulti` / `ShootSummon` 时不再把 pattern 逻辑散落在 server tick 里。
+- Java 依据：
+  - `Weapon.shoot(...)` 通过 `shoot.shoot(...)` 生成 `Shot`，再把 `shot.x` / `shot.y` / `shot.rotation` 接入实际 bullet spawn；
+  - `ShootPattern` 默认 `shots = 1`，`firstShotDelay = 0`，`shotDelay = 0`；
+  - `ShootSpread.shoot(...)` 按 `angleOffset = i * spread - (shots - 1) * spread / 2f` 生成多发 rotation offset。
+- Rust 新增/变化：
+  - `core/src/mindustry/type/weapon.rs`
+    - 引入 `ShootPattern` / `ShootSpread` / `Shot`；
+    - 新增 `Weapon::shoot_pattern_shots(total_shots)`，默认路径复用 `ShootPattern`，`ShootSpread` 路径复用 `ShootSpread::new(...)`；
+    - 新增 `weapon_shoot_pattern_shots_reuses_core_spread_pattern`，确认 3 发 `ShootSpread` 输出 `-10/0/10` rotation offset。
+  - `server/src/lib.rs`
+    - `tick_server_unit_weapons(...)` 不再手写 spread 公式；
+    - ready 发弹循环统一消费 core `Shot`，将 `shot.x/y` 叠加到 `shoot_x/shoot_y`，将 `shot.rotation` 叠加到最终 bullet rotation。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_reuses_core_spread_pattern --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `Weapon::shoot_pattern_shots(...)` 当前只接入默认 `ShootPattern` 与 `ShootSpread`，还未把 `ShootAlternate` / `ShootBarrel` / `ShootHelix` / `ShootMulti` / `ShootSummon` 全部挂上；
+  - firstShotDelay / shotDelay 仍是即时展开，尚未按 Java 延迟调度；
+  - 完整 `bulletRotation(...)`、xRand/yRand、inaccuracy、velocityRnd、ammo/eject、sound/effect、continuous beam 仍未完成；
+  - 当前总体迁移约 12.3%，远未可玩。

@@ -1,5 +1,7 @@
 use core::fmt;
 
+use crate::mindustry::entities::{ShootPattern, ShootSpread, Shot};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Weapon {
     pub name: String,
@@ -186,6 +188,21 @@ impl Weapon {
         self.shoot_shots.max(1)
     }
 
+    pub fn shoot_pattern_shots(&self, total_shots: i32) -> Vec<Shot> {
+        let mut shots = Vec::new();
+        if self.shoot_pattern == "ShootSpread" {
+            let pattern = ShootSpread::new(self.shoot_shots(), self.shoot_spread);
+            pattern.shoot(total_shots, &mut |shot| shots.push(shot), None);
+        } else {
+            let mut pattern = ShootPattern::new();
+            pattern.shots = self.shoot_shots();
+            pattern.first_shot_delay = self.shoot_first_shot_delay;
+            pattern.shot_delay = self.shoot_shot_delay;
+            pattern.shoot(total_shots, &mut |shot| shots.push(shot), None);
+        }
+        shots
+    }
+
     pub fn dps(&self, bullet_damage: f32, shots: f32) -> f32 {
         if self.reload <= 0.0 {
             0.0
@@ -262,6 +279,21 @@ mod tests {
 
         weapon.shoot_shots = 0;
         assert_eq!(weapon.shoot_shots(), 1);
+    }
+
+    #[test]
+    fn weapon_shoot_pattern_shots_reuses_core_spread_pattern() {
+        let mut weapon = Weapon::new("spread");
+        weapon.shoot_pattern = "ShootSpread".into();
+        weapon.shoot_shots = 3;
+        weapon.shoot_spread = 10.0;
+
+        let shots = weapon.shoot_pattern_shots(0);
+
+        assert_eq!(shots.len(), 3);
+        assert_eq!(shots[0].rotation, -10.0);
+        assert_eq!(shots[1].rotation, 0.0);
+        assert_eq!(shots[2].rotation, 10.0);
     }
 
     #[test]

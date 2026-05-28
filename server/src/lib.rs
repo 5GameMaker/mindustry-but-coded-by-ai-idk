@@ -2472,8 +2472,6 @@ impl ServerLauncher {
                         weapon.base_rotation
                     };
                 let (mount_dx, mount_dy) = rotate_offset(unit_rotation - 90.0, weapon.x, weapon.y);
-                let (shoot_dx, shoot_dy) =
-                    rotate_offset(weapon_rotation, weapon.shoot_x, weapon.shoot_y);
                 let shoot_angle = unit_rotation
                     + if weapon.rotate {
                         mount_rotation
@@ -2481,23 +2479,21 @@ impl ServerLauncher {
                         weapon.base_rotation
                     };
                 let bullet_name = weapon.bullet.clone();
-                let shot_count = weapon.shoot_shots();
                 let recoils_count = weapon.recoils;
-                let spread = weapon.shoot_spread;
-                let spread_pattern = weapon.shoot_pattern == "ShootSpread";
-                for shot_index in 0..shot_count {
-                    let angle_offset = if spread_pattern {
-                        shot_index as f32 * spread - (shot_count - 1) as f32 * spread / 2.0
-                    } else {
-                        0.0
-                    };
+                let pattern_shots = weapon.shoot_pattern_shots(mount.total_shots);
+                for shot in pattern_shots {
+                    let (shoot_dx, shoot_dy) = rotate_offset(
+                        weapon_rotation,
+                        weapon.shoot_x + shot.x,
+                        weapon.shoot_y + shot.y,
+                    );
                     spawn_plans.push(ServerWeaponBulletSpawnPlan {
                         owner_id: unit_id,
                         team,
                         bullet: bullet_name.clone(),
                         x: unit_x + mount_dx + shoot_dx,
                         y: unit_y + mount_dy + shoot_dy,
-                        rotation: shoot_angle + angle_offset,
+                        rotation: shoot_angle + shot.rotation,
                     });
 
                     let barrel_counter = mount.barrel_counter;

@@ -7592,3 +7592,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. ShootAlternate/ShootBarrel/ShootHelix/ShootMulti/ShootSummon、delay、x/y offset、inaccuracy、velocityRnd 仍未完成；
   3. 完整 `bulletRotation(...)`、ammo/eject、sound/effect、continuous beam；
   4. 当前总迁移约 12% 出头，远未可玩，goal 绝不能标记 complete。
+
+---
+
+## 225. 最新闭环记录：Weapon shoot pattern core Shot generator seam
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1 / 05b2ecd4eb`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到文字乱码优先 UTF-8 再尝试读取。
+- 本轮目标：把 server 内部 `ShootSpread` 特判下沉为 core `Weapon::shoot_pattern_shots(...)`，让发弹循环统一消费 Java 风格 `Shot { x, y, rotation, ... }`，避免后续 pattern 迁移变成互不接入的独立 helper。
+- Rust 主改动：
+  - `core/src/mindustry/type/weapon.rs`
+    - 引入 `ShootPattern` / `ShootSpread` / `Shot`；
+    - 新增 `Weapon::shoot_pattern_shots(total_shots)`；
+    - 默认 pattern 路径复用 `ShootPattern`，`ShootSpread` 路径复用 `ShootSpread::new(...)`；
+    - 新增 `weapon_shoot_pattern_shots_reuses_core_spread_pattern`。
+  - `server/src/lib.rs`
+    - `tick_server_unit_weapons(...)` 改为调用 `weapon.shoot_pattern_shots(mount.total_shots)`；
+    - 每发 bullet 使用 `shot.x/y` 修正 shoot offset，使用 `shot.rotation` 修正 bullet rotation。
+  - `MIGRATION.md`
+    - 新增 `12.299`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core weapon_shoot_pattern_shots_reuses_core_spread_pattern --lib`
+  - `cargo test -p mindustry-server server_update_fires_ready_unit_weapon_into_bullet_snapshot --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 当前仍需继续：
+  1. 把 `ShootAlternate` / `ShootBarrel` / `ShootHelix` / `ShootMulti` / `ShootSummon` 逐步接入 `Weapon::shoot_pattern_shots(...)` 或等价 runtime seam；
+  2. 实现 firstShotDelay / shotDelay 调度，而不是 ready 后即时展开全部 shot；
+  3. 完整 `bulletRotation(...)`、xRand/yRand、inaccuracy、velocityRnd、ammo/eject、sound/effect、continuous beam；
+  4. 当前总迁移约 12.3%，远未可玩，goal 绝不能标记 complete。
