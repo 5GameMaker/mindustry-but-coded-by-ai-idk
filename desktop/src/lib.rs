@@ -25,11 +25,12 @@ use mindustry_core::mindustry::entities::{
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::{
-    FloorRenderPlan, FloorRendererState, GraphicsFrameBundle, GraphicsFrameStats,
-    LightRendererPlan, LightRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
-    MinimapRect, MinimapRendererState, MinimapWorldSize, OverlayRendererPlan, OverlayRendererState,
-    RenderBridge, RenderCamera, RenderEngineState, RenderFramePlan, RenderPoint, RenderSize,
-    RenderViewport, Viewport as FloorViewport,
+    FloorRenderPlan, FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState,
+    FogViewport, GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState,
+    MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect, MinimapRendererState,
+    MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, RenderBridge, RenderCamera,
+    RenderEngineState, RenderFramePlan, RenderPoint, RenderSize, RenderViewport,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -353,6 +354,7 @@ pub struct DesktopLauncher {
     pub overlay_renderer_state: OverlayRendererState,
     pub light_renderer_state: LightRendererState,
     pub floor_renderer_state: FloorRendererState,
+    pub fog_renderer_state: FogRendererState,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub args: Vec<String>,
@@ -412,6 +414,7 @@ impl DesktopLauncher {
             overlay_renderer_state: OverlayRendererState::default(),
             light_renderer_state: LightRendererState::default(),
             floor_renderer_state: FloorRendererState::default(),
+            fog_renderer_state: FogRendererState::default(),
             connect_target,
             connect_error: None,
             args,
@@ -862,6 +865,45 @@ impl DesktopLauncher {
         )))
     }
 
+    pub fn fog_frame_plan(
+        &mut self,
+        mut camera: RenderCamera,
+        viewport: RenderViewport,
+    ) -> Option<FogFramePlan> {
+        let world = self.current_minimap_world_size();
+        if world.width <= 0 || world.height <= 0 || !self.game_state.rules.fog {
+            return None;
+        }
+
+        let team = self.player.team.0;
+        let discovered = self.game_state.fog_control.get_discovered(team)?;
+        let discovered_tiles = (0..discovered.len())
+            .map(|index| discovered.get(index))
+            .collect::<Vec<_>>();
+
+        camera.viewport = viewport;
+        let world_rect = camera.world_rect();
+        let mut input = FogFrameInput::new(
+            FogViewport::new(
+                world.width,
+                world.height,
+                8,
+                world_rect.x,
+                world_rect.y,
+                world_rect.width,
+                world_rect.height,
+            ),
+            team as u32,
+            true,
+            self.game_state.rules.static_fog,
+            FogColor::WHITE,
+            FogColor::BLACK,
+        );
+        input.discovered_tiles = Some(discovered_tiles);
+
+        self.fog_renderer_state.draw_fog_plan(input)
+    }
+
     pub fn graphics_frame_for_render(
         &mut self,
         frame_index: u64,
@@ -876,6 +918,7 @@ impl DesktopLauncher {
             render_frame.sort_passes();
         }
         let floor_renderer = self.floor_render_plan(camera, viewport);
+        let fog_frame = self.fog_frame_plan(camera, viewport);
         let overlay_renderer = self.drain_overlay_renderer_plan();
         let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
 
@@ -886,6 +929,9 @@ impl DesktopLauncher {
             .set_minimap_overlay(minimap_overlay);
         if let Some(floor_renderer) = floor_renderer {
             bridge.set_floor_renderer(floor_renderer);
+        }
+        if let Some(fog_frame) = fog_frame {
+            bridge.set_fog_frame(fog_frame);
         }
 
         DesktopGraphicsFrame {
@@ -1732,6 +1778,7 @@ impl DesktopLauncher {
         self.overlay_renderer_state = OverlayRendererState::default();
         self.light_renderer_state = LightRendererState::default();
         self.floor_renderer_state = FloorRendererState::default();
+        self.fog_renderer_state = FogRendererState::default();
     }
 
     fn apply_client_player_entity_snapshot(&mut self, entity_id: i32, sync_bytes: &[u8]) -> bool {
@@ -3453,7 +3500,7 @@ mod tests {
             camera,
             viewport,
             minimap_camera,
-            sample_minimap_overlay_input(false),
+            sample_minimap_overlay_input(true),
         );
 
         assert_eq!(frame.bundle.stats.present_plans, 3);
@@ -3487,10 +3534,59 @@ mod tests {
             camera,
             viewport,
             minimap_camera,
-            sample_minimap_overlay_input(false),
+            sample_minimap_overlay_input(true),
         );
         assert_eq!(empty_frame.bundle.stats.render_passes, 0);
         assert_eq!(empty_frame.bundle.stats.render_commands, 0);
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_feeds_fog_renderer_when_rules_and_data_exist() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+        launcher.game_state.rules.fog = true;
+        launcher.game_state.rules.static_fog = true;
+
+        let width = launcher.game_state.world.width();
+        let height = launcher.game_state.world.height();
+        let team = launcher.player.team.0;
+        launcher.game_state.fog_control.reset_world(width, height);
+        launcher
+            .game_state
+            .fog_control
+            .ensure_data(team)
+            .static_data
+            .set_range(0, width * height);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 8.0), viewport);
+        let minimap_camera = MinimapCamera::new(12.0, 8.0, 64.0, 64.0);
+        let frame = launcher.graphics_frame_for_render(
+            13,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        assert_eq!(frame.bundle.stats.present_plans, 5);
+        assert_eq!(frame.bundle.stats.fog_team_changed_frames, 1);
+        assert_eq!(frame.bundle.stats.fog_static_fog_enabled_frames, 1);
+        assert!(frame.bundle.stats.fog_stages >= 4);
+
+        let fog_plan = frame.bundle.fog_frame.as_ref().unwrap();
+        assert_eq!(fog_plan.viewport.world_width, width as i32);
+        assert_eq!(fog_plan.viewport.world_height, height as i32);
+        assert_eq!(fog_plan.viewport.tile_size, 8);
+        assert!(fog_plan.team_changed);
+        assert!(fog_plan.static_fog_enabled);
     }
 
     #[test]

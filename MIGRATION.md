@@ -10752,3 +10752,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Floor plan 当前仍是 viewport/chunk/stage/dirty-cache 计划，还没有接真实 tile sprite atlas、chunk mesh、wall cache layer 与 underwater draw backend；
   - block/fog plan 仍未接入 desktop dispatcher；
   - 当前总体迁移约 17.1%，仍未达到完整可玩。
+
+### 12.338 Desktop graphics frame feeds FogRendererPlan
+
+- 2026-05-29：继续补 renderer dispatcher 接线；本轮把已有 `FogRendererState/FogFramePlan` 接入 `DesktopLauncher::graphics_frame_for_render(...)`，让 desktop 图形帧能在规则启用 fog 且 `FogControl` 已有当前队伍数据时携带 fog plan。
+- Java 对照范围：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/Renderer.java`
+    - `fog.drawFog()` 位于 overlay 与 block overdraw 附近的主渲染阶段；
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/graphics/FogRenderer.java`
+    - 根据世界尺寸、camera viewport、team/static fog 数据、动态 light sources 和 static fog events 生成 copy/clear/draw/composite 阶段。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `fog_renderer_state: FogRendererState`；
+    - 新增 `DesktopLauncher::fog_frame_plan(...)`：
+      - world 尺寸无效或 `rules.fog == false` 时返回 `None`；
+      - 没有当前 `player.team` 的 `FogControl` discovered 数据时返回 `None`；
+      - 有数据时从 `RenderCamera.world_rect()`、`Rules::static_fog` 和 `FogControl::get_discovered(...)` 生成 `FogFrameInput`；
+    - `graphics_frame_for_render(...)` 会在 fog plan 存在时调用 `RenderBridge::set_fog_frame(...)`；
+    - `clear_snapshot_apply_cursors()` 重置 `fog_renderer_state`；
+    - desktop graphics frame 测试覆盖 fog rules/data 存在时的 `fog_team_changed_frames / fog_static_fog_enabled_frames / fog_stages` 统计。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+  - `cargo test -p mindustry-desktop graphics_frame --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `4 passed`
+  - `cargo test -p mindustry-core fog_renderer --manifest-path D:/MDT/rust-mindustry/Cargo.toml -- --test-threads=1`
+    - `6 passed`
+  - `cargo check -p mindustry-desktop --manifest-path D:/MDT/rust-mindustry/Cargo.toml`
+- 仍未完成：
+  - Fog plan 当前仍未绑定真实 GPU texture/framebuffer、动态 fog light source 采样、shader composite backend；
+  - block renderer plan 仍未接入 desktop dispatcher；
+  - 当前总体迁移约 17.2%，仍未达到完整可玩。
