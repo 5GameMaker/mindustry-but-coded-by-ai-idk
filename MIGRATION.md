@@ -7548,3 +7548,45 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前仍是 standard effect/headless primitive seam，triangle/circle 真实 GPU/window renderer 尚未接入；
   - `shootQuellPulse` 用多条具体 `TriangleFan` plan 表达偏移簇，后续若做批量 renderer 可再抽通用 seeded offset triangle primitive；
   - 当前只是 Fx 局部闭环，仍未接近完整可游玩目标。
+
+### 12.240 Fx.shootSmokeSquare rotated square particles
+
+- 2026-05-28：迁移 `shootSmokeSquare=169`、`shootSmokeSquareSparse=170`、`shootSmokeSquareBig=171`，补齐每粒子随机旋转的 square/poly smoke 表达。
+- 本轮迁移：
+  - `shootSmokeSquare=169`
+  - `shootSmokeSquareSparse=170`
+  - `shootSmokeSquareBig=171`
+- Java 依据：
+  - `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/content/Fx.java:1992` 附近：
+    - 三者均 `color(Color.white, e.color, e.fin())`；
+    - `rand.setSeed(e.id)` 后每粒子：
+      - `rot = e.rotation + rand.range(angleRange)`；
+      - `v.trns(rot, rand.random(e.finpow() * lengthScale))`；
+      - `Fill.poly(..., 4, e.fout() * radiusScale + 0.2f, rand.random(360f))`。
+    - 参数：
+      - `shootSmokeSquare`：lifetime `20f`，count `6`，angleRange `22f`，lengthScale `21f`，radiusScale `2f`；
+      - `shootSmokeSquareSparse`：lifetime `30f`，count `2`，angleRange `30f`，lengthScale `27f`，radiusScale `3.8f`；
+      - `shootSmokeSquareBig`：lifetime `32f`，count `13`，angleRange `26f`，lengthScale `30f`，radiusScale `4f`。
+- Rust 新增/变化：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增 `FX_SHOOT_SMOKE_SQUARE_ID=169`、`FX_SHOOT_SMOKE_SQUARE_SPARSE_ID=170`、`FX_SHOOT_SMOKE_SQUARE_BIG_ID=171`；
+    - 接入 lookup/metadata；
+    - 新增 `StandardEffectDrawKind::SeededRotatedSquareParticles`；
+    - `square_render_primitives_from_seed()` 对该 kind 按 Java 随机顺序生成 offset 与每粒子 `rand.random(360f)` rotation；
+    - `standard_effect_draw_plan(...)` 对三者输出 white→input color 的 seeded rotated square particles。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_smoke_square_particles_for_render`，验证 3 个 draw plans 展开为 21 个 square primitives。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_shoot_smoke_square_particles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_smoke_square_particles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - square primitive 当前仍是 headless render seam，真实 renderer/backend 尚未可见绘制；
+  - 后续相邻 `shootSmokeTitan` / `shootSmokeSmite` 需要 per-particle scaled lifetime 与 color interpolation，不能直接套用本轮简单 square kind；
+  - 当前仍只是 Fx 局部迁移。

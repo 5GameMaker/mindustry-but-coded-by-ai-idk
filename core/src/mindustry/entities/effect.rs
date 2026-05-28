@@ -210,6 +210,12 @@ pub const FX_SHOOT_BIG_SMOKE_ID: i32 = 166;
 pub const FX_SHOOT_BIG_SMOKE2_ID: i32 = 167;
 /// Upstream `Fx.shootSmokeDisperse` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SHOOT_SMOKE_DISPERSE_ID: i32 = 168;
+/// Upstream `Fx.shootSmokeSquare` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMOKE_SQUARE_ID: i32 = 169;
+/// Upstream `Fx.shootSmokeSquareSparse` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMOKE_SQUARE_SPARSE_ID: i32 = 170;
+/// Upstream `Fx.shootSmokeSquareBig` id in `mindustry.content.Fx` for v158.1.
+pub const FX_SHOOT_SMOKE_SQUARE_BIG_ID: i32 = 171;
 /// Upstream `Fx.smokeCloud` id in `mindustry.content.Fx` for v158.1.
 pub const FX_SMOKE_CLOUD_ID: i32 = 222;
 /// Upstream `Fx.blastsmoke` id in `mindustry.content.Fx` for v158.1.
@@ -340,6 +346,9 @@ pub fn standard_effect_id(name: &str) -> Option<i32> {
         "shootBigSmoke" => Some(FX_SHOOT_BIG_SMOKE_ID),
         "shootBigSmoke2" => Some(FX_SHOOT_BIG_SMOKE2_ID),
         "shootSmokeDisperse" => Some(FX_SHOOT_SMOKE_DISPERSE_ID),
+        "shootSmokeSquare" => Some(FX_SHOOT_SMOKE_SQUARE_ID),
+        "shootSmokeSquareSparse" => Some(FX_SHOOT_SMOKE_SQUARE_SPARSE_ID),
+        "shootSmokeSquareBig" => Some(FX_SHOOT_SMOKE_SQUARE_BIG_ID),
         "smokeCloud" => Some(FX_SMOKE_CLOUD_ID),
         "blastsmoke" => Some(FX_BLAST_SMOKE_ID),
         "ripple" => Some(FX_RIPPLE_ID),
@@ -555,6 +564,15 @@ pub fn standard_effect(effect_id: i32) -> Option<Effect> {
         }
         FX_SHOOT_SMOKE_DISPERSE_ID => {
             Effect::with_lifetime(FX_SHOOT_SMOKE_DISPERSE_ID, 25.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_SMOKE_SQUARE_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMOKE_SQUARE_ID, 20.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_SMOKE_SQUARE_SPARSE_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMOKE_SQUARE_SPARSE_ID, 30.0, DEFAULT_EFFECT_CLIP)
+        }
+        FX_SHOOT_SMOKE_SQUARE_BIG_ID => {
+            Effect::with_lifetime(FX_SHOOT_SMOKE_SQUARE_BIG_ID, 32.0, DEFAULT_EFFECT_CLIP)
         }
         FX_SMOKE_CLOUD_ID => Effect::with_lifetime(FX_SMOKE_CLOUD_ID, 70.0, DEFAULT_EFFECT_CLIP),
         FX_BLAST_SMOKE_ID => Effect::with_lifetime(FX_BLAST_SMOKE_ID, 26.0, DEFAULT_EFFECT_CLIP),
@@ -1560,6 +1578,7 @@ pub enum StandardEffectDrawKind {
     StrokedRotatedSquare,
     SeededSquareParticles,
     SeededRadialSquareParticles,
+    SeededRotatedSquareParticles,
     TrianglePair,
     TriangleFan,
 }
@@ -1794,6 +1813,7 @@ impl StandardEffectDrawPlan {
             | StandardEffectDrawKind::StrokedRotatedSquare
             | StandardEffectDrawKind::SeededSquareParticles
             | StandardEffectDrawKind::SeededRadialSquareParticles
+            | StandardEffectDrawKind::SeededRotatedSquareParticles
             | StandardEffectDrawKind::TrianglePair
             | StandardEffectDrawKind::TriangleFan => Vec::new(),
         }
@@ -1868,6 +1888,32 @@ impl StandardEffectDrawPlan {
                         }
                     })
                     .collect()
+            }
+            StandardEffectDrawKind::SeededRotatedSquareParticles => {
+                let Some(particles) = self.particles else {
+                    return Vec::new();
+                };
+                let mut rand = ArcRand::with_seed(particles.seed as i64);
+                let mut squares = Vec::with_capacity(particles.count as usize);
+                for _ in 0..particles.count {
+                    let angle = particles.angle.unwrap_or(0.0) + rand.range(particles.angle_range);
+                    let length = rand.random(particles.length);
+                    let (x, y) = trns(angle, length);
+                    let rotation = rand.random(360.0);
+                    let radius = particles.radius_base
+                        + particles.radius_fin_scale * particles.fin
+                        + particles.radius_fout_scale * particles.fout
+                        + particles.radius_fslope_scale * particles.fslope;
+                    squares.push(StandardEffectSquareRenderPrimitive {
+                        center: (self.center.0 + x, self.center.1 + y),
+                        radius,
+                        stroke: 0.0,
+                        rotation,
+                        alpha: self.alpha,
+                        color,
+                    });
+                }
+                squares
             }
             StandardEffectDrawKind::FilledCircle
             | StandardEffectDrawKind::StrokedCircle
@@ -3966,6 +4012,56 @@ pub fn standard_effect_draw_plan(
                 light_opacity: 0.0,
             }
         }
+        FX_SHOOT_SMOKE_SQUARE_ID
+        | FX_SHOOT_SMOKE_SQUARE_SPARSE_ID
+        | FX_SHOOT_SMOKE_SQUARE_BIG_ID => {
+            let (count, angle_range, length_scale, radius_fout_scale) = match effect_id {
+                FX_SHOOT_SMOKE_SQUARE_ID => (6, 22.0, 21.0, 2.0),
+                FX_SHOOT_SMOKE_SQUARE_SPARSE_ID => (2, 30.0, 27.0, 3.8),
+                FX_SHOOT_SMOKE_SQUARE_BIG_ID => (13, 26.0, 30.0, 4.0),
+                _ => unreachable!(),
+            };
+
+            StandardEffectDrawPlan {
+                effect_id,
+                layer: effect.layer,
+                kind: StandardEffectDrawKind::SeededRotatedSquareParticles,
+                center: (x, y),
+                color_from: Some("Color.white"),
+                color_mid: None,
+                color_to: Some("Input.color"),
+                color_mix: fin,
+                input_color: Some(color),
+                color_mul: 1.0,
+                alpha: 1.0,
+                radius: 0.0,
+                stroke: 0.0,
+                particles: Some(StandardEffectParticleSpec {
+                    seed: state_id,
+                    count,
+                    progress: None,
+                    angle: Some(rotation),
+                    angle_range,
+                    length: finpow * length_scale,
+                    fin,
+                    fout,
+                    fslope,
+                    radius_base: 0.2,
+                    radius_fin_scale: 0.0,
+                    radius_fout_scale,
+                    radius_fslope_scale: 0.0,
+                    secondary_vector_scale: 0.0,
+                    secondary_radius_base: 0.0,
+                    secondary_radius_fin_scale: 0.0,
+                    secondary_radius_fout_scale: 0.0,
+                    secondary_radius_fslope_scale: 0.0,
+                    alpha_midpoint: false,
+                }),
+                light_color: None,
+                light_radius: 0.0,
+                light_opacity: 0.0,
+            }
+        }
         FX_SMOKE_CLOUD_ID => StandardEffectDrawPlan {
             effect_id,
             layer: effect.layer,
@@ -5793,6 +5889,18 @@ mod tests {
             standard_effect_id("shootSmokeDisperse"),
             Some(FX_SHOOT_SMOKE_DISPERSE_ID)
         );
+        assert_eq!(
+            standard_effect_id("shootSmokeSquare"),
+            Some(FX_SHOOT_SMOKE_SQUARE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("shootSmokeSquareSparse"),
+            Some(FX_SHOOT_SMOKE_SQUARE_SPARSE_ID)
+        );
+        assert_eq!(
+            standard_effect_id("shootSmokeSquareBig"),
+            Some(FX_SHOOT_SMOKE_SQUARE_BIG_ID)
+        );
         assert_eq!(standard_effect_id("smokeCloud"), Some(FX_SMOKE_CLOUD_ID));
         assert_eq!(standard_effect_id("blastsmoke"), Some(FX_BLAST_SMOKE_ID));
         assert_eq!(standard_effect_id("ripple"), Some(FX_RIPPLE_ID));
@@ -6057,6 +6165,22 @@ mod tests {
                 .unwrap()
                 .lifetime,
             25.0
+        );
+        assert_eq!(
+            standard_effect(FX_SHOOT_SMOKE_SQUARE_ID).unwrap().lifetime,
+            20.0
+        );
+        assert_eq!(
+            standard_effect(FX_SHOOT_SMOKE_SQUARE_SPARSE_ID)
+                .unwrap()
+                .lifetime,
+            30.0
+        );
+        assert_eq!(
+            standard_effect(FX_SHOOT_SMOKE_SQUARE_BIG_ID)
+                .unwrap()
+                .lifetime,
+            32.0
         );
         assert_eq!(standard_effect(FX_BLAST_SMOKE_ID).unwrap().lifetime, 26.0);
 
@@ -7442,6 +7566,87 @@ mod tests {
         assert_eq!(shoot_titan.stroke, 17.5);
         assert_eq!(shoot_titan.particles.unwrap().length, 3.0);
         assert_eq!(shoot_titan.triangle_render_primitives_from_seed().len(), 2);
+    }
+
+    #[test]
+    fn standard_effect_draw_plan_covers_shoot_smoke_square_particles() {
+        let input_color = DecalColor::from_rgba(0x336699ff);
+        let square = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMOKE_SQUARE_ID as u16),
+            169,
+            3.0,
+            4.0,
+            45.0,
+            10.0,
+            20.0,
+            input_color,
+        )
+        .unwrap();
+        assert_eq!(
+            square.kind,
+            StandardEffectDrawKind::SeededRotatedSquareParticles
+        );
+        assert_eq!(square.color_from, Some("Color.white"));
+        assert_eq!(square.color_to, Some("Input.color"));
+        assert_eq!(square.input_color, Some(input_color));
+        assert_eq!(square.color_mix, 0.5);
+        let particles = square.particles.unwrap();
+        assert_eq!(particles.count, 6);
+        assert_eq!(particles.angle, Some(45.0));
+        assert_eq!(particles.angle_range, 22.0);
+        assert_eq!(particles.length, effect_finpow_from_fin(0.5) * 21.0);
+        assert_eq!(particles.radius_base, 0.2);
+        assert_eq!(particles.radius_fout_scale, 2.0);
+
+        let mut rand = ArcRand::with_seed(169);
+        let angle = 45.0 + rand.range(22.0);
+        let length = rand.random(effect_finpow_from_fin(0.5) * 21.0);
+        let expected_rotation = rand.random(360.0);
+        let (offset_x, offset_y) = trns(angle, length);
+        let square_primitives = square.square_render_primitives_from_seed();
+        assert_eq!(square_primitives.len(), 6);
+        assert!((square_primitives[0].center.0 - (3.0 + offset_x)).abs() < 0.0001);
+        assert!((square_primitives[0].center.1 - (4.0 + offset_y)).abs() < 0.0001);
+        assert!((square_primitives[0].radius - 1.2).abs() < 0.0001);
+        assert!((square_primitives[0].rotation - expected_rotation).abs() < 0.0001);
+        assert_eq!(
+            square.resolved_draw_color(),
+            Some(lerp_color(DecalColor::WHITE, input_color, 0.5))
+        );
+
+        let sparse = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMOKE_SQUARE_SPARSE_ID as u16),
+            170,
+            3.0,
+            4.0,
+            45.0,
+            15.0,
+            30.0,
+            input_color,
+        )
+        .unwrap();
+        let sparse_particles = sparse.particles.unwrap();
+        assert_eq!(sparse_particles.count, 2);
+        assert_eq!(sparse_particles.angle_range, 30.0);
+        assert_eq!(sparse_particles.length, effect_finpow_from_fin(0.5) * 27.0);
+        assert!((sparse.square_render_primitives_from_seed()[0].radius - 2.1).abs() < 0.0001);
+
+        let big = standard_effect_draw_plan(
+            Some(FX_SHOOT_SMOKE_SQUARE_BIG_ID as u16),
+            171,
+            3.0,
+            4.0,
+            45.0,
+            16.0,
+            32.0,
+            input_color,
+        )
+        .unwrap();
+        let big_particles = big.particles.unwrap();
+        assert_eq!(big_particles.count, 13);
+        assert_eq!(big_particles.angle_range, 26.0);
+        assert_eq!(big_particles.length, effect_finpow_from_fin(0.5) * 30.0);
+        assert!((big.square_render_primitives_from_seed()[0].radius - 2.2).abs() < 0.0001);
     }
 
     #[test]

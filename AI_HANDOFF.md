@@ -5574,3 +5574,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `shootSmokeSquare=169`、`shootSmokeSquareSparse=170`、`shootSmokeSquareBig=171` 是相邻 Fx，但需要四边形/rotated square 随机粒子；已有 `SeededSquareParticles` 可部分复用，需核对随机旋转与角度范围；
   2. 也可转向真实 desktop renderer/backend，把当前 headless circle/square/line/triangle primitive 接入可见窗口；
   3. 无论继续 Fx 还是 renderer，都必须保持最终目标：整体可玩 Rust MDT，而不是独立 helper。
+
+---
+
+## 166. 最新闭环记录：Fx.shootSmokeSquare rotated square particles
+
+- 固定工作路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前 `v158.1` / `05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮目标：迁移 `shootSmokeSquare=169`、`shootSmokeSquareSparse=170`、`shootSmokeSquareBig=171`，补齐每粒子随机 rotation 的 square/poly smoke。
+- 本轮迁移：
+  - `shootSmokeSquare=169`
+  - `shootSmokeSquareSparse=170`
+  - `shootSmokeSquareBig=171`
+- Rust 主改动：
+  - `core/src/mindustry/entities/effect.rs`
+    - 新增三个 Fx ID 并接入 lookup/metadata；
+    - 新增 `StandardEffectDrawKind::SeededRotatedSquareParticles`；
+    - `square_render_primitives_from_seed()` 现在能按 Java `rand.range(...) -> rand.random(length) -> rand.random(360f)` 的顺序生成 offset square 与逐粒子 rotation；
+    - `standard_effect_draw_plan(...)` 输出 white→input color、count/angleRange/lengthScale/radiusScale 分别对齐 Java。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_flattens_shoot_smoke_square_particles_for_render`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core standard_effect_draw_plan_covers_shoot_smoke_square_particles --lib`
+  - `cargo test -p mindustry-core standard_effect_ids_include --lib`
+  - `cargo test -p mindustry-core standard_effect_lookup --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_flattens_shoot_smoke_square_particles_for_render --lib`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop`
+  - `git diff --check`
+- 下一步建议：
+  1. 相邻 `shootSmokeTitan` / `shootSmokeSmite` 需要 per-particle scaled lifetime、局部 `b.fin()/b.fout()` 与更复杂颜色，不要半迁移；
+  2. 如果继续 Fx，可优先寻找现有 primitives 已能完整表达的效果；
+  3. 更长期应推进真实 renderer/backend，避免 headless primitive seam 继续堆积。
