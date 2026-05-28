@@ -4,6 +4,10 @@
 //! The first migrated pieces are the Java `Mod` base class hooks and the
 //! `NoPatch` marker annotation.
 
+use crate::mindustry::graphics::{
+    MultiPackerPlan, PageType, RegionRequest, TextureAtlasRegionSource,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModConfigPaths {
     pub mods_dir: String,
@@ -94,6 +98,36 @@ impl SpritePackRequest {
         self.r#override = r#override;
         self
     }
+
+    /// 解析该请求应该进入哪个 atlas page。
+    ///
+    /// 显式 `page_hint` 优先；`sprites` / `sprites-override` 这类上层目录
+    /// 会回退到和 upstream Java packer 相同的路径推断规则。
+    pub fn page_type(&self) -> PageType {
+        resolve_sprite_page_type(&self.page_hint, &self.source_path)
+    }
+
+    /// 把请求转换成纯数据 region 请求。
+    ///
+    /// 当没有真实图片尺寸时，`width` / `height` 可以作为占位 metadata，
+    /// 默认值为 `1x1`。
+    pub fn to_region_request(&self) -> RegionRequest<TextureAtlasRegionSource<bool>> {
+        self.to_region_request_with_size(1, 1)
+    }
+
+    /// 把请求转换成纯数据 region 请求，并显式提供占位尺寸。
+    pub fn to_region_request_with_size(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> RegionRequest<TextureAtlasRegionSource<bool>> {
+        RegionRequest::new(
+            self.atlas_name.clone(),
+            width.max(1),
+            height.max(1),
+            TextureAtlasRegionSource::new(self.source_path.clone(), self.r#override),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -124,6 +158,30 @@ impl SpritePacker {
 
     pub fn requests(&self) -> &[SpritePackRequest] {
         &self.requests
+    }
+
+    /// 导出纯数据 atlas 计划。
+    ///
+    /// 没有真实图片尺寸时，默认使用 `1x1` 作为占位 metadata。
+    pub fn to_multi_packer_plan(&self) -> MultiPackerPlan<TextureAtlasRegionSource<bool>> {
+        self.to_multi_packer_plan_with_size(1, 1)
+    }
+
+    /// 导出纯数据 atlas 计划，并显式指定占位尺寸。
+    pub fn to_multi_packer_plan_with_size(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> MultiPackerPlan<TextureAtlasRegionSource<bool>> {
+        let mut plan = MultiPackerPlan::new();
+
+        for request in &self.requests {
+            let page_type = request.page_type();
+            let region = request.to_region_request_with_size(width, height);
+            let _ = plan.insert_or_replace_request(page_type, region);
+        }
+
+        plan
     }
 }
 
@@ -210,6 +268,52 @@ fn trim_slash(mut path: String) -> String {
     } else {
         path.replace('\\', "/")
     }
+}
+
+fn resolve_sprite_page_type(page_hint: &str, source_path: &str) -> PageType {
+    if let Some(page_type) = page_type_from_hint(page_hint) {
+        return page_type;
+    }
+
+    page_type_from_source_path(source_path)
+}
+
+fn page_type_from_hint(page_hint: &str) -> Option<PageType> {
+    let hint = normalize_sprite_hint(page_hint);
+
+    match hint.as_str() {
+        "" => None,
+        "main" => Some(PageType::Main),
+        "environment" => Some(PageType::Environment),
+        "ui" => Some(PageType::Ui),
+        "rubble" => Some(PageType::Rubble),
+        "sprites" | "sprites-override" => None,
+        _ if hint.contains("environment") => Some(PageType::Environment),
+        _ if hint.contains("rubble") => Some(PageType::Rubble),
+        _ if hint.contains("ui") => Some(PageType::Ui),
+        _ if hint.contains("main") => Some(PageType::Main),
+        _ => None,
+    }
+}
+
+fn page_type_from_source_path(source_path: &str) -> PageType {
+    let path = normalize_sprite_hint(source_path);
+
+    if path.contains("sprites/blocks/environment")
+        || path.contains("sprites-override/blocks/environment")
+    {
+        PageType::Environment
+    } else if path.contains("sprites/rubble") || path.contains("sprites-override/rubble") {
+        PageType::Rubble
+    } else if path.contains("sprites/ui") || path.contains("sprites-override/ui") {
+        PageType::Ui
+    } else {
+        PageType::Main
+    }
+}
+
+fn normalize_sprite_hint(value: &str) -> String {
+    value.trim().replace('\\', "/").to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -339,6 +443,16 @@ mod tests {
                 "sprites/custom.png"
             )]
         );
+
+        let plan = packer.to_multi_packer_plan();
+        let region = plan
+            .page(PageType::Main)
+            .get("sprites/custom.png")
+            .expect("default sprite texture should export to main page");
+        assert_eq!(region.width, 1);
+        assert_eq!(region.height, 1);
+        assert_eq!(region.payload.source_path, "sprites/custom.png");
+        assert!(!region.payload.payload);
     }
 
     #[test]
@@ -373,6 +487,75 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn sprite_pack_request_page_type_uses_stable_hints_and_source_paths() {
+        let main = SpritePackRequest::new("sprites/custom.png", "custom");
+        let environment =
+            SpritePackRequest::new("assets/ignored.png", "env").with_page_hint("environment");
+        let ui = SpritePackRequest::new("sprites/ui/icon.png", "icon").with_page_hint("sprites");
+        let rubble = SpritePackRequest::new("sprites-override/rubble/crack.png", "crack")
+            .with_page_hint("sprites-override");
+
+        assert_eq!(main.page_type(), PageType::Main);
+        assert_eq!(environment.page_type(), PageType::Environment);
+        assert_eq!(ui.page_type(), PageType::Ui);
+        assert_eq!(rubble.page_type(), PageType::Rubble);
+    }
+
+    #[test]
+    fn sprite_packer_exports_multi_packer_plan_with_placeholder_metadata() {
+        let mut packer = SpritePacker::new();
+
+        packer.add_request(
+            SpritePackRequest::new("sprites/block.png", "block")
+                .with_page_hint("sprites")
+                .with_override(false),
+        );
+        packer.add_request(
+            SpritePackRequest::new("sprites/blocks/environment/env.png", "env")
+                .with_page_hint("environment")
+                .with_override(true),
+        );
+        packer.add_request(
+            SpritePackRequest::new("sprites/ui/icon.png", "icon")
+                .with_page_hint("sprites-override"),
+        );
+        packer.add_request(
+            SpritePackRequest::new("sprites/rubble/crack.png", "crack")
+                .with_page_hint("rubble")
+                .with_override(true),
+        );
+
+        let plan = packer.to_multi_packer_plan_with_size(8, 16);
+
+        let main = plan.page(PageType::Main).get("block").unwrap();
+        assert_eq!(main.width, 8);
+        assert_eq!(main.height, 16);
+        assert_eq!(main.payload.source_path, "sprites/block.png");
+        assert!(!main.payload.payload);
+
+        let environment = plan.page(PageType::Environment).get("env").unwrap();
+        assert_eq!(environment.width, 8);
+        assert_eq!(environment.height, 16);
+        assert_eq!(
+            environment.payload.source_path,
+            "sprites/blocks/environment/env.png"
+        );
+        assert!(environment.payload.payload);
+
+        let ui = plan.page(PageType::Ui).get("icon").unwrap();
+        assert_eq!(ui.width, 8);
+        assert_eq!(ui.height, 16);
+        assert_eq!(ui.payload.source_path, "sprites/ui/icon.png");
+        assert!(!ui.payload.payload);
+
+        let rubble = plan.page(PageType::Rubble).get("crack").unwrap();
+        assert_eq!(rubble.width, 8);
+        assert_eq!(rubble.height, 16);
+        assert_eq!(rubble.payload.source_path, "sprites/rubble/crack.png");
+        assert!(rubble.payload.payload);
     }
 
     #[test]
