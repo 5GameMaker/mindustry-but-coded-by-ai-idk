@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **29.9%**。
+- 当前总体迁移完成度：约 **30.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10941,3 +10941,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 uniform/attribute location 纳入 resolved action；
   2. 后续把模拟 handle cache 替换/连接真实 GL context；
   3. 继续推进 texture upload/cache。
+
+---
+
+## 349. 最新闭环记录：Shader uniform / vertex attribute location 解析
+
+- 本轮总体进度更新：约 **30.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 shader uniform / texture sampler binding 增加 `uniform_location`；
+    - 为 sprite vertex attribute plan 增加 `attribute_location`；
+    - 新增 `DesktopGraphicsOpenGlBackendLocationCache`；
+    - executor 与 classifying adapter 在 `ShaderApply` 时解析 uniform location；
+    - sprite mesh buffer plan 生成时解析 `a_position/a_color/a_texCoord0/a_mix_color` attribute location；
+    - 测试覆盖 BlockBuild uniform location、Mesh sprite attribute location 与 cache 重复解析稳定性。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 优先推进 texture upload/resource table，让 `texture_identity.gl_handle` 接入 `BindTexture`；
+  2. 继续推进真实 GL backend 对 `glUniform* / glVertexAttribPointer / glDrawElements` 的 adapter trait；
+  3. 之后补 window/context/present 闭环，保持原版 OpenGL/Arc 语义。

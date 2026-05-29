@@ -13717,3 +13717,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - handle 仍为模拟分配，不是 GL context 返回值；
   - uniform/attribute location 与 texture upload 尚未真实连接；
   - 当前总体迁移约 29.9%，仍未达到完整可玩。
+
+## 12.443 Shader uniform / vertex attribute location 解析
+
+- 2026-05-29：在 resolved draw call handle cache 之后继续补 OpenGL shader location 解析层。当前仍不调用真实 `glGetUniformLocation/glGetAttribLocation`，但已把 shader uniform 与 sprite vertex attribute 从 symbolic name 推进到稳定的模拟 location，形成真实 GL uniform 上传与 VAO attribute pointer 之前的计划层。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendShaderUniformBindingPlan` 新增 `uniform_location: Option<i32>`；
+    - `DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan` 新增 `uniform_location: Option<i32>`，为 sampler uniform/texture slot 后续真实绑定预留位置；
+    - `DesktopGraphicsOpenGlBackendVertexAttributePlan` 新增 `attribute_location: Option<i32>`；
+    - 新增 `DesktopGraphicsOpenGlBackendLocationCache`，按 `program_key` 缓存 uniform / attribute name 到 location 的稳定映射；
+    - `DesktopGraphicsOpenGlBackendShaderProgramBinding::resolve_locations(...)` 在 shader apply 进入 executor / classifying adapter 时解析 `u_progress/u_time/u_alpha/u_uv/u_uv2/u_texsize` 等 uniform location；
+    - `DesktopGraphicsOpenGlBackendMeshBufferPlan::resolve_attribute_locations(...)` 在 sprite mesh buffer plan 生成时解析 `a_position/a_color/a_texCoord0/a_mix_color`；
+    - 回归测试验证 BlockBuild uniform location 顺序与 Mesh sprite attribute location 顺序稳定，并验证 location cache 重复解析不会重新发号。
+- 迁移意义：
+  - OpenGL 渲染链路从“程序/纹理/VAO handle 解析”继续推进到“uniform / attribute location 解析”；
+  - BlockBuild shader 的 `progress/time/alpha/uv/uv2/texsize` 绑定已具备真实 `glUniform*` 调用前的 location 载体；
+  - Arc SpriteBatch 顶点属性 `position/color/texCoord0/mixColor` 已具备真实 VAO attribute pointer 绑定前的 location 载体；
+  - 继续保持该层接在 `RenderFramePlan -> OpenGL executor -> shader binding / mesh buffer plan` 主链路内，不形成独立 helper。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - location 仍为模拟顺序分配，不是真实 GL program 返回值；
+  - 尚未接真实 `glUniform*`、`glVertexAttribPointer`、texture upload/cache 与 window/context present；
+  - 当前总体迁移约 30.0%，仍未达到完整可玩。

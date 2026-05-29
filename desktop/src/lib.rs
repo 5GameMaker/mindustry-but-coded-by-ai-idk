@@ -657,6 +657,7 @@ pub struct DesktopGraphicsOpenGlBackendVertexAttributePlan {
     pub components: usize,
     pub offset_bytes: usize,
     pub packed_color: bool,
+    pub attribute_location: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -710,6 +711,7 @@ pub struct DesktopGraphicsOpenGlBackendShaderProgramBinding {
 pub struct DesktopGraphicsOpenGlBackendShaderUniformBindingPlan {
     pub name: &'static str,
     pub value: UniformValue,
+    pub uniform_location: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -717,6 +719,7 @@ pub struct DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan {
     pub uniform: &'static str,
     pub slot: u8,
     pub texture: TextureBinding,
+    pub uniform_location: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -751,24 +754,28 @@ impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
                 components: 2,
                 offset_bytes: Self::SPRITE_POSITION_OFFSET_BYTES,
                 packed_color: false,
+                attribute_location: None,
             },
             DesktopGraphicsOpenGlBackendVertexAttributePlan {
                 name: "a_color",
                 components: 4,
                 offset_bytes: Self::SPRITE_COLOR_OFFSET_BYTES,
                 packed_color: true,
+                attribute_location: None,
             },
             DesktopGraphicsOpenGlBackendVertexAttributePlan {
                 name: "a_texCoord0",
                 components: 2,
                 offset_bytes: Self::SPRITE_TEXCOORD_OFFSET_BYTES,
                 packed_color: false,
+                attribute_location: None,
             },
             DesktopGraphicsOpenGlBackendVertexAttributePlan {
                 name: "a_mix_color",
                 components: 4,
                 offset_bytes: Self::SPRITE_MIX_COLOR_OFFSET_BYTES,
                 packed_color: true,
+                attribute_location: None,
             },
         ]
     }
@@ -785,6 +792,17 @@ impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
             vertex_stride_bytes: Self::SPRITE_VERTEX_STRIDE_BYTES,
             vertex_buffer_bytes: batch.packed_vertices.len() * Self::SPRITE_VERTEX_STRIDE_BYTES,
             index_buffer_bytes: batch.indices.len() * std::mem::size_of::<u32>(),
+        }
+    }
+
+    pub fn resolve_attribute_locations(
+        &mut self,
+        program_key: &str,
+        cache: &mut DesktopGraphicsOpenGlBackendLocationCache,
+    ) {
+        for attribute in &mut self.vertex_attributes {
+            attribute.attribute_location =
+                Some(cache.attribute_location(program_key, attribute.name));
         }
     }
 }
@@ -875,6 +893,7 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
                     Some(DesktopGraphicsOpenGlBackendShaderUniformBindingPlan {
                         name: binding.name,
                         value: binding.value.clone(),
+                        uniform_location: None,
                     })
                 }
                 _ => None,
@@ -892,6 +911,7 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
                     uniform,
                     slot: *slot,
                     texture: texture.clone(),
+                    uniform_location: None,
                 }),
                 _ => None,
             })
@@ -902,6 +922,53 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
             error_count: apply.errors.len(),
             uniform_bindings,
             texture_unit_bindings,
+        }
+    }
+
+    pub fn resolve_locations(&mut self, cache: &mut DesktopGraphicsOpenGlBackendLocationCache) {
+        for binding in &mut self.uniform_bindings {
+            binding.uniform_location =
+                Some(cache.uniform_location(&self.identity.program_key, binding.name));
+        }
+        for binding in &mut self.texture_unit_bindings {
+            binding.uniform_location =
+                Some(cache.uniform_location(&self.identity.program_key, binding.uniform));
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendLocationCache {
+    pub uniform_locations: BTreeMap<String, BTreeMap<&'static str, i32>>,
+    pub attribute_locations: BTreeMap<String, BTreeMap<&'static str, i32>>,
+}
+
+impl DesktopGraphicsOpenGlBackendLocationCache {
+    pub fn uniform_location(&mut self, program_key: &str, name: &'static str) -> i32 {
+        let locations = self
+            .uniform_locations
+            .entry(program_key.to_string())
+            .or_default();
+        if let Some(location) = locations.get(name) {
+            *location
+        } else {
+            let location = locations.len() as i32;
+            locations.insert(name, location);
+            location
+        }
+    }
+
+    pub fn attribute_location(&mut self, program_key: &str, name: &'static str) -> i32 {
+        let locations = self
+            .attribute_locations
+            .entry(program_key.to_string())
+            .or_default();
+        if let Some(location) = locations.get(name) {
+            *location
+        } else {
+            let location = locations.len() as i32;
+            locations.insert(name, location);
+            location
         }
     }
 }
@@ -963,12 +1030,16 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshBatch {
 
 fn opengl_backend_mesh_buffer_plans_from_batches(
     batches: &[DesktopGraphicsOpenGlBackendSpriteMeshBatch],
+    location_cache: &mut DesktopGraphicsOpenGlBackendLocationCache,
 ) -> Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan> {
     batches
         .iter()
         .enumerate()
         .map(|(batch_index, batch)| {
-            DesktopGraphicsOpenGlBackendMeshBufferPlan::from_sprite_batch(batch_index, batch)
+            let mut plan =
+                DesktopGraphicsOpenGlBackendMeshBufferPlan::from_sprite_batch(batch_index, batch);
+            plan.resolve_attribute_locations(&batch.shader_program.program_key, location_cache);
+            plan
         })
         .collect()
 }
@@ -1947,6 +2018,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub custom_markers: Vec<String>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
+    pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
     pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
@@ -1987,6 +2059,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             custom_markers: Vec::new(),
             actions: Vec::new(),
             shader_program_bindings: Vec::new(),
+            location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
             sprite_texture_bindings: Vec::new(),
             sprite_quads: Vec::new(),
             sprite_mesh_batches: Vec::new(),
@@ -2136,8 +2209,10 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
         self.sprite_quads.push(quad);
         self.sprite_mesh_batches =
             opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
-        self.sprite_mesh_buffer_plans =
-            opengl_backend_mesh_buffer_plans_from_batches(&self.sprite_mesh_batches);
+        self.sprite_mesh_buffer_plans = opengl_backend_mesh_buffer_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &mut self.location_cache,
+        );
         self.sprite_mesh_resource_plans =
             opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
                 &self.sprite_mesh_buffer_plans,
@@ -2255,7 +2330,9 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
             DesktopGraphicsOpenGlBackendEvent::ShaderApply { apply, .. } => {
                 self.state.shader_applies += 1;
                 self.state.current_shader = Some(apply.shader);
-                let binding = DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
+                let mut binding =
+                    DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
+                binding.resolve_locations(&mut self.state.location_cache);
                 self.state.current_shader_program = Some(binding.identity.clone());
                 self.state.shader_program_bindings.push(binding);
             }
@@ -2299,6 +2376,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub event_log: Vec<DesktopGraphicsOpenGlBackendEvent>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
+    pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub action_count: usize,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
@@ -2340,6 +2418,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             event_log: Vec::new(),
             actions: Vec::new(),
             shader_program_bindings: Vec::new(),
+            location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
             last_action: None,
             action_count: 0,
             sprite_texture_bindings: Vec::new(),
@@ -2497,8 +2576,10 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         self.sprite_quads.push(quad);
         self.sprite_mesh_batches =
             opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
-        self.sprite_mesh_buffer_plans =
-            opengl_backend_mesh_buffer_plans_from_batches(&self.sprite_mesh_batches);
+        self.sprite_mesh_buffer_plans = opengl_backend_mesh_buffer_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &mut self.location_cache,
+        );
         self.sprite_mesh_resource_plans =
             opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
                 &self.sprite_mesh_buffer_plans,
@@ -2551,7 +2632,9 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
             DesktopGraphicsOpenGlBackendStepKind::ShaderApply { apply } => {
                 self.record_target_for_pass_step(&target);
                 self.state.current_shader = Some(apply.shader);
-                let binding = DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
+                let mut binding =
+                    DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
+                binding.resolve_locations(&mut self.state.location_cache);
                 self.state.current_shader_program = Some(binding.identity.clone());
                 self.state.shader_program_bindings.push(binding);
                 self.state.shader_applies += 1;
@@ -10238,6 +10321,20 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_location_cache_reuses_shader_locations() {
+        let mut cache = super::DesktopGraphicsOpenGlBackendLocationCache::default();
+
+        assert_eq!(cache.uniform_location("shader:BlockBuild", "u_progress"), 0);
+        assert_eq!(cache.uniform_location("shader:BlockBuild", "u_time"), 1);
+        assert_eq!(cache.uniform_location("shader:BlockBuild", "u_progress"), 0);
+        assert_eq!(cache.attribute_location("shader:Mesh", "a_position"), 0);
+        assert_eq!(cache.attribute_location("shader:Mesh", "a_color"), 1);
+        assert_eq!(cache.attribute_location("shader:Mesh", "a_position"), 0);
+        assert_eq!(cache.uniform_locations["shader:BlockBuild"].len(), 2);
+        assert_eq!(cache.attribute_locations["shader:Mesh"].len(), 2);
+    }
+
+    #[test]
     fn desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps() {
         let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
         let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
@@ -10504,13 +10601,25 @@ mod tests {
             vec!["a_position", "a_color", "a_texCoord0", "a_mix_color"]
         );
         assert_eq!(
+            executor.state.sprite_mesh_buffer_plans[0]
+                .vertex_attributes
+                .iter()
+                .map(|attribute| attribute.attribute_location)
+                .collect::<Vec<_>>(),
+            vec![Some(0), Some(1), Some(2), Some(3)]
+        );
+        let mut expected_sprite_attributes =
+            super::DesktopGraphicsOpenGlBackendMeshBufferPlan::sprite_vertex_attributes();
+        for (index, attribute) in expected_sprite_attributes.iter_mut().enumerate() {
+            attribute.attribute_location = Some(index as i32);
+        }
+        assert_eq!(
             executor.state.sprite_mesh_buffer_plans[0],
             super::DesktopGraphicsOpenGlBackendMeshBufferPlan {
                 batch_index: 0,
                 vertex_count: 4,
                 index_count: 6,
-                vertex_attributes:
-                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::sprite_vertex_attributes(),
+                vertex_attributes: expected_sprite_attributes,
                 vertex_stride_bytes:
                     super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
                 vertex_buffer_bytes: 4
@@ -11386,6 +11495,14 @@ mod tests {
                 "u_uv2",
                 "u_texsize"
             ]
+        );
+        assert_eq!(
+            executor.state.shader_program_bindings[0]
+                .uniform_bindings
+                .iter()
+                .map(|binding| binding.uniform_location)
+                .collect::<Vec<_>>(),
+            vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]
         );
         assert!(executor.state.shader_program_bindings[0]
             .texture_unit_bindings
