@@ -13061,3 +13061,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 分类状态尚未绑定真实 GL 调用；
   - `DrawSprite / DrawCircle / DrawText` 的 GPU 执行仍待落地；
   - 当前总体迁移约 27.3%，仍未达到完整可玩。
+
+## 12.417 OpenGL adapter action log
+
+- 2026-05-29：在 OpenGL adapter 命令分类状态之上继续新增 action log，把已保真的 `RenderCommand` payload 转成后续真实 OpenGL adapter 可顺序回放的动作枚举。该闭环仍保持原版 OpenGL 语义路线，不切换到 `wgpu` / Vulkan / Bevy，也不绕过既有 `RenderFramePlan -> OpenGL backend -> adapter` 主链。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendAdapterAction`；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增 `actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>`；
+    - `DesktopGraphicsClassifyingOpenGlBackendAdapter::consume_command(...)` 在分类计数之外记录动作顺序；
+    - `Clear / SetBlend / SetClip / ClearClip` 记录为 state action；
+    - `DrawSprite / DrawCircle / DrawText` 记录为 draw action，并保留 symbol、rect、tint、rotation、layer、text、align 等 payload；
+    - `Custom` 记录 marker 名称与 properties；
+    - `FillRect / StrokeRect / DrawLine / DrawPolygon / DrawPixel` 暂时记录为 `DeferredNoOp`，确保未完成命令在 adapter action 边界可观测。
+  - 测试增强：
+    - `desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps` 断言 action log 中 `Clear -> SetBlend -> DrawSprite` 顺序与 payload；
+    - `desktop_graphics_opengl_backend_adapter_receives_noop_command_events` 断言 5 个 deferred no-op action 与后续 `DrawSprite` action。
+- 迁移意义：
+  - 真实 OpenGL adapter 不再只能读取统计计数，而是能按顺序消费 action log；
+  - 后续可把 action log 上移到 executor 状态机，再映射到真实 GL state change / draw call；
+  - 这保持渲染后端接入主 runtime/render/backend 链路，避免变成独立 demo 模块。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - action log 仍是无依赖过渡层，尚未绑定真实 OpenGL API；
+  - executor 自身还未直接持有/emit action，需要继续把 action 生成从 classifying adapter 上移到执行状态机；
+  - atlas texture binding、shader program/resource binding、FBO/texture resolve 与窗口化 present 仍待落地；
+  - 当前总体迁移约 27.4%，仍未达到完整可玩。

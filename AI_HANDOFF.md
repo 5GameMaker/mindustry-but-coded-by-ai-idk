@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **27.3%**。
+- 当前总体迁移完成度：约 **27.4%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10397,3 +10397,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 state command 转为真实 OpenGL 状态 adapter 方法；
   2. 优先让 `DrawSprite` 走 atlas/resource table 的真实 binding 语义；
   3. 后续再推进 `DrawCircle / DrawText`。
+
+---
+
+## 323. 最新闭环记录：OpenGL adapter action log
+
+- 本轮总体进度更新：约 **27.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendAdapterAction`，将 adapter 分类状态继续落为可顺序回放的动作日志；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增 `actions`；
+    - `DesktopGraphicsClassifyingOpenGlBackendAdapter` 在消费 `RenderCommand` payload 时记录 `Clear / SetBlend / SetClip / ClearClip / DrawSprite / DrawCircle / DrawText / Custom` 的完整 action；
+    - `FillRect / StrokeRect / DrawLine / DrawPolygon / DrawPixel` 暂仍记录为 `DeferredNoOp`，保证后续真实 GL adapter 能看到未实现命令而不是静默丢失；
+    - 回归测试断言 action 顺序与 payload 保真，覆盖 clear/blend/sprite 与 deferred no-op 路径。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 下一步：
+  1. 将 action 生成上移/并入 executor 状态机，形成 `FramePlan -> ExecutorState -> Action -> GL adapter` 的连续执行边界；
+  2. 不新增外部依赖时，先补 `actions / last_action / emit_action(...)` 等无依赖状态机字段；
+  3. 若要接真实窗口和 GPU，仍优先保持原版 OpenGL 语义，待确认后再引入 `glow/glutin/winit` 等依赖。
