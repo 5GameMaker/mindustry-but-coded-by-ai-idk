@@ -3440,12 +3440,23 @@ impl DesktopGraphicsOpenGlBackendResolveCommand {
     pub const FULLSCREEN_QUAD_INDEX_COUNT: usize = 6;
     pub const FULLSCREEN_QUAD_INDEX_OFFSET_BYTES: usize = 0;
 
-    pub fn shader_blit_to_opengl_draw_commands(
+    pub const fn resolve_kind_uses_source_texture_sample_draw_commands(
+        resolve_kind: RenderResolveKind,
+    ) -> bool {
+        matches!(
+            resolve_kind,
+            RenderResolveKind::ShaderBlit
+                | RenderResolveKind::DrawRectSample
+                | RenderResolveKind::DrawFboSample
+        )
+    }
+
+    pub fn source_texture_sample_to_opengl_draw_commands(
         &self,
         shader_program_handle: u32,
         fullscreen_quad_vertex_array_handle: u32,
     ) -> Vec<DesktopGraphicsOpenGlBackendDrawCommand> {
-        if self.resolve_kind != RenderResolveKind::ShaderBlit {
+        if !Self::resolve_kind_uses_source_texture_sample_draw_commands(self.resolve_kind) {
             return Vec::new();
         }
         let Some(source_attachment) = self.source_attachment.as_ref() else {
@@ -3472,6 +3483,20 @@ impl DesktopGraphicsOpenGlBackendResolveCommand {
                 index_offset_bytes: Self::FULLSCREEN_QUAD_INDEX_OFFSET_BYTES,
             },
         ]
+    }
+
+    pub fn shader_blit_to_opengl_draw_commands(
+        &self,
+        shader_program_handle: u32,
+        fullscreen_quad_vertex_array_handle: u32,
+    ) -> Vec<DesktopGraphicsOpenGlBackendDrawCommand> {
+        if self.resolve_kind != RenderResolveKind::ShaderBlit {
+            return Vec::new();
+        }
+        self.source_texture_sample_to_opengl_draw_commands(
+            shader_program_handle,
+            fullscreen_quad_vertex_array_handle,
+        )
     }
 }
 
@@ -4123,6 +4148,7 @@ pub struct DesktopGraphicsOpenGlBackendDriverExecutionState {
     pub sprite_mesh_upload_commands: usize,
     pub shader_commands: usize,
     pub draw_commands: usize,
+    pub resolve_draw_commands: usize,
     pub resolve_commands: usize,
 }
 
@@ -4992,7 +5018,18 @@ pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
 
 impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     pub const SHADER_BLIT_PROGRAM_KEY: &'static str = "shader:resolve:ShaderBlit";
+    pub const DRAW_RECT_SAMPLE_PROGRAM_KEY: &'static str = "shader:resolve:DrawRectSample";
+    pub const DRAW_FBO_SAMPLE_PROGRAM_KEY: &'static str = "shader:resolve:DrawFboSample";
     pub const FULLSCREEN_QUAD_VERTEX_ARRAY_KEY: &'static str = "mesh:resolve:fullscreen-quad";
+
+    pub const fn resolve_draw_program_key(resolve_kind: RenderResolveKind) -> Option<&'static str> {
+        match resolve_kind {
+            RenderResolveKind::ShaderBlit => Some(Self::SHADER_BLIT_PROGRAM_KEY),
+            RenderResolveKind::DrawRectSample => Some(Self::DRAW_RECT_SAMPLE_PROGRAM_KEY),
+            RenderResolveKind::DrawFboSample => Some(Self::DRAW_FBO_SAMPLE_PROGRAM_KEY),
+            RenderResolveKind::Blit => None,
+        }
+    }
 
     pub fn consume_opengl_framebuffer_attachment(
         &mut self,
@@ -5022,19 +5059,21 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             resolve_kind: event.resolve_kind,
             source_attachment,
         };
-        let shader_program_handle = self.cache.program_handle(
-            Self::SHADER_BLIT_PROGRAM_KEY.to_string(),
-            &mut self.allocator,
-        );
-        let fullscreen_quad_vertex_array_handle = self.cache.vertex_array_handle(
-            Self::FULLSCREEN_QUAD_VERTEX_ARRAY_KEY.to_string(),
-            &mut self.allocator,
-        );
-        self.resolve_draw_commands
-            .extend(command.shader_blit_to_opengl_draw_commands(
-                shader_program_handle,
-                fullscreen_quad_vertex_array_handle,
-            ));
+        if let Some(program_key) = Self::resolve_draw_program_key(command.resolve_kind) {
+            let shader_program_handle = self
+                .cache
+                .program_handle(program_key.to_string(), &mut self.allocator);
+            let fullscreen_quad_vertex_array_handle = self.cache.vertex_array_handle(
+                Self::FULLSCREEN_QUAD_VERTEX_ARRAY_KEY.to_string(),
+                &mut self.allocator,
+            );
+            self.resolve_draw_commands.extend(
+                command.source_texture_sample_to_opengl_draw_commands(
+                    shader_program_handle,
+                    fullscreen_quad_vertex_array_handle,
+                ),
+            );
+        }
         self.resolve_commands.push(command);
     }
 
@@ -5224,6 +5263,7 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         state.sprite_mesh_upload_commands = self.drive_sprite_mesh_upload_command_sink(driver);
         state.shader_commands = self.drive_resolved_shader_command_sink(driver);
         state.draw_commands = self.drive_draw_command_sink(driver);
+        state.resolve_draw_commands = self.drive_resolve_draw_command_sink(driver);
         state.resolve_commands = self.drive_resolve_command_sink(driver);
         state
     }
@@ -18718,6 +18758,7 @@ mod tests {
                 sprite_mesh_upload_commands: resolving_executor.sprite_mesh_upload_commands.len(),
                 shader_commands: resolving_executor.resolved_shader_commands.len(),
                 draw_commands: resolving_executor.draw_commands.len(),
+                resolve_draw_commands: resolving_executor.resolve_draw_commands.len(),
                 resolve_commands: resolving_executor.resolve_commands.len(),
             }
         );
@@ -18728,6 +18769,7 @@ mod tests {
                 + driver_state.sprite_mesh_upload_commands
                 + driver_state.shader_commands
                 + driver_state.draw_commands
+                + driver_state.resolve_draw_commands
                 + driver_state.resolve_commands
         );
         assert!(matches!(
@@ -18781,30 +18823,32 @@ mod tests {
             ),
         };
 
+        let expected = vec![
+            super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 17 },
+            super::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
+                texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
+            },
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: 43,
+            },
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                vertex_array_handle: 23,
+            },
+            super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
+                primitive_type:
+                    super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                index_count:
+                    super::DesktopGraphicsOpenGlBackendResolveCommand::FULLSCREEN_QUAD_INDEX_COUNT,
+                index_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT,
+                index_offset_bytes:
+                    super::DesktopGraphicsOpenGlBackendResolveCommand::FULLSCREEN_QUAD_INDEX_OFFSET_BYTES,
+            },
+        ];
+
         assert_eq!(
             command.shader_blit_to_opengl_draw_commands(17, 23),
-            vec![
-                super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 17 },
-                super::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
-                    texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
-                },
-                super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
-                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
-                    texture_handle: 43,
-                },
-                super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
-                    vertex_array_handle: 23,
-                },
-                super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
-                    primitive_type:
-                        super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
-                    index_count:
-                        super::DesktopGraphicsOpenGlBackendResolveCommand::FULLSCREEN_QUAD_INDEX_COUNT,
-                    index_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT,
-                    index_offset_bytes:
-                        super::DesktopGraphicsOpenGlBackendResolveCommand::FULLSCREEN_QUAD_INDEX_OFFSET_BYTES,
-                },
-            ]
+            expected
         );
 
         let mut fbo_sample = command.clone();
@@ -18812,11 +18856,31 @@ mod tests {
         assert!(fbo_sample
             .shader_blit_to_opengl_draw_commands(17, 23)
             .is_empty());
+        assert_eq!(
+            fbo_sample.source_texture_sample_to_opengl_draw_commands(17, 23),
+            expected
+        );
+
+        let mut rect_sample = fbo_sample.clone();
+        rect_sample.resolve_kind = RenderResolveKind::DrawRectSample;
+        assert_eq!(
+            rect_sample.source_texture_sample_to_opengl_draw_commands(17, 23),
+            expected
+        );
+
+        let mut blit = rect_sample.clone();
+        blit.resolve_kind = RenderResolveKind::Blit;
+        assert!(blit
+            .source_texture_sample_to_opengl_draw_commands(17, 23)
+            .is_empty());
 
         let mut missing_source = command;
         missing_source.source_attachment = None;
         assert!(missing_source
             .shader_blit_to_opengl_draw_commands(17, 23)
+            .is_empty());
+        assert!(missing_source
+            .source_texture_sample_to_opengl_draw_commands(17, 23)
             .is_empty());
     }
 
@@ -18875,6 +18939,104 @@ mod tests {
         assert_eq!(sink.commands, executor.resolve_draw_commands);
     }
 
+    #[test]
+    fn desktop_graphics_opengl_shared_resolver_allocates_draw_rect_and_fbo_sample_quad_resources() {
+        let mut executor = super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        executor.consume_opengl_framebuffer_attachment(
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::from_buffer_name(
+                "buffer:draw-rect-source",
+            ),
+        );
+        executor.consume_opengl_framebuffer_attachment(
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::from_buffer_name(
+                "buffer:draw-fbo-source",
+            ),
+        );
+
+        executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
+            source_target: RenderTarget::Buffer("draw-rect-source".into()),
+            resolve_target: RenderTarget::Screen,
+            resolve_kind: RenderResolveKind::DrawRectSample,
+        });
+        executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
+            source_target: RenderTarget::Buffer("draw-fbo-source".into()),
+            resolve_target: RenderTarget::Screen,
+            resolve_kind: RenderResolveKind::DrawFboSample,
+        });
+
+        assert_eq!(executor.resolve_commands.len(), 2);
+        assert_eq!(executor.resolve_draw_commands.len(), 10);
+        let rect_program = executor.cache.programs
+            [super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::DRAW_RECT_SAMPLE_PROGRAM_KEY];
+        let fbo_program = executor.cache.programs
+            [super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::DRAW_FBO_SAMPLE_PROGRAM_KEY];
+        let quad_vertex_array = executor.cache.vertex_arrays
+            [super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::FULLSCREEN_QUAD_VERTEX_ARRAY_KEY];
+        assert_ne!(rect_program, fbo_program);
+
+        let rect_texture = executor.resolve_commands[0]
+            .source_attachment
+            .as_ref()
+            .expect("draw-rect resolve should retain source attachment")
+            .color_texture_handle;
+        let fbo_texture = executor.resolve_commands[1]
+            .source_attachment
+            .as_ref()
+            .expect("draw-fbo resolve should retain source attachment")
+            .color_texture_handle;
+
+        let rect_commands = &executor.resolve_draw_commands[0..5];
+        let fbo_commands = &executor.resolve_draw_commands[5..10];
+        assert_eq!(
+            rect_commands[0],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
+                program_handle: rect_program
+            }
+        );
+        assert_eq!(
+            rect_commands[2],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: rect_texture,
+            }
+        );
+        assert_eq!(
+            rect_commands[3],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                vertex_array_handle: quad_vertex_array,
+            }
+        );
+        assert_eq!(
+            fbo_commands[0],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
+                program_handle: fbo_program
+            }
+        );
+        assert_eq!(
+            fbo_commands[2],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: fbo_texture,
+            }
+        );
+        assert_eq!(
+            fbo_commands[4],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
+                primitive_type:
+                    super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                index_count:
+                    super::DesktopGraphicsOpenGlBackendResolveCommand::FULLSCREEN_QUAD_INDEX_COUNT,
+                index_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT,
+                index_offset_bytes:
+                    super::DesktopGraphicsOpenGlBackendResolveCommand::FULLSCREEN_QUAD_INDEX_OFFSET_BYTES,
+            }
+        );
+
+        let mut sink = super::DesktopGraphicsRecordingOpenGlBackendDrawCommandSink::default();
+        assert_eq!(executor.drive_resolve_draw_command_sink(&mut sink), 10);
+        assert_eq!(sink.commands, executor.resolve_draw_commands);
+    }
+
     #[cfg(feature = "opengl-backend")]
     #[test]
     fn desktop_graphics_opengl_backend_runtime_feature_records_driver_submission() {
@@ -18902,6 +19064,7 @@ mod tests {
         super::DesktopGraphicsOpenGlBackendRuntime::present_frame(&mut runtime);
 
         assert_eq!(driver_state.framebuffer_attachment_plans, 1);
+        assert_eq!(driver_state.resolve_draw_commands, 5);
         assert_eq!(driver_state.resolve_commands, 1);
         assert_eq!(
             runtime.state.surface_size,
@@ -18915,6 +19078,21 @@ mod tests {
             runtime.driver.commands.as_slice(),
             [
                 super::DesktopGraphicsOpenGlBackendDriverCommand::FramebufferAttachment(_),
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { .. }
+                ),
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture { .. }
+                ),
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture { .. }
+                ),
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray { .. }
+                ),
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. }
+                ),
                 super::DesktopGraphicsOpenGlBackendDriverCommand::Resolve(_)
             ]
         ));
