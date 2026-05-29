@@ -3440,6 +3440,7 @@ pub struct DesktopGraphicsOpenGlBackendResolveCommand {
     pub resolve_kind: RenderResolveKind,
     pub resolve_sample: Option<RenderTextureSamplePlan>,
     pub resolve_sample_trace: Option<DesktopGraphicsOpenGlBackendResolveSampleTrace>,
+    pub resolve_sample_quad: Option<DesktopGraphicsOpenGlBackendResolveQuad>,
     pub source_attachment: Option<DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment>,
 }
 
@@ -3456,6 +3457,64 @@ impl From<RenderTextureSamplePlan> for DesktopGraphicsOpenGlBackendResolveSample
             geometry: sample.geometry,
             uv: sample.uv,
             flip: sample.flip,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendResolveQuadVertex {
+    pub position: [f32; 2],
+    pub uv: [f32; 2],
+}
+
+impl DesktopGraphicsOpenGlBackendResolveQuadVertex {
+    pub const fn new(x: f32, y: f32, u: f32, v: f32) -> Self {
+        Self {
+            position: [x, y],
+            uv: [u, v],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendResolveQuad {
+    pub geometry: RenderRect,
+    pub uv: RenderUvRect,
+    pub flip: RenderTextureSampleFlip,
+    pub vertices: [DesktopGraphicsOpenGlBackendResolveQuadVertex; 4],
+    pub indices: [u32; 6],
+}
+
+impl From<RenderTextureSamplePlan> for DesktopGraphicsOpenGlBackendResolveQuad {
+    fn from(sample: RenderTextureSamplePlan) -> Self {
+        let rect = sample.geometry;
+        let uv = sample.uv;
+        Self {
+            geometry: rect,
+            uv,
+            flip: sample.flip,
+            vertices: [
+                DesktopGraphicsOpenGlBackendResolveQuadVertex::new(rect.x, rect.y, uv.u, uv.v),
+                DesktopGraphicsOpenGlBackendResolveQuadVertex::new(
+                    rect.right(),
+                    rect.y,
+                    uv.u2,
+                    uv.v,
+                ),
+                DesktopGraphicsOpenGlBackendResolveQuadVertex::new(
+                    rect.right(),
+                    rect.bottom(),
+                    uv.u2,
+                    uv.v2,
+                ),
+                DesktopGraphicsOpenGlBackendResolveQuadVertex::new(
+                    rect.x,
+                    rect.bottom(),
+                    uv.u,
+                    uv.v2,
+                ),
+            ],
+            indices: [0, 1, 2, 2, 3, 0],
         }
     }
 }
@@ -5037,6 +5096,7 @@ pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     pub resolved_draw_actions: Vec<DesktopGraphicsOpenGlBackendResolvedDrawCallAction>,
     pub draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
     pub resolve_commands: Vec<DesktopGraphicsOpenGlBackendResolveCommand>,
+    pub resolve_sample_quads: Vec<DesktopGraphicsOpenGlBackendResolveQuad>,
     pub resolve_draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
 }
 
@@ -5045,6 +5105,7 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     pub const DRAW_RECT_SAMPLE_PROGRAM_KEY: &'static str = "shader:resolve:DrawRectSample";
     pub const DRAW_FBO_SAMPLE_PROGRAM_KEY: &'static str = "shader:resolve:DrawFboSample";
     pub const FULLSCREEN_QUAD_VERTEX_ARRAY_KEY: &'static str = "mesh:resolve:fullscreen-quad";
+    pub const SAMPLE_QUAD_VERTEX_ARRAY_KEY_PREFIX: &'static str = "mesh:resolve:sample-quad";
 
     pub const fn resolve_draw_program_key(resolve_kind: RenderResolveKind) -> Option<&'static str> {
         match resolve_kind {
@@ -5053,6 +5114,17 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             RenderResolveKind::DrawFboSample => Some(Self::DRAW_FBO_SAMPLE_PROGRAM_KEY),
             RenderResolveKind::Blit => None,
         }
+    }
+
+    pub fn resolve_sample_quad_vertex_array_key(
+        command: &DesktopGraphicsOpenGlBackendResolveCommand,
+    ) -> String {
+        format!(
+            "{}:{:?}:{:?}",
+            Self::SAMPLE_QUAD_VERTEX_ARRAY_KEY_PREFIX,
+            command.source_target,
+            command.resolve_kind
+        )
     }
 
     pub fn consume_opengl_framebuffer_attachment(
@@ -5083,16 +5155,24 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             resolve_kind: event.resolve_kind,
             resolve_sample: event.resolve_sample,
             resolve_sample_trace: event.resolve_sample.map(Into::into),
+            resolve_sample_quad: event.resolve_sample.map(Into::into),
             source_attachment,
         };
         if let Some(program_key) = Self::resolve_draw_program_key(command.resolve_kind) {
             let shader_program_handle = self
                 .cache
                 .program_handle(program_key.to_string(), &mut self.allocator);
-            let fullscreen_quad_vertex_array_handle = self.cache.vertex_array_handle(
-                Self::FULLSCREEN_QUAD_VERTEX_ARRAY_KEY.to_string(),
-                &mut self.allocator,
-            );
+            let vertex_array_key = if command.resolve_sample_quad.is_some() {
+                Self::resolve_sample_quad_vertex_array_key(&command)
+            } else {
+                Self::FULLSCREEN_QUAD_VERTEX_ARRAY_KEY.to_string()
+            };
+            let fullscreen_quad_vertex_array_handle = self
+                .cache
+                .vertex_array_handle(vertex_array_key, &mut self.allocator);
+            if let Some(quad) = command.resolve_sample_quad {
+                self.resolve_sample_quads.push(quad);
+            }
             self.resolve_draw_commands.extend(
                 command.source_texture_sample_to_opengl_draw_commands(
                     shader_program_handle,
@@ -18975,6 +19055,7 @@ mod tests {
             resolve_kind: RenderResolveKind::ShaderBlit,
             resolve_sample: None,
             resolve_sample_trace: None,
+            resolve_sample_quad: None,
             source_attachment: Some(
                 super::DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
                     framebuffer_key: "framebuffer:buffer:shader-blit-source".into(),
@@ -19106,6 +19187,7 @@ mod tests {
                 },
             ]
         );
+        assert!(executor.resolve_sample_quads.is_empty());
 
         let mut sink = super::DesktopGraphicsRecordingOpenGlBackendDrawCommandSink::default();
         assert_eq!(executor.drive_resolve_draw_command_sink(&mut sink), 5);
@@ -19166,13 +19248,27 @@ mod tests {
 
         assert_eq!(executor.resolve_commands.len(), 2);
         assert_eq!(executor.resolve_draw_commands.len(), 10);
+        assert_eq!(
+            executor.resolve_sample_quads,
+            vec![
+                super::DesktopGraphicsOpenGlBackendResolveQuad::from(rect_sample),
+                super::DesktopGraphicsOpenGlBackendResolveQuad::from(fbo_sample),
+            ]
+        );
         let rect_program = executor.cache.programs
             [super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::DRAW_RECT_SAMPLE_PROGRAM_KEY];
         let fbo_program = executor.cache.programs
             [super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::DRAW_FBO_SAMPLE_PROGRAM_KEY];
-        let quad_vertex_array = executor.cache.vertex_arrays
-            [super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::FULLSCREEN_QUAD_VERTEX_ARRAY_KEY];
+        let rect_quad_vertex_array = executor.cache.vertex_arrays
+            [&super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::resolve_sample_quad_vertex_array_key(
+                &executor.resolve_commands[0],
+            )];
+        let fbo_quad_vertex_array = executor.cache.vertex_arrays
+            [&super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::resolve_sample_quad_vertex_array_key(
+                &executor.resolve_commands[1],
+            )];
         assert_ne!(rect_program, fbo_program);
+        assert_ne!(rect_quad_vertex_array, fbo_quad_vertex_array);
 
         let rect_texture = executor.resolve_commands[0]
             .source_attachment
@@ -19189,6 +19285,12 @@ mod tests {
                 rect_sample
             ))
         );
+        assert_eq!(
+            executor.resolve_commands[0].resolve_sample_quad,
+            Some(super::DesktopGraphicsOpenGlBackendResolveQuad::from(
+                rect_sample
+            ))
+        );
         let fbo_texture = executor.resolve_commands[1]
             .source_attachment
             .as_ref()
@@ -19201,6 +19303,12 @@ mod tests {
         assert_eq!(
             executor.resolve_commands[1].resolve_sample_trace,
             Some(super::DesktopGraphicsOpenGlBackendResolveSampleTrace::from(
+                fbo_sample
+            ))
+        );
+        assert_eq!(
+            executor.resolve_commands[1].resolve_sample_quad,
+            Some(super::DesktopGraphicsOpenGlBackendResolveQuad::from(
                 fbo_sample
             ))
         );
@@ -19223,8 +19331,25 @@ mod tests {
         assert_eq!(
             rect_commands[3],
             super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
-                vertex_array_handle: quad_vertex_array,
+                vertex_array_handle: rect_quad_vertex_array,
             }
+        );
+        let rect_quad = executor.resolve_sample_quads[0];
+        assert_eq!(
+            rect_quad.vertices[0].position,
+            [rect_sample.geometry.x, rect_sample.geometry.y]
+        );
+        assert_eq!(
+            rect_quad.vertices[0].uv,
+            [rect_sample.uv.u, rect_sample.uv.v]
+        );
+        assert_eq!(
+            rect_quad.vertices[2].position,
+            [rect_sample.geometry.right(), rect_sample.geometry.bottom()]
+        );
+        assert_eq!(
+            rect_quad.vertices[2].uv,
+            [rect_sample.uv.u2, rect_sample.uv.v2]
         );
         assert_eq!(
             fbo_commands[0],
@@ -19238,6 +19363,26 @@ mod tests {
                 target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
                 texture_handle: fbo_texture,
             }
+        );
+        assert_eq!(
+            fbo_commands[3],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                vertex_array_handle: fbo_quad_vertex_array,
+            }
+        );
+        let fbo_quad = executor.resolve_sample_quads[1];
+        assert_eq!(
+            fbo_quad.vertices[0].position,
+            [fbo_sample.geometry.x, fbo_sample.geometry.y]
+        );
+        assert_eq!(fbo_quad.vertices[0].uv, [fbo_sample.uv.u, fbo_sample.uv.v]);
+        assert_eq!(
+            fbo_quad.vertices[2].position,
+            [fbo_sample.geometry.right(), fbo_sample.geometry.bottom()]
+        );
+        assert_eq!(
+            fbo_quad.vertices[2].uv,
+            [fbo_sample.uv.u2, fbo_sample.uv.v2]
         );
         assert_eq!(
             fbo_commands[4],
