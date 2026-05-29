@@ -12380,3 +12380,20 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 按子代理探索结果，优先把 `DesktopStandardEffectRenderFrame` 的 line/rect/triangle/circle bridge 成 `RenderPass` / `RenderCommand`；
   2. circle 已经可以走 `RenderCommand::DrawCircle`，line/rect/triangle 可复用 `DrawLine / FillRect / StrokeRect / DrawPolygon`；
   3. textured-line、light、minimap overlay、world label 单独后置。
+
+### 2026-05-30：standard effect circle 接入 graphics/OpenGL backend
+
+- 当前整体完成度：约 **38.2%**。
+- 已完成：
+  - `DesktopStandardEffectRenderFrame::to_circle_render_pass()`；
+  - `DesktopLauncher::graphics_frame_for_render(...)` 将 standard effect circle primitives 注入 `RenderPassKind::Overlay`；
+  - circle primitives 转成 `RenderCommand::DrawCircle`，再复用当前 OpenGL DrawCircle primitive mesh path；
+  - `desktop_launcher_routes_standard_effect_circles_into_graphics_backend` 覆盖 effect event → graphics frame → OpenGL executor。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_circles_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 下一步：
+  1. 继续 bridge `line_primitives` 到 `RenderCommand::DrawLine`；
+  2. 继续 bridge `rect_primitives` 到 `FillRect` / `DrawSprite`，注意 textured rect 的 atlas region；
+  3. `triangle/square/light/textured-line` 分批接，别再停留在 headless stats。

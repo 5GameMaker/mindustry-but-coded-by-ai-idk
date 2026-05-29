@@ -18,15 +18,16 @@ use mindustry_core::mindustry::core::{
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
-use mindustry_core::mindustry::entities::comp::BuildingComp;
+use mindustry_core::mindustry::entities::comp::{BuildingComp, DecalColor};
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
     PlayerUnitSwitchContext, ShieldArcAbility, StandardEffectCircleRenderPrimitive,
-    StandardEffectDrawPlan, StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
-    StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
-    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
+    StandardEffectDrawKind, StandardEffectDrawPlan, StandardEffectLightRenderPrimitive,
+    StandardEffectLineRenderPrimitive, StandardEffectRectRenderPrimitive,
+    StandardEffectShieldArcBreak, StandardEffectSquareRenderPrimitive,
+    StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::{
@@ -100,6 +101,35 @@ pub struct DesktopStandardEffectRenderFrame {
     pub line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
+}
+
+fn desktop_effect_render_color(color: Option<DecalColor>, alpha: f32) -> [f32; 4] {
+    let color = color.unwrap_or(DecalColor::WHITE);
+    [color.r, color.g, color.b, color.a * alpha]
+}
+
+impl DesktopStandardEffectRenderFrame {
+    pub fn to_circle_render_pass(&self) -> Option<RenderPass> {
+        let mut pass = RenderPass::new(RenderPassKind::Overlay);
+        for primitive in &self.circle_primitives {
+            if primitive.radius <= f32::EPSILON {
+                continue;
+            }
+            let filled = matches!(
+                primitive.kind,
+                StandardEffectDrawKind::FilledCircle
+                    | StandardEffectDrawKind::SeededCircleParticles
+            );
+            pass.push(RenderCommand::draw_circle(
+                RenderPoint::new(primitive.center.0, primitive.center.1),
+                primitive.radius,
+                desktop_effect_render_color(primitive.color, primitive.alpha),
+                filled,
+                Layer::EFFECT,
+            ));
+        }
+        (!pass.commands.is_empty()).then_some(pass)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10788,6 +10818,9 @@ impl DesktopLauncher {
             for pass in fog_frame.to_render_passes() {
                 render_frame.push_pass(pass);
             }
+        }
+        if let Some(pass) = self.standard_effect_render_frame().to_circle_render_pass() {
+            render_frame.push_pass(pass);
         }
         if let Some(ui_pass) = self.desktop_ui_render_pass(viewport) {
             render_frame.push_pass(ui_pass);
@@ -23152,6 +23185,106 @@ mod tests {
             }
         );
         assert_eq!(renderer.last_stats, stats);
+    }
+
+    #[test]
+    fn desktop_launcher_routes_standard_effect_circles_into_graphics_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("fire").unwrap() as u16,
+                    x: 32.0,
+                    y: 48.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+        let expected_circles = launcher
+            .standard_effect_render_frame()
+            .circle_primitives
+            .iter()
+            .map(|circle| {
+                (
+                    RenderPoint::new(circle.center.0, circle.center.1),
+                    circle.radius,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            3,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let effect_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, RenderCommand::DrawCircle { .. }))
+            })
+            .expect("standard effect circles should be routed into an overlay render pass");
+        let circle_commands: Vec<_> = effect_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    filled,
+                    layer,
+                    ..
+                } => Some((*center, *radius, *filled, *layer)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(circle_commands.len(), 2);
+        assert!(circle_commands.iter().all(|(_, _, filled, layer)| {
+            *filled && (*layer - Layer::EFFECT).abs() < f32::EPSILON
+        }));
+        assert_eq!(
+            circle_commands
+                .iter()
+                .map(|(center, radius, _, _)| (*center, *radius))
+                .collect::<Vec<_>>(),
+            expected_circles
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert_eq!(
+            renderer
+                .last_opengl_backend_executor_state
+                .draw_circle_commands,
+            2
+        );
+        assert!(
+            renderer
+                .last_opengl_backend_executor_state
+                .sprite_quads
+                .len()
+                >= 2 * super::DESKTOP_GRAPHICS_OPENGL_CIRCLE_MIN_SEGMENTS
+        );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_draw_call_plans
+            .iter()
+            .any(|plan| plan.target == Some(RenderTarget::Screen)));
     }
 
     #[test]
