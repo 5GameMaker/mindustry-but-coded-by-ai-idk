@@ -38,7 +38,7 @@ impl VersionInfo {
             .copied()
             .unwrap_or("unknown")
             .to_string();
-        let (build, revision) = parse_build_revision(map.get("build").copied().unwrap_or("0"));
+        let (build, revision) = parse_build_revision(map.get("build").copied().unwrap_or(""));
         Self {
             build_type: map.get("type").copied().unwrap_or("unknown").to_string(),
             modifier: modifier.clone(),
@@ -80,13 +80,17 @@ impl VersionInfo {
 }
 
 pub fn parse_build_revision(build: &str) -> (i32, i32) {
-    if let Some((major, minor)) = build.split_once('.') {
-        match (major.parse::<i32>(), minor.parse::<i32>()) {
-            (Ok(build), Ok(revision)) => (build, revision),
+    if build.contains('.') {
+        let mut parts = build.splitn(3, '.');
+        match (parts.next(), parts.next()) {
+            (Some(major), Some(minor)) => match (major.parse::<i32>(), minor.parse::<i32>()) {
+                (Ok(build), Ok(revision)) => (build, revision),
+                _ => (-1, 0),
+            },
             _ => (-1, 0),
         }
-    } else if build.parse::<i32>().is_ok() {
-        (build.parse::<i32>().unwrap_or(-1), 0)
+    } else if let Ok(build) = build.parse::<i32>() {
+        (build, 0)
     } else {
         (-1, 0)
     }
@@ -170,11 +174,39 @@ mod tests {
     }
 
     #[test]
+    fn version_properties_use_java_like_default_build_and_number_values() {
+        let info = VersionInfo::from_properties([
+            ("modifier", "steam-beta"),
+            ("number", "oops"),
+            ("build", "157.4.1"),
+        ]);
+
+        assert_eq!(info.build_type, "unknown");
+        assert_eq!(info.modifier, "steam-beta");
+        assert_eq!(info.commit_hash, "unknown");
+        assert_eq!(info.build_date, "unknown");
+        assert_eq!(info.number, 4);
+        assert_eq!(info.build, 157);
+        assert_eq!(info.revision, 4);
+        assert!(info.is_steam);
+        assert_eq!(info.build_string(), "157.4");
+        assert_eq!(info.combined(), "unknown build 157.4");
+
+        let missing_build = VersionInfo::from_properties([]);
+        assert_eq!(missing_build.build, -1);
+        assert_eq!(missing_build.revision, 0);
+        assert_eq!(missing_build.build_string(), "custom");
+        assert_eq!(missing_build.combined(), "custom build");
+    }
+
+    #[test]
     fn version_helpers_follow_upstream_edge_cases() {
         assert_eq!(parse_build_revision("157"), (157, 0));
         assert_eq!(parse_build_revision("157.4"), (157, 4));
+        assert_eq!(parse_build_revision("157.4.1"), (157, 4));
         assert_eq!(parse_build_revision("oops"), (-1, 0));
         assert_eq!(parse_build_revision("157.oops"), (-1, 0));
+        assert_eq!(parse_build_revision("157."), (-1, 0));
 
         assert!(is_at_least(-1, 0, "999"));
         assert!(is_at_least(0, 0, "999"));
