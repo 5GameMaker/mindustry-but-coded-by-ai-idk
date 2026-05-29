@@ -3,6 +3,8 @@
 /// The Java side keeps a mutable runtime registry. In Rust we model the stable
 /// set of cache-layer kinds as an enum and preserve the upstream order for the
 /// built-in layers.
+use super::render_engine::{RenderPass, RenderPassKind, RenderResolveKind, RenderTarget};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum CacheLayer {
     #[default]
@@ -22,6 +24,15 @@ pub enum CacheLayer {
 pub enum CacheLayerTarget {
     FloorCache,
     EffectBuffer,
+}
+
+impl CacheLayerTarget {
+    pub fn render_target(self, layer_name: &str) -> RenderTarget {
+        match self {
+            Self::FloorCache => RenderTarget::Buffer(format!("cache-layer:{layer_name}:floor")),
+            Self::EffectBuffer => RenderTarget::Buffer(format!("cache-layer:{layer_name}:effect")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -96,6 +107,25 @@ impl CacheLayerPassMetadata {
             steps: &Self::SHADER_STEPS,
         }
     }
+
+    pub const fn render_resolve_kind(self) -> Option<RenderResolveKind> {
+        match self.blend_hint {
+            CacheLayerBlendHint::Opaque => None,
+            CacheLayerBlendHint::ShaderBlit => Some(RenderResolveKind::ShaderBlit),
+        }
+    }
+
+    pub fn apply_to_render_pass(self, layer_name: &str, pass: RenderPass) -> RenderPass {
+        let pass = pass.with_target(self.target.render_target(layer_name));
+        match self.render_resolve_kind() {
+            Some(kind) => pass.with_resolve(self.blit_target.render_target(layer_name), kind),
+            None => pass,
+        }
+    }
+
+    pub fn to_render_pass(self, layer_name: &str) -> RenderPass {
+        self.apply_to_render_pass(layer_name, RenderPass::new(RenderPassKind::Floor))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +172,10 @@ impl CacheLayerEntry {
 
     pub const fn direct(id: usize, name: &'static str, layer: CacheLayer, liquid: bool) -> Self {
         Self::new(id, name, layer, liquid, CacheLayerPassMetadata::direct())
+    }
+
+    pub fn to_render_pass(self) -> RenderPass {
+        self.pass.to_render_pass(self.name)
     }
 }
 
@@ -276,6 +310,7 @@ mod tests {
         CacheLayer, CacheLayerBlendHint, CacheLayerInvalidationHint, CacheLayerPassStep,
         CacheLayerShaderHint, CacheLayerTarget,
     };
+    use crate::mindustry::graphics::{RenderPassKind, RenderResolveKind, RenderTarget};
 
     #[test]
     fn cache_layer_defaults_and_lookup_match_upstream_order() {
@@ -369,5 +404,37 @@ mod tests {
             walls.pass.invalidation_hint,
             CacheLayerInvalidationHint::Chunk
         );
+    }
+
+    #[test]
+    fn cache_layer_pass_metadata_maps_to_render_pass_resolve_kind() {
+        let water = CacheLayer::Water.entry().unwrap();
+        let water_pass = water.to_render_pass();
+        assert_eq!(water_pass.kind, RenderPassKind::Floor);
+        assert_eq!(
+            water_pass.target,
+            RenderTarget::Buffer("cache-layer:water:effect".into())
+        );
+        assert_eq!(
+            water_pass.resolve_target,
+            Some(RenderTarget::Buffer("cache-layer:water:floor".into()))
+        );
+        assert_eq!(water_pass.resolve_kind, Some(RenderResolveKind::ShaderBlit));
+
+        let space = CacheLayer::Space.entry().unwrap().to_render_pass();
+        assert_eq!(
+            space.target,
+            RenderTarget::Buffer("cache-layer:space:effect".into())
+        );
+        assert_eq!(space.resolve_kind, Some(RenderResolveKind::ShaderBlit));
+
+        let walls = CacheLayer::Walls.entry().unwrap().to_render_pass();
+        assert_eq!(walls.kind, RenderPassKind::Floor);
+        assert_eq!(
+            walls.target,
+            RenderTarget::Buffer("cache-layer:walls:floor".into())
+        );
+        assert_eq!(walls.resolve_target, None);
+        assert_eq!(walls.resolve_kind, None);
     }
 }

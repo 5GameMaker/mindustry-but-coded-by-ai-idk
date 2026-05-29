@@ -12297,3 +12297,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `DrawPolygon` 已是一等 backend-neutral 命令，但仍未接真实 OpenGL/glow 绘制；
   - 仍需把 `DesktopGraphicsLiveBackendRenderCommandSink` 落成真实 window/surface/GPU backend，并把 atlas upload、shader bind、FBO resolve 串到同一条链路；
   - 当前总体迁移约 24.5%，仍未达到完整可玩。
+
+### 12.389 CacheLayer metadata 接入 RenderPass resolve_kind
+
+- 2026-05-29：继续避免 `RenderResolveKind` 停留在孤立 enum，把 Java `CacheLayer.ShaderLayer.begin/end/blit(shader)` 的离屏写入与 shader blit 回填语义接到 `RenderPass`。本轮仍不引入 GPU 依赖，但 cache layer 的 target/blit metadata 已能直接生成后续 backend 可消费的 `RenderPass` target/resolve 信息。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/cache_layer.rs`
+    - `CacheLayerTarget::render_target(layer_name)` 将 `FloorCache` / `EffectBuffer` 映射到稳定 `RenderTarget::Buffer("cache-layer:<name>:floor/effect")`；
+    - `CacheLayerPassMetadata::render_resolve_kind()` 将 `CacheLayerBlendHint::ShaderBlit` 映射为 `Some(RenderResolveKind::ShaderBlit)`，direct/opaque layer 保持 `None`；
+    - `CacheLayerPassMetadata::apply_to_render_pass(...)` 与 `to_render_pass(...)` 把 pass metadata 写入 `RenderPass::target + resolve_target + resolve_kind`；
+    - `CacheLayerEntry::to_render_pass()` 以 entry name 生成 floor-stage cache render pass。
+- Java 对照要点：
+  - water/mud/tar/slag/arkycite/cryofluid/space 等 shader layer 走 `EffectBuffer -> FloorCache` 且 `ShaderBlit`；
+  - normal/walls 直接写 `FloorCache`，不生成 resolve；
+  - 这只是 FBO/回填 seam，真实 OpenGL/glow backend 仍需实现 buffer 创建、绑定、shader uniform 与 blit 执行。
+- 已跑验证：
+  - `cargo fmt -p mindustry-core`
+  - `cargo test -p mindustry-core cache_layer --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - CacheLayer render pass 还未并入真实 floor renderer frame pass 列表；
+  - `RenderTarget::Buffer("cache-layer:*")` 仍是 backend-neutral 名称，未创建真实 FBO/texture；
+  - 当前总体迁移约 24.6%，仍未达到完整可玩。
