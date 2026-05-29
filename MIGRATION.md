@@ -13925,3 +13925,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - VAO/VBO/IBO 命令仍是 command adapter 层，尚未调用 `glBufferData` / `glVertexAttribPointer`；
   - SpriteBatch flush/request、draw range、layer 内部排序仍需继续对照 Arc；
   - 当前总体迁移约 30.7%，仍未达到完整可玩。
+
+## 12.451 OpenGL draw call command adapter 接入
+
+- 2026-05-29：继续把 SpriteBatch 绘制从 resolved draw call action 推进到真实 GL draw command 边界。`DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor` 现在不仅解析 program/texture/VAO handle，还会生成 `UseProgram`、`ActiveTexture`、`BindTexture`、`BindVertexArray`、`DrawElements` 命令序列。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DESKTOP_GRAPHICS_OPENGL_TEXTURE0`；
+    - 新增 `DesktopGraphicsOpenGlBackendDrawCommand`；
+    - 新增 `DesktopGraphicsOpenGlBackendDrawCommandSink` 与 recording sink；
+    - `DesktopGraphicsOpenGlBackendResolvedDrawCallAction::to_opengl_draw_commands(...)` 将 resolved action 映射为 GL draw command；
+    - `DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor` 增加 `commands` 缓冲与 `drive_draw_command_sink(...)`；
+    - 测试覆盖 resolved draw action 到 command sink 的完整输出。
+- 迁移意义：
+  - `MeshUploadCommand -> DrawCommand` 两条链路已经并列成形，下一步 real GL executor 可以按顺序消费 texture upload、mesh upload、draw command；
+  - draw call 现在明确包含 `TEXTURE0`、`TEXTURE_2D`、`UNSIGNED_INT` index type 和 byte offset，减少后续接真实 GL 时的隐式假设；
+  - 仍保持原版 OpenGL/SpriteBatch 路线，不引入 wgpu/Bevy/Vulkan。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - real GL API 调用层、window/context/present 仍未接入；
+  - shader compile/link、uniform upload、texture unit 多槽绑定仍需继续推进；
+  - drawRange、flushRequests、SpriteBatch cache lifecycle 仍需继续对照 Arc；
+  - 当前总体迁移约 30.8%，仍未达到完整可玩。

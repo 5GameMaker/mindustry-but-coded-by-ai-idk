@@ -609,6 +609,7 @@ pub const DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER: u32 = 0x8893;
 pub const DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW: u32 = 0x88e8;
 pub const DESKTOP_GRAPHICS_OPENGL_FLOAT: u32 = 0x1406;
 pub const DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT: u32 = 0x1405;
+pub const DESKTOP_GRAPHICS_OPENGL_TEXTURE0: u32 = 0x84c0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
@@ -2726,6 +2727,83 @@ pub enum DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendDrawCommand {
+    UseProgram {
+        program_handle: u32,
+    },
+    ActiveTexture {
+        texture_unit: u32,
+    },
+    BindTexture {
+        target: u32,
+        texture_handle: u32,
+    },
+    BindVertexArray {
+        vertex_array_handle: u32,
+    },
+    DrawElements {
+        primitive_type: u32,
+        index_count: usize,
+        index_type: u32,
+        index_offset_bytes: usize,
+    },
+}
+
+pub trait DesktopGraphicsOpenGlBackendDrawCommandSink {
+    fn consume_opengl_draw_command(&mut self, command: DesktopGraphicsOpenGlBackendDrawCommand);
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendDrawCommandSink {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
+}
+
+impl DesktopGraphicsOpenGlBackendDrawCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendDrawCommandSink
+{
+    fn consume_opengl_draw_command(&mut self, command: DesktopGraphicsOpenGlBackendDrawCommand) {
+        self.commands.push(command);
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
+    pub fn to_opengl_draw_commands(&self) -> Vec<DesktopGraphicsOpenGlBackendDrawCommand> {
+        match self {
+            Self::UseProgram { program_handle, .. } => {
+                vec![DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
+                    program_handle: *program_handle,
+                }]
+            }
+            Self::BindTexture { texture_handle, .. } => vec![
+                DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
+                    texture_unit: DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
+                },
+                DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                    target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    texture_handle: *texture_handle,
+                },
+            ],
+            Self::BindVertexArray {
+                vertex_array_handle,
+                ..
+            } => vec![DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                vertex_array_handle: *vertex_array_handle,
+            }],
+            Self::DrawElements {
+                primitive_type,
+                index_count,
+                index_offset,
+            } => vec![DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
+                primitive_type: *primitive_type,
+                index_count: *index_count,
+                index_type: DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT,
+                index_offset_bytes: index_offset.saturating_mul(std::mem::size_of::<u32>()),
+            }],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendHandleAllocator {
     pub next_handle: u32,
 }
@@ -2998,6 +3076,19 @@ pub struct DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub actions: Vec<DesktopGraphicsOpenGlBackendResolvedDrawCallAction>,
+    pub commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
+}
+
+impl DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor {
+    pub fn drive_draw_command_sink<S: DesktopGraphicsOpenGlBackendDrawCommandSink>(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.commands {
+            sink.consume_opengl_draw_command(command.clone());
+        }
+        self.commands.len()
+    }
 }
 
 impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
@@ -3010,8 +3101,10 @@ impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
         let mut recording = DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor::default();
         recording.consume_opengl_sprite_draw_call(draw_call);
         for action in recording.actions {
-            self.actions
-                .push(self.cache.resolve_action(action, &mut self.allocator));
+            let resolved_action = self.cache.resolve_action(action, &mut self.allocator);
+            self.commands
+                .extend(resolved_action.to_opengl_draw_commands());
+            self.actions.push(resolved_action);
         }
     }
 }
@@ -12624,6 +12717,36 @@ mod tests {
                 },
             ]
         );
+        assert_eq!(
+            resolving_executor.commands,
+            vec![
+                super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 1 },
+                super::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
+                    texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    texture_handle: 2,
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                    vertex_array_handle: 3,
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
+                    primitive_type:
+                        super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                    index_count: 6,
+                    index_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT,
+                    index_offset_bytes: 0,
+                },
+            ]
+        );
+        let mut draw_command_sink =
+            super::DesktopGraphicsRecordingOpenGlBackendDrawCommandSink::default();
+        assert_eq!(
+            resolving_executor.drive_draw_command_sink(&mut draw_command_sink),
+            resolving_executor.commands.len()
+        );
+        assert_eq!(draw_command_sink.commands, resolving_executor.commands);
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
