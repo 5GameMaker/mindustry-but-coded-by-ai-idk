@@ -515,6 +515,18 @@ impl DesktopGraphicsOpenGlBackendTextureResourceIdentity {
         }
     }
 
+    pub fn from_shader_texture_binding(texture: &TextureBinding) -> Self {
+        match texture {
+            TextureBinding::Asset(source_path) => Self::from_atlas_page(
+                opengl_backend_texture_page_type_from_source_path(source_path),
+                source_path.clone(),
+            ),
+            TextureBinding::EffectBuffer => {
+                Self::from_runtime_texture("renderer.effectBuffer.texture")
+            }
+        }
+    }
+
     pub fn with_gl_handle(mut self, gl_handle: u32, generation: u64) -> Self {
         self.generation = generation;
         self.gl_handle = Some(gl_handle);
@@ -526,6 +538,21 @@ impl DesktopGraphicsOpenGlBackendTextureResourceIdentity {
         self.generation = generation;
         self.gl_handle = Some(gl_handle);
         self
+    }
+}
+
+fn opengl_backend_texture_page_type_from_source_path(source_path: &str) -> PageType {
+    let path = source_path.trim().replace('\\', "/").to_ascii_lowercase();
+    if path.contains("sprites/blocks/environment")
+        || path.contains("sprites-override/blocks/environment")
+    {
+        PageType::Environment
+    } else if path.contains("sprites/rubble") || path.contains("sprites-override/rubble") {
+        PageType::Rubble
+    } else if path.contains("sprites/ui") || path.contains("sprites-override/ui") {
+        PageType::Ui
+    } else {
+        PageType::Main
     }
 }
 
@@ -1338,6 +1365,8 @@ pub struct DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan {
     pub slot: u8,
     pub texture: TextureBinding,
     pub uniform_location: Option<i32>,
+    pub resolved_texture_identity: Option<DesktopGraphicsOpenGlBackendTextureResourceIdentity>,
+    pub resolved_texture_handle: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1974,6 +2003,8 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
                     slot: *slot,
                     texture: texture.clone(),
                     uniform_location: None,
+                    resolved_texture_identity: None,
+                    resolved_texture_handle: None,
                 }),
                 _ => None,
             })
@@ -1995,6 +2026,26 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
         for binding in &mut self.texture_unit_bindings {
             binding.uniform_location =
                 Some(cache.uniform_location(&self.identity.program_key, binding.uniform));
+        }
+    }
+
+    pub fn resolve_texture_bindings(
+        &mut self,
+        cache: &mut DesktopGraphicsOpenGlBackendHandleCache,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) {
+        for binding in &mut self.texture_unit_bindings {
+            let texture_identity =
+                DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_shader_texture_binding(
+                    &binding.texture,
+                );
+            let texture_handle = cache.texture_handle_for_identity(&texture_identity, allocator);
+            binding.resolved_texture_identity = Some(
+                texture_identity
+                    .clone()
+                    .with_uploaded_gl_handle(texture_handle, texture_identity.generation),
+            );
+            binding.resolved_texture_handle = Some(texture_handle);
         }
     }
 
@@ -4244,6 +4295,8 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub shader_commands: Vec<DesktopGraphicsOpenGlBackendShaderCommand>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
+    pub shader_texture_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub sprite_texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
@@ -4289,6 +4342,8 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             shader_program_bindings: Vec::new(),
             shader_commands: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
+            shader_texture_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
+            shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
             sprite_texture_upload_plans: Vec::new(),
@@ -4579,6 +4634,10 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
                 let mut binding =
                     DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
                 binding.resolve_locations(&mut self.state.location_cache);
+                binding.resolve_texture_bindings(
+                    &mut self.state.shader_texture_handle_cache,
+                    &mut self.state.shader_texture_handle_allocator,
+                );
                 self.state.current_shader_program = Some(binding.identity.clone());
                 self.state
                     .shader_commands
@@ -4627,6 +4686,8 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub shader_commands: Vec<DesktopGraphicsOpenGlBackendShaderCommand>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
+    pub shader_texture_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub sprite_texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
@@ -4673,6 +4734,8 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             shader_program_bindings: Vec::new(),
             shader_commands: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
+            shader_texture_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
+            shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
             sprite_texture_upload_plans: Vec::new(),
@@ -4963,6 +5026,10 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                 let mut binding =
                     DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
                 binding.resolve_locations(&mut self.state.location_cache);
+                binding.resolve_texture_bindings(
+                    &mut self.state.shader_texture_handle_cache,
+                    &mut self.state.shader_texture_handle_allocator,
+                );
                 self.state.current_shader_program = Some(binding.identity.clone());
                 self.state
                     .shader_commands
@@ -14664,6 +14731,10 @@ mod tests {
             super::DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
         let mut location_cache = super::DesktopGraphicsOpenGlBackendLocationCache::default();
         binding.resolve_locations(&mut location_cache);
+        let mut texture_handle_cache = super::DesktopGraphicsOpenGlBackendHandleCache::default();
+        let mut texture_handle_allocator =
+            super::DesktopGraphicsOpenGlBackendHandleAllocator::default();
+        binding.resolve_texture_bindings(&mut texture_handle_cache, &mut texture_handle_allocator);
 
         assert_eq!(
             binding
@@ -14672,6 +14743,37 @@ mod tests {
                 .map(|binding| (binding.uniform, binding.slot, binding.uniform_location))
                 .collect::<Vec<_>>(),
             vec![("u_noise", 1, Some(0)), ("effectBuffer", 0, Some(1))]
+        );
+        assert_eq!(
+            binding.texture_unit_bindings[0].resolved_texture_identity,
+            Some(super::DesktopGraphicsOpenGlBackendTextureResourceIdentity {
+                key: "atlas:Main:sprites/noise.png".into(),
+                resource_kind: super::DesktopGraphicsOpenGlBackendTextureResourceKind::AtlasPage,
+                page_type: PageType::Main,
+                page_source_path: "sprites/noise.png".into(),
+                generation: 0,
+                gl_handle: Some(1),
+            })
+        );
+        assert_eq!(
+            binding.texture_unit_bindings[0].resolved_texture_handle,
+            Some(1)
+        );
+        assert_eq!(
+            binding.texture_unit_bindings[1].resolved_texture_identity,
+            Some(super::DesktopGraphicsOpenGlBackendTextureResourceIdentity {
+                key: "runtime-texture:renderer.effectBuffer.texture".into(),
+                resource_kind:
+                    super::DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture,
+                page_type: PageType::Ui,
+                page_source_path: "runtime:renderer.effectBuffer.texture".into(),
+                generation: 0,
+                gl_handle: Some(2),
+            })
+        );
+        assert_eq!(
+            binding.texture_unit_bindings[1].resolved_texture_handle,
+            Some(2)
         );
         let commands = binding.to_opengl_shader_commands();
         assert_eq!(

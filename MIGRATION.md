@@ -14097,7 +14097,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 预处理仍是最小模型，未覆盖 Arc 全量平台差异；
   - preprocess 结果尚未与 resolved lifecycle executor 合并为真实 shader build executor；
   - compile/link error log 仍未记录；
-  - 当前总体迁移约 31.5%，仍未达到完整可玩。
+  - 当前总体迁移约 31.6%，仍未达到完整可玩。
 
 ## 12.457 Shader build executor 与 compile/link log 边界接入
 
@@ -14126,4 +14126,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - build executor 仍未调用真实 `glCreateShader/glShaderSource/glCompileShader/glLinkProgram`；
   - compile/link log 当前由 override/record 边界表达，尚未来自真实 GL；
   - build report 的 program handle 尚未和 `ShaderApply/DrawCommand` 的 `UseProgram` 合流；
-  - 当前总体迁移约 31.5%，仍未达到完整可玩。
+  - 当前总体迁移约 31.6%，仍未达到完整可玩。
+
+## 12.458 Shader texture binding 解析闭环
+
+- 2026-05-29：继续把 `ShaderApply` 侧的 `TextureBinding` 解析成可执行资源身份与句柄。当前 `Asset` / `EffectBuffer` 已经从纯符号 binding 推到 `TextureResourceIdentity + handle`，并由 shader binding 自身保存解析结果。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendTextureResourceIdentity` 新增 `from_shader_texture_binding(...)`，`Asset(path)` 走路径推断 page type 的 atlas identity，`EffectBuffer` 走稳定 runtime texture identity；
+    - `DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan` 新增 `resolved_texture_identity` / `resolved_texture_handle`；
+    - `DesktopGraphicsOpenGlBackendShaderProgramBinding::resolve_texture_bindings(...)` 负责把 shader apply 的 texture binding 解析到 identity/handle；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 与 `DesktopGraphicsOpenGlBackendExecutorState` 都补了 shader texture handle cache / allocator，并在 ShaderApply 事件里同步解析 texture binding。
+  - 测试：
+    - `desktop_graphics_opengl_shader_commands_preserve_texture_units_without_implicit_sampler_upload`
+    - `cargo test -p mindustry-desktop shader_commands --lib`
+    - `cargo test -p mindustry-desktop opengl --lib`
+    - `cargo fmt`
+- 迁移意义：
+  - shader apply 侧不再只是“先发 `BindTexture(TextureBinding)` 再说”，而是已经能把 `Asset` / `EffectBuffer` 映射成稳定资源身份和运行时 handle；
+  - 这一步让 shader 路线开始和 sprite texture / handle cache 共享同一套资源语义，后续真实 GL executor 可以直接接这个 identity/handle 层；
+  - 仍然保持 OpenGL / Arc 路线，没有切到 wgpu / Bevy / Vulkan。
+- 仍未完成：
+  - shader apply 的 `UseProgram` 仍是 `program_key` 主导，尚未和 draw 侧 `program_handle` 真正合流；
+  - `EffectBuffer` 仍是语义上稳定的 runtime texture identity，但还没接到真实 framebuffer attachment 管线；
+  - 当前总体迁移约 31.6%，仍未达到完整可玩。

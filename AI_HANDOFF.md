@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **31.5%**。
+- 当前总体迁移完成度：约 **31.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -398,11 +398,43 @@ git -C 'D:/MDT/rust-mindustry' status --short
 - 当前 shader 链路已经从“离散 loader / preprocess / lifecycle helper”推进到“单一 build executor”，后续真实 OpenGL executor 可以直接接这个 report 边界写入 `glCreateShader/glCompileShader/glLinkProgram` 的结果。
 - 仍然保持原版 Arc / OpenGL 路线，没有引入 wgpu / Bevy / Vulkan。
 
-当前总体迁移约 **31.5%**，下一步建议继续推进：
+当前总体迁移约 **31.6%**，下一步建议继续推进：
 
 1. `program handle` 与 `ShaderApply/DrawCommand::UseProgram` 合流。
 2. `TextureBinding::Asset / EffectBuffer` 解析成实际纹理资源句柄。
 3. 继续收紧 OpenGL executor，让 shader build report 连接到真实 GL 状态流。
+
+### 2026-05-29 续作：Shader texture binding 解析闭环
+
+文件：
+
+- `desktop/src/lib.rs`
+- `MIGRATION.md`
+- `README.md`
+
+完成内容：
+
+1. `DesktopGraphicsOpenGlBackendTextureResourceIdentity` 新增 `from_shader_texture_binding(...)`：
+   - `TextureBinding::Asset(path)` 依据路径推断 `PageType` 并生成 atlas identity；
+   - `TextureBinding::EffectBuffer` 映射到稳定 runtime texture identity。
+2. `DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan` 新增：
+   - `resolved_texture_identity`
+   - `resolved_texture_handle`
+3. `DesktopGraphicsOpenGlBackendShaderProgramBinding::resolve_texture_bindings(...)` 已把 shader apply 的 texture binding 解析成 identity/handle。
+4. `DesktopGraphicsOpenGlBackendAdapterExecutionState` 与 `DesktopGraphicsOpenGlBackendExecutorState` 都补了 shader texture handle cache / allocator，并在 ShaderApply 事件里同步解析 texture binding。
+5. 新增/更新测试：
+   - `desktop_graphics_opengl_shader_commands_preserve_texture_units_without_implicit_sampler_upload`
+   - `cargo test -p mindustry-desktop shader_commands --lib`
+   - `cargo test -p mindustry-desktop opengl --lib`
+   - `cargo fmt`
+
+迁移意义：
+
+- shader apply 侧开始真正共享 sprite texture 那套 resource identity / handle 语义；
+- `EffectBuffer` 不再只是纯符号占位，而是已经有稳定 runtime texture identity；
+- 这一步仍然保持 OpenGL / Arc 路线，没有切换到别的渲染引擎。
+
+当前总体迁移完成度：约 **31.6%**。
 
 ### 较早完成：世界流前置信息
 
