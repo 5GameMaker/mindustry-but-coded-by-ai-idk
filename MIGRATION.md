@@ -14271,3 +14271,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shader/draw/mesh/upload 的驱动顺序仍是阶段聚合顺序，完整 frame event interleaving 后续需要在 real GL backend 中恢复；
   - framebuffer attachment resize、resolve/present、window/context 仍未接入；
   - 当前总体迁移约 32.1%，仍未达到完整可玩。
+
+## 12.464 EffectBuffer attachment resize/generation 接入
+
+- 2026-05-29：继续对齐 Java `renderer.effectBuffer.resize(...)` / `FrameBuffer` 生命周期语义。当前 framebuffer attachment plan 已携带 `width/height/generation`，并按 Arc `FrameBuffer.resize(...)` 将尺寸 clamp 到至少 `2x2`；handle cache 会记录 framebuffer/color attachment 当前尺寸与 generation；同尺寸同 generation 复用，尺寸或 generation 变化时同步重建 framebuffer handle 与 color texture handle 并保留 previous handle。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan` 新增 `width` / `height` / `generation`；
+    - 新增 `DesktopGraphicsOpenGlBackendFramebufferAttachmentState`，记录 framebuffer handle、color texture handle、尺寸与 generation；
+    - `DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment` 新增 `previous_framebuffer_handle`、`framebuffer_was_recreated`、`previous_color_texture_handle`、`color_texture_was_recreated`、尺寸与 generation；
+    - `DesktopGraphicsOpenGlBackendHandleCache` 新增 `framebuffer_attachments` 状态表；
+    - `resolve_framebuffer_attachment(...)` 会按尺寸/generation 判断是否重建 framebuffer 与 attachment texture；
+    - 新增 `effect_buffer_with_size(...)` 构造器与 `desktop_graphics_opengl_effect_buffer_attachment_resize_recreates_framebuffer_and_color_texture` 测试。
+- 迁移意义：
+  - `EffectBuffer` 不再只是“有 FBO attachment 身份”，而是开始具备 resize/recreate 生命周期；
+  - 为后续真实 `glFramebufferTexture2D`、surface resize、viewport resize、shader blit 采样旧/新 attachment 提供了明确状态边界；
+  - resize/generation 变化时 framebuffer 与 color texture 都会替换，贴近 Arc `FrameBuffer.resize(...)` 的 `dispose()` + `build()` 资源生命周期。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop effect_buffer --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - attachment resize 尚未从 `DesktopSurfaceSize` / actual frame surface 自动驱动；
+  - 未执行真实 `glBindFramebuffer/glFramebufferTexture2D/glViewport`；
+  - `ShaderBlit` / `DrawFboSample` 仍未消费该 attachment 执行真实 resolve；
+  - 当前总体迁移约 32.3%，仍未达到完整可玩。

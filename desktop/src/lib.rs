@@ -663,21 +663,47 @@ pub struct DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan {
     pub framebuffer_target: u32,
     pub color_attachment: u32,
     pub color_texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
+    pub width: u32,
+    pub height: u32,
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
     pub framebuffer_key: String,
     pub framebuffer_handle: u32,
+    pub previous_framebuffer_handle: Option<u32>,
+    pub framebuffer_was_recreated: bool,
     pub framebuffer_target: u32,
     pub color_attachment: u32,
     pub color_texture_key: String,
     pub color_texture_handle: u32,
+    pub previous_color_texture_handle: Option<u32>,
+    pub color_texture_was_recreated: bool,
+    pub width: u32,
+    pub height: u32,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendFramebufferAttachmentState {
+    pub framebuffer_handle: u32,
+    pub color_texture_handle: u32,
+    pub width: u32,
+    pub height: u32,
+    pub generation: u64,
 }
 
 impl DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan {
-    pub fn from_buffer_name(name: impl Into<String>) -> Self {
+    pub fn from_buffer_name_with_size(
+        name: impl Into<String>,
+        width: u32,
+        height: u32,
+        generation: u64,
+    ) -> Self {
         let name = name.into();
+        let width = width.max(2);
+        let height = height.max(2);
         Self {
             framebuffer_key: format!("framebuffer:{name}"),
             framebuffer_target: DESKTOP_GRAPHICS_OPENGL_FRAMEBUFFER,
@@ -686,7 +712,18 @@ impl DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan {
                 DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_framebuffer_color_attachment(
                     name,
                 ),
+            width,
+            height,
+            generation,
         }
+    }
+
+    pub fn from_buffer_name(name: impl Into<String>) -> Self {
+        Self::from_buffer_name_with_size(name, 0, 0, 0)
+    }
+
+    pub fn effect_buffer_with_size(width: u32, height: u32, generation: u64) -> Self {
+        Self::from_buffer_name_with_size("renderer.effectBuffer", width, height, generation)
     }
 
     pub fn effect_buffer() -> Self {
@@ -3933,6 +3970,8 @@ pub struct DesktopGraphicsOpenGlBackendHandleCache {
     pub shaders: BTreeMap<String, u32>,
     pub textures: BTreeMap<String, u32>,
     pub framebuffers: BTreeMap<String, u32>,
+    pub framebuffer_attachments:
+        BTreeMap<String, DesktopGraphicsOpenGlBackendFramebufferAttachmentState>,
     pub vertex_arrays: BTreeMap<String, u32>,
     pub buffers: BTreeMap<String, u32>,
 }
@@ -4040,21 +4079,85 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
             .or_insert_with(|| allocator.allocate())
     }
 
+    pub fn replace_framebuffer_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> (Option<u32>, u32) {
+        let key = key.into();
+        let framebuffer_handle = allocator.allocate();
+        let previous_framebuffer_handle = self.framebuffers.insert(key, framebuffer_handle);
+        (previous_framebuffer_handle, framebuffer_handle)
+    }
+
     pub fn resolve_framebuffer_attachment(
         &mut self,
         plan: &DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
         allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
     ) -> DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
-        let framebuffer_handle = self.framebuffer_handle(plan.framebuffer_key.clone(), allocator);
-        let color_texture_handle =
-            self.texture_handle_for_identity(&plan.color_texture_identity, allocator);
+        let previous_state = self
+            .framebuffer_attachments
+            .get(&plan.color_texture_identity.key)
+            .copied();
+        let attachment_was_recreated = previous_state
+            .map(|state| {
+                state.width != plan.width
+                    || state.height != plan.height
+                    || state.generation != plan.generation
+            })
+            .unwrap_or(true);
+        let (
+            previous_framebuffer_handle,
+            framebuffer_handle,
+            previous_color_texture_handle,
+            color_texture_handle,
+        ) = if attachment_was_recreated {
+            let (previous_framebuffer_from_cache, framebuffer_handle) =
+                self.replace_framebuffer_handle(plan.framebuffer_key.clone(), allocator);
+            let (previous_texture_from_cache, texture_handle) =
+                self.replace_texture_handle(plan.color_texture_identity.key.clone(), allocator);
+            (
+                previous_framebuffer_from_cache
+                    .or(previous_state.map(|state| state.framebuffer_handle))
+                    .filter(|previous| *previous != framebuffer_handle),
+                framebuffer_handle,
+                previous_texture_from_cache
+                    .or(previous_state.map(|state| state.color_texture_handle))
+                    .filter(|previous| *previous != texture_handle),
+                texture_handle,
+            )
+        } else {
+            (
+                None,
+                self.framebuffer_handle(plan.framebuffer_key.clone(), allocator),
+                None,
+                self.texture_handle_for_identity(&plan.color_texture_identity, allocator),
+            )
+        };
+        self.framebuffer_attachments.insert(
+            plan.color_texture_identity.key.clone(),
+            DesktopGraphicsOpenGlBackendFramebufferAttachmentState {
+                framebuffer_handle,
+                color_texture_handle,
+                width: plan.width,
+                height: plan.height,
+                generation: plan.generation,
+            },
+        );
         DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
             framebuffer_key: plan.framebuffer_key.clone(),
             framebuffer_handle,
+            previous_framebuffer_handle,
+            framebuffer_was_recreated: attachment_was_recreated,
             framebuffer_target: plan.framebuffer_target,
             color_attachment: plan.color_attachment,
             color_texture_key: plan.color_texture_identity.key.clone(),
             color_texture_handle,
+            previous_color_texture_handle,
+            color_texture_was_recreated: attachment_was_recreated,
+            width: plan.width,
+            height: plan.height,
+            generation: plan.generation,
         }
     }
 
@@ -15434,10 +15537,17 @@ mod tests {
             super::DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
                 framebuffer_key: "framebuffer:renderer.effectBuffer".into(),
                 framebuffer_handle: 1,
+                previous_framebuffer_handle: None,
+                framebuffer_was_recreated: true,
                 framebuffer_target: super::DESKTOP_GRAPHICS_OPENGL_FRAMEBUFFER,
                 color_attachment: super::DESKTOP_GRAPHICS_OPENGL_COLOR_ATTACHMENT0,
                 color_texture_key: "framebuffer-attachment:renderer.effectBuffer:color0".into(),
                 color_texture_handle: 2,
+                previous_color_texture_handle: None,
+                color_texture_was_recreated: true,
+                width: 2,
+                height: 2,
+                generation: 0,
             }
         );
         assert_eq!(cache.framebuffers["framebuffer:renderer.effectBuffer"], 1);
@@ -15465,6 +15575,83 @@ mod tests {
                 texture: TextureBinding::EffectBuffer,
                 texture_key: "framebuffer-attachment:renderer.effectBuffer:color0".into(),
                 texture_handle: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_effect_buffer_attachment_resize_recreates_framebuffer_and_color_texture(
+    ) {
+        let mut cache = super::DesktopGraphicsOpenGlBackendHandleCache::default();
+        let mut allocator = super::DesktopGraphicsOpenGlBackendHandleAllocator::default();
+        let clamped =
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::effect_buffer_with_size(
+                0, 1, 0,
+            );
+        assert_eq!(clamped.width, 2);
+        assert_eq!(clamped.height, 2);
+
+        let initial =
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::effect_buffer_with_size(
+                1280, 720, 0,
+            );
+        let first = cache.resolve_framebuffer_attachment(&initial, &mut allocator);
+        assert_eq!(first.framebuffer_handle, 1);
+        assert_eq!(first.previous_framebuffer_handle, None);
+        assert!(first.framebuffer_was_recreated);
+        assert_eq!(first.color_texture_handle, 2);
+        assert_eq!(first.previous_color_texture_handle, None);
+        assert!(first.color_texture_was_recreated);
+
+        let same_size = cache.resolve_framebuffer_attachment(&initial, &mut allocator);
+        assert_eq!(same_size.framebuffer_handle, 1);
+        assert_eq!(same_size.previous_framebuffer_handle, None);
+        assert!(!same_size.framebuffer_was_recreated);
+        assert_eq!(same_size.color_texture_handle, 2);
+        assert_eq!(same_size.previous_color_texture_handle, None);
+        assert!(!same_size.color_texture_was_recreated);
+
+        let resized =
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::effect_buffer_with_size(
+                1920, 1080, 1,
+            );
+        let after_resize = cache.resolve_framebuffer_attachment(&resized, &mut allocator);
+        assert_eq!(after_resize.framebuffer_handle, 3);
+        assert_eq!(after_resize.previous_framebuffer_handle, Some(1));
+        assert!(after_resize.framebuffer_was_recreated);
+        assert_eq!(after_resize.color_texture_handle, 4);
+        assert_eq!(after_resize.previous_color_texture_handle, Some(2));
+        assert!(after_resize.color_texture_was_recreated);
+        assert_eq!(after_resize.width, 1920);
+        assert_eq!(after_resize.height, 1080);
+        assert_eq!(after_resize.generation, 1);
+
+        let regenerated =
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::effect_buffer_with_size(
+                1920, 1080, 2,
+            );
+        let after_generation_change =
+            cache.resolve_framebuffer_attachment(&regenerated, &mut allocator);
+        assert_eq!(after_generation_change.framebuffer_handle, 5);
+        assert_eq!(after_generation_change.previous_framebuffer_handle, Some(3));
+        assert!(after_generation_change.framebuffer_was_recreated);
+        assert_eq!(after_generation_change.color_texture_handle, 6);
+        assert_eq!(
+            after_generation_change.previous_color_texture_handle,
+            Some(4)
+        );
+        assert!(after_generation_change.color_texture_was_recreated);
+        assert_eq!(after_generation_change.width, 1920);
+        assert_eq!(after_generation_change.height, 1080);
+        assert_eq!(after_generation_change.generation, 2);
+        assert_eq!(
+            cache.framebuffer_attachments["framebuffer-attachment:renderer.effectBuffer:color0"],
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentState {
+                framebuffer_handle: 5,
+                color_texture_handle: 6,
+                width: 1920,
+                height: 1080,
+                generation: 2,
             }
         );
     }

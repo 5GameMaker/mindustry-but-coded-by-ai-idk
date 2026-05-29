@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **32.1%**。
+- 当前总体迁移完成度：约 **32.3%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11602,3 +11602,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 做 feature-gated real OpenGL backend 前，先明确 window/context crate 方案；
   2. 继续将 FBO attachment resize/generation 与 pass target 绑定；
   3. 后续接真实 `glTexImage2D/glBufferData/glUseProgram/glDrawElements`。
+
+---
+
+## 370. 最新闭环记录：EffectBuffer attachment resize/generation 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **32.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - framebuffer attachment plan / resolved attachment 增加 `width/height/generation`；
+    - 新增 `DesktopGraphicsOpenGlBackendFramebufferAttachmentState`；
+    - `HandleCache` 新增 `framebuffer_attachments`；
+    - `resolve_framebuffer_attachment(...)` 可区分同尺寸复用与 resize/generation 重建，并在重建时同步替换 framebuffer handle 与 color texture handle；
+    - 新增 `effect_buffer_with_size(...)`；
+    - 测试 `desktop_graphics_opengl_effect_buffer_attachment_resize_recreates_framebuffer_and_color_texture` 锁定首次创建、同尺寸复用、resize/generation 后替换 framebuffer 与 color texture 的 handle 行为。
+- 关键语义：
+  - 尺寸按 Arc `FrameBuffer.resize(...)` 语义 clamp 到至少 `2x2`；
+  - framebuffer handle 与 color attachment texture 都会随 resize/generation 替换，更贴近 Java `dispose()` 后重新 `build()` 的生命周期；
+  - 这是 Java `FrameBuffer.resize(...)` / `renderer.effectBuffer.resize(...)` 的后端状态雏形；
+  - 仍未执行真实 GL，只是先把生命周期状态建模进 shared backend cache。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop effect_buffer --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 将 effectBuffer size 从 `DesktopSurfaceSize` / render frame 自动注入；
+  2. 把 `ShaderBlit` / `DrawFboSample` resolve 接到 attachment texture；
+  3. 再考虑 feature-gated real OpenGL context/window。
