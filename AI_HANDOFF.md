@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **25.3%**。
+- 当前总体迁移完成度：约 **25.4%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9914,3 +9914,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步：
   1. 继续拆 `BlockOverdraw` 或更细 `BlockBuild` pass；
   2. 给 `BlockWalls` pass 填入真实 walls cache tile commands，并最终由 OpenGL/glow backend 消费。
+
+---
+
+## 303. 最新闭环记录：FogFramePlan 接入 RenderFramePlan
+
+- 本轮总体进度更新：约 **25.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderPassKind::Fog`，映射到 `RendererDrawStage::Fog`。
+  - `core/src/mindustry/graphics/fog_renderer.rs`
+    - `FogTextureKind` 可映射到 `RenderTarget::Buffer("fog:static|dynamic")`；
+    - `FogDrawStage::to_render_pass(...)` 将 clear / draw light / draw events / copyFromCpu / composite 阶段转为 `RenderPassKind::Fog`；
+    - composite 阶段使用 `RenderResolveKind::DrawFboSample` 回填到 screen；
+    - `FogFramePlan::to_render_passes()` 将 fog stages 推入可执行 render pass seam。
+  - `desktop/src/lib.rs`
+    - `graphics_frame_for_render(...)` 现在在排序前把 fog passes 推入 `RenderFramePlan`；
+    - fog graphics frame 测试确认 dynamic/static fog composite pass 均进入 render frame。
+- 已验证：
+  - `cargo test -p mindustry-core fog_renderer --lib`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_feeds_fog_renderer_when_rules_and_data_exist --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 Fog pass 的 custom marker 下沉成更具体的 geometry/texture commands；
+  2. 真实 OpenGL/glow backend 需要创建 `fog:static` / `fog:dynamic` FBO 并执行 `DrawFboSample`。

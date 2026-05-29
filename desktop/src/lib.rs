@@ -2664,9 +2664,14 @@ impl DesktopLauncher {
                 render_frame.push_pass(pass);
             }
         }
+        let fog_frame = self.fog_frame_plan(camera, viewport);
+        if let Some(fog_frame) = &fog_frame {
+            for pass in fog_frame.to_render_passes() {
+                render_frame.push_pass(pass);
+            }
+        }
         render_frame.sort_passes_like_java_renderer_draw();
         let floor_chunk_batches = self.floor_chunk_draw_batches(camera, viewport);
-        let fog_frame = self.fog_frame_plan(camera, viewport);
         let pixelator = self.pixelator_frame_plan(camera, viewport);
         let shader_dispatch = self.shader_dispatch_frame_plan(camera, viewport);
         let overlay_renderer = self.drain_overlay_renderer_plan();
@@ -7117,6 +7122,21 @@ mod tests {
         assert_eq!(fog_plan.viewport.tile_size, 8);
         assert!(fog_plan.team_changed);
         assert!(fog_plan.static_fog_enabled);
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let fog_passes = render_frame
+            .passes
+            .iter()
+            .filter(|pass| pass.kind == RenderPassKind::Fog)
+            .collect::<Vec<_>>();
+        assert_eq!(fog_passes.len(), fog_plan.stages.len());
+        assert!(fog_passes.iter().any(|pass| {
+            pass.target == RenderTarget::Buffer("fog:dynamic".into())
+                && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
+        }));
+        assert!(fog_passes.iter().any(|pass| {
+            pass.target == RenderTarget::Buffer("fog:static".into())
+                && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
+        }));
     }
 
     #[test]

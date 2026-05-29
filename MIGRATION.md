@@ -12522,3 +12522,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `BlockWalls` pass 暂时只有 cache layer target/resolve seam，未填真实 wall tile draw commands；
   - 真实 OpenGL/glow backend 尚未消费这些 pass；
   - 当前总体迁移约 25.3%，仍未达到完整可玩。
+
+### 12.397 FogFramePlan 接入 RenderFramePlan
+
+- 2026-05-29：继续减少独立渲染 plan。此前 fog renderer 只作为 `GraphicsFrameBundle.fog_frame` 统计/计划存在，未进入 `RenderFramePlan`。本轮新增 `RenderPassKind::Fog`，并将 fog clear/draw/copy/composite stages 映射为 backend-neutral render passes。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind` 新增 `Fog`；
+    - `Fog.label() = "fog"`，`default_order() = 90`，`java_renderer_draw_stage() = RendererDrawStage::Fog`。
+  - `core/src/mindustry/graphics/fog_renderer.rs`
+    - `FogTextureKind::render_target()` 产出 `RenderTarget::Buffer("fog:static")` / `Buffer("fog:dynamic")`；
+    - `FogDrawStage::to_render_pass(stage_index)` 将：
+      - clear -> `RenderCommand::Clear`；
+      - draw light -> `Custom("fog-draw-light")`；
+      - draw events -> `Custom("fog-draw-events")`；
+      - copyFromCpu -> `Custom("fog-copy-from-cpu")`；
+      - composite -> `Custom("fog-composite") + Screen/DrawFboSample resolve`；
+    - `FogFramePlan::to_render_passes()` 汇总 fog stage passes。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 现在先构建 fog frame，再把 `fog_frame.to_render_passes()` 推入 render frame，最后统一 Java stage sort；
+    - desktop fog 测试确认 static/dynamic fog composite pass 均进入 render frame。
+- Java 对照要点：
+  - 对齐 `FogRenderer.drawFog()` 中 `dynamicFog.begin/end`、`staticFog.begin/end`、`Draw.shader(Shaders.fog)` 与 `Draw.fbo(...)` 的主链位置；
+  - 当前仍是 backend-neutral seam，真实 fog 多边形、CPU texture upload、shader/fbo 仍待 OpenGL/glow backend 执行。
+- 已跑验证：
+  - `cargo test -p mindustry-core fog_renderer --lib`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_feeds_fog_renderer_when_rules_and_data_exist --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - fog pass 内仍有 custom marker，未完全拆成 primitive/texture upload commands；
+  - `fog:static` / `fog:dynamic` 仍未绑定真实 FBO/texture；
+  - 当前总体迁移约 25.4%，仍未达到完整可玩。

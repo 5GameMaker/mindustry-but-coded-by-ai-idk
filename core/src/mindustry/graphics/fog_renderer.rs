@@ -8,6 +8,10 @@
 //!
 //! 目标是让不同渲染后端在不依赖 GPU API 的前提下，按同一份计划执行。
 
+use super::{
+    RenderCommand, RenderPass, RenderPassKind, RenderProperty, RenderResolveKind, RenderTarget,
+};
+
 pub const DEFAULT_FOG_EVENT_PADDING: i32 = 1;
 pub const DEFAULT_STATIC_FOG_DYNAMIC_ALPHA: f32 = 0.5;
 
@@ -16,6 +20,19 @@ pub enum FogTextureKind {
     #[default]
     Static,
     Dynamic,
+}
+
+impl FogTextureKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::Dynamic => "dynamic",
+        }
+    }
+
+    pub fn render_target(self) -> RenderTarget {
+        RenderTarget::Buffer(format!("fog:{}", self.label()))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,6 +57,10 @@ impl FogColor {
         } else {
             self.a.max(DEFAULT_STATIC_FOG_DYNAMIC_ALPHA)
         }
+    }
+
+    pub const fn rgba(self) -> [f32; 4] {
+        [self.r, self.g, self.b, self.a]
     }
 }
 
@@ -343,6 +364,90 @@ pub enum FogDrawStage {
     Composite(FogCompositeStage),
 }
 
+impl FogDrawStage {
+    pub fn texture_kind(&self) -> FogTextureKind {
+        match self {
+            Self::Clear(stage) => stage.kind,
+            Self::DrawLight(stage) => stage.kind,
+            Self::DrawFog(stage) => stage.kind,
+            Self::CopyFromCpu(stage) => stage.kind,
+            Self::Composite(stage) => stage.kind,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Clear(_) => "clear",
+            Self::DrawLight(_) => "draw_light",
+            Self::DrawFog(_) => "draw_fog",
+            Self::CopyFromCpu(_) => "copy_from_cpu",
+            Self::Composite(_) => "composite",
+        }
+    }
+
+    pub fn to_render_pass(&self, stage_index: usize) -> RenderPass {
+        let kind = self.texture_kind();
+        let mut pass = RenderPass::new(RenderPassKind::Fog)
+            .with_order(RenderPassKind::Fog.default_order() + stage_index as i32)
+            .with_target(kind.render_target());
+
+        match self {
+            Self::Clear(stage) => {
+                pass.push(RenderCommand::clear(stage.color.rgba()));
+            }
+            Self::DrawLight(stage) => {
+                pass.push(RenderCommand::custom(
+                    "fog-draw-light",
+                    vec![
+                        RenderProperty::new("texture", stage.kind.label()),
+                        RenderProperty::new("sources", stage.sources.len().to_string()),
+                        RenderProperty::new("clip_padding", stage.clip_padding.to_string()),
+                    ],
+                ));
+            }
+            Self::DrawFog(stage) => {
+                pass.push(RenderCommand::custom(
+                    "fog-draw-events",
+                    vec![
+                        RenderProperty::new("texture", stage.kind.label()),
+                        RenderProperty::new("events", stage.events.len().to_string()),
+                        RenderProperty::new("clip_padding", stage.clip_padding.to_string()),
+                    ],
+                ));
+            }
+            Self::CopyFromCpu(stage) => {
+                pass.push(RenderCommand::custom(
+                    "fog-copy-from-cpu",
+                    vec![
+                        RenderProperty::new("texture", stage.kind.label()),
+                        RenderProperty::new(
+                            "revealed_tiles",
+                            stage.plan.revealed_tiles.len().to_string(),
+                        ),
+                    ],
+                ));
+            }
+            Self::Composite(stage) => {
+                pass = pass.with_resolve(RenderTarget::Screen, RenderResolveKind::DrawFboSample);
+                pass.push(RenderCommand::custom(
+                    "fog-composite",
+                    vec![
+                        RenderProperty::new("texture", stage.kind.label()),
+                        RenderProperty::new("world_width", stage.world_width.to_string()),
+                        RenderProperty::new("world_height", stage.world_height.to_string()),
+                        RenderProperty::new("tile_size", stage.tile_size.to_string()),
+                        RenderProperty::new("offset_x", stage.offset_x.to_string()),
+                        RenderProperty::new("offset_y", stage.offset_y.to_string()),
+                        RenderProperty::new("alpha", stage.alpha.to_string()),
+                    ],
+                ));
+            }
+        }
+
+        pass
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FogFrameInput {
     pub viewport: FogViewport,
@@ -386,6 +491,16 @@ pub struct FogFramePlan {
     pub consumed_events: Vec<FogEvent>,
     pub team_changed: bool,
     pub static_fog_enabled: bool,
+}
+
+impl FogFramePlan {
+    pub fn to_render_passes(&self) -> Vec<RenderPass> {
+        self.stages
+            .iter()
+            .enumerate()
+            .map(|(index, stage)| stage.to_render_pass(index))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -621,6 +736,27 @@ mod tests {
             .stages
             .iter()
             .any(|stage| matches!(stage, FogDrawStage::Composite(stage) if stage.kind == FogTextureKind::Static)));
+
+        let passes = plan.to_render_passes();
+        assert_eq!(passes.len(), plan.stages.len());
+        assert_eq!(passes[0].kind, RenderPassKind::Fog);
+        assert_eq!(passes[0].target, RenderTarget::Buffer("fog:static".into()));
+        assert!(matches!(
+            passes[0].commands.first(),
+            Some(RenderCommand::Custom { name, properties })
+                if name == "fog-copy-from-cpu"
+                    && properties.iter().any(|property| property.key == "revealed_tiles")
+        ));
+        assert!(passes.iter().any(|pass| {
+            pass.target == RenderTarget::Buffer("fog:dynamic".into())
+                && pass.resolve_target == Some(RenderTarget::Screen)
+                && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
+        }));
+        assert!(passes.iter().any(|pass| {
+            pass.target == RenderTarget::Buffer("fog:static".into())
+                && pass.resolve_target == Some(RenderTarget::Screen)
+                && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
+        }));
 
         assert!(state.queued_events.is_empty());
         assert_eq!(state.last_team, Some(2));
