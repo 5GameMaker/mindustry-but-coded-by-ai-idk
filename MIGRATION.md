@@ -13867,3 +13867,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 `glow/glutin/winit` 或等价 window/context/present 层尚未引入，当前是可执行 GL 调用描述层；
   - dirty pixels 后续仍需合并为矩形 sub-image batch，减少真实 GL 调用；
   - 当前总体迁移约 30.5%，仍未达到完整可玩。
+
+## 12.449 PNG RGBA8888 解码接入 texture upload pixel source
+
+- 2026-05-29：继续推进 full page pixel source，不再只停留在 page path 元数据。`core` 侧新增最小 PNG RGBA8888 解码器，支持非交错 8-bit grayscale/RGB/grayscale-alpha/RGBA PNG、zlib IDAT 与 PNG scanline filter 0-4；`desktop` 侧 atlas pixel source 可按路径加载 RGBA8888 字节并校验尺寸，为后续真实 `glTexImage2D` / full-page `glTexSubImage2D` 提供像素缓冲入口。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增 `PngRgba8888Image`、`PngRgba8888DecodeError`；
+    - 新增 `png_rgba8888_from_path(...)` / `png_rgba8888_from_reader(...)` / `png_rgba8888_from_bytes(...)`；
+    - 解码 IDAT zlib 流并反转 PNG scanline filter，输出连续 RGBA8888 bytes；
+    - 新增测试覆盖 RGBA 像素读取与 Up filter 反转。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadPixelBytes`；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError`；
+    - `DesktopGraphicsOpenGlBackendTextureUploadPixelSource::load_rgba8888_pixels(...)` 可从 atlas page path 加载真实 PNG RGBA bytes，并对 page 尺寸做强校验；
+    - 修正测试用 `write_test_png(...)` 为真实 RGBA8 1×1 transparent PNG；
+    - 新增测试覆盖 atlas pixel source 加载 bytes 与尺寸不匹配错误。
+- 迁移意义：
+  - atlas full upload / full-page sub-image 已有从 `page_source_path` 到 RGBA8888 bytes 的最小路径；
+  - 后续 real GL adapter 可以在消费 `TexImage2D` / `TexSubImage2DFromSource` 时调用 pixel source loader 获取 bytes；
+  - 仍保持 `TextureUploadPlan -> ResolvedUpload -> UploadCommand -> PixelSource` 主链路，不新增孤立资源系统。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core png_rgba8888 --lib`
+  - `cargo test -p mindustry-desktop opengl_texture_upload --lib`
+- 仍未完成：
+  - PNG 解码暂不支持 interlace、palette、16-bit、ICC/gamma 等高级 PNG 变体；
+  - atlas page 合成/pack 后像素输出仍未接入，当前能加载已存在的 page PNG；
+  - runtime texture full upload 的 CPU pixmap bytes 仍需从 minimap/floor cache 等状态接入；
+  - 当前总体迁移约 30.6%，仍未达到完整可玩。

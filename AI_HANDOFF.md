@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **30.5%**。
+- 当前总体迁移完成度：约 **30.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11076,3 +11076,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 评估是否在用户确认后引入 `winit + glutin + glow` 可选 real backend；
   3. 推进 SpriteBatch/VBO/IBO 上传命令层与真实 draw executor；
   4. 保持 OpenGL/Arc/SpriteBatch 路线，不切 wgpu/Bevy/Vulkan。
+
+---
+
+## 355. 最新闭环记录：PNG RGBA8888 解码接入 texture upload pixel source
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前本地 HEAD 为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **30.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/texture_atlas.rs`
+    - 新增最小 PNG RGBA8888 解码器，读 IHDR/IDAT/IEND，使用 zlib inflate；
+    - 支持非交错 8-bit grayscale/RGB/grayscale-alpha/RGBA；
+    - 实现 PNG filter 0/1/2/3/4 反转；
+    - 新增 `PngRgba8888Image` / `PngRgba8888DecodeError` 和 `png_rgba8888_from_*` API。
+  - `desktop/src/lib.rs`
+    - 新增 pixel source bytes/loading error 类型；
+    - `DesktopGraphicsOpenGlBackendTextureUploadPixelSource::load_rgba8888_pixels(...)` 可从 atlas page PNG path 加载 RGBA bytes 并校验尺寸；
+    - 测试用 PNG fixture 修正为真实 RGBA8 1×1 transparent PNG；
+    - 新增 pixel source 加载与尺寸 mismatch 测试。
+- 已验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core png_rgba8888 --lib`
+  - `cargo test -p mindustry-desktop opengl_texture_upload --lib`
+- 下一步：
+  1. 把 `TexImage2D` / `TexSubImage2DFromSource` 的 pixel source loader 接入真实 GL command executor；
+  2. 继续实现 atlas page 合成/pack 后像素输出，不能只依赖已存在 page PNG；
+  3. 为 runtime minimap full upload 提供 CPU pixmap bytes；
+  4. 继续推进 SpriteBatch/VBO/IBO 上传与真实 OpenGL window/context/present。

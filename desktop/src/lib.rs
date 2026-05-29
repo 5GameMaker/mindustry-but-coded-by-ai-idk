@@ -30,7 +30,7 @@ use mindustry_core::mindustry::entities::{
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::{
-    BlockRendererBlockParticleWorldSample, BlockRendererBuildingSnapshot,
+    png_rgba8888_from_path, BlockRendererBlockParticleWorldSample, BlockRendererBuildingSnapshot,
     BlockRendererBuildingVisualRuntimeLiquidSnapshot,
     BlockRendererBuildingVisualRuntimePowerSnapshot, BlockRendererBuildingVisualRuntimeSnapshot,
     BlockRendererBuildingVisualRuntimeTurretSnapshot, BlockRendererPlan, BlockRendererState,
@@ -42,14 +42,14 @@ use mindustry_core::mindustry::graphics::{
     MenuFramePlan, MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput,
     MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapTextureFramePlan,
     MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, PageType, Pal, PixelatorCamera,
-    PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBackendFlushBoundary,
-    RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
-    RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
-    RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle,
-    RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCamera,
-    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderParameters, ShaderTextureRegion,
-    ShaderViewport, TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TextureBinding,
-    TileBounds, TileCoord, UniformValue, Viewport as FloorViewport,
+    PixelatorFramePlan, PixelatorInput, PixelatorState, PngRgba8888DecodeError,
+    RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
+    RenderCommand, RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
+    RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
+    RenderTextStyle, RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan,
+    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderParameters,
+    ShaderTextureRegion, ShaderViewport, TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor,
+    TextureBinding, TileBounds, TileCoord, UniformValue, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -619,6 +619,77 @@ pub enum DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
         width: u32,
         height: u32,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendTextureUploadPixelBytes {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError {
+    PngDecode {
+        source_path: String,
+        error: PngRgba8888DecodeError,
+    },
+    SizeMismatch {
+        source_path: String,
+        expected_width: u32,
+        expected_height: u32,
+        actual_width: u32,
+        actual_height: u32,
+    },
+    RuntimeTexturePixelsUnavailable {
+        texture_key: String,
+    },
+}
+
+impl DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
+    pub fn load_rgba8888_pixels(
+        &self,
+    ) -> Result<
+        DesktopGraphicsOpenGlBackendTextureUploadPixelBytes,
+        DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError,
+    > {
+        match self {
+            Self::AtlasPage {
+                page_source_path,
+                width,
+                height,
+                ..
+            } => {
+                let image = png_rgba8888_from_path(page_source_path).map_err(|error| {
+                    DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::PngDecode {
+                        source_path: page_source_path.clone(),
+                        error,
+                    }
+                })?;
+                if image.width != *width || image.height != *height {
+                    return Err(
+                        DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::SizeMismatch {
+                            source_path: page_source_path.clone(),
+                            expected_width: *width,
+                            expected_height: *height,
+                            actual_width: image.width,
+                            actual_height: image.height,
+                        },
+                    );
+                }
+                Ok(DesktopGraphicsOpenGlBackendTextureUploadPixelBytes {
+                    width: image.width,
+                    height: image.height,
+                    pixels: image.pixels,
+                })
+            }
+            Self::RuntimeTexture { texture_key, .. } => Err(
+                DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::RuntimeTexturePixelsUnavailable {
+                    texture_key: texture_key.clone(),
+                },
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11311,6 +11382,53 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_texture_upload_pixel_source_loads_atlas_png_rgba_bytes() {
+        let path = temp_desktop_path("opengl-upload-pixels.png");
+        write_test_png(&path);
+        let source_path = path.to_string_lossy().replace('\\', "/");
+        let pixel_source = super::DesktopGraphicsOpenGlBackendTextureUploadPixelSource::AtlasPage {
+            page_type: PageType::Main,
+            page_source_path: source_path,
+            width: 1,
+            height: 1,
+        };
+
+        let pixels = pixel_source.load_rgba8888_pixels().unwrap();
+
+        assert_eq!(pixels.width, 1);
+        assert_eq!(pixels.height, 1);
+        assert_eq!(pixels.pixels, vec![0, 0, 0, 0]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_texture_upload_pixel_source_reports_size_mismatch() {
+        let path = temp_desktop_path("opengl-upload-pixels-size.png");
+        write_test_png(&path);
+        let source_path = path.to_string_lossy().replace('\\', "/");
+        let pixel_source = super::DesktopGraphicsOpenGlBackendTextureUploadPixelSource::AtlasPage {
+            page_type: PageType::Main,
+            page_source_path: source_path.clone(),
+            width: 2,
+            height: 1,
+        };
+
+        let error = pixel_source.load_rgba8888_pixels().unwrap_err();
+
+        assert_eq!(
+            error,
+            super::DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::SizeMismatch {
+                source_path,
+                expected_width: 2,
+                expected_height: 1,
+                actual_width: 1,
+                actual_height: 1,
+            }
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn desktop_graphics_opengl_texture_upload_executor_uses_tex_sub_image_2d_for_existing_full_page(
     ) {
         let upload = super::DesktopGraphicsOpenGlBackendTextureUploadPlan {
@@ -13386,13 +13504,24 @@ mod tests {
         assert_eq!(crack_count, 7 * 8);
     }
 
+    fn temp_desktop_path(file_name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "mindustry-desktop-{}-{}-{file_name}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos()
+        ))
+    }
+
     fn write_test_png(path: &std::path::Path) {
         const PNG_1X1_TRANSPARENT: &[u8] = &[
             0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
             0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
-            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
-            0x9C, 0x63, 0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE5, 0x27, 0xD4, 0xA2, 0x00,
-            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0x60, 0x00, 0x02, 0x00, 0x00, 0x05, 0x00, 0x01, 0x7A, 0x5E, 0xAB, 0x3F,
+            0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
         ];
         std::fs::write(path, PNG_1X1_TRANSPARENT).expect("test png should be writable");
     }

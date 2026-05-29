@@ -1,4 +1,5 @@
 use super::multi_packer::{MultiPackerPlan, PackPlan, PagePlan, PageSpec, PageType, RegionRequest};
+use flate2::read::ZlibDecoder;
 use std::{fs::File, io::Read, path::Path};
 
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
@@ -331,6 +332,331 @@ impl TextureAtlasSpriteSourceDescriptor {
 pub fn png_dimensions_from_path(path: impl AsRef<Path>) -> Option<(u32, u32)> {
     let mut file = File::open(path.as_ref()).ok()?;
     png_dimensions_from_reader(&mut file)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PngRgba8888Image {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PngRgba8888DecodeError {
+    Io,
+    InvalidSignature,
+    InvalidChunk,
+    MissingIhdr,
+    MissingImageData,
+    DimensionOverflow,
+    UnsupportedBitDepth(u8),
+    UnsupportedColorType(u8),
+    UnsupportedCompression(u8),
+    UnsupportedFilterMethod(u8),
+    UnsupportedInterlace(u8),
+    InvalidInflateStream,
+    InvalidScanline,
+    InvalidFilter(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PngRgba8888Header {
+    width: u32,
+    height: u32,
+    bit_depth: u8,
+    color_type: u8,
+    compression: u8,
+    filter: u8,
+    interlace: u8,
+}
+
+pub fn png_rgba8888_from_path(
+    path: impl AsRef<Path>,
+) -> Result<PngRgba8888Image, PngRgba8888DecodeError> {
+    let mut file = File::open(path.as_ref()).map_err(|_| PngRgba8888DecodeError::Io)?;
+    png_rgba8888_from_reader(&mut file)
+}
+
+pub fn png_rgba8888_from_reader(
+    reader: &mut impl Read,
+) -> Result<PngRgba8888Image, PngRgba8888DecodeError> {
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|_| PngRgba8888DecodeError::Io)?;
+    png_rgba8888_from_bytes(&bytes)
+}
+
+pub fn png_rgba8888_from_bytes(bytes: &[u8]) -> Result<PngRgba8888Image, PngRgba8888DecodeError> {
+    let (header, idat) = parse_png_rgba8888_chunks(bytes)?;
+    decode_png_rgba8888_idat(header, &idat)
+}
+
+fn parse_png_rgba8888_chunks(
+    bytes: &[u8],
+) -> Result<(PngRgba8888Header, Vec<u8>), PngRgba8888DecodeError> {
+    if bytes.len() < PNG_SIGNATURE.len() || bytes[..PNG_SIGNATURE.len()] != PNG_SIGNATURE {
+        return Err(PngRgba8888DecodeError::InvalidSignature);
+    }
+
+    let mut cursor = PNG_SIGNATURE.len();
+    let mut header = None;
+    let mut idat = Vec::new();
+    let mut seen_iend = false;
+
+    while cursor < bytes.len() {
+        if cursor.saturating_add(8) > bytes.len() {
+            return Err(PngRgba8888DecodeError::InvalidChunk);
+        }
+        let len = u32::from_be_bytes(
+            bytes[cursor..cursor + 4]
+                .try_into()
+                .map_err(|_| PngRgba8888DecodeError::InvalidChunk)?,
+        ) as usize;
+        let chunk_type = &bytes[cursor + 4..cursor + 8];
+        let data_start = cursor + 8;
+        let data_end = data_start
+            .checked_add(len)
+            .ok_or(PngRgba8888DecodeError::InvalidChunk)?;
+        let next = data_end
+            .checked_add(4)
+            .ok_or(PngRgba8888DecodeError::InvalidChunk)?;
+        if next > bytes.len() {
+            return Err(PngRgba8888DecodeError::InvalidChunk);
+        }
+        let data = &bytes[data_start..data_end];
+
+        match chunk_type {
+            b"IHDR" => header = Some(parse_png_rgba8888_ihdr(data)?),
+            b"IDAT" => idat.extend_from_slice(data),
+            b"IEND" => {
+                seen_iend = true;
+                break;
+            }
+            _ => {}
+        }
+        cursor = next;
+    }
+
+    if !seen_iend {
+        return Err(PngRgba8888DecodeError::InvalidChunk);
+    }
+    let header = header.ok_or(PngRgba8888DecodeError::MissingIhdr)?;
+    if idat.is_empty() {
+        return Err(PngRgba8888DecodeError::MissingImageData);
+    }
+    Ok((header, idat))
+}
+
+fn parse_png_rgba8888_ihdr(data: &[u8]) -> Result<PngRgba8888Header, PngRgba8888DecodeError> {
+    if data.len() != 13 {
+        return Err(PngRgba8888DecodeError::InvalidChunk);
+    }
+
+    let width = u32::from_be_bytes(
+        data[0..4]
+            .try_into()
+            .map_err(|_| PngRgba8888DecodeError::InvalidChunk)?,
+    );
+    let height = u32::from_be_bytes(
+        data[4..8]
+            .try_into()
+            .map_err(|_| PngRgba8888DecodeError::InvalidChunk)?,
+    );
+    if width == 0 || height == 0 {
+        return Err(PngRgba8888DecodeError::DimensionOverflow);
+    }
+
+    let header = PngRgba8888Header {
+        width,
+        height,
+        bit_depth: data[8],
+        color_type: data[9],
+        compression: data[10],
+        filter: data[11],
+        interlace: data[12],
+    };
+    validate_png_rgba8888_header(header)?;
+    Ok(header)
+}
+
+fn validate_png_rgba8888_header(header: PngRgba8888Header) -> Result<(), PngRgba8888DecodeError> {
+    if header.bit_depth != 8 {
+        return Err(PngRgba8888DecodeError::UnsupportedBitDepth(
+            header.bit_depth,
+        ));
+    }
+    match header.color_type {
+        0 | 2 | 4 | 6 => {}
+        other => return Err(PngRgba8888DecodeError::UnsupportedColorType(other)),
+    }
+    if header.compression != 0 {
+        return Err(PngRgba8888DecodeError::UnsupportedCompression(
+            header.compression,
+        ));
+    }
+    if header.filter != 0 {
+        return Err(PngRgba8888DecodeError::UnsupportedFilterMethod(
+            header.filter,
+        ));
+    }
+    if header.interlace != 0 {
+        return Err(PngRgba8888DecodeError::UnsupportedInterlace(
+            header.interlace,
+        ));
+    }
+    Ok(())
+}
+
+fn decode_png_rgba8888_idat(
+    header: PngRgba8888Header,
+    idat: &[u8],
+) -> Result<PngRgba8888Image, PngRgba8888DecodeError> {
+    let mut zlib = ZlibDecoder::new(idat);
+    let mut inflated = Vec::new();
+    zlib.read_to_end(&mut inflated)
+        .map_err(|_| PngRgba8888DecodeError::InvalidInflateStream)?;
+
+    let bytes_per_pixel = png_rgba8888_source_bytes_per_pixel(header.color_type)?;
+    let width =
+        usize::try_from(header.width).map_err(|_| PngRgba8888DecodeError::DimensionOverflow)?;
+    let height =
+        usize::try_from(header.height).map_err(|_| PngRgba8888DecodeError::DimensionOverflow)?;
+    let row_len = width
+        .checked_mul(bytes_per_pixel)
+        .ok_or(PngRgba8888DecodeError::DimensionOverflow)?;
+    let expected_len = height
+        .checked_mul(
+            row_len
+                .checked_add(1)
+                .ok_or(PngRgba8888DecodeError::DimensionOverflow)?,
+        )
+        .ok_or(PngRgba8888DecodeError::DimensionOverflow)?;
+    if inflated.len() < expected_len {
+        return Err(PngRgba8888DecodeError::InvalidScanline);
+    }
+
+    let output_len = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(PngRgba8888DecodeError::DimensionOverflow)?;
+    let mut pixels = Vec::with_capacity(output_len);
+    let mut previous = vec![0u8; row_len];
+    let mut current = vec![0u8; row_len];
+    let mut cursor = 0;
+
+    for _ in 0..height {
+        let filter = inflated[cursor];
+        cursor += 1;
+        let row = inflated
+            .get(cursor..cursor + row_len)
+            .ok_or(PngRgba8888DecodeError::InvalidScanline)?;
+        cursor += row_len;
+        reverse_png_filter(filter, row, &previous, bytes_per_pixel, &mut current)?;
+        append_png_rgba8888_row(header.color_type, &current, &mut pixels)?;
+        previous.copy_from_slice(&current);
+    }
+
+    Ok(PngRgba8888Image {
+        width: header.width,
+        height: header.height,
+        pixels,
+    })
+}
+
+fn png_rgba8888_source_bytes_per_pixel(color_type: u8) -> Result<usize, PngRgba8888DecodeError> {
+    match color_type {
+        0 => Ok(1),
+        2 => Ok(3),
+        4 => Ok(2),
+        6 => Ok(4),
+        other => Err(PngRgba8888DecodeError::UnsupportedColorType(other)),
+    }
+}
+
+fn reverse_png_filter(
+    filter: u8,
+    row: &[u8],
+    previous: &[u8],
+    bytes_per_pixel: usize,
+    output: &mut [u8],
+) -> Result<(), PngRgba8888DecodeError> {
+    if row.len() != output.len() || previous.len() != output.len() {
+        return Err(PngRgba8888DecodeError::InvalidScanline);
+    }
+
+    for index in 0..row.len() {
+        let left = if index >= bytes_per_pixel {
+            output[index - bytes_per_pixel]
+        } else {
+            0
+        };
+        let up = previous[index];
+        let up_left = if index >= bytes_per_pixel {
+            previous[index - bytes_per_pixel]
+        } else {
+            0
+        };
+        output[index] = match filter {
+            0 => row[index],
+            1 => row[index].wrapping_add(left),
+            2 => row[index].wrapping_add(up),
+            3 => row[index].wrapping_add(((left as u16 + up as u16) / 2) as u8),
+            4 => row[index].wrapping_add(paeth_predictor(left, up, up_left)),
+            other => return Err(PngRgba8888DecodeError::InvalidFilter(other)),
+        };
+    }
+    Ok(())
+}
+
+fn paeth_predictor(left: u8, up: u8, up_left: u8) -> u8 {
+    let left = left as i32;
+    let up = up as i32;
+    let up_left = up_left as i32;
+    let estimate = left + up - up_left;
+    let distance_left = (estimate - left).abs();
+    let distance_up = (estimate - up).abs();
+    let distance_up_left = (estimate - up_left).abs();
+
+    if distance_left <= distance_up && distance_left <= distance_up_left {
+        left as u8
+    } else if distance_up <= distance_up_left {
+        up as u8
+    } else {
+        up_left as u8
+    }
+}
+
+fn append_png_rgba8888_row(
+    color_type: u8,
+    row: &[u8],
+    pixels: &mut Vec<u8>,
+) -> Result<(), PngRgba8888DecodeError> {
+    match color_type {
+        0 => {
+            for gray in row {
+                pixels.extend_from_slice(&[*gray, *gray, *gray, 0xff]);
+            }
+        }
+        2 => {
+            for rgb in row.chunks_exact(3) {
+                pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0xff]);
+            }
+        }
+        4 => {
+            for gray_alpha in row.chunks_exact(2) {
+                pixels.extend_from_slice(&[
+                    gray_alpha[0],
+                    gray_alpha[0],
+                    gray_alpha[0],
+                    gray_alpha[1],
+                ]);
+            }
+        }
+        6 => pixels.extend_from_slice(row),
+        other => return Err(PngRgba8888DecodeError::UnsupportedColorType(other)),
+    }
+    Ok(())
 }
 
 fn png_dimensions_from_reader(reader: &mut impl Read) -> Option<(u32, u32)> {
@@ -1124,6 +1450,40 @@ mod tests {
         bytes
     }
 
+    fn png_chunk(chunk_type: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(chunk_type);
+        bytes.extend_from_slice(data);
+        bytes.extend_from_slice(&0u32.to_be_bytes());
+        bytes
+    }
+
+    fn rgba_png_bytes(width: u32, height: u32, scanlines: &[Vec<u8>]) -> Vec<u8> {
+        use flate2::{write::ZlibEncoder, Compression};
+        use std::io::Write;
+
+        let mut raw = Vec::new();
+        for scanline in scanlines {
+            raw.extend_from_slice(scanline);
+        }
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&raw).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&PNG_SIGNATURE);
+        bytes.extend_from_slice(&png_chunk(b"IHDR", &ihdr));
+        bytes.extend_from_slice(&png_chunk(b"IDAT", &compressed));
+        bytes.extend_from_slice(&png_chunk(b"IEND", &[]));
+        bytes
+    }
+
     fn temp_png_path(stem: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1245,6 +1605,43 @@ mod tests {
         assert_eq!(region.height, 16);
 
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn png_rgba8888_decoder_reads_rgba_pixels() {
+        let bytes = rgba_png_bytes(
+            2,
+            1,
+            &[vec![0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80]],
+        );
+
+        let image = png_rgba8888_from_bytes(&bytes).unwrap();
+
+        assert_eq!(image.width, 2);
+        assert_eq!(image.height, 1);
+        assert_eq!(
+            image.pixels,
+            vec![0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80]
+        );
+    }
+
+    #[test]
+    fn png_rgba8888_decoder_reverses_up_filter() {
+        let bytes = rgba_png_bytes(
+            2,
+            2,
+            &[
+                vec![0, 1, 2, 3, 4, 10, 20, 30, 40],
+                vec![2, 1, 2, 3, 4, 10, 20, 30, 40],
+            ],
+        );
+
+        let image = png_rgba8888_from_bytes(&bytes).unwrap();
+
+        assert_eq!(
+            image.pixels,
+            vec![1, 2, 3, 4, 10, 20, 30, 40, 2, 4, 6, 8, 20, 40, 60, 80]
+        );
     }
 
     #[test]
