@@ -869,6 +869,28 @@ pub enum DesktopGraphicsOpenGlBackendEvent {
     },
 }
 
+pub trait DesktopGraphicsOpenGlBackendAdapter {
+    fn consume_opengl_backend_event(&mut self, event: DesktopGraphicsOpenGlBackendEvent);
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsNullOpenGlBackendAdapter;
+
+impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsNullOpenGlBackendAdapter {
+    fn consume_opengl_backend_event(&mut self, _event: DesktopGraphicsOpenGlBackendEvent) {}
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendAdapter {
+    pub events: Vec<DesktopGraphicsOpenGlBackendEvent>,
+}
+
+impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsRecordingOpenGlBackendAdapter {
+    fn consume_opengl_backend_event(&mut self, event: DesktopGraphicsOpenGlBackendEvent) {
+        self.events.push(event);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub active_pass: Option<DesktopGraphicsOpenGlBackendPassContext>,
@@ -922,12 +944,25 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
     }
 }
 
+impl DesktopGraphicsOpenGlBackendExecutorState {
+    pub fn drive_adapter<A: DesktopGraphicsOpenGlBackendAdapter>(&self, adapter: &mut A) -> usize {
+        for event in &self.event_log {
+            adapter.consume_opengl_backend_event(event.clone());
+        }
+        self.event_log.len()
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendExecutor {
     pub state: DesktopGraphicsOpenGlBackendExecutorState,
 }
 
 impl DesktopGraphicsOpenGlBackendExecutor {
+    pub fn drive_adapter<A: DesktopGraphicsOpenGlBackendAdapter>(&self, adapter: &mut A) -> usize {
+        self.state.drive_adapter(adapter)
+    }
+
     fn record_error(&mut self, message: impl Into<String>) {
         let message = message.into();
         self.state.errors.push(message.clone());
@@ -9040,6 +9075,104 @@ mod tests {
             state.last_step.as_ref().map(|step| &step.kind),
             Some(DesktopGraphicsOpenGlBackendStepKind::EndPass)
         ));
+
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        plan.drive_step_sink(&mut executor);
+        let mut adapter = super::DesktopGraphicsRecordingOpenGlBackendAdapter::default();
+        let event_count = executor.drive_adapter(&mut adapter);
+        assert_eq!(event_count, executor.state.event_log.len());
+        assert_eq!(adapter.events, executor.state.event_log);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_adapter_receives_noop_command_events() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(45, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Overlay)
+            .with_order(RenderPassKind::Overlay.default_order());
+        pass.extend([
+            RenderCommand::FillRect {
+                rect: RenderRect::new(0.0, 0.0, 8.0, 8.0),
+                color: [0.1, 0.2, 0.3, 1.0],
+                layer: Layer::OVERLAY_UI,
+            },
+            RenderCommand::StrokeRect {
+                rect: RenderRect::new(8.0, 0.0, 8.0, 8.0),
+                color: [0.3, 0.2, 0.1, 1.0],
+                thickness: 2.0,
+                layer: Layer::OVERLAY_UI,
+            },
+            RenderCommand::DrawLine {
+                from: RenderPoint::new(0.0, 0.0),
+                to: RenderPoint::new(8.0, 8.0),
+                stroke: 1.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                layer: Layer::OVERLAY_UI,
+            },
+            RenderCommand::DrawPolygon {
+                center: RenderPoint::new(12.0, 12.0),
+                radius: 4.0,
+                sides: 6,
+                rotation: 0.0,
+                color: [0.8, 0.8, 1.0, 1.0],
+                filled: false,
+                layer: Layer::OVERLAY_UI,
+            },
+            RenderCommand::DrawPixel {
+                x: 3,
+                y: 4,
+                color: [1.0, 0.0, 0.0, 1.0],
+                layer: Layer::OVERLAY_UI,
+            },
+            RenderCommand::draw_sprite(
+                "router",
+                RenderRect::new(16.0, 16.0, 8.0, 8.0),
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                Layer::OVERLAY_UI,
+            ),
+        ]);
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        plan.drive_step_sink(&mut executor);
+        let mut adapter = super::DesktopGraphicsRecordingOpenGlBackendAdapter::default();
+        executor.drive_adapter(&mut adapter);
+
+        let command_kinds = adapter
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                super::DesktopGraphicsOpenGlBackendEvent::Command { kind, .. } => Some(*kind),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            command_kinds,
+            vec![
+                "FillRect",
+                "StrokeRect",
+                "DrawLine",
+                "DrawPolygon",
+                "DrawPixel",
+                "DrawSprite"
+            ]
+        );
+        assert_eq!(executor.state.draw_sprite_commands, 1);
+        assert_eq!(executor.state.commands, 6);
+        assert!(executor.state.errors.is_empty());
     }
 
     #[test]

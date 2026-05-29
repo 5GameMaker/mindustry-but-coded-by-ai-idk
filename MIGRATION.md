@@ -12989,3 +12989,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - resource table 仍未映射到真实 OpenGL object id / FBO / texture handle；
   - 尚未把 `DesktopGraphicsOpenGlBackendEvent` 拆成真实 adapter trait；
   - 当前总体迁移约 27.0%，仍未达到完整可玩。
+
+## 12.414 OpenGL backend adapter trait 边界
+
+- 2026-05-29：继续收口 OpenGL 后端执行边界，新增无依赖 backend adapter trait，使 executor 的 event log 可以被 adapter 顺序消费。该层仍不引入 `glow/glutin/winit`，只定义后续真实 OpenGL adapter 的输入边界。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendAdapter` trait；
+    - 新增 `DesktopGraphicsNullOpenGlBackendAdapter`；
+    - 新增 `DesktopGraphicsRecordingOpenGlBackendAdapter`；
+    - `DesktopGraphicsOpenGlBackendExecutorState::drive_adapter(...)` 与 `DesktopGraphicsOpenGlBackendExecutor::drive_adapter(...)` 可将 event log 顺序送入 adapter；
+    - 新增测试 `desktop_graphics_opengl_backend_adapter_receives_noop_command_events`，证明 `FillRect / StrokeRect / DrawLine / DrawPolygon / DrawPixel` 等暂未真实绘制的命令仍进入 adapter event，不会丢失为独立模块外的孤立数据。
+- 迁移意义：
+  - OpenGL 后端现在形成 `FramePlan -> Step -> ExecutorState/EventLog -> Adapter` 的连续链路；
+  - 后续真实 GL 实现可以实现 adapter trait，而不是绕过现有 render/runtime 主链。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - adapter 仍是事件消费边界，尚未绑定真实 OpenGL API；
+  - `DrawSprite / DrawCircle / DrawText` 的 GPU path 仍待落地；
+  - 当前总体迁移约 27.1%，仍未达到完整可玩。
