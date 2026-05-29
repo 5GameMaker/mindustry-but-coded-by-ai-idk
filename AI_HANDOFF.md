@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **28.8%**。
+- 当前总体迁移完成度：约 **28.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10730,3 +10730,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续推进 Arc packed color / packed mixColor 顶点布局；
   2. 增加 texture handle/resource identity，避免把 page path 当成真实 GL 纹理身份；
   3. 后续落地 VBO/IBO/VAO 与 shader program binding。
+
+---
+
+## 338. 最新闭环记录：Arc SpriteBatch packed color 上传布局
+
+- 本轮总体进度更新：约 **28.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendPackedSpriteVertex`；
+    - 新增 `opengl_backend_pack_color_rgba(...)`，按 ABGR float bits + `0xfeff_ffff` mask 打包；
+    - `DesktopGraphicsOpenGlBackendSpriteMeshBatch` 新增 `packed_vertices`；
+    - `DesktopGraphicsOpenGlBackendMeshBufferPlan` 改为 6-float Arc sprite upload stride；
+    - 测试覆盖 white/clear 与非平凡 RGBA/mixColor packed bits。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 增加 texture handle/resource identity，避免 page path 被误当成 GL texture；
+  2. 推进 VBO/IBO/VAO buffer resource plan；
+  3. 接 shader program binding 与实际 draw call executor。

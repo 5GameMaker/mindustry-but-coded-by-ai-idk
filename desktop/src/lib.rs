@@ -492,6 +492,25 @@ pub struct DesktopGraphicsOpenGlBackendSpriteVertex {
     pub mix_color: [f32; 4],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendPackedSpriteVertex {
+    pub position: RenderPoint,
+    pub color_packed: f32,
+    pub uv: [f32; 2],
+    pub mix_color_packed: f32,
+}
+
+impl DesktopGraphicsOpenGlBackendPackedSpriteVertex {
+    fn from_sprite_vertex(vertex: DesktopGraphicsOpenGlBackendSpriteVertex) -> Self {
+        Self {
+            position: vertex.position,
+            color_packed: opengl_backend_pack_color_rgba(vertex.color),
+            uv: vertex.uv,
+            mix_color_packed: opengl_backend_pack_color_rgba(vertex.mix_color),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteQuad {
     pub command_index: Option<usize>,
@@ -574,6 +593,7 @@ pub struct DesktopGraphicsOpenGlBackendSpriteMeshBatch {
     pub min_layer: f32,
     pub max_layer: f32,
     pub vertices: Vec<DesktopGraphicsOpenGlBackendSpriteVertex>,
+    pub packed_vertices: Vec<DesktopGraphicsOpenGlBackendPackedSpriteVertex>,
     pub indices: Vec<u32>,
 }
 
@@ -588,7 +608,9 @@ pub struct DesktopGraphicsOpenGlBackendMeshBufferPlan {
 }
 
 impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
-    pub const SPRITE_VERTEX_STRIDE_BYTES: usize = 12 * std::mem::size_of::<f32>();
+    pub const SPRITE_VERTEX_FLOATS: usize = 6;
+    pub const SPRITE_VERTEX_STRIDE_BYTES: usize =
+        Self::SPRITE_VERTEX_FLOATS * std::mem::size_of::<f32>();
 
     pub fn from_sprite_batch(
         batch_index: usize,
@@ -596,10 +618,10 @@ impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
     ) -> Self {
         Self {
             batch_index,
-            vertex_count: batch.vertices.len(),
+            vertex_count: batch.packed_vertices.len(),
             index_count: batch.indices.len(),
             vertex_stride_bytes: Self::SPRITE_VERTEX_STRIDE_BYTES,
-            vertex_buffer_bytes: batch.vertices.len() * Self::SPRITE_VERTEX_STRIDE_BYTES,
+            vertex_buffer_bytes: batch.packed_vertices.len() * Self::SPRITE_VERTEX_STRIDE_BYTES,
             index_buffer_bytes: batch.indices.len() * std::mem::size_of::<u32>(),
         }
     }
@@ -617,6 +639,7 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshBatch {
             min_layer: quad.layer,
             max_layer: quad.layer,
             vertices: Vec::new(),
+            packed_vertices: Vec::new(),
             indices: Vec::new(),
         }
     }
@@ -624,6 +647,12 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshBatch {
     fn push_quad(&mut self, quad: &DesktopGraphicsOpenGlBackendSpriteQuad) {
         let base = self.vertices.len() as u32;
         self.vertices.extend_from_slice(&quad.vertices);
+        self.packed_vertices.extend(
+            quad.vertices
+                .iter()
+                .copied()
+                .map(DesktopGraphicsOpenGlBackendPackedSpriteVertex::from_sprite_vertex),
+        );
         self.indices
             .extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 3, base]);
         self.quad_count += 1;
@@ -664,6 +693,11 @@ fn opengl_backend_sprite_mesh_batches_from_quads(
         }
     }
     batches
+}
+
+fn opengl_backend_pack_color_rgba(color: [f32; 4]) -> f32 {
+    let [r, g, b, a] = color.map(|channel| (channel.clamp(0.0, 1.0) * 255.0) as u32);
+    f32::from_bits(((a << 24) | (b << 16) | (g << 8) | r) & 0xfeff_ffff)
 }
 
 fn opengl_backend_sprite_quad_positions(
@@ -9415,6 +9449,17 @@ mod tests {
             }
         }
 
+        let packed = super::DesktopGraphicsOpenGlBackendPackedSpriteVertex::from_sprite_vertex(
+            super::DesktopGraphicsOpenGlBackendSpriteVertex {
+                position: RenderPoint::new(1.0, 2.0),
+                uv: [0.25, 0.75],
+                color: [1.0, 0.5, 0.25, 0.75],
+                mix_color: [0.2, 0.3, 0.4, 0.5],
+            },
+        );
+        assert_eq!(packed.color_packed.to_bits(), 0xbe3f_7fff);
+        assert_eq!(packed.mix_color_packed.to_bits(), 0x7e66_4c33);
+
         let binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
             command_index: Some(7),
             symbol: "pivot-router".into(),
@@ -9722,6 +9767,11 @@ mod tests {
         assert_eq!(mesh_batch.page_source_path, "sprites.png");
         assert_eq!(mesh_batch.quad_count, 1);
         assert_eq!(mesh_batch.vertices.len(), 4);
+        assert_eq!(mesh_batch.packed_vertices.len(), 4);
+        assert!(mesh_batch.packed_vertices.iter().all(|vertex| {
+            vertex.color_packed.to_bits() == 0xfeff_ffff
+                && vertex.mix_color_packed.to_bits() == 0x0000_0000
+        }));
         assert_eq!(mesh_batch.indices, vec![0, 1, 2, 2, 3, 0]);
         assert_eq!(mesh_batch.min_layer, 8.0);
         assert_eq!(mesh_batch.max_layer, 8.0);
@@ -9732,8 +9782,10 @@ mod tests {
                 batch_index: 0,
                 vertex_count: 4,
                 index_count: 6,
-                vertex_stride_bytes: 12 * std::mem::size_of::<f32>(),
-                vertex_buffer_bytes: 4 * 12 * std::mem::size_of::<f32>(),
+                vertex_stride_bytes:
+                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
+                vertex_buffer_bytes: 4
+                    * super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
                 index_buffer_bytes: 6 * std::mem::size_of::<u32>(),
             }
         );

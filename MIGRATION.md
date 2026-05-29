@@ -13459,6 +13459,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 已跑验证：
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
-  - CPU 结构仍使用展开 RGBA 数组，尚未改成 Arc 的 packed color / packed mixColor float 语义；
+  - CPU trace 结构仍保留展开 RGBA 数组，packed color / packed mixColor 上传视图已在下一节补齐；
   - 真实 GPU texture handle、VBO/IBO/VAO、shader program binding 与 draw call 仍待落地；
   - 当前总体迁移约 28.8%，仍未达到完整可玩。
+
+## 12.432 Arc SpriteBatch packed color 上传布局
+
+- 2026-05-29：在顶点顺序对齐后继续补 Arc `SpriteBatch` 的上传顶点布局。Arc 每个 sprite 顶点按 6 个 float 写入：`x / y / packedColor / u / v / packedMixColor`；此前 Rust mesh buffer plan 仍按展开 RGBA 与展开 mixColor 计算 12-float stride。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendPackedSpriteVertex`，保留 `position / color_packed / uv / mix_color_packed`；
+    - 新增 `opengl_backend_pack_color_rgba(...)`，按 Arc/LibGDX 风格 ABGR float bits 打包，并用 `0xfeff_ffff` 掩码避免 alpha NaN 位；
+    - `DesktopGraphicsOpenGlBackendSpriteMeshBatch` 新增 `packed_vertices`，在 `push_quad(...)` 时由展开 trace 顶点同步生成；
+    - `DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_FLOATS` 固定为 `6`，stride/vertex bytes 改用 packed upload 顶点数量计算；
+    - 回归测试验证白色/透明 mixColor bits、非平凡 RGBA/mixColor 的 packed bits、packed vertex 数量与 buffer stride。
+- 迁移意义：
+  - mesh/buffer plan 更接近 Arc `SpriteBatch` 的真实 GPU 上传语义；
+  - 展开 RGBA 顶点仍保留为中间 trace/debug 数据，packed vertex 成为后续 VBO 写入入口；
+  - 为真实 `a_position / a_color / a_texCoord0 / a_mix_color` shader attribute 绑定做前置。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 尚未真正创建/更新 VBO/IBO/VAO；
+  - 真实 GPU texture handle、shader program binding 与 draw call 仍待落地；
+  - 当前总体迁移约 28.9%，仍未达到完整可玩。
