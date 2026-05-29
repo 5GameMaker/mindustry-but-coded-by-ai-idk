@@ -12469,18 +12469,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 
 ### 12.395 RenderPassKind::Block 脱离 BlockShadows stage
 
-- 2026-05-29：继续收紧 Java `Renderer.draw()` stage 顺序。此前 `RenderPassKind::Block` 与 `RenderPassKind::BlockShadows` 都映射到 `RendererDrawStage::BlockShadows`，会让 block sprite/particle 与 shadow resolve 落在同一 Java stage。现在 `Block` 已改映射到 `RendererDrawStage::BlockBuild`，使 shadow pass 稳定排在 block pass 之前，darkness 稳定排在 block pass 之后。
+- 【历史记录，已被 12.398 覆盖】2026-05-29：继续收紧 Java `Renderer.draw()` stage 顺序。此前 `RenderPassKind::Block` 与 `RenderPassKind::BlockShadows` 都映射到 `RendererDrawStage::BlockShadows`，会让 block sprite/particle 与 shadow resolve 落在同一 Java stage。当时曾临时把 `Block` 改映射到 `RendererDrawStage::BlockBuild`；当前正确状态是 `BlockBuild` 独立承载建造/施工视觉，`Block` / `BlockOverdraw` 映射到 `RendererDrawStage::BlockOverdraw`。
 - Rust 新增/接入：
   - `core/src/mindustry/graphics/render_engine.rs`
-    - `RenderPassKind::Block.java_renderer_draw_stage()` 从 `BlockShadows` 改为 `BlockBuild`；
-    - 新增 `block_pass_sorts_after_shadows_and_before_lighting_like_java_renderer`，在乱序 push 的情况下断言排序结果为 `Floor -> BlockShadows -> Block -> Lighting`；
-    - `java_renderer_stage_and_pass_mapping_is_exhaustive_and_ordered` 更新 `Block -> BlockBuild` 的映射断言。
+    - 当时 `RenderPassKind::Block.java_renderer_draw_stage()` 从 `BlockShadows` 临时改为 `BlockBuild`；
+    - 当时新增 `block_pass_sorts_after_shadows_and_before_lighting_like_java_renderer`，在乱序 push 的情况下断言过渡排序结果为 `Floor -> BlockShadows -> Block -> Lighting`；
+    - 当前映射和排序已由 12.398 修正为 `BlockBuild` 独立、`Block`/`BlockOverdraw` 位于尾段 overdraw。
   - `desktop/src/lib.rs`
     - `desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes` 通过显式 router tile 产出真实 `Block` pass，并断言 `BlockShadows` pass index 小于 `Block`，`Block` 小于 `Darkness`。
 - Java 对照要点：
   - `Renderer.draw()` 中 `Layer.block - 1` 的 shadow 已由 `RenderPassKind::BlockShadows` 表达；
-  - 当前 `RenderPassKind::Block` 临时承载 block sprite 与 block particle，更接近 `Layer.blockBuilding` / block draw 主体，而不应继续复用 shadow stage；
-  - Java 里 `Layer.block - 0.09f` walls cache layer 与末尾 `blocks.drawBlocks()` 仍需后续拆成更细 `BlockWalls/BlockOverdraw` pass kind。
+  - 本节中的 `Block -> BlockBuild` 判断是过渡态；当前 `RenderPassKind::Block` 更接近 Java `Trigger.drawOver -> blocks.drawBlocks()` 尾段；
+  - Java 里 `Layer.block - 0.09f` walls cache layer 与末尾 `blocks.drawBlocks()` 已在后续 12.396 / 12.398 拆出 `BlockWalls` 与 `BlockOverdraw` stage。
 - 已跑验证：
   - `cargo test -p mindustry-core render_engine --lib`
   - `cargo test -p mindustry-desktop graphics_frame --lib`
@@ -12584,3 +12584,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 OpenGL/glow backend 尚未消费这些 pass；
   - `BlockBuild` 还需要接入真实建造/施工视觉命令；
   - 当前总体迁移约 25.5%，仍未达到完整可玩。
+
+### 12.399 OpenGL 语义 backend plan seam
+
+- 2026-05-29：继续推进渲染可执行后端方向，但不新增 `glow` / `winit` / `glutin` 依赖。本轮先把现有 `DesktopGraphicsExecutionTrace` 提升为线性 OpenGL 语义 backend plan，让 headless renderer 和未来真实 OpenGL renderer 共享同一执行顺序与 flush/resolve 语义。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendFramePlan`；
+    - 新增 `DesktopGraphicsOpenGlBackendStep` / `DesktopGraphicsOpenGlBackendStepKind` / `DesktopGraphicsOpenGlBackendStepSource`；
+    - `DesktopGraphicsOpenGlBackendFramePlan::from_trace(...)` 将 block particle sidecar 与 render pass 编译为线性步骤；
+    - 每条 `RenderCommand` 会保留 `RenderBackendFlushBoundary`，用于后续真实 OpenGL backend 在 `Clear` / `SetBlend` / `SetClip` / `Custom` 等边界处 flush 或切换状态；
+    - 显式 `resolve_target` 会生成 `Resolve { resolve_target, resolve_kind }`，没有显式 resolve 的 pass 不自动伪造回填；
+    - `DesktopGraphicsExecutionTrace::to_opengl_backend_plan()` 暴露 trace -> backend plan 的主链转换；
+    - `HeadlessDesktopGraphicsRenderer` 新增 `last_opengl_backend_plan`，每帧真实走 `trace -> opengl plan`，避免该 seam 只停留在测试里。
+- Java/OpenGL 对照要点：
+  - Java 原版桌面仍是 Arc/LWJGL/OpenGL 语义；Rust 当前不切换到 `wgpu` / Vulkan；
+  - 当前仍没有真实窗口、OpenGL context、FBO、shader compile 或 present；
+  - 该 plan 是接入真实 OpenGL/glow backend 前的执行顺序契约。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend_plan --lib`
+  - `cargo test -p mindustry-desktop render_command_sink --lib`
+- 仍未完成：
+  - 真实 OpenGL/glow backend 尚未接入；
+  - texture atlas 上传、FBO 创建、shader 编译、window/present 仍待后续；
+  - 当前总体迁移约 25.6%，仍未达到完整可玩。

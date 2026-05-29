@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **25.4%**。
+- 当前总体迁移完成度：约 **25.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9870,11 +9870,12 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 ## 301. 最新闭环记录：Block pass 脱离 shadow stage
 
 - 本轮总体进度更新：约 **25.2%**，仍未达到完整可玩。
+- 历史提示：本节记录的是过渡态，后续已被 302/304 覆盖；当前 `RenderPassKind::Block` 不再等同 `BlockBuild`，而是映射到 `RendererDrawStage::BlockOverdraw`。
 - 本轮主改动：
   - `core/src/mindustry/graphics/render_engine.rs`
-    - `RenderPassKind::Block` 的 Java stage 从错误复用 `RendererDrawStage::BlockShadows` 改为 `RendererDrawStage::BlockBuild`；
-    - 新增 `block_pass_sorts_after_shadows_and_before_lighting_like_java_renderer`，锁定 `Floor -> BlockShadows -> Block -> Lighting` 的 Java stage 排序；
-    - `java_renderer_stage_and_pass_mapping_is_exhaustive_and_ordered` 同步更新 `Block -> BlockBuild` 映射断言。
+    - 当时曾把 `RenderPassKind::Block` 的 Java stage 从错误复用 `RendererDrawStage::BlockShadows` 临时改为 `RendererDrawStage::BlockBuild`；
+    - 当时新增 `block_pass_sorts_after_shadows_and_before_lighting_like_java_renderer`，锁定 `Floor -> BlockShadows -> Block -> Lighting` 的过渡排序；
+    - 当前正确结论见 304：`BlockBuild` 负责建造/施工，`Block`/`BlockOverdraw` 负责 `Trigger.drawOver -> blocks.drawBlocks()` 尾段。
   - `desktop/src/lib.rs`
     - `desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes` 新增 `shadow < block < darkness` 顺序断言；
     - 测试中显式放置 `router` tile，确保真实 graphics frame 中存在 block sprite pass，可防止 block pass 回退到 shadow stage。
@@ -9966,3 +9967,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把真实建造/施工视觉命令接入 `RenderPassKind::BlockBuild`；
   2. 继续把 fog/block 里的 custom marker 下沉为真实 primitive/texture/FBO 命令；
   3. 真实 OpenGL/glow backend 仍是渲染可玩化 P0，当前仍是 OpenGL 语义的 backend-neutral seam。
+
+---
+
+## 305. 最新闭环记录：OpenGL 语义 backend plan seam
+
+- 本轮总体进度更新：约 **25.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendFramePlan`、`DesktopGraphicsOpenGlBackendStep`、`DesktopGraphicsOpenGlBackendStepKind` 与 `DesktopGraphicsOpenGlBackendStepSource`；
+    - `DesktopGraphicsExecutionTrace::to_opengl_backend_plan()` 将 trace 编译成线性 backend plan，保留 pass begin/end、flush boundary、command、resolve 顺序；
+    - `HeadlessDesktopGraphicsRenderer` 现在记录 `last_opengl_backend_plan`，使该 seam 接入主渲染入口，而不是只停在测试 helper；
+    - 新增测试验证 `Clear/SetBlend/DrawSprite` 的 OpenGL 语义 flush 顺序，以及显式 `ShaderBlit` resolve。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend_plan --lib`
+  - `cargo test -p mindustry-desktop render_command_sink --lib`
+- 下一步：
+  1. 继续把 `DesktopGraphicsOpenGlBackendFramePlan` 扩展到 texture/FBO/shader 上传语义；
+  2. 真正接 `glow/glutin/winit` 前必须按用户/规则确认新增依赖；
+  3. 当前仍没有真实 OpenGL context/window/present，只是 OpenGL 语义的可执行计划 seam。

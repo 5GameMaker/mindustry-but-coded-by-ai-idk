@@ -38,10 +38,10 @@ use mindustry_core::mindustry::graphics::{
     MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
     MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
     OverlayRendererPlan, OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan,
-    PixelatorInput, PixelatorState, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
-    RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderRect, RenderResolveKind,
-    RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderCamera, ShaderCatalog,
-    ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
+    PixelatorInput, PixelatorState, RenderBackendFlushBoundary, RenderBlendMode, RenderBridge,
+    RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint,
+    RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext,
+    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
     TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
@@ -454,6 +454,203 @@ pub struct DesktopGraphicsLiveBackendRenderCommandTrace {
     pub command: RenderCommand,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendStepSource {
+    RenderPass {
+        pass_index: usize,
+        command_index: Option<usize>,
+        pass_kind: RenderPassKind,
+        pass_order: i32,
+    },
+    BlockParticles {
+        command_index: Option<usize>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopGraphicsOpenGlBackendStepKind {
+    BeginPass,
+    FlushBoundary {
+        boundary: RenderBackendFlushBoundary,
+        label: &'static str,
+    },
+    Command {
+        kind: &'static str,
+        command: RenderCommand,
+    },
+    EndPass,
+    Resolve {
+        resolve_target: RenderTarget,
+        resolve_kind: RenderResolveKind,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendStep {
+    pub source: DesktopGraphicsOpenGlBackendStepSource,
+    pub target: RenderTarget,
+    pub kind: DesktopGraphicsOpenGlBackendStepKind,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendFramePlan {
+    pub steps: Vec<DesktopGraphicsOpenGlBackendStep>,
+}
+
+impl DesktopGraphicsOpenGlBackendFramePlan {
+    pub fn from_frame(frame: &DesktopGraphicsFrame) -> Self {
+        let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
+        trace.to_opengl_backend_plan()
+    }
+
+    pub fn from_trace(trace: &DesktopGraphicsExecutionTrace) -> Self {
+        let mut plan = Self::default();
+
+        let block_particle_commands_in_render_pass =
+            !trace.block_particle_render_commands.is_empty()
+                && trace
+                    .render_passes
+                    .iter()
+                    .any(|pass| pass.commands == trace.block_particle_render_commands);
+
+        if !block_particle_commands_in_render_pass
+            && !trace.block_particle_render_commands.is_empty()
+        {
+            plan.push_synthetic_block_particle_pass(&trace.block_particle_render_commands);
+        }
+
+        for (pass_index, pass) in trace.render_passes.iter().enumerate() {
+            plan.push_render_pass(pass_index, pass);
+        }
+
+        plan
+    }
+
+    fn push_synthetic_block_particle_pass(&mut self, commands: &[RenderCommand]) {
+        let target = RenderTarget::Screen;
+        self.steps.push(DesktopGraphicsOpenGlBackendStep {
+            source: DesktopGraphicsOpenGlBackendStepSource::BlockParticles {
+                command_index: None,
+            },
+            target: target.clone(),
+            kind: DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        });
+        self.push_commands(
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepSource::BlockParticles {
+                command_index: None,
+            },
+            commands,
+        );
+        self.steps.push(DesktopGraphicsOpenGlBackendStep {
+            source: DesktopGraphicsOpenGlBackendStepSource::BlockParticles {
+                command_index: None,
+            },
+            target,
+            kind: DesktopGraphicsOpenGlBackendStepKind::EndPass,
+        });
+    }
+
+    fn push_render_pass(&mut self, pass_index: usize, pass: &DesktopGraphicsPassExecutionTrace) {
+        self.steps.push(DesktopGraphicsOpenGlBackendStep {
+            source: DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                pass_index,
+                command_index: None,
+                pass_kind: pass.kind.clone(),
+                pass_order: pass.order,
+            },
+            target: pass.target.clone(),
+            kind: DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        });
+
+        self.push_commands(
+            pass.target.clone(),
+            DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                pass_index,
+                command_index: None,
+                pass_kind: pass.kind.clone(),
+                pass_order: pass.order,
+            },
+            &pass.commands,
+        );
+
+        self.steps.push(DesktopGraphicsOpenGlBackendStep {
+            source: DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                pass_index,
+                command_index: None,
+                pass_kind: pass.kind.clone(),
+                pass_order: pass.order,
+            },
+            target: pass.target.clone(),
+            kind: DesktopGraphicsOpenGlBackendStepKind::EndPass,
+        });
+
+        if let Some(resolve_target) = pass.resolve_target.clone() {
+            self.steps.push(DesktopGraphicsOpenGlBackendStep {
+                source: DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                    pass_index,
+                    command_index: None,
+                    pass_kind: pass.kind.clone(),
+                    pass_order: pass.order,
+                },
+                target: pass.target.clone(),
+                kind: DesktopGraphicsOpenGlBackendStepKind::Resolve {
+                    resolve_target,
+                    resolve_kind: pass.resolve_kind.unwrap_or(RenderResolveKind::Blit),
+                },
+            });
+        }
+    }
+
+    fn push_commands(
+        &mut self,
+        target: RenderTarget,
+        source: DesktopGraphicsOpenGlBackendStepSource,
+        commands: &[RenderCommand],
+    ) {
+        for (command_index, command) in commands.iter().enumerate() {
+            let command_source = match &source {
+                DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                    pass_index,
+                    pass_kind,
+                    pass_order,
+                    ..
+                } => DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                    pass_index: *pass_index,
+                    command_index: Some(command_index),
+                    pass_kind: pass_kind.clone(),
+                    pass_order: *pass_order,
+                },
+                DesktopGraphicsOpenGlBackendStepSource::BlockParticles { .. } => {
+                    DesktopGraphicsOpenGlBackendStepSource::BlockParticles {
+                        command_index: Some(command_index),
+                    }
+                }
+            };
+
+            if let Some(boundary) = command.backend_flush_boundary() {
+                self.steps.push(DesktopGraphicsOpenGlBackendStep {
+                    source: command_source.clone(),
+                    target: target.clone(),
+                    kind: DesktopGraphicsOpenGlBackendStepKind::FlushBoundary {
+                        boundary,
+                        label: boundary.label(),
+                    },
+                });
+            }
+
+            self.steps.push(DesktopGraphicsOpenGlBackendStep {
+                source: command_source,
+                target: target.clone(),
+                kind: DesktopGraphicsOpenGlBackendStepKind::Command {
+                    kind: render_command_trace_kind(command),
+                    command: command.clone(),
+                },
+            });
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopGraphicsLiveBackendRenderTargetEventKind {
     Begin,
@@ -722,6 +919,10 @@ pub struct DesktopGraphicsExecutionTrace {
 impl DesktopGraphicsExecutionTrace {
     pub fn from_frame(frame: &DesktopGraphicsFrame) -> Self {
         Self::from_frame_and_atlas(frame, Some(&frame.texture_atlas))
+    }
+
+    pub fn to_opengl_backend_plan(&self) -> DesktopGraphicsOpenGlBackendFramePlan {
+        DesktopGraphicsOpenGlBackendFramePlan::from_trace(self)
     }
 
     pub fn from_frame_with_atlas<T>(
@@ -1437,6 +1638,7 @@ pub struct HeadlessDesktopGraphicsRenderer {
     pub last_stats: GraphicsFrameStats,
     pub last_execution: DesktopGraphicsExecutionSummary,
     pub last_trace: DesktopGraphicsExecutionTrace,
+    pub last_opengl_backend_plan: DesktopGraphicsOpenGlBackendFramePlan,
     pub last_live_backend_state: DesktopGraphicsLiveBackendExecutionState,
 }
 
@@ -1444,6 +1646,7 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
     fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats {
         let stats = frame.stats().clone();
         let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
+        let opengl_backend_plan = trace.to_opengl_backend_plan();
         let execution = DesktopGraphicsExecutionSummary::from_trace(frame, &trace);
         let mut live_backend_sink = DesktopGraphicsNullLiveBackendDrawSpriteSink;
         let mut block_particle_sink = DesktopGraphicsNullLiveBackendBlockParticleSink;
@@ -1462,6 +1665,7 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
         self.last_stats = stats.clone();
         self.last_execution = execution;
         self.last_trace = trace;
+        self.last_opengl_backend_plan = opengl_backend_plan;
         self.last_live_backend_state = live_backend_state;
         stats
     }
@@ -4357,11 +4561,13 @@ mod tests {
         DesktopGraphicsLiveBackendRenderCommandTrace,
         DesktopGraphicsLiveBackendRenderTargetEventKind,
         DesktopGraphicsLiveBackendRenderTargetSink, DesktopGraphicsLiveBackendRenderTargetTrace,
-        DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
-        DesktopGraphicsShaderApplyExecutionTrace, DesktopGraphicsTextureSamplerTrace,
-        DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceConfig, DesktopSurfaceSize,
-        HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
-        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
+        DesktopGraphicsOpenGlBackendFramePlan, DesktopGraphicsOpenGlBackendStepKind,
+        DesktopGraphicsOpenGlBackendStepSource, DesktopGraphicsRenderer,
+        DesktopGraphicsResolvedSpriteTrace, DesktopGraphicsShaderApplyExecutionTrace,
+        DesktopGraphicsTextureSamplerTrace, DesktopInputTickEvent, DesktopLauncher,
+        DesktopSurfaceConfig, DesktopSurfaceSize, HeadlessDesktopAudioRenderer,
+        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
+        HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -4383,11 +4589,11 @@ mod tests {
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer, Layer,
         LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput, MinimapCamera,
-        MinimapOverlayInput, PageType, ParticleRendererState, RenderBlendMode, RenderBridge,
-        RenderCamera, RenderCommand, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
-        RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
-        RenderViewport, ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame,
-        ShaderId, TextureAtlasPlan, TileCoord,
+        MinimapOverlayInput, PageType, ParticleRendererState, RenderBackendFlushBoundary,
+        RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderFramePlan, RenderPass,
+        RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize,
+        RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext, ShaderApplyPlan,
+        ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -6622,6 +6828,106 @@ mod tests {
                 .as_ref()
                 .map(|trace| trace.source.clone())
         );
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(41, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Lighting)
+            .with_order(8)
+            .with_target(RenderTarget::Buffer("lighting-buffer".into()))
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::ShaderBlit);
+        pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        pass.push(RenderCommand::set_blend(RenderBlendMode::Additive));
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(8.0, 8.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            8.0,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+        };
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_trace(&trace);
+
+        assert_eq!(plan.steps.len(), 8);
+        assert!(matches!(
+            plan.steps[0].kind,
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass
+        ));
+        assert!(matches!(
+            plan.steps[1].kind,
+            DesktopGraphicsOpenGlBackendStepKind::FlushBoundary {
+                boundary: RenderBackendFlushBoundary::Clear,
+                label: "clear"
+            }
+        ));
+        assert!(matches!(
+            plan.steps[2].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Command { kind: "Clear", .. }
+        ));
+        assert!(matches!(
+            plan.steps[3].kind,
+            DesktopGraphicsOpenGlBackendStepKind::FlushBoundary {
+                boundary: RenderBackendFlushBoundary::BlendState,
+                label: "blend_state"
+            }
+        ));
+        assert!(matches!(
+            plan.steps[4].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "SetBlend",
+                ..
+            }
+        ));
+        assert!(matches!(
+            plan.steps[5].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "DrawSprite",
+                ..
+            }
+        ));
+        assert!(matches!(
+            plan.steps[6].kind,
+            DesktopGraphicsOpenGlBackendStepKind::EndPass
+        ));
+        assert!(matches!(
+            plan.steps[7].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Resolve {
+                resolve_target: RenderTarget::Screen,
+                resolve_kind: RenderResolveKind::ShaderBlit
+            }
+        ));
+        assert_eq!(
+            plan.steps[5].source,
+            DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                pass_index: 0,
+                command_index: Some(2),
+                pass_kind: RenderPassKind::Lighting,
+                pass_order: 8,
+            }
+        );
+        assert_eq!(
+            plan.steps[5].target,
+            RenderTarget::Buffer("lighting-buffer".into())
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert_eq!(renderer.last_opengl_backend_plan, plan);
     }
 
     #[test]
