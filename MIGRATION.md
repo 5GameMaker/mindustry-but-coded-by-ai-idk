@@ -14964,3 +14964,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
   - `cargo test -p mindustry-desktop --features opengl-native-runtime --no-run`
   - `git diff --check`
+
+## 401. 最新闭环记录：OpenGL primitive mesh draw 闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **37.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 primitive 1x1 runtime white texture binding 与像素源，供纯色图元复用现有 sprite mesh pipeline；
+    - `FillRect / StrokeRect / DrawLine / DrawPixel` 会转换成目标感知的 quad mesh；
+    - `DrawPolygon` filled 路径按三角扇生成 mesh，outline 路径按边生成 line quad；
+    - classifying adapter 与 OpenGL executor 都会把 primitive 命令记录进 sprite quad / mesh batch / draw call plan，不再把这些命令计入 `pending_gl_draw_commands`；
+    - 新增状态继承回归，锁定 primitive 会继承当前 shader / blend / scissor clip，并保持 classifying adapter 与 executor 输出一致；
+    - offscreen primitive pass 会确保 framebuffer attachment plan，避免后续 native target bind 缺失附件。
+- 迁移意义：
+  - Java/Arc 的 `Fill.*`、`Lines.*` 这类 2D primitive 不再只是 render command / trace 层数据，已经进入 OpenGL backend 可提交的 mesh upload + draw elements 通道；
+  - 后续 UI、overlay、标准特效和 block/entity draw 中大量基础矩形/线段/多边形可以复用同一条 native draw path。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_primitives_emit_targeted_mesh_draws_and_driver_records_them --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_primitives_inherit_state_and_match_adapter --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 仍未完成：
+  - primitive 目前复用 sprite mesh pipeline，仍需继续把 circle/arc/triangle/textured-line 等 higher-level effect primitive 真实接入；
+  - UI / overlay / minimap / entity world draw 还需要进一步从 frame/cache seam 收口到 native OpenGL runtime；
+  - 当前总体迁移约 37.8%，仍未达到完整可玩。

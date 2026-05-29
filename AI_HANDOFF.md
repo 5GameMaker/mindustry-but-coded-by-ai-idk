@@ -12339,3 +12339,25 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - 还没完成的部分依次是：
     1. primitive mesh / entity / UI 的真实 draw path。
 - 建议下一步继续围绕 primitive draw 与 UI/entity 的真实渲染路径推进。
+
+### 2026-05-30：OpenGL primitive mesh draw 闭环
+
+- 当前整体完成度：约 **37.8%**。
+- 固定路径继续写死在交接上下文里：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；乱码优先 UTF-8。
+- 这轮已经把基础 2D primitive 从 pending/no-op 推进到 OpenGL mesh/draw path：
+  - `FillRect / StrokeRect / DrawLine / DrawPixel` 生成 quad；
+  - filled `DrawPolygon` 生成三角扇 mesh，outline `DrawPolygon` 生成边线 quad；
+  - primitive 使用 runtime 1x1 white texture，复用现有 sprite mesh upload / draw elements / driver 链；
+  - offscreen primitive 会确保 framebuffer attachment plan；
+  - 新测试 `desktop_graphics_opengl_primitives_emit_targeted_mesh_draws_and_driver_records_them` 覆盖 resolving executor 和 recording driver；
+  - 新测试 `desktop_graphics_opengl_primitives_inherit_state_and_match_adapter` 覆盖 primitive 继承 shader / blend / clip，并验证 classifying adapter 与 executor 输出一致。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_primitives_emit_targeted_mesh_draws_and_driver_records_them --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_primitives_inherit_state_and_match_adapter --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 下一步不要宣称渲染完成：
+  1. 把 UI / overlay / minimap / entity world draw 的 frame/cache seam 继续收口到 native OpenGL runtime；
+  2. 继续接 circle/arc/triangle/textured-line/atlas rect 等 higher-level effect primitive；
+  3. 继续保持所有新 helper 最终必须进入真实 runtime/render/backend 主链路。

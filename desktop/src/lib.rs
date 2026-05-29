@@ -812,6 +812,21 @@ impl DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
                     pixels: image.pixels,
                 })
             }
+            Self::RuntimeTexture {
+                texture_key,
+                width,
+                height,
+                ..
+            } if texture_key == DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_KEY
+                && *width == 1
+                && *height == 1 =>
+            {
+                Ok(DesktopGraphicsOpenGlBackendTextureUploadPixelBytes {
+                    width: *width,
+                    height: *height,
+                    pixels: vec![255, 255, 255, 255],
+                })
+            }
             Self::RuntimeTexture { texture_key, .. } => Err(
                 DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::RuntimeTexturePixelsUnavailable {
                     texture_key: texture_key.clone(),
@@ -1215,6 +1230,59 @@ pub struct DesktopGraphicsOpenGlBackendSpriteQuad {
 }
 
 impl DesktopGraphicsOpenGlBackendSpriteQuad {
+    fn from_primitive_vertices(
+        symbol: impl Into<String>,
+        target: Option<RenderTarget>,
+        shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+        blend_state: DesktopGraphicsOpenGlBackendBlendState,
+        clip: Option<RenderRect>,
+        layer: f32,
+        color: [f32; 4],
+        positions: [RenderPoint; 4],
+    ) -> Self {
+        let binding = opengl_backend_primitive_texture_binding(symbol);
+        Self {
+            command_index: None,
+            symbol: binding.symbol.clone(),
+            target,
+            shader_program,
+            blend_state,
+            clip,
+            texture_identity: binding.texture_identity,
+            page_source_path: binding.page_source_path,
+            sampler: binding.sampler,
+            layer,
+            origin: RenderPoint::new(0.0, 0.0),
+            rotation: 0.0,
+            vertices: [
+                DesktopGraphicsOpenGlBackendSpriteVertex {
+                    position: positions[0],
+                    uv: [0.0, 0.0],
+                    color,
+                    mix_color: [0.0, 0.0, 0.0, 0.0],
+                },
+                DesktopGraphicsOpenGlBackendSpriteVertex {
+                    position: positions[1],
+                    uv: [0.0, 1.0],
+                    color,
+                    mix_color: [0.0, 0.0, 0.0, 0.0],
+                },
+                DesktopGraphicsOpenGlBackendSpriteVertex {
+                    position: positions[2],
+                    uv: [1.0, 1.0],
+                    color,
+                    mix_color: [0.0, 0.0, 0.0, 0.0],
+                },
+                DesktopGraphicsOpenGlBackendSpriteVertex {
+                    position: positions[3],
+                    uv: [1.0, 0.0],
+                    color,
+                    mix_color: [0.0, 0.0, 0.0, 0.0],
+                },
+            ],
+        }
+    }
+
     pub fn from_draw_sprite(
         binding: &DesktopGraphicsOpenGlBackendTextureBinding,
         target: Option<RenderTarget>,
@@ -1896,6 +1964,30 @@ pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
 fn opengl_backend_default_sprite_shader_program(
 ) -> DesktopGraphicsOpenGlBackendShaderProgramIdentity {
     DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(ShaderId::Mesh)
+}
+
+const DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_NAME: &str = "primitive-white";
+const DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_KEY: &str = "runtime-texture:primitive-white";
+const DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_SOURCE: &str = "runtime:primitive-white";
+
+fn opengl_backend_primitive_texture_binding(
+    symbol: impl Into<String>,
+) -> DesktopGraphicsOpenGlBackendTextureBinding {
+    DesktopGraphicsOpenGlBackendTextureBinding {
+        command_index: None,
+        symbol: symbol.into(),
+        texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_runtime_texture(
+            DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_NAME,
+        ),
+        page_type: PageType::Ui,
+        page_source_path: DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_SOURCE.to_string(),
+        page_width: 1,
+        page_height: 1,
+        sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+        uv: [0.0, 0.0, 1.0, 1.0],
+        region_width: 1,
+        region_height: 1,
+    }
 }
 
 impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
@@ -3011,6 +3103,226 @@ fn opengl_backend_sprite_quad_positions(
         let dy = point.y - pivot.y;
         RenderPoint::new(pivot.x + dx * cos - dy * sin, pivot.y + dx * sin + dy * cos)
     })
+}
+
+fn opengl_backend_rect_primitive_positions(rect: RenderRect) -> [RenderPoint; 4] {
+    [
+        RenderPoint::new(rect.x, rect.y),
+        RenderPoint::new(rect.x, rect.y + rect.height),
+        RenderPoint::new(rect.x + rect.width, rect.y + rect.height),
+        RenderPoint::new(rect.x + rect.width, rect.y),
+    ]
+}
+
+fn opengl_backend_line_primitive_positions(
+    from: RenderPoint,
+    to: RenderPoint,
+    stroke: f32,
+) -> Option<[RenderPoint; 4]> {
+    let stroke = stroke.max(0.0);
+    if stroke <= f32::EPSILON {
+        return None;
+    }
+    let dx = to.x - from.x;
+    let dy = to.y - from.y;
+    let length = (dx * dx + dy * dy).sqrt();
+    let half = stroke * 0.5;
+    if length <= f32::EPSILON {
+        return Some(opengl_backend_rect_primitive_positions(RenderRect::new(
+            from.x - half,
+            from.y - half,
+            stroke,
+            stroke,
+        )));
+    }
+    let nx = -dy / length * half;
+    let ny = dx / length * half;
+    Some([
+        RenderPoint::new(from.x + nx, from.y + ny),
+        RenderPoint::new(from.x - nx, from.y - ny),
+        RenderPoint::new(to.x - nx, to.y - ny),
+        RenderPoint::new(to.x + nx, to.y + ny),
+    ])
+}
+
+fn opengl_backend_polygon_primitive_points(
+    center: RenderPoint,
+    radius: f32,
+    sides: usize,
+    rotation: f32,
+) -> Vec<RenderPoint> {
+    if sides < 3 || radius <= f32::EPSILON {
+        return Vec::new();
+    }
+    let rotation = rotation.to_radians();
+    (0..sides)
+        .map(|side| {
+            let angle = rotation + (side as f32 / sides as f32) * std::f32::consts::TAU;
+            RenderPoint::new(
+                center.x + angle.cos() * radius,
+                center.y + angle.sin() * radius,
+            )
+        })
+        .collect()
+}
+
+fn opengl_backend_primitive_quads_from_action(
+    action: &DesktopGraphicsOpenGlBackendAdapterAction,
+    target: Option<RenderTarget>,
+    shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+    blend_state: DesktopGraphicsOpenGlBackendBlendState,
+    clip: Option<RenderRect>,
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteQuad> {
+    match action {
+        DesktopGraphicsOpenGlBackendAdapterAction::FillRect { rect, color, layer } => {
+            vec![
+                DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                    "primitive:FillRect",
+                    target,
+                    shader_program,
+                    blend_state,
+                    clip,
+                    *layer,
+                    *color,
+                    opengl_backend_rect_primitive_positions(*rect),
+                ),
+            ]
+        }
+        DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
+            rect,
+            color,
+            thickness,
+            layer,
+        } => {
+            let thickness = thickness.max(0.0);
+            if thickness <= f32::EPSILON
+                || rect.width <= f32::EPSILON
+                || rect.height <= f32::EPSILON
+            {
+                return Vec::new();
+            }
+            let left = RenderRect::new(rect.x, rect.y, thickness.min(rect.width), rect.height);
+            let right_width = thickness.min(rect.width);
+            let right = RenderRect::new(
+                rect.x + rect.width - right_width,
+                rect.y,
+                right_width,
+                rect.height,
+            );
+            let top = RenderRect::new(rect.x, rect.y, rect.width, thickness.min(rect.height));
+            let bottom_height = thickness.min(rect.height);
+            let bottom = RenderRect::new(
+                rect.x,
+                rect.y + rect.height - bottom_height,
+                rect.width,
+                bottom_height,
+            );
+            [left, right, top, bottom]
+                .into_iter()
+                .map(|edge| {
+                    DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                        "primitive:StrokeRect",
+                        target.clone(),
+                        shader_program.clone(),
+                        blend_state,
+                        clip,
+                        *layer,
+                        *color,
+                        opengl_backend_rect_primitive_positions(edge),
+                    )
+                })
+                .collect()
+        }
+        DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+            from,
+            to,
+            stroke,
+            color,
+            layer,
+        } => opengl_backend_line_primitive_positions(*from, *to, *stroke)
+            .into_iter()
+            .map(|positions| {
+                DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                    "primitive:DrawLine",
+                    target.clone(),
+                    shader_program.clone(),
+                    blend_state,
+                    clip,
+                    *layer,
+                    *color,
+                    positions,
+                )
+            })
+            .collect(),
+        DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon {
+            center,
+            radius,
+            sides,
+            rotation,
+            color,
+            filled,
+            layer,
+        } => {
+            let points =
+                opengl_backend_polygon_primitive_points(*center, *radius, *sides, *rotation);
+            if *filled {
+                points
+                    .iter()
+                    .zip(points.iter().cycle().skip(1))
+                    .take(points.len())
+                    .map(|(from, to)| {
+                        DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                            "primitive:DrawPolygon",
+                            target.clone(),
+                            shader_program.clone(),
+                            blend_state,
+                            clip,
+                            *layer,
+                            *color,
+                            [*center, *from, *to, *center],
+                        )
+                    })
+                    .collect()
+            } else {
+                points
+                    .iter()
+                    .zip(points.iter().cycle().skip(1))
+                    .take(points.len())
+                    .filter_map(|(from, to)| {
+                        opengl_backend_line_primitive_positions(*from, *to, 1.0).map(|positions| {
+                            DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                                "primitive:DrawPolygon",
+                                target.clone(),
+                                shader_program.clone(),
+                                blend_state,
+                                clip,
+                                *layer,
+                                *color,
+                                positions,
+                            )
+                        })
+                    })
+                    .collect()
+            }
+        }
+        DesktopGraphicsOpenGlBackendAdapterAction::DrawPixel { x, y, color, layer } => {
+            vec![
+                DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                    "primitive:DrawPixel",
+                    target,
+                    shader_program,
+                    blend_state,
+                    clip,
+                    *layer,
+                    *color,
+                    opengl_backend_rect_primitive_positions(RenderRect::new(
+                        *x as f32, *y as f32, 1.0, 1.0,
+                    )),
+                ),
+            ]
+        }
+        _ => Vec::new(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -6064,6 +6376,8 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
         self.state.command_events += 1;
         let action = opengl_backend_adapter_action_from_render_command(&command, resolved_sprite);
         self.consume_sprite_texture_binding(&target, &command, &action);
+        self.state
+            .record_primitive_quads(Some(target.clone()), &action);
         match command {
             RenderCommand::Clear { .. } => {
                 self.state.state_commands += 1;
@@ -6108,7 +6422,6 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
             | RenderCommand::DrawPolygon { .. }
             | RenderCommand::DrawPixel { .. } => {
                 self.state.draw_commands += 1;
-                self.state.pending_gl_draw_commands += 1;
             }
         }
         self.state.actions.push(action);
@@ -6180,6 +6493,32 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
 impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
     fn refresh_sprite_texture_upload_plans(&mut self) {
         self.sprite_texture_upload_plans = self.sprite_texture_resource_table.full_upload_plans();
+    }
+
+    fn record_primitive_quads(
+        &mut self,
+        target: Option<RenderTarget>,
+        action: &DesktopGraphicsOpenGlBackendAdapterAction,
+    ) {
+        let quads = opengl_backend_primitive_quads_from_action(
+            action,
+            target,
+            self.current_shader_program
+                .clone()
+                .unwrap_or_else(opengl_backend_default_sprite_shader_program),
+            self.current_blend_state,
+            self.current_clip,
+        );
+        if quads.is_empty() {
+            return;
+        }
+        for quad in quads {
+            self.record_sprite_quad(quad);
+        }
+        let binding = opengl_backend_primitive_texture_binding("primitive");
+        self.sprite_texture_resource_table
+            .register_binding(&binding);
+        self.refresh_sprite_texture_upload_plans();
     }
 
     fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
@@ -6750,6 +7089,14 @@ impl DesktopGraphicsOpenGlBackendExecutor {
             DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { .. } => {
                 self.state.missing_sprite_texture_bindings += 1;
             }
+            DesktopGraphicsOpenGlBackendAdapterAction::FillRect { .. }
+            | DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect { .. }
+            | DesktopGraphicsOpenGlBackendAdapterAction::DrawLine { .. }
+            | DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon { .. }
+            | DesktopGraphicsOpenGlBackendAdapterAction::DrawPixel { .. } => {
+                let target = self.state.current_target.clone();
+                self.state.record_primitive_quads(target, action);
+            }
             _ => {}
         }
     }
@@ -6809,6 +7156,32 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             &self.sprite_mesh_batches,
             &self.sprite_mesh_resource_plans,
         );
+    }
+
+    fn record_primitive_quads(
+        &mut self,
+        target: Option<RenderTarget>,
+        action: &DesktopGraphicsOpenGlBackendAdapterAction,
+    ) {
+        let quads = opengl_backend_primitive_quads_from_action(
+            action,
+            target,
+            self.current_shader_program
+                .clone()
+                .unwrap_or_else(opengl_backend_default_sprite_shader_program),
+            self.current_blend_state,
+            self.current_clip,
+        );
+        if quads.is_empty() {
+            return;
+        }
+        for quad in quads {
+            self.record_sprite_quad(quad);
+        }
+        let binding = opengl_backend_primitive_texture_binding("primitive");
+        self.sprite_texture_resource_table
+            .register_binding(&binding);
+        self.refresh_sprite_texture_upload_plans();
     }
 }
 
@@ -6978,7 +7351,10 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                     | RenderCommand::StrokeRect { .. }
                     | RenderCommand::DrawLine { .. }
                     | RenderCommand::DrawPolygon { .. }
-                    | RenderCommand::DrawPixel { .. } => {}
+                    | RenderCommand::DrawPixel { .. } => {
+                        self.state
+                            .ensure_framebuffer_attachment_plan_for_target(&target);
+                    }
                 }
             }
             DesktopGraphicsOpenGlBackendStepKind::EndPass => {
@@ -17019,6 +17395,318 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_primitives_emit_targeted_mesh_draws_and_driver_records_them() {
+        let offscreen = RenderTarget::Buffer("primitive-offscreen".into());
+        let screen = RenderTarget::Screen;
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            offscreen.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        for command in [
+            RenderCommand::fill_rect(
+                RenderRect::new(0.0, 0.0, 8.0, 4.0),
+                [1.0, 0.0, 0.0, 1.0],
+                1.0,
+            ),
+            RenderCommand::stroke_rect(
+                RenderRect::new(10.0, 0.0, 6.0, 6.0),
+                [0.0, 1.0, 0.0, 1.0],
+                1.5,
+                2.0,
+            ),
+            RenderCommand::draw_line(
+                RenderPoint::new(0.0, 10.0),
+                RenderPoint::new(8.0, 12.0),
+                2.0,
+                [0.0, 0.0, 1.0, 1.0],
+                3.0,
+            ),
+        ] {
+            executor.consume_opengl_backend_step(opengl_backend_test_step(
+                0,
+                offscreen.clone(),
+                DesktopGraphicsOpenGlBackendStepKind::Command {
+                    kind: super::render_command_trace_kind(&command),
+                    command,
+                    resolved_sprite: None,
+                },
+            ));
+        }
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            offscreen.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::EndPass,
+        ));
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            1,
+            screen.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        for command in [
+            RenderCommand::draw_polygon(
+                RenderPoint::new(20.0, 20.0),
+                5.0,
+                5,
+                0.0,
+                [1.0, 1.0, 0.0, 1.0],
+                true,
+                4.0,
+            ),
+            RenderCommand::draw_pixel(3, 4, [1.0, 1.0, 1.0, 1.0], 5.0),
+        ] {
+            executor.consume_opengl_backend_step(opengl_backend_test_step(
+                1,
+                screen.clone(),
+                DesktopGraphicsOpenGlBackendStepKind::Command {
+                    kind: super::render_command_trace_kind(&command),
+                    command,
+                    resolved_sprite: None,
+                },
+            ));
+        }
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            1,
+            screen.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::EndPass,
+        ));
+
+        assert_eq!(executor.state.commands, 5);
+        assert_eq!(executor.state.sprite_quads.len(), 12);
+        assert_eq!(executor.state.sprite_mesh_batches.len(), 2);
+        assert_eq!(executor.state.sprite_mesh_upload_plans.len(), 2);
+        assert_eq!(executor.state.sprite_draw_call_plans.len(), 2);
+        assert_eq!(executor.state.framebuffer_attachment_plans.len(), 1);
+        assert_eq!(
+            executor.state.framebuffer_attachment_plans[0].framebuffer_key,
+            "framebuffer:buffer:primitive-offscreen"
+        );
+        assert!(executor
+            .state
+            .sprite_mesh_batches
+            .iter()
+            .any(|batch| batch.target == Some(offscreen.clone()) && batch.quad_count == 6));
+        assert!(executor
+            .state
+            .sprite_mesh_batches
+            .iter()
+            .any(|batch| batch.target == Some(screen.clone()) && batch.quad_count == 6));
+        assert!(executor
+            .state
+            .sprite_texture_upload_plans
+            .iter()
+            .any(|upload| {
+                upload.texture_key == super::DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_KEY
+                    && upload.page_width == 1
+                    && upload.page_height == 1
+            }));
+
+        let mut resolving_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        let resolved_state = executor.drive_resolving_command_executor(&mut resolving_executor);
+        assert_eq!(resolved_state.framebuffer_attachments_emitted, 1);
+        assert_eq!(resolved_state.sprite_mesh_uploads_emitted, 2);
+        assert_eq!(resolved_state.sprite_draw_calls_emitted, 2);
+        assert_eq!(
+            resolving_executor
+                .draw_commands
+                .iter()
+                .filter(|command| matches!(
+                    command,
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. }
+                ))
+                .count(),
+            2
+        );
+        assert!(resolving_executor.draw_commands.iter().any(|command| {
+            matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                    target: Some(target)
+                } if *target == offscreen
+            )
+        }));
+        assert!(resolving_executor.draw_commands.iter().any(|command| {
+            matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                    target: Some(RenderTarget::Screen)
+                }
+            )
+        }));
+
+        let mut driver = super::DesktopGraphicsRecordingOpenGlBackendDriver::default();
+        let driver_state = resolving_executor.drive_driver(&mut driver);
+        assert_eq!(driver_state.framebuffer_attachment_plans, 1);
+        assert!(driver_state.texture_upload_commands > 0);
+        assert!(driver_state.sprite_mesh_upload_commands > 0);
+        assert!(driver_state.draw_commands > 0);
+        assert!(driver.commands.iter().any(|command| {
+            matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. }
+                )
+            )
+        }));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_primitives_inherit_state_and_match_adapter() {
+        let target = RenderTarget::Buffer("primitive-state".into());
+        let clip = RenderRect::new(2.0, 3.0, 12.0, 10.0);
+        let additive =
+            super::DesktopGraphicsOpenGlBackendBlendState::from_mode(RenderBlendMode::Additive);
+        let shader_apply = ShaderApplyPlan::new(ShaderId::Shield);
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::ShaderApply {
+                apply: shader_apply,
+            },
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "SetBlend",
+                command: RenderCommand::set_blend(RenderBlendMode::Additive),
+                resolved_sprite: None,
+            },
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "SetClip",
+                command: RenderCommand::set_clip(clip),
+                resolved_sprite: None,
+            },
+        ));
+        for command in [
+            RenderCommand::fill_rect(
+                RenderRect::new(4.0, 4.0, 8.0, 5.0),
+                [0.2, 0.4, 0.8, 1.0],
+                1.0,
+            ),
+            RenderCommand::draw_polygon(
+                RenderPoint::new(16.0, 16.0),
+                4.0,
+                4,
+                45.0,
+                [1.0, 0.8, 0.2, 1.0],
+                false,
+                2.0,
+            ),
+        ] {
+            executor.consume_opengl_backend_step(opengl_backend_test_step(
+                0,
+                target.clone(),
+                DesktopGraphicsOpenGlBackendStepKind::Command {
+                    kind: super::render_command_trace_kind(&command),
+                    command,
+                    resolved_sprite: None,
+                },
+            ));
+        }
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::EndPass,
+        ));
+
+        assert_eq!(executor.state.sprite_quads.len(), 5);
+        assert_eq!(executor.state.sprite_mesh_batches.len(), 1);
+        assert_eq!(executor.state.sprite_mesh_upload_plans.len(), 1);
+        assert_eq!(executor.state.sprite_draw_call_plans.len(), 1);
+
+        let batch = &executor.state.sprite_mesh_batches[0];
+        assert_eq!(batch.target, Some(target.clone()));
+        assert_eq!(batch.shader_program.shader, ShaderId::Shield);
+        assert_eq!(batch.blend_state, additive);
+        assert_eq!(batch.clip, Some(clip));
+        assert_eq!(batch.quad_count, 5);
+
+        let draw_call = &executor.state.sprite_draw_call_plans[0];
+        assert_eq!(draw_call.target, Some(target.clone()));
+        assert_eq!(draw_call.shader_program.shader, ShaderId::Shield);
+        assert_eq!(draw_call.blend_state, additive);
+        assert_eq!(draw_call.clip, Some(clip));
+        assert_eq!(draw_call.index_count, 30);
+
+        assert_eq!(executor.state.framebuffer_attachment_plans.len(), 1);
+        assert_eq!(
+            executor.state.framebuffer_attachment_plans[0].framebuffer_key,
+            "framebuffer:buffer:primitive-state"
+        );
+
+        let mut classifying_adapter =
+            super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
+        executor.drive_adapter(&mut classifying_adapter);
+        assert_eq!(
+            classifying_adapter.state.sprite_quads,
+            executor.state.sprite_quads
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_mesh_batches,
+            executor.state.sprite_mesh_batches
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_draw_call_plans,
+            executor.state.sprite_draw_call_plans
+        );
+
+        let mut resolving_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        executor.drive_resolving_command_executor(&mut resolving_executor);
+        assert!(resolving_executor.draw_commands.iter().any(|command| {
+            matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDrawCommand::SetBlend { state }
+                    if *state == additive
+            )
+        }));
+        assert!(resolving_executor.draw_commands.iter().any(|command| {
+            matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDrawCommand::SetScissor {
+                    target: Some(scissor_target),
+                    rect
+                } if *scissor_target == target && *rect == clip
+            )
+        }));
+        assert!(resolving_executor.draw_commands.iter().any(|command| {
+            matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle }
+                    if *program_handle > 0
+            )
+        }));
+        assert!(resolving_executor
+            .resolved_draw_actions
+            .iter()
+            .any(|action| {
+                matches!(
+                    action,
+                    super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
+                        program_key,
+                        ..
+                    } if program_key == "shader:Shield"
+                )
+            }));
+    }
+
+    #[test]
     fn desktop_graphics_opengl_state_commands_reach_driver_in_target_order() {
         let offscreen = RenderTarget::Buffer("state-offscreen".into());
         let screen = RenderTarget::Screen;
@@ -18964,7 +19652,7 @@ mod tests {
         assert_eq!(classifying_adapter.state.deferred_noop_commands, 0);
         assert_eq!(classifying_adapter.state.draw_sprite_commands, 1);
         assert_eq!(classifying_adapter.state.draw_commands, 6);
-        assert_eq!(classifying_adapter.state.pending_gl_draw_commands, 5);
+        assert_eq!(classifying_adapter.state.pending_gl_draw_commands, 0);
         assert_eq!(classifying_adapter.state.state_commands, 0);
         assert_eq!(classifying_adapter.state.actions.len(), 6);
         assert!(matches!(
