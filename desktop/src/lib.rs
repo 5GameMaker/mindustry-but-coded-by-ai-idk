@@ -2638,6 +2638,9 @@ impl DesktopLauncher {
             for pass in block_renderer.to_sprite_render_passes(8.0) {
                 render_frame.push_pass(pass);
             }
+            for pass in block_renderer.to_resolve_render_passes(8.0) {
+                render_frame.push_pass(pass);
+            }
         }
         let floor_renderer = self.floor_render_plan(camera, viewport);
         if let Some(floor_renderer) = &floor_renderer {
@@ -5761,6 +5764,76 @@ mod tests {
                 .map(|dispatch| dispatch.applies.len()),
             Some(2)
         );
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let world_data = sample_network_world_data(None);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.last_world_data_error = None;
+            state.last_loaded_world_data = Some(world_data);
+        }
+        launcher.update();
+
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 16.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 8.0), viewport);
+        let minimap_camera = MinimapCamera::new(12.0, 8.0, 32.0, 16.0);
+        let _ = launcher.graphics_frame_for_render(
+            10,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        launcher
+            .block_renderer_state
+            .cache
+            .shadow_events
+            .insert(TileCoord::new(1, 1));
+        launcher
+            .block_renderer_state
+            .cache
+            .dark_events
+            .insert(TileCoord::new(1, 1));
+
+        let frame = launcher.graphics_frame_for_render(
+            11,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let shadow = render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::BlockShadows)
+            .expect("shadow resolve pass should be present");
+        assert_eq!(shadow.target, RenderTarget::Buffer("block-shadows".into()));
+        assert_eq!(shadow.resolve_target, Some(RenderTarget::Screen));
+        assert_eq!(shadow.resolve_kind, Some(RenderResolveKind::DrawRectSample));
+
+        let darkness = render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Darkness)
+            .expect("darkness resolve pass should be present");
+        assert_eq!(
+            darkness.target,
+            RenderTarget::Buffer("block-darkness".into())
+        );
+        assert_eq!(darkness.resolve_target, Some(RenderTarget::Screen));
+        assert_eq!(
+            darkness.resolve_kind,
+            Some(RenderResolveKind::DrawFboSample)
+        );
+        assert!(darkness.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::Custom { name, .. } if name == "darkness-dirty-tile"
+        )));
     }
 
     #[test]

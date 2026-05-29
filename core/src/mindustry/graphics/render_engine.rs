@@ -570,10 +570,12 @@ impl RenderPassExecutionStep {
 pub enum RenderPassKind {
     Background,
     Floor,
+    BlockShadows,
     Block,
     Overlay,
     Minimap,
     Lighting,
+    Darkness,
     Ui,
     Custom(String),
 }
@@ -583,10 +585,12 @@ impl RenderPassKind {
         match self {
             Self::Background => "background",
             Self::Floor => "floor",
+            Self::BlockShadows => "block_shadows",
             Self::Block => "block",
             Self::Overlay => "overlay",
             Self::Minimap => "minimap",
             Self::Lighting => "lighting",
+            Self::Darkness => "darkness",
             Self::Ui => "ui",
             Self::Custom(name) => name.as_str(),
         }
@@ -596,10 +600,12 @@ impl RenderPassKind {
         match self {
             Self::Background => 0,
             Self::Floor => 10,
+            Self::BlockShadows => 20,
             Self::Block => 20,
             Self::Overlay => 30,
             Self::Minimap => 40,
             Self::Lighting => 50,
+            Self::Darkness => 70,
             Self::Ui => 60,
             Self::Custom(_) => 1_000,
         }
@@ -609,10 +615,12 @@ impl RenderPassKind {
         match self {
             Self::Background => RendererDrawStage::Background,
             Self::Floor => RendererDrawStage::Floor,
+            Self::BlockShadows => RendererDrawStage::BlockShadows,
             Self::Block => RendererDrawStage::BlockShadows,
             Self::Overlay => RendererDrawStage::Overlay,
             Self::Minimap => RendererDrawStage::Debug,
             Self::Lighting => RendererDrawStage::Lighting,
+            Self::Darkness => RendererDrawStage::Darkness,
             Self::Ui => RendererDrawStage::Ui,
             Self::Custom(_) => RendererDrawStage::Debug,
         }
@@ -1151,6 +1159,12 @@ mod tests {
             ),
             (RenderPassKind::Floor, "floor", 10, RendererDrawStage::Floor),
             (
+                RenderPassKind::BlockShadows,
+                "block_shadows",
+                20,
+                RendererDrawStage::BlockShadows,
+            ),
+            (
                 RenderPassKind::Block,
                 "block",
                 20,
@@ -1173,6 +1187,12 @@ mod tests {
                 "lighting",
                 50,
                 RendererDrawStage::Lighting,
+            ),
+            (
+                RenderPassKind::Darkness,
+                "darkness",
+                70,
+                RendererDrawStage::Darkness,
             ),
             (RenderPassKind::Ui, "ui", 60, RendererDrawStage::Ui),
         ];

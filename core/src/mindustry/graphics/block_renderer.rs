@@ -10,7 +10,8 @@ use crate::mindustry::{
     entities::comp::DecalColor,
     graphics::{
         particle_renderer::{BlockDrawerParticlePlan, ParticleColor, ParticleRendererState},
-        CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
+        CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
+        RenderRect, RenderResolveKind, RenderTarget,
     },
     world::draw::{DrawBlockParticleBlendMode, DrawBlockParticleRenderKind},
     world::point2_pack,
@@ -1256,6 +1257,79 @@ impl BlockRendererPlan {
         passes
     }
 
+    pub fn to_resolve_render_passes(&self, tile_size_world: f32) -> Vec<RenderPass> {
+        let mut passes = Vec::new();
+        if let Some(pass) = self.to_shadow_resolve_pass() {
+            passes.push(pass);
+        }
+        if let Some(pass) = self.to_darkness_resolve_pass(tile_size_world) {
+            passes.push(pass);
+        }
+        passes
+    }
+
+    pub fn to_shadow_resolve_pass(&self) -> Option<RenderPass> {
+        let has_shadow_tiles = self
+            .tile_passes
+            .iter()
+            .any(|pass| pass.stage == BlockDrawStage::TileShadow && !pass.tiles.is_empty());
+        if !has_shadow_tiles {
+            return None;
+        }
+
+        Some(
+            RenderPass::new(RenderPassKind::BlockShadows)
+                .with_target(RenderTarget::Buffer("block-shadows".into()))
+                .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawRectSample),
+        )
+    }
+
+    pub fn to_darkness_resolve_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
+        if tile_size_world <= 0.0 {
+            return None;
+        }
+
+        let has_darkness_work = self.darkness.effective_fill() == DarknessFill::Black
+            || !self.darkness.tiles.is_empty()
+            || !self.darkness.dirty_tiles.is_empty();
+        if !has_darkness_work {
+            return None;
+        }
+
+        let mut pass = RenderPass::new(RenderPassKind::Darkness)
+            .with_target(RenderTarget::Buffer("block-darkness".into()))
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawFboSample);
+
+        if self.darkness.effective_fill() == DarknessFill::Black {
+            pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        }
+
+        for tile in &self.darkness.tiles {
+            pass.push(RenderCommand::fill_rect(
+                RenderRect::new(
+                    tile.coord.x as f32 * tile_size_world,
+                    tile.coord.y as f32 * tile_size_world,
+                    tile_size_world,
+                    tile_size_world,
+                ),
+                [0.0, 0.0, 0.0, tile.opacity],
+                tile.layer,
+            ));
+        }
+
+        for coord in &self.darkness.dirty_tiles {
+            pass.push(RenderCommand::custom(
+                "darkness-dirty-tile",
+                vec![
+                    RenderProperty::new("x", coord.x.to_string()),
+                    RenderProperty::new("y", coord.y.to_string()),
+                ],
+            ));
+        }
+
+        Some(pass)
+    }
+
     pub fn to_block_sprite_ops(&self, tile_size_world: f32) -> Vec<BlockSpriteOp> {
         if tile_size_world <= 0.0 {
             return Vec::new();
@@ -2474,6 +2548,73 @@ mod tests {
             }
             other => panic!("expected DrawSprite, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn block_renderer_plan_emits_shadow_and_darkness_resolve_passes() {
+        let mut plan = BlockRendererPlan::default();
+        plan.tile_passes.push(TilePassPlan {
+            stage: BlockDrawStage::TileShadow,
+            layer: BlockDrawStage::TileShadow.layer(),
+            tiles: vec![TileDrawPlan {
+                coord: TileCoord::new(2, 3),
+                block: "router".into(),
+                cache_layer: CacheLayer::Normal,
+                draw_custom_shadow: false,
+                emits_light: false,
+                obstructs_light: false,
+            }],
+        });
+        plan.darkness.fill = DarknessFill::Black;
+        plan.darkness.push_tile(TileCoord::new(1, 2), 1.5);
+        plan.darkness.push_dirty_tile(TileCoord::new(3, 4));
+
+        let passes = plan.to_resolve_render_passes(8.0);
+
+        assert_eq!(passes.len(), 2);
+        assert_eq!(passes[0].kind, RenderPassKind::BlockShadows);
+        assert_eq!(
+            passes[0].target,
+            RenderTarget::Buffer("block-shadows".into())
+        );
+        assert_eq!(passes[0].resolve_target, Some(RenderTarget::Screen));
+        assert_eq!(
+            passes[0].resolve_kind,
+            Some(RenderResolveKind::DrawRectSample)
+        );
+        assert!(passes[0].commands.is_empty());
+
+        assert_eq!(passes[1].kind, RenderPassKind::Darkness);
+        assert_eq!(
+            passes[1].target,
+            RenderTarget::Buffer("block-darkness".into())
+        );
+        assert_eq!(passes[1].resolve_target, Some(RenderTarget::Screen));
+        assert_eq!(
+            passes[1].resolve_kind,
+            Some(RenderResolveKind::DrawFboSample)
+        );
+        assert!(matches!(
+            passes[1].commands.get(0),
+            Some(RenderCommand::Clear { color }) if *color == [0.0, 0.0, 0.0, 1.0]
+        ));
+        assert!(matches!(
+            passes[1].commands.get(1),
+            Some(RenderCommand::FillRect { rect, color, layer })
+                if *rect == RenderRect::new(8.0, 16.0, 8.0, 8.0)
+                    && *color == [0.0, 0.0, 0.0, 0.5]
+                    && *layer == Layer::DARKNESS
+        ));
+        assert!(matches!(
+            passes[1].commands.get(2),
+            Some(RenderCommand::Custom { name, properties })
+                if name == "darkness-dirty-tile"
+                    && properties
+                        == &vec![
+                            RenderProperty::new("x", "3"),
+                            RenderProperty::new("y", "4"),
+                        ]
+        ));
     }
 
     #[test]

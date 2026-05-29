@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **24.7%**。
+- 当前总体迁移完成度：约 **24.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9761,3 +9761,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 给 cache layer pass 填入真实 floor/cache tile draw commands，不能长期只携带 target/resolve metadata；
   2. 继续补 `BlockRenderer.shadows` / `darkness` 的 `DrawRectSample` / `DrawFboSample` pass；
   3. 真实 OpenGL/glow backend 需要消费 render frame 里的 cache-layer target 并创建/绑定 FBO。
+
+---
+
+## 297. 最新闭环记录：BlockRenderer shadows/darkness resolve pass
+
+- 本轮总体进度更新：约 **24.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind` 新增 `BlockShadows` / `Darkness`；
+    - 两者分别映射到 `RendererDrawStage::BlockShadows` / `RendererDrawStage::Darkness`。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `BlockRendererPlan::to_resolve_render_passes(...)`；
+    - `to_shadow_resolve_pass()` 生成 `Buffer("block-shadows") -> Screen`，`resolve_kind = DrawRectSample`；
+    - `to_darkness_resolve_pass(...)` 生成 `Buffer("block-darkness") -> Screen`，`resolve_kind = DrawFboSample`；
+    - darkness tile 先以 `FillRect` 表达，dirty tile 以 custom 命令保留重绘信号。
+  - `desktop/src/lib.rs`
+    - `graphics_frame_for_render(...)` 推入 block resolve passes；
+    - 新增测试确认 desktop graphics frame 能看到 shadow/darkness resolve pass。
+- 已验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core block_renderer_plan_emits_shadow_and_darkness_resolve_passes --lib`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo test -p mindustry-desktop render_target --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 将 tile shadow draw commands 真正写入 `block-shadows` target，而不是只建 resolve seam；
+  2. 完善 darkness FBO 写入、dirty tile cache 重绘与 shader 参数；
+  3. 继续推进真实 OpenGL/glow backend 消费 `RenderTarget::Buffer("block-*")`。

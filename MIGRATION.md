@@ -12347,3 +12347,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - cache layer pass 已进入 render frame，但其中 tile draw command 仍待接入真实 floor/cache tile batching；
   - backend 仍需把 `RenderTarget::Buffer("cache-layer:*")` 创建为真实 FBO/texture 并执行 shader blit；
   - 当前总体迁移约 24.7%，仍未达到完整可玩。
+
+### 12.391 BlockRenderer shadows/darkness resolve pass 接入 render frame
+
+- 2026-05-29：继续补齐 Java `BlockRenderer.drawShadows()` 与 `drawDarkness()` 的 FBO 回填 seam。本轮先把 shadows/darkness 从纯数据/事件推进到 backend-neutral `RenderPass`，并接入 desktop `RenderFramePlan`；真实 OpenGL/glow 后端仍待消费这些 target/resolve，但不再只有孤立 `DarknessPlan`。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind` 新增 `BlockShadows` 与 `Darkness`；
+    - `BlockShadows` 映射到 Java `RendererDrawStage::BlockShadows`；
+    - `Darkness` 映射到 Java `RendererDrawStage::Darkness`。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererPlan::to_resolve_render_passes(tile_size_world)` 汇总 shadows/darkness resolve pass；
+    - `to_shadow_resolve_pass()` 在存在 `TileShadow` pass 时生成 `RenderPassKind::BlockShadows`，target 为 `Buffer("block-shadows")`，resolve 为 `Screen + DrawRectSample`；
+    - `to_darkness_resolve_pass(...)` 在存在 darkness fill/tile/dirty tile 时生成 `RenderPassKind::Darkness`，target 为 `Buffer("block-darkness")`，resolve 为 `Screen + DrawFboSample`；
+    - darkness tiles 暂以 `FillRect` 表达，dirty tile 以 `Custom("darkness-dirty-tile")` 保留缓存重绘信号。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 在 block sprite pass 后推入 shadows/darkness resolve pass，再统一 Java 顺序排序；
+    - 新增 desktop 测试确认真实 graphics frame 中存在 `BlockShadows`/`Darkness` resolve pass。
+- Java 对照要点：
+  - `drawShadows()` 对应 `Draw.rect(texture)` 采样回填，所以使用 `RenderResolveKind::DrawRectSample`；
+  - `drawDarkness()` 对应 `Draw.fbo(texture)`/darkness shader 采样回填，所以使用 `RenderResolveKind::DrawFboSample`；
+  - 当前仍是 FBO/resolve seam，尚未实现真实 GPU framebuffer。
+- 已跑验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core block_renderer_plan_emits_shadow_and_darkness_resolve_passes --lib`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo test -p mindustry-desktop render_target --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `block-shadows`/`block-darkness` 还未绑定真实 FBO/texture；
+  - shadow pass 当前只建立 resolve seam，实际阴影 FBO 写入还需与 tile shadow draw command 合并；
+  - darkness dirty tile 的真实重绘/缓存生命周期还需继续对照 Java；
+  - 当前总体迁移约 24.8%，仍未达到完整可玩。
