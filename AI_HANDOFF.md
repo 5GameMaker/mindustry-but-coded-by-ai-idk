@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **25.6%**。
+- 当前总体迁移完成度：约 **25.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9987,3 +9987,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 `DesktopGraphicsOpenGlBackendFramePlan` 扩展到 texture/FBO/shader 上传语义；
   2. 真正接 `glow/glutin/winit` 前必须按用户/规则确认新增依赖；
   3. 当前仍没有真实 OpenGL context/window/present，只是 OpenGL 语义的可执行计划 seam。
+
+---
+
+## 306. 最新闭环记录：Environment stage 接入 RenderFramePlan
+
+- 本轮总体进度更新：约 **25.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind` 新增 `Environment`，映射到 `RendererDrawStage::Environment`；
+    - Java renderer 顺序测试覆盖 `BlockBuild -> Environment -> Lighting`。
+  - `core/src/mindustry/graphics/env_renderers.rs`
+    - `EnvRendererPlan::to_render_commands()` 将 surface/water/space/weather/effects bucket 转成 `RenderCommand::Custom("env-*")`；
+    - `EnvRendererPlan::to_render_pass()` 产出 `RenderPassKind::Environment`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 持有 `EnvRendererRegistry::with_defaults()`；
+    - `graphics_frame_for_render(...)` 根据 `game_state.rules.env/fog` 构建 env plan，并把 environment pass 推入 `RenderFramePlan` 后统一 Java stage sort。
+- 已验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core env_renderers --lib`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop environment_pass --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 env custom marker 下沉为真实纹理/粒子/noise commands；
+  2. 继续补 `Debug` 或 `Bloom/PostProcess` stage；
+  3. 真实 OpenGL/glow backend 后续需要消费 `Environment` pass 中的 env commands。

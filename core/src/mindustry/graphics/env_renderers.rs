@@ -4,6 +4,7 @@
 /// `Renderer.addEnvRenderer(...)`.  This Rust module keeps the selection
 /// rules, command payloads, and bucketed plan data separate so a backend can
 /// translate them into concrete draw calls.
+use super::{RenderCommand, RenderPass, RenderPassKind, RenderProperty};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Env;
@@ -31,6 +32,24 @@ pub enum EnvColor {
 pub enum EnvBlendMode {
     Normal,
     Additive,
+}
+
+impl EnvBlendMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Additive => "additive",
+        }
+    }
+}
+
+impl EnvColor {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Hex(hex) => hex,
+            Self::Named(name) => name,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -160,6 +179,93 @@ pub enum EnvRenderCommand {
         layer_scl_m: f32,
         layer_color_m: f32,
     },
+}
+
+impl EnvRenderCommand {
+    pub const fn kind_label(self) -> &'static str {
+        match self {
+            Self::FillRect { .. } => "fill_rect",
+            Self::BlitTexture { .. } => "blit_texture",
+            Self::RayField { .. } => "ray_field",
+            Self::Particles { .. } => "particles",
+            Self::NoiseLayers { .. } => "noise_layers",
+        }
+    }
+
+    pub const fn layer(self) -> &'static str {
+        match self {
+            Self::FillRect { layer, .. }
+            | Self::BlitTexture { layer, .. }
+            | Self::RayField { layer, .. }
+            | Self::Particles { layer, .. }
+            | Self::NoiseLayers { layer, .. } => layer,
+        }
+    }
+
+    pub fn to_render_command(self, bucket: &'static str) -> RenderCommand {
+        let mut properties = vec![
+            RenderProperty::new("bucket", bucket),
+            RenderProperty::new("kind", self.kind_label()),
+            RenderProperty::new("layer", self.layer()),
+        ];
+
+        match self {
+            Self::FillRect { color, alpha, .. } => {
+                properties.push(RenderProperty::new("color", color.label()));
+                properties.push(RenderProperty::new("alpha", alpha.to_string()));
+            }
+            Self::BlitTexture {
+                resource, blend, ..
+            } => {
+                properties.push(RenderProperty::new("resource", resource));
+                properties.push(RenderProperty::new("blend", blend.label()));
+            }
+            Self::RayField {
+                texture,
+                count,
+                time_scale,
+                windx,
+                windy,
+                ..
+            } => {
+                properties.push(RenderProperty::new("texture", texture));
+                properties.push(RenderProperty::new("count", count.to_string()));
+                properties.push(RenderProperty::new("time_scale", time_scale.to_string()));
+                properties.push(RenderProperty::new("windx", windx.to_string()));
+                properties.push(RenderProperty::new("windy", windy.to_string()));
+            }
+            Self::Particles {
+                region,
+                color,
+                density,
+                intensity,
+                opacity,
+                ..
+            } => {
+                properties.push(RenderProperty::new("region", region));
+                properties.push(RenderProperty::new("color", color.label()));
+                properties.push(RenderProperty::new("density", density.to_string()));
+                properties.push(RenderProperty::new("intensity", intensity.to_string()));
+                properties.push(RenderProperty::new("opacity", opacity.to_string()));
+            }
+            Self::NoiseLayers {
+                texture,
+                color,
+                noise_scale,
+                opacity,
+                layers,
+                ..
+            } => {
+                properties.push(RenderProperty::new("texture", texture));
+                properties.push(RenderProperty::new("color", color.label()));
+                properties.push(RenderProperty::new("noise_scale", noise_scale.to_string()));
+                properties.push(RenderProperty::new("opacity", opacity.to_string()));
+                properties.push(RenderProperty::new("layers", layers.to_string()));
+            }
+        }
+
+        RenderCommand::custom(format!("env-{}", self.kind_label()), properties)
+    }
 }
 
 impl EnvRenderCommandTemplate {
@@ -484,6 +590,48 @@ impl EnvRendererPlan {
             && self.weather.is_empty()
             && self.effects.is_empty()
     }
+
+    pub fn render_command_count(&self) -> usize {
+        self.surface.len()
+            + self.water.len()
+            + self.space.len()
+            + self.weather.len()
+            + self.effects.len()
+    }
+
+    pub fn to_render_commands(&self) -> Vec<RenderCommand> {
+        let mut commands = Vec::with_capacity(self.render_command_count());
+        Self::extend_bucket_commands(&mut commands, "surface", &self.surface);
+        Self::extend_bucket_commands(&mut commands, "water", &self.water);
+        Self::extend_bucket_commands(&mut commands, "space", &self.space);
+        Self::extend_bucket_commands(&mut commands, "weather", &self.weather);
+        Self::extend_bucket_commands(&mut commands, "effects", &self.effects);
+        commands
+    }
+
+    pub fn to_render_pass(&self) -> Option<RenderPass> {
+        let commands = self.to_render_commands();
+        if commands.is_empty() {
+            return None;
+        }
+
+        let mut pass = RenderPass::new(RenderPassKind::Environment);
+        pass.extend(commands);
+        Some(pass)
+    }
+
+    fn extend_bucket_commands(
+        commands: &mut Vec<RenderCommand>,
+        bucket: &'static str,
+        source: &[EnvRenderCommand],
+    ) {
+        commands.extend(
+            source
+                .iter()
+                .copied()
+                .map(|command| command.to_render_command(bucket)),
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -742,6 +890,28 @@ mod tests {
             }
             other => panic!("unexpected effect command: {other:?}"),
         }
+
+        let pass = plan
+            .to_render_pass()
+            .expect("matched environment renderer should enter RenderFramePlan");
+        assert_eq!(pass.kind, RenderPassKind::Environment);
+        assert_eq!(pass.order, RenderPassKind::Environment.default_order());
+        assert_eq!(pass.commands.len(), plan.render_command_count());
+        assert!(matches!(
+            &pass.commands[0],
+            RenderCommand::Custom { name, properties }
+                if name == "env-fill_rect"
+                    && properties.iter().any(|property| property.key == "bucket" && property.value == "surface")
+                    && properties.iter().any(|property| property.key == "color" && property.value == "353982")
+        ));
+        assert!(matches!(
+            &pass.commands[1],
+            RenderCommand::Custom { name, properties }
+                if name == "env-blit_texture"
+                    && properties.iter().any(|property| property.key == "bucket" && property.value == "water")
+                    && properties.iter().any(|property| property.key == "resource" && property.value == "Shaders.caustics")
+                    && properties.iter().any(|property| property.key == "blend" && property.value == "additive")
+        ));
     }
 
     #[test]

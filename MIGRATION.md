@@ -12609,3 +12609,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 OpenGL/glow backend 尚未接入；
   - texture atlas 上传、FBO 创建、shader 编译、window/present 仍待后续；
   - 当前总体迁移约 25.6%，仍未达到完整可玩。
+
+### 12.400 Environment stage 接入 RenderFramePlan
+
+- 2026-05-29：继续对齐 Java `Renderer.draw()` 中 `blockBuilding` 与 `light` 之间的 `envRenderers` 阶段。本轮把已有 `EnvRendererPlan` 从独立数据层推进到 `RenderFramePlan` 主链，形成 `RenderPassKind::Environment`。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind` 新增 `Environment`；
+    - `Environment.label() = "environment"`，`default_order() = 50`，`java_renderer_draw_stage() = RendererDrawStage::Environment`；
+    - 排序测试覆盖 `Floor -> BlockShadows -> BlockWalls -> BlockBuild -> Environment -> Lighting -> Darkness -> Fog -> Block`。
+  - `core/src/mindustry/graphics/env_renderers.rs`
+    - `EnvBlendMode::label()`、`EnvColor::label()`、`EnvRenderCommand::{kind_label, layer, to_render_command}`；
+    - `EnvRendererPlan::{render_command_count, to_render_commands, to_render_pass}`；
+    - surface/water/space/weather/effects bucket 会以稳定顺序转成 `RenderCommand::Custom("env-*")`，保留 bucket、layer、resource/color/blend 等属性。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `env_renderer_registry: EnvRendererRegistry`；
+    - `env_render_plan()` 用 `game_state.rules.env`、默认 terrestrial env、`game_state.rules.fog` 构建 `EnvRendererContext`；
+    - `graphics_frame_for_render(...)` 把 env pass 推入 render frame，再统一 `sort_passes_like_java_renderer_draw()`。
+- Java 对照要点：
+  - Java `envRenderers` 位于 `Layer.blockBuilding` 之后、`Layer.light` 之前；
+  - Rust `Environment` pass 现在也在 Java stage rank 50，位于 `BlockBuild` 与 `Lighting` 之间；
+  - 当前 env 命令仍是 backend-neutral custom marker，真实 OpenGL backend 后续需要执行纹理 blit、粒子、ray/noise 层。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core env_renderers --lib`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop environment_pass --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - env custom marker 未拆成真实 sprite/noise/particle commands；
+  - `Environment` pass 还没有真实 OpenGL/glow backend 消费；
+  - 当前总体迁移约 25.7%，仍未达到完整可玩。

@@ -32,16 +32,17 @@ use mindustry_core::mindustry::graphics::{
     BlockRendererBuildingVisualRuntimePowerSnapshot, BlockRendererBuildingVisualRuntimeSnapshot,
     BlockRendererBuildingVisualRuntimeTurretSnapshot, BlockRendererPlan, BlockRendererState,
     BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer,
-    FloorRenderPlan, FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState,
-    FogViewport, GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState,
-    LoadFrameInput, LoadFramePlan, LoadRendererState, MenuFrameInput, MenuFramePlan,
-    MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
-    MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
-    OverlayRendererPlan, OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan,
-    PixelatorInput, PixelatorState, RenderBackendFlushBoundary, RenderBlendMode, RenderBridge,
-    RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint,
-    RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext,
-    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
+    Env as GraphicsEnv, EnvRendererContext, EnvRendererPlan, EnvRendererRegistry, FloorRenderPlan,
+    FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState, FogViewport,
+    GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState, LoadFrameInput,
+    LoadFramePlan, LoadRendererState, MenuFrameInput, MenuFramePlan, MenuRendererConfig,
+    MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect,
+    MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize, OverlayRendererPlan,
+    OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
+    PixelatorState, RenderBackendFlushBoundary, RenderBlendMode, RenderBridge, RenderCamera,
+    RenderCommand, RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderRect,
+    RenderResolveKind, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderCamera,
+    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
     TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
@@ -1694,6 +1695,7 @@ pub struct DesktopLauncher {
     pub overlay_renderer_state: OverlayRendererState,
     pub block_renderer_state: BlockRendererState,
     pub light_renderer_state: LightRendererState,
+    pub env_renderer_registry: EnvRendererRegistry,
     pub floor_renderer_state: FloorRendererState,
     pub fog_renderer_state: FogRendererState,
     pub minimap_renderer_state: MinimapRendererState,
@@ -2044,6 +2046,7 @@ impl DesktopLauncher {
             overlay_renderer_state: OverlayRendererState::default(),
             block_renderer_state,
             light_renderer_state: LightRendererState::default(),
+            env_renderer_registry: EnvRendererRegistry::with_defaults(),
             floor_renderer_state: FloorRendererState::default(),
             fog_renderer_state: FogRendererState::default(),
             minimap_renderer_state: MinimapRendererState::new(MinimapWorldSize::new(0, 0)),
@@ -2622,6 +2625,22 @@ impl DesktopLauncher {
         self.light_renderer_state.drain_plan()
     }
 
+    pub fn env_render_plan(&self) -> Option<EnvRendererPlan> {
+        let context = EnvRendererContext::new(
+            self.game_state.rules.env,
+            None,
+            GraphicsEnv::TERRESTRIAL,
+            true,
+            self.game_state.rules.fog,
+        );
+        let plan = self.env_renderer_registry.plan(&context);
+        if plan.render_command_count() > 0 {
+            Some(plan)
+        } else {
+            None
+        }
+    }
+
     pub fn block_render_plan(
         &mut self,
         mut camera: RenderCamera,
@@ -2865,6 +2884,12 @@ impl DesktopLauncher {
         let floor_renderer = self.floor_render_plan(camera, viewport);
         if let Some(floor_renderer) = &floor_renderer {
             for pass in floor_renderer.cache_layer_passes.iter().cloned() {
+                render_frame.push_pass(pass);
+            }
+        }
+        let env_renderer = self.env_render_plan();
+        if let Some(env_renderer) = &env_renderer {
+            if let Some(pass) = env_renderer.to_render_pass() {
                 render_frame.push_pass(pass);
             }
         }
@@ -4587,13 +4612,14 @@ mod tests {
     use mindustry_core::mindustry::ctype::{Content, ContentId};
     use mindustry_core::mindustry::entities::comp::DecalColor;
     use mindustry_core::mindustry::graphics::{
-        BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer, Layer,
-        LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput, MinimapCamera,
-        MinimapOverlayInput, PageType, ParticleRendererState, RenderBackendFlushBoundary,
-        RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderFramePlan, RenderPass,
-        RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize,
-        RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext, ShaderApplyPlan,
-        ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
+        BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
+        Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
+        MinimapCamera, MinimapOverlayInput, PageType, ParticleRendererState,
+        RenderBackendFlushBoundary, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
+        RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
+        RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
+        ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId,
+        TextureAtlasPlan, TileCoord,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -6928,6 +6954,58 @@ mod tests {
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
         assert_eq!(renderer.last_opengl_backend_plan, plan);
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_includes_environment_pass_before_lighting() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.rules.env = GraphicsEnv::UNDERWATER;
+        assert!(launcher.light_renderer_state.add_circle(
+            4.0,
+            5.0,
+            6.0,
+            LightPrimitive {
+                center: (4.0, 5.0),
+                radius: 6.0,
+                color: DecalColor::WHITE,
+                opacity: 1.0,
+            },
+        ));
+
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 32.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let frame = launcher.graphics_frame_for_render(
+            42,
+            camera,
+            viewport,
+            MinimapCamera::new(16.0, 16.0, 32.0, 32.0),
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let environment_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::Environment)
+            .expect("environment pass should enter render frame");
+        let lighting_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::Lighting)
+            .expect("lighting pass should enter render frame");
+        assert!(environment_index < lighting_index);
+
+        let environment_pass = &render_frame.passes[environment_index];
+        assert_eq!(
+            environment_pass.kind.java_renderer_draw_stage().label(),
+            "env"
+        );
+        assert!(environment_pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::Custom { name, properties }
+                if name == "env-fill_rect"
+                    && properties.iter().any(|property| property.key == "bucket" && property.value == "surface")
+        )));
     }
 
     #[test]

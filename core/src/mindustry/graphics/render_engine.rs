@@ -573,6 +573,7 @@ pub enum RenderPassKind {
     BlockShadows,
     BlockWalls,
     BlockBuild,
+    Environment,
     Block,
     BlockOverdraw,
     Overlay,
@@ -592,6 +593,7 @@ impl RenderPassKind {
             Self::BlockShadows => "block_shadows",
             Self::BlockWalls => "block_walls",
             Self::BlockBuild => "block_build",
+            Self::Environment => "environment",
             Self::Block => "block",
             Self::BlockOverdraw => "block_overdraw",
             Self::Overlay => "overlay",
@@ -611,6 +613,7 @@ impl RenderPassKind {
             Self::BlockShadows => 20,
             Self::BlockWalls => 30,
             Self::BlockBuild => 40,
+            Self::Environment => 50,
             Self::Block => 20,
             Self::BlockOverdraw => 100,
             Self::Overlay => 30,
@@ -630,6 +633,7 @@ impl RenderPassKind {
             Self::BlockShadows => RendererDrawStage::BlockShadows,
             Self::BlockWalls => RendererDrawStage::BlockWalls,
             Self::BlockBuild => RendererDrawStage::BlockBuild,
+            Self::Environment => RendererDrawStage::Environment,
             Self::Block => RendererDrawStage::BlockOverdraw,
             Self::BlockOverdraw => RendererDrawStage::BlockOverdraw,
             Self::Overlay => RendererDrawStage::Overlay,
@@ -1148,6 +1152,7 @@ mod tests {
         plan.push_pass(RenderPass::new(RenderPassKind::Block).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::Fog).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::Darkness).with_order(0));
+        plan.push_pass(RenderPass::new(RenderPassKind::Environment).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::BlockBuild).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::BlockWalls).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::BlockShadows).with_order(99));
@@ -1164,6 +1169,7 @@ mod tests {
                 RenderPassKind::BlockShadows,
                 RenderPassKind::BlockWalls,
                 RenderPassKind::BlockBuild,
+                RenderPassKind::Environment,
                 RenderPassKind::Lighting,
                 RenderPassKind::Darkness,
                 RenderPassKind::Fog,
@@ -1230,6 +1236,12 @@ mod tests {
                 "block_build",
                 40,
                 RendererDrawStage::BlockBuild,
+            ),
+            (
+                RenderPassKind::Environment,
+                "environment",
+                50,
+                RendererDrawStage::Environment,
             ),
             (
                 RenderPassKind::Block,
