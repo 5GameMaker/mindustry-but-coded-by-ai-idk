@@ -13388,3 +13388,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Arc SpriteBatch 的 `mixColor`、origin/pivot 与更完整排序语义仍待补齐；
   - texture handle、shader binding 与 draw call 仍待落地；
   - 当前总体迁移约 28.5%，仍未达到完整可玩。
+
+## 12.429 SpriteBatch mix_color 语义
+
+- 2026-05-29：根据 Java/Arc `SpriteBatch` 顶点布局补齐 `mixColor`。Arc 的 sprite 顶点包含 position、color、uv、mixColor；此前 Rust 只有 tint/color，导致后续 `Draw.mixcol(...)` 与双色混合效果无法表达。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderCommand::DrawSprite` 新增 `mix_color: [f32; 4]`；
+    - `RenderCommand::draw_sprite(...)` 默认写入 `[0.0, 0.0, 0.0, 0.0]`，保持旧调用兼容；
+    - 新增 `RenderCommand::draw_sprite_mixed(...)`。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite` 新增 `mix_color`；
+    - `DesktopGraphicsOpenGlBackendSpriteVertex` 新增 `mix_color`；
+    - `DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(...)` 将 mix color 写入四个顶点；
+    - `DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES` 从 8 个 f32 更新为 12 个 f32。
+- 迁移意义：
+  - sprite 顶点布局更接近 Arc `SpriteBatch`；
+  - 后续真实 shader 可接入 `a_mix_color` / mix color attribute；
+  - 避免特效、发光、过渡或局部混色路径退化为单 tint。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `Draw.mixcol(...)` 形式的全局 batch 状态尚未迁移为 render command/state；
+  - origin/pivot、packed color、shader identity 与真实 GL attribute binding 仍待落地；
+  - 当前总体迁移约 28.6%，仍未达到完整可玩。

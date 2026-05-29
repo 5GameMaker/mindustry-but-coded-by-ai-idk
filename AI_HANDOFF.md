@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **28.5%**。
+- 当前总体迁移完成度：约 **28.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10664,3 +10664,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 按 Java/Arc SpriteBatch 语义补 `mix_color` 到 sprite vertex/quad；
   2. 再推进真实 GL buffer handle/resource table；
   3. 后续补 origin/pivot 与更完整排序语义。
+
+---
+
+## 335. 最新闭环记录：SpriteBatch mix_color 语义
+
+- 本轮总体进度更新：约 **28.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderCommand::DrawSprite` 新增 `mix_color`；
+    - `draw_sprite(...)` 默认使用透明 mix color；
+    - 新增 `draw_sprite_mixed(...)`。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendSpriteVertex` 新增 `mix_color`；
+    - `DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite` 保留 mix color；
+    - sprite quad 顶点与 buffer stride 按 `position + uv + color + mix_color` 更新。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 继续补 Arc `Draw.rect` 的 origin/pivot 语义；
+  2. 再推进真实 GL buffer handle/resource table；
+  3. 后续补完整排序/packed color/shader identity。

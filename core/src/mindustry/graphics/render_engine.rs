@@ -427,6 +427,7 @@ pub enum RenderCommand {
         symbol: String,
         rect: RenderRect,
         tint: [f32; 4],
+        mix_color: [f32; 4],
         rotation: f32,
         layer: f32,
     },
@@ -516,6 +517,25 @@ impl RenderCommand {
             symbol: symbol.into(),
             rect,
             tint,
+            mix_color: [0.0, 0.0, 0.0, 0.0],
+            rotation,
+            layer,
+        }
+    }
+
+    pub fn draw_sprite_mixed(
+        symbol: impl Into<String>,
+        rect: RenderRect,
+        tint: [f32; 4],
+        mix_color: [f32; 4],
+        rotation: f32,
+        layer: f32,
+    ) -> Self {
+        Self::DrawSprite {
+            symbol: symbol.into(),
+            rect,
+            tint,
+            mix_color,
             rotation,
             layer,
         }
@@ -1529,16 +1549,33 @@ mod tests {
                 symbol,
                 rect: sprite_rect,
                 tint,
+                mix_color,
                 rotation,
                 layer,
             } => {
                 assert_eq!(symbol, "overlay-icon");
                 assert_eq!(sprite_rect, rect);
                 assert_eq!(tint, [1.0, 0.5, 0.25, 0.75]);
+                assert_eq!(mix_color, [0.0, 0.0, 0.0, 0.0]);
                 assert_eq!(rotation, 90.0);
                 assert_eq!(layer, 30.0);
             }
             other => panic!("unexpected command: {other:?}"),
+        }
+
+        let mixed_sprite = RenderCommand::draw_sprite_mixed(
+            "mixed-icon",
+            rect,
+            [1.0, 1.0, 1.0, 1.0],
+            [0.2, 0.3, 0.4, 0.5],
+            0.0,
+            31.0,
+        );
+        match mixed_sprite {
+            RenderCommand::DrawSprite { mix_color, .. } => {
+                assert_eq!(mix_color, [0.2, 0.3, 0.4, 0.5]);
+            }
+            other => panic!("unexpected mixed sprite command: {other:?}"),
         }
 
         match text {

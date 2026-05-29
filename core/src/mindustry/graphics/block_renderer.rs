@@ -3189,6 +3189,7 @@ mod tests {
                 tint,
                 rotation,
                 layer,
+                ..
             } => {
                 assert_eq!(symbol, "surge-wall-glow");
                 assert_eq!(*rect, op.rect);

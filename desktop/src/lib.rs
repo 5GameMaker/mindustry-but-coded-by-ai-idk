@@ -489,6 +489,7 @@ pub struct DesktopGraphicsOpenGlBackendSpriteVertex {
     pub position: RenderPoint,
     pub uv: [f32; 2],
     pub color: [f32; 4],
+    pub mix_color: [f32; 4],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -513,6 +514,7 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
         clip: Option<RenderRect>,
         rect: RenderRect,
         tint: [f32; 4],
+        mix_color: [f32; 4],
         rotation: f32,
         layer: f32,
     ) -> Self {
@@ -533,21 +535,25 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
                     position: positions[0],
                     uv: [u, v],
                     color: tint,
+                    mix_color,
                 },
                 DesktopGraphicsOpenGlBackendSpriteVertex {
                     position: positions[1],
                     uv: [u2, v],
                     color: tint,
+                    mix_color,
                 },
                 DesktopGraphicsOpenGlBackendSpriteVertex {
                     position: positions[2],
                     uv: [u2, v2],
                     color: tint,
+                    mix_color,
                 },
                 DesktopGraphicsOpenGlBackendSpriteVertex {
                     position: positions[3],
                     uv: [u, v2],
                     color: tint,
+                    mix_color,
                 },
             ],
         }
@@ -579,7 +585,7 @@ pub struct DesktopGraphicsOpenGlBackendMeshBufferPlan {
 }
 
 impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
-    pub const SPRITE_VERTEX_STRIDE_BYTES: usize = 8 * std::mem::size_of::<f32>();
+    pub const SPRITE_VERTEX_STRIDE_BYTES: usize = 12 * std::mem::size_of::<f32>();
 
     pub fn from_sprite_batch(
         batch_index: usize,
@@ -1248,6 +1254,7 @@ pub enum DesktopGraphicsOpenGlBackendAdapterAction {
         resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
         rect: RenderRect,
         tint: [f32; 4],
+        mix_color: [f32; 4],
         rotation: f32,
         layer: f32,
     },
@@ -1466,6 +1473,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                     if let DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
                         rect,
                         tint,
+                        mix_color,
                         rotation,
                         layer,
                         ..
@@ -1479,6 +1487,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                                 self.state.current_clip,
                                 *rect,
                                 *tint,
+                                *mix_color,
                                 *rotation,
                                 *layer,
                             ),
@@ -1526,6 +1535,7 @@ fn opengl_backend_adapter_action_from_render_command(
             symbol,
             rect,
             tint,
+            mix_color,
             rotation,
             layer,
         } => DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
@@ -1533,6 +1543,7 @@ fn opengl_backend_adapter_action_from_render_command(
             resolved_sprite,
             rect: *rect,
             tint: *tint,
+            mix_color: *mix_color,
             rotation: *rotation,
             layer: *layer,
         },
@@ -1769,6 +1780,7 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                     if let DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
                         rect,
                         tint,
+                        mix_color,
                         rotation,
                         layer,
                         ..
@@ -1782,6 +1794,7 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                                 self.state.current_clip,
                                 *rect,
                                 *tint,
+                                *mix_color,
                                 *rotation,
                                 *layer,
                             ),
@@ -9594,6 +9607,11 @@ mod tests {
                 [0.0, 1.0 / 4096.0],
             ]
         );
+        assert!(executor.state.sprite_quads[0]
+            .vertices
+            .iter()
+            .all(|vertex| vertex.color == [1.0, 1.0, 1.0, 1.0]
+                && vertex.mix_color == [0.0, 0.0, 0.0, 0.0]));
         assert_eq!(executor.state.sprite_mesh_batches.len(), 1);
         let mesh_batch = &executor.state.sprite_mesh_batches[0];
         assert_eq!(
@@ -9615,10 +9633,8 @@ mod tests {
                 batch_index: 0,
                 vertex_count: 4,
                 index_count: 6,
-                vertex_stride_bytes:
-                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
-                vertex_buffer_bytes: 4
-                    * super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
+                vertex_stride_bytes: 12 * std::mem::size_of::<f32>(),
+                vertex_buffer_bytes: 4 * 12 * std::mem::size_of::<f32>(),
                 index_buffer_bytes: 6 * std::mem::size_of::<u32>(),
             }
         );
