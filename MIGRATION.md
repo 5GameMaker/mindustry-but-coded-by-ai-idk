@@ -13896,3 +13896,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - atlas page 合成/pack 后像素输出仍未接入，当前能加载已存在的 page PNG；
   - runtime texture full upload 的 CPU pixmap bytes 仍需从 minimap/floor cache 等状态接入；
   - 当前总体迁移约 30.6%，仍未达到完整可玩。
+
+## 12.450 SpriteBatch VBO/IBO upload command adapter 接入
+
+- 2026-05-29：继续推进原版 Arc `SpriteBatch` / OpenGL mesh 上传主线。Rust desktop 侧在已有 sprite quad、mesh batch、draw call plan 基础上新增 sprite mesh upload plan / resolving executor / command sink，把每个 batch 的 packed vertex 与 index 数据转换为可落到真实 GL 的 VAO/VBO/IBO 命令序列。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 GL buffer 常量：`ARRAY_BUFFER`、`ELEMENT_ARRAY_BUFFER`、`DYNAMIC_DRAW`、`FLOAT`、`UNSIGNED_INT`；
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan`；
+    - 新增 `DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload`；
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand`，覆盖 `BindVertexArray`、`BindBuffer`、`BufferData`、`EnableVertexAttributeArray`、`VertexAttributePointer`；
+    - 新增 mesh upload sink / recording sink / command sink / resolving executor；
+    - `DesktopGraphicsOpenGlBackendHandleCache` 增加 buffer handle 表；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 与 classifying adapter state 现在在记录 sprite quad 后同步生成 `sprite_mesh_upload_plans`，与 mesh buffer/resource/draw call plan 保持同一主链路；
+    - `drive_sprite_mesh_upload_sink(...)` 可把 upload plan 推给 resolving executor 并生成真实 GL buffer 命令描述。
+- 迁移意义：
+  - `DrawSprite -> SpriteQuad -> SpriteMeshBatch -> MeshBufferPlan -> MeshUploadPlan -> GL buffer commands -> DrawElements` 链路继续闭合；
+  - packed vertex layout 继续保持 `x,y,color,u,v,mixColor` 六个 float 的 Arc SpriteBatch 语义；
+  - index buffer 现在以 u32 little-endian bytes 写入 `ELEMENT_ARRAY_BUFFER`，后续可在真实 GL executor 中按 `UNSIGNED_INT` 消费。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 GL context/window/present 尚未接入；
+  - VAO/VBO/IBO 命令仍是 command adapter 层，尚未调用 `glBufferData` / `glVertexAttribPointer`；
+  - SpriteBatch flush/request、draw range、layer 内部排序仍需继续对照 Arc；
+  - 当前总体迁移约 30.7%，仍未达到完整可玩。

@@ -604,6 +604,11 @@ pub const DESKTOP_GRAPHICS_OPENGL_NEAREST: u32 = 0x2600;
 pub const DESKTOP_GRAPHICS_OPENGL_LINEAR: u32 = 0x2601;
 pub const DESKTOP_GRAPHICS_OPENGL_RGBA: u32 = 0x1908;
 pub const DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE: u32 = 0x1401;
+pub const DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER: u32 = 0x8892;
+pub const DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER: u32 = 0x8893;
+pub const DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW: u32 = 0x88e8;
+pub const DESKTOP_GRAPHICS_OPENGL_FLOAT: u32 = 0x1406;
+pub const DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT: u32 = 0x1405;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
@@ -1198,6 +1203,110 @@ pub struct DesktopGraphicsOpenGlBackendSpriteMeshResourceTable {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan {
+    pub batch_index: usize,
+    pub vertex_array_key: String,
+    pub vertex_buffer_key: String,
+    pub index_buffer_key: String,
+    pub vertex_count: usize,
+    pub index_count: usize,
+    pub vertex_stride_bytes: usize,
+    pub vertex_attributes: Vec<DesktopGraphicsOpenGlBackendVertexAttributePlan>,
+    pub vertex_bytes: Vec<u8>,
+    pub index_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload {
+    pub batch_index: usize,
+    pub vertex_array_key: String,
+    pub vertex_array_handle: u32,
+    pub vertex_buffer_key: String,
+    pub vertex_buffer_handle: u32,
+    pub index_buffer_key: String,
+    pub index_buffer_handle: u32,
+    pub vertex_count: usize,
+    pub index_count: usize,
+    pub vertex_stride_bytes: usize,
+    pub vertex_attributes: Vec<DesktopGraphicsOpenGlBackendVertexAttributePlan>,
+    pub vertex_bytes: Vec<u8>,
+    pub index_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand {
+    BindVertexArray {
+        vertex_array_handle: u32,
+    },
+    BindBuffer {
+        target: u32,
+        buffer_handle: u32,
+    },
+    BufferData {
+        target: u32,
+        usage: u32,
+        bytes: Vec<u8>,
+    },
+    EnableVertexAttributeArray {
+        attribute_location: i32,
+    },
+    VertexAttributePointer {
+        attribute_location: i32,
+        components: usize,
+        gl_type: u32,
+        normalized: bool,
+        stride_bytes: usize,
+        offset_bytes: usize,
+    },
+}
+
+pub trait DesktopGraphicsOpenGlBackendSpriteMeshUploadSink {
+    fn consume_opengl_sprite_mesh_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan,
+    );
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendSpriteMeshUploadSink {
+    pub uploads: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>,
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshUploadSink
+    for DesktopGraphicsRecordingOpenGlBackendSpriteMeshUploadSink
+{
+    fn consume_opengl_sprite_mesh_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan,
+    ) {
+        self.uploads.push(upload);
+    }
+}
+
+pub trait DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink {
+    fn consume_opengl_sprite_mesh_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand,
+    );
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendSpriteMeshUploadCommandSink {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand>,
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendSpriteMeshUploadCommandSink
+{
+    fn consume_opengl_sprite_mesh_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand,
+    ) {
+        self.commands.push(command);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendShaderProgramIdentity {
     pub shader: ShaderId,
     pub program_key: String,
@@ -1368,6 +1477,102 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshResourceTable {
         self.resources
             .values()
             .find(|resource| resource.batch_index == batch_index)
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendPackedSpriteVertex {
+    fn append_to_vertex_bytes(self, bytes: &mut Vec<u8>) {
+        bytes.extend_from_slice(&self.position.x.to_le_bytes());
+        bytes.extend_from_slice(&self.position.y.to_le_bytes());
+        bytes.extend_from_slice(&self.color_packed.to_le_bytes());
+        bytes.extend_from_slice(&self.uv[0].to_le_bytes());
+        bytes.extend_from_slice(&self.uv[1].to_le_bytes());
+        bytes.extend_from_slice(&self.mix_color_packed.to_le_bytes());
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan {
+    pub fn from_batch_buffer_and_resource_plan(
+        batch: &DesktopGraphicsOpenGlBackendSpriteMeshBatch,
+        buffer_plan: &DesktopGraphicsOpenGlBackendMeshBufferPlan,
+        resource_plan: &DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan,
+    ) -> Self {
+        let mut vertex_bytes =
+            Vec::with_capacity(buffer_plan.vertex_count * buffer_plan.vertex_stride_bytes);
+        for vertex in &batch.packed_vertices {
+            vertex.append_to_vertex_bytes(&mut vertex_bytes);
+        }
+        let mut index_bytes =
+            Vec::with_capacity(buffer_plan.index_count * std::mem::size_of::<u32>());
+        for index in &batch.indices {
+            index_bytes.extend_from_slice(&index.to_le_bytes());
+        }
+
+        Self {
+            batch_index: buffer_plan.batch_index,
+            vertex_array_key: resource_plan.vertex_array_key.clone(),
+            vertex_buffer_key: resource_plan.vertex_buffer_key.clone(),
+            index_buffer_key: resource_plan.index_buffer_key.clone(),
+            vertex_count: buffer_plan.vertex_count,
+            index_count: buffer_plan.index_count,
+            vertex_stride_bytes: buffer_plan.vertex_stride_bytes,
+            vertex_attributes: buffer_plan.vertex_attributes.clone(),
+            vertex_bytes,
+            index_bytes,
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload {
+    pub fn to_opengl_sprite_mesh_upload_commands(
+        &self,
+    ) -> Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand> {
+        let mut commands = vec![
+            DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindVertexArray {
+                vertex_array_handle: self.vertex_array_handle,
+            },
+            DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindBuffer {
+                target: DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                buffer_handle: self.vertex_buffer_handle,
+            },
+            DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BufferData {
+                target: DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                usage: DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                bytes: self.vertex_bytes.clone(),
+            },
+            DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindBuffer {
+                target: DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER,
+                buffer_handle: self.index_buffer_handle,
+            },
+            DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BufferData {
+                target: DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER,
+                usage: DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                bytes: self.index_bytes.clone(),
+            },
+        ];
+
+        for attribute in &self.vertex_attributes {
+            let Some(attribute_location) = attribute.attribute_location else {
+                continue;
+            };
+            commands.push(
+                DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::EnableVertexAttributeArray {
+                    attribute_location,
+                },
+            );
+            commands.push(
+                DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::VertexAttributePointer {
+                    attribute_location,
+                    components: attribute.components,
+                    gl_type: DESKTOP_GRAPHICS_OPENGL_FLOAT,
+                    normalized: attribute.packed_color,
+                    stride_bytes: self.vertex_stride_bytes,
+                    offset_bytes: attribute.offset_bytes,
+                },
+            );
+        }
+
+        commands
     }
 }
 
@@ -1557,6 +1762,25 @@ fn opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
     plans
         .iter()
         .map(DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan::from_buffer_plan)
+        .collect()
+}
+
+fn opengl_backend_sprite_mesh_upload_plans_from_batches(
+    batches: &[DesktopGraphicsOpenGlBackendSpriteMeshBatch],
+    buffer_plans: &[DesktopGraphicsOpenGlBackendMeshBufferPlan],
+    resource_plans: &[DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan],
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan> {
+    batches
+        .iter()
+        .zip(buffer_plans.iter())
+        .zip(resource_plans.iter())
+        .map(|((batch, buffer_plan), resource_plan)| {
+            DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan::from_batch_buffer_and_resource_plan(
+                batch,
+                buffer_plan,
+                resource_plan,
+            )
+        })
         .collect()
 }
 
@@ -2386,6 +2610,12 @@ pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
     pub last_draw_call: Option<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteMeshUploadSinkExecutionState {
+    pub mesh_uploads_emitted: usize,
+    pub last_mesh_upload: Option<DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>,
+}
+
 pub trait DesktopGraphicsOpenGlBackendTextureUploadSink {
     fn consume_opengl_texture_upload(
         &mut self,
@@ -2519,6 +2749,7 @@ pub struct DesktopGraphicsOpenGlBackendHandleCache {
     pub programs: BTreeMap<String, u32>,
     pub textures: BTreeMap<String, u32>,
     pub vertex_arrays: BTreeMap<String, u32>,
+    pub buffers: BTreeMap<String, u32>,
 }
 
 impl DesktopGraphicsOpenGlBackendHandleCache {
@@ -2578,6 +2809,18 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
         let key = key.into();
         *self
             .vertex_arrays
+            .entry(key)
+            .or_insert_with(|| allocator.allocate())
+    }
+
+    pub fn buffer_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> u32 {
+        let key = key.into();
+        *self
+            .buffers
             .entry(key)
             .or_insert_with(|| allocator.allocate())
     }
@@ -2692,6 +2935,65 @@ impl DesktopGraphicsOpenGlBackendTextureUploadSink
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsResolvingOpenGlBackendSpriteMeshUploadExecutor {
+    pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub uploads: Vec<DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload>,
+    pub commands: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand>,
+}
+
+impl DesktopGraphicsResolvingOpenGlBackendSpriteMeshUploadExecutor {
+    pub fn drive_sprite_mesh_upload_command_sink<
+        S: DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.commands {
+            sink.consume_opengl_sprite_mesh_upload_command(command.clone());
+        }
+        self.commands.len()
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshUploadSink
+    for DesktopGraphicsResolvingOpenGlBackendSpriteMeshUploadExecutor
+{
+    fn consume_opengl_sprite_mesh_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan,
+    ) {
+        let vertex_array_handle = self
+            .cache
+            .vertex_array_handle(upload.vertex_array_key.clone(), &mut self.allocator);
+        let vertex_buffer_handle = self
+            .cache
+            .buffer_handle(upload.vertex_buffer_key.clone(), &mut self.allocator);
+        let index_buffer_handle = self
+            .cache
+            .buffer_handle(upload.index_buffer_key.clone(), &mut self.allocator);
+        let resolved_upload = DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload {
+            batch_index: upload.batch_index,
+            vertex_array_key: upload.vertex_array_key,
+            vertex_array_handle,
+            vertex_buffer_key: upload.vertex_buffer_key,
+            vertex_buffer_handle,
+            index_buffer_key: upload.index_buffer_key,
+            index_buffer_handle,
+            vertex_count: upload.vertex_count,
+            index_count: upload.index_count,
+            vertex_stride_bytes: upload.vertex_stride_bytes,
+            vertex_attributes: upload.vertex_attributes,
+            vertex_bytes: upload.vertex_bytes,
+            index_bytes: upload.index_bytes,
+        };
+        self.commands
+            .extend(resolved_upload.to_opengl_sprite_mesh_upload_commands());
+        self.uploads.push(resolved_upload);
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
@@ -2752,6 +3054,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub sprite_mesh_buffer_plans: Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan>,
     pub sprite_mesh_resource_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan>,
     pub sprite_mesh_resource_table: DesktopGraphicsOpenGlBackendSpriteMeshResourceTable,
+    pub sprite_mesh_upload_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>,
     pub sprite_draw_call_plans: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
     pub missing_sprite_texture_bindings: usize,
 }
@@ -2797,6 +3100,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             sprite_mesh_resource_plans: Vec::new(),
             sprite_mesh_resource_table:
                 DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::default(),
+            sprite_mesh_upload_plans: Vec::new(),
             sprite_draw_call_plans: Vec::new(),
             missing_sprite_texture_bindings: 0,
         }
@@ -2959,6 +3263,11 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
             DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::from_plans(
                 &self.sprite_mesh_resource_plans,
             );
+        self.sprite_mesh_upload_plans = opengl_backend_sprite_mesh_upload_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &self.sprite_mesh_buffer_plans,
+            &self.sprite_mesh_resource_plans,
+        );
         self.sprite_draw_call_plans = opengl_backend_sprite_draw_call_plans_from_batches(
             &self.sprite_mesh_batches,
             &self.sprite_mesh_resource_plans,
@@ -3125,6 +3434,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub sprite_mesh_buffer_plans: Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan>,
     pub sprite_mesh_resource_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan>,
     pub sprite_mesh_resource_table: DesktopGraphicsOpenGlBackendSpriteMeshResourceTable,
+    pub sprite_mesh_upload_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>,
     pub sprite_draw_call_plans: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
     pub missing_sprite_texture_bindings: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
@@ -3171,6 +3481,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             sprite_mesh_resource_plans: Vec::new(),
             sprite_mesh_resource_table:
                 DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::default(),
+            sprite_mesh_upload_plans: Vec::new(),
             sprite_draw_call_plans: Vec::new(),
             missing_sprite_texture_bindings: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
@@ -3211,6 +3522,19 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         state
     }
 
+    pub fn drive_sprite_mesh_upload_sink<S: DesktopGraphicsOpenGlBackendSpriteMeshUploadSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendSpriteMeshUploadSinkExecutionState {
+        let mut state = DesktopGraphicsOpenGlBackendSpriteMeshUploadSinkExecutionState::default();
+        for upload in &self.sprite_mesh_upload_plans {
+            sink.consume_opengl_sprite_mesh_upload(upload.clone());
+            state.mesh_uploads_emitted += 1;
+            state.last_mesh_upload = Some(upload.clone());
+        }
+        state
+    }
+
     pub fn drive_texture_upload_sink<S: DesktopGraphicsOpenGlBackendTextureUploadSink>(
         &self,
         sink: &mut S,
@@ -3247,6 +3571,13 @@ impl DesktopGraphicsOpenGlBackendExecutor {
         sink: &mut S,
     ) -> DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
         self.state.drive_sprite_draw_call_sink(sink)
+    }
+
+    pub fn drive_sprite_mesh_upload_sink<S: DesktopGraphicsOpenGlBackendSpriteMeshUploadSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendSpriteMeshUploadSinkExecutionState {
+        self.state.drive_sprite_mesh_upload_sink(sink)
     }
 
     pub fn drive_texture_upload_sink<S: DesktopGraphicsOpenGlBackendTextureUploadSink>(
@@ -3359,6 +3690,11 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::from_plans(
                 &self.sprite_mesh_resource_plans,
             );
+        self.sprite_mesh_upload_plans = opengl_backend_sprite_mesh_upload_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &self.sprite_mesh_buffer_plans,
+            &self.sprite_mesh_resource_plans,
+        );
         self.sprite_draw_call_plans = opengl_backend_sprite_draw_call_plans_from_batches(
             &self.sprite_mesh_batches,
             &self.sprite_mesh_resource_plans,
@@ -12034,6 +12370,25 @@ mod tests {
             mesh_resource.vertex_buffer_bytes,
             executor.state.sprite_mesh_buffer_plans[0].vertex_buffer_bytes
         );
+        assert_eq!(executor.state.sprite_mesh_upload_plans.len(), 1);
+        let mesh_upload = &executor.state.sprite_mesh_upload_plans[0];
+        assert_eq!(mesh_upload.batch_index, 0);
+        assert_eq!(mesh_upload.vertex_array_key, "sprite-batch:0:vao");
+        assert_eq!(mesh_upload.vertex_buffer_key, "sprite-batch:0:vbo");
+        assert_eq!(mesh_upload.index_buffer_key, "sprite-batch:0:ibo");
+        assert_eq!(mesh_upload.vertex_count, 4);
+        assert_eq!(mesh_upload.index_count, 6);
+        assert_eq!(
+            mesh_upload.vertex_bytes.len(),
+            4 * super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES
+        );
+        assert_eq!(
+            mesh_upload.index_bytes,
+            [0u32, 1, 2, 2, 3, 0]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
         assert_eq!(executor.state.sprite_draw_call_plans.len(), 1);
         assert_eq!(
             executor.state.sprite_draw_call_plans[0],
@@ -12107,6 +12462,10 @@ mod tests {
             executor.state.sprite_mesh_resource_table
         );
         assert_eq!(
+            classifying_adapter.state.sprite_mesh_upload_plans,
+            executor.state.sprite_mesh_upload_plans
+        );
+        assert_eq!(
             classifying_adapter.state.sprite_draw_call_plans,
             executor.state.sprite_draw_call_plans
         );
@@ -12148,6 +12507,60 @@ mod tests {
             draw_call_sink.draw_calls,
             executor.state.sprite_draw_call_plans
         );
+        let mut mesh_upload_sink =
+            super::DesktopGraphicsRecordingOpenGlBackendSpriteMeshUploadSink::default();
+        let mesh_upload_sink_state = executor.drive_sprite_mesh_upload_sink(&mut mesh_upload_sink);
+        assert_eq!(mesh_upload_sink_state.mesh_uploads_emitted, 1);
+        assert_eq!(
+            mesh_upload_sink_state.last_mesh_upload.as_ref(),
+            executor.state.sprite_mesh_upload_plans.last()
+        );
+        assert_eq!(
+            mesh_upload_sink.uploads,
+            executor.state.sprite_mesh_upload_plans
+        );
+        let mut mesh_upload_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendSpriteMeshUploadExecutor::default();
+        let mesh_upload_executor_state =
+            executor.drive_sprite_mesh_upload_sink(&mut mesh_upload_executor);
+        assert_eq!(mesh_upload_executor_state.mesh_uploads_emitted, 1);
+        assert_eq!(
+            mesh_upload_executor.cache.vertex_arrays["sprite-batch:0:vao"],
+            1
+        );
+        assert_eq!(mesh_upload_executor.cache.buffers["sprite-batch:0:vbo"], 2);
+        assert_eq!(mesh_upload_executor.cache.buffers["sprite-batch:0:ibo"], 3);
+        assert_eq!(mesh_upload_executor.uploads[0].vertex_array_handle, 1);
+        assert_eq!(mesh_upload_executor.uploads[0].vertex_buffer_handle, 2);
+        assert_eq!(mesh_upload_executor.uploads[0].index_buffer_handle, 3);
+        assert_eq!(
+            mesh_upload_executor.commands[0],
+            super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindVertexArray {
+                vertex_array_handle: 1,
+            }
+        );
+        assert_eq!(
+            mesh_upload_executor.commands[2],
+            super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BufferData {
+                target: super::DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                usage: super::DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                bytes: executor.state.sprite_mesh_upload_plans[0]
+                    .vertex_bytes
+                    .clone(),
+            }
+        );
+        assert!(mesh_upload_executor.commands.contains(
+            &super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::VertexAttributePointer {
+                attribute_location: 0,
+                components: 2,
+                gl_type: super::DESKTOP_GRAPHICS_OPENGL_FLOAT,
+                normalized: false,
+                stride_bytes:
+                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
+                offset_bytes:
+                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_POSITION_OFFSET_BYTES,
+            }
+        ));
         let mut draw_call_executor =
             super::DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor::default();
         let draw_call_executor_state =
