@@ -10,8 +10,8 @@ use crate::mindustry::{
     entities::comp::DecalColor,
     graphics::{
         particle_renderer::{BlockDrawerParticlePlan, ParticleColor, ParticleRendererState},
-        CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
-        RenderRect, RenderResolveKind, RenderTarget,
+        CacheLayer, Layer, RenderBlendMode, RenderCommand, RenderPass, RenderPassKind, RenderPoint,
+        RenderProperty, RenderRect, RenderResolveKind, RenderTarget,
     },
     world::draw::{DrawBlockParticleBlendMode, DrawBlockParticleRenderKind},
     world::point2_pack,
@@ -1166,6 +1166,72 @@ pub struct BlockRendererBlockParticleWorldSample {
     pub region: Option<&'static str>,
 }
 
+impl BlockRendererBlockParticleWorldSample {
+    pub fn render_blend_mode(&self) -> RenderBlendMode {
+        match self.blend_mode {
+            DrawBlockParticleBlendMode::Normal => RenderBlendMode::Normal,
+            DrawBlockParticleBlendMode::Additive => RenderBlendMode::Additive,
+        }
+    }
+
+    pub fn tint(&self) -> [f32; 4] {
+        let base = [self.color.r, self.color.g, self.color.b, self.color.a];
+        let color = if let (Some(secondary), Some(t)) = (self.secondary_color, self.color_t) {
+            let t = t.clamp(0.0, 1.0);
+            [
+                base[0] + (secondary.r - base[0]) * t,
+                base[1] + (secondary.g - base[1]) * t,
+                base[2] + (secondary.b - base[2]) * t,
+                base[3] + (secondary.a - base[3]) * t,
+            ]
+        } else {
+            base
+        };
+
+        [color[0], color[1], color[2], color[3] * self.alpha]
+    }
+
+    pub fn to_render_commands(&self) -> Vec<RenderCommand> {
+        let mut commands = vec![RenderCommand::set_blend(self.render_blend_mode())];
+        let center = RenderPoint::new(self.x, self.y);
+
+        match self.render_kind {
+            DrawBlockParticleRenderKind::Circle => {
+                commands.push(RenderCommand::draw_circle(
+                    center,
+                    self.size.max(0.0),
+                    self.tint(),
+                    true,
+                    self.layer,
+                ));
+            }
+            DrawBlockParticleRenderKind::SoftSprite => {
+                let symbol = self.region.unwrap_or("circle-shadow");
+                commands.push(RenderCommand::draw_sprite(
+                    symbol,
+                    RenderRect::from_center(center, self.size, self.size),
+                    self.tint(),
+                    0.0,
+                    self.layer,
+                ));
+            }
+            DrawBlockParticleRenderKind::Polygon => {
+                commands.push(RenderCommand::draw_polygon(
+                    center,
+                    self.size.max(0.0),
+                    self.sides,
+                    self.rotation,
+                    self.tint(),
+                    true,
+                    self.layer,
+                ));
+            }
+        }
+
+        commands
+    }
+}
+
 impl BlockRendererBlockParticlePlan {
     pub fn world_samples(
         &self,
@@ -1198,6 +1264,13 @@ impl BlockRendererBlockParticlePlan {
                     region: self.plan.region,
                 })
             })
+            .collect()
+    }
+
+    pub fn render_commands(&self, tile_size_world: f32) -> Vec<RenderCommand> {
+        self.world_samples(tile_size_world)
+            .iter()
+            .flat_map(BlockRendererBlockParticleWorldSample::to_render_commands)
             .collect()
     }
 }
@@ -1280,6 +1353,25 @@ impl BlockRendererPlan {
             passes.push(pass);
         }
         passes
+    }
+
+    pub fn to_block_particle_render_commands(&self, tile_size_world: f32) -> Vec<RenderCommand> {
+        self.block_particles
+            .iter()
+            .flat_map(|particle| particle.render_commands(tile_size_world))
+            .collect()
+    }
+
+    pub fn to_block_particle_render_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
+        let commands = self.to_block_particle_render_commands(tile_size_world);
+        if commands.is_empty() {
+            return None;
+        }
+
+        let mut pass = RenderPass::new(RenderPassKind::Block)
+            .with_order(RenderPassKind::Block.default_order() + 1);
+        pass.extend(commands);
+        Some(pass)
     }
 
     pub fn to_shadow_resolve_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
@@ -2597,6 +2689,72 @@ mod tests {
         );
         assert_eq!(samples[0].blend_mode, DrawBlockParticleBlendMode::Additive);
         assert_eq!(samples[0].region, Some("circle-shadow"));
+    }
+
+    #[test]
+    fn block_particle_samples_enter_block_render_pass_commands() {
+        let mut soft = crate::mindustry::world::draw::draw_soft_particles_block_config();
+        soft.particle_radius = 0.0;
+        soft.particle_count = 1;
+        let mut polygon = crate::mindustry::world::draw::draw_particles_block_config();
+        polygon.particle_radius = 0.0;
+        polygon.particle_count = 1;
+        polygon.sides = 6;
+        polygon.particle_rotation = 25.0;
+        polygon.render_kind = DrawBlockParticleRenderKind::Polygon;
+
+        let mut plan = BlockRendererPlan::default();
+        plan.block_particles = vec![
+            BlockRendererBlockParticlePlan {
+                coord: TileCoord::new(1, 1),
+                block: "soft-particle-test".into(),
+                size: 2,
+                plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                    soft,
+                    3,
+                    1.0,
+                    0.0,
+                    Layer::BLOCK,
+                ),
+            },
+            BlockRendererBlockParticlePlan {
+                coord: TileCoord::new(2, 2),
+                block: "poly-particle-test".into(),
+                size: 2,
+                plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                    polygon,
+                    4,
+                    1.0,
+                    0.0,
+                    Layer::BLOCK,
+                ),
+            },
+        ];
+
+        let pass = plan
+            .to_block_particle_render_pass(8.0)
+            .expect("particles should produce a block render pass");
+
+        assert_eq!(pass.kind, RenderPassKind::Block);
+        assert_eq!(pass.order, RenderPassKind::Block.default_order() + 1);
+        assert_eq!(pass.commands.len(), 4);
+        assert!(matches!(
+            pass.commands.get(0),
+            Some(RenderCommand::SetBlend { mode }) if *mode == RenderBlendMode::Additive
+        ));
+        assert!(matches!(
+            pass.commands.get(1),
+            Some(RenderCommand::DrawSprite { symbol, .. }) if symbol == "circle-shadow"
+        ));
+        assert!(matches!(
+            pass.commands.get(2),
+            Some(RenderCommand::SetBlend { mode }) if *mode == RenderBlendMode::Normal
+        ));
+        assert!(matches!(
+            pass.commands.get(3),
+            Some(RenderCommand::DrawPolygon { sides, rotation, filled, .. })
+                if *sides == 6 && *rotation == 25.0 && *filled
+        ));
     }
 
     #[test]

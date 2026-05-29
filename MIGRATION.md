@@ -12434,3 +12434,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `World.getDarkness(...)` 的完整动态 darkness 规则尚未迁移；
   - `checkChanges()` 的 wall darkness 回写尚未进入真实 runtime；
   - 当前总体迁移约 25.0%，仍未达到完整可玩。
+
+### 12.394 Block particle commands 接入 RenderFramePlan
+
+- 2026-05-29：继续消除 block particle 仅停留在 desktop trace/旁路 backend sink 的问题。本轮把 `BlockRendererBlockParticleWorldSample` 直接映射为 `RenderCommand`，并由 `BlockRendererPlan` 产出 `RenderPassKind::Block` pass，使 circle / soft sprite / polygon 粒子进入与 block/shadow/darkness 相同的 `RenderFramePlan` 主链。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBlockParticleWorldSample::render_blend_mode()` 对齐 Java `Blending.normal/additive`；
+    - `BlockRendererBlockParticleWorldSample::tint()` 保留 soft particle 的 `color/color2/color_t` 插值与 alpha；
+    - `BlockRendererBlockParticleWorldSample::to_render_commands()` 将三类粒子映射为：
+      - circle -> `SetBlend + DrawCircle`；
+      - soft sprite -> `SetBlend + DrawSprite("circle-shadow")`；
+      - polygon -> `SetBlend + DrawPolygon`；
+    - `BlockRendererBlockParticlePlan::render_commands(...)`、`BlockRendererPlan::to_block_particle_render_commands(...)` 与 `to_block_particle_render_pass(...)` 把粒子批次包装进 `RenderPassKind::Block`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 在 block sprite passes 后推入 particle render pass，再推入 shadows/darkness resolve passes；
+    - `DesktopGraphicsExecutionTrace` 继续保留 `block_particle_*` 统计与 draw-call 观测，但 `drive_render_command_sink(...)` 检测到同一批粒子命令已存在于 render pass 时不再重复发射旁路命令；
+    - `desktop_graphics_trace_reports_block_particle_plans_for_live_backend` 断言 graphics frame 的 render passes 中存在与 `block_particle_render_commands` 相同的 `RenderPassKind::Block`。
+- Java 对照要点：
+  - `DrawParticles` / `DrawSoftParticles` 的 blend、region、polygon/circle 分支已进入统一 render command；
+  - 当前仍依赖 backend-neutral `RenderCommand`，真实 OpenGL batch/atlas/shader 还未执行；
+  - `RenderPassKind::Block` 仍是粗粒度 stage，后续需继续拆出 Java `BlockWalls/BlockBuild/BlockOverdraw` 等细分顺序。
+- 已跑验证：
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop block_particle --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 OpenGL/glow backend 尚未消费这些 particle commands；
+  - `RenderPassKind::Block` 的 Java stage 映射仍需细分；
+  - 纹理粒子的 atlas/GPU sampler 路径仍待真实 backend 接入；
+  - 当前总体迁移约 25.1%，仍未达到完整可玩。

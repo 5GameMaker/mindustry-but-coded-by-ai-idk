@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **25.0%**。
+- 当前总体迁移完成度：约 **25.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9839,3 +9839,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续补 `World::getDarkness(...)` 中 border/sector/map-limit 等动态 darkness 采样，而不只用 `Tile::static_darkness(...)`；
   2. 将 `checkChanges()` 的 wall darkness side-effect 接到 runtime/world tile `data` 回写；
   3. 准备真实 OpenGL/glow backend 消费 `block-darkness` FBO、darkness shader 与 `DrawFboSample` resolve。
+
+---
+
+## 300. 最新闭环记录：Block particles 接入 render pass 主链
+
+- 本轮总体进度更新：约 **25.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBlockParticleWorldSample` 新增 `render_blend_mode()` / `tint()` / `to_render_commands()`；
+    - `BlockRendererBlockParticlePlan::render_commands(...)` 与 `BlockRendererPlan::to_block_particle_render_commands(...)` 将 circle / soft sprite / polygon 粒子统一转为 `RenderCommand`；
+    - `BlockRendererPlan::to_block_particle_render_pass(...)` 生成 `RenderPassKind::Block`，让粒子不再只停在 desktop trace 旁路。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 把 block particle pass 推入 `RenderFramePlan`；
+    - `DesktopGraphicsExecutionTrace` 继续保留粒子 trace/draw-call 统计，但 live backend 在检测到同一批粒子命令已经位于 render pass 时不再重复发射旁路命令；
+    - graphics frame 测试确认粒子命令已经作为 `RenderPassKind::Block` 出现在 render pass 中。
+- 已验证：
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop block_particle --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 `RenderPassKind::Block` 映射从粗糙 `BlockShadows` 折叠拆向 Java `BlockBuild/BlockWalls` 等更细 stage；
+  2. 真实 OpenGL/glow backend 需要直接消费这些 pass 中的 `SetBlend + DrawCircle/DrawSprite/DrawPolygon`；
+  3. 保持 desktop trace 只做观测，实际绘制以 `RenderFramePlan` 为主链。

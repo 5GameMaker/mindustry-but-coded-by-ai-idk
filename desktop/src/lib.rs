@@ -771,17 +771,26 @@ impl DesktopGraphicsExecutionTrace {
     ) -> DesktopGraphicsLiveBackendExecutionState {
         let mut state = DesktopGraphicsLiveBackendExecutionState::default();
 
-        for (command_index, command) in self.block_particle_render_commands.iter().enumerate() {
-            let trace = DesktopGraphicsLiveBackendRenderCommandTrace {
-                source: DesktopGraphicsLiveBackendRenderCommandSource::BlockParticles {
-                    command_index,
-                },
-                kind: render_command_trace_kind(command),
-                command: command.clone(),
-            };
-            sink.consume_render_command_trace(trace.clone());
-            state.backend_render_commands_emitted += 1;
-            state.last_backend_render_command = Some(trace);
+        let block_particle_commands_in_render_pass =
+            !self.block_particle_render_commands.is_empty()
+                && self
+                    .render_passes
+                    .iter()
+                    .any(|pass| pass.commands == self.block_particle_render_commands);
+
+        if !block_particle_commands_in_render_pass {
+            for (command_index, command) in self.block_particle_render_commands.iter().enumerate() {
+                let trace = DesktopGraphicsLiveBackendRenderCommandTrace {
+                    source: DesktopGraphicsLiveBackendRenderCommandSource::BlockParticles {
+                        command_index,
+                    },
+                    kind: render_command_trace_kind(command),
+                    command: command.clone(),
+                };
+                sink.consume_render_command_trace(trace.clone());
+                state.backend_render_commands_emitted += 1;
+                state.last_backend_render_command = Some(trace);
+            }
         }
 
         for (pass_index, pass) in self.render_passes.iter().enumerate() {
@@ -934,10 +943,13 @@ impl DesktopGraphicsExecutionTrace {
                 .iter()
                 .map(DesktopGraphicsBlockParticleDrawCall::from_trace)
                 .collect();
-        let block_particle_render_commands = block_particle_draw_calls
-            .iter()
-            .flat_map(DesktopGraphicsBlockParticleDrawCall::render_commands)
-            .collect();
+        let block_particle_render_commands = frame
+            .bundle
+            .block_renderer
+            .as_ref()
+            .map_or_else(Vec::new, |block_renderer| {
+                block_renderer.to_block_particle_render_commands(8.0)
+            });
         if block_particle_plans > 0 {
             execution_steps.push(DesktopGraphicsExecutionStepTrace::BlockParticles {
                 plan_count: block_particle_plans,
@@ -2637,6 +2649,9 @@ impl DesktopLauncher {
         let block_renderer = self.block_render_plan(camera, viewport);
         if let Some(block_renderer) = &block_renderer {
             for pass in block_renderer.to_sprite_render_passes(8.0) {
+                render_frame.push_pass(pass);
+            }
+            if let Some(pass) = block_renderer.to_block_particle_render_pass(8.0) {
                 render_frame.push_pass(pass);
             }
             for pass in block_renderer.to_resolve_render_passes(8.0) {
@@ -6120,6 +6135,14 @@ mod tests {
             renderer.last_execution.block_particle_render_commands,
             renderer.last_trace.block_particle_render_commands.len()
         );
+        let particle_pass = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .find(|pass| pass.commands == renderer.last_trace.block_particle_render_commands)
+            .expect("graphics frame should carry block particles as a render pass");
+        assert_eq!(particle_pass.kind, RenderPassKind::Block);
+        assert_eq!(particle_pass.target, RenderTarget::Screen);
         assert_eq!(
             renderer
                 .last_live_backend_state
