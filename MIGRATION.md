@@ -15058,3 +15058,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - textured-line 仍保留 region 数据，尚未解析 atlas / sprite；
   - rect / square / triangle / light primitives 还需继续 bridge；
   - 当前总体迁移约 38.4%，仍未达到完整可玩。
+
+## 405. 最新闭环记录：standard effect square 接入 graphics/OpenGL backend
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **38.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame::to_render_pass()` 继续 bridge square primitive；
+    - `StandardEffectSquareRenderPrimitive` 转成 `RenderCommand::DrawPolygon { sides: 4 }`；
+    - filled / stroked square 通过 `stroke <= EPSILON` 选择 `filled`，并将 Java `Fill.square` 半边语义映射到四边形外接圆半径；
+    - 新增 `desktop_launcher_routes_standard_effect_squares_into_graphics_backend`，覆盖 effect event → square primitive → overlay render pass → OpenGL executor sprite mesh。
+- 迁移意义：
+  - `healBlock` 等标准特效的 square primitive 不再只停留在 headless stats；
+  - square 类本地特效开始复用现有 polygon/OpenGL primitive draw path。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_squares_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 仍未完成：
+  - rect / triangle / textured-line / light primitives 还需继续 bridge；
+  - stroked square 的线宽当前仍受 `RenderCommand::DrawPolygon` 表达能力限制；
+  - 当前总体迁移约 38.6%，仍未达到完整可玩。

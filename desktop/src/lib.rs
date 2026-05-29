@@ -149,6 +149,20 @@ impl DesktopStandardEffectRenderFrame {
                 Layer::EFFECT,
             ));
         }
+        for primitive in &self.square_primitives {
+            if primitive.radius <= f32::EPSILON {
+                continue;
+            }
+            pass.push(RenderCommand::draw_polygon(
+                RenderPoint::new(primitive.center.0, primitive.center.1),
+                primitive.radius * std::f32::consts::SQRT_2,
+                4,
+                primitive.rotation + 45.0,
+                desktop_effect_render_color(primitive.color, primitive.alpha),
+                primitive.stroke <= f32::EPSILON,
+                Layer::EFFECT,
+            ));
+        }
         (!pass.commands.is_empty()).then_some(pass)
     }
 }
@@ -23401,6 +23415,106 @@ mod tests {
                 .sprite_quads
                 .len()
                 >= expected_lines.len()
+        );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_draw_call_plans
+            .iter()
+            .any(|plan| plan.target == Some(RenderTarget::Screen)));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_standard_effect_squares_into_graphics_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("healBlock").unwrap() as u16,
+                    x: 16.0,
+                    y: 24.0,
+                    rotation: 2.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+        let expected_squares = launcher
+            .standard_effect_render_frame()
+            .square_primitives
+            .iter()
+            .map(|square| {
+                (
+                    RenderPoint::new(square.center.0, square.center.1),
+                    square.radius * std::f32::consts::SQRT_2,
+                    square.rotation + 45.0,
+                    square.stroke <= f32::EPSILON,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(!expected_squares.is_empty());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let minimap_camera = MinimapCamera::new(32.0, 32.0, 64.0, 64.0);
+        let frame = launcher.graphics_frame_for_render(
+            5,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let effect_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawPolygon { sides: 4, .. })
+                    })
+            })
+            .expect("standard effect squares should be routed into an overlay render pass");
+        let square_commands = effect_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawPolygon {
+                    center,
+                    radius,
+                    sides,
+                    rotation,
+                    filled,
+                    layer,
+                    ..
+                } if *sides == 4 => Some((*center, *radius, *rotation, *filled, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(square_commands.len(), expected_squares.len());
+        assert!(square_commands
+            .iter()
+            .all(|(_, _, _, _, layer)| (*layer - Layer::EFFECT).abs() < f32::EPSILON));
+        assert_eq!(
+            square_commands
+                .iter()
+                .map(|(center, radius, rotation, filled, _)| {
+                    (*center, *radius, *rotation, *filled)
+                })
+                .collect::<Vec<_>>(),
+            expected_squares
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(
+            renderer
+                .last_opengl_backend_executor_state
+                .sprite_quads
+                .len()
+                >= expected_squares.len() * 4
         );
         assert!(renderer
             .last_opengl_backend_executor_state

@@ -12415,3 +12415,21 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. bridge `rect_primitives`，先接 `FilledRect`，再处理 `TexturedRect.region`；
   2. bridge square/triangle 到 `DrawPolygon`；
   3. textured-line 必须接 atlas/sprite，不要丢 region 信息。
+
+### 2026-05-30：standard effect square 接入 graphics/OpenGL backend
+
+- 当前整体完成度：约 **38.6%**。
+- 已完成：
+  - `DesktopStandardEffectRenderFrame::to_render_pass()` 继续处理 square；
+  - square primitive 转成 `RenderCommand::DrawPolygon { sides: 4 }`；
+  - `desktop_launcher_routes_standard_effect_squares_into_graphics_backend` 覆盖 square primitive 进入 graphics frame 与 OpenGL executor；
+  - 复用现有 DrawPolygon primitive mesh path。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_squares_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 下一步：
+  1. rect：先接 `FilledRect` 零旋转，textured rect 单独接 atlas；
+  2. triangle：需要更精确三角形 mesh 或临时 DrawPolygon 表达，避免丢 width/length 语义；
+  3. light/textured-line 后置，分别需要光照层与 atlas region 支持。
