@@ -12244,3 +12244,54 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. DirectionLiquidBridge / reinforced bridge conduit 按 Java `DirectionBridge` 独立 runtime 迁移；
   2. liquid flow / bridge 占用关系；
   3. turret：液体炮灭火优先、连续液体炮 activated 保真。
+
+---
+
+## 395. 最新闭环记录：native OpenGL shader/program/vao/draw_elements 接通
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **35.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `caa62482` 这一轮把 native OpenGL driver 的 shader/program/use_program/vao/draw_elements 主链路真正接通；
+    - `use_program` 已可和 VAO 绑定、纹理绑定一起进入真实 GL draw path；
+    - `draw_elements` 不再只停留在 recording 阶段，最终绘制命令已能走到 native backend。
+- 已验证：
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --features opengl-backend --lib`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime --no-run`
+  - `git diff --check`
+- 下一步：
+  1. 继续补齐 texture / framebuffer / resolve 的真实 GL 路径；
+  2. 把 remaining render pass 逐步从 recording 收敛到 native runtime；
+  3. 保持 null/recording backend smoke 不回退。
+
+---
+
+## 396. 最新闭环记录：native OpenGL framebuffer attachment 与 DirectionLiquidBridge sidecar
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **36.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - native runtime 增加 framebuffer 资源表与 framebuffer attachment handle cache；
+    - `consume_opengl_framebuffer_attachment(...)` 现在会真实创建/复用 `glow::NativeFramebuffer` 与 color texture；
+    - color attachment 会分配 RGBA texture storage、设置 clamp/linear sampler、执行 `framebuffer_texture_2d` 并检查 `FRAMEBUFFER_COMPLETE`；
+    - 该路径仍保留 recording trace，后续继续补 BeginPass/EndPass target bind 与 ResolveCommand。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `game_runtime_liquid_bridge_sidecar_kind(...)` 现在同时覆盖 `LiquidBridge` 与 `DirectionLiquidBridge`；
+    - 新增 reinforced bridge conduit 回归，确保 `reinforced-bridge-conduit` 不再丢 liquid bridge state tail。
+  - `README.md` / `MIGRATION.md`
+    - README 仅同步百分比；
+    - MIGRATION 渲染主线补记 FBO attachment 当前接入点与下一步缺口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core liquid_bridge -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_effect_buffer_attachment_resize_recreates_framebuffer_and_color_texture --lib --features opengl-backend`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+  - `git diff --check`
+- 下一步：
+  1. native OpenGL：补 render target 的 BeginPass/EndPass framebuffer bind/viewport/clear，再接 ResolveCommand；
+  2. 渲染 primitive：把 `FillRect/StrokeRect/DrawLine/DrawPixel` 从 pending/no-op 下沉到 mesh/draw；
+  3. liquid：继续补 DirectionLiquidBridge 独立 flow/占用关系与 visual warmup 差异。
