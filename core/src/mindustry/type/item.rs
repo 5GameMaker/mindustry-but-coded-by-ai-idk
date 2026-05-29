@@ -127,9 +127,13 @@ mod tests {
         assert_eq!(item.charge, 0.0);
         assert_eq!(item.hardness, 0);
         assert_eq!(item.cost, 1.0);
+        assert_eq!(item.health_scaling, 0.0);
+        assert!(!item.low_priority);
+        assert_eq!(item.frames, 0);
+        assert_eq!(item.transition_frames, 0);
+        assert_eq!(item.frame_time, 5.0);
         assert!(item.buildable);
         assert!(!item.hidden);
-        assert_eq!(item.frame_time, 5.0);
         assert_eq!(item.base.mappable.base.content_type, ContentType::Item);
     }
 

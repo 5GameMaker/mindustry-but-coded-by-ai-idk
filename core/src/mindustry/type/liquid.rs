@@ -164,6 +164,8 @@ mod tests {
         assert_eq!(liquid.gas_color_rgba, 0xbfbfbfff);
         assert_eq!(liquid.bar_color_rgba, None);
         assert_eq!(liquid.light_color_rgba, 0x00000000);
+        assert_eq!(liquid.flammability, 0.0);
+        assert_eq!(liquid.explosiveness, 0.0);
         assert_eq!(liquid.temperature, 0.5);
         assert_eq!(liquid.heat_capacity, 0.5);
         assert_eq!(liquid.viscosity, 0.5);
@@ -175,6 +177,7 @@ mod tests {
         assert_eq!(liquid.particle_effect, "none");
         assert_eq!(liquid.particle_spacing, 60.0);
         assert_eq!(liquid.boil_point, 2.0);
+        assert_eq!(liquid.vapor_effect, "vapor");
         assert!(liquid.cap_puddles);
         assert!(!liquid.hidden);
         assert!(liquid.can_stay_on.is_empty());
@@ -183,6 +186,7 @@ mod tests {
         assert_eq!(liquid.cell_spread_conversion, 1.2);
         assert_eq!(liquid.cell_spread_damage, 0.11);
         assert_eq!(liquid.cell_remove_scaling, 0.25);
+        assert_eq!(liquid.bar_color(), liquid.color_rgba);
         assert_eq!(liquid.base.mappable.base.content_type, ContentType::Liquid);
     }
 
