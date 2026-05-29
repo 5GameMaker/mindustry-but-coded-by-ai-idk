@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **27.7%**。
+- 当前总体迁移完成度：约 **27.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10485,3 +10485,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 `SetClip / ClearClip` 下沉到真实 OpenGL scissor 状态执行器；
   2. 裁剪栈之后优先推进 `SetBlend` 的 disabled/custom factor 语义；
   3. 再补 `DrawText` 的 font/layout/align 信息。
+
+---
+
+## 327. 最新闭环记录：OpenGL 混合因子状态
+
+- 本轮总体进度更新：约 **27.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderBlendFactor`；
+    - `RenderBlendMode` 新增 `Disabled` 与 `Custom { source, destination }`；
+    - 新增 `RenderBlendMode::custom(...) / blend_factors() / enabled()`；
+    - 覆盖 Normal/Additive/Multiply/Screen/PremultipliedAlpha 的默认 OpenGL-style factor 对。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendBlendState`；
+    - executor state 和 classifying adapter state 均新增 `current_blend_state`；
+    - `SetBlend` 现在同时更新逻辑 mode 与可执行 factor/enabled 状态；
+    - 新增 `desktop_graphics_opengl_backend_executor_tracks_disabled_and_custom_blend_factors`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core blend_modes_cover_disabled_and_custom_factor_semantics --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 将 `DesktopGraphicsOpenGlBackendBlendState` 下沉到真实 GL state action sink；
+  2. 后续继续补 `DrawText` 的 font/layout/align 信息；
+  3. 再回到 `DrawSprite` 的 atlas/resource binding。

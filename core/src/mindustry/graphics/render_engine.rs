@@ -207,12 +207,67 @@ impl RenderCamera {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderBlendFactor {
+    Zero,
+    One,
+    SrcColor,
+    OneMinusSrcColor,
+    DstColor,
+    OneMinusDstColor,
+    SrcAlpha,
+    OneMinusSrcAlpha,
+    DstAlpha,
+    OneMinusDstAlpha,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderBlendMode {
     Normal,
     Additive,
     Multiply,
     Screen,
     PremultipliedAlpha,
+    Disabled,
+    Custom {
+        source: RenderBlendFactor,
+        destination: RenderBlendFactor,
+    },
+}
+
+impl RenderBlendMode {
+    pub const fn custom(source: RenderBlendFactor, destination: RenderBlendFactor) -> Self {
+        Self::Custom {
+            source,
+            destination,
+        }
+    }
+
+    pub const fn blend_factors(self) -> Option<(RenderBlendFactor, RenderBlendFactor)> {
+        match self {
+            Self::Normal => Some((
+                RenderBlendFactor::SrcAlpha,
+                RenderBlendFactor::OneMinusSrcAlpha,
+            )),
+            Self::Additive => Some((RenderBlendFactor::SrcAlpha, RenderBlendFactor::One)),
+            Self::Multiply => Some((
+                RenderBlendFactor::DstColor,
+                RenderBlendFactor::OneMinusSrcAlpha,
+            )),
+            Self::Screen => Some((RenderBlendFactor::One, RenderBlendFactor::OneMinusSrcColor)),
+            Self::PremultipliedAlpha => {
+                Some((RenderBlendFactor::One, RenderBlendFactor::OneMinusSrcAlpha))
+            }
+            Self::Disabled => None,
+            Self::Custom {
+                source,
+                destination,
+            } => Some((source, destination)),
+        }
+    }
+
+    pub const fn enabled(self) -> bool {
+        self.blend_factors().is_some()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -975,6 +1030,25 @@ mod tests {
 
         assert_eq!(camera.visible_tile_bounds(10.0), Some((1, 0, 9, 5)));
         assert_eq!(camera.visible_tile_bounds(0.0), None);
+    }
+
+    #[test]
+    fn blend_modes_cover_disabled_and_custom_factor_semantics() {
+        assert!(RenderBlendMode::Normal.enabled());
+        assert_eq!(
+            RenderBlendMode::Normal.blend_factors(),
+            Some((
+                RenderBlendFactor::SrcAlpha,
+                RenderBlendFactor::OneMinusSrcAlpha
+            ))
+        );
+        assert_eq!(RenderBlendMode::Disabled.blend_factors(), None);
+        assert!(!RenderBlendMode::Disabled.enabled());
+        assert_eq!(
+            RenderBlendMode::custom(RenderBlendFactor::One, RenderBlendFactor::OneMinusDstAlpha)
+                .blend_factors(),
+            Some((RenderBlendFactor::One, RenderBlendFactor::OneMinusDstAlpha))
+        );
     }
 
     #[test]

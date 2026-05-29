@@ -43,12 +43,12 @@ use mindustry_core::mindustry::graphics::{
     MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapTextureFramePlan,
     MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, PageType, Pal, PixelatorCamera,
     PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBackendFlushBoundary,
-    RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan,
-    RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind,
-    RenderSize, RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext, ShaderApplyPlan,
-    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderParameters,
-    ShaderTextureRegion, ShaderViewport, TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor,
-    TileBounds, TileCoord, Viewport as FloorViewport,
+    RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
+    RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
+    RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
+    ShaderApplyContext, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
+    ShaderId, ShaderParameters, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
+    TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -830,6 +830,39 @@ impl DesktopGraphicsOpenGlBackendPassContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendBlendState {
+    pub mode: RenderBlendMode,
+    pub enabled: bool,
+    pub source_factor: Option<RenderBlendFactor>,
+    pub destination_factor: Option<RenderBlendFactor>,
+}
+
+impl Default for DesktopGraphicsOpenGlBackendBlendState {
+    fn default() -> Self {
+        Self::from_mode(RenderBlendMode::Normal)
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendBlendState {
+    pub const fn from_mode(mode: RenderBlendMode) -> Self {
+        match mode.blend_factors() {
+            Some((source_factor, destination_factor)) => Self {
+                mode,
+                enabled: true,
+                source_factor: Some(source_factor),
+                destination_factor: Some(destination_factor),
+            },
+            None => Self {
+                mode,
+                enabled: false,
+                source_factor: None,
+                destination_factor: None,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendClipStackState {
     pub stack: Vec<RenderRect>,
@@ -1031,6 +1064,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub draw_circle_commands: usize,
     pub draw_text_commands: usize,
     pub current_blend: RenderBlendMode,
+    pub current_blend_state: DesktopGraphicsOpenGlBackendBlendState,
     pub current_clip: Option<RenderRect>,
     pub clip_stack: DesktopGraphicsOpenGlBackendClipStackState,
     pub current_shader: Option<ShaderId>,
@@ -1060,6 +1094,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             draw_circle_commands: 0,
             draw_text_commands: 0,
             current_blend: RenderBlendMode::Normal,
+            current_blend_state: DesktopGraphicsOpenGlBackendBlendState::default(),
             current_clip: None,
             clip_stack: DesktopGraphicsOpenGlBackendClipStackState::default(),
             current_shader: None,
@@ -1087,6 +1122,8 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                 self.state.state_commands += 1;
                 self.state.blend_state_changes += 1;
                 self.state.current_blend = mode;
+                self.state.current_blend_state =
+                    DesktopGraphicsOpenGlBackendBlendState::from_mode(mode);
             }
             RenderCommand::SetClip { rect } => {
                 self.state.state_commands += 1;
@@ -1245,6 +1282,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub current_target: Option<RenderTarget>,
     pub pass_active: bool,
     pub current_blend: RenderBlendMode,
+    pub current_blend_state: DesktopGraphicsOpenGlBackendBlendState,
     pub current_clip: Option<RenderRect>,
     pub clip_stack: DesktopGraphicsOpenGlBackendClipStackState,
     pub current_shader: Option<ShaderId>,
@@ -1275,6 +1313,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             current_target: None,
             pass_active: false,
             current_blend: RenderBlendMode::Normal,
+            current_blend_state: DesktopGraphicsOpenGlBackendBlendState::default(),
             current_clip: None,
             clip_stack: DesktopGraphicsOpenGlBackendClipStackState::default(),
             current_shader: None,
@@ -1428,6 +1467,8 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                     }
                     RenderCommand::SetBlend { mode } => {
                         self.state.current_blend = mode;
+                        self.state.current_blend_state =
+                            DesktopGraphicsOpenGlBackendBlendState::from_mode(mode);
                     }
                     RenderCommand::SetClip { rect } => {
                         self.state.current_clip = self.state.clip_stack.push_clip(rect);
@@ -6099,9 +6140,9 @@ mod tests {
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
         MinimapCamera, MinimapOverlayInput, PageType, ParticleRendererState,
-        RenderBackendFlushBoundary, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
-        RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
-        RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
+        RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
+        RenderCommand, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
+        RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
         ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId,
         TextureAtlasPlan, TileCoord, UniformValue,
     };
@@ -9532,6 +9573,78 @@ mod tests {
         assert_eq!(classifying_adapter.state.clip_stack.pushes, 2);
         assert_eq!(classifying_adapter.state.clip_stack.pops, 2);
         assert_eq!(classifying_adapter.state.clip_stack.max_depth, 2);
+        assert_eq!(executor.state.actions, classifying_adapter.state.actions);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_tracks_disabled_and_custom_blend_factors() {
+        let target = RenderTarget::Screen;
+        let custom =
+            RenderBlendMode::custom(RenderBlendFactor::One, RenderBlendFactor::OneMinusDstAlpha);
+
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "SetBlend",
+                command: RenderCommand::set_blend(RenderBlendMode::Disabled),
+            },
+        ));
+        assert_eq!(executor.state.current_blend, RenderBlendMode::Disabled);
+        assert_eq!(
+            executor.state.current_blend_state,
+            super::DesktopGraphicsOpenGlBackendBlendState {
+                mode: RenderBlendMode::Disabled,
+                enabled: false,
+                source_factor: None,
+                destination_factor: None,
+            }
+        );
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target,
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "SetBlend",
+                command: RenderCommand::set_blend(custom),
+            },
+        ));
+        assert_eq!(executor.state.current_blend, custom);
+        assert_eq!(
+            executor.state.current_blend_state,
+            super::DesktopGraphicsOpenGlBackendBlendState {
+                mode: custom,
+                enabled: true,
+                source_factor: Some(RenderBlendFactor::One),
+                destination_factor: Some(RenderBlendFactor::OneMinusDstAlpha),
+            }
+        );
+        assert_eq!(executor.state.action_count, 2);
+        assert!(matches!(
+            executor.state.actions[0],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::SetBlend {
+                mode: RenderBlendMode::Disabled
+            }
+        ));
+        assert!(matches!(
+            executor.state.actions[1],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::SetBlend { mode } if mode == custom
+        ));
+
+        let mut classifying_adapter =
+            super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
+        executor.drive_adapter(&mut classifying_adapter);
+        assert_eq!(classifying_adapter.state.current_blend, custom);
+        assert_eq!(
+            classifying_adapter.state.current_blend_state,
+            executor.state.current_blend_state
+        );
         assert_eq!(executor.state.actions, classifying_adapter.state.actions);
     }
 

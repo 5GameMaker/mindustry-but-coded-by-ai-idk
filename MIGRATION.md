@@ -13175,3 +13175,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `SetClip` 还没有表达 Java `ScissorStack.push` 返回 false 后调用方跳过绘制的控制流；
   - `SetBlend` 的 disabled/custom factor 与 `DrawText` 的 font/layout 语义仍待补齐；
   - 当前总体迁移约 27.7%，仍未达到完整可玩。
+
+## 12.421 OpenGL 混合因子状态
+
+- 2026-05-29：根据 Java/Arc `Draw.blend(...)` / `Blending.apply()` 语义，扩展 Rust render command 的混合模式表达。此前 `RenderBlendMode` 只有固定枚举，无法表达 Java 侧 `disabled` 与自定义 factor 对；现在 core 与 desktop backend 状态都能记录 enabled/factor。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderBlendFactor`，覆盖 `Zero / One / SrcColor / OneMinusSrcColor / DstColor / OneMinusDstColor / SrcAlpha / OneMinusSrcAlpha / DstAlpha / OneMinusDstAlpha`；
+    - `RenderBlendMode` 新增 `Disabled`；
+    - `RenderBlendMode` 新增 `Custom { source, destination }`；
+    - 新增 `RenderBlendMode::custom(...)`；
+    - 新增 `RenderBlendMode::blend_factors()` 与 `enabled()`。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendBlendState`；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `current_blend_state`；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增 `current_blend_state`；
+    - executor 与 classifying adapter 在 `SetBlend` 时同步更新 factor/enabled 状态；
+    - 新增 `desktop_graphics_opengl_backend_executor_tracks_disabled_and_custom_blend_factors`。
+- 迁移意义：
+  - 这补上了子代理对照 Java 后标出的高风险项：OpenGL blend 不只是 Normal/Additive，还需要 disabled 与自定义 factor；
+  - 后续真实 GL backend 可根据 `enabled=false` 调用 disable blend，根据 factor 对调用 blendFunc；
+  - 该扩展在 core render vocabulary 层生效，后续世界渲染/菜单/UI 均可复用，不是 desktop-only hack。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core blend_modes_cover_disabled_and_custom_factor_semantics --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - factor 仍未真正映射到 OpenGL 常量与 `glBlendFunc`；
+  - 暂未覆盖 Java 更复杂的 separate RGB/alpha factor；
+  - `DrawText` 的 font/layout/align 与 `DrawSprite` 的 atlas/resource binding 仍待补齐；
+  - 当前总体迁移约 27.8%，仍未达到完整可玩。
