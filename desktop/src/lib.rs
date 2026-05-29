@@ -27,7 +27,8 @@ use mindustry_core::mindustry::entities::{
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::{
-    BlockRendererBuildingSnapshot, BlockRendererBuildingVisualRuntimeLiquidSnapshot,
+    BlockRendererBlockParticleWorldSample, BlockRendererBuildingSnapshot,
+    BlockRendererBuildingVisualRuntimeLiquidSnapshot,
     BlockRendererBuildingVisualRuntimePowerSnapshot, BlockRendererBuildingVisualRuntimeSnapshot,
     BlockRendererBuildingVisualRuntimeTurretSnapshot, BlockRendererPlan, BlockRendererState,
     BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer,
@@ -424,12 +425,36 @@ pub struct DesktopGraphicsLiveBackendDrawSpriteTrace {
     pub resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsBlockParticleTrace {
+    pub plan_index: usize,
+    pub sample_index: usize,
+    pub coord: TileCoord,
+    pub block: String,
+    pub sample: BlockRendererBlockParticleWorldSample,
+}
+
+pub trait DesktopGraphicsLiveBackendBlockParticleSink {
+    fn consume_block_particle_trace(&mut self, trace: DesktopGraphicsBlockParticleTrace);
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DesktopGraphicsNullLiveBackendBlockParticleSink;
+
+impl DesktopGraphicsLiveBackendBlockParticleSink
+    for DesktopGraphicsNullLiveBackendBlockParticleSink
+{
+    fn consume_block_particle_trace(&mut self, _trace: DesktopGraphicsBlockParticleTrace) {}
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsLiveBackendExecutionState {
     pub render_passes_visited: usize,
     pub render_commands_visited: usize,
     pub draw_sprite_traces_emitted: usize,
     pub last_draw_sprite_trace: Option<DesktopGraphicsLiveBackendDrawSpriteTrace>,
+    pub block_particle_traces_emitted: usize,
+    pub last_block_particle_trace: Option<DesktopGraphicsBlockParticleTrace>,
 }
 
 pub trait DesktopGraphicsLiveBackendDrawSpriteSink {
@@ -448,6 +473,7 @@ pub struct DesktopGraphicsExecutionTrace {
     pub shader_dispatch: DesktopGraphicsShaderDispatchExecutionTrace,
     pub block_particle_plans: usize,
     pub block_particle_world_samples: usize,
+    pub block_particle_traces: Vec<DesktopGraphicsBlockParticleTrace>,
     pub execution_steps: Vec<DesktopGraphicsExecutionStepTrace>,
     pub render_passes: Vec<DesktopGraphicsPassExecutionTrace>,
 }
@@ -498,6 +524,25 @@ impl DesktopGraphicsExecutionTrace {
         state
     }
 
+    pub fn drive_live_backend_sinks<
+        S: DesktopGraphicsLiveBackendDrawSpriteSink,
+        P: DesktopGraphicsLiveBackendBlockParticleSink,
+    >(
+        &self,
+        draw_sprite_sink: &mut S,
+        block_particle_sink: &mut P,
+    ) -> DesktopGraphicsLiveBackendExecutionState {
+        let mut state = self.drive_draw_sprite_sink(draw_sprite_sink);
+
+        for trace in &self.block_particle_traces {
+            block_particle_sink.consume_block_particle_trace(trace.clone());
+            state.block_particle_traces_emitted += 1;
+            state.last_block_particle_trace = Some(trace.clone());
+        }
+
+        state
+    }
+
     fn from_frame_and_atlas<T>(
         frame: &DesktopGraphicsFrame,
         atlas: Option<&TextureAtlasPlan<T>>,
@@ -528,18 +573,30 @@ impl DesktopGraphicsExecutionTrace {
             .block_renderer
             .as_ref()
             .map_or(0, |block_renderer| block_renderer.block_particles.len());
-        let block_particle_world_samples =
+        let block_particle_traces =
             frame
                 .bundle
                 .block_renderer
                 .as_ref()
-                .map_or(0, |block_renderer| {
+                .map_or_else(Vec::new, |block_renderer| {
                     block_renderer
                         .block_particles
                         .iter()
-                        .map(|particle| particle.world_samples(8.0).len())
-                        .sum()
+                        .enumerate()
+                        .flat_map(|(plan_index, particle)| {
+                            particle.world_samples(8.0).into_iter().map(move |sample| {
+                                DesktopGraphicsBlockParticleTrace {
+                                    plan_index,
+                                    sample_index: sample.index,
+                                    coord: particle.coord,
+                                    block: particle.block.clone(),
+                                    sample,
+                                }
+                            })
+                        })
+                        .collect()
                 });
+        let block_particle_world_samples = block_particle_traces.len();
         if block_particle_plans > 0 {
             execution_steps.push(DesktopGraphicsExecutionStepTrace::BlockParticles {
                 plan_count: block_particle_plans,
@@ -614,6 +671,7 @@ impl DesktopGraphicsExecutionTrace {
             shader_dispatch,
             block_particle_plans,
             block_particle_world_samples,
+            block_particle_traces,
             execution_steps,
             render_passes,
         }
@@ -986,7 +1044,9 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
         let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
         let execution = DesktopGraphicsExecutionSummary::from_trace(frame, &trace);
         let mut live_backend_sink = DesktopGraphicsNullLiveBackendDrawSpriteSink;
-        let live_backend_state = trace.drive_draw_sprite_sink(&mut live_backend_sink);
+        let mut block_particle_sink = DesktopGraphicsNullLiveBackendBlockParticleSink;
+        let live_backend_state =
+            trace.drive_live_backend_sinks(&mut live_backend_sink, &mut block_particle_sink);
         self.frames_rendered += 1;
         self.last_stats = stats.clone();
         self.last_execution = execution;
@@ -5440,8 +5500,34 @@ mod tests {
         assert_eq!(renderer.last_execution.block_particle_plans, 1);
         assert!(renderer.last_trace.block_particle_world_samples > 0);
         assert_eq!(
+            renderer.last_trace.block_particle_traces.len(),
+            renderer.last_trace.block_particle_world_samples
+        );
+        assert_eq!(
+            renderer
+                .last_trace
+                .block_particle_traces
+                .first()
+                .map(|trace| (trace.plan_index, trace.coord, trace.block.as_str())),
+            Some((0, TileCoord::new(1, 1), "atmospheric-concentrator"))
+        );
+        assert_eq!(
             renderer.last_execution.block_particle_world_samples,
             renderer.last_trace.block_particle_world_samples
+        );
+        assert_eq!(
+            renderer
+                .last_live_backend_state
+                .block_particle_traces_emitted,
+            renderer.last_trace.block_particle_world_samples
+        );
+        assert_eq!(
+            renderer
+                .last_live_backend_state
+                .last_block_particle_trace
+                .as_ref()
+                .map(|trace| trace.block.as_str()),
+            Some("atmospheric-concentrator")
         );
         assert!(renderer
             .last_trace

@@ -9415,3 +9415,25 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. desktop trace 增加 block particle sample 明细列表或 live backend sink；
   2. 补 drawer x/y、poly/sides/particleRotation 等 Java `DrawParticles` 未建模字段；
   3. 继续补 `DesktopFramePacing` / `AlreadyClosed` / surface 默认契约测试，为真实 `sdl2+glow` 后端做准备。
+
+---
+
+## 284. 最新闭环记录：Desktop live backend block particle trace sink
+
+- 本轮总体进度更新：约 **23.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsBlockParticleTrace`；
+    - `DesktopGraphicsLiveBackendBlockParticleSink`；
+    - `DesktopGraphicsExecutionTrace.block_particle_traces`；
+    - `DesktopGraphicsExecutionTrace::drive_live_backend_sinks(...)`；
+    - `DesktopGraphicsLiveBackendExecutionState.block_particle_traces_emitted` / `last_block_particle_trace`；
+    - `HeadlessDesktopGraphicsRenderer` 现在同时驱动 sprite sink 与 block particle sink。
+- 已验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `git diff --check`
+- 下一步：
+  1. 补 block particle trace 空输入/多 emitter 顺序稳定测试；
+  2. 补 Java `DrawParticles` 的 `x/y`、`poly/sides/particleRotation`；
+  3. 补 desktop frame loop pacing / already-closed / surface default 契约测试。

@@ -12110,3 +12110,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - world samples 目前只以计数进入 desktop trace/summary，后续还要暴露完整 sample trace 或直接喂给真实 backend；
   - `DrawParticles` 的 poly/sides/particleRotation 与 drawer x/y 偏移还未完整建模；
   - 当前总体迁移约 23.3%，仍未达到完整可玩。
+
+### 12.382 Desktop live backend 可消费 block particle sample trace
+
+- 2026-05-29：继续把 block particle world samples 从“只有计数”推进到 desktop live backend 可消费的明细 trace。本轮仍不引入 GPU 依赖，但后续真实 backend 已可按同一 sink 通道接收每个 world-space particle sample。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsBlockParticleTrace`，记录 `plan_index`、`sample_index`、`coord`、`block` 与 `BlockRendererBlockParticleWorldSample`；
+    - 新增 `DesktopGraphicsLiveBackendBlockParticleSink`；
+    - 新增空 sink `DesktopGraphicsNullLiveBackendBlockParticleSink`；
+    - `DesktopGraphicsLiveBackendExecutionState` 新增 `block_particle_traces_emitted` 与 `last_block_particle_trace`；
+    - `DesktopGraphicsExecutionTrace` 新增 `block_particle_traces`；
+    - `DesktopGraphicsExecutionTrace::drive_live_backend_sinks(...)` 同时驱动 draw sprite sink 与 block particle sink；
+    - `HeadlessDesktopGraphicsRenderer` 改为使用 combined live backend sink，保留 sprite trace 的同时也记录 block particle trace。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - block particle trace 已可被 backend sink 接收，但仍未实际发出 GPU draw call；
+  - 还需要为 multiple particle emitters 的稳定顺序与空输入无噪声补专门测试；
+  - 当前总体迁移约 23.4%，仍未达到完整可玩。
