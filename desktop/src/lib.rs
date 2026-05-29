@@ -38,11 +38,11 @@ use mindustry_core::mindustry::graphics::{
     MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan,
     MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
     OverlayRendererPlan, OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan,
-    PixelatorInput, PixelatorState, RenderBridge, RenderCamera, RenderCommand, RenderEngineState,
-    RenderFramePlan, RenderPassKind, RenderPoint, RenderSize, RenderTarget, RenderViewport,
-    ShaderApplyContext, ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport,
-    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord,
-    Viewport as FloorViewport,
+    PixelatorInput, PixelatorState, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
+    RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
+    RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderCamera, ShaderCatalog,
+    ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
+    TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -456,6 +456,7 @@ pub struct DesktopGraphicsBlockParticleDrawCall {
     pub alpha: f32,
     pub layer: f32,
     pub color: [f32; 4],
+    pub secondary_color: Option<[f32; 4]>,
     pub color_t: Option<f32>,
     pub blend_mode: DrawBlockParticleBlendMode,
     pub kind: DesktopGraphicsBlockParticleDrawCallKind,
@@ -495,10 +496,86 @@ impl DesktopGraphicsBlockParticleDrawCall {
                 sample.color.b,
                 sample.color.a,
             ],
+            secondary_color: sample
+                .secondary_color
+                .map(|color| [color.r, color.g, color.b, color.a]),
             color_t: sample.color_t,
             blend_mode: sample.blend_mode,
             kind,
         }
+    }
+
+    pub fn render_blend_mode(&self) -> RenderBlendMode {
+        match self.blend_mode {
+            DrawBlockParticleBlendMode::Normal => RenderBlendMode::Normal,
+            DrawBlockParticleBlendMode::Additive => RenderBlendMode::Additive,
+        }
+    }
+
+    pub fn tint(&self) -> [f32; 4] {
+        let color = if let (Some(secondary), Some(t)) = (self.secondary_color, self.color_t) {
+            let t = t.clamp(0.0, 1.0);
+            [
+                self.color[0] + (secondary[0] - self.color[0]) * t,
+                self.color[1] + (secondary[1] - self.color[1]) * t,
+                self.color[2] + (secondary[2] - self.color[2]) * t,
+                self.color[3] + (secondary[3] - self.color[3]) * t,
+            ]
+        } else {
+            self.color
+        };
+
+        [color[0], color[1], color[2], color[3] * self.alpha]
+    }
+
+    pub fn render_commands(&self) -> Vec<RenderCommand> {
+        let mut commands = vec![RenderCommand::set_blend(self.render_blend_mode())];
+        let center = RenderPoint::new(self.x, self.y);
+
+        match &self.kind {
+            DesktopGraphicsBlockParticleDrawCallKind::Circle => {
+                commands.push(RenderCommand::draw_circle(
+                    center,
+                    self.size.max(0.0),
+                    self.tint(),
+                    true,
+                    self.layer,
+                ));
+            }
+            DesktopGraphicsBlockParticleDrawCallKind::SoftSprite { region } => {
+                let symbol = region
+                    .clone()
+                    .unwrap_or_else(|| String::from("circle-shadow"));
+                commands.push(RenderCommand::draw_sprite(
+                    symbol,
+                    RenderRect::from_center(center, self.size, self.size),
+                    self.tint(),
+                    0.0,
+                    self.layer,
+                ));
+            }
+            DesktopGraphicsBlockParticleDrawCallKind::Polygon { sides, rotation } => {
+                commands.push(RenderCommand::Custom {
+                    name: "block-particle-polygon".into(),
+                    properties: vec![
+                        RenderProperty::new("block", self.block.clone()),
+                        RenderProperty::new("plan_index", self.plan_index.to_string()),
+                        RenderProperty::new("sample_index", self.sample_index.to_string()),
+                        RenderProperty::new("x", self.x.to_string()),
+                        RenderProperty::new("y", self.y.to_string()),
+                        RenderProperty::new("radius", self.size.to_string()),
+                        RenderProperty::new("sides", sides.to_string()),
+                        RenderProperty::new("rotation", rotation.to_string()),
+                        RenderProperty::new("alpha", self.alpha.to_string()),
+                        RenderProperty::new("layer", self.layer.to_string()),
+                        RenderProperty::new("blend", format!("{:?}", self.blend_mode)),
+                        RenderProperty::new("color", format!("{:?}", self.tint())),
+                    ],
+                });
+            }
+        }
+
+        commands
     }
 }
 
@@ -562,6 +639,7 @@ pub struct DesktopGraphicsExecutionTrace {
     pub block_particle_world_samples: usize,
     pub block_particle_traces: Vec<DesktopGraphicsBlockParticleTrace>,
     pub block_particle_draw_calls: Vec<DesktopGraphicsBlockParticleDrawCall>,
+    pub block_particle_render_commands: Vec<RenderCommand>,
     pub execution_steps: Vec<DesktopGraphicsExecutionStepTrace>,
     pub render_passes: Vec<DesktopGraphicsPassExecutionTrace>,
 }
@@ -693,9 +771,14 @@ impl DesktopGraphicsExecutionTrace {
                         .collect()
                 });
         let block_particle_world_samples = block_particle_traces.len();
-        let block_particle_draw_calls = block_particle_traces
+        let block_particle_draw_calls: Vec<DesktopGraphicsBlockParticleDrawCall> =
+            block_particle_traces
+                .iter()
+                .map(DesktopGraphicsBlockParticleDrawCall::from_trace)
+                .collect();
+        let block_particle_render_commands = block_particle_draw_calls
             .iter()
-            .map(DesktopGraphicsBlockParticleDrawCall::from_trace)
+            .flat_map(DesktopGraphicsBlockParticleDrawCall::render_commands)
             .collect();
         if block_particle_plans > 0 {
             execution_steps.push(DesktopGraphicsExecutionStepTrace::BlockParticles {
@@ -773,6 +856,7 @@ impl DesktopGraphicsExecutionTrace {
             block_particle_world_samples,
             block_particle_traces,
             block_particle_draw_calls,
+            block_particle_render_commands,
             execution_steps,
             render_passes,
         }
@@ -869,6 +953,7 @@ pub struct DesktopGraphicsExecutionSummary {
     pub block_particle_plans: usize,
     pub block_particle_world_samples: usize,
     pub block_particle_draw_calls: usize,
+    pub block_particle_render_commands: usize,
     pub floor_renderer_slots: usize,
     pub fog_frame_slots: usize,
     pub overlay_renderer_slots: usize,
@@ -928,6 +1013,7 @@ impl DesktopGraphicsExecutionSummary {
         summary.block_particle_plans = trace.block_particle_plans;
         summary.block_particle_world_samples = trace.block_particle_world_samples;
         summary.block_particle_draw_calls = trace.block_particle_draw_calls.len();
+        summary.block_particle_render_commands = trace.block_particle_render_commands.len();
         summary.floor_renderer_slots = usize::from(frame.bundle.floor_renderer.is_some());
         summary.fog_frame_slots = usize::from(frame.bundle.fog_frame.is_some());
         summary.overlay_renderer_slots = usize::from(frame.bundle.overlay_renderer.is_some());
@@ -4059,9 +4145,9 @@ mod tests {
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer, Layer,
         LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput, MinimapCamera,
-        MinimapOverlayInput, PageType, ParticleRendererState, RenderBridge, RenderCamera,
-        RenderCommand, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderRect,
-        RenderSize, RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext,
+        MinimapOverlayInput, PageType, ParticleRendererState, RenderBlendMode, RenderBridge,
+        RenderCamera, RenderCommand, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
+        RenderRect, RenderSize, RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext,
         ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
     };
     use mindustry_core::mindustry::io::{
@@ -5714,6 +5800,10 @@ mod tests {
             renderer.last_trace.block_particle_draw_calls.len()
         );
         assert_eq!(
+            renderer.last_execution.block_particle_render_commands,
+            renderer.last_trace.block_particle_render_commands.len()
+        );
+        assert_eq!(
             renderer
                 .last_live_backend_state
                 .block_particle_traces_emitted,
@@ -5768,6 +5858,7 @@ mod tests {
         assert_eq!(trace.block_particle_world_samples, 0);
         assert!(trace.block_particle_traces.is_empty());
         assert!(trace.block_particle_draw_calls.is_empty());
+        assert!(trace.block_particle_render_commands.is_empty());
         assert!(!trace.execution_steps.iter().any(|step| matches!(
             step,
             DesktopGraphicsExecutionStepTrace::BlockParticles { .. }
@@ -5782,6 +5873,13 @@ mod tests {
         let mut soft = mindustry_core::mindustry::world::draw::draw_soft_particles_block_config();
         soft.particle_count = 1;
         soft.particle_radius = 0.0;
+        let mut polygon = mindustry_core::mindustry::world::draw::draw_particles_block_config();
+        polygon.particle_count = 1;
+        polygon.particle_radius = 0.0;
+        polygon.sides = 5;
+        polygon.particle_rotation = 15.0;
+        polygon.render_kind =
+            mindustry_core::mindustry::world::draw::DrawBlockParticleRenderKind::Polygon;
 
         let mut block_renderer = BlockRendererPlan::default();
         block_renderer.block_particles = vec![
@@ -5809,6 +5907,18 @@ mod tests {
                     Layer::BLOCK,
                 ),
             },
+            BlockRendererBlockParticlePlan {
+                coord: TileCoord::new(3, 3),
+                block: "polygon-emitter".into(),
+                size: 2,
+                plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                    polygon,
+                    12,
+                    1.0,
+                    0.0,
+                    Layer::BLOCK,
+                ),
+            },
         ];
 
         let mut bridge = RenderBridge::new();
@@ -5822,10 +5932,11 @@ mod tests {
 
         let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
 
-        assert_eq!(trace.block_particle_plans, 2);
-        assert_eq!(trace.block_particle_world_samples, 2);
-        assert_eq!(trace.block_particle_traces.len(), 2);
-        assert_eq!(trace.block_particle_draw_calls.len(), 2);
+        assert_eq!(trace.block_particle_plans, 3);
+        assert_eq!(trace.block_particle_world_samples, 3);
+        assert_eq!(trace.block_particle_traces.len(), 3);
+        assert_eq!(trace.block_particle_draw_calls.len(), 3);
+        assert_eq!(trace.block_particle_render_commands.len(), 6);
         assert_eq!(
             trace
                 .block_particle_traces
@@ -5834,7 +5945,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (0, "regular-emitter", None),
-                (1, "soft-emitter", Some("circle-shadow"))
+                (1, "soft-emitter", Some("circle-shadow")),
+                (2, "polygon-emitter", None)
             ]
         );
         assert!(matches!(
@@ -5847,9 +5959,43 @@ mod tests {
                 region: Some("circle-shadow".into())
             }
         );
+        assert!(trace.block_particle_draw_calls[1].secondary_color.is_some());
+        assert!(trace.block_particle_draw_calls[1].color_t.is_some());
+        let soft_tint = trace.block_particle_draw_calls[1].tint();
+        assert_eq!(
+            trace.block_particle_draw_calls[2].kind,
+            DesktopGraphicsBlockParticleDrawCallKind::Polygon {
+                sides: 5,
+                rotation: 15.0
+            }
+        );
+        assert!(matches!(
+            trace.block_particle_render_commands.get(0),
+            Some(RenderCommand::SetBlend { mode }) if *mode == RenderBlendMode::Normal
+        ));
+        assert!(matches!(
+            trace.block_particle_render_commands.get(1),
+            Some(RenderCommand::DrawCircle { filled: true, .. })
+        ));
+        assert!(matches!(
+            trace.block_particle_render_commands.get(2),
+            Some(RenderCommand::SetBlend { mode }) if *mode == RenderBlendMode::Additive
+        ));
+        assert!(matches!(
+            trace.block_particle_render_commands.get(3),
+            Some(RenderCommand::DrawSprite { symbol, tint, .. }) if symbol == "circle-shadow" && *tint == soft_tint
+        ));
+        assert!(matches!(
+            trace.block_particle_render_commands.get(4),
+            Some(RenderCommand::SetBlend { mode }) if *mode == RenderBlendMode::Normal
+        ));
+        assert!(matches!(
+            trace.block_particle_render_commands.get(5),
+            Some(RenderCommand::Custom { name, .. }) if name == "block-particle-polygon"
+        ));
         assert!(trace.execution_steps.iter().any(|step| matches!(
             step,
-            DesktopGraphicsExecutionStepTrace::BlockParticles { plan_count: 2 }
+            DesktopGraphicsExecutionStepTrace::BlockParticles { plan_count: 3 }
         )));
     }
 

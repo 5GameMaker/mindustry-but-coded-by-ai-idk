@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **23.8%**。
+- 当前总体迁移完成度：约 **24.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9509,3 +9509,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步：
   1. 将 `DesktopGraphicsBlockParticleDrawCall` 继续落到真实 `RenderCommand` / OpenGL(glow) backend；
   2. 根据 darkness 子代理结论，优先补 `darkness_to_opacity_matches_java_piecewise_curve` 与 `build_plan_preserves_dark_events_as_dirty_tiles`。
+
+---
+
+## 288. 最新闭环记录：Block particle draw-call 生成 RenderCommand
+
+- 本轮总体进度更新：约 **23.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsBlockParticleDrawCall::render_commands()` 把 draw-call seam 转成 backend-neutral `RenderCommand`；
+    - Circle → `SetBlend` + `DrawCircle`；
+    - SoftSprite → `SetBlend` + `DrawSprite(circle-shadow)`，并用 `secondary_color/color_t` 做 Java `Draw.tint(color, color2, col)` 的颜色插值；
+    - Polygon → `SetBlend` + `Custom("block-particle-polygon")`，保留 sides/rotation/radius/layer/color 等属性，等待真实 polygon backend；
+    - `DesktopGraphicsExecutionTrace.block_particle_render_commands` 与 summary 计数可直接审计。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_preserves_block_particle_order_and_soft_region --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_ --manifest-path "Cargo.toml" -- --test-threads=1`
+- 下一步：
+  1. 将这些 `RenderCommand` 交给真实 OpenGL/glow backend 消费；
+  2. 后续给 polygon 增加真实三角扇/mesh 输出，替代当前 `Custom` 占位命令。
+
+---
+
+## 289. 最新闭环记录：BlockRenderer darkness 曲线与 dirty tile 传播
+
+- 本轮总体进度更新：约 **24.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `build_plan_from_snapshot(...)` 在 `had_map_limit` 为真时写入 `DarknessFill::Black` 与 `limited_map_area`；
+    - 新增 `darkness_to_opacity_matches_java_piecewise_curve`，锁定 Java darkness 透明度曲线；
+    - 新增 `build_plan_preserves_dark_events_as_dirty_tiles`，锁定 `dark_events -> plan.darkness.dirty_tiles` 的传播与排序。
+- 已验证：
+  - `cargo test -p mindustry-core darkness --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core build_plan_preserves_dark_events_as_dirty_tiles --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_ --manifest-path "Cargo.toml" -- --test-threads=1`
+- 下一步：
+  1. 继续补 `DarknessPlan::clear`、limited map fill/clear、reload/clear_frame_queues 的缓存闭环；
+  2. 将 particle `RenderCommand` 交给真实 OpenGL/glow backend 消费。

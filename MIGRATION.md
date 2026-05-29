@@ -12215,3 +12215,46 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java `Renderer.draw()` 中的更多细分 stage 还需逐步从折叠 pass 提升成真实 pass；
   - darkness/cache 下一步优先补 Java 曲线与 dirty tile 传播闭环；
   - 当前总体迁移约 23.8%，仍未达到完整可玩。
+
+### 12.386 Block particle draw-call 生成 RenderCommand
+
+- 2026-05-29：继续把 block particle 从 desktop draw-call seam 推进到现有 backend-neutral `RenderCommand` 层。这一步仍不等于真实 OpenGL 绘制，但已经把 circle/soft sprite/polygon 三类粒子变成现有 render backend 可枚举、可排序、可测试的命令序列，后续 glow/OpenGL backend 可以直接消费这些命令。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsBlockParticleDrawCall::render_blend_mode()` 映射 `DrawBlockParticleBlendMode::{Normal, Additive}` 到 `RenderBlendMode`；
+    - `BlockRendererBlockParticleWorldSample.secondary_color` 与 `DesktopGraphicsBlockParticleDrawCall.secondary_color` 透传 soft particle 的二次颜色；
+    - `DesktopGraphicsBlockParticleDrawCall::tint()` 合并颜色 alpha 与 sample alpha，并在存在 `secondary_color/color_t` 时对齐 Java `Draw.tint(color, color2, col)` 的双色插值；
+    - `DesktopGraphicsBlockParticleDrawCall::render_commands()`：
+      - Circle 生成 `RenderCommand::SetBlend` + `RenderCommand::DrawCircle`；
+      - SoftSprite 生成 `RenderCommand::SetBlend` + `RenderCommand::DrawSprite`，region 缺失时 fallback 到 `circle-shadow`；
+      - Polygon 生成 `RenderCommand::SetBlend` + `RenderCommand::Custom("block-particle-polygon")`，保留 `block/plan_index/sample_index/x/y/radius/sides/rotation/alpha/layer/blend/color`；
+    - `DesktopGraphicsExecutionTrace.block_particle_render_commands` 汇总 draw-call 生成的命令；
+    - `DesktopGraphicsExecutionSummary.block_particle_render_commands` 暴露命令数量；
+    - 现有 block particle trace 测试扩展为覆盖 circle、soft sprite、polygon 三种 command 输出。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_preserves_block_particle_order_and_soft_region --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_ --manifest-path "Cargo.toml" -- --test-threads=1`
+- 仍未完成：
+  - `RenderCommand` 已生成，但仍未接真实 OpenGL/glow backend 执行；
+  - Polygon 目前仍以 `Custom` 占位命令表达，后续需要三角扇/mesh 或专用 polygon command；
+  - 当前总体迁移约 23.9%，仍未达到完整可玩。
+
+### 12.387 BlockRenderer darkness 曲线与 dirty tile 传播
+
+- 2026-05-29：继续推进 Java `BlockRenderer.updateDarkness/drawDarkness/checkChanges` 相关语义。本轮锁定 darkness 数值到透明度的 Java 曲线，并让 `BlockRendererState` 在 limited map area 下把 darkness plan 初始化成黑底，同时把缓存中的 `dark_events` 稳定传播到 `plan.darkness.dirty_tiles`。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `build_plan_from_snapshot(...)` 在 `self.had_map_limit` 为真时设置：
+      - `plan.darkness.fill = DarknessFill::Black`
+      - `plan.darkness.limited_map_area = Some(self.cache.block_tree.bounds)`
+    - 新增 `darkness_to_opacity_matches_java_piecewise_curve`，覆盖 `darkness <= 0`、中间段、`darkness >= 3.5` 截断；
+    - 新增 `build_plan_preserves_dark_events_as_dirty_tiles`，验证 `BTreeSet` 顺序下的 dirty tile 输出、limited map 黑底和 `effective_fill()`。
+- 已跑验证：
+  - `cargo test -p mindustry-core darkness --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core build_plan_preserves_dark_events_as_dirty_tiles --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_ --manifest-path "Cargo.toml" -- --test-threads=1`
+- 仍未完成：
+  - darkness 的 clear/reset/reload 生命周期还需继续对照 Java；
+  - limited map 起始区域清白、fog/darkness 与实际地图边界交互仍需更细测试；
+  - 当前总体迁移约 24.0%，仍未达到完整可玩。

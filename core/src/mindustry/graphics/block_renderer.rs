@@ -918,6 +918,10 @@ impl BlockRendererState {
         plan.broken_fade = self.broken_fade;
         plan.draw_quadtree_debug = self.draw_quadtree_debug;
         plan.update_floors = self.cache.update_floors.clone();
+        if self.had_map_limit {
+            plan.darkness.fill = DarknessFill::Black;
+            plan.darkness.limited_map_area = Some(self.cache.block_tree.bounds);
+        }
 
         if let Some(pass) = build_tile_pass_from_snapshot(
             BlockDrawStage::TileBase,
@@ -1129,6 +1133,7 @@ pub struct BlockRendererBlockParticleWorldSample {
     pub alpha: f32,
     pub layer: f32,
     pub color: ParticleColor,
+    pub secondary_color: Option<ParticleColor>,
     pub color_t: Option<f32>,
     pub render_kind: DrawBlockParticleRenderKind,
     pub blend_mode: DrawBlockParticleBlendMode,
@@ -1160,6 +1165,7 @@ impl BlockRendererBlockParticlePlan {
                     alpha: sample.alpha,
                     layer: self.plan.layer,
                     color: self.plan.color,
+                    secondary_color: self.plan.secondary_color,
                     color_t: sample.color_t,
                     render_kind: self.plan.render_kind,
                     blend_mode: self.plan.blend_mode,
@@ -1769,6 +1775,47 @@ mod tests {
         assert_eq!(atlas.region_index_for(-0.25), CRACK_REGION_COUNT - 1);
         assert_eq!(atlas.region_index_for(1.25), 0);
         assert_eq!(atlas.region_index_for(f32::NAN), 0);
+    }
+
+    #[test]
+    fn darkness_to_opacity_matches_java_piecewise_curve() {
+        let cases = [
+            (-0.75, 1.0),
+            (0.0, 1.0),
+            (0.25, 0.8125),
+            (0.5, 0.75),
+            (1.5, 0.5),
+            (3.5, 0.0),
+            (4.0, 0.0),
+            (8.0, 0.0),
+        ];
+
+        for (darkness, expected) in cases {
+            assert!(
+                (darkness_to_opacity(darkness) - expected).abs() < 0.0001,
+                "darkness={darkness}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_plan_preserves_dark_events_as_dirty_tiles() {
+        let mut state = BlockRendererState::reload(TileBounds::new(0, 0, 16, 16), true);
+        state.cache.dark_events.insert(TileCoord::new(5, 5));
+        state.cache.dark_events.insert(TileCoord::new(1, 2));
+
+        let plan = state.build_plan();
+
+        assert_eq!(
+            plan.darkness.dirty_tiles,
+            vec![TileCoord::new(1, 2), TileCoord::new(5, 5)]
+        );
+        assert_eq!(plan.darkness.fill, DarknessFill::Black);
+        assert_eq!(
+            plan.darkness.limited_map_area,
+            Some(TileBounds::new(0, 0, 16, 16))
+        );
+        assert_eq!(plan.darkness.effective_fill(), DarknessFill::Black);
     }
 
     #[test]
