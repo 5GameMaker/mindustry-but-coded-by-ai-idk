@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **30.2%**。
+- 当前总体迁移完成度：约 **30.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11050,3 +11050,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 texture upload sink 落到真实 `glTexImage2D/glTexSubImage2D` adapter；
   2. 合并 dirty pixels 为 sub-image batch，减少真实 GL 调用；
   3. 推进 VBO/IBO dirty upload 与 draw executor，保持 OpenGL/Arc/SpriteBatch 路线。
+
+---
+
+## 354. 最新闭环记录：OpenGL texture upload command adapter 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前本地 HEAD 为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **30.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 OpenGL texture upload 常量与命令模型；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadPixelSource`，用于保留 atlas page / runtime texture 的 full upload 像素来源；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadCommandSink` 与 recording sink；
+    - resolved texture upload 可生成 `BindTexture` / `SetTextureParameter` / `TexImage2D` / `TexSubImage2DFromSource` / `TexSubImage2D` 命令序列；
+    - 首次创建/重建走 `TexImage2D`，既有 texture 的 full refresh 走整图 `TexSubImage2DFromSource`，对齐 Arc `Texture.load(...)` 与 `Texture.draw(Pixmap)` 的区别；
+    - `DirtyPixels` 按 RGBA8888 生成 1×1 `TexSubImage2D` 字节；
+    - `recreate_texture` 会通过 handle cache 分配新 texture handle，并记录 previous handle 以便发出 `DeleteTexture` 命令；
+    - 新增测试覆盖 atlas full page `TexImage2D`、既有 full page `TexSubImage2DFromSource`、runtime dirty pixel `TexSubImage2D`、runtime texture recreate handle 替换。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_texture_upload --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 把 full page pixel source 接到真实 PNG/Pixmap 解码与 RGBA 字节缓冲；
+  2. 评估是否在用户确认后引入 `winit + glutin + glow` 可选 real backend；
+  3. 推进 SpriteBatch/VBO/IBO 上传命令层与真实 draw executor；
+  4. 保持 OpenGL/Arc/SpriteBatch 路线，不切 wgpu/Bevy/Vulkan。

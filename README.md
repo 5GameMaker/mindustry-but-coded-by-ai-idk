@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 迁移基线：`D:\MDT\mindustry-upstream-v157.4`
+- 迁移基线：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考 tag 为 `v158.1 / 05b2ecd`）
 - Rust 工作区：`D:\MDT\rust-mindustry`。
 - 禁止使用废案目录：`D:\MDT\mindustry-rust`。
 - 迁移目标是整体化、可运行、可游玩的 Rust 版 MDT/Mindustry；过渡 helper/plan 必须继续接入 runtime/render/backend 主链路。
@@ -13,7 +13,7 @@
 
 ## 迁移进度
 
-- 当前总体完成度：约 **30.4%**。
+- 当前总体完成度：约 **30.5%**。
 
 ## 作者的话
 

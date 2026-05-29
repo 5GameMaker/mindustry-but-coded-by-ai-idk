@@ -426,6 +426,13 @@ impl DesktopGraphicsTextureSamplerTrace {
             Self::Nearest
         }
     }
+
+    pub const fn to_opengl_filter(self) -> i32 {
+        match self {
+            Self::Nearest => DESKTOP_GRAPHICS_OPENGL_NEAREST as i32,
+            Self::Linear => DESKTOP_GRAPHICS_OPENGL_LINEAR as i32,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -573,6 +580,8 @@ pub struct DesktopGraphicsOpenGlBackendTextureUploadPlan {
 pub struct DesktopGraphicsOpenGlBackendResolvedTextureUpload {
     pub texture_key: String,
     pub texture_handle: u32,
+    pub previous_texture_handle: Option<u32>,
+    pub texture_was_allocated: bool,
     pub resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind,
     pub page_type: PageType,
     pub page_source_path: String,
@@ -583,6 +592,240 @@ pub struct DesktopGraphicsOpenGlBackendResolvedTextureUpload {
     pub recreate_texture: bool,
     pub dirty_pixels: Vec<DesktopGraphicsOpenGlBackendTexturePixelUpdate>,
     pub kind: DesktopGraphicsOpenGlBackendTextureUploadKind,
+}
+
+pub const DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D: u32 = 0x0de1;
+pub const DESKTOP_GRAPHICS_OPENGL_TEXTURE_MIN_FILTER: u32 = 0x2801;
+pub const DESKTOP_GRAPHICS_OPENGL_TEXTURE_MAG_FILTER: u32 = 0x2800;
+pub const DESKTOP_GRAPHICS_OPENGL_TEXTURE_WRAP_S: u32 = 0x2802;
+pub const DESKTOP_GRAPHICS_OPENGL_TEXTURE_WRAP_T: u32 = 0x2803;
+pub const DESKTOP_GRAPHICS_OPENGL_CLAMP_TO_EDGE: u32 = 0x812f;
+pub const DESKTOP_GRAPHICS_OPENGL_NEAREST: u32 = 0x2600;
+pub const DESKTOP_GRAPHICS_OPENGL_LINEAR: u32 = 0x2601;
+pub const DESKTOP_GRAPHICS_OPENGL_RGBA: u32 = 0x1908;
+pub const DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE: u32 = 0x1401;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
+    AtlasPage {
+        page_type: PageType,
+        page_source_path: String,
+        width: u32,
+        height: u32,
+    },
+    RuntimeTexture {
+        texture_key: String,
+        page_source_path: String,
+        width: u32,
+        height: u32,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendTextureUploadCommand {
+    DeleteTexture {
+        texture_handle: u32,
+    },
+    BindTexture {
+        target: u32,
+        texture_handle: u32,
+    },
+    SetTextureParameter {
+        target: u32,
+        pname: u32,
+        param: i32,
+    },
+    TexImage2D {
+        target: u32,
+        level: i32,
+        internal_format: i32,
+        width: i32,
+        height: i32,
+        border: i32,
+        format: u32,
+        pixel_type: u32,
+        pixel_source: DesktopGraphicsOpenGlBackendTextureUploadPixelSource,
+    },
+    TexSubImage2DFromSource {
+        target: u32,
+        level: i32,
+        xoffset: i32,
+        yoffset: i32,
+        width: i32,
+        height: i32,
+        format: u32,
+        pixel_type: u32,
+        pixel_source: DesktopGraphicsOpenGlBackendTextureUploadPixelSource,
+    },
+    TexSubImage2D {
+        target: u32,
+        level: i32,
+        xoffset: i32,
+        yoffset: i32,
+        width: i32,
+        height: i32,
+        format: u32,
+        pixel_type: u32,
+        pixels: Vec<u8>,
+    },
+}
+
+pub trait DesktopGraphicsOpenGlBackendTextureUploadCommandSink {
+    fn consume_opengl_texture_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendTextureUploadCommand,
+    );
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendTextureUploadCommandSink {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendTextureUploadCommand>,
+}
+
+impl DesktopGraphicsOpenGlBackendTextureUploadCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendTextureUploadCommandSink
+{
+    fn consume_opengl_texture_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendTextureUploadCommand,
+    ) {
+        self.commands.push(command);
+    }
+}
+
+fn opengl_backend_texture_upload_dimension(value: u32) -> i32 {
+    value.min(i32::MAX as u32) as i32
+}
+
+fn opengl_backend_rgba8888_upload_bytes(rgba: u32) -> [u8; 4] {
+    [
+        ((rgba >> 24) & 0xff) as u8,
+        ((rgba >> 16) & 0xff) as u8,
+        ((rgba >> 8) & 0xff) as u8,
+        (rgba & 0xff) as u8,
+    ]
+}
+
+impl DesktopGraphicsOpenGlBackendResolvedTextureUpload {
+    fn full_upload_pixel_source(&self) -> DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
+        match self.resource_kind {
+            DesktopGraphicsOpenGlBackendTextureResourceKind::AtlasPage => {
+                DesktopGraphicsOpenGlBackendTextureUploadPixelSource::AtlasPage {
+                    page_type: self.page_type,
+                    page_source_path: self.page_source_path.clone(),
+                    width: self.page_width,
+                    height: self.page_height,
+                }
+            }
+            DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture => {
+                DesktopGraphicsOpenGlBackendTextureUploadPixelSource::RuntimeTexture {
+                    texture_key: self.texture_key.clone(),
+                    page_source_path: self.page_source_path.clone(),
+                    width: self.page_width,
+                    height: self.page_height,
+                }
+            }
+        }
+    }
+
+    pub fn to_opengl_texture_upload_commands(
+        &self,
+    ) -> Vec<DesktopGraphicsOpenGlBackendTextureUploadCommand> {
+        let mut commands = Vec::new();
+        if let Some(texture_handle) = self.previous_texture_handle {
+            commands.push(
+                DesktopGraphicsOpenGlBackendTextureUploadCommand::DeleteTexture { texture_handle },
+            );
+        }
+        commands.push(
+            DesktopGraphicsOpenGlBackendTextureUploadCommand::BindTexture {
+                target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: self.texture_handle,
+            },
+        );
+
+        match self.kind {
+            DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage => {
+                if self.recreate_texture || self.texture_was_allocated {
+                    let filter = self.sampler.to_opengl_filter();
+                    commands.push(
+                        DesktopGraphicsOpenGlBackendTextureUploadCommand::SetTextureParameter {
+                            target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                            pname: DESKTOP_GRAPHICS_OPENGL_TEXTURE_MIN_FILTER,
+                            param: filter,
+                        },
+                    );
+                    commands.push(
+                        DesktopGraphicsOpenGlBackendTextureUploadCommand::SetTextureParameter {
+                            target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                            pname: DESKTOP_GRAPHICS_OPENGL_TEXTURE_MAG_FILTER,
+                            param: filter,
+                        },
+                    );
+                    commands.push(
+                        DesktopGraphicsOpenGlBackendTextureUploadCommand::SetTextureParameter {
+                            target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                            pname: DESKTOP_GRAPHICS_OPENGL_TEXTURE_WRAP_S,
+                            param: DESKTOP_GRAPHICS_OPENGL_CLAMP_TO_EDGE as i32,
+                        },
+                    );
+                    commands.push(
+                        DesktopGraphicsOpenGlBackendTextureUploadCommand::SetTextureParameter {
+                            target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                            pname: DESKTOP_GRAPHICS_OPENGL_TEXTURE_WRAP_T,
+                            param: DESKTOP_GRAPHICS_OPENGL_CLAMP_TO_EDGE as i32,
+                        },
+                    );
+                    commands.push(
+                        DesktopGraphicsOpenGlBackendTextureUploadCommand::TexImage2D {
+                            target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                            level: 0,
+                            internal_format: DESKTOP_GRAPHICS_OPENGL_RGBA as i32,
+                            width: opengl_backend_texture_upload_dimension(self.page_width),
+                            height: opengl_backend_texture_upload_dimension(self.page_height),
+                            border: 0,
+                            format: DESKTOP_GRAPHICS_OPENGL_RGBA,
+                            pixel_type: DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                            pixel_source: self.full_upload_pixel_source(),
+                        },
+                    );
+                } else {
+                    commands.push(
+                        DesktopGraphicsOpenGlBackendTextureUploadCommand::TexSubImage2DFromSource {
+                            target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                            level: 0,
+                            xoffset: 0,
+                            yoffset: 0,
+                            width: opengl_backend_texture_upload_dimension(self.page_width),
+                            height: opengl_backend_texture_upload_dimension(self.page_height),
+                            format: DESKTOP_GRAPHICS_OPENGL_RGBA,
+                            pixel_type: DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                            pixel_source: self.full_upload_pixel_source(),
+                        },
+                    );
+                }
+            }
+            DesktopGraphicsOpenGlBackendTextureUploadKind::DirtyPixels => {
+                for pixel in &self.dirty_pixels {
+                    commands.push(
+                        DesktopGraphicsOpenGlBackendTextureUploadCommand::TexSubImage2D {
+                            target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                            level: 0,
+                            xoffset: pixel.x,
+                            yoffset: pixel.y,
+                            width: 1,
+                            height: 1,
+                            format: DESKTOP_GRAPHICS_OPENGL_RGBA,
+                            pixel_type: DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                            pixels: opengl_backend_rgba8888_upload_bytes(pixel.rgba).to_vec(),
+                        },
+                    );
+                }
+            }
+        }
+
+        commands
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -2245,6 +2488,17 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
         }
     }
 
+    pub fn replace_texture_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> (Option<u32>, u32) {
+        let key = key.into();
+        let texture_handle = allocator.allocate();
+        let previous_texture_handle = self.textures.insert(key, texture_handle);
+        (previous_texture_handle, texture_handle)
+    }
+
     pub fn vertex_array_handle(
         &mut self,
         key: impl Into<String>,
@@ -2304,6 +2558,21 @@ pub struct DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub uploads: Vec<DesktopGraphicsOpenGlBackendResolvedTextureUpload>,
+    pub commands: Vec<DesktopGraphicsOpenGlBackendTextureUploadCommand>,
+}
+
+impl DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor {
+    pub fn drive_texture_upload_command_sink<
+        S: DesktopGraphicsOpenGlBackendTextureUploadCommandSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.commands {
+            sink.consume_opengl_texture_upload_command(command.clone());
+        }
+        self.commands.len()
+    }
 }
 
 impl DesktopGraphicsOpenGlBackendTextureUploadSink
@@ -2313,24 +2582,41 @@ impl DesktopGraphicsOpenGlBackendTextureUploadSink
         &mut self,
         upload: DesktopGraphicsOpenGlBackendTextureUploadPlan,
     ) {
-        let texture_handle = self
-            .cache
-            .texture_handle_for_identity(&upload.texture_identity, &mut self.allocator);
-        self.uploads
-            .push(DesktopGraphicsOpenGlBackendResolvedTextureUpload {
-                texture_key: upload.texture_key,
-                texture_handle,
-                resource_kind: upload.resource_kind,
-                page_type: upload.page_type,
-                page_source_path: upload.page_source_path,
-                page_width: upload.page_width,
-                page_height: upload.page_height,
-                sampler: upload.sampler,
-                generation: upload.generation,
-                recreate_texture: upload.recreate_texture,
-                dirty_pixels: upload.dirty_pixels,
-                kind: upload.kind,
-            });
+        let texture_identity_key = upload.texture_identity.key.clone();
+        let texture_existed = upload.texture_identity.gl_handle.is_some()
+            || self.cache.textures.contains_key(&texture_identity_key);
+        let (previous_texture_handle, texture_handle) = if upload.recreate_texture {
+            self.cache
+                .replace_texture_handle(texture_identity_key, &mut self.allocator)
+        } else {
+            (
+                None,
+                self.cache
+                    .texture_handle_for_identity(&upload.texture_identity, &mut self.allocator),
+            )
+        };
+        let previous_texture_handle = previous_texture_handle
+            .or(upload.texture_identity.gl_handle)
+            .filter(|previous| *previous != texture_handle);
+        let resolved_upload = DesktopGraphicsOpenGlBackendResolvedTextureUpload {
+            texture_key: upload.texture_key,
+            texture_handle,
+            previous_texture_handle,
+            texture_was_allocated: upload.recreate_texture || !texture_existed,
+            resource_kind: upload.resource_kind,
+            page_type: upload.page_type,
+            page_source_path: upload.page_source_path,
+            page_width: upload.page_width,
+            page_height: upload.page_height,
+            sampler: upload.sampler,
+            generation: upload.generation,
+            recreate_texture: upload.recreate_texture,
+            dirty_pixels: upload.dirty_pixels,
+            kind: upload.kind,
+        };
+        self.commands
+            .extend(resolved_upload.to_opengl_texture_upload_commands());
+        self.uploads.push(resolved_upload);
     }
 }
 
@@ -10943,6 +11229,271 @@ mod tests {
         assert_eq!(uploaded_resource.identity.gl_handle, Some(1));
         assert_eq!(uploaded_resource.identity.generation, 1);
         assert!(uploaded_table.full_upload_plans().is_empty());
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_texture_upload_executor_emits_tex_image_2d_for_atlas_full_page() {
+        let upload = super::DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            texture_key: "atlas:Main:sprites.png".into(),
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Main,
+                    "sprites.png",
+                ),
+            resource_kind: super::DesktopGraphicsOpenGlBackendTextureResourceKind::AtlasPage,
+            page_type: PageType::Main,
+            page_source_path: "sprites.png".into(),
+            page_width: 64,
+            page_height: 32,
+            sampler: DesktopGraphicsTextureSamplerTrace::Linear,
+            generation: 1,
+            bind_count: 3,
+            recreate_texture: false,
+            dirty_pixels: Vec::new(),
+            kind: super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage,
+        };
+        let mut upload_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor::default();
+
+        super::DesktopGraphicsOpenGlBackendTextureUploadSink::consume_opengl_texture_upload(
+            &mut upload_executor,
+            upload,
+        );
+
+        assert_eq!(upload_executor.uploads.len(), 1);
+        assert_eq!(upload_executor.uploads[0].texture_handle, 1);
+        assert_eq!(upload_executor.uploads[0].previous_texture_handle, None);
+        assert!(upload_executor.uploads[0].texture_was_allocated);
+        assert_eq!(upload_executor.commands.len(), 6);
+        assert_eq!(
+            upload_executor.commands[0],
+            super::DesktopGraphicsOpenGlBackendTextureUploadCommand::BindTexture {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: 1,
+            }
+        );
+        assert_eq!(
+            upload_executor.commands[1],
+            super::DesktopGraphicsOpenGlBackendTextureUploadCommand::SetTextureParameter {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                pname: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_MIN_FILTER,
+                param: super::DESKTOP_GRAPHICS_OPENGL_LINEAR as i32,
+            }
+        );
+        assert_eq!(
+            upload_executor.commands[5],
+            super::DesktopGraphicsOpenGlBackendTextureUploadCommand::TexImage2D {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                level: 0,
+                internal_format: super::DESKTOP_GRAPHICS_OPENGL_RGBA as i32,
+                width: 64,
+                height: 32,
+                border: 0,
+                format: super::DESKTOP_GRAPHICS_OPENGL_RGBA,
+                pixel_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                pixel_source:
+                    super::DesktopGraphicsOpenGlBackendTextureUploadPixelSource::AtlasPage {
+                        page_type: PageType::Main,
+                        page_source_path: "sprites.png".into(),
+                        width: 64,
+                        height: 32,
+                    },
+            }
+        );
+
+        let mut command_sink =
+            super::DesktopGraphicsRecordingOpenGlBackendTextureUploadCommandSink::default();
+        assert_eq!(
+            upload_executor.drive_texture_upload_command_sink(&mut command_sink),
+            6
+        );
+        assert_eq!(command_sink.commands, upload_executor.commands);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_texture_upload_executor_uses_tex_sub_image_2d_for_existing_full_page(
+    ) {
+        let upload = super::DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            texture_key: "runtime-texture:minimap".into(),
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_runtime_texture(
+                    "minimap",
+                )
+                .with_uploaded_gl_handle(77, 1),
+            resource_kind: super::DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture,
+            page_type: PageType::Ui,
+            page_source_path: "runtime:minimap".into(),
+            page_width: 16,
+            page_height: 8,
+            sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+            generation: 2,
+            bind_count: 0,
+            recreate_texture: false,
+            dirty_pixels: Vec::new(),
+            kind: super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage,
+        };
+        let mut upload_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor::default();
+
+        super::DesktopGraphicsOpenGlBackendTextureUploadSink::consume_opengl_texture_upload(
+            &mut upload_executor,
+            upload,
+        );
+
+        assert_eq!(upload_executor.uploads[0].texture_handle, 77);
+        assert!(!upload_executor.uploads[0].texture_was_allocated);
+        assert_eq!(
+            upload_executor.commands,
+            vec![
+                super::DesktopGraphicsOpenGlBackendTextureUploadCommand::BindTexture {
+                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    texture_handle: 77,
+                },
+                super::DesktopGraphicsOpenGlBackendTextureUploadCommand::TexSubImage2DFromSource {
+                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    level: 0,
+                    xoffset: 0,
+                    yoffset: 0,
+                    width: 16,
+                    height: 8,
+                    format: super::DESKTOP_GRAPHICS_OPENGL_RGBA,
+                    pixel_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                    pixel_source:
+                        super::DesktopGraphicsOpenGlBackendTextureUploadPixelSource::RuntimeTexture {
+                            texture_key: "runtime-texture:minimap".into(),
+                            page_source_path: "runtime:minimap".into(),
+                            width: 16,
+                            height: 8,
+                        },
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_texture_upload_executor_emits_tex_sub_image_2d_for_dirty_pixels() {
+        let upload = super::DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            texture_key: "runtime-texture:minimap".into(),
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_runtime_texture(
+                    "minimap",
+                ),
+            resource_kind: super::DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture,
+            page_type: PageType::Ui,
+            page_source_path: "runtime:minimap".into(),
+            page_width: 8,
+            page_height: 8,
+            sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+            generation: 1,
+            bind_count: 0,
+            recreate_texture: false,
+            dirty_pixels: vec![
+                super::DesktopGraphicsOpenGlBackendTexturePixelUpdate {
+                    x: 2,
+                    y: 4,
+                    rgba: 0xaabb_ccdd,
+                },
+                super::DesktopGraphicsOpenGlBackendTexturePixelUpdate {
+                    x: 3,
+                    y: 5,
+                    rgba: 0x1122_3344,
+                },
+            ],
+            kind: super::DesktopGraphicsOpenGlBackendTextureUploadKind::DirtyPixels,
+        };
+        let mut upload_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor::default();
+
+        super::DesktopGraphicsOpenGlBackendTextureUploadSink::consume_opengl_texture_upload(
+            &mut upload_executor,
+            upload,
+        );
+
+        assert_eq!(upload_executor.commands.len(), 3);
+        assert_eq!(
+            upload_executor.commands[0],
+            super::DesktopGraphicsOpenGlBackendTextureUploadCommand::BindTexture {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: 1,
+            }
+        );
+        assert_eq!(
+            upload_executor.commands[1],
+            super::DesktopGraphicsOpenGlBackendTextureUploadCommand::TexSubImage2D {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                level: 0,
+                xoffset: 2,
+                yoffset: 4,
+                width: 1,
+                height: 1,
+                format: super::DESKTOP_GRAPHICS_OPENGL_RGBA,
+                pixel_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                pixels: vec![0xaa, 0xbb, 0xcc, 0xdd],
+            }
+        );
+        assert_eq!(
+            upload_executor.commands[2],
+            super::DesktopGraphicsOpenGlBackendTextureUploadCommand::TexSubImage2D {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                level: 0,
+                xoffset: 3,
+                yoffset: 5,
+                width: 1,
+                height: 1,
+                format: super::DESKTOP_GRAPHICS_OPENGL_RGBA,
+                pixel_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                pixels: vec![0x11, 0x22, 0x33, 0x44],
+            }
+        );
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_texture_upload_executor_recreates_runtime_texture_handle() {
+        let first_upload = super::DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            texture_key: "runtime-texture:minimap".into(),
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_runtime_texture(
+                    "minimap",
+                ),
+            resource_kind: super::DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture,
+            page_type: PageType::Ui,
+            page_source_path: "runtime:minimap".into(),
+            page_width: 16,
+            page_height: 16,
+            sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+            generation: 1,
+            bind_count: 0,
+            recreate_texture: true,
+            dirty_pixels: Vec::new(),
+            kind: super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage,
+        };
+        let second_upload = super::DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            generation: 2,
+            ..first_upload.clone()
+        };
+        let mut upload_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor::default();
+
+        super::DesktopGraphicsOpenGlBackendTextureUploadSink::consume_opengl_texture_upload(
+            &mut upload_executor,
+            first_upload,
+        );
+        super::DesktopGraphicsOpenGlBackendTextureUploadSink::consume_opengl_texture_upload(
+            &mut upload_executor,
+            second_upload,
+        );
+
+        assert_eq!(upload_executor.uploads[0].texture_handle, 1);
+        assert_eq!(upload_executor.uploads[0].previous_texture_handle, None);
+        assert!(upload_executor.uploads[0].texture_was_allocated);
+        assert_eq!(upload_executor.uploads[1].texture_handle, 2);
+        assert_eq!(upload_executor.uploads[1].previous_texture_handle, Some(1));
+        assert!(upload_executor.uploads[1].texture_was_allocated);
+        assert!(upload_executor.commands.contains(
+            &super::DesktopGraphicsOpenGlBackendTextureUploadCommand::DeleteTexture {
+                texture_handle: 1,
+            }
+        ));
     }
 
     #[test]

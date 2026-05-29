@@ -13842,3 +13842,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - minimap dirty pixels 目前按 1×1 计划表达，后续可合并为矩形 sub-image 批量上传；
   - texture handle/cache 仍是 recording/resolving 层，真实 GL context/window/present 仍未完成；
   - 当前总体迁移约 30.4%，仍未达到完整可玩。
+
+## 12.448 OpenGL texture upload command adapter 接入
+
+- 2026-05-29：继续沿原版 Arc/LWJGL/OpenGL 语义推进 texture upload 主链路，把 `DesktopGraphicsOpenGlBackendTextureUploadPlan` / resolved upload 进一步转换为可下沉到真实 GL 的命令序列：`BindTexture`、`SetTextureParameter`、`TexImage2D`、`TexSubImage2DFromSource`、`TexSubImage2D`，并在 runtime texture recreate 时显式发出旧 handle 删除意图。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 OpenGL texture 常量、`DesktopGraphicsOpenGlBackendTextureUploadPixelSource`、`DesktopGraphicsOpenGlBackendTextureUploadCommand`；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadCommandSink` 与 recording sink；
+    - `DesktopGraphicsOpenGlBackendResolvedTextureUpload::to_opengl_texture_upload_commands(...)` 将首次创建/重建 full page upload 映射为 `glTexImage2D` 形态，将既有 texture 的 full page 刷新映射为整图 `glTexSubImage2D` 形态，将 dirty pixels 映射为 1×1 `glTexSubImage2D` 形态；
+    - `DesktopGraphicsOpenGlBackendHandleCache::replace_texture_handle(...)` 支持 `recreate_texture` 分配新 handle 并保留 previous handle；
+    - `DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor` 现在同时保存 resolved uploads 与 OpenGL texture upload commands，并可驱动 command sink。
+- 迁移意义：
+  - atlas page 首次 upload 已具备 Java `Texture.load(...)` / Arc `GLTexture.uploadImageData(...)` 对应的 `TexImage2D` 命令边界；
+  - runtime texture 既有 full refresh 已具备 Java `Texture.draw(Pixmap)` / 整图 `glTexSubImage2D` 命令边界；
+  - minimap dirty pixel upload 已具备 Java `Pixmaps.drawPixel(...)` / `glTexSubImage2D` 的 1×1 像素上传命令边界；
+  - 该 adapter 仍接在 `FramePlan/ExecutorState -> TextureUploadSink -> Resolving executor -> CommandSink` 主链路中，不是孤立 helper。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_texture_upload --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - full page upload / full page sub-image 目前携带 pixel source 元数据，真实 PNG/Pixmap 解码与 RGBA 字节供给尚未接入；
+  - 真实 `glow/glutin/winit` 或等价 window/context/present 层尚未引入，当前是可执行 GL 调用描述层；
+  - dirty pixels 后续仍需合并为矩形 sub-image batch，减少真实 GL 调用；
+  - 当前总体迁移约 30.5%，仍未达到完整可玩。
