@@ -14659,3 +14659,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java 生产/运输/电力的完整视觉、特效、路由 UI 与所有边界分支仍需继续迁移；
   - Router 完整运行时行为、生产块完整配置表、电力断链/cheat/零容量边界还需继续补强；
   - 当前总体迁移约 34.5%，仍未达到完整可玩。
+
+## 12.480 Draw.fbo / Draw.rect 采样公式语义化
+
+- 2026-05-29：对照 Java/Arc `Draw.fbo(...)`、`Draw.rect(TextureRegion, ...)` 与 `Renderer.backgroundBuffer` 的翻转语义，新增 backend 可透传的 texture sample plan。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderUvRect`、`RenderTextureSampleFlip`、`RenderTextureSamplePlan`；
+    - `RenderTextureSamplePlan::fbo_uv_window(...)` 实现 Java `Draw.fbo` / `BlockRenderer.drawShadows` 的 UV-Y 翻转窗口公式；
+    - `RenderTextureSamplePlan::background_buffer_geometry_flip(...)` 表达 Java `Draw.rect(..., drawSize, -drawSize)` 的几何 Y 翻转；
+    - `RenderPass` 新增 `resolve_sample` 与 `with_resolve_sample(...)`。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsPassExecutionTrace` / live render-target trace / OpenGL resolve step / resolve event / resolve command 全链路透传 `resolve_sample`；
+    - `desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps` 验证 resolve sample 能从 `RenderPass` 进入 OpenGL backend plan/executor。
+- 迁移意义：
+  - `DrawRectSample` / `DrawFboSample` 不再只有 kind 标签，可承载 Java 相机窗口、UV-Y 翻转、backgroundBuffer 负高度几何翻转这些真实采样语义；
+  - 后续真实 OpenGL backend 可以把 `resolve_sample.uv` 写入 fullscreen/viewport quad mesh，而不是硬编码整张纹理。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core render_texture_sample_plan`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `git diff --check`
+- 仍未完成：
+  - BlockRenderer/FogRenderer 生产路径尚未全部自动填充 `resolve_sample`；
+  - fullscreen quad / viewport quad 的真实 VBO/IBO/UV 上传仍待接入；
+  - 当前总体迁移约 34.6%，仍未达到完整可玩。
