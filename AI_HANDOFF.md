@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **24.0%**。
+- 当前总体迁移完成度：约 **24.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9683,3 +9683,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 `CacheLayerPassMetadata::{target, blit_target, blend_hint}` 显式映射成 `RenderPass::with_resolve(..., RenderResolveKind::ShaderBlit)`；
   2. 补 `shadows/dark` 对应的 `DrawRectSample` / `DrawFboSample` pass plan；
   3. 继续准备真实 OpenGL/glow backend，但新增依赖前必须确认。
+
+---
+
+## 294. 最新闭环记录：Block particle polygon 一等 RenderCommand
+
+- 本轮总体进度更新：约 **24.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderCommand::DrawPolygon { center, radius, sides, rotation, color, filled, layer }`；
+    - 新增 `RenderCommand::draw_polygon(...)`；
+    - `backend_flush_boundary()` 将 polygon 视为普通几何 primitive，不额外 flush。
+  - `desktop/src/lib.rs`
+    - block particle Polygon 分支从 `Custom("block-particle-polygon")` 升级为 `SetBlend` + `DrawPolygon`；
+    - `DesktopGraphicsCommandExecutionTrace` 新增 `DrawPolygon { sides }`；
+    - `DesktopGraphicsPassExecutionTrace.draw_polygon_sides` 与 `DesktopGraphicsExecutionSummary.draw_polygon_commands` 纳入 trace/summary；
+    - block particle、render command sink、headless summary 测试已覆盖 polygon 不再降级成 NoOp/Custom。
+- Java 对照：
+  - 对应 `DrawParticles` 中 `Fill.poly(..., sides, radius, particleRotation)`；
+  - `DrawSoftParticles` 仍保持 `DrawSprite(circle-shadow)` 路径，不走 polygon；
+  - blend 仍由前置 `SetBlend` 表示，alpha 合并进颜色。
+- 已验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop render_command --lib`
+  - `cargo test -p mindustry-desktop block_particle --lib`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_records_execution_summary_without_polluting_stats --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 继续把 `DesktopGraphicsLiveBackendRenderCommandSink` 落到真实 OpenGL/glow backend；
+  2. 同步推进 atlas page upload、shader compile/bind、RenderTarget/FBO resolve，确保不是孤立 headless seam；
+  3. 新增依赖前先确认，但不要把真实渲染目标改成 wgpu/Vulkan；当前方向仍是原版 OpenGL 语义。

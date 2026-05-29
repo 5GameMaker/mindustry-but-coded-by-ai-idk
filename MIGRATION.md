@@ -12268,3 +12268,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - darkness 的 clear/reset/reload 生命周期还需继续对照 Java；
   - limited map 起始区域清白、fog/darkness 与实际地图边界交互仍需更细测试；
   - 当前总体迁移约 24.0%，仍未达到完整可玩。
+
+### 12.388 Block particle polygon 升级为一等 RenderCommand
+
+- 2026-05-29：继续推进渲染 backend seam，修正上一轮 polygon 仍停在 `Custom("block-particle-polygon")` 占位的问题。本轮把 Java `DrawParticles` 的 `Fill.poly(...)` 语义映射到 Rust 的一等 `RenderCommand::DrawPolygon`，仍不引入 GPU 依赖，但真实 OpenGL/glow backend 后续可以直接按命令消费，不需要再解析 custom 属性。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderCommand` 新增 `DrawPolygon { center, radius, sides, rotation, color, filled, layer }`；
+    - 新增 `RenderCommand::draw_polygon(...)` builder；
+    - `backend_flush_boundary()` 将 `DrawPolygon` 归为普通几何命令，不制造额外 flush boundary，对齐 Java `Fill.poly` 作为当前 blend/color 状态下的绘制 primitive。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsBlockParticleDrawCall::render_commands()` 的 Polygon 分支改为 `SetBlend` + `DrawPolygon`；
+    - `render_command_trace_kind()` 能识别 `DrawPolygon`；
+    - `DesktopGraphicsCommandExecutionTrace` 新增 `DrawPolygon { sides }`，避免 polygon 在 pass trace 中继续被降级成 `NoOp`；
+    - `DesktopGraphicsPassExecutionTrace.draw_polygon_sides` 与 `DesktopGraphicsExecutionSummary.draw_polygon_commands` 暴露 polygon 命令数量，便于后续真实 backend/回归测试确认 polygon 未丢失。
+- Java 对照要点：
+  - `DrawParticles` 的 polygon 路径是 `Draw.blend(...)` / `Draw.color(...)` / `Draw.alpha(...)` 后调用 `Fill.poly(x, y, sides, radius, particleRotation)`；
+  - Rust 侧对应为前置 `SetBlend`，`alpha` 合并进 RGBA，`filled=true`，`radius=size`，`rotation=particle_rotation`，`sides` 原样透传；
+  - `DrawSoftParticles` 仍保持 `SoftSprite` + `DrawSprite(circle-shadow)`，不走 polygon。
+- 已跑验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop render_command --lib`
+  - `cargo test -p mindustry-desktop block_particle --lib`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_records_execution_summary_without_polluting_stats --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `DrawPolygon` 已是一等 backend-neutral 命令，但仍未接真实 OpenGL/glow 绘制；
+  - 仍需把 `DesktopGraphicsLiveBackendRenderCommandSink` 落成真实 window/surface/GPU backend，并把 atlas upload、shader bind、FBO resolve 串到同一条链路；
+  - 当前总体迁移约 24.5%，仍未达到完整可玩。

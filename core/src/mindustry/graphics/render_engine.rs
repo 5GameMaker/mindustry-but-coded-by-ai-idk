@@ -313,6 +313,15 @@ pub enum RenderCommand {
         filled: bool,
         layer: f32,
     },
+    DrawPolygon {
+        center: RenderPoint,
+        radius: f32,
+        sides: usize,
+        rotation: f32,
+        color: [f32; 4],
+        filled: bool,
+        layer: f32,
+    },
     DrawPixel {
         x: i32,
         y: i32,
@@ -412,6 +421,26 @@ impl RenderCommand {
         }
     }
 
+    pub fn draw_polygon(
+        center: RenderPoint,
+        radius: f32,
+        sides: usize,
+        rotation: f32,
+        color: [f32; 4],
+        filled: bool,
+        layer: f32,
+    ) -> Self {
+        Self::DrawPolygon {
+            center,
+            radius,
+            sides,
+            rotation,
+            color,
+            filled,
+            layer,
+        }
+    }
+
     pub fn draw_pixel(x: i32, y: i32, color: [f32; 4], layer: f32) -> Self {
         Self::DrawPixel { x, y, color, layer }
     }
@@ -454,6 +483,7 @@ impl RenderCommand {
             | Self::DrawSprite { .. }
             | Self::DrawLine { .. }
             | Self::DrawCircle { .. }
+            | Self::DrawPolygon { .. }
             | Self::DrawPixel { .. }
             | Self::DrawText { .. } => None,
         }
@@ -1198,6 +1228,15 @@ mod tests {
             RenderTextAlign::Center,
             60.0,
         );
+        let polygon = RenderCommand::draw_polygon(
+            RenderPoint::new(8.0, 9.0),
+            6.5,
+            5,
+            15.0,
+            [0.2, 0.3, 0.4, 0.5],
+            true,
+            70.0,
+        );
         let custom = RenderCommand::custom(
             "module-bridge",
             vec![
@@ -1237,6 +1276,27 @@ mod tests {
                 assert_eq!(size, 12.0);
                 assert_eq!(align, RenderTextAlign::Center);
                 assert_eq!(layer, 60.0);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        match polygon {
+            RenderCommand::DrawPolygon {
+                center,
+                radius,
+                sides,
+                rotation,
+                color,
+                filled,
+                layer,
+            } => {
+                assert_eq!(center, RenderPoint::new(8.0, 9.0));
+                assert_eq!(radius, 6.5);
+                assert_eq!(sides, 5);
+                assert_eq!(rotation, 15.0);
+                assert_eq!(color, [0.2, 0.3, 0.4, 0.5]);
+                assert!(filled);
+                assert_eq!(layer, 70.0);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -1309,6 +1369,15 @@ mod tests {
             RenderTextAlign::Center,
             30.0,
         ));
+        pass.push(RenderCommand::draw_polygon(
+            RenderPoint::new(6.0, 7.0),
+            8.0,
+            6,
+            30.0,
+            [0.3, 0.4, 0.5, 0.6],
+            true,
+            31.0,
+        ));
         pass.push(RenderCommand::custom(
             "backend-marker",
             vec![RenderProperty::new("stage", "block")],
@@ -1325,6 +1394,7 @@ mod tests {
                 Some(RenderBackendFlushBoundary::BlendState),
                 Some(RenderBackendFlushBoundary::ClipState),
                 None,
+                None,
                 Some(RenderBackendFlushBoundary::Custom),
             ]
         );
@@ -1338,7 +1408,15 @@ mod tests {
                 .filter(|step| step.kind == RenderPassExecutionStepKind::Command)
                 .map(|step| step.command_index)
                 .collect::<Vec<_>>(),
-            vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]
+            vec![
+                Some(0),
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(4),
+                Some(5),
+                Some(6)
+            ]
         );
         assert_eq!(
             steps
@@ -1362,7 +1440,7 @@ mod tests {
                 (Some(0), "clear"),
                 (Some(2), "blend_state"),
                 (Some(3), "clip_state"),
-                (Some(5), "custom"),
+                (Some(6), "custom"),
             ]
         );
     }

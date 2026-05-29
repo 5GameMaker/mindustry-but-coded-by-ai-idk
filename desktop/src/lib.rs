@@ -39,9 +39,9 @@ use mindustry_core::mindustry::graphics::{
     MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
     OverlayRendererPlan, OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan,
     PixelatorInput, PixelatorState, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
-    RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
-    RenderResolveKind, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderCamera,
-    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
+    RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderRect, RenderResolveKind,
+    RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderCamera, ShaderCatalog,
+    ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
     TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
@@ -365,6 +365,7 @@ pub enum DesktopGraphicsExecutionStepTrace {
 pub enum DesktopGraphicsCommandExecutionTrace {
     DrawSprite { symbol: String },
     DrawText { text: String },
+    DrawPolygon { sides: usize },
     NoOp { kind: String },
 }
 
@@ -381,6 +382,7 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub draw_sprite_symbols: Vec<String>,
     pub resolved_sprites: Vec<DesktopGraphicsResolvedSpriteTrace>,
     pub draw_texts: Vec<String>,
+    pub draw_polygon_sides: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -598,23 +600,15 @@ impl DesktopGraphicsBlockParticleDrawCall {
                 ));
             }
             DesktopGraphicsBlockParticleDrawCallKind::Polygon { sides, rotation } => {
-                commands.push(RenderCommand::Custom {
-                    name: "block-particle-polygon".into(),
-                    properties: vec![
-                        RenderProperty::new("block", self.block.clone()),
-                        RenderProperty::new("plan_index", self.plan_index.to_string()),
-                        RenderProperty::new("sample_index", self.sample_index.to_string()),
-                        RenderProperty::new("x", self.x.to_string()),
-                        RenderProperty::new("y", self.y.to_string()),
-                        RenderProperty::new("radius", self.size.to_string()),
-                        RenderProperty::new("sides", sides.to_string()),
-                        RenderProperty::new("rotation", rotation.to_string()),
-                        RenderProperty::new("alpha", self.alpha.to_string()),
-                        RenderProperty::new("layer", self.layer.to_string()),
-                        RenderProperty::new("blend", format!("{:?}", self.blend_mode)),
-                        RenderProperty::new("color", format!("{:?}", self.tint())),
-                    ],
-                });
+                commands.push(RenderCommand::draw_polygon(
+                    center,
+                    self.size.max(0.0),
+                    *sides,
+                    *rotation,
+                    self.tint(),
+                    true,
+                    self.layer,
+                ));
             }
         }
 
@@ -970,6 +964,7 @@ impl DesktopGraphicsExecutionTrace {
                             let mut draw_sprite_symbols = Vec::new();
                             let mut resolved_sprites = Vec::new();
                             let mut draw_texts = Vec::new();
+                            let mut draw_polygon_sides = Vec::new();
                             for command in &pass.commands {
                                 match command {
                                     RenderCommand::DrawSprite { symbol, .. } => {
@@ -992,6 +987,14 @@ impl DesktopGraphicsExecutionTrace {
                                         );
                                         draw_texts.push(text.clone());
                                     }
+                                    RenderCommand::DrawPolygon { sides, .. } => {
+                                        command_trace.push(
+                                            DesktopGraphicsCommandExecutionTrace::DrawPolygon {
+                                                sides: *sides,
+                                            },
+                                        );
+                                        draw_polygon_sides.push(*sides);
+                                    }
                                     other => command_trace.push(
                                         DesktopGraphicsCommandExecutionTrace::NoOp {
                                             kind: render_command_trace_kind(other).to_string(),
@@ -1012,6 +1015,7 @@ impl DesktopGraphicsExecutionTrace {
                                 draw_sprite_symbols,
                                 resolved_sprites,
                                 draw_texts,
+                                draw_polygon_sides,
                             }
                         })
                         .collect()
@@ -1123,6 +1127,7 @@ fn render_command_trace_kind(command: &RenderCommand) -> &'static str {
         RenderCommand::DrawSprite { .. } => "DrawSprite",
         RenderCommand::DrawLine { .. } => "DrawLine",
         RenderCommand::DrawCircle { .. } => "DrawCircle",
+        RenderCommand::DrawPolygon { .. } => "DrawPolygon",
         RenderCommand::DrawPixel { .. } => "DrawPixel",
         RenderCommand::DrawText { .. } => "DrawText",
         RenderCommand::Custom { .. } => "Custom",
@@ -1135,6 +1140,7 @@ pub struct DesktopGraphicsExecutionSummary {
     pub render_commands_visited: usize,
     pub draw_sprite_commands: usize,
     pub draw_text_commands: usize,
+    pub draw_polygon_commands: usize,
     pub shader_dispatch_applies: usize,
     pub shader_dispatch_operations: usize,
     pub shader_dispatch_errors: usize,
@@ -1183,6 +1189,7 @@ impl DesktopGraphicsExecutionSummary {
                 .filter(|sprite| sprite.missing)
                 .count();
             summary.draw_text_commands += pass.draw_texts.len();
+            summary.draw_polygon_commands += pass.draw_polygon_sides.len();
             match &pass.target {
                 RenderTarget::Screen => summary.screen_target_passes += 1,
                 RenderTarget::Texture(_) => summary.texture_target_passes += 1,
@@ -6192,10 +6199,27 @@ mod tests {
             trace.block_particle_render_commands.get(4),
             Some(RenderCommand::SetBlend { mode }) if *mode == RenderBlendMode::Normal
         ));
-        assert!(matches!(
-            trace.block_particle_render_commands.get(5),
-            Some(RenderCommand::Custom { name, .. }) if name == "block-particle-polygon"
-        ));
+        let polygon_call = &trace.block_particle_draw_calls[2];
+        match trace.block_particle_render_commands.get(5) {
+            Some(RenderCommand::DrawPolygon {
+                center,
+                radius,
+                sides,
+                rotation,
+                color,
+                filled,
+                layer,
+            }) => {
+                assert_eq!(*center, RenderPoint::new(polygon_call.x, polygon_call.y));
+                assert_eq!(*radius, polygon_call.size.max(0.0));
+                assert_eq!(*sides, 5);
+                assert_eq!(*rotation, 15.0);
+                assert_eq!(*color, polygon_call.tint());
+                assert!(*filled);
+                assert_eq!(*layer, Layer::BLOCK);
+            }
+            other => panic!("expected DrawPolygon block particle command, got {other:?}"),
+        }
         assert!(trace.execution_steps.iter().any(|step| matches!(
             step,
             DesktopGraphicsExecutionStepTrace::BlockParticles { plan_count: 3 }
@@ -6992,6 +7016,15 @@ mod tests {
             [0.0, 0.0, 0.0, 1.0],
             1.0,
         ));
+        block_pass.push(RenderCommand::draw_polygon(
+            RenderPoint::new(20.0, 21.0),
+            5.0,
+            6,
+            30.0,
+            [0.25, 0.5, 0.75, 1.0],
+            true,
+            32.0,
+        ));
         render_frame.push_pass(block_pass);
 
         let mut ui_pass = RenderPass::new(RenderPassKind::Ui)
@@ -7044,9 +7077,10 @@ mod tests {
 
         let summary = DesktopGraphicsExecutionSummary::from_frame(&frame);
         assert_eq!(summary.render_passes_visited, 3);
-        assert_eq!(summary.render_commands_visited, 6);
+        assert_eq!(summary.render_commands_visited, 7);
         assert_eq!(summary.draw_sprite_commands, 3);
         assert_eq!(summary.draw_text_commands, 2);
+        assert_eq!(summary.draw_polygon_commands, 1);
         assert_eq!(summary.shader_dispatch_applies, 2);
         assert_eq!(summary.shader_dispatch_operations, 1);
         assert_eq!(summary.shader_dispatch_errors, 0);
@@ -7054,13 +7088,13 @@ mod tests {
         assert_eq!(summary.texture_target_passes, 1);
         assert_eq!(summary.buffer_target_passes, 1);
         assert_eq!(frame.bundle.stats.render_passes, 3);
-        assert_eq!(frame.bundle.stats.render_commands, 6);
+        assert_eq!(frame.bundle.stats.render_commands, 7);
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         let stats = renderer.render_graphics_frame(&frame);
         assert_eq!(stats.render_passes, 3);
         assert_eq!(renderer.last_execution, summary);
-        assert_eq!(renderer.last_stats.render_commands, 6);
+        assert_eq!(renderer.last_stats.render_commands, 7);
         assert_eq!(
             renderer.last_trace,
             DesktopGraphicsExecutionTrace::from_frame(&frame)
@@ -7109,6 +7143,10 @@ mod tests {
             vec!["backend-ready".to_string()]
         );
         assert_eq!(
+            renderer.last_trace.render_passes[0].draw_polygon_sides,
+            vec![6]
+        );
+        assert_eq!(
             renderer.last_trace.render_passes[1].target,
             RenderTarget::Texture("ui-layer".into())
         );
@@ -7121,7 +7159,7 @@ mod tests {
             RenderTarget::Screen
         );
         assert_eq!(renderer.last_live_backend_state.render_passes_visited, 3);
-        assert_eq!(renderer.last_live_backend_state.render_commands_visited, 6);
+        assert_eq!(renderer.last_live_backend_state.render_commands_visited, 7);
         assert_eq!(
             renderer
                 .last_live_backend_state
@@ -7438,6 +7476,15 @@ mod tests {
                 "kind", "debug",
             )],
         ));
+        pass.push(RenderCommand::draw_polygon(
+            RenderPoint::new(6.0, 7.0),
+            3.0,
+            5,
+            45.0,
+            [0.8, 0.7, 0.6, 1.0],
+            true,
+            11.5,
+        ));
         pass.push(RenderCommand::draw_sprite(
             "beta",
             RenderRect::new(5.0, 5.0, 4.0, 4.0),
@@ -7483,6 +7530,7 @@ mod tests {
                 DesktopGraphicsCommandExecutionTrace::NoOp {
                     kind: "Custom".to_string(),
                 },
+                DesktopGraphicsCommandExecutionTrace::DrawPolygon { sides: 5 },
                 DesktopGraphicsCommandExecutionTrace::DrawSprite {
                     symbol: "beta".to_string(),
                 },
@@ -7496,6 +7544,7 @@ mod tests {
             vec!["alpha".to_string(), "beta".to_string()]
         );
         assert_eq!(pass_trace.draw_texts, vec!["status".to_string()]);
+        assert_eq!(pass_trace.draw_polygon_sides, vec![5]);
     }
 
     #[test]
@@ -7706,6 +7755,15 @@ mod tests {
                 [0.4, 0.3, 0.2, 0.1],
                 11.0,
             ),
+            RenderCommand::draw_polygon(
+                RenderPoint::new(10.0, 11.0),
+                3.5,
+                5,
+                22.5,
+                [0.7, 0.6, 0.5, 0.4],
+                true,
+                12.0,
+            ),
             RenderCommand::custom(
                 "backend-marker",
                 vec![RenderProperty::new("stage", "world")],
@@ -7775,6 +7833,7 @@ mod tests {
                 "SetClip",
                 "StrokeRect",
                 "DrawLine",
+                "DrawPolygon",
                 "Custom",
                 "DrawSprite",
                 "DrawText",
@@ -7799,7 +7858,7 @@ mod tests {
             }
         );
         assert_eq!(
-            sink.traces[5].source,
+            sink.traces[6].source,
             DesktopGraphicsLiveBackendRenderCommandSource::RenderPass {
                 pass_index: 1,
                 command_index: 0,
