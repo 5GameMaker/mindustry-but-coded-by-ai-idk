@@ -36,6 +36,12 @@ pub enum PowerBlockStatus {
     LogicDisable,
 }
 
+impl Default for PowerBlockStatus {
+    fn default() -> Self {
+        Self::NoInput
+    }
+}
+
 pub fn power_node_link_valid(
     same_building: bool,
     link_exists: bool,
@@ -633,10 +639,29 @@ pub struct PowerBattery {
     pub enabled: bool,
 }
 
+impl Default for PowerBattery {
+    fn default() -> Self {
+        Self {
+            status: 0.0,
+            capacity: 0.0,
+            enabled: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PowerProducer {
     pub production: f32,
     pub delta: f32,
+}
+
+impl Default for PowerProducer {
+    fn default() -> Self {
+        Self {
+            production: 0.0,
+            delta: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -649,6 +674,21 @@ pub struct PowerConsumer {
     pub capacity: f32,
     pub status: f32,
     pub cheating: bool,
+}
+
+impl Default for PowerConsumer {
+    fn default() -> Self {
+        Self {
+            should_consume_power: true,
+            requested_power: 0.0,
+            usage: 0.0,
+            delta: 1.0,
+            buffered: false,
+            capacity: 0.0,
+            status: 0.0,
+            cheating: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -666,6 +706,26 @@ pub struct PowerGraphNode {
     pub battery_capacity: f32,
     pub enabled: bool,
     pub cheating: bool,
+}
+
+impl Default for PowerGraphNode {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            outputs_power: false,
+            consumes_power: false,
+            buffered: false,
+            should_consume_power: true,
+            production: 0.0,
+            requested_power: 0.0,
+            usage: 0.0,
+            delta: 1.0,
+            battery_status: 0.0,
+            battery_capacity: 0.0,
+            enabled: true,
+            cheating: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1514,6 +1574,96 @@ mod tests {
         assert_eq!(beam_node_status(-1.0, 1.0), PowerBlockStatus::NoOutput);
         assert_eq!(beam_node_status(0.0, 0.0), PowerBlockStatus::NoInput);
         assert_eq!(long_power_node_warmup(0.0, 1), 0.05);
+    }
+
+    #[test]
+    fn power_graph_defaults_and_minimal_network_update_match_java_neutral_state() {
+        assert_eq!(PowerBlockStatus::default(), PowerBlockStatus::NoInput);
+        assert_eq!(
+            PowerBattery::default(),
+            PowerBattery {
+                status: 0.0,
+                capacity: 0.0,
+                enabled: true,
+            }
+        );
+        assert_eq!(
+            PowerProducer::default(),
+            PowerProducer {
+                production: 0.0,
+                delta: 1.0,
+            }
+        );
+        assert_eq!(
+            PowerConsumer::default(),
+            PowerConsumer {
+                should_consume_power: true,
+                requested_power: 0.0,
+                usage: 0.0,
+                delta: 1.0,
+                buffered: false,
+                capacity: 0.0,
+                status: 0.0,
+                cheating: false,
+            }
+        );
+        assert_eq!(
+            PowerGraphNode::default(),
+            PowerGraphNode {
+                id: 0,
+                outputs_power: false,
+                consumes_power: false,
+                buffered: false,
+                should_consume_power: true,
+                production: 0.0,
+                requested_power: 0.0,
+                usage: 0.0,
+                delta: 1.0,
+                battery_status: 0.0,
+                battery_capacity: 0.0,
+                enabled: true,
+                cheating: false,
+            }
+        );
+
+        let mut graph = PowerGraphRuntime::default();
+        assert!(graph.add_node(PowerGraphNode {
+            id: 1,
+            outputs_power: true,
+            production: 5.0,
+            ..PowerGraphNode::default()
+        }));
+        assert!(graph.add_node(PowerGraphNode {
+            id: 2,
+            consumes_power: true,
+            requested_power: 3.0,
+            usage: 3.0,
+            ..PowerGraphNode::default()
+        }));
+        assert!(graph.add_node(PowerGraphNode {
+            id: 3,
+            outputs_power: true,
+            consumes_power: true,
+            buffered: true,
+            battery_status: 0.25,
+            battery_capacity: 10.0,
+            ..PowerGraphNode::default()
+        }));
+
+        graph.update_with_delta(1.0);
+
+        assert_eq!(graph.last_power_needed, 3.0);
+        assert_eq!(graph.last_power_produced, 5.0);
+        assert_eq!(graph.last_power_stored, 2.5);
+        assert_eq!(graph.last_capacity, 10.0);
+        assert_eq!(graph.last_scaled_power_in, 5.0);
+        assert_eq!(graph.last_scaled_power_out, 3.0);
+        assert_eq!(graph.power_balance(), 2.0);
+        assert_eq!(graph.producer_nodes, vec![1]);
+        assert_eq!(graph.consumer_nodes, vec![2]);
+        assert_eq!(graph.battery_nodes, vec![3]);
+        assert_eq!(graph.consumers[0].status, 1.0);
+        assert!((graph.batteries[0].status - 0.45).abs() < 0.0001);
     }
 
     #[test]
