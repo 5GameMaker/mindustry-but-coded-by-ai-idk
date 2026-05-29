@@ -21792,6 +21792,53 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_roundtrips_reinforced_bridge_conduit_state_and_visual_warmup() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let bridge_def = content.block_by_name("reinforced-bridge-conduit").unwrap();
+        let tile_pos = point2_pack(4, 13);
+        let state = LiquidBridgeState {
+            link: point2_pack(6, 13),
+            warmup: 0.8,
+            incoming: vec![point2_pack(2, 13), point2_pack(3, 13)],
+            was_moved: true,
+            moved: false,
+        };
+
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 16);
+        runtime.add_building(BuildingComp::new(
+            tile_pos,
+            bridge_def.base().clone(),
+            TeamId(1),
+        ));
+        runtime
+            .liquid_runtime_states
+            .insert(tile_pos, GameRuntimeLiquidBlockState::Bridge(state.clone()));
+
+        let map = runtime.export_network_map_snapshot(&content);
+
+        let mut loaded = GameRuntime::default();
+        let report = loaded.load_network_map_with_buildings(&content, &map);
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(report.block_state_bytes_ignored, 0);
+        assert_eq!(
+            loaded.liquid_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeLiquidBlockState::Bridge(LiquidBridgeState {
+                was_moved: true,
+                moved: true,
+                ..state
+            }))
+        );
+
+        let snapshot = loaded
+            .block_visual_runtime_snapshot(tile_pos)
+            .expect("reinforced bridge conduit building should snapshot");
+        assert_eq!(snapshot.warmup, Some(0.8));
+    }
+
+    #[test]
     fn game_runtime_block_visual_runtime_snapshot_leaves_missing_state_absent() {
         let content = ContentLoader::create_base_content().unwrap();
         let mut runtime = GameRuntime::default();
