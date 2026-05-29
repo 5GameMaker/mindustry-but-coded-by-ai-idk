@@ -14762,3 +14762,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - LiquidRouter / LiquidBridge / Conduit 的完整 Java updateTile 边界仍需继续迁移；
   - liquid turret ammo 仍需接入 GameRuntime 主链；
   - 当前总体迁移约 34.9%，仍未达到完整可玩。
+
+## 12.484 Renderer.backgroundBuffer 最小生产 pass
+
+- 2026-05-30：对照 Java `Renderer.backgroundBuffer` 的“背景缓存贴回屏幕”路径，把 Rust 侧 `RenderPassKind::Background` 从测试语义位接入 desktop 合帧生产链。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::background_render_pass(...)`；
+    - 当 rules 定义 `background_texture` 或 `custom_background_callback` 时生成 `RenderPassKind::Background`；
+    - pass 写入 `RenderTarget::Buffer("background-buffer")`，以 `DrawRectSample` resolve 到 screen，并自动填充 `RenderTextureSamplePlan::background_buffer_geometry_flip(camera)`；
+    - `graphics_frame_for_render(...)` 在合帧开始阶段注入 background pass，并继续依赖 Java-like pass sort。
+  - 新增测试 `desktop_launcher_graphics_frame_includes_background_buffer_resolve_when_rules_define_background`：
+    - 验证 background pass 的 target / resolve kind / geometry flip sample / texture callback metadata。
+- 迁移意义：
+  - `Renderer.backgroundBuffer` 不再只有 helper，已经进入 desktop runtime 合帧主链；
+  - Java `Draw.rect(Draw.wrap(backgroundBuffer.getTexture()), ..., drawSize, -drawSize)` 的几何 Y 翻转语义可由 backend resolve command 消费。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_background_buffer_resolve_when_rules_define_background --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame --lib`
+  - `git diff --check`
+- 仍未完成：
+  - 背景缓存目前是最小生产 pass，真实 planets/background renderer、跨帧 framebuffer resize/invalidate 还需继续迁移；
+  - `background-buffer` 的真实 GL framebuffer/texture 生命周期仍需接 native OpenGL backend；
+  - 当前总体迁移约 35.0%，仍未达到完整可玩。
