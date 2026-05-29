@@ -13526,5 +13526,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
   - 尚未真实调用 `glGenBuffers/glBufferData/glVertexAttribPointer` 等 API；
-  - shader program binding 与实际 draw call 仍待落地；
+  - shader program identity/binding 已在下一节补齐，真实 GL shader 编译/链接与 draw call 仍待落地；
   - 当前总体迁移约 29.1%，仍未达到完整可玩。
+
+## 12.435 Shader program identity/binding
+
+- 2026-05-29：在 VAO/VBO/IBO resource plan 之后继续补 shader program 前置绑定语义。当前仍不编译真实 GLSL program，但 executor 与 adapter 已能把 `ShaderApplyPlan` 映射为稳定 shader program identity/binding。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderProgramIdentity`，保留 `shader / program_key / generation / gl_program`；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderProgramBinding`，记录 shader identity、operation count 与 error count；
+    - `from_shader(...)` 生成 `shader:{ShaderId}` 默认 identity，`with_gl_program(...)` 预留真实 GL program handle；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 与 `DesktopGraphicsOpenGlBackendAdapterExecutionState` 均新增 `current_shader_program` 与 `shader_program_bindings`；
+    - executor 消费 `ShaderApply` step 时同步记录 shader binding；
+    - classifying adapter 回放 `ShaderApply` event 时同步重建同样 binding；
+    - 回归测试验证 executor/adapter 的 shader program binding 一致，且 `BlockBuild` 的 operation/error count 保真。
+- 迁移意义：
+  - shader apply 不再只停留在计数与 `current_shader: ShaderId`，开始形成可映射真实 GL program 的资源身份；
+  - 后续真实 adapter 可把 `program_key`/`gl_program` 与 shader cache 连接；
+  - 为 `a_position / a_color / a_texCoord0 / a_mix_color` attribute binding 与 draw call executor 做前置。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 尚未真实编译/链接 GLSL program，也未绑定 attribute/uniform location；
+  - 实际 GL draw call executor 仍待落地；
+  - 当前总体迁移约 29.2%，仍未达到完整可玩。

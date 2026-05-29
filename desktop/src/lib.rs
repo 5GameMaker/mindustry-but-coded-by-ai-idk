@@ -657,6 +657,21 @@ pub struct DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
     pub vertex_stride_bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderProgramIdentity {
+    pub shader: ShaderId,
+    pub program_key: String,
+    pub generation: u64,
+    pub gl_program: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderProgramBinding {
+    pub identity: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+    pub operation_count: usize,
+    pub error_count: usize,
+}
+
 impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
     pub const SPRITE_VERTEX_FLOATS: usize = 6;
     pub const SPRITE_VERTEX_STRIDE_BYTES: usize =
@@ -688,6 +703,34 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
             vertex_buffer_bytes: plan.vertex_buffer_bytes,
             index_buffer_bytes: plan.index_buffer_bytes,
             vertex_stride_bytes: plan.vertex_stride_bytes,
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderProgramIdentity {
+    pub fn from_shader(shader: ShaderId) -> Self {
+        Self {
+            shader,
+            program_key: format!("shader:{shader:?}"),
+            generation: 0,
+            gl_program: None,
+        }
+    }
+
+    pub fn with_gl_program(mut self, gl_program: u32, generation: u64) -> Self {
+        self.generation = generation;
+        self.gl_program = Some(gl_program);
+        self.program_key = format!("gl-program:{gl_program}:generation:{generation}");
+        self
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
+    pub fn from_apply(apply: &ShaderApplyPlan) -> Self {
+        Self {
+            identity: DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(apply.shader),
+            operation_count: apply.operations.len(),
+            error_count: apply.errors.len(),
         }
     }
 }
@@ -1450,8 +1493,10 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub current_clip: Option<RenderRect>,
     pub clip_stack: DesktopGraphicsOpenGlBackendClipStackState,
     pub current_shader: Option<ShaderId>,
+    pub current_shader_program: Option<DesktopGraphicsOpenGlBackendShaderProgramIdentity>,
     pub custom_markers: Vec<String>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
+    pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
     pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
@@ -1486,8 +1531,10 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             current_clip: None,
             clip_stack: DesktopGraphicsOpenGlBackendClipStackState::default(),
             current_shader: None,
+            current_shader_program: None,
             custom_markers: Vec::new(),
             actions: Vec::new(),
+            shader_program_bindings: Vec::new(),
             sprite_texture_bindings: Vec::new(),
             sprite_quads: Vec::new(),
             sprite_mesh_batches: Vec::new(),
@@ -1741,6 +1788,9 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
             DesktopGraphicsOpenGlBackendEvent::ShaderApply { apply, .. } => {
                 self.state.shader_applies += 1;
                 self.state.current_shader = Some(apply.shader);
+                let binding = DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
+                self.state.current_shader_program = Some(binding.identity.clone());
+                self.state.shader_program_bindings.push(binding);
             }
             DesktopGraphicsOpenGlBackendEvent::Command {
                 target,
@@ -1767,6 +1817,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub current_clip: Option<RenderRect>,
     pub clip_stack: DesktopGraphicsOpenGlBackendClipStackState,
     pub current_shader: Option<ShaderId>,
+    pub current_shader_program: Option<DesktopGraphicsOpenGlBackendShaderProgramIdentity>,
     pub begin_passes: usize,
     pub end_passes: usize,
     pub flush_boundaries: usize,
@@ -1780,6 +1831,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub resolve_events: Vec<DesktopGraphicsOpenGlBackendResolveEvent>,
     pub event_log: Vec<DesktopGraphicsOpenGlBackendEvent>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
+    pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub action_count: usize,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
@@ -1804,6 +1856,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             current_clip: None,
             clip_stack: DesktopGraphicsOpenGlBackendClipStackState::default(),
             current_shader: None,
+            current_shader_program: None,
             begin_passes: 0,
             end_passes: 0,
             flush_boundaries: 0,
@@ -1817,6 +1870,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             resolve_events: Vec::new(),
             event_log: Vec::new(),
             actions: Vec::new(),
+            shader_program_bindings: Vec::new(),
             last_action: None,
             action_count: 0,
             sprite_texture_bindings: Vec::new(),
@@ -1993,6 +2047,9 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
             DesktopGraphicsOpenGlBackendStepKind::ShaderApply { apply } => {
                 self.record_target_for_pass_step(&target);
                 self.state.current_shader = Some(apply.shader);
+                let binding = DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
+                self.state.current_shader_program = Some(binding.identity.clone());
+                self.state.shader_program_bindings.push(binding);
                 self.state.shader_applies += 1;
                 self.state
                     .event_log
@@ -10649,6 +10706,29 @@ mod tests {
 
         let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
         plan.drive_step_sink(&mut executor);
+        assert_eq!(executor.state.shader_program_bindings.len(), 1);
+        assert_eq!(
+            executor.state.current_shader_program,
+            Some(super::DesktopGraphicsOpenGlBackendShaderProgramIdentity {
+                shader: ShaderId::BlockBuild,
+                program_key: "shader:BlockBuild".into(),
+                generation: 0,
+                gl_program: None,
+            })
+        );
+        assert_eq!(
+            executor.state.shader_program_bindings[0],
+            super::DesktopGraphicsOpenGlBackendShaderProgramBinding {
+                identity: super::DesktopGraphicsOpenGlBackendShaderProgramIdentity {
+                    shader: ShaderId::BlockBuild,
+                    program_key: "shader:BlockBuild".into(),
+                    generation: 0,
+                    gl_program: None,
+                },
+                operation_count: 6,
+                error_count: 0,
+            }
+        );
         let mut adapter = super::DesktopGraphicsRecordingOpenGlBackendAdapter::default();
         let event_count = executor.drive_adapter(&mut adapter);
         assert_eq!(event_count, executor.state.event_log.len());
@@ -10669,6 +10749,17 @@ mod tests {
             .0
             .uniforms()
             .any(|binding| binding.name == "u_time" && binding.value == UniformValue::Float(77.0)));
+        let mut classifying_adapter =
+            super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
+        executor.drive_adapter(&mut classifying_adapter);
+        assert_eq!(
+            classifying_adapter.state.shader_program_bindings,
+            executor.state.shader_program_bindings
+        );
+        assert_eq!(
+            classifying_adapter.state.current_shader_program,
+            executor.state.current_shader_program
+        );
     }
 
     #[test]
