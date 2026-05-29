@@ -95,15 +95,29 @@ mod tests {
     #[test]
     fn save11_manifest_places_patches_before_map() {
         let manifest = SaveRegion::manifest_for_version(Save11::VERSION);
+        assert_eq!(manifest, SaveRegion::manifest());
+        assert_eq!(
+            manifest,
+            &[
+                SaveRegion::Meta,
+                SaveRegion::Content,
+                SaveRegion::Patches,
+                SaveRegion::Map,
+                SaveRegion::Entities,
+                SaveRegion::Markers,
+                SaveRegion::Custom,
+            ]
+        );
+
         let patches = manifest
             .iter()
-            .position(|region| *region == SaveRegion::Patches);
+            .position(|region| *region == SaveRegion::Patches)
+            .unwrap();
         let map = manifest
             .iter()
-            .position(|region| *region == SaveRegion::Map);
+            .position(|region| *region == SaveRegion::Map)
+            .unwrap();
 
-        assert!(patches.is_some());
-        assert!(map.is_some());
         assert!(patches < map);
     }
 }
