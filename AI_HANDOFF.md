@@ -12510,3 +12510,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. block fullIcon textured rect：把 `block-fullIcon:*` 映射到真实 content/atlas symbol；
   2. world label：把 `WorldLabelDrawPlan` 接进 render frame；
   3. overlay/minimap overlay：继续从 sidecar plan 收口到 `RenderPass`。
+
+### 2026-05-30：standard effect block fullIcon rect 接入 atlas/OpenGL backend
+
+- 当前整体完成度：约 **39.6%**。
+- 已完成：
+  - `DesktopStandardEffectRenderFrame` 新增 `block_full_icon_regions`，把 content id 映射到真实 block fullIcon atlas symbol；
+  - `DesktopLauncher::standard_effect_render_frame()` 从 `content_loader.blocks()` 构建这张映射；
+  - `DesktopStandardEffectRenderFrame::to_render_pass()` 会把 `block-fullIcon:<id>` 伪 region 解析为 content id，再转成真实 `DrawSprite(symbol)`；
+  - `healBlockFull` 的 block fullIcon rect 已进入 overlay pass / atlas sprite binding / OpenGL sprite mesh path；
+  - 新增 `desktop_launcher_routes_standard_effect_block_full_icon_rects_into_graphics_backend`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_block_full_icon_rects_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 下一步：
+  1. world label：把 runtime snapshot / `WorldLabelDrawPlan` 接进 `RenderPassKind::Overlay`；
+  2. minimap overlay：独立 lower 到 `RenderPassKind::Minimap`，不要污染 standard effect overlay；
+  3. entity/world draw：继续从 sidecar/state 进入真实 render frame。

@@ -101,11 +101,18 @@ pub struct DesktopStandardEffectRenderFrame {
     pub line_primitives: Vec<StandardEffectLineRenderPrimitive>,
     pub triangle_primitives: Vec<StandardEffectTriangleRenderPrimitive>,
     pub light_primitives: Vec<StandardEffectLightRenderPrimitive>,
+    pub block_full_icon_regions: BTreeMap<ContentId, String>,
 }
 
 fn desktop_effect_render_color(color: Option<DecalColor>, alpha: f32) -> [f32; 4] {
     let color = color.unwrap_or(DecalColor::WHITE);
     [color.r, color.g, color.b, color.a * alpha]
+}
+
+fn desktop_block_full_icon_region_content_id(region: &str) -> Option<ContentId> {
+    region
+        .strip_prefix("block-fullIcon:")
+        .and_then(|id| id.parse::<ContentId>().ok())
 }
 
 impl DesktopStandardEffectRenderFrame {
@@ -208,6 +215,21 @@ impl DesktopStandardEffectRenderFrame {
             );
             let color = desktop_effect_render_color(primitive.color, primitive.alpha);
             match (&primitive.kind, &primitive.region) {
+                (StandardEffectDrawKind::TexturedRect, Some(region))
+                    if region.starts_with("block-fullIcon:") =>
+                {
+                    if let Some(symbol) = desktop_block_full_icon_region_content_id(region)
+                        .and_then(|id| self.block_full_icon_regions.get(&id))
+                    {
+                        pass.push(RenderCommand::draw_sprite(
+                            symbol.clone(),
+                            rect,
+                            color,
+                            primitive.rotation,
+                            Layer::EFFECT,
+                        ));
+                    }
+                }
                 (StandardEffectDrawKind::TexturedRect, Some(region))
                     if !region.starts_with("block-fullIcon:") =>
                 {
@@ -10226,6 +10248,13 @@ impl DesktopLauncher {
             line_primitives: self.standard_local_effect_line_primitives.clone(),
             triangle_primitives: self.standard_local_effect_triangle_primitives.clone(),
             light_primitives: self.standard_local_effect_light_primitives.clone(),
+            block_full_icon_regions: self
+                .content_loader
+                .blocks()
+                .filter_map(|block| {
+                    block_full_icon_region_symbol(block).map(|symbol| (block.base().id, symbol))
+                })
+                .collect(),
         }
     }
 
@@ -24120,6 +24149,107 @@ mod tests {
             .sprite_quads
             .iter()
             .any(|quad| quad.symbol == "casing"));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_standard_effect_block_full_icon_rects_into_graphics_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let block_def = launcher
+            .content_loader
+            .block_by_name("duo")
+            .expect("base content should include duo")
+            .clone();
+        let block = block_def.base().clone();
+        let expected_symbol = super::block_full_icon_region_symbol(&block_def)
+            .expect("block fullIcon symbol should be resolved from content metadata");
+        launcher.texture_atlas =
+            TextureAtlasPlan::from_virtual_source_paths([format!("sprites/{expected_symbol}.png")]);
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("healBlockFull").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(0x33cc66ff_i32),
+                },
+                data: TypeValue::Content(type_io::ContentRef::new(ContentType::Block, block.id)),
+            });
+
+        launcher.update();
+        let expected_rect = RenderRect::from_center(
+            RenderPoint::new(24.0, 32.0),
+            block.size as f32 * mindustry_core::mindustry::vars::TILE_SIZE as f32,
+            block.size as f32 * mindustry_core::mindustry::vars::TILE_SIZE as f32,
+        );
+        let frame_state = launcher.standard_effect_render_frame();
+        assert_eq!(
+            frame_state
+                .block_full_icon_regions
+                .get(&block.id)
+                .map(String::as_str),
+            Some(expected_symbol.as_str())
+        );
+        assert_eq!(
+            frame_state.rect_primitives[0].region.as_deref(),
+            Some(format!("block-fullIcon:{}", block.id).as_str())
+        );
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let minimap_camera = MinimapCamera::new(32.0, 32.0, 64.0, 64.0);
+        let frame = launcher.graphics_frame_for_render(
+            10,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let effect_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == &expected_symbol)
+                    })
+            })
+            .expect("block fullIcon rect should be routed into an overlay render pass");
+        let icon_commands = effect_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    rotation,
+                    layer,
+                    ..
+                } if symbol == &expected_symbol => Some((symbol.clone(), *rect, *rotation, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(icon_commands.len(), 1);
+        assert_eq!(
+            icon_commands[0],
+            (expected_symbol.clone(), expected_rect, 0.0, Layer::EFFECT)
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_texture_bindings
+            .iter()
+            .any(|binding| binding.symbol == expected_symbol));
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_draw_call_plans
+            .iter()
+            .any(|plan| plan.target == Some(RenderTarget::Screen)));
     }
 
     #[test]
