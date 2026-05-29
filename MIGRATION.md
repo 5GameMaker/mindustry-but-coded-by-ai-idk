@@ -12582,7 +12582,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `git diff --check`
 - 仍未完成：
   - 真实 OpenGL/glow backend 尚未消费这些 pass；
-  - `BlockBuild` 还需要接入真实建造/施工视觉命令；
+  - `BlockBuild` 真实建造/施工视觉命令已由 12.401 接入过渡命令链，但 generated icons/full icon/recipe region resolver 仍需继续补齐；
   - 当前总体迁移约 25.5%，仍未达到完整可玩。
 
 ### 12.399 OpenGL 语义 backend plan seam
@@ -12642,3 +12642,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - env custom marker 未拆成真实 sprite/noise/particle commands；
   - `Environment` pass 还没有真实 OpenGL/glow backend 消费；
   - 当前总体迁移约 25.7%，仍未达到完整可玩。
+
+### 12.401 BlockBuild 建造/施工视觉命令接入 RenderFramePlan
+
+- 2026-05-29：继续优先推进渲染引擎部分。本轮把此前只存在于 Java draw stage 映射里的 `RenderPassKind::BlockBuild` 推进到真实 `BlockRendererPlan -> RenderFramePlan -> DesktopGraphicsRenderer` 主链，避免 `Layer.blockBuilding` 对应的建造/施工视觉只停留在语义枚举。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `BlockBuildPlan`，从 `BuildingDrawPlan.visual_runtime.progress/warmup/total_progress` 生成 `progress/time/alpha`；
+    - `BlockRendererPlan` 新增 `block_builds`，纳入 `clear()` / `is_empty()` / `Default`；
+    - `append_building_passes_from_snapshot(...)` 在 building base 汇总后同步生成 `block_builds`；
+    - 新增 `to_block_build_render_commands(...)` 与 `to_block_build_render_pass(...)`，输出 `RenderPassKind::BlockBuild`；
+    - 当前 command 形态为 `RenderCommand::Custom("blockbuild-shader") + DrawSprite`，给后续真实 OpenGL/glow backend 留出 shader uniform 边界。
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - `GraphicsFrameStats` 新增 `block_build_plans`，让 BlockBuild 不再只是 block renderer 内部 helper，而是进入统一 frame stats。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 在 block sprite/particle/resolve 前把 `block_renderer.to_block_build_render_pass(8.0)` 推入 `RenderFramePlan`；
+    - 继续通过 `sort_passes_like_java_renderer_draw()` 保证 `BlockBuild -> Environment -> Lighting` 的 Java stage 顺序；
+    - headless graphics trace 可观察到 `BlockBuild` pass 和对应 `DrawSprite`。
+- Java 对照要点：
+  - Java `Renderer.draw()` 中 `Draw.drawRange(Layer.blockBuilding, () -> Draw.shader(Shaders.blockbuild, true), Draw::shader)` 已有 Rust pass 落点；
+  - `Shaders.blockbuild` 的 `u_progress/u_time/u_alpha` 参数已由 Rust plan 携带；
+  - 当前 region 仍先复用 building block sprite symbol，`ConstructBlock.current.getGeneratedIcons()`、`BlockProducer.recipe.getGeneratedIcons()`、`UnitAssembler.plan.unit.fullIcon`、`Accelerator.launchBlock.getGeneratedIcons()` 的精确 region resolver 仍待后续接入。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-core render_bridge --lib`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `BlockBuildPlan` 的 region 仍是过渡 symbol，尚未精确解析 Java 四类 blockbuild 使用点的 generated icons/full icon；
+  - `time` 目前来自 runtime `total_progress` 近似，后续应接统一 world render frame clock；
+  - `blockbuild-shader` custom command 尚未由真实 OpenGL/glow backend 编译/绑定 shader 并提交 GPU draw call；
+  - 当前总体迁移约 25.8%，仍未达到完整可玩。

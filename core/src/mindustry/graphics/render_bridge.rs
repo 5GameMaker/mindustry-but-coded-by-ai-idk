@@ -31,6 +31,7 @@ mod test_support {
     pub struct BlockRendererPlan {
         pub tile_passes: Vec<()>,
         pub building_passes: Vec<()>,
+        pub block_builds: Vec<()>,
         pub cracks: Vec<()>,
         pub build_previews: Vec<()>,
         pub darkness: DarknessPlan,
@@ -89,6 +90,7 @@ pub struct GraphicsFrameStats {
     pub render_commands: usize,
     pub block_tile_passes: usize,
     pub block_building_passes: usize,
+    pub block_build_plans: usize,
     pub block_cracks: usize,
     pub block_build_previews: usize,
     pub block_darkness_tiles: usize,
@@ -118,6 +120,7 @@ impl GraphicsFrameStats {
             + self.render_commands
             + self.block_tile_passes
             + self.block_building_passes
+            + self.block_build_plans
             + self.block_cracks
             + self.block_build_previews
             + self.block_darkness_tiles
@@ -152,6 +155,7 @@ impl Default for GraphicsFrameStats {
             render_commands: 0,
             block_tile_passes: 0,
             block_building_passes: 0,
+            block_build_plans: 0,
             block_cracks: 0,
             block_build_previews: 0,
             block_darkness_tiles: 0,
@@ -205,6 +209,7 @@ impl GraphicsFrameStatsSource for BlockRendererPlan {
     fn contribute_graphics_stats(&self, stats: &mut GraphicsFrameStats) {
         stats.block_tile_passes += self.tile_passes.len();
         stats.block_building_passes += self.building_passes.len();
+        stats.block_build_plans += self.block_builds.len();
         stats.block_cracks += self.cracks.len();
         stats.block_build_previews += self.build_previews.len();
         stats.block_darkness_tiles += self.darkness.tiles.len();
@@ -218,6 +223,7 @@ impl GraphicsFrameStatsSource for BlockRendererPlan {
     fn contribute_graphics_stats(&self, stats: &mut GraphicsFrameStats) {
         stats.block_tile_passes += self.tile_passes.len();
         stats.block_building_passes += self.building_passes.len();
+        stats.block_build_plans += self.block_builds.len();
         stats.block_cracks += self.cracks.len();
         stats.block_build_previews += self.build_previews.len();
         stats.block_darkness_tiles += self.darkness.tiles.len();
@@ -755,6 +761,7 @@ mod tests {
     fn block_plan(
         tile_passes: usize,
         building_passes: usize,
+        block_builds: usize,
         cracks: usize,
         build_previews: usize,
         darkness_tiles: usize,
@@ -763,6 +770,7 @@ mod tests {
         BlockRendererPlan {
             tile_passes: vec![(); tile_passes],
             building_passes: vec![(); building_passes],
+            block_builds: vec![(); block_builds],
             cracks: vec![(); cracks],
             build_previews: vec![(); build_previews],
             darkness: super::test_support::DarknessPlan {
@@ -843,6 +851,7 @@ mod tests {
             + stats.render_commands
             + stats.block_tile_passes
             + stats.block_building_passes
+            + stats.block_build_plans
             + stats.block_cracks
             + stats.block_build_previews
             + stats.block_darkness_tiles
@@ -883,7 +892,7 @@ mod tests {
 
         composer
             .set_render_frame(render_frame(&[1, 2]))
-            .set_block_renderer(block_plan(2, 1, 3, 4, 5, 6))
+            .set_block_renderer(block_plan(2, 1, 2, 3, 4, 5, 6))
             .set_floor_renderer(floor_plan(7, 8, 9, 10))
             .set_fog_frame(fog_plan(11, 12, true, false))
             .set_overlay_renderer(overlay_plan(13, 14, 15))
@@ -905,6 +914,7 @@ mod tests {
         assert_eq!(bundle.stats.render_commands, 3);
         assert_eq!(bundle.stats.block_tile_passes, 2);
         assert_eq!(bundle.stats.block_building_passes, 1);
+        assert_eq!(bundle.stats.block_build_plans, 2);
         assert_eq!(bundle.stats.block_cracks, 3);
         assert_eq!(bundle.stats.block_build_previews, 4);
         assert_eq!(bundle.stats.block_darkness_tiles, 5);
@@ -931,6 +941,7 @@ mod tests {
         assert_eq!(stats.render_commands, 3);
         assert_eq!(stats.block_tile_passes, 2);
         assert_eq!(stats.block_building_passes, 1);
+        assert_eq!(stats.block_build_plans, 2);
         assert_eq!(stats.block_cracks, 3);
         assert_eq!(stats.block_build_previews, 4);
         assert_eq!(stats.block_darkness_tiles, 5);
@@ -959,7 +970,7 @@ mod tests {
         bridge
             .set_render_frame(render_frame(&[1]))
             .set_render_frame(render_frame(&[2, 1, 1]))
-            .set_block_renderer(block_plan(1, 0, 0, 0, 0, 0));
+            .set_block_renderer(block_plan(1, 0, 0, 0, 0, 0, 0));
 
         let bundle = bridge.finish();
 
@@ -1016,7 +1027,7 @@ mod tests {
 
         bridge
             .set_overlay_renderer(overlay_plan(1, 1, 1))
-            .set_block_renderer(block_plan(1, 1, 1, 1, 1, 1))
+            .set_block_renderer(block_plan(1, 1, 0, 1, 1, 1, 1))
             .set_shader_dispatch(shader_dispatch(1))
             .set_floor_renderer(floor_plan(1, 1, 1, 1))
             .set_pixelator(pixelator_plan(64, 32))

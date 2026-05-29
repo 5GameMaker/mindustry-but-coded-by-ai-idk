@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **25.7%**。
+- 当前总体迁移完成度：约 **25.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10015,3 +10015,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 env custom marker 下沉为真实纹理/粒子/noise commands；
   2. 继续补 `Debug` 或 `Bloom/PostProcess` stage；
   3. 真实 OpenGL/glow backend 后续需要消费 `Environment` pass 中的 env commands。
+
+---
+
+## 307. 最新闭环记录：BlockBuild pass 接入 RenderFramePlan
+
+- 本轮总体进度更新：约 **25.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `BlockBuildPlan`；
+    - `BlockRendererPlan.block_builds` 从 `BuildingDrawPlan.visual_runtime.progress/warmup/total_progress` 生成；
+    - 新增 `to_block_build_render_commands(...)` / `to_block_build_render_pass(...)`；
+    - 当前命令为 `RenderCommand::Custom("blockbuild-shader") + DrawSprite`，保留后续真实 shader backend 接点。
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - `GraphicsFrameStats` 新增 `block_build_plans`，BlockBuild 进入 frame stats，不再只是孤立 helper。
+  - `desktop/src/lib.rs`
+    - `graphics_frame_for_render(...)` 会把 `BlockBuild` pass 推入 world `RenderFramePlan`；
+    - 测试锁定 `BlockBuild` 位于 `Environment` 前，且 `Layer::BLOCK_BUILDING` 的 sprite command 进入 desktop graphics frame。
+- 已验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-core render_bridge --lib`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 补 Java 四类 blockbuild 使用点的精确 region resolver：`ConstructBlock.current.getGeneratedIcons()`、`BlockProducer.recipe.getGeneratedIcons()`、`UnitAssembler.plan.unit.fullIcon`、`Accelerator.launchBlock.getGeneratedIcons()`；
+  2. 把 `u_time` 改接统一 world render frame clock，而不是长期依赖 runtime `total_progress` 近似；
+  3. 真实 OpenGL/glow backend 仍需消费 `blockbuild-shader` custom 边界并绑定 `Shaders.blockbuild`。

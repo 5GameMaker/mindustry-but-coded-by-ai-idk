@@ -1140,6 +1140,99 @@ pub fn draw_block_dispatch_sprite_ops(
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BlockBuildPlan {
+    pub coord: TileCoord,
+    pub block: String,
+    pub region: String,
+    pub size: u8,
+    pub rotation: i16,
+    pub progress: f32,
+    pub time: f32,
+    pub alpha: f32,
+}
+
+impl BlockBuildPlan {
+    pub fn from_building(building: &BuildingDrawPlan) -> Option<Self> {
+        let visual_runtime = building.visual_runtime.as_ref()?;
+        let progress = visual_runtime.progress?;
+        if building.block.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            coord: building.coord,
+            block: building.block.clone(),
+            region: building.block.clone(),
+            size: building.size.max(1),
+            rotation: building.rotation,
+            progress: normalize_unit_fraction(progress),
+            time: finite_or_zero(visual_runtime.total_progress.unwrap_or(0.0)),
+            alpha: visual_runtime.warmup.map_or(1.0, normalize_unit_fraction),
+        })
+    }
+
+    pub fn rect(&self, tile_size_world: f32) -> Option<RenderRect> {
+        if tile_size_world <= 0.0 {
+            None
+        } else {
+            Some(building_sprite_rect(
+                self.coord,
+                self.size.max(1),
+                tile_size_world,
+            ))
+        }
+    }
+
+    pub fn shader_command(&self, tile_size_world: f32) -> Option<RenderCommand> {
+        let rect = self.rect(tile_size_world)?;
+        Some(RenderCommand::custom(
+            "blockbuild-shader",
+            vec![
+                RenderProperty::new("shader", "blockbuild"),
+                RenderProperty::new("source", "BuildingDrawPlan.visual_runtime"),
+                RenderProperty::new("block", self.block.clone()),
+                RenderProperty::new("region", self.region.clone()),
+                RenderProperty::new("tile_x", self.coord.x.to_string()),
+                RenderProperty::new("tile_y", self.coord.y.to_string()),
+                RenderProperty::new("x", rect.x.to_string()),
+                RenderProperty::new("y", rect.y.to_string()),
+                RenderProperty::new("width", rect.width.to_string()),
+                RenderProperty::new("height", rect.height.to_string()),
+                RenderProperty::new(
+                    "rotation",
+                    building_rotation_degrees(self.rotation).to_string(),
+                ),
+                RenderProperty::new("layer", Layer::BLOCK_BUILDING.to_string()),
+                RenderProperty::new("u_progress", self.progress.to_string()),
+                RenderProperty::new("u_time", self.time.to_string()),
+                RenderProperty::new("u_alpha", self.alpha.to_string()),
+            ],
+        ))
+    }
+
+    pub fn draw_command(&self, tile_size_world: f32) -> Option<RenderCommand> {
+        Some(RenderCommand::draw_sprite(
+            self.region.clone(),
+            self.rect(tile_size_world)?,
+            SPRITE_TINT_WHITE,
+            building_rotation_degrees(self.rotation),
+            Layer::BLOCK_BUILDING,
+        ))
+    }
+
+    pub fn render_commands(&self, tile_size_world: f32) -> Vec<RenderCommand> {
+        let mut commands = Vec::new();
+        if let Some(command) = self.shader_command(tile_size_world) {
+            commands.push(command);
+        }
+        if let Some(command) = self.draw_command(tile_size_world) {
+            commands.push(command);
+        }
+        commands
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockRendererBlockParticlePlan {
     pub coord: TileCoord,
     pub block: String,
@@ -1280,6 +1373,7 @@ pub struct BlockRendererPlan {
     pub sprite_ops: Vec<BlockSpriteOp>,
     pub tile_passes: Vec<TilePassPlan>,
     pub building_passes: Vec<BuildingPassPlan>,
+    pub block_builds: Vec<BlockBuildPlan>,
     pub block_particles: Vec<BlockRendererBlockParticlePlan>,
     pub cracks: Vec<CrackPlan>,
     pub build_previews: Vec<BuildPlanPreview>,
@@ -1295,6 +1389,7 @@ impl BlockRendererPlan {
         self.sprite_ops.clear();
         self.tile_passes.clear();
         self.building_passes.clear();
+        self.block_builds.clear();
         self.block_particles.clear();
         self.cracks.clear();
         self.build_previews.clear();
@@ -1309,6 +1404,7 @@ impl BlockRendererPlan {
         self.sprite_ops.is_empty()
             && self.tile_passes.is_empty()
             && self.building_passes.is_empty()
+            && self.block_builds.is_empty()
             && self.block_particles.is_empty()
             && self.cracks.is_empty()
             && self.build_previews.is_empty()
@@ -1342,6 +1438,24 @@ impl BlockRendererPlan {
         }
 
         passes
+    }
+
+    pub fn to_block_build_render_commands(&self, tile_size_world: f32) -> Vec<RenderCommand> {
+        self.block_builds
+            .iter()
+            .flat_map(|build| build.render_commands(tile_size_world))
+            .collect()
+    }
+
+    pub fn to_block_build_render_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
+        let commands = self.to_block_build_render_commands(tile_size_world);
+        if commands.is_empty() {
+            return None;
+        }
+
+        let mut pass = RenderPass::new(RenderPassKind::BlockBuild);
+        pass.extend(commands);
+        Some(pass)
     }
 
     pub fn to_resolve_render_passes(&self, tile_size_world: f32) -> Vec<RenderPass> {
@@ -1521,6 +1635,7 @@ impl Default for BlockRendererPlan {
             sprite_ops: Vec::new(),
             tile_passes: Vec::new(),
             building_passes: Vec::new(),
+            block_builds: Vec::new(),
             block_particles: Vec::new(),
             cracks: Vec::new(),
             build_previews: Vec::new(),
@@ -1621,6 +1736,7 @@ fn append_building_passes_from_snapshot(
         BlockDrawStage::BuildingBase,
         buildings.iter().cloned(),
     );
+    append_block_build_plans(plan, &buildings);
     append_block_particle_plans(plan, &buildings);
     push_building_pass(
         plan,
@@ -1696,6 +1812,11 @@ fn append_block_particle_plans(plan: &mut BlockRendererPlan, buildings: &[Buildi
             }),
         );
     }
+}
+
+fn append_block_build_plans(plan: &mut BlockRendererPlan, buildings: &[BuildingDrawPlan]) {
+    plan.block_builds
+        .extend(buildings.iter().filter_map(BlockBuildPlan::from_building));
 }
 
 fn push_building_pass<I>(plan: &mut BlockRendererPlan, stage: BlockDrawStage, buildings: I)
@@ -1828,6 +1949,22 @@ fn normalize_health_fraction(health_fraction: f32) -> f32 {
         health_fraction.clamp(0.0, 1.0)
     } else {
         1.0
+    }
+}
+
+fn normalize_unit_fraction(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn finite_or_zero(value: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
     }
 }
 
@@ -2210,6 +2347,7 @@ mod tests {
         assert!(empty_plan.is_empty());
         assert!(empty_plan.tile_passes.is_empty());
         assert!(empty_plan.building_passes.is_empty());
+        assert!(empty_plan.block_builds.is_empty());
         assert!(empty_plan.darkness.dirty_tiles.is_empty());
         assert!(empty_plan.update_floors.is_empty());
         assert!(!empty_plan.draw_quadtree_debug);
@@ -2226,6 +2364,16 @@ mod tests {
         ));
         plan.tile_passes.push(TilePassPlan::default());
         plan.building_passes.push(BuildingPassPlan::default());
+        plan.block_builds.push(BlockBuildPlan {
+            coord: TileCoord::new(1, 2),
+            block: "router".into(),
+            region: "router".into(),
+            size: 1,
+            rotation: 0,
+            progress: 0.5,
+            time: 12.0,
+            alpha: 1.0,
+        });
         plan.cracks.push(CrackPlan::default());
         plan.build_previews.push(BuildPlanPreview::default());
         plan.darkness.push_tile(TileCoord::new(1, 2), 2.0);
@@ -2239,6 +2387,7 @@ mod tests {
         plan.clear();
         assert!(plan.is_empty());
         assert!(plan.sprite_ops.is_empty());
+        assert!(plan.block_builds.is_empty());
         assert_eq!(plan.darkness.fill, DarknessFill::White);
         assert!(plan.darkness.tiles.is_empty());
         assert!(plan.darkness.dirty_tiles.is_empty());
@@ -2485,6 +2634,13 @@ mod tests {
                 }),
             })
         );
+        assert_eq!(plan.block_builds.len(), 1);
+        assert_eq!(plan.block_builds[0].coord, TileCoord::new(4, 4));
+        assert_eq!(plan.block_builds[0].block, "duo");
+        assert_eq!(plan.block_builds[0].region, "duo");
+        assert_eq!(plan.block_builds[0].progress, 0.25);
+        assert_eq!(plan.block_builds[0].time, 0.9);
+        assert_eq!(plan.block_builds[0].alpha, 0.5);
 
         let remembered = &plan.building_passes[0].buildings[1];
         assert_eq!(remembered.block, "mender");
@@ -2572,6 +2728,119 @@ mod tests {
         assert_eq!(missing_runtime_plan.coord, TileCoord::new(10, 11));
         assert_eq!(missing_runtime_plan.block, "router");
         assert!(missing_runtime_plan.draw_cracks);
+    }
+
+    #[test]
+    fn block_build_plan_from_visual_runtime_emits_shader_state_and_sprite() {
+        let building = BuildingDrawPlan {
+            coord: TileCoord::new(8, 9),
+            block: "constructor".into(),
+            drawer: String::new(),
+            build_id_seed: point2_pack(8, 9),
+            cache_layer: CacheLayer::Normal,
+            size: 2,
+            rotation: 3,
+            team: 1,
+            visible: true,
+            was_visible: false,
+            damaged: false,
+            health_fraction: 1.0,
+            draw_cracks: true,
+            draw_team_overlay: false,
+            draw_status: false,
+            emits_light: false,
+            visual_runtime: Some(BlockRendererBuildingVisualRuntimeSnapshot {
+                progress: Some(1.25),
+                warmup: Some(0.4),
+                total_progress: Some(17.5),
+                ..BlockRendererBuildingVisualRuntimeSnapshot::default()
+            }),
+        };
+
+        let build = BlockBuildPlan::from_building(&building)
+            .expect("runtime progress should create a blockbuild plan");
+        assert_eq!(build.coord, TileCoord::new(8, 9));
+        assert_eq!(build.block, "constructor");
+        assert_eq!(build.region, "constructor");
+        assert_eq!(build.progress, 1.0);
+        assert_eq!(build.time, 17.5);
+        assert_eq!(build.alpha, 0.4);
+
+        let commands = build.render_commands(8.0);
+        assert_eq!(commands.len(), 2);
+        match &commands[0] {
+            RenderCommand::Custom { name, properties } => {
+                assert_eq!(name, "blockbuild-shader");
+                let property = |key: &str| {
+                    properties
+                        .iter()
+                        .find(|property| property.key == key)
+                        .map(|property| property.value.as_str())
+                };
+                assert_eq!(property("shader"), Some("blockbuild"));
+                assert_eq!(property("region"), Some("constructor"));
+                assert_eq!(property("u_progress"), Some("1"));
+                assert_eq!(property("u_time"), Some("17.5"));
+                assert_eq!(property("u_alpha"), Some("0.4"));
+            }
+            other => panic!("expected blockbuild shader custom command, got {other:?}"),
+        }
+        match &commands[1] {
+            RenderCommand::DrawSprite {
+                symbol,
+                rect,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(symbol, "constructor");
+                assert_eq!(*rect, RenderRect::new(56.0, 64.0, 16.0, 16.0));
+                assert_eq!(*rotation, 270.0);
+                assert_eq!(*layer, Layer::BLOCK_BUILDING);
+            }
+            other => panic!("expected blockbuild sprite command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn block_renderer_block_build_pass_uses_visual_runtime_shader_parameters() {
+        let mut plan = BlockRendererPlan::default();
+        plan.block_builds.push(BlockBuildPlan {
+            coord: TileCoord::new(2, 3),
+            block: "payload-constructor".into(),
+            region: "payload-constructor".into(),
+            size: 3,
+            rotation: 1,
+            progress: 0.35,
+            time: 42.0,
+            alpha: 0.75,
+        });
+
+        let pass = plan
+            .to_block_build_render_pass(8.0)
+            .expect("non-empty blockbuild plan should emit a render pass");
+        assert_eq!(pass.kind, RenderPassKind::BlockBuild);
+        assert_eq!(pass.order, RenderPassKind::BlockBuild.default_order());
+        assert_eq!(pass.commands.len(), 2);
+        assert!(matches!(
+            pass.commands[0],
+            RenderCommand::Custom { ref name, .. } if name == "blockbuild-shader"
+        ));
+        match &pass.commands[1] {
+            RenderCommand::DrawSprite {
+                symbol,
+                rect,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(symbol, "payload-constructor");
+                assert_eq!(*rect, RenderRect::new(8.0, 16.0, 24.0, 24.0));
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::BLOCK_BUILDING);
+            }
+            other => panic!("expected blockbuild sprite command, got {other:?}"),
+        }
     }
 
     #[test]

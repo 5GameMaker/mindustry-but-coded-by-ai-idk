@@ -2871,6 +2871,9 @@ impl DesktopLauncher {
         }
         let block_renderer = self.block_render_plan(camera, viewport);
         if let Some(block_renderer) = &block_renderer {
+            if let Some(pass) = block_renderer.to_block_build_render_pass(8.0) {
+                render_frame.push_pass(pass);
+            }
             for pass in block_renderer.to_sprite_render_passes(8.0) {
                 render_frame.push_pass(pass);
             }
@@ -6242,9 +6245,9 @@ mod tests {
             tile_pos
         };
 
-        launcher
-            .runtime
-            .add_building(BuildingComp::new(tile_pos, smelter, TeamId(3)));
+        let mut building = BuildingComp::new(tile_pos, smelter, TeamId(3));
+        building.rotation = 1;
+        launcher.runtime.add_building(building);
         launcher.runtime.crafting_runtime_states.insert(
             tile_pos,
             mindustry_core::mindustry::core::game_runtime::GameRuntimeCraftingBlockState::GenericCrafter(
@@ -6281,6 +6284,110 @@ mod tests {
         assert_eq!(power.status, Some(0.0));
         assert_eq!(power.production_efficiency, None);
         assert!(visual_runtime.turret.is_none());
+
+        assert_eq!(plan.block_builds.len(), 1);
+        let block_build = &plan.block_builds[0];
+        assert_eq!(block_build.coord, TileCoord::new(1, 1));
+        assert_eq!(block_build.block, "silicon-smelter");
+        assert_eq!(block_build.region, "silicon-smelter");
+        assert_eq!(block_build.progress, 0.25);
+        assert_eq!(block_build.time, 13.0);
+        assert_eq!(block_build.alpha, 0.5);
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_includes_block_build_pass_before_environment() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let smelter = launcher
+            .content_loader
+            .block_by_name("silicon-smelter")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(4, 4);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = smelter.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: smelter.id,
+                team: 3,
+                rotation: 1,
+            });
+            tile_pos
+        };
+
+        let mut building = BuildingComp::new(tile_pos, smelter, TeamId(3));
+        building.rotation = 1;
+        launcher.runtime.add_building(building);
+        launcher.runtime.crafting_runtime_states.insert(
+            tile_pos,
+            mindustry_core::mindustry::core::game_runtime::GameRuntimeCraftingBlockState::GenericCrafter(
+                mindustry_core::mindustry::world::blocks::production::GenericCrafterState {
+                    progress: 0.25,
+                    total_progress: 13.0,
+                    warmup: 0.5,
+                },
+            ),
+        );
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let minimap_camera = MinimapCamera::new(12.0, 12.0, 8.0, 8.0);
+        let frame = launcher.graphics_frame_for_render(
+            13,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+        assert_eq!(frame.bundle.stats.block_build_plans, 1);
+        let render_frame = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("graphics frame should carry the world render frame");
+        assert!(render_frame.matches_java_renderer_draw_order());
+
+        let block_build_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::BlockBuild)
+            .expect("visual runtime progress should emit a BlockBuild pass");
+        if let Some(environment_index) = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::Environment)
+        {
+            assert!(block_build_index < environment_index);
+        }
+
+        let block_build_pass = &render_frame.passes[block_build_index];
+        assert_eq!(
+            block_build_pass.order,
+            RenderPassKind::BlockBuild.default_order()
+        );
+        assert_eq!(block_build_pass.commands.len(), 2);
+        assert!(matches!(
+            block_build_pass.commands[0],
+            RenderCommand::Custom { ref name, .. } if name == "blockbuild-shader"
+        ));
+        match &block_build_pass.commands[1] {
+            RenderCommand::DrawSprite {
+                symbol,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(symbol, "silicon-smelter");
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::BLOCK_BUILDING);
+            }
+            other => panic!("expected blockbuild DrawSprite command, got {other:?}"),
+        }
     }
 
     #[test]
