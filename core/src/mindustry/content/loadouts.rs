@@ -105,6 +105,37 @@ mod tests {
     }
 
     #[test]
+    fn vanilla_loadout_schematic_metadata_matches_java_static_payloads() {
+        let loadouts = load().unwrap();
+        let expected = [
+            (BASIC_SHARD, "https://youtu.be/EVYO0Ax2lz0", ""),
+            (BASIC_FOUNDATION, "beans", ""),
+            (BASIC_NUCLEUS, "did you know", "m"),
+            (BASIC_BASTION, "anime", "you do not exist\n"),
+        ];
+
+        for (loadout, (name, schematic_name, description)) in loadouts.iter().zip(expected) {
+            assert_eq!(loadout.name, name);
+            assert_eq!(
+                loadout.schematic.tags.get("name").map(String::as_str),
+                Some(schematic_name)
+            );
+            assert_eq!(
+                loadout
+                    .schematic
+                    .tags
+                    .get("description")
+                    .map(String::as_str),
+                Some(description)
+            );
+            assert_eq!(
+                loadout.schematic.tags.get("labels").map(String::as_str),
+                Some("[]")
+            );
+        }
+    }
+
+    #[test]
     fn vanilla_loadout_schematics_roundtrip_through_base64_codec() {
         for loadout in load().unwrap() {
             let encoded = write_schematic_base64(&loadout.schematic).unwrap();

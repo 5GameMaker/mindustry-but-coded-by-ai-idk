@@ -14547,3 +14547,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - fullscreen quad 的实际 VBO/IBO 数据上传尚未接入；
   - `DrawRectSample` / `DrawFboSample` 尚未展开；
   - 当前总体迁移约 33.5%，仍未达到完整可玩。
+
+## 12.476 Loadouts Java static metadata 回归
+
+- 2026-05-29：并行补充 vanilla loadout 静态 schematic metadata 回归，避免仅依赖解码/roundtrip 测试而漏掉 Java `Loadouts.java` 静态 payload 的内容标签形状。
+- Rust 新增/接入：
+  - `core/src/mindustry/content/loadouts.rs`
+    - 新增测试 `vanilla_loadout_schematic_metadata_matches_java_static_payloads`；
+    - 断言 4 个 vanilla loadout 顺序与 Java 静态字段一致；
+    - 断言每个 schematic 的 `name` / `description` / `labels` 元数据与静态 payload 解码结果一致。
+- 迁移意义：
+  - loadout 静态内容继续向 Java 侧默认内容注册语义靠拢；
+  - 为后续 content registry / launch loadout / campaign 默认核心配置提供更稳定的静态内容回归。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core loadout --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 当前总体迁移约 33.6%，仍未达到完整可玩。
