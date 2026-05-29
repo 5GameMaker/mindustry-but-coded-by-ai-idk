@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **31.3%**。
+- 当前总体迁移完成度：约 **31.4%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11281,3 +11281,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 接 compile/link error log；
   3. 将 source loader、resolved lifecycle executor 与真实 GL 调用层合并；
   4. 继续让 shader program handle 和 draw/apply command 合流。
+
+---
+
+## 362. 最新闭环记录：Arc Shader preprocess 最小模型接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前本地 HEAD 为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **31.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 shader preprocess options/result/error；
+    - source file 可执行 `preprocess(...)`；
+    - 支持 vertex/fragment prepend；
+    - 非 GL30 注入 precision / lowp / mediump / highp 兼容宏；
+    - GL30 注入 `#version`、fragment `out vec4 fragColor;` 并替换 `varying/attribute/texture2D/textureCube/gl_FragColor`；
+    - 显式 `#version` 与显式 `#ifdef GL_ES` 会被拒绝。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_preprocess --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 下一步：
+  1. 把 preprocess 结果接入 resolved lifecycle build executor；
+  2. 记录 compile/link error log；
+  3. 让 shader program handle 与 `ShaderApply/DrawCommand` 的 `UseProgram` 合流；
+  4. 继续接真实 GL API 调用层。

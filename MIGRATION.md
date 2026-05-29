@@ -14069,3 +14069,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - source loader 尚未与 resolved lifecycle executor 合并成真实 compile/link 执行器；
   - compile/link error log 仍未记录；
   - 当前总体迁移约 31.3%，仍未达到完整可玩。
+
+## 12.456 Arc Shader preprocess 最小模型接入
+
+- 2026-05-29：继续对齐 Arc `Shader` 编译前处理语义，在 shader source loader 后新增最小 preprocess 层。该层仍不执行真实 GL 编译，但已经能把 raw shader source 转成更接近 `glShaderSource` 前输入的文本。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderPreprocessOptions`，保留 vertex/fragment prepend、GL30、desktop/mobile、GL 版本能力开关；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderPreprocessedSource` 与 `DesktopGraphicsOpenGlBackendShaderProgramPreprocessedSources`；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderPreprocessError`，拒绝显式 `#version` 与显式 `#ifdef GL_ES`；
+    - `DesktopGraphicsOpenGlBackendShaderSourceFile::preprocess(...)` 先应用 prepend，再执行 Arc 风格检查与宏/precision 注入；
+    - 非 GL30 路径注入 `lowp/mediump/highp` 兼容宏与 fragment precision；
+    - GL30 路径注入 `#version` / `out vec4 fragColor;`，并转换 `varying/attribute/texture2D/textureCube/gl_FragColor`；
+    - 新增测试覆盖 prepend、HIGHP precision、GL30 rewrite、拒绝显式 `#version`、拒绝显式 `#ifdef GL_ES`，以及 prepend 中的 `#version` 会被拒绝。
+- 迁移意义：
+  - source loader 输出不再直接等同 compile 输入，开始保留 Arc `Shader` 的编译前处理边界；
+  - 后续真实 GL executor 可按 `raw source -> preprocess -> glShaderSource -> glCompileShader` 顺序接入；
+  - 预处理错误与 source 读取错误分离，便于后续 compile/link error log 分层。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_preprocess --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - 预处理仍是最小模型，未覆盖 Arc 全量平台差异；
+  - preprocess 结果尚未与 resolved lifecycle executor 合并为真实 shader build executor；
+  - compile/link error log 仍未记录；
+  - 当前总体迁移约 31.4%，仍未达到完整可玩。

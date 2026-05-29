@@ -1588,6 +1588,46 @@ pub struct DesktopGraphicsOpenGlBackendShaderSourceLoader {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderPreprocessOptions {
+    pub prepend_vertex_code: String,
+    pub prepend_fragment_code: String,
+    pub gl30: bool,
+    pub desktop: bool,
+    pub mobile: bool,
+    pub gl_version_at_least_3_2: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderPreprocessedSource {
+    pub shader: ShaderId,
+    pub stage: DesktopGraphicsOpenGlBackendShaderStage,
+    pub source_path: String,
+    pub source_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderProgramPreprocessedSources {
+    pub shader: ShaderId,
+    pub program_key: String,
+    pub vertex: DesktopGraphicsOpenGlBackendShaderPreprocessedSource,
+    pub fragment: DesktopGraphicsOpenGlBackendShaderPreprocessedSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendShaderPreprocessError {
+    ExplicitGlesBlock {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: String,
+    },
+    ExplicitVersion {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
     pub batch_index: usize,
     pub shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
@@ -2074,6 +2114,148 @@ impl DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan {
 
 fn opengl_backend_normalize_shader_source(source: &str) -> String {
     source.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn opengl_backend_shader_precision(source: &str) -> &'static str {
+    if source.contains("#define HIGHP") && !source.contains("//#define HIGHP") {
+        "highp"
+    } else {
+        "mediump"
+    }
+}
+
+fn opengl_backend_preprocess_non_gl30_header(
+    stage: DesktopGraphicsOpenGlBackendShaderStage,
+    source: &str,
+) -> String {
+    match stage {
+        DesktopGraphicsOpenGlBackendShaderStage::Vertex => {
+            format!(
+                "#ifndef GL_ES\n#define lowp \n#define mediump \n#define highp \n#endif\n{source}"
+            )
+        }
+        DesktopGraphicsOpenGlBackendShaderStage::Fragment => {
+            let precision = opengl_backend_shader_precision(source);
+            format!(
+                "#ifdef GL_ES\nprecision {precision} float;\nprecision mediump int;\n#else\n#define lowp \n#define mediump \n#define highp \n#endif\n{source}"
+            )
+        }
+    }
+}
+
+fn opengl_backend_preprocess_gl30_source(
+    stage: DesktopGraphicsOpenGlBackendShaderStage,
+    source: String,
+    options: &DesktopGraphicsOpenGlBackendShaderPreprocessOptions,
+) -> String {
+    let version = if options.desktop {
+        if options.gl_version_at_least_3_2 {
+            "150"
+        } else {
+            "130"
+        }
+    } else {
+        "300 es"
+    };
+    let mut result = format!("#version {version}\n");
+    if stage == DesktopGraphicsOpenGlBackendShaderStage::Fragment {
+        result.push_str("out vec4 fragColor;\n");
+    }
+    let varying_replacement = if stage == DesktopGraphicsOpenGlBackendShaderStage::Fragment {
+        "in"
+    } else {
+        "out"
+    };
+    result.push_str(
+        &source
+            .replace("varying", varying_replacement)
+            .replace("attribute", "in")
+            .replace("texture2D(", "texture(")
+            .replace("textureCube(", "texture(")
+            .replace("gl_FragColor", "fragColor"),
+    );
+    result
+}
+
+impl Default for DesktopGraphicsOpenGlBackendShaderPreprocessOptions {
+    fn default() -> Self {
+        Self {
+            prepend_vertex_code: String::new(),
+            prepend_fragment_code: String::new(),
+            gl30: false,
+            desktop: true,
+            mobile: false,
+            gl_version_at_least_3_2: true,
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderSourceFile {
+    pub fn preprocess(
+        &self,
+        options: &DesktopGraphicsOpenGlBackendShaderPreprocessOptions,
+    ) -> Result<
+        DesktopGraphicsOpenGlBackendShaderPreprocessedSource,
+        DesktopGraphicsOpenGlBackendShaderPreprocessError,
+    > {
+        let prepend = match self.stage {
+            DesktopGraphicsOpenGlBackendShaderStage::Vertex => &options.prepend_vertex_code,
+            DesktopGraphicsOpenGlBackendShaderStage::Fragment => &options.prepend_fragment_code,
+        };
+        let source = format!("{prepend}{}", self.source_text);
+
+        if source.contains("#ifdef GL_ES") {
+            return Err(
+                DesktopGraphicsOpenGlBackendShaderPreprocessError::ExplicitGlesBlock {
+                    shader: self.shader,
+                    stage: self.stage,
+                    source_path: self.source_path.clone(),
+                },
+            );
+        }
+        if source.contains("#version") {
+            return Err(
+                DesktopGraphicsOpenGlBackendShaderPreprocessError::ExplicitVersion {
+                    shader: self.shader,
+                    stage: self.stage,
+                    source_path: self.source_path.clone(),
+                },
+            );
+        }
+
+        let source_text = opengl_backend_preprocess_non_gl30_header(self.stage, &source);
+        let source_text = if options.gl30 {
+            opengl_backend_preprocess_gl30_source(self.stage, source_text, options)
+        } else {
+            source_text
+        };
+
+        Ok(DesktopGraphicsOpenGlBackendShaderPreprocessedSource {
+            shader: self.shader,
+            stage: self.stage,
+            source_path: self.source_path.clone(),
+            source_text,
+        })
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderProgramSourceFiles {
+    pub fn preprocess(
+        &self,
+        options: &DesktopGraphicsOpenGlBackendShaderPreprocessOptions,
+    ) -> Result<
+        DesktopGraphicsOpenGlBackendShaderProgramPreprocessedSources,
+        DesktopGraphicsOpenGlBackendShaderPreprocessError,
+    > {
+        Ok(
+            DesktopGraphicsOpenGlBackendShaderProgramPreprocessedSources {
+                shader: self.shader,
+                program_key: self.program_key.clone(),
+                vertex: self.vertex.preprocess(options)?,
+                fragment: self.fragment.preprocess(options)?,
+            },
+        )
+    }
 }
 
 impl DesktopGraphicsOpenGlBackendShaderSourceLoader {
@@ -14626,6 +14808,20 @@ mod tests {
         std::fs::write(path, text).unwrap();
     }
 
+    fn desktop_shader_source_file(
+        stage: super::DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: &str,
+        source_text: &str,
+    ) -> super::DesktopGraphicsOpenGlBackendShaderSourceFile {
+        super::DesktopGraphicsOpenGlBackendShaderSourceFile {
+            shader: ShaderId::Mesh,
+            stage,
+            source_path: source_path.into(),
+            file_path: std::path::PathBuf::from(source_path),
+            source_text: source_text.into(),
+        }
+    }
+
     #[test]
     fn desktop_graphics_opengl_shader_source_loader_reads_vertex_and_fragment_sources() {
         let root = desktop_shader_test_asset_root("success");
@@ -14704,6 +14900,96 @@ mod tests {
                     stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
                 }
             )
+        ));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_preprocess_applies_prepend_precision_and_gl30_rewrites() {
+        let options = super::DesktopGraphicsOpenGlBackendShaderPreprocessOptions {
+            prepend_vertex_code: "// vertex-prepend\n".into(),
+            prepend_fragment_code: "// fragment-prepend\n".into(),
+            gl30: true,
+            ..Default::default()
+        };
+
+        let vertex = desktop_shader_source_file(
+            super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+            "shaders/mesh.vert",
+            "attribute vec3 a_position;\nvarying vec2 v_texCoords;\nvoid main(){}\n",
+        );
+        let vertex = vertex.preprocess(&options).unwrap();
+        assert!(vertex.source_text.starts_with("#version 150\n"));
+        assert!(vertex.source_text.contains("// vertex-prepend"));
+        assert!(vertex.source_text.contains("in vec3 a_position;"));
+        assert!(vertex.source_text.contains("out vec2 v_texCoords;"));
+
+        let fragment = desktop_shader_source_file(
+            super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+            "shaders/planet.frag",
+            "#define HIGHP\nvarying vec2 v_texCoords;\nvoid main(){ gl_FragColor = texture2D(u_texture, v_texCoords); }\n",
+        );
+        let fragment = fragment.preprocess(&options).unwrap();
+        assert!(fragment
+            .source_text
+            .starts_with("#version 150\nout vec4 fragColor;\n"));
+        assert!(fragment.source_text.contains("precision highp float;"));
+        assert!(fragment.source_text.contains("// fragment-prepend"));
+        assert!(fragment.source_text.contains("in vec2 v_texCoords;"));
+        assert!(fragment
+            .source_text
+            .contains("fragColor = texture(u_texture, v_texCoords);"));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_preprocess_rejects_explicit_version_and_gles_blocks() {
+        let versioned = desktop_shader_source_file(
+            super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+            "shaders/mesh.vert",
+            "#version 120\nvoid main(){}\n",
+        );
+        assert!(matches!(
+            versioned.preprocess(
+                &super::DesktopGraphicsOpenGlBackendShaderPreprocessOptions::default()
+            ),
+            Err(super::DesktopGraphicsOpenGlBackendShaderPreprocessError::ExplicitVersion {
+                shader: ShaderId::Mesh,
+                stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                ref source_path,
+            }) if source_path == "shaders/mesh.vert"
+        ));
+
+        let gles = desktop_shader_source_file(
+            super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+            "shaders/planet.frag",
+            "#ifdef GL_ES\nprecision mediump float;\n#endif\nvoid main(){}\n",
+        );
+        assert!(matches!(
+            gles.preprocess(
+                &super::DesktopGraphicsOpenGlBackendShaderPreprocessOptions::default()
+            ),
+            Err(super::DesktopGraphicsOpenGlBackendShaderPreprocessError::ExplicitGlesBlock {
+                shader: ShaderId::Mesh,
+                stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                ref source_path,
+            }) if source_path == "shaders/planet.frag"
+        ));
+
+        let options = super::DesktopGraphicsOpenGlBackendShaderPreprocessOptions {
+            prepend_vertex_code: "#version 100\n".into(),
+            ..Default::default()
+        };
+        let plain = desktop_shader_source_file(
+            super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+            "shaders/mesh.vert",
+            "void main(){}\n",
+        );
+        assert!(matches!(
+            plain.preprocess(&options),
+            Err(super::DesktopGraphicsOpenGlBackendShaderPreprocessError::ExplicitVersion {
+                shader: ShaderId::Mesh,
+                stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                ref source_path,
+            }) if source_path == "shaders/mesh.vert"
         ));
     }
 
