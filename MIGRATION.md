@@ -14990,3 +14990,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - primitive 目前复用 sprite mesh pipeline，仍需继续把 circle/arc/triangle/textured-line 等 higher-level effect primitive 真实接入；
   - UI / overlay / minimap / entity world draw 还需要进一步从 frame/cache seam 收口到 native OpenGL runtime；
   - 当前总体迁移约 37.8%，仍未达到完整可玩。
+
+## 402. 最新闭环记录：OpenGL DrawCircle primitive mesh 闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **38.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `RenderCommand::DrawCircle` / `DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle` 现在会下沉到 primitive white-texture sprite mesh pipeline；
+    - filled circle 按自适应分段三角扇近似生成 mesh；
+    - outline circle 按边线 quad 生成 mesh；
+    - offscreen circle primitive 会确保 framebuffer attachment plan；
+    - 新增 `desktop_graphics_opengl_draw_circle_primitives_emit_mesh_draws`，覆盖 filled/outline circle 到 mesh upload、draw call、recording driver 的闭环。
+- 迁移意义：
+  - block particle、light renderer、load renderer、accelerator launch light 等已经产出的 `DrawCircle` 不再停在 command/trace 层；
+  - 后续 standard effect circle primitives 可先 bridge 成 `RenderCommand::DrawCircle`，再复用当前 OpenGL primitive draw path。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_draw_circle_primitives_emit_mesh_draws --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 仍未完成：
+  - standard effect primitives 仍需从 `DesktopStandardEffectRenderFrame` 接入 `RenderPass` / `RenderCommand`；
+  - light primitive、textured-line、atlas rect 等仍需要后续真实 backend bridge；
+  - 当前总体迁移约 38.0%，仍未达到完整可玩。

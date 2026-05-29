@@ -1969,6 +1969,8 @@ fn opengl_backend_default_sprite_shader_program(
 const DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_NAME: &str = "primitive-white";
 const DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_KEY: &str = "runtime-texture:primitive-white";
 const DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_SOURCE: &str = "runtime:primitive-white";
+const DESKTOP_GRAPHICS_OPENGL_CIRCLE_MIN_SEGMENTS: usize = 12;
+const DESKTOP_GRAPHICS_OPENGL_CIRCLE_MAX_SEGMENTS: usize = 96;
 
 fn opengl_backend_primitive_texture_binding(
     symbol: impl Into<String>,
@@ -3166,6 +3168,16 @@ fn opengl_backend_polygon_primitive_points(
         .collect()
 }
 
+fn opengl_backend_circle_primitive_segment_count(radius: f32) -> usize {
+    if radius <= f32::EPSILON {
+        return 0;
+    }
+    ((radius * 2.0).ceil() as usize).clamp(
+        DESKTOP_GRAPHICS_OPENGL_CIRCLE_MIN_SEGMENTS,
+        DESKTOP_GRAPHICS_OPENGL_CIRCLE_MAX_SEGMENTS,
+    )
+}
+
 fn opengl_backend_primitive_quads_from_action(
     action: &DesktopGraphicsOpenGlBackendAdapterAction,
     target: Option<RenderTarget>,
@@ -3174,6 +3186,55 @@ fn opengl_backend_primitive_quads_from_action(
     clip: Option<RenderRect>,
 ) -> Vec<DesktopGraphicsOpenGlBackendSpriteQuad> {
     match action {
+        DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+            center,
+            radius,
+            color,
+            filled,
+            layer,
+        } => {
+            let sides = opengl_backend_circle_primitive_segment_count(*radius);
+            let points = opengl_backend_polygon_primitive_points(*center, *radius, sides, 0.0);
+            if *filled {
+                points
+                    .iter()
+                    .zip(points.iter().cycle().skip(1))
+                    .take(points.len())
+                    .map(|(from, to)| {
+                        DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                            "primitive:DrawCircle",
+                            target.clone(),
+                            shader_program.clone(),
+                            blend_state,
+                            clip,
+                            *layer,
+                            *color,
+                            [*center, *from, *to, *center],
+                        )
+                    })
+                    .collect()
+            } else {
+                points
+                    .iter()
+                    .zip(points.iter().cycle().skip(1))
+                    .take(points.len())
+                    .filter_map(|(from, to)| {
+                        opengl_backend_line_primitive_positions(*from, *to, 1.0).map(|positions| {
+                            DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                                "primitive:DrawCircle",
+                                target.clone(),
+                                shader_program.clone(),
+                                blend_state,
+                                clip,
+                                *layer,
+                                *color,
+                                positions,
+                            )
+                        })
+                    })
+                    .collect()
+            }
+        }
         DesktopGraphicsOpenGlBackendAdapterAction::FillRect { rect, color, layer } => {
             vec![
                 DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
@@ -7089,7 +7150,8 @@ impl DesktopGraphicsOpenGlBackendExecutor {
             DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { .. } => {
                 self.state.missing_sprite_texture_bindings += 1;
             }
-            DesktopGraphicsOpenGlBackendAdapterAction::FillRect { .. }
+            DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle { .. }
+            | DesktopGraphicsOpenGlBackendAdapterAction::FillRect { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::DrawLine { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon { .. }
@@ -7340,6 +7402,8 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                     }
                     RenderCommand::DrawCircle { .. } => {
                         self.state.draw_circle_commands += 1;
+                        self.state
+                            .ensure_framebuffer_attachment_plan_for_target(&target);
                     }
                     RenderCommand::DrawText { .. } => {
                         self.state.draw_text_commands += 1;
@@ -17697,13 +17761,113 @@ mod tests {
             .iter()
             .any(|action| {
                 matches!(
-                    action,
-                    super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
-                        program_key,
-                        ..
+                        action,
+                        super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
+                            program_key,
+                            ..
                     } if program_key == "shader:Shield"
                 )
             }));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_draw_circle_primitives_emit_mesh_draws() {
+        let target = RenderTarget::Buffer("circle-primitive".into());
+        let filled_radius = 6.0;
+        let outline_radius = 8.0;
+        let expected_quads = super::opengl_backend_circle_primitive_segment_count(filled_radius)
+            + super::opengl_backend_circle_primitive_segment_count(outline_radius);
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        for command in [
+            RenderCommand::draw_circle(
+                RenderPoint::new(12.0, 12.0),
+                filled_radius,
+                [1.0, 0.25, 0.25, 0.75],
+                true,
+                Layer::EFFECT,
+            ),
+            RenderCommand::draw_circle(
+                RenderPoint::new(32.0, 12.0),
+                outline_radius,
+                [0.25, 0.75, 1.0, 1.0],
+                false,
+                Layer::EFFECT + 0.1,
+            ),
+        ] {
+            executor.consume_opengl_backend_step(opengl_backend_test_step(
+                0,
+                target.clone(),
+                DesktopGraphicsOpenGlBackendStepKind::Command {
+                    kind: super::render_command_trace_kind(&command),
+                    command,
+                    resolved_sprite: None,
+                },
+            ));
+        }
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::EndPass,
+        ));
+
+        assert_eq!(executor.state.draw_circle_commands, 2);
+        assert_eq!(executor.state.sprite_quads.len(), expected_quads);
+        assert_eq!(executor.state.sprite_mesh_batches.len(), 1);
+        assert_eq!(
+            executor.state.sprite_mesh_batches[0].quad_count,
+            expected_quads
+        );
+        assert_eq!(executor.state.sprite_mesh_upload_plans.len(), 1);
+        assert_eq!(executor.state.sprite_draw_call_plans.len(), 1);
+        assert_eq!(
+            executor.state.sprite_draw_call_plans[0].index_count,
+            expected_quads * 6
+        );
+        assert_eq!(executor.state.framebuffer_attachment_plans.len(), 1);
+        assert_eq!(
+            executor.state.framebuffer_attachment_plans[0].framebuffer_key,
+            "framebuffer:buffer:circle-primitive"
+        );
+
+        let mut resolving_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        let resolved_state = executor.drive_resolving_command_executor(&mut resolving_executor);
+        assert_eq!(resolved_state.framebuffer_attachments_emitted, 1);
+        assert_eq!(resolved_state.sprite_mesh_uploads_emitted, 1);
+        assert_eq!(resolved_state.sprite_draw_calls_emitted, 1);
+        assert!(resolving_executor.draw_commands.iter().any(|command| {
+            matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
+                    index_count,
+                    ..
+                } if *index_count == expected_quads * 6
+            )
+        }));
+
+        let mut driver = super::DesktopGraphicsRecordingOpenGlBackendDriver::default();
+        let driver_state = resolving_executor.drive_driver(&mut driver);
+        assert_eq!(driver_state.framebuffer_attachment_plans, 1);
+        assert!(driver_state.texture_upload_commands > 0);
+        assert_eq!(
+            driver
+                .commands
+                .iter()
+                .filter(|command| matches!(
+                    command,
+                    super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                        super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. }
+                    )
+                ))
+                .count(),
+            1
+        );
     }
 
     #[test]
