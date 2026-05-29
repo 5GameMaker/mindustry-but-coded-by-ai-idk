@@ -646,6 +646,111 @@ impl DesktopNativeOpenGlDriver<'_> {
         self.consume_native_resolved_framebuffer_attachment(&attachment);
     }
 
+    fn framebuffer_attachment_plan_for_render_target(
+        target: &mindustry_core::mindustry::graphics::RenderTarget,
+        width: u32,
+        height: u32,
+    ) -> Option<mindustry_desktop::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan> {
+        match target {
+            mindustry_core::mindustry::graphics::RenderTarget::Screen => None,
+            mindustry_core::mindustry::graphics::RenderTarget::Texture(name) => Some(
+                mindustry_desktop::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::from_buffer_name_with_size(
+                    format!("texture:{name}"),
+                    width,
+                    height,
+                    0,
+                ),
+            ),
+            mindustry_core::mindustry::graphics::RenderTarget::Buffer(name) => Some(
+                mindustry_desktop::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::from_buffer_name_with_size(
+                    format!("buffer:{name}"),
+                    width,
+                    height,
+                    0,
+                ),
+            ),
+        }
+    }
+
+    fn native_framebuffer_for_attachment(
+        &mut self,
+        attachment: &mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment,
+    ) -> Option<glow::NativeFramebuffer> {
+        self.consume_native_resolved_framebuffer_attachment(attachment);
+        self.framebuffers
+            .get(&attachment.framebuffer_handle)
+            .copied()
+    }
+
+    fn native_framebuffer_for_render_target(
+        &mut self,
+        target: &mindustry_core::mindustry::graphics::RenderTarget,
+        width: u32,
+        height: u32,
+    ) -> Option<glow::NativeFramebuffer> {
+        let plan = Self::framebuffer_attachment_plan_for_render_target(target, width, height)?;
+        let attachment = self
+            .framebuffer_handle_cache
+            .resolve_framebuffer_attachment(&plan, self.framebuffer_handle_allocator);
+        self.native_framebuffer_for_attachment(&attachment)
+    }
+
+    fn consume_native_resolve_command(
+        &mut self,
+        command: &mindustry_desktop::DesktopGraphicsOpenGlBackendResolveCommand,
+    ) {
+        if command.resolve_kind != mindustry_core::mindustry::graphics::RenderResolveKind::Blit {
+            return;
+        }
+        let Some(source_attachment) = command.source_attachment.as_ref() else {
+            self.native_errors.push(format!(
+                "native OpenGL Blit resolve from {:?} has no framebuffer attachment",
+                command.source_target
+            ));
+            return;
+        };
+        let Some(source_framebuffer) = self.native_framebuffer_for_attachment(source_attachment)
+        else {
+            return;
+        };
+        let (Ok(width), Ok(height)) = (
+            i32::try_from(source_attachment.width),
+            i32::try_from(source_attachment.height),
+        ) else {
+            self.native_errors.push(format!(
+                "native OpenGL Blit resolve source {:?} has invalid size {}x{}",
+                command.source_target, source_attachment.width, source_attachment.height
+            ));
+            return;
+        };
+        let target_framebuffer = self.native_framebuffer_for_render_target(
+            &command.resolve_target,
+            source_attachment.width,
+            source_attachment.height,
+        );
+
+        unsafe {
+            self.gl
+                .bind_framebuffer(glow::READ_FRAMEBUFFER, Some(source_framebuffer));
+            self.gl
+                .bind_framebuffer(glow::DRAW_FRAMEBUFFER, target_framebuffer);
+            self.gl.blit_framebuffer(
+                0,
+                0,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
+            self.gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None);
+            self.gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
+        }
+    }
+
     fn consume_native_resolved_shader_lifecycle_command(
         &mut self,
         command: &mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand,
@@ -1262,6 +1367,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendResolveCommandSink
         &mut self,
         command: mindustry_desktop::DesktopGraphicsOpenGlBackendResolveCommand,
     ) {
+        self.consume_native_resolve_command(&command);
         self.recording.consume_opengl_resolve_command(command);
     }
 }
