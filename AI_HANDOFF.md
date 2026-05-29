@@ -12295,3 +12295,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. native OpenGL：补 render target 的 BeginPass/EndPass framebuffer bind/viewport/clear，再接 ResolveCommand；
   2. 渲染 primitive：把 `FillRect/StrokeRect/DrawLine/DrawPixel` 从 pending/no-op 下沉到 mesh/draw；
   3. liquid：继续补 DirectionLiquidBridge 独立 flow/占用关系与 visual warmup 差异。
+
+---
+
+## 397. 最新闭环记录：native OpenGL Blit resolve 与 target 数据链回归
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **36.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `DesktopNativeOpenGlDriver::consume_opengl_resolve_command(...)` 现在会调用 native resolve；
+    - `RenderResolveKind::Blit` 走真实 `glBlitFramebuffer`，source FBO 绑定到 `READ_FRAMEBUFFER`，screen/offscreen target 绑定到 `DRAW_FRAMEBUFFER` 或默认 framebuffer；
+    - `ShaderBlit/DrawRectSample/DrawFboSample` 继续由 `resolve_draw_commands` 的 shader/sample quad draw 路径执行，避免误用普通 blit。
+  - `desktop/src/lib.rs`
+    - 新增数据层回归 `desktop_graphics_opengl_backend_preserves_begin_end_pass_targets_through_resolve_and_driver`；
+    - 锁定 BeginPass/EndPass/Resolve target 从 frame plan、executor、resolving executor 到 recording driver command 不丢失。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `game_runtime_roundtrips_reinforced_bridge_conduit_state_and_visual_warmup`；
+    - 覆盖 reinforced bridge conduit 的 export/import 与 visual warmup 快照闭环。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --lib desktop_graphics_opengl_backend_preserves_begin_end_pass_targets_through_resolve_and_driver`
+  - `cargo test -p mindustry-core reinforced_bridge_conduit_state_and_visual_warmup`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime --no-run`
+  - `git diff --check`
+- 下一步：
+  1. 真正解决 pass 时序：把 BeginPass/EndPass 有序 target bind 下沉到 native driver，而不是只在数据层保存；
+  2. resolve draw 前显式绑定 resolve target，支持非 screen resolve target；
+  3. primitive mesh：优先把 `FillRect/StrokeRect/DrawLine/DrawPixel` 接入 draw path。
