@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **32.6%**。
+- 当前总体迁移完成度：约 **32.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11708,3 +11708,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 resolve attachment 转成真实 draw/shader/blit command；
   2. 整理 feature-gated real OpenGL driver trait；
   3. 后续再引入真实 window/context。
+
+---
+
+## 374. 最新闭环记录：纯 Rust OpenGL driver seam
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **32.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendDriver` trait，组合 framebuffer attachment、texture upload command、sprite mesh upload command、resolved shader command、shader lifecycle command、draw command 六类 sink；
+    - 新增 `DesktopGraphicsOpenGlBackendDriverCommand` 聚合命令；
+    - 新增 `DesktopGraphicsOpenGlBackendDriverExecutionState`；
+    - 新增 `DesktopGraphicsRecordingOpenGlBackendDriver`，作为不引入 OpenGL crate 的 native driver seam/recording driver；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 新增 framebuffer attachment plan / resolved attachment 缓存，shared resolver 会先消费 effectBuffer 与 resolve source attachment；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor::drive_driver(...)` 按 framebuffer attachment -> texture upload -> mesh upload -> shader -> draw 顺序驱动 driver；
+    - `headless_graphics_renderer_roundtrips_opengl_state_to_shared_resolver` 扩展到验证 shared resolver 可以继续驱动 recording driver，并确认 framebuffer/texture/mesh/draw 均进入 driver 边界。
+- 关键语义：
+  - 真实 GL backend 后续不需要反向读取 helper 内部状态，可直接实现 driver/sink；
+  - 当前仍不引入 `glow/glutin/winit`，但 native driver 的消费边界已经明确；
+  - driver 顺序与 shared resolver 输出顺序一致，便于后续替换为真实 GL 调用。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_roundtrips --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 增加 resolve 专用 driver command；
+  2. 把 resolve attachment 转成 blit/screen quad command；
+  3. 再接 feature-gated window/context。

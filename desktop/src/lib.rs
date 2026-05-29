@@ -3814,6 +3814,7 @@ pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+    pub framebuffer_attachments_emitted: usize,
     pub texture_uploads_emitted: usize,
     pub sprite_mesh_uploads_emitted: usize,
     pub shader_commands_emitted: usize,
@@ -4008,6 +4009,123 @@ impl DesktopGraphicsOpenGlBackendDrawCommandSink
 {
     fn consume_opengl_draw_command(&mut self, command: DesktopGraphicsOpenGlBackendDrawCommand) {
         self.commands.push(command);
+    }
+}
+
+pub trait DesktopGraphicsOpenGlBackendDriver:
+    DesktopGraphicsOpenGlBackendTextureUploadCommandSink
+    + DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink
+    + DesktopGraphicsOpenGlBackendResolvedShaderCommandSink
+    + DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink
+    + DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
+    + DesktopGraphicsOpenGlBackendDrawCommandSink
+{
+}
+
+impl<T> DesktopGraphicsOpenGlBackendDriver for T where
+    T: DesktopGraphicsOpenGlBackendTextureUploadCommandSink
+        + DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink
+        + DesktopGraphicsOpenGlBackendResolvedShaderCommandSink
+        + DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink
+        + DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
+        + DesktopGraphicsOpenGlBackendDrawCommandSink
+{
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopGraphicsOpenGlBackendDriverCommand {
+    FramebufferAttachment(DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan),
+    TextureUpload(DesktopGraphicsOpenGlBackendTextureUploadCommand),
+    SpriteMeshUpload(DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand),
+    Shader(DesktopGraphicsOpenGlBackendResolvedShaderCommand),
+    ShaderLifecycle(DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand),
+    Draw(DesktopGraphicsOpenGlBackendDrawCommand),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendDriverExecutionState {
+    pub framebuffer_attachment_plans: usize,
+    pub texture_upload_commands: usize,
+    pub sprite_mesh_upload_commands: usize,
+    pub shader_commands: usize,
+    pub draw_commands: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendDriver {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendDriverCommand>,
+}
+
+impl DesktopGraphicsOpenGlBackendTextureUploadCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendDriver
+{
+    fn consume_opengl_texture_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendTextureUploadCommand,
+    ) {
+        self.commands
+            .push(DesktopGraphicsOpenGlBackendDriverCommand::TextureUpload(
+                command,
+            ));
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendDriver
+{
+    fn consume_opengl_sprite_mesh_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand,
+    ) {
+        self.commands
+            .push(DesktopGraphicsOpenGlBackendDriverCommand::SpriteMeshUpload(
+                command,
+            ));
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolvedShaderCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendDriver
+{
+    fn consume_opengl_resolved_shader_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendResolvedShaderCommand,
+    ) {
+        self.commands
+            .push(DesktopGraphicsOpenGlBackendDriverCommand::Shader(command));
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendDriver
+{
+    fn consume_opengl_resolved_shader_lifecycle_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand,
+    ) {
+        self.commands
+            .push(DesktopGraphicsOpenGlBackendDriverCommand::ShaderLifecycle(
+                command,
+            ));
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
+    for DesktopGraphicsRecordingOpenGlBackendDriver
+{
+    fn consume_opengl_framebuffer_attachment(
+        &mut self,
+        plan: DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    ) {
+        self.commands
+            .push(DesktopGraphicsOpenGlBackendDriverCommand::FramebufferAttachment(plan));
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendDrawCommandSink for DesktopGraphicsRecordingOpenGlBackendDriver {
+    fn consume_opengl_draw_command(&mut self, command: DesktopGraphicsOpenGlBackendDrawCommand) {
+        self.commands
+            .push(DesktopGraphicsOpenGlBackendDriverCommand::Draw(command));
     }
 }
 
@@ -4720,6 +4838,9 @@ impl DesktopGraphicsOpenGlBackendShaderCommandSink
 pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub framebuffer_attachment_plans: Vec<DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan>,
+    pub resolved_framebuffer_attachments:
+        Vec<DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment>,
     pub resolved_texture_uploads: Vec<DesktopGraphicsOpenGlBackendResolvedTextureUpload>,
     pub texture_upload_commands: Vec<DesktopGraphicsOpenGlBackendTextureUploadCommand>,
     pub resolved_sprite_mesh_uploads: Vec<DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload>,
@@ -4730,6 +4851,17 @@ pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
 }
 
 impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
+    pub fn consume_opengl_framebuffer_attachment(
+        &mut self,
+        plan: DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    ) {
+        let resolved = self
+            .cache
+            .resolve_framebuffer_attachment(&plan, &mut self.allocator);
+        self.framebuffer_attachment_plans.push(plan);
+        self.resolved_framebuffer_attachments.push(resolved);
+    }
+
     pub fn consume_opengl_texture_upload(
         &mut self,
         upload: DesktopGraphicsOpenGlBackendTextureUploadPlan,
@@ -4840,6 +4972,18 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         self.resolved_shader_commands.len()
     }
 
+    pub fn drive_framebuffer_attachment_sink<
+        S: DesktopGraphicsOpenGlBackendFramebufferAttachmentSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for plan in &self.framebuffer_attachment_plans {
+            sink.consume_opengl_framebuffer_attachment(plan.clone());
+        }
+        self.framebuffer_attachment_plans.len()
+    }
+
     pub fn drive_texture_upload_command_sink<
         S: DesktopGraphicsOpenGlBackendTextureUploadCommandSink,
     >(
@@ -4872,6 +5016,30 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             sink.consume_opengl_draw_command(command.clone());
         }
         self.draw_commands.len()
+    }
+
+    pub fn drive_driver<D: DesktopGraphicsOpenGlBackendDriver>(
+        &self,
+        driver: &mut D,
+    ) -> DesktopGraphicsOpenGlBackendDriverExecutionState {
+        let mut state = DesktopGraphicsOpenGlBackendDriverExecutionState::default();
+        state.framebuffer_attachment_plans = self.drive_framebuffer_attachment_sink(driver);
+        state.texture_upload_commands = self.drive_texture_upload_command_sink(driver);
+        state.sprite_mesh_upload_commands = self.drive_sprite_mesh_upload_command_sink(driver);
+        state.shader_commands = self.drive_resolved_shader_command_sink(driver);
+        state.draw_commands = self.drive_draw_command_sink(driver);
+        state
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
+    for DesktopGraphicsResolvingOpenGlBackendCommandExecutor
+{
+    fn consume_opengl_framebuffer_attachment(
+        &mut self,
+        plan: DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    ) {
+        Self::consume_opengl_framebuffer_attachment(self, plan);
     }
 }
 
@@ -5498,6 +5666,10 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         executor: &mut DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
     ) -> DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
         let mut state = DesktopGraphicsOpenGlBackendResolvedCommandExecutorState::default();
+        for plan in &self.framebuffer_attachment_plans {
+            executor.consume_opengl_framebuffer_attachment(plan.clone());
+            state.framebuffer_attachments_emitted += 1;
+        }
         for upload in &self.sprite_texture_upload_plans {
             executor.consume_opengl_texture_upload(upload.clone());
             state.texture_uploads_emitted += 1;
@@ -16015,6 +16187,7 @@ mod tests {
         assert_eq!(
             execution_state,
             super::DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+                framebuffer_attachments_emitted: 0,
                 texture_uploads_emitted: 0,
                 sprite_mesh_uploads_emitted: 0,
                 shader_commands_emitted: 2,
@@ -16156,6 +16329,7 @@ mod tests {
         assert_eq!(
             execution_state,
             super::DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+                framebuffer_attachments_emitted: 0,
                 texture_uploads_emitted: 1,
                 sprite_mesh_uploads_emitted: 1,
                 shader_commands_emitted: 0,
@@ -18249,12 +18423,37 @@ mod tests {
         assert_eq!(
             resolved_state,
             super::DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+                framebuffer_attachments_emitted: renderer
+                    .last_opengl_backend_executor_state
+                    .framebuffer_attachment_plans
+                    .len(),
                 texture_uploads_emitted: 1,
                 sprite_mesh_uploads_emitted: 1,
                 shader_commands_emitted: 0,
                 sprite_draw_calls_emitted: 1,
             }
         );
+        assert_eq!(
+            resolving_executor.framebuffer_attachment_plans.len(),
+            renderer
+                .last_opengl_backend_executor_state
+                .framebuffer_attachment_plans
+                .len()
+        );
+        assert_eq!(
+            resolving_executor.resolved_framebuffer_attachments.len(),
+            resolving_executor.framebuffer_attachment_plans.len()
+        );
+        assert!(resolving_executor
+            .resolved_framebuffer_attachments
+            .iter()
+            .any(|attachment| attachment.color_texture_key
+                == "framebuffer-attachment:renderer.effectBuffer:color0"));
+        assert!(resolving_executor
+            .resolved_framebuffer_attachments
+            .iter()
+            .any(|attachment| attachment.color_texture_key
+                == "framebuffer-attachment:buffer:roundtrip-fbo:color0"));
         let upload_handle = resolving_executor.resolved_texture_uploads[0].texture_handle;
         let draw_texture_handle =
             resolving_executor
@@ -18284,6 +18483,41 @@ mod tests {
                 })
                 .unwrap()
         );
+
+        let mut driver = super::DesktopGraphicsRecordingOpenGlBackendDriver::default();
+        let driver_state = resolving_executor.drive_driver(&mut driver);
+        assert_eq!(
+            driver_state,
+            super::DesktopGraphicsOpenGlBackendDriverExecutionState {
+                framebuffer_attachment_plans: resolving_executor.framebuffer_attachment_plans.len(),
+                texture_upload_commands: resolving_executor.texture_upload_commands.len(),
+                sprite_mesh_upload_commands: resolving_executor.sprite_mesh_upload_commands.len(),
+                shader_commands: resolving_executor.resolved_shader_commands.len(),
+                draw_commands: resolving_executor.draw_commands.len(),
+            }
+        );
+        assert_eq!(
+            driver.commands.len(),
+            driver_state.framebuffer_attachment_plans
+                + driver_state.texture_upload_commands
+                + driver_state.sprite_mesh_upload_commands
+                + driver_state.shader_commands
+                + driver_state.draw_commands
+        );
+        assert!(matches!(
+            driver.commands.first(),
+            Some(super::DesktopGraphicsOpenGlBackendDriverCommand::FramebufferAttachment(_))
+        ));
+        assert!(driver.commands.iter().any(|command| matches!(
+            command,
+            super::DesktopGraphicsOpenGlBackendDriverCommand::SpriteMeshUpload(_)
+        )));
+        assert!(driver.commands.iter().any(|command| matches!(
+            command,
+            super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. }
+            )
+        )));
     }
 
     #[test]

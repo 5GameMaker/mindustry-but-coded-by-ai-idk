@@ -14369,3 +14369,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - resolve attachment 尚未被转换为真实 screen quad / blit command；
   - feature-gated real OpenGL driver/window/context 尚未接入；
   - 当前总体迁移约 32.6%，仍未达到完整可玩。
+
+## 12.468 纯 Rust OpenGL driver seam
+
+- 2026-05-29：继续推进真实 OpenGL backend 的接入边界。本轮仍不引入外部 GL/window 依赖，而是在 resolved command 层新增一个纯 Rust driver seam，让后续 `glow/glutin/winit` 实现可以直接消费现有 command sink，而不是重新读取 helper 内部状态。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendDriver`，组合 framebuffer attachment、texture upload command、sprite mesh upload command、resolved shader command、shader lifecycle command、draw command 六类 sink；
+    - 新增 `DesktopGraphicsOpenGlBackendDriverCommand`，聚合 framebuffer attachment / texture upload / sprite mesh upload / shader / shader lifecycle / draw 六类命令；
+    - 新增 `DesktopGraphicsOpenGlBackendDriverExecutionState`；
+    - 新增 `DesktopGraphicsRecordingOpenGlBackendDriver`，作为不依赖真实 GL 的 driver 验收对象；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 新增 framebuffer attachment plan / resolved attachment 缓存，shared resolver 现在会先消费 effectBuffer 与 resolve source attachment，再继续 texture/mesh/shader/draw；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor::drive_driver(...)` 按 framebuffer attachment -> texture upload -> mesh upload -> resolved shader -> draw 命令顺序驱动 driver；
+    - 扩展 `headless_graphics_renderer_roundtrips_opengl_state_to_shared_resolver`，确认 renderer 主链路到 shared resolver 后还能继续驱动 recording driver，并保留 framebuffer/texture/mesh/draw 命令顺序。
+- 迁移意义：
+  - 真实 OpenGL backend 的消费边界从“多个分散 sink”推进到一个聚合 driver seam；
+  - 后续 real backend 可以实现同一 driver trait，把 `BindTexture/BufferData/UseProgram/DrawElements` 等命令替换为实际 GL 调用；
+  - 仍保持 headless/pure Rust，可在引入窗口依赖前持续验证。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_roundtrips --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - driver 目前只是 recording，不执行真实 GL；
+  - resolve/blit/present 尚未进入 driver command；
+  - feature-gated real OpenGL window/context 尚未接入；
+  - 当前总体迁移约 32.8%，仍未达到完整可玩。
