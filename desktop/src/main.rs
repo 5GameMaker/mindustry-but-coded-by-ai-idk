@@ -120,6 +120,8 @@ struct DesktopNativeOpenGlRuntime {
     gl: glow::Context,
     state: mindustry_desktop::DesktopGraphicsOpenGlBackendRuntimeState,
     driver: mindustry_desktop::DesktopGraphicsRecordingOpenGlBackendDriver,
+    textures: std::collections::BTreeMap<u32, glow::NativeTexture>,
+    native_errors: Vec<String>,
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -185,6 +187,8 @@ impl DesktopNativeOpenGlRuntime {
             gl,
             state: mindustry_desktop::DesktopGraphicsOpenGlBackendRuntimeState::default(),
             driver: mindustry_desktop::DesktopGraphicsRecordingOpenGlBackendDriver::default(),
+            textures: std::collections::BTreeMap::new(),
+            native_errors: Vec::new(),
         };
         runtime.resize_native_surface(runtime.window_surface_size());
         Ok(runtime)
@@ -226,6 +230,264 @@ impl DesktopNativeOpenGlRuntime {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+struct DesktopNativeOpenGlDriver<'a> {
+    gl: &'a glow::Context,
+    recording: &'a mut mindustry_desktop::DesktopGraphicsRecordingOpenGlBackendDriver,
+    textures: &'a mut std::collections::BTreeMap<u32, glow::NativeTexture>,
+    native_errors: &'a mut Vec<String>,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl DesktopNativeOpenGlDriver<'_> {
+    fn texture_for_handle(&mut self, texture_handle: u32) -> Option<glow::NativeTexture> {
+        if let Some(texture) = self.textures.get(&texture_handle) {
+            return Some(*texture);
+        }
+        let texture = unsafe { self.gl.create_texture() };
+        match texture {
+            Ok(texture) => {
+                self.textures.insert(texture_handle, texture);
+                Some(texture)
+            }
+            Err(error) => {
+                self.native_errors.push(format!(
+                    "failed to create native OpenGL texture for logical handle {texture_handle}: {error}"
+                ));
+                None
+            }
+        }
+    }
+
+    fn pixel_data_from_source(
+        &mut self,
+        pixel_source: &mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadPixelSource,
+    ) -> Option<Vec<u8>> {
+        match pixel_source.load_rgba8888_pixels() {
+            Ok(pixels) => Some(pixels.pixels),
+            Err(error) => {
+                self.native_errors.push(format!(
+                    "failed to load native OpenGL texture pixel source: {error:?}"
+                ));
+                None
+            }
+        }
+    }
+
+    fn consume_native_texture_upload_command(
+        &mut self,
+        command: &mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand,
+    ) {
+        match command {
+            mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::DeleteTexture {
+                texture_handle,
+            } => {
+                if let Some(texture) = self.textures.remove(texture_handle) {
+                    unsafe {
+                        self.gl.delete_texture(texture);
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::BindTexture {
+                target,
+                texture_handle,
+            } => {
+                if let Some(texture) = self.texture_for_handle(*texture_handle) {
+                    unsafe {
+                        self.gl.bind_texture(*target, Some(texture));
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::SetTextureParameter {
+                target,
+                pname,
+                param,
+            } => unsafe {
+                self.gl.tex_parameter_i32(*target, *pname, *param);
+            },
+            mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::TexImage2D {
+                target,
+                level,
+                internal_format,
+                width,
+                height,
+                border,
+                format,
+                pixel_type,
+                pixel_source,
+            } => {
+                let pixels = self.pixel_data_from_source(pixel_source);
+                let unpack = glow::PixelUnpackData::Slice(pixels.as_deref());
+                unsafe {
+                    self.gl.tex_image_2d(
+                        *target,
+                        *level,
+                        *internal_format,
+                        *width,
+                        *height,
+                        *border,
+                        *format,
+                        *pixel_type,
+                        unpack,
+                    );
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::TexSubImage2DFromSource {
+                target,
+                level,
+                xoffset,
+                yoffset,
+                width,
+                height,
+                format,
+                pixel_type,
+                pixel_source,
+            } => {
+                if let Some(pixels) = self.pixel_data_from_source(pixel_source) {
+                    unsafe {
+                        self.gl.tex_sub_image_2d(
+                            *target,
+                            *level,
+                            *xoffset,
+                            *yoffset,
+                            *width,
+                            *height,
+                            *format,
+                            *pixel_type,
+                            glow::PixelUnpackData::Slice(Some(&pixels)),
+                        );
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::TexSubImage2D {
+                target,
+                level,
+                xoffset,
+                yoffset,
+                width,
+                height,
+                format,
+                pixel_type,
+                pixels,
+            } => unsafe {
+                self.gl.tex_sub_image_2d(
+                    *target,
+                    *level,
+                    *xoffset,
+                    *yoffset,
+                    *width,
+                    *height,
+                    *format,
+                    *pixel_type,
+                    glow::PixelUnpackData::Slice(Some(pixels)),
+                );
+            },
+        }
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommandSink
+    for DesktopNativeOpenGlDriver<'_>
+{
+    fn consume_opengl_texture_upload_command(
+        &mut self,
+        command: mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand,
+    ) {
+        self.consume_native_texture_upload_command(&command);
+        self.recording
+            .consume_opengl_texture_upload_command(command);
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl mindustry_desktop::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink
+    for DesktopNativeOpenGlDriver<'_>
+{
+    fn consume_opengl_sprite_mesh_upload_command(
+        &mut self,
+        command: mindustry_desktop::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand,
+    ) {
+        self.recording
+            .consume_opengl_sprite_mesh_upload_command(command);
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl mindustry_desktop::DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink
+    for DesktopNativeOpenGlDriver<'_>
+{
+    fn consume_opengl_resolve_mesh_upload_command(
+        &mut self,
+        command: mindustry_desktop::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand,
+    ) {
+        self.recording
+            .consume_opengl_resolve_mesh_upload_command(command);
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommandSink
+    for DesktopNativeOpenGlDriver<'_>
+{
+    fn consume_opengl_resolved_shader_command(
+        &mut self,
+        command: mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand,
+    ) {
+        self.recording
+            .consume_opengl_resolved_shader_command(command);
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink
+    for DesktopNativeOpenGlDriver<'_>
+{
+    fn consume_opengl_resolved_shader_lifecycle_command(
+        &mut self,
+        command: mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand,
+    ) {
+        self.recording
+            .consume_opengl_resolved_shader_lifecycle_command(command);
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl mindustry_desktop::DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
+    for DesktopNativeOpenGlDriver<'_>
+{
+    fn consume_opengl_framebuffer_attachment(
+        &mut self,
+        plan: mindustry_desktop::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    ) {
+        self.recording.consume_opengl_framebuffer_attachment(plan);
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommandSink
+    for DesktopNativeOpenGlDriver<'_>
+{
+    fn consume_opengl_draw_command(
+        &mut self,
+        command: mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand,
+    ) {
+        self.recording.consume_opengl_draw_command(command);
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl mindustry_desktop::DesktopGraphicsOpenGlBackendResolveCommandSink
+    for DesktopNativeOpenGlDriver<'_>
+{
+    fn consume_opengl_resolve_command(
+        &mut self,
+        command: mindustry_desktop::DesktopGraphicsOpenGlBackendResolveCommand,
+    ) {
+        self.recording.consume_opengl_resolve_command(command);
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpenGlRuntime {
     fn resize_surface(&mut self, size: mindustry_desktop::DesktopSurfaceSize) {
         self.resize_native_surface(size);
@@ -236,7 +498,13 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
         executor: &mindustry_desktop::DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
     ) -> mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
         self.clear_backbuffer();
-        let driver_state = executor.drive_driver(&mut self.driver);
+        let mut driver = DesktopNativeOpenGlDriver {
+            gl: &self.gl,
+            recording: &mut self.driver,
+            textures: &mut self.textures,
+            native_errors: &mut self.native_errors,
+        };
+        let driver_state = executor.drive_driver(&mut driver);
         self.state.frames_submitted += 1;
         self.state.last_driver_state = Some(driver_state);
         driver_state

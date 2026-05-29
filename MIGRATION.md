@@ -293,6 +293,7 @@ git -C "D:/MDT/rust-mindustry" checkout -- "core/src/mindustry/game/rules.rs"
 - `DesktopGraphicsOpenGlBackendAdapterAction` 已不再把 `FillRect/StrokeRect/DrawLine/DrawPolygon/DrawPixel` 仅压成 `DeferredNoOp`，这些基础图元的 rect/point/color/stroke/layer 等 payload 会保留到 adapter action；当前标记为 `pending_gl_draw_commands`，后续需继续把它们 tessellate 到真实 GL mesh/draw path。
 - `opengl-native-runtime` 下已补 `DesktopNativeOpenGlRuntimeConfig` 与 `desktop_frame_loop_events_from_winit_window_event(...)`，把 `DesktopSurfaceConfig` 转为 winit window attributes，并将 `Resized/RedrawRequested/CloseRequested` 映射到现有 `DesktopFrameLoopEvent`；后续仍需把该桥接接进真实 `ApplicationHandler` 与 glutin surface/context 生命周期。
 - `desktop/src/main.rs` 的 `opengl-native-runtime` 分支已从单纯 winit window/null runtime 推进到 `glutin + glow` runtime skeleton：`resumed()` 创建 GL config/context/surface 与 `glow::Context`，resize 同步 surface/viewport，`present_frame()` 真实调用 `swap_buffers`；当前 driver 仍是 recording + clear backbuffer，基础图元、texture、shader、FBO/resolve 等 sink 尚未真实落到 GPU。
+- native runtime 中已新增第一段真实 GL driver sink：`DesktopNativeOpenGlDriver` 会在保留 recording trace 的同时消费 `TextureUploadCommand`，把逻辑 texture handle 映射为 `glow::NativeTexture`，执行 `bind_texture/tex_parameter/tex_image_2d/tex_sub_image_2d/delete_texture`；shader、mesh、draw、FBO/resolve sink 仍暂时走 recording，需要后续逐项替换。
 - 后续真实 backend 方向预期保持 OpenGL-compatible，倾向 `winit + glow` 组合。
 - 迁移时需要持续对齐原版 Java / Arc 的 GL 渲染语义，避免只做接口替换而丢失实际绘制行为。
 
