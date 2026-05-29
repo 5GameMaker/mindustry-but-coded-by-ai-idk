@@ -12726,3 +12726,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - region 当前仍是 atlas symbol 名称，真实 OpenGL/glow backend 仍需把 `blockbuild-shader` custom command 绑定到 GPU shader；
   - `UnitAssembler` 的 unit `fullIcon`、`Accelerator` 的 launch/fallback 分支尚未精确落到 runtime visual snapshot；
   - 当前总体迁移约 26.0%，仍未达到完整可玩。
+
+### 12.404 BlockBuild shader 接入 OpenGL backend plan
+
+- 2026-05-29：继续推进渲染后端主链。本轮未新增 `glow/winit/glutin/wgpu` 等外部依赖，而是在现有 `DesktopGraphicsOpenGlBackendFramePlan` 中把 `RenderCommand::Custom("blockbuild-shader")` 识别为 `ShaderApplyPlan`，让 OpenGL backend plan 不再只把它当泛化 custom command 保存。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendStepKind` 新增 `ShaderApply { apply }`；
+    - `DesktopGraphicsOpenGlBackendFramePlan::push_commands(...)` 在 custom command 进入普通 command step 前，识别 `blockbuild-shader` 并插入 shader apply step；
+    - 新增 properties 解析与 atlas resolved sprite 到 `ShaderTextureRegion` 的转换，生成 `ShaderCatalog::apply_plan(ShaderId::BlockBuild, ...)`；
+    - 新测试确认 `u_progress/u_time/u_alpha/u_uv/u_uv2/u_texsize` 从 command properties 与 atlas region 进入 OpenGL backend plan。
+- Java 对照要点：
+  - Java `BlockBuildShader.apply()` 的 GPU 输入实际是 `u_progress/u_time/u_alpha/u_uv/u_uv2/u_texsize`；
+  - Rust 现在已能在 backend plan 层从 blockbuild custom command 和 atlas resolved sprite 还原这些 uniform，而不是只保留字符串 region。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend_plan --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 这仍是 backend plan/trace 层，不是实际 `glow` GPU draw call；
+  - 还需要后续真实 OpenGL program/cache/context 执行 `ShaderApplyPlan`；
+  - 当前总体迁移约 26.1%，仍未达到完整可玩。

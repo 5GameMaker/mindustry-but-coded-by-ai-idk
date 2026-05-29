@@ -40,10 +40,11 @@ use mindustry_core::mindustry::graphics::{
     MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize, OverlayRendererPlan,
     OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
     PixelatorState, RenderBackendFlushBoundary, RenderBlendMode, RenderBridge, RenderCamera,
-    RenderCommand, RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderRect,
-    RenderResolveKind, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderCamera,
-    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
-    TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord, Viewport as FloorViewport,
+    RenderCommand, RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderProperty,
+    RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext,
+    ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderParameters,
+    ShaderTextureRegion, ShaderViewport, TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor,
+    TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -475,6 +476,9 @@ pub enum DesktopGraphicsOpenGlBackendStepKind {
         boundary: RenderBackendFlushBoundary,
         label: &'static str,
     },
+    ShaderApply {
+        apply: ShaderApplyPlan,
+    },
     Command {
         kind: &'static str,
         command: RenderCommand,
@@ -542,6 +546,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
                 command_index: None,
             },
             commands,
+            &[],
         );
         self.steps.push(DesktopGraphicsOpenGlBackendStep {
             source: DesktopGraphicsOpenGlBackendStepSource::BlockParticles {
@@ -573,6 +578,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
                 pass_order: pass.order,
             },
             &pass.commands,
+            &pass.resolved_sprites,
         );
 
         self.steps.push(DesktopGraphicsOpenGlBackendStep {
@@ -608,6 +614,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
         target: RenderTarget,
         source: DesktopGraphicsOpenGlBackendStepSource,
         commands: &[RenderCommand],
+        resolved_sprites: &[DesktopGraphicsResolvedSpriteTrace],
     ) {
         for (command_index, command) in commands.iter().enumerate() {
             let command_source = match &source {
@@ -640,6 +647,16 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
                 });
             }
 
+            if let Some(apply) =
+                blockbuild_shader_apply_plan_from_render_command(command, resolved_sprites)
+            {
+                self.steps.push(DesktopGraphicsOpenGlBackendStep {
+                    source: command_source.clone(),
+                    target: target.clone(),
+                    kind: DesktopGraphicsOpenGlBackendStepKind::ShaderApply { apply },
+                });
+            }
+
             self.steps.push(DesktopGraphicsOpenGlBackendStep {
                 source: command_source,
                 target: target.clone(),
@@ -650,6 +667,62 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
             });
         }
     }
+}
+
+fn blockbuild_shader_apply_plan_from_render_command(
+    command: &RenderCommand,
+    resolved_sprites: &[DesktopGraphicsResolvedSpriteTrace],
+) -> Option<ShaderApplyPlan> {
+    let RenderCommand::Custom { name, properties } = command else {
+        return None;
+    };
+    if name != "blockbuild-shader" {
+        return None;
+    }
+
+    let mut parameters = ShaderParameters::default();
+    parameters.progress = render_property_f32(properties, "u_progress").unwrap_or(0.0);
+    parameters.time = render_property_f32(properties, "u_time").unwrap_or(0.0);
+    parameters.alpha = render_property_f32(properties, "u_alpha").unwrap_or(1.0);
+    parameters.region = render_property_value(properties, "region")
+        .and_then(|symbol| shader_texture_region_from_resolved_sprite(resolved_sprites, symbol));
+
+    let mut context = ShaderApplyContext::default();
+    context.parameters = parameters;
+    Some(ShaderCatalog::apply_plan(ShaderId::BlockBuild, &context))
+}
+
+fn render_property_value<'a>(properties: &'a [RenderProperty], key: &str) -> Option<&'a str> {
+    properties
+        .iter()
+        .find(|property| property.key == key)
+        .map(|property| property.value.as_str())
+}
+
+fn render_property_f32(properties: &[RenderProperty], key: &str) -> Option<f32> {
+    render_property_value(properties, key).and_then(|value| {
+        value
+            .parse::<f32>()
+            .ok()
+            .filter(|parsed| parsed.is_finite())
+    })
+}
+
+fn shader_texture_region_from_resolved_sprite(
+    resolved_sprites: &[DesktopGraphicsResolvedSpriteTrace],
+    symbol: &str,
+) -> Option<ShaderTextureRegion> {
+    let sprite = resolved_sprites
+        .iter()
+        .find(|sprite| sprite.symbol == symbol && !sprite.missing)?;
+    Some(ShaderTextureRegion::new(
+        sprite.u?,
+        sprite.v?,
+        sprite.u2?,
+        sprite.v2?,
+        sprite.page_width? as f32,
+        sprite.page_height? as f32,
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4638,7 +4711,7 @@ mod tests {
         RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
         RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
         ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId,
-        TextureAtlasPlan, TileCoord,
+        TextureAtlasPlan, TileCoord, UniformValue,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -7119,6 +7192,114 @@ mod tests {
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
         assert_eq!(renderer.last_opengl_backend_plan, plan);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_plan_maps_blockbuild_custom_to_shader_apply() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(42, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::BlockBuild)
+            .with_order(RenderPassKind::BlockBuild.default_order());
+        pass.push(RenderCommand::custom(
+            "blockbuild-shader",
+            vec![
+                RenderProperty::new("shader", "blockbuild"),
+                RenderProperty::new("region", "router"),
+                RenderProperty::new("u_progress", "0.5"),
+                RenderProperty::new("u_time", "77"),
+                RenderProperty::new("u_alpha", "0.75"),
+            ],
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(8.0, 8.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::BLOCK_BUILDING,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+        };
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_trace(&trace);
+
+        assert_eq!(plan.steps.len(), 6);
+        assert!(matches!(
+            plan.steps[1].kind,
+            DesktopGraphicsOpenGlBackendStepKind::FlushBoundary {
+                boundary: RenderBackendFlushBoundary::Custom,
+                label: "custom"
+            }
+        ));
+        assert!(matches!(
+            plan.steps[3].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Command { kind: "Custom", .. }
+        ));
+        assert!(matches!(
+            plan.steps[4].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "DrawSprite",
+                ..
+            }
+        ));
+
+        let apply = match &plan.steps[2].kind {
+            DesktopGraphicsOpenGlBackendStepKind::ShaderApply { apply } => apply,
+            other => panic!("expected blockbuild shader apply step, got {other:?}"),
+        };
+        assert_eq!(apply.shader, ShaderId::BlockBuild);
+        assert_eq!(
+            plan.steps[2].source,
+            DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                pass_index: 0,
+                command_index: Some(0),
+                pass_kind: RenderPassKind::BlockBuild,
+                pass_order: RenderPassKind::BlockBuild.default_order(),
+            }
+        );
+        let uniform = |name: &str| {
+            apply
+                .uniforms()
+                .find(|binding| binding.name == name)
+                .map(|binding| binding.value.clone())
+        };
+        assert_eq!(uniform("u_progress"), Some(UniformValue::Float(0.5)));
+        assert_eq!(uniform("u_time"), Some(UniformValue::Float(77.0)));
+        assert_eq!(uniform("u_alpha"), Some(UniformValue::Float(0.75)));
+
+        let resolved = &trace.render_passes[0].resolved_sprites[0];
+        assert!(!resolved.missing);
+        assert_eq!(
+            uniform("u_uv"),
+            Some(UniformValue::Vec2([
+                resolved.u.unwrap(),
+                resolved.v.unwrap()
+            ]))
+        );
+        assert_eq!(
+            uniform("u_uv2"),
+            Some(UniformValue::Vec2([
+                resolved.u2.unwrap(),
+                resolved.v2.unwrap()
+            ]))
+        );
+        assert_eq!(
+            uniform("u_texsize"),
+            Some(UniformValue::Vec2([
+                resolved.page_width.unwrap() as f32,
+                resolved.page_height.unwrap() as f32
+            ]))
+        );
     }
 
     #[test]

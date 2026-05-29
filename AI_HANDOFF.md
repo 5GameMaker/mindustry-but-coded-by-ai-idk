@@ -10091,3 +10091,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 `UnitAssembler.plan.unit.fullIcon` 与 `Accelerator.launchBlock.getGeneratedIcons()` 特殊分支接入 runtime visual snapshot；
   2. 推进真实 OpenGL/glow 后端消费 `blockbuild-shader` custom command；
   3. 保持后续渲染工作优先聚焦渲染引擎主链，而不是生成孤立 helper。
+
+---
+
+## 310. 最新闭环记录：BlockBuild shader 接入 OpenGL backend plan
+
+- 本轮总体进度更新：约 **26.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendStepKind` 新增 `ShaderApply { apply }`；
+    - `DesktopGraphicsOpenGlBackendFramePlan::push_commands(...)` 识别 `RenderCommand::Custom("blockbuild-shader")`；
+    - 从 custom properties 解析 `u_progress/u_time/u_alpha/region`；
+    - 使用 pass 中的 atlas resolved sprite 转成 `ShaderTextureRegion`，再生成 `ShaderCatalog::apply_plan(ShaderId::BlockBuild, ...)`；
+    - OpenGL backend plan 现在保留 `blockbuild` 的真实 uniform apply 数据，不再只有泛化 `Command { kind: "Custom" }`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend_plan --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 `ShaderApplyPlan` 下沉到真实 OpenGL/glow program/context 执行层；
+  2. 继续补 `UnitAssembler` / `Accelerator` 的特殊 fullIcon/generatedIcons 入口；
+  3. 后续仍保持 OpenGL/Arc/LWJGL 语义路线，不切 `wgpu`。
