@@ -1,10 +1,10 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::content::blocks::{BlockDef, DistributionBlockKind};
 use mindustry_core::mindustry::core::game_runtime::{
-    GameRuntimeClientCameraShakeEvent, GameRuntimeClientSnapshotApplyReport,
-    GameRuntimeClientUnitEnteredPayloadApplyReport, GameRuntimeCommandBuildingReport,
-    GameRuntimeReconstructorConfigureResult, GameRuntimeUnitCargoUnloadConfigureResult,
-    GameRuntimeUnitFactoryConfigureResult,
+    GameRuntimeBlockVisualRuntimeSnapshot, GameRuntimeClientCameraShakeEvent,
+    GameRuntimeClientSnapshotApplyReport, GameRuntimeClientUnitEnteredPayloadApplyReport,
+    GameRuntimeCommandBuildingReport, GameRuntimeReconstructorConfigureResult,
+    GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
@@ -27,7 +27,9 @@ use mindustry_core::mindustry::entities::{
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::{
-    BlockRendererBuildingSnapshot, BlockRendererPlan, BlockRendererState,
+    BlockRendererBuildingSnapshot, BlockRendererBuildingVisualRuntimeLiquidSnapshot,
+    BlockRendererBuildingVisualRuntimePowerSnapshot, BlockRendererBuildingVisualRuntimeSnapshot,
+    BlockRendererBuildingVisualRuntimeTurretSnapshot, BlockRendererPlan, BlockRendererState,
     BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer,
     FloorRenderPlan, FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState,
     FogViewport, GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState,
@@ -1082,10 +1084,45 @@ fn graphics_cache_layer_from_world(layer: WorldCacheLayer) -> GraphicsCacheLayer
     }
 }
 
+fn block_renderer_visual_runtime_snapshot_from_game_runtime(
+    snapshot: GameRuntimeBlockVisualRuntimeSnapshot,
+) -> BlockRendererBuildingVisualRuntimeSnapshot {
+    BlockRendererBuildingVisualRuntimeSnapshot {
+        liquid: snapshot
+            .liquid
+            .map(|liquid| BlockRendererBuildingVisualRuntimeLiquidSnapshot {
+                current: liquid.current,
+                amount: liquid.amount,
+                capacity: liquid.capacity,
+            }),
+        progress: snapshot.progress,
+        heat: snapshot.heat,
+        warmup: snapshot.warmup,
+        total_progress: snapshot.total_progress,
+        charge: snapshot.charge,
+        power: snapshot
+            .power
+            .map(|power| BlockRendererBuildingVisualRuntimePowerSnapshot {
+                status: power.status,
+                production_efficiency: power.production_efficiency,
+            }),
+        turret: snapshot
+            .turret
+            .map(|turret| BlockRendererBuildingVisualRuntimeTurretSnapshot {
+                rotation: turret.rotation,
+                recoil: turret.recoil,
+                heat: turret.heat,
+                charge: turret.charge,
+                side_heat: turret.side_heat,
+            }),
+    }
+}
+
 fn block_renderer_building_snapshot_from_world(
     coord: TileCoord,
     tile_build: Option<BuildingRef>,
     runtime_building: Option<&BuildingComp>,
+    visual_runtime: Option<GameRuntimeBlockVisualRuntimeSnapshot>,
     content_loader: &ContentLoader,
 ) -> Option<BlockRendererBuildingSnapshot> {
     let block_id = tile_build
@@ -1126,6 +1163,12 @@ fn block_renderer_building_snapshot_from_world(
         snapshot.rotation = build_ref.rotation as i16;
         snapshot.team = build_ref.team.clamp(0, u8::MAX as i32) as u8;
         snapshot.visible = true;
+    }
+
+    if let Some(visual_runtime) = visual_runtime {
+        snapshot.visual_runtime = Some(block_renderer_visual_runtime_snapshot_from_game_runtime(
+            visual_runtime,
+        ));
     }
 
     Some(snapshot)
@@ -1213,6 +1256,7 @@ fn push_icon_candidate_virtual_source_paths(
 fn block_renderer_tile_snapshot_from_world(
     tile: &Tile,
     runtime_building: Option<&BuildingComp>,
+    visual_runtime: Option<GameRuntimeBlockVisualRuntimeSnapshot>,
     content_loader: &ContentLoader,
 ) -> BlockRendererTileSnapshot {
     let coord = TileCoord::new(tile.x as i32, tile.y as i32);
@@ -1238,6 +1282,7 @@ fn block_renderer_tile_snapshot_from_world(
         coord,
         tile_build,
         runtime_building,
+        visual_runtime,
         content_loader,
     );
     snapshot
@@ -2040,9 +2085,14 @@ impl DesktopLauncher {
                         .build
                         .and_then(|build| runtime_buildings.get(&build.tile_pos).copied())
                         .or_else(|| runtime_buildings.get(&tile.pos()).copied());
+                    let visual_runtime = runtime_building.map(|building| {
+                        self.runtime
+                            .block_visual_runtime_snapshot_for_building(building)
+                    });
                     block_renderer_tile_snapshot_from_world(
                         tile,
                         runtime_building,
+                        visual_runtime,
                         &self.content_loader,
                     )
                 })
@@ -5160,6 +5210,72 @@ mod tests {
             .building_passes
             .iter()
             .any(|pass| pass.stage == BlockDrawStage::BuildingCracks));
+    }
+
+    #[test]
+    fn desktop_launcher_block_render_plan_carries_runtime_visual_snapshot_into_building_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let smelter = launcher
+            .content_loader
+            .block_by_name("silicon-smelter")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(4, 4);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = smelter.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: smelter.id,
+                team: 3,
+                rotation: 1,
+            });
+            tile_pos
+        };
+
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(tile_pos, smelter, TeamId(3)));
+        launcher.runtime.crafting_runtime_states.insert(
+            tile_pos,
+            mindustry_core::mindustry::core::game_runtime::GameRuntimeCraftingBlockState::GenericCrafter(
+                mindustry_core::mindustry::world::blocks::production::GenericCrafterState {
+                    progress: 0.25,
+                    total_progress: 13.0,
+                    warmup: 0.5,
+                },
+            ),
+        );
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let plan = launcher.block_render_plan(camera, viewport).unwrap();
+        let building = plan
+            .building_passes
+            .iter()
+            .flat_map(|pass| pass.buildings.iter())
+            .find(|building| building.coord == TileCoord::new(1, 1))
+            .expect("runtime building should enter block renderer plan");
+        let visual_runtime = building
+            .visual_runtime
+            .as_ref()
+            .expect("runtime visual snapshot should be attached to building plan");
+
+        assert_eq!(visual_runtime.progress, Some(0.25));
+        assert_eq!(visual_runtime.total_progress, Some(13.0));
+        assert_eq!(visual_runtime.warmup, Some(0.5));
+        assert!(visual_runtime.liquid.is_none());
+        let power = visual_runtime
+            .power
+            .as_ref()
+            .expect("smelter power module status should be mirrored into visual runtime");
+        assert_eq!(power.status, Some(0.0));
+        assert_eq!(power.production_efficiency, None);
+        assert!(visual_runtime.turret.is_none());
     }
 
     #[test]

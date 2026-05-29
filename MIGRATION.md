@@ -12004,3 +12004,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Desktop mods CLI 已显式接入 run 参数，但还需继续补错误提示、文档化与真实内容生命周期；
   - 下一阶段优先推进真实窗口/surface/GPU backend、atlas page upload、shader uniform、Pixelator/CacheLayer FBO 执行；
   - 当前总体迁移约 22.8%，仍未达到完整可玩。
+
+### 12.377 Desktop block render plan 自动携带 runtime visual snapshot
+
+- 2026-05-29：补齐 `GameRuntimeBlockVisualRuntimeSnapshot` 到 `BlockRendererBuildingSnapshot.visual_runtime` 的真实主链接线，解除上一轮“runtime 能导出、renderer 能承载但 desktop world snapshot 不传递”的断点。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `block_renderer_world_snapshot(...)` 在定位 `runtime_building` 后调用 `GameRuntime::block_visual_runtime_snapshot_for_building(...)`；
+    - `block_renderer_tile_snapshot_from_world(...)` 与 `block_renderer_building_snapshot_from_world(...)` 新增 visual runtime 参数传递；
+    - 新增 `block_renderer_visual_runtime_snapshot_from_game_runtime(...)`，把 runtime 侧 liquid/progress/heat/warmup/total_progress/charge/power/turret 字段映射到 renderer 侧结构；
+    - `BlockRendererBuildingSnapshot.visual_runtime` 现在可由 `DesktopLauncher::block_render_plan(...)` 自动填充，再经 `to_draw_plan()` 进入 `BuildingDrawPlan`。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_block_render_plan_carries_runtime_visual_snapshot_into_building_pass --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+- 仍未完成：
+  - visual runtime 已进入 building plan，但还需要按 Java draw families 消费 liquid/heat/warmup/power/turret 字段生成真实动态绘制；
+  - `BlockDrawerParticlePlan` 仍需接入实际 block/effect/render frame；
+  - 当前总体迁移约 22.9%，仍未达到完整可玩。

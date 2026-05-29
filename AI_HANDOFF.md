@@ -9303,3 +9303,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 把 `BlockDrawerParticlePlan` 接进实际 effect/render 消费链；
   3. 渲染后端优先走 `sdl2 + glow`：窗口/surface/context/present、texture upload/sampler、shader uniform、Pixelator/CacheLayer FBO；
   4. 继续推进 Java↔Rust 进程级 handshake/world stream smoke。
+
+---
+
+## 279. 最新闭环记录：runtime visual snapshot 自动进入 desktop block render plan
+
+- 本轮总体进度更新：约 **22.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `block_renderer_world_snapshot(...)` 现在从 `GameRuntime` 取 `block_visual_runtime_snapshot_for_building(...)`；
+    - visual runtime 经 tile/building snapshot helper 写入 `BlockRendererBuildingSnapshot.visual_runtime`；
+    - 新增 runtime visual snapshot 到 renderer visual snapshot 的字段映射 helper；
+    - 新增测试 `desktop_launcher_block_render_plan_carries_runtime_visual_snapshot_into_building_pass`，覆盖 crafter `progress/total_progress/warmup` 和 power status 进入 building plan。
+- 已验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_block_render_plan_carries_runtime_visual_snapshot_into_building_pass --manifest-path "Cargo.toml" -- --test-threads=1`
+- 当前下一步：
+  1. 按 Java `DrawLiquidRegion/DrawLiquidTile/DrawHeat*/DrawWarmupRegion/DrawPower/DrawTurret` 消费 `BuildingDrawPlan.visual_runtime`；
+  2. 给 `BlockRendererPlan` 或 `GraphicsFrameBundle` 增加真实 block particle plan 槽位；
+  3. 渲染后端继续以 `DesktopGraphicsRenderer` / `run_with_desktop_frame_loop` / `DesktopSurfaceConfig` 为 seam，新增依赖前先补平台层契约测试。
