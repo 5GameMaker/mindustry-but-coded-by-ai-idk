@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **31.4%**。
+- 当前总体迁移完成度：约 **31.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -359,6 +359,50 @@ git -C 'D:/MDT/rust-mindustry' status --short
 
 - `LogicProcessor` 变量读取已使用 boxed reader；后续差距是把 `TypeValue::Building/Unit` 这类 boxed wire id 在真实 `loadBlock` / world runtime 阶段延迟 unbox 成 live reference，而不是只保留 sidecar 数据。
 - `GameRuntime` 当前已能读入 processor sidecar，但还缺少统一写回/保存出口，以及将变量、links、wait timers 恢复到真实 `LExecutor` 的 runtime 接入。
+
+### 2026-05-29 续作：Shader build executor 收口
+
+文件：
+
+- `desktop/src/lib.rs`
+- `MIGRATION.md`
+- `README.md`
+
+完成内容：
+
+1. `DesktopGraphicsOpenGlBackendShaderStage` 现在支持有序比较，便于后续按 stage/handle 做稳定排序或分组。
+2. 新增 `DesktopGraphicsOpenGlBackendShaderBuildExecutor`，把 shader source loader、Arc-style preprocess、lifecycle handle resolve、compile/link report 聚合成一个构建闭环：
+   - `ShaderLoadTask -> load_program_sources(...) -> preprocess(...) -> lifecycle_executor -> compile/link report`
+3. 新增 `DesktopGraphicsOpenGlBackendShaderBuildError`，把 source load / preprocess 错误与后续 compile/link 结果边界分开。
+4. 新增 compile/link log override 与 report 结构：
+   - `DesktopGraphicsOpenGlBackendShaderCompileLogOverride`
+   - `DesktopGraphicsOpenGlBackendShaderLinkLogOverride`
+   - `DesktopGraphicsOpenGlBackendShaderCompileReport`
+   - `DesktopGraphicsOpenGlBackendShaderLinkReport`
+   - `DesktopGraphicsOpenGlBackendShaderBuildReport`
+5. `build_task(...)` 现在能输出：
+   - 原始 source files
+   - 预处理后的 source files
+   - resolved shader lifecycle commands
+   - compile/link reports
+6. 补了三组测试：
+   - 成功构建并解析 handle
+   - source load / preprocess 错误边界
+   - compile/link log override 传递
+7. 已验证：
+   - `cargo test -p mindustry-desktop shader_build_executor --lib`
+   - `cargo fmt --check`
+
+迁移意义：
+
+- 当前 shader 链路已经从“离散 loader / preprocess / lifecycle helper”推进到“单一 build executor”，后续真实 OpenGL executor 可以直接接这个 report 边界写入 `glCreateShader/glCompileShader/glLinkProgram` 的结果。
+- 仍然保持原版 Arc / OpenGL 路线，没有引入 wgpu / Bevy / Vulkan。
+
+当前总体迁移约 **31.5%**，下一步建议继续推进：
+
+1. `program handle` 与 `ShaderApply/DrawCommand::UseProgram` 合流。
+2. `TextureBinding::Asset / EffectBuffer` 解析成实际纹理资源句柄。
+3. 继续收紧 OpenGL executor，让 shader build report 连接到真实 GL 状态流。
 
 ### 较早完成：世界流前置信息
 

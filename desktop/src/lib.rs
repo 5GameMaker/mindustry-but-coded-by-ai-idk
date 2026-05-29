@@ -1384,7 +1384,7 @@ impl DesktopGraphicsOpenGlBackendShaderCommandSink
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DesktopGraphicsOpenGlBackendShaderStage {
     Vertex,
     Fragment,
@@ -1625,6 +1625,67 @@ pub enum DesktopGraphicsOpenGlBackendShaderPreprocessError {
         stage: DesktopGraphicsOpenGlBackendShaderStage,
         source_path: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendShaderBuildError {
+    SourceLoad(DesktopGraphicsOpenGlBackendShaderSourceLoadError),
+    Preprocess(DesktopGraphicsOpenGlBackendShaderPreprocessError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderCompileLogOverride {
+    pub shader: ShaderId,
+    pub stage: DesktopGraphicsOpenGlBackendShaderStage,
+    pub success: bool,
+    pub log: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderLinkLogOverride {
+    pub shader: ShaderId,
+    pub success: bool,
+    pub log: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderCompileReport {
+    pub shader: ShaderId,
+    pub stage: DesktopGraphicsOpenGlBackendShaderStage,
+    pub shader_key: String,
+    pub shader_handle: u32,
+    pub source_path: String,
+    pub success: Option<bool>,
+    pub log: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderLinkReport {
+    pub shader: ShaderId,
+    pub program_key: String,
+    pub program_handle: u32,
+    pub success: Option<bool>,
+    pub log: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderBuildReport {
+    pub shader: ShaderId,
+    pub program_key: String,
+    pub sources: DesktopGraphicsOpenGlBackendShaderProgramSourceFiles,
+    pub preprocessed_sources: DesktopGraphicsOpenGlBackendShaderProgramPreprocessedSources,
+    pub resolved_commands: Vec<DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand>,
+    pub compile_reports: Vec<DesktopGraphicsOpenGlBackendShaderCompileReport>,
+    pub link_reports: Vec<DesktopGraphicsOpenGlBackendShaderLinkReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderBuildExecutor {
+    pub source_loader: DesktopGraphicsOpenGlBackendShaderSourceLoader,
+    pub preprocess_options: DesktopGraphicsOpenGlBackendShaderPreprocessOptions,
+    pub lifecycle_executor: DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor,
+    pub compile_log_overrides: Vec<DesktopGraphicsOpenGlBackendShaderCompileLogOverride>,
+    pub link_log_overrides: Vec<DesktopGraphicsOpenGlBackendShaderLinkLogOverride>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2339,6 +2400,165 @@ impl DesktopGraphicsOpenGlBackendShaderSourceLoader {
                 DesktopGraphicsOpenGlBackendShaderStage::Fragment,
                 task.source.fragment_path(),
             )?,
+        })
+    }
+}
+
+impl From<DesktopGraphicsOpenGlBackendShaderSourceLoadError>
+    for DesktopGraphicsOpenGlBackendShaderBuildError
+{
+    fn from(error: DesktopGraphicsOpenGlBackendShaderSourceLoadError) -> Self {
+        Self::SourceLoad(error)
+    }
+}
+
+impl From<DesktopGraphicsOpenGlBackendShaderPreprocessError>
+    for DesktopGraphicsOpenGlBackendShaderBuildError
+{
+    fn from(error: DesktopGraphicsOpenGlBackendShaderPreprocessError) -> Self {
+        Self::Preprocess(error)
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderBuildReport {
+    pub fn has_errors(&self) -> bool {
+        self.compile_reports
+            .iter()
+            .any(|report| report.success == Some(false))
+            || self
+                .link_reports
+                .iter()
+                .any(|report| report.success == Some(false))
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderBuildExecutor {
+    pub fn new(source_loader: DesktopGraphicsOpenGlBackendShaderSourceLoader) -> Self {
+        Self {
+            source_loader,
+            preprocess_options: DesktopGraphicsOpenGlBackendShaderPreprocessOptions::default(),
+            lifecycle_executor:
+                DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor::default(),
+            compile_log_overrides: Vec::new(),
+            link_log_overrides: Vec::new(),
+        }
+    }
+
+    pub fn with_preprocess_options(
+        mut self,
+        preprocess_options: DesktopGraphicsOpenGlBackendShaderPreprocessOptions,
+    ) -> Self {
+        self.preprocess_options = preprocess_options;
+        self
+    }
+
+    pub fn push_compile_log_override(
+        &mut self,
+        override_log: DesktopGraphicsOpenGlBackendShaderCompileLogOverride,
+    ) {
+        self.compile_log_overrides.push(override_log);
+    }
+
+    pub fn push_link_log_override(
+        &mut self,
+        override_log: DesktopGraphicsOpenGlBackendShaderLinkLogOverride,
+    ) {
+        self.link_log_overrides.push(override_log);
+    }
+
+    fn compile_log_for(
+        &self,
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+    ) -> (Option<bool>, Option<String>) {
+        self.compile_log_overrides
+            .iter()
+            .rev()
+            .find(|override_log| override_log.shader == shader && override_log.stage == stage)
+            .map(|override_log| (Some(override_log.success), Some(override_log.log.clone())))
+            .unwrap_or((None, None))
+    }
+
+    fn link_log_for(&self, shader: ShaderId) -> (Option<bool>, Option<String>) {
+        self.link_log_overrides
+            .iter()
+            .rev()
+            .find(|override_log| override_log.shader == shader)
+            .map(|override_log| (Some(override_log.success), Some(override_log.log.clone())))
+            .unwrap_or((None, None))
+    }
+
+    pub fn build_task(
+        &mut self,
+        task: &ShaderLoadTask,
+    ) -> Result<
+        DesktopGraphicsOpenGlBackendShaderBuildReport,
+        DesktopGraphicsOpenGlBackendShaderBuildError,
+    > {
+        let sources = self.source_loader.load_program_sources(task)?;
+        let preprocessed_sources = sources.preprocess(&self.preprocess_options)?;
+        let command_plan = DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan {
+            commands: DesktopGraphicsOpenGlBackendShaderLifecycleCommand::from_load_task(task),
+        };
+        let command_start = self.lifecycle_executor.commands.len();
+        command_plan.drive_shader_lifecycle_command_sink(&mut self.lifecycle_executor);
+        let resolved_commands = self.lifecycle_executor.commands[command_start..].to_vec();
+
+        let mut compile_reports = Vec::new();
+        let mut link_reports = Vec::new();
+        for command in &resolved_commands {
+            match command {
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CompileShader {
+                    shader,
+                    stage,
+                    shader_key,
+                    shader_handle,
+                } => {
+                    let source_path = match stage {
+                        DesktopGraphicsOpenGlBackendShaderStage::Vertex => {
+                            preprocessed_sources.vertex.source_path.clone()
+                        }
+                        DesktopGraphicsOpenGlBackendShaderStage::Fragment => {
+                            preprocessed_sources.fragment.source_path.clone()
+                        }
+                    };
+                    let (success, log) = self.compile_log_for(*shader, *stage);
+                    compile_reports.push(DesktopGraphicsOpenGlBackendShaderCompileReport {
+                        shader: *shader,
+                        stage: *stage,
+                        shader_key: shader_key.clone(),
+                        shader_handle: *shader_handle,
+                        source_path,
+                        success,
+                        log,
+                    });
+                }
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::LinkProgram {
+                    shader,
+                    program_key,
+                    program_handle,
+                } => {
+                    let (success, log) = self.link_log_for(*shader);
+                    link_reports.push(DesktopGraphicsOpenGlBackendShaderLinkReport {
+                        shader: *shader,
+                        program_key: program_key.clone(),
+                        program_handle: *program_handle,
+                        success,
+                        log,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        Ok(DesktopGraphicsOpenGlBackendShaderBuildReport {
+            shader: task.shader,
+            program_key: opengl_backend_shader_program_key(task.shader),
+            sources,
+            preprocessed_sources,
+            resolved_commands,
+            compile_reports,
+            link_reports,
         })
     }
 }
@@ -14808,6 +15028,14 @@ mod tests {
         std::fs::write(path, text).unwrap();
     }
 
+    fn desktop_mesh_shader_task() -> mindustry_core::mindustry::graphics::ShaderLoadTask {
+        ShaderCatalog::init_plan()
+            .tasks
+            .into_iter()
+            .find(|task| task.shader == ShaderId::Mesh)
+            .unwrap()
+    }
+
     fn desktop_shader_source_file(
         stage: super::DesktopGraphicsOpenGlBackendShaderStage,
         source_path: &str,
@@ -14991,6 +15219,137 @@ mod tests {
                 ref source_path,
             }) if source_path == "shaders/mesh.vert"
         ));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_build_executor_loads_preprocesses_and_resolves_handles() {
+        let root = desktop_shader_test_asset_root("build-success");
+        write_shader_source(
+            &root,
+            "shaders/mesh.vert",
+            "attribute vec3 a_position;\nvoid main(){}\n",
+        );
+        write_shader_source(
+            &root,
+            "shaders/planet.frag",
+            "void main(){ gl_FragColor = vec4(1.0); }\n",
+        );
+        let mut executor = super::DesktopGraphicsOpenGlBackendShaderBuildExecutor::new(
+            super::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(&root),
+        )
+        .with_preprocess_options(
+            super::DesktopGraphicsOpenGlBackendShaderPreprocessOptions {
+                gl30: true,
+                ..Default::default()
+            },
+        );
+        let report = executor.build_task(&desktop_mesh_shader_task()).unwrap();
+
+        assert_eq!(report.shader, ShaderId::Mesh);
+        assert_eq!(report.program_key, "shader:Mesh");
+        assert_eq!(report.resolved_commands.len(), 12);
+        assert_eq!(report.compile_reports.len(), 2);
+        assert_eq!(report.link_reports.len(), 1);
+        assert!(!report.has_errors());
+        assert_eq!(
+            report.compile_reports[0],
+            super::DesktopGraphicsOpenGlBackendShaderCompileReport {
+                shader: ShaderId::Mesh,
+                stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                shader_key: "shader:Mesh:vertex".into(),
+                shader_handle: 1,
+                source_path: "shaders/mesh.vert".into(),
+                success: None,
+                log: None,
+            }
+        );
+        assert_eq!(report.compile_reports[1].source_path, "shaders/planet.frag");
+        assert_eq!(report.link_reports[0].program_handle, 3);
+        assert!(report
+            .preprocessed_sources
+            .vertex
+            .source_text
+            .contains("#version 150\n"));
+        assert!(report
+            .preprocessed_sources
+            .fragment
+            .source_text
+            .contains("out vec4 fragColor;"));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_build_executor_reports_source_and_preprocess_errors() {
+        let missing_root = desktop_shader_test_asset_root("build-missing");
+        write_shader_source(&missing_root, "shaders/mesh.vert", "void main(){}\n");
+        let mut missing_executor = super::DesktopGraphicsOpenGlBackendShaderBuildExecutor::new(
+            super::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(&missing_root),
+        );
+        assert!(matches!(
+            missing_executor.build_task(&desktop_mesh_shader_task()),
+            Err(super::DesktopGraphicsOpenGlBackendShaderBuildError::SourceLoad(
+                super::DesktopGraphicsOpenGlBackendShaderSourceLoadError::ReadSource {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    ref source_path,
+                    ..
+                }
+            )) if source_path == "shaders/planet.frag"
+        ));
+
+        let versioned_root = desktop_shader_test_asset_root("build-versioned");
+        write_shader_source(&versioned_root, "shaders/mesh.vert", "void main(){}\n");
+        write_shader_source(
+            &versioned_root,
+            "shaders/planet.frag",
+            "#version 120\nvoid main(){}\n",
+        );
+        let mut versioned_executor = super::DesktopGraphicsOpenGlBackendShaderBuildExecutor::new(
+            super::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(&versioned_root),
+        );
+        assert!(matches!(
+            versioned_executor.build_task(&desktop_mesh_shader_task()),
+            Err(super::DesktopGraphicsOpenGlBackendShaderBuildError::Preprocess(
+                super::DesktopGraphicsOpenGlBackendShaderPreprocessError::ExplicitVersion {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    ref source_path,
+                }
+            )) if source_path == "shaders/planet.frag"
+        ));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_build_executor_carries_compile_and_link_logs() {
+        let root = desktop_shader_test_asset_root("build-logs");
+        write_shader_source(&root, "shaders/mesh.vert", "void main(){}\n");
+        write_shader_source(&root, "shaders/planet.frag", "void main(){}\n");
+        let mut executor = super::DesktopGraphicsOpenGlBackendShaderBuildExecutor::new(
+            super::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(&root),
+        );
+        executor.push_compile_log_override(
+            super::DesktopGraphicsOpenGlBackendShaderCompileLogOverride {
+                shader: ShaderId::Mesh,
+                stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                success: false,
+                log: "fragment syntax error".into(),
+            },
+        );
+        executor.push_link_log_override(super::DesktopGraphicsOpenGlBackendShaderLinkLogOverride {
+            shader: ShaderId::Mesh,
+            success: false,
+            log: "link failed".into(),
+        });
+        let report = executor.build_task(&desktop_mesh_shader_task()).unwrap();
+
+        assert!(report.has_errors());
+        assert_eq!(report.compile_reports[0].success, None);
+        assert_eq!(report.compile_reports[1].success, Some(false));
+        assert_eq!(
+            report.compile_reports[1].log.as_deref(),
+            Some("fragment syntax error")
+        );
+        assert_eq!(report.link_reports[0].success, Some(false));
+        assert_eq!(report.link_reports[0].log.as_deref(), Some("link failed"));
     }
 
     #[test]

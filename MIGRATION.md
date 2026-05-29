@@ -14097,4 +14097,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 预处理仍是最小模型，未覆盖 Arc 全量平台差异；
   - preprocess 结果尚未与 resolved lifecycle executor 合并为真实 shader build executor；
   - compile/link error log 仍未记录；
-  - 当前总体迁移约 31.4%，仍未达到完整可玩。
+  - 当前总体迁移约 31.5%，仍未达到完整可玩。
+
+## 12.457 Shader build executor 与 compile/link log 边界接入
+
+- 2026-05-29：继续把 shader source loader、preprocess 与 resolved lifecycle executor 合流，新增 shader build executor。当前仍不调用真实 GL，但一个 shader load task 已能按 `load source -> preprocess -> resolve lifecycle handles -> collect compile/link reports` 形成完整构建报告。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderBuildError`，分离 source load 与 preprocess 错误；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderCompileLogOverride` / `ShaderLinkLogOverride`，用于记录或模拟真实 GL compile/link 结果；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderCompileReport` / `ShaderLinkReport`；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderBuildReport`，聚合 raw sources、preprocessed sources、resolved lifecycle commands、compile/link reports；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderBuildExecutor`，持有 source loader、preprocess options、lifecycle resolving executor 与 compile/link log override；
+    - `build_task(...)` 已能输出单个 shader 的 source、preprocess、resolved handle 与 compile/link report；
+    - 新增测试覆盖成功构建、缺 fragment source、preprocess `#version` 错误、模拟 fragment compile error 与 link error。
+- 迁移意义：
+  - shader 生命周期链路从离散 helper 收口为 build executor：`ShaderLoadTask -> source text -> preprocess -> resolved GL object handles -> compile/link report`；
+  - compile/link log 现在有明确数据边界，后续真实 GL executor 可把 `glGetShaderInfoLog/glGetProgramInfoLog` 写入同一 report；
+  - 这一步仍保持 OpenGL/Arc 路线，不引入 wgpu/Bevy/Vulkan。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_build_executor --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - build executor 仍未调用真实 `glCreateShader/glShaderSource/glCompileShader/glLinkProgram`；
+  - compile/link log 当前由 override/record 边界表达，尚未来自真实 GL；
+  - build report 的 program handle 尚未和 `ShaderApply/DrawCommand` 的 `UseProgram` 合流；
+  - 当前总体迁移约 31.5%，仍未达到完整可玩。
