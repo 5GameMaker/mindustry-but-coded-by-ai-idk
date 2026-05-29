@@ -63,10 +63,11 @@ use crate::mindustry::{
     },
     world::blocks::defense::turrets::{
         continuous_turret_read_child, continuous_turret_write_child, item_turret_read_ammo,
-        item_turret_write_ammo, payload_ammo_turret_read_payloads,
-        payload_ammo_turret_write_payloads, point_defense_read_child, point_defense_write_child,
-        tractor_beam_read_child, tractor_beam_write_child, turret_read_child, turret_write_child,
-        ContinuousTurretState, ItemAmmoEntry, PointDefenseState, TractorBeamState, TurretState,
+        item_turret_write_ammo, liquid_turret_accept_liquid, liquid_turret_unit_ammo_fraction,
+        payload_ammo_turret_read_payloads, payload_ammo_turret_write_payloads,
+        point_defense_read_child, point_defense_write_child, tractor_beam_read_child,
+        tractor_beam_write_child, turret_read_child, turret_write_child, ContinuousTurretState,
+        ItemAmmoEntry, PointDefenseState, TractorBeamState, TurretState,
     },
     world::blocks::defense::{
         build_turret_read_child_with_loader, build_turret_write_child_with_loader,
@@ -1376,6 +1377,7 @@ pub struct GameRuntimeBlockVisualTurretSnapshot {
     pub heat: Option<f32>,
     pub charge: Option<f32>,
     pub side_heat: Option<[f32; 4]>,
+    pub ammo_fraction: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -3188,6 +3190,18 @@ impl GameRuntime {
         }
         if let Some(state) = self.turret_runtime_states.get(&tile_pos) {
             game_runtime_visual_apply_turret_state(&mut snapshot, state);
+        }
+        if let Some(liquid) = snapshot.liquid {
+            if let (Some(amount), Some(capacity)) = (liquid.amount, liquid.capacity) {
+                if capacity > 0.0 {
+                    if let Some(turret) = snapshot.turret.as_mut() {
+                        game_runtime_visual_set_once(
+                            &mut turret.ammo_fraction,
+                            liquid_turret_unit_ammo_fraction(amount, capacity),
+                        );
+                    }
+                }
+            }
         }
 
         snapshot
@@ -18057,15 +18071,66 @@ impl GameRuntime {
         if source.team != target.team || !target.block.has_liquids {
             return false;
         }
-        if !matches!(content.block(target.block.id), Some(BlockDef::Liquid(_))) {
-            return false;
+        match content.block(target.block.id) {
+            Some(BlockDef::Turret(turret))
+                if matches!(
+                    turret.kind,
+                    TurretBlockKind::LiquidTurret | TurretBlockKind::ContinuousLiquidTurret
+                ) =>
+            {
+                let Some(liquids) = target.liquids.as_ref() else {
+                    return false;
+                };
+                let incoming_is_ammo = turret
+                    .liquid_ammo
+                    .iter()
+                    .any(|ammo| ammo.liquid == liquid_id);
+                if !incoming_is_ammo {
+                    return false;
+                }
+                let current = liquids.current();
+                let current_is_ammo = current
+                    .and_then(|current_liquid| {
+                        turret
+                            .liquid_ammo
+                            .iter()
+                            .find(|ammo| ammo.liquid == current_liquid)
+                            .map(|ammo| ammo.bullet.ammo_multiplier)
+                    })
+                    .is_some();
+                let current_ammo_multiplier = current
+                    .and_then(|current_liquid| {
+                        turret
+                            .liquid_ammo
+                            .iter()
+                            .find(|ammo| ammo.liquid == current_liquid)
+                            .map(|ammo| ammo.bullet.ammo_multiplier)
+                    })
+                    .unwrap_or(1.0);
+                target.block.liquid_capacity > 0.0
+                    && liquids.get(liquid_id) < target.block.liquid_capacity
+                    && liquid_turret_accept_liquid(
+                        true,
+                        current == Some(liquid_id),
+                        current_is_ammo,
+                        liquids.current_amount(),
+                        current_ammo_multiplier,
+                    )
+            }
+            Some(BlockDef::Liquid(_)) => {
+                let Some(liquids) = target.liquids.as_ref() else {
+                    return false;
+                };
+                target.block.liquid_capacity > 0.0
+                    && liquids.get(liquid_id) < target.block.liquid_capacity
+                    && accept_same_or_low_amount(
+                        liquids.current(),
+                        liquid_id,
+                        liquids.current_amount(),
+                    )
+            }
+            _ => false,
         }
-        let Some(liquids) = target.liquids.as_ref() else {
-            return false;
-        };
-        target.block.liquid_capacity > 0.0
-            && liquids.get(liquid_id) < target.block.liquid_capacity
-            && accept_same_or_low_amount(liquids.current(), liquid_id, liquids.current_amount())
     }
 
     fn payload_loader_load_inner_building(
@@ -21350,10 +21415,11 @@ mod tests {
                 AcceleratorState,
             },
             blocks::defense::turrets::{
-                continuous_turret_write_child, item_turret_write_ammo,
-                payload_ammo_turret_write_payloads, point_defense_write_child,
-                tractor_beam_write_child, turret_write_child, ContinuousTurretState, ItemAmmoEntry,
-                PointDefenseState, TractorBeamState, TurretState,
+                continuous_turret_write_child, item_turret_write_ammo, liquid_turret_has_ammo,
+                liquid_turret_use_ammo, payload_ammo_turret_write_payloads,
+                point_defense_write_child, tractor_beam_write_child, turret_write_child,
+                ContinuousTurretState, ItemAmmoEntry, PointDefenseState, TractorBeamState,
+                TurretState,
             },
             blocks::defense::{
                 build_turret_write_child_with_loader, write_auto_door_state,
@@ -21601,6 +21667,7 @@ mod tests {
                 heat: Some(0.7),
                 charge: Some(0.9),
                 side_heat: Some([0.1, 0.2, 0.3, 0.4]),
+                ammo_fraction: None,
             })
         );
 
@@ -21682,6 +21749,184 @@ mod tests {
         assert_eq!(
             runtime.block_visual_runtime_snapshot(point2_pack(9, 9)),
             None
+        );
+    }
+
+    #[test]
+    fn game_runtime_liquid_turret_acceptance_and_ammo_fraction_match_java() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let wave = content.block_by_name("wave").unwrap();
+        let water = content
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let slag = content
+            .liquid_by_name("slag")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let tile_source = point2_pack(3, 4);
+        let tile_target = point2_pack(4, 4);
+        let mut runtime = GameRuntime::default();
+        runtime.state.world.resize(8, 8);
+        runtime.add_building(BuildingComp::new(
+            tile_source,
+            content.block_by_name("duo").unwrap().base().clone(),
+            TeamId(1),
+        ));
+        runtime.add_building(BuildingComp::new(
+            tile_target,
+            wave.base().clone(),
+            TeamId(1),
+        ));
+        runtime.turret_runtime_states.insert(
+            tile_target,
+            GameRuntimeTurretBlockState::Generic(TurretState {
+                rotation: 37.0,
+                cur_recoil: 0.2,
+                heat: 0.7,
+                charge: 0.9,
+                side_heat: [0.1, 0.2, 0.3, 0.4],
+                ..TurretState::default()
+            }),
+        );
+
+        let wave_turret = match wave {
+            BlockDef::Turret(turret) => turret,
+            _ => panic!("wave should be a turret block"),
+        };
+        let water_multiplier = wave_turret
+            .liquid_ammo
+            .iter()
+            .find(|ammo| ammo.liquid == water)
+            .map(|ammo| ammo.bullet.ammo_multiplier)
+            .expect("wave should accept water ammo");
+
+        {
+            let target = runtime
+                .buildings_mut()
+                .iter_mut()
+                .find(|building| building.tile_pos == tile_target)
+                .expect("target building should exist");
+            target
+                .liquids
+                .as_mut()
+                .expect("wave should have a liquid module")
+                .set(water, 5.0);
+        }
+
+        let snapshot = runtime
+            .block_visual_runtime_snapshot(tile_target)
+            .expect("liquid turret should snapshot");
+        assert_eq!(
+            snapshot.liquid,
+            Some(GameRuntimeBlockVisualLiquidSnapshot {
+                current: Some(water),
+                amount: Some(5.0),
+                capacity: Some(10.0),
+            })
+        );
+        assert_eq!(
+            snapshot.turret,
+            Some(GameRuntimeBlockVisualTurretSnapshot {
+                rotation: Some(37.0),
+                recoil: Some(0.2),
+                heat: Some(0.7),
+                charge: Some(0.9),
+                side_heat: Some([0.1, 0.2, 0.3, 0.4]),
+                ammo_fraction: Some(0.5),
+            })
+        );
+        assert!(liquid_turret_has_ammo(Some(water_multiplier), 5.0));
+        assert!(runtime.dump_liquid_target_accepts(&content, 0, 1, water));
+        assert!(!runtime.dump_liquid_target_accepts(&content, 0, 1, slag));
+        assert_eq!(
+            runtime.dump_liquid_target_accepts(&content, 0, 1, water),
+            liquid_turret_accept_liquid(true, true, true, 5.0, water_multiplier)
+        );
+        assert_eq!(
+            runtime.dump_liquid_target_accepts(&content, 0, 1, slag),
+            liquid_turret_accept_liquid(true, false, true, 5.0, water_multiplier)
+        );
+        {
+            let target = runtime
+                .buildings_mut()
+                .iter_mut()
+                .find(|building| building.tile_pos == tile_target)
+                .expect("target building should exist");
+            target
+                .liquids
+                .as_mut()
+                .expect("wave should have a liquid module")
+                .set(water, target.block.liquid_capacity);
+        }
+        assert!(!runtime.dump_liquid_target_accepts(&content, 0, 1, water));
+        {
+            let target = runtime
+                .buildings_mut()
+                .iter_mut()
+                .find(|building| building.tile_pos == tile_target)
+                .expect("target building should exist");
+            target
+                .liquids
+                .as_mut()
+                .expect("wave should have a liquid module")
+                .set(water, 5.0);
+        }
+
+        let amount_after_shot = liquid_turret_use_ammo(5.0, water_multiplier, false);
+        let expected_amount_after_shot = (5.0 - 1.0 / water_multiplier).max(0.0);
+        assert_eq!(amount_after_shot, expected_amount_after_shot);
+        {
+            let target = runtime
+                .buildings_mut()
+                .iter_mut()
+                .find(|building| building.tile_pos == tile_target)
+                .expect("target building should exist");
+            target
+                .liquids
+                .as_mut()
+                .expect("wave should have a liquid module")
+                .set(water, amount_after_shot);
+        }
+
+        let snapshot_after = runtime
+            .block_visual_runtime_snapshot(tile_target)
+            .expect("liquid turret should snapshot after consuming ammo");
+        assert_eq!(
+            snapshot_after.turret,
+            Some(GameRuntimeBlockVisualTurretSnapshot {
+                rotation: Some(37.0),
+                recoil: Some(0.2),
+                heat: Some(0.7),
+                charge: Some(0.9),
+                side_heat: Some([0.1, 0.2, 0.3, 0.4]),
+                ammo_fraction: Some(amount_after_shot / 10.0),
+            })
+        );
+
+        let low_amount = 1.0 / water_multiplier + 0.0005;
+        {
+            let target = runtime
+                .buildings_mut()
+                .iter_mut()
+                .find(|building| building.tile_pos == tile_target)
+                .expect("target building should exist");
+            target
+                .liquids
+                .as_mut()
+                .expect("wave should have a liquid module")
+                .set(water, low_amount);
+        }
+        assert!(runtime.dump_liquid_target_accepts(&content, 0, 1, slag));
+        assert_eq!(
+            runtime.dump_liquid_target_accepts(&content, 0, 1, slag),
+            liquid_turret_accept_liquid(true, false, true, low_amount, water_multiplier)
         );
     }
 
