@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **32.5%**。
+- 当前总体迁移完成度：约 **32.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11683,3 +11683,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 让真实 shader/draw resolved command 流消费这些 resolve attachment；
   2. 补 renderer -> executor state -> shared resolver 的端到端测试；
   3. 后续再接 feature-gated real OpenGL context/window。
+
+---
+
+## 373. 最新闭环记录：renderer 到 shared resolver 主链路测试
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **32.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增测试 `headless_graphics_renderer_roundtrips_opengl_state_to_shared_resolver`；
+    - 构造带 `RenderTarget::Buffer(...).with_resolve(Screen, ShaderBlit)`、atlas sprite、surface effectBuffer attachment 的 frame；
+    - 先经 `HeadlessDesktopGraphicsRenderer` 产出 `DesktopGraphicsOpenGlBackendExecutorState`；
+    - 再把 executor state 喂给 `DesktopGraphicsResolvingOpenGlBackendCommandExecutor`；
+    - 断言 texture upload / mesh upload / draw call 进入 shared resolver，并复用同一 texture handle 与 VAO handle。
+- 关键语义：
+  - 当前主链路验收不再只依赖 isolated helper 单测；
+  - renderer -> backend plan -> executor state -> shared resolver 已有一条端到端回归；
+  - 仍未执行真实 GL，但真实 backend 后续可以直接挂在 shared resolver/sink 边界。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_roundtrips --lib`
+- 下一步：
+  1. 将 resolve attachment 转成真实 draw/shader/blit command；
+  2. 整理 feature-gated real OpenGL driver trait；
+  3. 后续再引入真实 window/context。

@@ -18176,6 +18176,117 @@ mod tests {
     }
 
     #[test]
+    fn headless_graphics_renderer_roundtrips_opengl_state_to_shared_resolver() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(89, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Lighting)
+            .with_target(RenderTarget::Buffer("roundtrip-fbo".into()))
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::ShaderBlit);
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(8.0, 12.0, 16.0, 20.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            0.0,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+        };
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame_for_surface(
+            &frame,
+            super::DesktopGraphicsEffectBufferSurface::new(DesktopSurfaceSize::new(800, 600), 7),
+        );
+
+        assert_eq!(
+            renderer.last_opengl_backend_execution_state.resolve_steps,
+            1
+        );
+        assert_eq!(
+            renderer
+                .last_live_backend_state
+                .resolve_target_events_emitted,
+            1
+        );
+        assert_eq!(
+            renderer
+                .last_opengl_backend_executor_state
+                .resolve_events
+                .len(),
+            1
+        );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .resolved_framebuffer_attachments
+            .iter()
+            .any(|attachment| attachment.color_texture_key
+                == "framebuffer-attachment:renderer.effectBuffer:color0"
+                && attachment.width == 800
+                && attachment.height == 600
+                && attachment.generation == 7));
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .resolved_framebuffer_attachments
+            .iter()
+            .any(|attachment| attachment.color_texture_key
+                == "framebuffer-attachment:buffer:roundtrip-fbo:color0"));
+
+        let mut resolving_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        let resolved_state = renderer
+            .last_opengl_backend_executor_state
+            .drive_resolving_command_executor(&mut resolving_executor);
+        assert_eq!(
+            resolved_state,
+            super::DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+                texture_uploads_emitted: 1,
+                sprite_mesh_uploads_emitted: 1,
+                shader_commands_emitted: 0,
+                sprite_draw_calls_emitted: 1,
+            }
+        );
+        let upload_handle = resolving_executor.resolved_texture_uploads[0].texture_handle;
+        let draw_texture_handle =
+            resolving_executor
+                .resolved_draw_actions
+                .iter()
+                .find_map(|action| match action {
+                    super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindTexture {
+                        texture_handle,
+                        ..
+                    } => Some(*texture_handle),
+                    _ => None,
+                });
+        assert_eq!(draw_texture_handle, Some(upload_handle));
+        assert_eq!(
+            resolving_executor.resolved_sprite_mesh_uploads[0].vertex_array_handle,
+            resolving_executor
+                .resolved_draw_actions
+                .iter()
+                .find_map(|action| {
+                    match action {
+                    super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindVertexArray {
+                        vertex_array_handle,
+                        ..
+                    } => Some(*vertex_array_handle),
+                    _ => None,
+                }
+                })
+                .unwrap()
+        );
+    }
+
+    #[test]
     fn headless_graphics_renderer_records_shader_dispatch_before_render_passes() {
         let viewport = RenderViewport::new(0.0, 0.0, 48.0, 48.0);
         let camera = RenderCamera::new(RenderPoint::new(24.0, 24.0), viewport);

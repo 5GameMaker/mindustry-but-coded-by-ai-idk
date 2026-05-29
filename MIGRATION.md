@@ -14346,3 +14346,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - pass target attachment 的实际尺寸仍需从 pass viewport / surface 策略补齐；
   - renderer -> executor state -> shared resolver 端到端测试仍待补；
   - 当前总体迁移约 32.5%，仍未达到完整可玩。
+
+## 12.467 renderer 到 shared resolver 主链路测试
+
+- 2026-05-29：补上 OpenGL/headless 渲染链路的一条端到端回归，避免 shared resolver 继续只由孤立 helper 测试覆盖。本轮新增测试从 `HeadlessDesktopGraphicsRenderer` 的真实 frame 输入开始，贯穿 backend plan、executor state，再把 state 下沉到 `DesktopGraphicsResolvingOpenGlBackendCommandExecutor`。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `headless_graphics_renderer_roundtrips_opengl_state_to_shared_resolver`；
+    - 测试 frame 包含 `RenderTarget::Buffer("roundtrip-fbo").with_resolve(Screen, ShaderBlit)`、一个可解析 atlas sprite、以及 `DesktopGraphicsEffectBufferSurface`；
+    - 断言 headless renderer 记录 resolve step、live resolve target event、effectBuffer attachment 与 resolve source attachment；
+    - 将 `last_opengl_backend_executor_state` 驱动到 shared resolving executor；
+    - 断言 texture upload、sprite mesh upload、draw call 均被 emitted，且 draw bind texture handle 复用 upload texture handle、draw bind VAO 复用 mesh upload VAO。
+- 迁移意义：
+  - OpenGL 迁移验收从“多个局部 helper 都能过”推进到“renderer 主链路可以抵达 shared resolver”；
+  - 后续真实 GL backend 可以直接复用该测试作为接入前置烟测；
+  - 仍保持纯 Rust/headless，不引入真实 OpenGL 依赖。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_roundtrips --lib`
+- 仍未完成：
+  - shared resolver 仍只是 resolved/recording 层，不执行真实 GL；
+  - resolve attachment 尚未被转换为真实 screen quad / blit command；
+  - feature-gated real OpenGL driver/window/context 尚未接入；
+  - 当前总体迁移约 32.6%，仍未达到完整可玩。
