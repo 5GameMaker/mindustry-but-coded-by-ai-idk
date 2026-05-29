@@ -671,6 +671,39 @@ pub fn liquid_turret_unit_ammo_fraction(current_amount: f32, liquid_capacity: f3
     current_amount / liquid_capacity
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiquidTurretTarget<T> {
+    Fire(T),
+    Normal(T),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiquidTurretTargeting<T> {
+    pub extinguish: bool,
+    pub can_extinguish: bool,
+    pub fire_target: Option<T>,
+    pub normal_target: Option<T>,
+}
+
+pub fn liquid_turret_select_target<T>(
+    targeting: LiquidTurretTargeting<T>,
+) -> Option<LiquidTurretTarget<T>> {
+    let LiquidTurretTargeting {
+        extinguish,
+        can_extinguish,
+        fire_target,
+        normal_target,
+    } = targeting;
+
+    if extinguish && can_extinguish {
+        fire_target
+            .map(LiquidTurretTarget::Fire)
+            .or_else(|| normal_target.map(LiquidTurretTarget::Normal))
+    } else {
+        normal_target.map(LiquidTurretTarget::Normal)
+    }
+}
+
 pub fn power_turret_sense_ammo(power_status: Option<f32>) -> f32 {
     power_status.unwrap_or(0.0)
 }
@@ -778,6 +811,25 @@ pub fn continuous_turret_read_child<R: Read>(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContinuousLiquidTurretState {
     pub activated: bool,
+}
+
+pub fn continuous_liquid_write_child<W: Write>(
+    write: &mut W,
+    state: &ContinuousLiquidTurretState,
+) -> io::Result<()> {
+    write_bool(write, state.activated)
+}
+
+pub fn continuous_liquid_read_child<R: Read>(
+    read: &mut R,
+    revision: u8,
+) -> io::Result<ContinuousLiquidTurretState> {
+    let activated = if revision >= 4 {
+        read_bool(read)?
+    } else {
+        false
+    };
+    Ok(ContinuousLiquidTurretState { activated })
 }
 
 pub fn continuous_liquid_update_activation(
@@ -1165,6 +1217,14 @@ fn read_i32<R: Read>(read: &mut R) -> io::Result<i32> {
     Ok(i32::from_be_bytes(buf))
 }
 
+fn write_bool<W: Write>(write: &mut W, value: bool) -> io::Result<()> {
+    write.write_all(&[value as u8])
+}
+
+fn read_bool<R: Read>(read: &mut R) -> io::Result<bool> {
+    Ok(read_u8(read)? != 0)
+}
+
 fn read_u8<R: Read>(read: &mut R) -> io::Result<u8> {
     let mut buf = [0; 1];
     read.read_exact(&mut buf)?;
@@ -1346,6 +1406,23 @@ mod tests {
         assert_eq!(restored.total(), 3);
         assert_eq!(restored.get(PayloadKey::new(ContentType::Block, 5)), 3);
 
+        let mut continuous_liquid_bytes = Vec::new();
+        continuous_liquid_write_child(
+            &mut continuous_liquid_bytes,
+            &ContinuousLiquidTurretState { activated: true },
+        )
+        .unwrap();
+        assert_eq!(
+            continuous_liquid_read_child(&mut continuous_liquid_bytes.as_slice(), 4).unwrap(),
+            ContinuousLiquidTurretState { activated: true }
+        );
+        assert_eq!(
+            continuous_liquid_read_child(&mut continuous_liquid_bytes.as_slice(), 3).unwrap(),
+            ContinuousLiquidTurretState { activated: false }
+        );
+        assert!(continuous_liquid_update_activation(false, 4.0, 1.0));
+        assert!(!continuous_liquid_update_activation(true, 0.5, 1.0));
+
         assert!(liquid_turret_has_ammo(Some(2.0), 0.5));
         assert!(!liquid_turret_has_ammo(Some(2.0), 0.49));
         assert!(liquid_turret_accept_liquid(true, false, false, 5.0, 2.0));
@@ -1353,10 +1430,40 @@ mod tests {
         assert!(!liquid_turret_accept_liquid(true, false, true, 0.6, 2.0));
         assert_eq!(liquid_turret_use_ammo(2.0, 4.0, false), 1.75);
         assert_eq!(liquid_turret_unit_ammo_fraction(5.0, 20.0), 0.25);
-
         assert_eq!(power_turret_sense_ammo(Some(0.75)), 0.75);
         assert_eq!(power_turret_unit_ammo(Some(0.5), 10.0), 5.0);
         assert!(power_turret_has_ammo());
+    }
+
+    #[test]
+    fn liquid_turret_prefers_fire_targets_before_normal_targets() {
+        assert_eq!(
+            liquid_turret_select_target(LiquidTurretTargeting {
+                extinguish: true,
+                can_extinguish: true,
+                fire_target: Some("fire"),
+                normal_target: Some("normal"),
+            }),
+            Some(LiquidTurretTarget::Fire("fire"))
+        );
+        assert_eq!(
+            liquid_turret_select_target(LiquidTurretTargeting {
+                extinguish: true,
+                can_extinguish: true,
+                fire_target: None,
+                normal_target: Some("normal"),
+            }),
+            Some(LiquidTurretTarget::Normal("normal"))
+        );
+        assert_eq!(
+            liquid_turret_select_target(LiquidTurretTargeting {
+                extinguish: false,
+                can_extinguish: false,
+                fire_target: Some("fire"),
+                normal_target: Some("normal"),
+            }),
+            Some(LiquidTurretTarget::Normal("normal"))
+        );
     }
 
     #[test]
