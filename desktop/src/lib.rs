@@ -3710,6 +3710,8 @@ pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+    pub texture_uploads_emitted: usize,
+    pub sprite_mesh_uploads_emitted: usize,
     pub shader_commands_emitted: usize,
     pub sprite_draw_calls_emitted: usize,
 }
@@ -4512,12 +4514,90 @@ impl DesktopGraphicsOpenGlBackendShaderCommandSink
 pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub resolved_texture_uploads: Vec<DesktopGraphicsOpenGlBackendResolvedTextureUpload>,
+    pub texture_upload_commands: Vec<DesktopGraphicsOpenGlBackendTextureUploadCommand>,
+    pub resolved_sprite_mesh_uploads: Vec<DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload>,
+    pub sprite_mesh_upload_commands: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand>,
     pub resolved_shader_commands: Vec<DesktopGraphicsOpenGlBackendResolvedShaderCommand>,
     pub resolved_draw_actions: Vec<DesktopGraphicsOpenGlBackendResolvedDrawCallAction>,
     pub draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
 }
 
 impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
+    pub fn consume_opengl_texture_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendTextureUploadPlan,
+    ) {
+        let texture_identity_key = upload.texture_identity.key.clone();
+        let texture_existed = upload.texture_identity.gl_handle.is_some()
+            || self.cache.textures.contains_key(&texture_identity_key);
+        let (previous_texture_handle, texture_handle) = if upload.recreate_texture {
+            self.cache
+                .replace_texture_handle(texture_identity_key, &mut self.allocator)
+        } else {
+            (
+                None,
+                self.cache
+                    .texture_handle_for_identity(&upload.texture_identity, &mut self.allocator),
+            )
+        };
+        let previous_texture_handle = previous_texture_handle
+            .or(upload.texture_identity.gl_handle)
+            .filter(|previous| *previous != texture_handle);
+        let resolved_upload = DesktopGraphicsOpenGlBackendResolvedTextureUpload {
+            texture_key: upload.texture_key,
+            texture_handle,
+            previous_texture_handle,
+            texture_was_allocated: upload.recreate_texture || !texture_existed,
+            resource_kind: upload.resource_kind,
+            page_type: upload.page_type,
+            page_source_path: upload.page_source_path,
+            page_width: upload.page_width,
+            page_height: upload.page_height,
+            sampler: upload.sampler,
+            generation: upload.generation,
+            recreate_texture: upload.recreate_texture,
+            dirty_pixels: upload.dirty_pixels,
+            kind: upload.kind,
+        };
+        self.texture_upload_commands
+            .extend(resolved_upload.to_opengl_texture_upload_commands());
+        self.resolved_texture_uploads.push(resolved_upload);
+    }
+
+    pub fn consume_opengl_sprite_mesh_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan,
+    ) {
+        let vertex_array_handle = self
+            .cache
+            .vertex_array_handle(upload.vertex_array_key.clone(), &mut self.allocator);
+        let vertex_buffer_handle = self
+            .cache
+            .buffer_handle(upload.vertex_buffer_key.clone(), &mut self.allocator);
+        let index_buffer_handle = self
+            .cache
+            .buffer_handle(upload.index_buffer_key.clone(), &mut self.allocator);
+        let resolved_upload = DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload {
+            batch_index: upload.batch_index,
+            vertex_array_key: upload.vertex_array_key,
+            vertex_array_handle,
+            vertex_buffer_key: upload.vertex_buffer_key,
+            vertex_buffer_handle,
+            index_buffer_key: upload.index_buffer_key,
+            index_buffer_handle,
+            vertex_count: upload.vertex_count,
+            index_count: upload.index_count,
+            vertex_stride_bytes: upload.vertex_stride_bytes,
+            vertex_attributes: upload.vertex_attributes,
+            vertex_bytes: upload.vertex_bytes,
+            index_bytes: upload.index_bytes,
+        };
+        self.sprite_mesh_upload_commands
+            .extend(resolved_upload.to_opengl_sprite_mesh_upload_commands());
+        self.resolved_sprite_mesh_uploads.push(resolved_upload);
+    }
+
     pub fn consume_opengl_shader_command(
         &mut self,
         command: DesktopGraphicsOpenGlBackendShaderCommand,
@@ -4554,6 +4634,30 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         self.resolved_shader_commands.len()
     }
 
+    pub fn drive_texture_upload_command_sink<
+        S: DesktopGraphicsOpenGlBackendTextureUploadCommandSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.texture_upload_commands {
+            sink.consume_opengl_texture_upload_command(command.clone());
+        }
+        self.texture_upload_commands.len()
+    }
+
+    pub fn drive_sprite_mesh_upload_command_sink<
+        S: DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.sprite_mesh_upload_commands {
+            sink.consume_opengl_sprite_mesh_upload_command(command.clone());
+        }
+        self.sprite_mesh_upload_commands.len()
+    }
+
     pub fn drive_draw_command_sink<S: DesktopGraphicsOpenGlBackendDrawCommandSink>(
         &self,
         sink: &mut S,
@@ -4562,6 +4666,28 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             sink.consume_opengl_draw_command(command.clone());
         }
         self.draw_commands.len()
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendTextureUploadSink
+    for DesktopGraphicsResolvingOpenGlBackendCommandExecutor
+{
+    fn consume_opengl_texture_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendTextureUploadPlan,
+    ) {
+        Self::consume_opengl_texture_upload(self, upload);
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshUploadSink
+    for DesktopGraphicsResolvingOpenGlBackendCommandExecutor
+{
+    fn consume_opengl_sprite_mesh_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan,
+    ) {
+        Self::consume_opengl_sprite_mesh_upload(self, upload);
     }
 }
 
@@ -5161,6 +5287,14 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         executor: &mut DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
     ) -> DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
         let mut state = DesktopGraphicsOpenGlBackendResolvedCommandExecutorState::default();
+        for upload in &self.sprite_texture_upload_plans {
+            executor.consume_opengl_texture_upload(upload.clone());
+            state.texture_uploads_emitted += 1;
+        }
+        for upload in &self.sprite_mesh_upload_plans {
+            executor.consume_opengl_sprite_mesh_upload(upload.clone());
+            state.sprite_mesh_uploads_emitted += 1;
+        }
         for command in &self.shader_commands {
             executor.consume_opengl_shader_command(command.clone());
             state.shader_commands_emitted += 1;
@@ -15373,6 +15507,8 @@ mod tests {
         assert_eq!(
             execution_state,
             super::DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+                texture_uploads_emitted: 0,
+                sprite_mesh_uploads_emitted: 0,
                 shader_commands_emitted: 2,
                 sprite_draw_calls_emitted: 1,
             }
@@ -15447,6 +15583,137 @@ mod tests {
             executor.draw_commands.len()
         );
         assert_eq!(draw_sink.commands, executor.draw_commands);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shared_command_executor_reuses_upload_mesh_and_draw_handles() {
+        let texture_identity =
+            super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                PageType::Main,
+                "sprites/shared.png",
+            );
+        let texture_upload = super::DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            texture_key: texture_identity.key.clone(),
+            texture_identity: texture_identity.clone(),
+            resource_kind: texture_identity.resource_kind.clone(),
+            page_type: PageType::Main,
+            page_source_path: "sprites/shared.png".into(),
+            page_width: 1,
+            page_height: 1,
+            sampler: super::DesktopGraphicsTextureSamplerTrace::Nearest,
+            generation: 1,
+            bind_count: 1,
+            recreate_texture: false,
+            dirty_pixels: Vec::new(),
+            kind: super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage,
+        };
+        let mesh_upload = super::DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan {
+            batch_index: 0,
+            vertex_array_key: "sprite-batch:0:vao".into(),
+            vertex_buffer_key: "sprite-batch:0:vbo".into(),
+            index_buffer_key: "sprite-batch:0:ibo".into(),
+            vertex_count: 1,
+            index_count: 1,
+            vertex_stride_bytes: 8,
+            vertex_attributes: vec![super::DesktopGraphicsOpenGlBackendVertexAttributePlan {
+                name: "a_position",
+                components: 2,
+                offset_bytes: 0,
+                packed_color: false,
+                attribute_location: Some(0),
+            }],
+            vertex_bytes: vec![0; 8],
+            index_bytes: vec![0; 4],
+        };
+        let draw_call = super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
+            batch_index: 0,
+            shader_program: super::DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(
+                ShaderId::Mesh,
+            ),
+            texture_identity: texture_identity.clone(),
+            vertex_array_key: "sprite-batch:0:vao".into(),
+            index_count: 1,
+            index_offset: 0,
+            primitive_type:
+                super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+        };
+        let state = super::DesktopGraphicsOpenGlBackendExecutorState {
+            sprite_texture_upload_plans: vec![texture_upload],
+            sprite_mesh_upload_plans: vec![mesh_upload],
+            sprite_draw_call_plans: vec![draw_call],
+            ..Default::default()
+        };
+        let mut executor = super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        let execution_state = state.drive_resolving_command_executor(&mut executor);
+        assert_eq!(
+            execution_state,
+            super::DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+                texture_uploads_emitted: 1,
+                sprite_mesh_uploads_emitted: 1,
+                shader_commands_emitted: 0,
+                sprite_draw_calls_emitted: 1,
+            }
+        );
+
+        assert_eq!(executor.cache.textures["atlas:Main:sprites/shared.png"], 1);
+        assert_eq!(executor.cache.vertex_arrays["sprite-batch:0:vao"], 2);
+        assert_eq!(executor.cache.buffers["sprite-batch:0:vbo"], 3);
+        assert_eq!(executor.cache.buffers["sprite-batch:0:ibo"], 4);
+        assert_eq!(executor.cache.programs["shader:Mesh"], 5);
+        assert_eq!(executor.resolved_texture_uploads[0].texture_handle, 1);
+        assert_eq!(
+            executor.resolved_sprite_mesh_uploads[0].vertex_array_handle,
+            2
+        );
+        assert_eq!(
+            executor.resolved_draw_actions,
+            vec![
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
+                    program_handle: 5,
+                    program_key: "shader:Mesh".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindTexture {
+                    texture_handle: 1,
+                    texture_key: "atlas:Main:sprites/shared.png".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindVertexArray {
+                    vertex_array_handle: 2,
+                    vertex_array_key: "sprite-batch:0:vao".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::DrawElements {
+                    primitive_type:
+                        super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                    index_count: 1,
+                    index_offset: 0,
+                },
+            ]
+        );
+        assert_eq!(
+            executor.texture_upload_commands[0],
+            super::DesktopGraphicsOpenGlBackendTextureUploadCommand::BindTexture {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: 1,
+            }
+        );
+        assert_eq!(
+            executor.sprite_mesh_upload_commands[0],
+            super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindVertexArray {
+                vertex_array_handle: 2,
+            }
+        );
+        assert_eq!(
+            executor.draw_commands[2],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: 1,
+            }
+        );
+        assert_eq!(
+            executor.draw_commands[3],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                vertex_array_handle: 2,
+            }
+        );
     }
 
     #[test]

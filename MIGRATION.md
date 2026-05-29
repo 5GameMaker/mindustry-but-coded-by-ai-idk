@@ -14247,3 +14247,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - attachment 尺寸/resize/generation 仍未接 surface size 与 pass target；
   - `ShaderBlit` / `DrawFboSample` 还没有统一消费 attachment 纹理并执行真实回填；
   - 当前总体迁移约 32.0%，仍未达到完整可玩。
+
+## 12.463 Texture/Mesh upload 纳入 shared backend handle state
+
+- 2026-05-29：继续把真实 OpenGL 后端状态边界向前收拢。当前 shared resolving executor 不再只合流 shader/draw，也能消费 texture upload plan 与 sprite mesh upload plan，并让 texture upload、mesh upload、draw call 共享同一个 handle cache。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendResolvedCommandExecutorState` 新增 texture upload / sprite mesh upload 计数；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 新增 `resolved_texture_uploads`、`texture_upload_commands`、`resolved_sprite_mesh_uploads`、`sprite_mesh_upload_commands`；
+    - shared executor 同时实现 `DesktopGraphicsOpenGlBackendTextureUploadSink` 与 `DesktopGraphicsOpenGlBackendSpriteMeshUploadSink`；
+    - `DesktopGraphicsOpenGlBackendExecutorState::drive_resolving_command_executor(...)` 驱动顺序扩展为 texture upload -> mesh upload -> shader command -> draw call；
+    - 新增 `desktop_graphics_opengl_shared_command_executor_reuses_upload_mesh_and_draw_handles`，确认 texture upload 分配的 texture handle 与 draw bind 复用同一 handle，mesh upload 分配的 VAO handle 与 draw bind 复用同一 handle。
+- 迁移意义：
+  - texture upload / mesh upload / shader apply / draw call 的 resolved 层开始合并到同一个 backend state；
+  - 后续真实 GL executor 可以按同一状态顺序消费 `glTexImage2D/glBufferData/glUseProgram/glBindTexture/glBindVertexArray/glDrawElements`；
+  - 继续保持 headless 测试可运行，没有引入外部 OpenGL crate。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shared_command --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - shared executor 仍是 resolved/recording 层，不执行真实 GL；
+  - shader/draw/mesh/upload 的驱动顺序仍是阶段聚合顺序，完整 frame event interleaving 后续需要在 real GL backend 中恢复；
+  - framebuffer attachment resize、resolve/present、window/context 仍未接入；
+  - 当前总体迁移约 32.1%，仍未达到完整可玩。

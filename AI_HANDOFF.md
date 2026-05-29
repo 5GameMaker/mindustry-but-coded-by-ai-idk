@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **32.0%**。
+- 当前总体迁移完成度：约 **32.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11577,3 +11577,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 接 `ShaderBlit` / `DrawFboSample` 对 attachment texture 的真实 resolve；
   3. 继续把 texture upload / mesh upload 纳入 shared real GL state；
   4. 准备 feature-gated real OpenGL backend。
+
+---
+
+## 369. 最新闭环记录：Texture/Mesh upload 纳入 shared backend handle state
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **32.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - shared resolving executor 新增 texture upload / sprite mesh upload resolved 结果与 command buffers；
+    - shared resolving executor 同时实现 texture upload sink、sprite mesh upload sink、shader command sink、sprite draw call sink；
+    - `drive_resolving_command_executor(...)` 现在按 texture upload -> mesh upload -> shader command -> draw call 顺序驱动；
+    - 测试 `desktop_graphics_opengl_shared_command_executor_reuses_upload_mesh_and_draw_handles` 锁定 upload/draw 共用 texture handle、mesh upload/draw 共用 VAO handle。
+- 关键语义：
+  - shared executor 已成为 texture / mesh / shader / draw 四条 resolved 流的共同 handle state；
+  - 仍然只是纯 Rust recording/resolving 层，尚不执行真实 GL；
+  - 后续真实 backend 应继续复用这个状态边界，而不是再拆独立 cache。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shared_command --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 做 feature-gated real OpenGL backend 前，先明确 window/context crate 方案；
+  2. 继续将 FBO attachment resize/generation 与 pass target 绑定；
+  3. 后续接真实 `glTexImage2D/glBufferData/glUseProgram/glDrawElements`。
