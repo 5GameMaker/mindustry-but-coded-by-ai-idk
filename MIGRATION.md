@@ -286,6 +286,7 @@ git -C "D:/MDT/rust-mindustry" checkout -- "core/src/mindustry/game/rules.rs"
 - `DesktopGraphicsLiveBackendRenderCommandSink` 必须消费完整 `RenderCommand` payload；`command_trace` 仍只作为审计摘要，不能反推真实 backend 输入。
 - 混合帧中的 backend 命令顺序已按 `execution_steps` 固定为 block particle render commands 先于 render pass commands，后续接 OpenGL backend 时不要让 trace 顺序与实际执行顺序分叉。
 - `DesktopGraphicsLiveBackendRenderTargetSink` 已记录每个 render pass 的 target `Begin/End` 生命周期，`RenderTarget::Screen` 对应默认 backbuffer，`Texture/Buffer` 对应后续 OpenGL FBO/离屏纹理路径；`RenderPass::resolve_target` 会显式生成 `Resolve` 事件，禁止对所有非 Screen target 自动推导回填。
+- `RenderResolveKind::{Blit, ShaderBlit, DrawRectSample, DrawFboSample}` 已用于区分 Java `effectBuffer.blit(shader)`、`Draw.rect(texture)`、`Draw.fbo(texture)` 等回填核；后续 CacheLayer 映射必须显式选择 kind。
 - 后续真实 backend 方向预期保持 OpenGL-compatible，倾向 `winit + glow` 组合。
 - 迁移时需要持续对齐原版 Java / Arc 的 GL 渲染语义，避免只做接口替换而丢失实际绘制行为。
 

@@ -40,8 +40,8 @@ use mindustry_core::mindustry::graphics::{
     OverlayRendererPlan, OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan,
     PixelatorInput, PixelatorState, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
     RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
-    RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderCamera, ShaderCatalog,
-    ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
+    RenderResolveKind, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderCamera,
+    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderViewport, TextureAtlasPlan,
     TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
@@ -374,6 +374,7 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub order: i32,
     pub target: RenderTarget,
     pub resolve_target: Option<RenderTarget>,
+    pub resolve_kind: Option<RenderResolveKind>,
     pub command_count: usize,
     pub commands: Vec<RenderCommand>,
     pub command_trace: Vec<DesktopGraphicsCommandExecutionTrace>,
@@ -465,6 +466,7 @@ pub struct DesktopGraphicsLiveBackendRenderTargetTrace {
     pub pass_order: i32,
     pub target: RenderTarget,
     pub resolve_target: Option<RenderTarget>,
+    pub resolve_kind: Option<RenderResolveKind>,
     pub event: DesktopGraphicsLiveBackendRenderTargetEventKind,
     pub command_count: usize,
 }
@@ -1003,6 +1005,7 @@ impl DesktopGraphicsExecutionTrace {
                                 order: pass.order,
                                 target: pass.target.clone(),
                                 resolve_target: pass.resolve_target.clone(),
+                                resolve_kind: pass.resolve_kind,
                                 command_count: pass.commands.len(),
                                 commands: pass.commands.clone(),
                                 command_trace,
@@ -1033,6 +1036,7 @@ impl DesktopGraphicsExecutionTrace {
                         pass_order: pass.order,
                         target: pass.target.clone(),
                         resolve_target: pass.resolve_target.clone(),
+                        resolve_kind: pass.resolve_kind,
                         event,
                         command_count: pass.command_count,
                     })
@@ -4345,9 +4349,9 @@ mod tests {
         LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput, MinimapCamera,
         MinimapOverlayInput, PageType, ParticleRendererState, RenderBlendMode, RenderBridge,
         RenderCamera, RenderCommand, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
-        RenderProperty, RenderRect, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
-        ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId,
-        TextureAtlasPlan, TileCoord,
+        RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
+        RenderViewport, ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame,
+        ShaderId, TextureAtlasPlan, TileCoord,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -7985,7 +7989,7 @@ mod tests {
         let mut resolved = RenderPass::new(RenderPassKind::Lighting)
             .with_order(8)
             .with_target(RenderTarget::Buffer("effect-buffer".into()))
-            .with_resolve_target(RenderTarget::Screen);
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::ShaderBlit);
         resolved.push(RenderCommand::custom(
             "shader-blit-placeholder",
             vec![RenderProperty::new("shader", "shield")],
@@ -8021,6 +8025,7 @@ mod tests {
                 pass_order: 8,
                 target: RenderTarget::Buffer("effect-buffer".into()),
                 resolve_target: Some(RenderTarget::Screen),
+                resolve_kind: Some(RenderResolveKind::ShaderBlit),
                 event: DesktopGraphicsLiveBackendRenderTargetEventKind::Resolve,
                 command_count: 1,
             }]

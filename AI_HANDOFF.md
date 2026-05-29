@@ -9647,3 +9647,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 增加 `ResolveKind`（例如 `ShaderBlit` / `DrawRectSample` / `DrawFboSample`）以区分 Java 三类回填核；
   2. 将 CacheLayer 的 `target/blit_target/needs_fbo` 映射到 `RenderPass.resolve_target + ResolveKind`；
   3. 继续推进 TextureAtlas GPU upload / ShaderCatalog compile-bind，为真实 OpenGL backend 做准备。
+
+---
+
+## 293. 最新闭环记录：RenderResolveKind 区分 Java 回填核
+
+- 本轮总体进度更新：约 **24.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderResolveKind::{Blit, ShaderBlit, DrawRectSample, DrawFboSample}`；
+    - `RenderResolveKind::label()` 提供稳定 backend/debug 标签；
+    - `RenderPass` 新增 `resolve_kind: Option<RenderResolveKind>`；
+    - `with_resolve_target(...)` 作为通用兜底，默认 `Some(RenderResolveKind::Blit)`；
+    - 新增 `with_resolve(target, kind)`，用于显式表达 Java 语义回填核；
+    - 新增测试覆盖默认 `None`、兜底 `Blit`、以及 Java 专用 kind 标签。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsPassExecutionTrace` 与 `DesktopGraphicsLiveBackendRenderTargetTrace` 透传 `resolve_kind`；
+    - `desktop_graphics_render_target_sink_resolves_only_explicit_targets` 改为验证 `ShaderBlit` 透传，并继续确认非 Screen target 不会自动 resolve。
+  - `README.md` / `MIGRATION.md`
+    - 总体完成度更新到 **24.4%**；
+    - 记录 ResolveKind 与 Java `effectBuffer.blit(shader)` / `Draw.rect(texture)` / `Draw.fbo(texture)` 的映射。
+- Java 对照要点：
+  - `RenderResolveKind::ShaderBlit`：`Renderer.effectBuffer.blit(shader)` 与 `CacheLayer.ShaderLayer.end()`；
+  - `RenderResolveKind::DrawRectSample`：`BlockRenderer.drawShadows()` 的 `Draw.rect(texture)`；
+  - `RenderResolveKind::DrawFboSample`：`BlockRenderer.drawDarkness()` 的 `Draw.fbo(texture)`；
+  - `RenderResolveKind::Blit`：通用兜底，不能替代 Java 专用路径。
+- 已验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core render_resolve -- --nocapture`
+  - `cargo test -p mindustry-core render_pass_resolve -- --nocapture`
+  - `cargo test -p mindustry-desktop render_target -- --nocapture`
+  - `cargo test -p mindustry-desktop`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 将 `CacheLayerPassMetadata::{target, blit_target, blend_hint}` 显式映射成 `RenderPass::with_resolve(..., RenderResolveKind::ShaderBlit)`；
+  2. 补 `shadows/dark` 对应的 `DrawRectSample` / `DrawFboSample` pass plan；
+  3. 继续准备真实 OpenGL/glow backend，但新增依赖前必须确认。

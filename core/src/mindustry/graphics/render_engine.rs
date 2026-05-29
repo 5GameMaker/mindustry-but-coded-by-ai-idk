@@ -235,6 +235,25 @@ impl Default for RenderTarget {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderResolveKind {
+    Blit,
+    ShaderBlit,
+    DrawRectSample,
+    DrawFboSample,
+}
+
+impl RenderResolveKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Blit => "blit",
+            Self::ShaderBlit => "shader_blit",
+            Self::DrawRectSample => "draw_rect_sample",
+            Self::DrawFboSample => "draw_fbo_sample",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderProperty {
     pub key: String,
@@ -655,6 +674,7 @@ pub struct RenderPass {
     pub order: i32,
     pub target: RenderTarget,
     pub resolve_target: Option<RenderTarget>,
+    pub resolve_kind: Option<RenderResolveKind>,
     pub viewport: Option<RenderViewport>,
     pub camera: Option<RenderCamera>,
     pub commands: Vec<RenderCommand>,
@@ -668,6 +688,7 @@ impl RenderPass {
             order,
             target: RenderTarget::default(),
             resolve_target: None,
+            resolve_kind: None,
             viewport: None,
             camera: None,
             commands: Vec::new(),
@@ -686,6 +707,13 @@ impl RenderPass {
 
     pub fn with_resolve_target(mut self, target: RenderTarget) -> Self {
         self.resolve_target = Some(target);
+        self.resolve_kind = Some(RenderResolveKind::Blit);
+        self
+    }
+
+    pub fn with_resolve(mut self, target: RenderTarget, kind: RenderResolveKind) -> Self {
+        self.resolve_target = Some(target);
+        self.resolve_kind = Some(kind);
         self
     }
 
@@ -1153,6 +1181,7 @@ mod tests {
         assert_eq!(pass.order, 123);
         assert_eq!(pass.target, RenderTarget::Buffer("overlay".into()));
         assert_eq!(pass.resolve_target, None);
+        assert_eq!(pass.resolve_kind, None);
         assert_eq!(
             pass.effective_viewport(RenderViewport::default()),
             clip.into()
@@ -1235,6 +1264,25 @@ mod tests {
 
         assert_eq!(pass.target, RenderTarget::Texture("effect-buffer".into()));
         assert_eq!(pass.resolve_target, Some(RenderTarget::Screen));
+        assert_eq!(pass.resolve_kind, Some(RenderResolveKind::Blit));
+    }
+
+    #[test]
+    fn render_resolve_kind_labels_cover_java_fbo_resolve_paths() {
+        assert_eq!(RenderResolveKind::Blit.label(), "blit");
+        assert_eq!(RenderResolveKind::ShaderBlit.label(), "shader_blit");
+        assert_eq!(
+            RenderResolveKind::DrawRectSample.label(),
+            "draw_rect_sample"
+        );
+        assert_eq!(RenderResolveKind::DrawFboSample.label(), "draw_fbo_sample");
+
+        let pass = RenderPass::new(RenderPassKind::Overlay)
+            .with_target(RenderTarget::Buffer("dark".into()))
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawFboSample);
+
+        assert_eq!(pass.resolve_target, Some(RenderTarget::Screen));
+        assert_eq!(pass.resolve_kind, Some(RenderResolveKind::DrawFboSample));
     }
 
     #[test]
