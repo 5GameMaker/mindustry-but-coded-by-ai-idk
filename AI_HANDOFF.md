@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **28.6%**。
+- 当前总体迁移完成度：约 **28.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10688,3 +10688,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续补 Arc `Draw.rect` 的 origin/pivot 语义；
   2. 再推进真实 GL buffer handle/resource table；
   3. 后续补完整排序/packed color/shader identity。
+
+---
+
+## 336. 最新闭环记录：DrawSprite origin/pivot 语义
+
+- 本轮总体进度更新：约 **28.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderRect` 新增 `center_origin()`；
+    - `RenderCommand::DrawSprite` 新增 `origin: RenderPoint`；
+    - `draw_sprite(...)` / `draw_sprite_mixed(...)` 默认使用中心 origin；
+    - 新增 `draw_sprite_with_origin(...)` / `draw_sprite_mixed_with_origin(...)`。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite` 与 `DesktopGraphicsOpenGlBackendSpriteQuad` 透传 origin；
+    - `opengl_backend_sprite_quad_positions(...)` 按 `rect.x + origin.x`、`rect.y + origin.y` 计算 Java/Arc 风格 pivot；
+    - 新增回归测试覆盖中心 pivot 兼容与左下角非中心 pivot。
+- 已验证：
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 对齐 Arc SpriteBatch 的顶点/UV 顺序与 triangle index 顺序；
+  2. 推进 packed color / packed mixColor 与 shader attribute layout；
+  3. 再把 texture binding 映射到真实 GL texture handle/resource table。

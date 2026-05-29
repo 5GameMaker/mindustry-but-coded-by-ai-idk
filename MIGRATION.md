@@ -13385,7 +13385,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop`
 - 仍未完成：
   - 尚未创建真实 VBO/IBO/VAO；
-  - Arc SpriteBatch 的 `mixColor`、origin/pivot 与更完整排序语义仍待补齐；
+  - Arc SpriteBatch 的 origin/pivot 与更完整排序语义仍待补齐，`mixColor` 已在下一节完成；
   - texture handle、shader binding 与 draw call 仍待落地；
   - 当前总体迁移约 28.5%，仍未达到完整可玩。
 
@@ -13413,5 +13413,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop`
 - 仍未完成：
   - `Draw.mixcol(...)` 形式的全局 batch 状态尚未迁移为 render command/state；
-  - origin/pivot、packed color、shader identity 与真实 GL attribute binding 仍待落地；
+  - packed color、shader identity 与真实 GL attribute binding 仍待落地，origin/pivot 已在下一节继续补齐；
   - 当前总体迁移约 28.6%，仍未达到完整可玩。
+
+## 12.430 DrawSprite origin/pivot 语义
+
+- 2026-05-29：根据 Java/Arc `Draw.rect(region, x, y, w, h, originX, originY, rotation)` 与 `SpriteBatch.constructVertices(...)` 语义，补齐 sprite 的显式旋转锚点。Arc 的 `originX/originY` 是相对未旋转 quad 左下角的局部偏移，旧 Rust 只按 `rect.center()` 旋转，无法表达非中心 pivot。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderRect` 新增 `center_origin()`，用于旧调用默认中心 pivot；
+    - `RenderCommand::DrawSprite` 新增 `origin: RenderPoint`；
+    - `RenderCommand::draw_sprite(...)` 与 `draw_sprite_mixed(...)` 默认写入中心 origin，保持旧调用兼容；
+    - 新增 `draw_sprite_with_origin(...)` 与 `draw_sprite_mixed_with_origin(...)`，用于表达 Java/Arc 显式 pivot。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite` 保留 origin；
+    - `DesktopGraphicsOpenGlBackendSpriteQuad` 保留 origin 以便后续 GL/debug 链路追踪；
+    - `DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(...)` 与 `opengl_backend_sprite_quad_positions(...)` 改为按 `rect.x + origin.x / rect.y + origin.y` 计算旋转 pivot；
+    - executor 与 classifying adapter 在 `DrawSprite` action 进入 texture binding / quad 生成时同步透传 origin。
+- 迁移意义：
+  - `DrawSprite` 不再只能表达中心旋转，开始覆盖 Arc/Mindustry 中 `RegionPart`、`Drawf` 等路径依赖的显式 pivot；
+  - 继续保持 `DrawSprite -> resolved atlas -> texture binding -> quad -> mesh batch -> buffer plan` 主链路，不引入独立渲染旁路；
+  - 为后续对齐 Arc 顶点顺序、packed color、texture handle 与真实 GL draw call 保留可验证输入。
+- 已跑验证：
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - Arc SpriteBatch 的 packed color / packed mixColor、顶点/UV 顺序和 index 顺序仍待进一步对齐；
+  - 真实 GPU texture handle、VBO/IBO/VAO、shader program binding 与 draw call 仍待落地；
+  - 当前总体迁移约 28.7%，仍未达到完整可玩。

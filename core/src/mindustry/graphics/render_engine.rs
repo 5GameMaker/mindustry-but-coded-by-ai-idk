@@ -68,6 +68,10 @@ impl RenderRect {
         RenderPoint::new(self.x + self.width / 2.0, self.y + self.height / 2.0)
     }
 
+    pub fn center_origin(self) -> RenderPoint {
+        RenderPoint::new(self.width / 2.0, self.height / 2.0)
+    }
+
     pub fn contains_point(self, point: RenderPoint) -> bool {
         point.x >= self.x
             && point.x <= self.right()
@@ -426,6 +430,7 @@ pub enum RenderCommand {
     DrawSprite {
         symbol: String,
         rect: RenderRect,
+        origin: RenderPoint,
         tint: [f32; 4],
         mix_color: [f32; 4],
         rotation: f32,
@@ -513,9 +518,21 @@ impl RenderCommand {
         rotation: f32,
         layer: f32,
     ) -> Self {
+        Self::draw_sprite_with_origin(symbol, rect, rect.center_origin(), tint, rotation, layer)
+    }
+
+    pub fn draw_sprite_with_origin(
+        symbol: impl Into<String>,
+        rect: RenderRect,
+        origin: RenderPoint,
+        tint: [f32; 4],
+        rotation: f32,
+        layer: f32,
+    ) -> Self {
         Self::DrawSprite {
             symbol: symbol.into(),
             rect,
+            origin,
             tint,
             mix_color: [0.0, 0.0, 0.0, 0.0],
             rotation,
@@ -531,9 +548,30 @@ impl RenderCommand {
         rotation: f32,
         layer: f32,
     ) -> Self {
+        Self::draw_sprite_mixed_with_origin(
+            symbol,
+            rect,
+            rect.center_origin(),
+            tint,
+            mix_color,
+            rotation,
+            layer,
+        )
+    }
+
+    pub fn draw_sprite_mixed_with_origin(
+        symbol: impl Into<String>,
+        rect: RenderRect,
+        origin: RenderPoint,
+        tint: [f32; 4],
+        mix_color: [f32; 4],
+        rotation: f32,
+        layer: f32,
+    ) -> Self {
         Self::DrawSprite {
             symbol: symbol.into(),
             rect,
+            origin,
             tint,
             mix_color,
             rotation,
@@ -1548,6 +1586,7 @@ mod tests {
             RenderCommand::DrawSprite {
                 symbol,
                 rect: sprite_rect,
+                origin,
                 tint,
                 mix_color,
                 rotation,
@@ -1555,6 +1594,7 @@ mod tests {
             } => {
                 assert_eq!(symbol, "overlay-icon");
                 assert_eq!(sprite_rect, rect);
+                assert_eq!(origin, RenderPoint::new(4.0, 8.0));
                 assert_eq!(tint, [1.0, 0.5, 0.25, 0.75]);
                 assert_eq!(mix_color, [0.0, 0.0, 0.0, 0.0]);
                 assert_eq!(rotation, 90.0);
@@ -1576,6 +1616,21 @@ mod tests {
                 assert_eq!(mix_color, [0.2, 0.3, 0.4, 0.5]);
             }
             other => panic!("unexpected mixed sprite command: {other:?}"),
+        }
+
+        let pivoted_sprite = RenderCommand::draw_sprite_with_origin(
+            "pivot-icon",
+            rect,
+            RenderPoint::new(1.0, 2.0),
+            [1.0, 1.0, 1.0, 1.0],
+            45.0,
+            32.0,
+        );
+        match pivoted_sprite {
+            RenderCommand::DrawSprite { origin, .. } => {
+                assert_eq!(origin, RenderPoint::new(1.0, 2.0));
+            }
+            other => panic!("unexpected pivoted sprite command: {other:?}"),
         }
 
         match text {

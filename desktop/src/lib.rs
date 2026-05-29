@@ -502,6 +502,7 @@ pub struct DesktopGraphicsOpenGlBackendSpriteQuad {
     pub page_source_path: String,
     pub sampler: DesktopGraphicsTextureSamplerTrace,
     pub layer: f32,
+    pub origin: RenderPoint,
     pub rotation: f32,
     pub vertices: [DesktopGraphicsOpenGlBackendSpriteVertex; 4],
 }
@@ -513,13 +514,14 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
         blend_state: DesktopGraphicsOpenGlBackendBlendState,
         clip: Option<RenderRect>,
         rect: RenderRect,
+        origin: RenderPoint,
         tint: [f32; 4],
         mix_color: [f32; 4],
         rotation: f32,
         layer: f32,
     ) -> Self {
         let [u, v, u2, v2] = binding.uv;
-        let positions = opengl_backend_sprite_quad_positions(rect, rotation);
+        let positions = opengl_backend_sprite_quad_positions(rect, origin, rotation);
         Self {
             command_index: binding.command_index,
             symbol: binding.symbol.clone(),
@@ -529,6 +531,7 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
             page_source_path: binding.page_source_path.clone(),
             sampler: binding.sampler,
             layer,
+            origin,
             rotation,
             vertices: [
                 DesktopGraphicsOpenGlBackendSpriteVertex {
@@ -663,7 +666,11 @@ fn opengl_backend_sprite_mesh_batches_from_quads(
     batches
 }
 
-fn opengl_backend_sprite_quad_positions(rect: RenderRect, rotation: f32) -> [RenderPoint; 4] {
+fn opengl_backend_sprite_quad_positions(
+    rect: RenderRect,
+    origin: RenderPoint,
+    rotation: f32,
+) -> [RenderPoint; 4] {
     let positions = [
         RenderPoint::new(rect.x, rect.y),
         RenderPoint::new(rect.right(), rect.y),
@@ -673,16 +680,13 @@ fn opengl_backend_sprite_quad_positions(rect: RenderRect, rotation: f32) -> [Ren
     if rotation.abs() <= f32::EPSILON {
         return positions;
     }
-    let center = rect.center();
+    let pivot = RenderPoint::new(rect.x + origin.x, rect.y + origin.y);
     let radians = rotation.to_radians();
     let (sin, cos) = radians.sin_cos();
     positions.map(|point| {
-        let dx = point.x - center.x;
-        let dy = point.y - center.y;
-        RenderPoint::new(
-            center.x + dx * cos - dy * sin,
-            center.y + dx * sin + dy * cos,
-        )
+        let dx = point.x - pivot.x;
+        let dy = point.y - pivot.y;
+        RenderPoint::new(pivot.x + dx * cos - dy * sin, pivot.y + dx * sin + dy * cos)
     })
 }
 
@@ -1253,6 +1257,7 @@ pub enum DesktopGraphicsOpenGlBackendAdapterAction {
         symbol: String,
         resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
         rect: RenderRect,
+        origin: RenderPoint,
         tint: [f32; 4],
         mix_color: [f32; 4],
         rotation: f32,
@@ -1472,6 +1477,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                 {
                     if let DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
                         rect,
+                        origin,
                         tint,
                         mix_color,
                         rotation,
@@ -1486,6 +1492,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                                 self.state.current_blend_state,
                                 self.state.current_clip,
                                 *rect,
+                                *origin,
                                 *tint,
                                 *mix_color,
                                 *rotation,
@@ -1534,6 +1541,7 @@ fn opengl_backend_adapter_action_from_render_command(
         RenderCommand::DrawSprite {
             symbol,
             rect,
+            origin,
             tint,
             mix_color,
             rotation,
@@ -1542,6 +1550,7 @@ fn opengl_backend_adapter_action_from_render_command(
             symbol: symbol.clone(),
             resolved_sprite,
             rect: *rect,
+            origin: *origin,
             tint: *tint,
             mix_color: *mix_color,
             rotation: *rotation,
@@ -1779,6 +1788,7 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                 {
                     if let DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
                         rect,
+                        origin,
                         tint,
                         mix_color,
                         rotation,
@@ -1793,6 +1803,7 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                                 self.state.current_blend_state,
                                 self.state.current_clip,
                                 *rect,
+                                *origin,
                                 *tint,
                                 *mix_color,
                                 *rotation,
@@ -9392,6 +9403,90 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_sprite_quad_respects_draw_sprite_origin() {
+        fn assert_points_close(actual: &[RenderPoint], expected: &[RenderPoint]) {
+            assert_eq!(actual.len(), expected.len());
+            for (actual, expected) in actual.iter().zip(expected.iter()) {
+                assert!(
+                    (actual.x - expected.x).abs() < 0.0001
+                        && (actual.y - expected.y).abs() < 0.0001,
+                    "expected point {expected:?}, got {actual:?}"
+                );
+            }
+        }
+
+        let binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
+            command_index: Some(7),
+            symbol: "pivot-router".into(),
+            page_type: PageType::Main,
+            page_source_path: "sprites.png".into(),
+            page_width: 64,
+            page_height: 64,
+            sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+            uv: [0.0, 0.0, 0.25, 0.25],
+            region_width: 16,
+            region_height: 16,
+        };
+        let rect = RenderRect::new(8.0, 8.0, 16.0, 16.0);
+
+        let center_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            &binding,
+            Some(RenderTarget::Screen),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            rect,
+            rect.center_origin(),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            90.0,
+            Layer::BLOCK,
+        );
+        assert_eq!(center_quad.origin, RenderPoint::new(8.0, 8.0));
+        let center_positions = center_quad
+            .vertices
+            .iter()
+            .map(|vertex| vertex.position)
+            .collect::<Vec<_>>();
+        assert_points_close(
+            &center_positions,
+            &[
+                RenderPoint::new(24.0, 8.0),
+                RenderPoint::new(24.0, 24.0),
+                RenderPoint::new(8.0, 24.0),
+                RenderPoint::new(8.0, 8.0),
+            ],
+        );
+
+        let lower_left_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            &binding,
+            Some(RenderTarget::Screen),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            rect,
+            RenderPoint::new(0.0, 0.0),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            90.0,
+            Layer::BLOCK,
+        );
+        assert_eq!(lower_left_quad.origin, RenderPoint::new(0.0, 0.0));
+        let lower_left_positions = lower_left_quad
+            .vertices
+            .iter()
+            .map(|vertex| vertex.position)
+            .collect::<Vec<_>>();
+        assert_points_close(
+            &lower_left_positions,
+            &[
+                RenderPoint::new(8.0, 8.0),
+                RenderPoint::new(8.0, 24.0),
+                RenderPoint::new(-8.0, 24.0),
+                RenderPoint::new(-8.0, 8.0),
+            ],
+        );
+    }
+
+    #[test]
     fn desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps() {
         let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
         let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
@@ -9581,6 +9676,10 @@ mod tests {
             "sprites.png"
         );
         assert_eq!(executor.state.sprite_quads[0].layer, 8.0);
+        assert_eq!(
+            executor.state.sprite_quads[0].origin,
+            RenderPoint::new(8.0, 8.0)
+        );
         assert_eq!(
             executor.state.sprite_quads[0]
                 .vertices
