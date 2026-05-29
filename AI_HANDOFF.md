@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **29.8%**。
+- 当前总体迁移完成度：约 **29.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10921,3 +10921,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 连接真实 GL context / handle cache；
   2. 把 uniform/attribute/texture unit location 加入 action 序列；
   3. 推进真实 draw executor。
+
+---
+
+## 348. 最新闭环记录：Draw call handle cache / resolved action
+
+- 本轮总体进度更新：约 **29.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolvedDrawCallAction`；
+    - 新增 `DesktopGraphicsOpenGlBackendHandleAllocator`；
+    - 新增 `DesktopGraphicsOpenGlBackendHandleCache`；
+    - 新增 `DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor`；
+    - resolving executor 将 `UseProgram/BindTexture/BindVertexArray/DrawElements` 解析为带模拟 handle 的动作；
+    - 测试验证 program/texture/VAO handle 稳定分配。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 把 uniform/attribute location 纳入 resolved action；
+  2. 后续把模拟 handle cache 替换/连接真实 GL context；
+  3. 继续推进 texture upload/cache。

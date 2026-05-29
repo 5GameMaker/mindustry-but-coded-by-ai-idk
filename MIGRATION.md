@@ -13691,6 +13691,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 已跑验证：
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
-  - recording executor 尚未持有真实 GL context；
+  - resolving draw call executor / handle cache 已在下一节补齐，recording executor 尚未持有真实 GL context；
   - 真实 handle 分配、texture cache、uniform/attribute location 仍待连接；
   - 当前总体迁移约 29.8%，仍未达到完整可玩。
+
+## 12.442 Draw call handle cache / resolved action
+
+- 2026-05-29：在 draw call action 序列之后继续补 handle cache 与 resolved action。当前仍不依赖真实 GL context，但可以把 program/texture/VAO key 映射为稳定的模拟 handle，形成真实 GL 调用前的句柄解析层。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolvedDrawCallAction`；
+    - 新增 `DesktopGraphicsOpenGlBackendHandleAllocator`；
+    - 新增 `DesktopGraphicsOpenGlBackendHandleCache`，分别维护 program / texture / vertex array key 到 handle 的映射；
+    - `HandleCache::resolve_action(...)` 将 `UseProgram/BindTexture/BindVertexArray/DrawElements` 解析为带 handle 的 action；
+    - 新增 `DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor`，实现 `DesktopGraphicsOpenGlBackendSpriteDrawCallSink`；
+    - resolving executor 复用 recording action 序列，再通过 handle cache 生成 resolved action；
+    - 回归测试验证 `shader:Mesh`、`atlas:Main:sprites.png`、`sprite-batch:0:vao` 分别获得稳定 handle，并生成 resolved `DrawElements`。
+- 迁移意义：
+  - draw call pipeline 从“字符串 key action”推进到“已解析 handle action”；
+  - 后续接真实 GL context 时，可以把 allocator/cache 替换为真实 `glCreateProgram/glGenTextures/glGenVertexArrays` 结果；
+  - 为 texture cache、shader program cache 与 mesh resource table 的统一 handle 生命周期打基础。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - handle 仍为模拟分配，不是 GL context 返回值；
+  - uniform/attribute location 与 texture upload 尚未真实连接；
+  - 当前总体迁移约 29.9%，仍未达到完整可玩。

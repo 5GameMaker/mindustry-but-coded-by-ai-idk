@@ -1770,6 +1770,154 @@ impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
+    UseProgram {
+        program_handle: u32,
+        program_key: String,
+    },
+    BindTexture {
+        texture_handle: u32,
+        texture_key: String,
+    },
+    BindVertexArray {
+        vertex_array_handle: u32,
+        vertex_array_key: String,
+    },
+    DrawElements {
+        primitive_type: u32,
+        index_count: usize,
+        index_offset: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendHandleAllocator {
+    pub next_handle: u32,
+}
+
+impl Default for DesktopGraphicsOpenGlBackendHandleAllocator {
+    fn default() -> Self {
+        Self { next_handle: 1 }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendHandleAllocator {
+    pub fn allocate(&mut self) -> u32 {
+        let handle = self.next_handle;
+        self.next_handle += 1;
+        handle
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendHandleCache {
+    pub programs: BTreeMap<String, u32>,
+    pub textures: BTreeMap<String, u32>,
+    pub vertex_arrays: BTreeMap<String, u32>,
+}
+
+impl DesktopGraphicsOpenGlBackendHandleCache {
+    pub fn program_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> u32 {
+        let key = key.into();
+        *self
+            .programs
+            .entry(key)
+            .or_insert_with(|| allocator.allocate())
+    }
+
+    pub fn texture_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> u32 {
+        let key = key.into();
+        *self
+            .textures
+            .entry(key)
+            .or_insert_with(|| allocator.allocate())
+    }
+
+    pub fn vertex_array_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> u32 {
+        let key = key.into();
+        *self
+            .vertex_arrays
+            .entry(key)
+            .or_insert_with(|| allocator.allocate())
+    }
+
+    pub fn resolve_action(
+        &mut self,
+        action: DesktopGraphicsOpenGlBackendDrawCallAction,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
+        match action {
+            DesktopGraphicsOpenGlBackendDrawCallAction::UseProgram { program_key } => {
+                let program_handle = self.program_handle(program_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
+                    program_handle,
+                    program_key,
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture { texture_key } => {
+                let texture_handle = self.texture_handle(texture_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindTexture {
+                    texture_handle,
+                    texture_key,
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCallAction::BindVertexArray { vertex_array_key } => {
+                let vertex_array_handle =
+                    self.vertex_array_handle(vertex_array_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindVertexArray {
+                    vertex_array_handle,
+                    vertex_array_key,
+                }
+            }
+            DesktopGraphicsOpenGlBackendDrawCallAction::DrawElements {
+                primitive_type,
+                index_count,
+                index_offset,
+            } => DesktopGraphicsOpenGlBackendResolvedDrawCallAction::DrawElements {
+                primitive_type,
+                index_count,
+                index_offset,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor {
+    pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub actions: Vec<DesktopGraphicsOpenGlBackendResolvedDrawCallAction>,
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
+    for DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor
+{
+    fn consume_opengl_sprite_draw_call(
+        &mut self,
+        draw_call: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan,
+    ) {
+        let mut recording = DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor::default();
+        recording.consume_opengl_sprite_draw_call(draw_call);
+        for action in recording.actions {
+            self.actions
+                .push(self.cache.resolve_action(action, &mut self.allocator));
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub events_received: usize,
@@ -10527,6 +10675,42 @@ mod tests {
                     vertex_array_key: "sprite-batch:0:vao".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendDrawCallAction::DrawElements {
+                    primitive_type:
+                        super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                    index_count: 6,
+                    index_offset: 0,
+                },
+            ]
+        );
+        let mut resolving_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor::default();
+        let resolving_state = executor.drive_sprite_draw_call_sink(&mut resolving_executor);
+        assert_eq!(resolving_state.draw_calls_emitted, 1);
+        assert_eq!(resolving_executor.cache.programs["shader:Mesh"], 1);
+        assert_eq!(
+            resolving_executor.cache.textures["atlas:Main:sprites.png"],
+            2
+        );
+        assert_eq!(
+            resolving_executor.cache.vertex_arrays["sprite-batch:0:vao"],
+            3
+        );
+        assert_eq!(
+            resolving_executor.actions,
+            vec![
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
+                    program_handle: 1,
+                    program_key: "shader:Mesh".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindTexture {
+                    texture_handle: 2,
+                    texture_key: "atlas:Main:sprites.png".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindVertexArray {
+                    vertex_array_handle: 3,
+                    vertex_array_key: "sprite-batch:0:vao".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::DrawElements {
                     primitive_type:
                         super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
                     index_count: 6,
