@@ -267,6 +267,7 @@ impl Default for TilePassPlan {
 pub struct BuildingDrawPlan {
     pub coord: TileCoord,
     pub block: String,
+    pub block_build_regions: Vec<String>,
     pub drawer: String,
     pub build_id_seed: i32,
     pub cache_layer: CacheLayer,
@@ -289,6 +290,7 @@ impl Default for BuildingDrawPlan {
         Self {
             coord: TileCoord::default(),
             block: String::new(),
+            block_build_regions: Vec::new(),
             drawer: String::new(),
             build_id_seed: point2_pack(0, 0),
             cache_layer: CacheLayer::None,
@@ -318,6 +320,7 @@ impl BuildingDrawPlan {
 pub struct BlockRendererBuildingSnapshot {
     pub coord: TileCoord,
     pub block: String,
+    pub block_build_regions: Vec<String>,
     pub drawer: String,
     pub build_id_seed: i32,
     pub cache_layer: CacheLayer,
@@ -374,6 +377,7 @@ impl BlockRendererBuildingSnapshot {
         Self {
             coord,
             block: block.into(),
+            block_build_regions: Vec::new(),
             drawer: String::new(),
             build_id_seed: point2_pack(coord.x, coord.y),
             cache_layer: CacheLayer::None,
@@ -408,6 +412,7 @@ impl BlockRendererBuildingSnapshot {
         BuildingDrawPlan {
             coord: self.coord,
             block: self.block.clone(),
+            block_build_regions: self.block_build_regions.clone(),
             drawer: self.drawer.clone(),
             build_id_seed: self.build_id_seed,
             cache_layer: self.cache_layer,
@@ -1144,6 +1149,7 @@ pub struct BlockBuildPlan {
     pub coord: TileCoord,
     pub block: String,
     pub region: String,
+    pub regions: Vec<String>,
     pub size: u8,
     pub rotation: i16,
     pub progress: f32,
@@ -1158,11 +1164,17 @@ impl BlockBuildPlan {
         if building.block.is_empty() {
             return None;
         }
+        let regions = normalize_block_build_regions(&building.block_build_regions, &building.block);
+        let region = regions
+            .first()
+            .cloned()
+            .unwrap_or_else(|| building.block.clone());
 
         Some(Self {
             coord: building.coord,
             block: building.block.clone(),
-            region: building.block.clone(),
+            region,
+            regions,
             size: building.size.max(1),
             rotation: building.rotation,
             progress: normalize_unit_fraction(progress),
@@ -1192,6 +1204,15 @@ impl BlockBuildPlan {
         tile_size_world: f32,
         time: f32,
     ) -> Option<RenderCommand> {
+        self.shader_command_with_region_and_time(tile_size_world, &self.region, time)
+    }
+
+    pub fn shader_command_with_region_and_time(
+        &self,
+        tile_size_world: f32,
+        region: &str,
+        time: f32,
+    ) -> Option<RenderCommand> {
         let rect = self.rect(tile_size_world)?;
         Some(RenderCommand::custom(
             "blockbuild-shader",
@@ -1199,7 +1220,7 @@ impl BlockBuildPlan {
                 RenderProperty::new("shader", "blockbuild"),
                 RenderProperty::new("source", "BuildingDrawPlan.visual_runtime"),
                 RenderProperty::new("block", self.block.clone()),
-                RenderProperty::new("region", self.region.clone()),
+                RenderProperty::new("region", region.to_string()),
                 RenderProperty::new("tile_x", self.coord.x.to_string()),
                 RenderProperty::new("tile_y", self.coord.y.to_string()),
                 RenderProperty::new("x", rect.x.to_string()),
@@ -1219,8 +1240,16 @@ impl BlockBuildPlan {
     }
 
     pub fn draw_command(&self, tile_size_world: f32) -> Option<RenderCommand> {
+        self.draw_command_with_region(tile_size_world, &self.region)
+    }
+
+    pub fn draw_command_with_region(
+        &self,
+        tile_size_world: f32,
+        region: &str,
+    ) -> Option<RenderCommand> {
         Some(RenderCommand::draw_sprite(
-            self.region.clone(),
+            region.to_string(),
             self.rect(tile_size_world)?,
             SPRITE_TINT_WHITE,
             building_rotation_degrees(self.rotation),
@@ -1234,11 +1263,15 @@ impl BlockBuildPlan {
 
     pub fn render_commands_with_time(&self, tile_size_world: f32, time: f32) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
-        if let Some(command) = self.shader_command_with_time(tile_size_world, time) {
-            commands.push(command);
-        }
-        if let Some(command) = self.draw_command(tile_size_world) {
-            commands.push(command);
+        for region in normalize_block_build_regions(&self.regions, &self.region) {
+            if let Some(command) =
+                self.shader_command_with_region_and_time(tile_size_world, &region, time)
+            {
+                commands.push(command);
+            }
+            if let Some(command) = self.draw_command_with_region(tile_size_world, &region) {
+                commands.push(command);
+            }
         }
         commands
     }
@@ -1991,6 +2024,20 @@ fn normalize_unit_fraction(value: f32) -> f32 {
     }
 }
 
+fn normalize_block_build_regions(regions: &[String], fallback: &str) -> Vec<String> {
+    let mut resolved = regions
+        .iter()
+        .filter(|region| !region.is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if resolved.is_empty() && !fallback.is_empty() {
+        resolved.push(fallback.to_string());
+    }
+
+    resolved
+}
+
 fn finite_or_zero(value: f32) -> f32 {
     if value.is_finite() {
         value
@@ -2399,6 +2446,7 @@ mod tests {
             coord: TileCoord::new(1, 2),
             block: "router".into(),
             region: "router".into(),
+            regions: vec!["router".into()],
             size: 1,
             rotation: 0,
             progress: 0.5,
@@ -2766,6 +2814,11 @@ mod tests {
         let building = BuildingDrawPlan {
             coord: TileCoord::new(8, 9),
             block: "constructor".into(),
+            block_build_regions: vec![
+                "constructor-bottom".into(),
+                "constructor-top".into(),
+                String::new(),
+            ],
             drawer: String::new(),
             build_id_seed: point2_pack(8, 9),
             cache_layer: CacheLayer::Normal,
@@ -2792,13 +2845,20 @@ mod tests {
             .expect("runtime progress should create a blockbuild plan");
         assert_eq!(build.coord, TileCoord::new(8, 9));
         assert_eq!(build.block, "constructor");
-        assert_eq!(build.region, "constructor");
+        assert_eq!(build.region, "constructor-bottom");
+        assert_eq!(
+            build.regions,
+            vec![
+                String::from("constructor-bottom"),
+                String::from("constructor-top")
+            ]
+        );
         assert_eq!(build.progress, 1.0);
         assert_eq!(build.time, 17.5);
         assert_eq!(build.alpha, 0.4);
 
         let commands = build.render_commands(8.0);
-        assert_eq!(commands.len(), 2);
+        assert_eq!(commands.len(), 4);
         match &commands[0] {
             RenderCommand::Custom { name, properties } => {
                 assert_eq!(name, "blockbuild-shader");
@@ -2809,7 +2869,7 @@ mod tests {
                         .map(|property| property.value.as_str())
                 };
                 assert_eq!(property("shader"), Some("blockbuild"));
-                assert_eq!(property("region"), Some("constructor"));
+                assert_eq!(property("region"), Some("constructor-bottom"));
                 assert_eq!(property("u_progress"), Some("1"));
                 assert_eq!(property("u_time"), Some("17.5"));
                 assert_eq!(property("u_alpha"), Some("0.4"));
@@ -2824,12 +2884,28 @@ mod tests {
                 layer,
                 ..
             } => {
-                assert_eq!(symbol, "constructor");
+                assert_eq!(symbol, "constructor-bottom");
                 assert_eq!(*rect, RenderRect::new(56.0, 64.0, 16.0, 16.0));
                 assert_eq!(*rotation, 270.0);
                 assert_eq!(*layer, Layer::BLOCK_BUILDING);
             }
             other => panic!("expected blockbuild sprite command, got {other:?}"),
+        }
+        match (&commands[2], &commands[3]) {
+            (
+                RenderCommand::Custom { properties, .. },
+                RenderCommand::DrawSprite { symbol, .. },
+            ) => {
+                assert_eq!(
+                    properties
+                        .iter()
+                        .find(|property| property.key == "region")
+                        .map(|property| property.value.as_str()),
+                    Some("constructor-top")
+                );
+                assert_eq!(symbol, "constructor-top");
+            }
+            other => panic!("expected second blockbuild shader/sprite pair, got {other:?}"),
         }
     }
 
@@ -2840,6 +2916,7 @@ mod tests {
             coord: TileCoord::new(2, 3),
             block: "payload-constructor".into(),
             region: "payload-constructor".into(),
+            regions: vec!["payload-constructor".into()],
             size: 3,
             rotation: 1,
             progress: 0.35,
@@ -3452,6 +3529,7 @@ mod tests {
         let building = BuildingDrawPlan {
             coord: TileCoord::new(4, 5),
             block: "duo".into(),
+            block_build_regions: vec!["duo".into()],
             drawer: String::new(),
             build_id_seed: point2_pack(4, 5),
             cache_layer: CacheLayer::Normal,

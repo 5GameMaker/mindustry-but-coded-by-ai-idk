@@ -12699,3 +12699,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ConstructBlock.current`、`BlockProducer.recipe`、`UnitAssembler.plan.unit`、`Accelerator.launchBlock` 的 atlas/full icon region 仍未精确解析；
   - `blockbuild-shader` custom command 仍需真实 OpenGL/glow backend 消费；
   - 当前总体迁移约 25.9%，仍未达到完整可玩。
+
+### 12.403 BlockBuild region resolver 接入
+
+- 2026-05-29：继续对齐 Java `ConstructBlock` / `BlockProducer` 的 `getGeneratedIcons()` 调用语义。本轮把 Rust `BlockBuildPlan` 从单一 block symbol 扩展为多 region symbol 列表，并让 desktop world snapshot 在 content/drawer 阶段解析 block generated icon symbols。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BuildingDrawPlan` / `BlockRendererBuildingSnapshot` 新增 `block_build_regions`；
+    - `BlockBuildPlan` 新增 `regions`，保留首个 region 作为兼容字段 `region`；
+    - `render_commands_with_time(...)` 按每个 region 输出 `blockbuild-shader` custom command 与对应 `DrawSprite`，不再只画单张 block 基础图。
+  - `desktop/src/lib.rs`
+    - 新增 `block_build_region_symbols_from_content_block(...)`；
+    - 复用 `draw_block_dispatch_icons(...)` 将 content block drawer 解析成 generated icon symbols；
+    - `block_renderer_building_snapshot_from_world(...)` 现在会把解析出的 region 列表写入 building snapshot，再进入 block renderer 主链。
+- Java 对照要点：
+  - Java `Shaders.blockbuild.region` 由调用方传入，shader 本体只消费 region 的 UV/texsize；
+  - `ConstructBlock` 与 `BlockProducer` 走 block `getGeneratedIcons()` 循环，Rust 现在已在普通 content/drawer 路径具备同类多 region 过渡入口；
+  - `UnitAssembler.plan.unit.fullIcon` 与 `Accelerator.launchBlock` 的精确特殊分支仍需后续单独接入。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - region 当前仍是 atlas symbol 名称，真实 OpenGL/glow backend 仍需把 `blockbuild-shader` custom command 绑定到 GPU shader；
+  - `UnitAssembler` 的 unit `fullIcon`、`Accelerator` 的 launch/fallback 分支尚未精确落到 runtime visual snapshot；
+  - 当前总体迁移约 26.0%，仍未达到完整可玩。

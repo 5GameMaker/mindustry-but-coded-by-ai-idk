@@ -64,7 +64,7 @@ use mindustry_core::mindustry::service::{
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
-    DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
+    draw_block_dispatch_icons, DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
 };
 use mindustry_core::mindustry::world::{BuildingRef, CacheLayer as WorldCacheLayer, Tile};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
@@ -1841,6 +1841,19 @@ fn block_drawer_from_content_block(block: &BlockDef) -> Option<&str> {
     .map(String::as_str)
 }
 
+fn block_build_region_symbols_from_content_block(block: &BlockDef) -> Vec<String> {
+    let block_name = &block.base().name;
+    let mut regions = block_drawer_from_content_block(block)
+        .map(|drawer| draw_block_dispatch_icons(block_name, drawer))
+        .unwrap_or_default();
+
+    if regions.is_empty() && !block_name.is_empty() {
+        regions.push(block_name.clone());
+    }
+
+    regions
+}
+
 fn block_renderer_building_snapshot_from_world(
     coord: TileCoord,
     tile_build: Option<BuildingRef>,
@@ -1869,6 +1882,7 @@ fn block_renderer_building_snapshot_from_world(
     }
 
     if let Some(def) = content_block {
+        snapshot.block_build_regions = block_build_region_symbols_from_content_block(def);
         if let Some(drawer) = block_drawer_from_content_block(def) {
             snapshot.drawer = drawer.to_string();
         }
@@ -6291,6 +6305,13 @@ mod tests {
         assert_eq!(block_build.coord, TileCoord::new(1, 1));
         assert_eq!(block_build.block, "silicon-smelter");
         assert_eq!(block_build.region, "silicon-smelter");
+        assert_eq!(
+            block_build.regions,
+            vec![
+                String::from("silicon-smelter"),
+                String::from("silicon-smelter-top")
+            ]
+        );
         assert_eq!(block_build.progress, 0.25);
         assert_eq!(block_build.time, 13.0);
         assert_eq!(block_build.alpha, 0.5);
@@ -6372,7 +6393,7 @@ mod tests {
             block_build_pass.order,
             RenderPassKind::BlockBuild.default_order()
         );
-        assert_eq!(block_build_pass.commands.len(), 2);
+        assert_eq!(block_build_pass.commands.len(), 4);
         assert!(matches!(
             block_build_pass.commands[0],
             RenderCommand::Custom { ref name, .. } if name == "blockbuild-shader"
@@ -6385,6 +6406,13 @@ mod tests {
                         .find(|property| property.key == "u_time")
                         .map(|property| property.value.as_str()),
                     Some("77")
+                );
+                assert_eq!(
+                    properties
+                        .iter()
+                        .find(|property| property.key == "region")
+                        .map(|property| property.value.as_str()),
+                    Some("silicon-smelter")
                 );
             }
             other => panic!("expected blockbuild shader custom command, got {other:?}"),
@@ -6401,6 +6429,22 @@ mod tests {
                 assert_eq!(*layer, Layer::BLOCK_BUILDING);
             }
             other => panic!("expected blockbuild DrawSprite command, got {other:?}"),
+        }
+        match (&block_build_pass.commands[2], &block_build_pass.commands[3]) {
+            (
+                RenderCommand::Custom { properties, .. },
+                RenderCommand::DrawSprite { symbol, .. },
+            ) => {
+                assert_eq!(
+                    properties
+                        .iter()
+                        .find(|property| property.key == "region")
+                        .map(|property| property.value.as_str()),
+                    Some("silicon-smelter-top")
+                );
+                assert_eq!(symbol, "silicon-smelter-top");
+            }
+            other => panic!("expected second blockbuild shader/sprite pair, got {other:?}"),
         }
     }
 

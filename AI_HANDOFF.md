@@ -10066,3 +10066,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续补四类 Java blockbuild region resolver；
   2. 继续把 `blockbuild-shader` custom marker 接到真实 OpenGL/glow shader 绑定；
   3. 保持 `BlockBuild -> Environment -> Lighting` 的 Java renderer stage 顺序。
+
+---
+
+## 309. 最新闭环记录：BlockBuild region resolver 接入
+
+- 本轮总体进度更新：约 **26.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BuildingDrawPlan` 与 `BlockRendererBuildingSnapshot` 增加 `block_build_regions`；
+    - `BlockBuildPlan` 增加 `regions`，`region` 继续作为首个 region 的兼容字段；
+    - `BlockBuildPlan::render_commands_with_time(...)` 现在按 region 列表生成多组 `blockbuild-shader` + `DrawSprite`。
+  - `desktop/src/lib.rs`
+    - 新增 `block_build_region_symbols_from_content_block(...)`；
+    - 通过 `draw_block_dispatch_icons(...)` 从 `BlockDef` 的 drawer 解析 generated icon symbols；
+    - `block_renderer_building_snapshot_from_world(...)` 将 region 列表写入 snapshot，接入 desktop world -> block renderer -> render frame 主链。
+- 已验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 `UnitAssembler.plan.unit.fullIcon` 与 `Accelerator.launchBlock.getGeneratedIcons()` 特殊分支接入 runtime visual snapshot；
+  2. 推进真实 OpenGL/glow 后端消费 `blockbuild-shader` custom command；
+  3. 保持后续渲染工作优先聚焦渲染引擎主链，而不是生成孤立 helper。
