@@ -693,7 +693,7 @@ fn write_network_map_block_state_tail<W: io::Write>(
     if let (BlockDef::Liquid(liquid), Some(GameRuntimeLiquidBlockState::Bridge(state))) =
         (block, runtime.liquid_runtime_states.get(&building.tile_pos))
     {
-        if liquid.kind == LiquidBlockKind::LiquidBridge {
+        if game_runtime_liquid_bridge_sidecar_kind(liquid.kind) {
             write_liquid_bridge_state(write, state)?;
         }
     }
@@ -815,7 +815,7 @@ fn network_map_building_revision(
     if let (BlockDef::Liquid(liquid), Some(GameRuntimeLiquidBlockState::Bridge(_))) =
         (block, runtime.liquid_runtime_states.get(&building.tile_pos))
     {
-        if liquid.kind == LiquidBlockKind::LiquidBridge {
+        if game_runtime_liquid_bridge_sidecar_kind(liquid.kind) {
             return 1;
         }
     }
@@ -1726,6 +1726,10 @@ fn game_runtime_visual_set_once(slot: &mut Option<f32>, value: f32) {
     if slot.is_none() {
         *slot = Some(value);
     }
+}
+
+fn game_runtime_liquid_bridge_sidecar_kind(kind: LiquidBlockKind) -> bool {
+    matches!(kind, LiquidBlockKind::LiquidBridge)
 }
 
 fn game_runtime_visual_liquid_snapshot(
@@ -21700,6 +21704,39 @@ mod tests {
     }
 
     #[test]
+    fn game_runtime_applies_liquid_bridge_warmup_to_block_visual_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let phase_def = content.block_by_name("phase-conduit").unwrap();
+        let tile_pos = point2_pack(3, 0);
+        let saved = BuildingComp::new(tile_pos, phase_def.base().clone(), TeamId(1));
+        let state = LiquidBridgeState {
+            link: point2_pack(5, 0),
+            warmup: 0.8,
+            incoming: vec![point2_pack(2, 0)],
+            was_moved: true,
+            moved: true,
+        };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(1);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        write_liquid_bridge_state(&mut building_bytes, &state).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 3, phase_def.base().id, building_bytes),
+        );
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+
+        let snapshot = runtime
+            .block_visual_runtime_snapshot(tile_pos)
+            .expect("phase-conduit building should snapshot");
+        assert_eq!(snapshot.warmup, Some(0.8));
+    }
+
+    #[test]
     fn game_runtime_block_visual_runtime_snapshot_leaves_missing_state_absent() {
         let content = ContentLoader::create_base_content().unwrap();
         let mut runtime = GameRuntime::default();
@@ -32678,6 +32715,32 @@ mod tests {
             roundtrip_exported_liquid_state(
                 &content,
                 "bridge-conduit",
+                4,
+                13,
+                GameRuntimeLiquidBlockState::Bridge(state.clone()),
+            ),
+            Some(GameRuntimeLiquidBlockState::Bridge(LiquidBridgeState {
+                was_moved: true,
+                moved: true,
+                ..state
+            }))
+        );
+    }
+
+    #[test]
+    fn game_runtime_exports_phase_conduit_liquid_bridge_state_tail_in_network_map_snapshot() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let state = LiquidBridgeState {
+            link: point2_pack(6, 13),
+            warmup: 0.8,
+            incoming: vec![point2_pack(2, 13), point2_pack(3, 13)],
+            was_moved: true,
+            moved: false,
+        };
+        assert_eq!(
+            roundtrip_exported_liquid_state(
+                &content,
+                "phase-conduit",
                 4,
                 13,
                 GameRuntimeLiquidBlockState::Bridge(state.clone()),
