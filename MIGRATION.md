@@ -12466,3 +12466,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `RenderPassKind::Block` 的 Java stage 映射仍需细分；
   - 纹理粒子的 atlas/GPU sampler 路径仍待真实 backend 接入；
   - 当前总体迁移约 25.1%，仍未达到完整可玩。
+
+### 12.395 RenderPassKind::Block 脱离 BlockShadows stage
+
+- 2026-05-29：继续收紧 Java `Renderer.draw()` stage 顺序。此前 `RenderPassKind::Block` 与 `RenderPassKind::BlockShadows` 都映射到 `RendererDrawStage::BlockShadows`，会让 block sprite/particle 与 shadow resolve 落在同一 Java stage。现在 `Block` 已改映射到 `RendererDrawStage::BlockBuild`，使 shadow pass 稳定排在 block pass 之前，darkness 稳定排在 block pass 之后。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind::Block.java_renderer_draw_stage()` 从 `BlockShadows` 改为 `BlockBuild`；
+    - 新增 `block_pass_sorts_after_shadows_and_before_lighting_like_java_renderer`，在乱序 push 的情况下断言排序结果为 `Floor -> BlockShadows -> Block -> Lighting`；
+    - `java_renderer_stage_and_pass_mapping_is_exhaustive_and_ordered` 更新 `Block -> BlockBuild` 的映射断言。
+  - `desktop/src/lib.rs`
+    - `desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes` 通过显式 router tile 产出真实 `Block` pass，并断言 `BlockShadows` pass index 小于 `Block`，`Block` 小于 `Darkness`。
+- Java 对照要点：
+  - `Renderer.draw()` 中 `Layer.block - 1` 的 shadow 已由 `RenderPassKind::BlockShadows` 表达；
+  - 当前 `RenderPassKind::Block` 临时承载 block sprite 与 block particle，更接近 `Layer.blockBuilding` / block draw 主体，而不应继续复用 shadow stage；
+  - Java 里 `Layer.block - 0.09f` walls cache layer 与末尾 `blocks.drawBlocks()` 仍需后续拆成更细 `BlockWalls/BlockOverdraw` pass kind。
+- 已跑验证：
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `BlockWalls` / `BlockOverdraw` 尚未成为独立 `RenderPassKind`；
+  - 真实 OpenGL/glow backend 尚未消费排序后的 pass；
+  - 当前总体迁移约 25.2%，仍未达到完整可玩。

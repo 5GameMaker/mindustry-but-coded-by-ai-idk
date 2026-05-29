@@ -616,7 +616,7 @@ impl RenderPassKind {
             Self::Background => RendererDrawStage::Background,
             Self::Floor => RendererDrawStage::Floor,
             Self::BlockShadows => RendererDrawStage::BlockShadows,
-            Self::Block => RendererDrawStage::BlockShadows,
+            Self::Block => RendererDrawStage::BlockBuild,
             Self::Overlay => RendererDrawStage::Overlay,
             Self::Minimap => RendererDrawStage::Debug,
             Self::Lighting => RendererDrawStage::Lighting,
@@ -1123,6 +1123,37 @@ mod tests {
     }
 
     #[test]
+    fn block_pass_sorts_after_shadows_and_before_lighting_like_java_renderer() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let mut plan = RenderFramePlan::new(7, RenderSize::new(64.0, 64.0), camera, viewport);
+
+        plan.push_pass(RenderPass::new(RenderPassKind::Lighting).with_order(0));
+        plan.push_pass(RenderPass::new(RenderPassKind::Block).with_order(0));
+        plan.push_pass(RenderPass::new(RenderPassKind::BlockShadows).with_order(99));
+        plan.push_pass(RenderPass::new(RenderPassKind::Floor).with_order(100));
+        plan.sort_passes_like_java_renderer_draw();
+
+        assert_eq!(
+            plan.passes
+                .iter()
+                .map(|pass| pass.kind.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                RenderPassKind::Floor,
+                RenderPassKind::BlockShadows,
+                RenderPassKind::Block,
+                RenderPassKind::Lighting,
+            ]
+        );
+        assert_eq!(
+            RenderPassKind::Block.java_renderer_draw_stage(),
+            RendererDrawStage::BlockBuild
+        );
+        assert!(plan.matches_java_renderer_draw_order());
+    }
+
+    #[test]
     fn java_renderer_stage_and_pass_mapping_is_exhaustive_and_ordered() {
         let expected_stages = [
             (RendererDrawStage::Background, "background", 0),
@@ -1168,7 +1199,7 @@ mod tests {
                 RenderPassKind::Block,
                 "block",
                 20,
-                RendererDrawStage::BlockShadows,
+                RendererDrawStage::BlockBuild,
             ),
             (
                 RenderPassKind::Overlay,

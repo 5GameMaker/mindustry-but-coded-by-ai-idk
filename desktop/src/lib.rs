@@ -5716,6 +5716,18 @@ mod tests {
             state.last_loaded_world_data = Some(world_data);
         }
         launcher.update();
+        let router_id = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("router should be registered")
+            .base()
+            .id;
+        launcher
+            .game_state
+            .world
+            .tile_mut(1, 1)
+            .expect("sample world should contain tile 1,1")
+            .block = router_id;
 
         let viewport = RenderViewport::new(0.0, 0.0, 32.0, 16.0);
         let camera = RenderCamera::new(RenderPoint::new(12.0, 8.0), viewport);
@@ -5828,6 +5840,11 @@ mod tests {
             .iter()
             .find(|pass| pass.kind == RenderPassKind::BlockShadows)
             .expect("shadow resolve pass should be present");
+        let shadow_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::BlockShadows)
+            .expect("shadow resolve pass should be indexed");
         assert_eq!(shadow.target, RenderTarget::Buffer("block-shadows".into()));
         assert_eq!(shadow.resolve_target, Some(RenderTarget::Screen));
         assert_eq!(shadow.resolve_kind, Some(RenderResolveKind::DrawRectSample));
@@ -5841,6 +5858,18 @@ mod tests {
             .iter()
             .find(|pass| pass.kind == RenderPassKind::Darkness)
             .expect("darkness resolve pass should be present");
+        let block_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::Block)
+            .expect("block sprite pass should be present");
+        let darkness_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::Darkness)
+            .expect("darkness resolve pass should be indexed");
+        assert!(shadow_index < block_index);
+        assert!(block_index < darkness_index);
         assert_eq!(
             darkness.target,
             RenderTarget::Buffer("block-darkness".into())
