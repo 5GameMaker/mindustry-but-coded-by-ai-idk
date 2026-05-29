@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **29.7%**。
+- 当前总体迁移完成度：约 **29.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10902,3 +10902,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 在 draw call sink 后继续接真实 GL handle/resource cache；
   2. 映射 uniform/attribute/texture unit location；
   3. 推进实际 OpenGL draw executor。
+
+---
+
+## 347. 最新闭环记录：Sprite draw call action 序列
+
+- 本轮总体进度更新：约 **29.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendDrawCallAction`；
+    - 新增 `DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor`；
+    - recording executor 实现 sprite draw call sink；
+    - draw call plan 会翻译为 `UseProgram -> BindTexture -> BindVertexArray -> DrawElements`；
+    - 测试验证默认 Mesh sprite 的 action 序列。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 连接真实 GL context / handle cache；
+  2. 把 uniform/attribute/texture unit location 加入 action 序列；
+  3. 推进真实 draw executor。

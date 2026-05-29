@@ -1718,6 +1718,58 @@ pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
     pub last_draw_call: Option<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendDrawCallAction {
+    UseProgram {
+        program_key: String,
+    },
+    BindTexture {
+        texture_key: String,
+    },
+    BindVertexArray {
+        vertex_array_key: String,
+    },
+    DrawElements {
+        primitive_type: u32,
+        index_count: usize,
+        index_offset: usize,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor {
+    pub actions: Vec<DesktopGraphicsOpenGlBackendDrawCallAction>,
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
+    for DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor
+{
+    fn consume_opengl_sprite_draw_call(
+        &mut self,
+        draw_call: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan,
+    ) {
+        self.actions
+            .push(DesktopGraphicsOpenGlBackendDrawCallAction::UseProgram {
+                program_key: draw_call.shader_program.program_key,
+            });
+        self.actions
+            .push(DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture {
+                texture_key: draw_call.texture_identity.key,
+            });
+        self.actions.push(
+            DesktopGraphicsOpenGlBackendDrawCallAction::BindVertexArray {
+                vertex_array_key: draw_call.vertex_array_key,
+            },
+        );
+        self.actions
+            .push(DesktopGraphicsOpenGlBackendDrawCallAction::DrawElements {
+                primitive_type: draw_call.primitive_type,
+                index_count: draw_call.index_count,
+                index_offset: draw_call.index_offset,
+            });
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub events_received: usize,
@@ -10456,6 +10508,31 @@ mod tests {
         assert_eq!(
             draw_call_sink.draw_calls,
             executor.state.sprite_draw_call_plans
+        );
+        let mut draw_call_executor =
+            super::DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor::default();
+        let draw_call_executor_state =
+            executor.drive_sprite_draw_call_sink(&mut draw_call_executor);
+        assert_eq!(draw_call_executor_state.draw_calls_emitted, 1);
+        assert_eq!(
+            draw_call_executor.actions,
+            vec![
+                super::DesktopGraphicsOpenGlBackendDrawCallAction::UseProgram {
+                    program_key: "shader:Mesh".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture {
+                    texture_key: "atlas:Main:sprites.png".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCallAction::BindVertexArray {
+                    vertex_array_key: "sprite-batch:0:vao".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCallAction::DrawElements {
+                    primitive_type:
+                        super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                    index_count: 6,
+                    index_offset: 0,
+                },
+            ]
         );
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();

@@ -13666,6 +13666,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 已跑验证：
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
-  - sink 尚未真实调用 `glUseProgram/glBindTexture/glBindVertexArray/glDrawElements`；
+  - draw call action 序列已在下一节补齐，sink 尚未真实调用 `glUseProgram/glBindTexture/glBindVertexArray/glDrawElements`；
   - GL object handle 分配和 texture cache 仍待连接；
   - 当前总体迁移约 29.7%，仍未达到完整可玩。
+
+## 12.441 Sprite draw call action 序列
+
+- 2026-05-29：在 draw call sink 边界之后继续把单个 sprite draw call 翻译为接近真实 OpenGL 调用顺序的动作序列。当前仍是记录型 executor，不直接调用 GL。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendDrawCallAction`；
+    - 新增 `DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor`；
+    - recording executor 实现 `DesktopGraphicsOpenGlBackendSpriteDrawCallSink`；
+    - 每个 `SpriteDrawCallPlan` 被翻译为：
+      - `UseProgram { program_key }`
+      - `BindTexture { texture_key }`
+      - `BindVertexArray { vertex_array_key }`
+      - `DrawElements { primitive_type, index_count, index_offset }`
+    - 回归测试验证默认 Mesh sprite draw call 被翻译成 `shader:Mesh -> atlas:Main:sprites.png -> sprite-batch:0:vao -> DrawElements(6)`。
+- 迁移意义：
+  - draw call plan 已具备可顺序执行的 GL-style action 形式；
+  - 后续真实 GL executor 可以逐项替换 recording action 为实际 GL 调用；
+  - 这进一步避免渲染后端停留在 telemetry/state 字段，而是朝可执行 pipeline 推进。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - recording executor 尚未持有真实 GL context；
+  - 真实 handle 分配、texture cache、uniform/attribute location 仍待连接；
+  - 当前总体迁移约 29.8%，仍未达到完整可玩。
