@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **30.8%**。
+- 当前总体迁移完成度：约 **30.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11153,3 +11153,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. uniform upload / texture unit 多槽绑定；
   3. real GL executor 顺序消费 texture upload、mesh upload、draw command；
   4. window/context/present。
+
+---
+
+## 358. 最新闭环记录：ShaderApply OpenGL command adapter 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前本地 HEAD 为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **30.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderCommand`；
+    - 新增 shader command sink / recording sink；
+    - `ShaderProgramBinding::to_opengl_shader_commands(...)` 将 shader apply 降为 `UseProgram`、`UploadUniform`、`ActiveTexture`、`BindTexture`；
+    - executor/classifying adapter state 新增 `shader_commands`；
+    - executor 暴露 `drive_shader_command_sink(...)`；
+    - 测试覆盖 `BlockBuild` 的 `UseProgram + UploadUniform` 输出，以及 texture unit 绑定不隐式补 sampler upload。
+- 关键语义：
+  - 保持 Arc 分层：`BindTexture` 只映射 texture unit 侧 `ActiveTexture + BindTexture`；
+  - sampler uniform 写入只来自显式 `SetUniform(Int(slot)) -> UploadUniform`；
+  - `effectBuffer` 这类只绑定 texture 的操作不会被错误生成隐式 sampler uniform。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 下一步：
+  1. 将 shader compile/link 拆为 shader 生命周期/init/reload 命令闭环，而不是塞进 per-apply；
+  2. 将 `TextureBinding` 解析到真实 GL texture handle / effect buffer texture；
+  3. real GL executor 按顺序消费 texture upload、mesh upload、shader apply、draw command；
+  4. 继续接 window/context/present，保持 OpenGL/Arc/SpriteBatch 路线。

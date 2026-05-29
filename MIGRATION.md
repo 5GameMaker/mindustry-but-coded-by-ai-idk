@@ -13951,3 +13951,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shader compile/link、uniform upload、texture unit 多槽绑定仍需继续推进；
   - drawRange、flushRequests、SpriteBatch cache lifecycle 仍需继续对照 Arc；
   - 当前总体迁移约 30.8%，仍未达到完整可玩。
+
+## 12.452 ShaderApply OpenGL command adapter 接入
+
+- 2026-05-29：继续沿原版 Arc/LWJGL/OpenGL 语义推进 shader apply 主链路。`ShaderApplyPlan` 现在不再只落到 `ShaderProgramBinding`/location cache，而是进一步生成可由真实 GL 后端消费的 shader apply command 序列。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderCommand`，覆盖 `UseProgram`、`UploadUniform`、`ActiveTexture`、`BindTexture`；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderCommandSink` 与 recording sink；
+    - `DesktopGraphicsOpenGlBackendShaderProgramBinding::to_opengl_shader_commands(...)` 将已解析 location 的 uniform binding 映射为 `UploadUniform`，将 texture unit binding 映射为 `ActiveTexture(TEXTURE0 + slot)` + `BindTexture(TEXTURE_2D, texture)`；
+    - executor 与 classifying adapter state 新增 `shader_commands`，在消费/回放 `ShaderApply` 时同步生成命令序列；
+    - executor 暴露 `drive_shader_command_sink(...)`，让后续真实 GL executor 可以按顺序消费 shader apply 命令；
+    - 新增测试锁定 `BlockBuild` shader apply 的 `UseProgram + 6 个 UploadUniform` 输出；
+    - 新增测试锁定 texture unit 绑定语义：`BindTexture` 只负责 `ActiveTexture + BindTexture`，不隐式补 `sampler uniform`；`u_noise` 这类 sampler slot 仍由显式 `SetUniform(Int(slot)) -> UploadUniform` 表达，`effectBuffer` 不会被错误生成隐式 sampler upload。
+- 迁移意义：
+  - shader apply 链路从“记录绑定计划”推进到“可下沉 GL 调用描述”，后续 real GL backend 可直接消费 `UseProgram/glUniform*/glActiveTexture/glBindTexture` 对应命令；
+  - 保持 Arc 分层：`GLTexture.bind(unit)` 的纹理单元绑定与 `Shader.setUniformi(...)` 的 sampler uniform 写入分离，避免把 `BindTexture` 硬编码为三连命令；
+  - 仍接在 `RenderFramePlan -> OpenGL executor -> shader command sink` 主链路，不是孤立 helper。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - shader compile/link 应拆到 shader 生命周期/init/reload 闭环，尚未接入真实 GLSL source 编译与 program cache；
+  - texture binding 仍携带 `TextureBinding` 语义对象，尚未解析为真实 GL texture handle；
+  - real GL API 调用层、window/context/present 仍未接入；
+  - 当前总体迁移约 30.9%，仍未达到完整可玩。

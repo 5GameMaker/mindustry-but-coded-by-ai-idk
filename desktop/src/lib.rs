@@ -1339,6 +1339,50 @@ pub struct DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan {
     pub uniform_location: Option<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopGraphicsOpenGlBackendShaderCommand {
+    UseProgram {
+        program_key: String,
+    },
+    UploadUniform {
+        program_key: String,
+        uniform: &'static str,
+        location: i32,
+        value: UniformValue,
+    },
+    ActiveTexture {
+        program_key: String,
+        slot: u8,
+        texture_unit: u32,
+    },
+    BindTexture {
+        program_key: String,
+        slot: u8,
+        target: u32,
+        texture: TextureBinding,
+    },
+}
+
+pub trait DesktopGraphicsOpenGlBackendShaderCommandSink {
+    fn consume_opengl_shader_command(&mut self, command: DesktopGraphicsOpenGlBackendShaderCommand);
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendShaderCommandSink {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendShaderCommand>,
+}
+
+impl DesktopGraphicsOpenGlBackendShaderCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendShaderCommandSink
+{
+    fn consume_opengl_shader_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendShaderCommand,
+    ) {
+        self.commands.push(command);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
     pub batch_index: usize,
@@ -1647,6 +1691,41 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
             binding.uniform_location =
                 Some(cache.uniform_location(&self.identity.program_key, binding.uniform));
         }
+    }
+
+    pub fn to_opengl_shader_commands(&self) -> Vec<DesktopGraphicsOpenGlBackendShaderCommand> {
+        let program_key = self.identity.program_key.clone();
+        let mut commands = vec![DesktopGraphicsOpenGlBackendShaderCommand::UseProgram {
+            program_key: program_key.clone(),
+        }];
+
+        for binding in &self.uniform_bindings {
+            let Some(location) = binding.uniform_location else {
+                continue;
+            };
+            commands.push(DesktopGraphicsOpenGlBackendShaderCommand::UploadUniform {
+                program_key: program_key.clone(),
+                uniform: binding.name,
+                location,
+                value: binding.value.clone(),
+            });
+        }
+
+        for binding in &self.texture_unit_bindings {
+            commands.push(DesktopGraphicsOpenGlBackendShaderCommand::ActiveTexture {
+                program_key: program_key.clone(),
+                slot: binding.slot,
+                texture_unit: DESKTOP_GRAPHICS_OPENGL_TEXTURE0 + u32::from(binding.slot),
+            });
+            commands.push(DesktopGraphicsOpenGlBackendShaderCommand::BindTexture {
+                program_key: program_key.clone(),
+                slot: binding.slot,
+                target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture: binding.texture.clone(),
+            });
+        }
+
+        commands
     }
 }
 
@@ -3138,6 +3217,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub custom_markers: Vec<String>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
+    pub shader_commands: Vec<DesktopGraphicsOpenGlBackendShaderCommand>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub sprite_texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
@@ -3182,6 +3262,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             custom_markers: Vec::new(),
             actions: Vec::new(),
             shader_program_bindings: Vec::new(),
+            shader_commands: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
@@ -3474,6 +3555,9 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
                     DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
                 binding.resolve_locations(&mut self.state.location_cache);
                 self.state.current_shader_program = Some(binding.identity.clone());
+                self.state
+                    .shader_commands
+                    .extend(binding.to_opengl_shader_commands());
                 self.state.shader_program_bindings.push(binding);
             }
             DesktopGraphicsOpenGlBackendEvent::Command {
@@ -3516,6 +3600,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub event_log: Vec<DesktopGraphicsOpenGlBackendEvent>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
+    pub shader_commands: Vec<DesktopGraphicsOpenGlBackendShaderCommand>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub sprite_texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
@@ -3561,6 +3646,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             event_log: Vec::new(),
             actions: Vec::new(),
             shader_program_bindings: Vec::new(),
+            shader_commands: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
@@ -3600,6 +3686,16 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             sink.consume_opengl_backend_action(action.clone());
         }
         self.actions.len()
+    }
+
+    pub fn drive_shader_command_sink<S: DesktopGraphicsOpenGlBackendShaderCommandSink>(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.shader_commands {
+            sink.consume_opengl_shader_command(command.clone());
+        }
+        self.shader_commands.len()
     }
 
     pub fn drive_sprite_draw_call_sink<S: DesktopGraphicsOpenGlBackendSpriteDrawCallSink>(
@@ -3657,6 +3753,13 @@ impl DesktopGraphicsOpenGlBackendExecutor {
         sink: &mut S,
     ) -> usize {
         self.state.drive_action_sink(sink)
+    }
+
+    pub fn drive_shader_command_sink<S: DesktopGraphicsOpenGlBackendShaderCommandSink>(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        self.state.drive_shader_command_sink(sink)
     }
 
     pub fn drive_sprite_draw_call_sink<S: DesktopGraphicsOpenGlBackendSpriteDrawCallSink>(
@@ -3836,6 +3939,9 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                     DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
                 binding.resolve_locations(&mut self.state.location_cache);
                 self.state.current_shader_program = Some(binding.identity.clone());
+                self.state
+                    .shader_commands
+                    .extend(binding.to_opengl_shader_commands());
                 self.state.shader_program_bindings.push(binding);
                 self.state.shader_applies += 1;
                 self.state
@@ -8561,8 +8667,9 @@ mod tests {
         RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan, RenderPass,
         RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize,
         RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
-        ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId,
-        TextureAtlasPlan, TileCoord, UniformValue,
+        ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCatalog,
+        ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureBinding, TileCoord, UniformBinding,
+        UniformValue,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -13427,6 +13534,42 @@ mod tests {
         assert!(executor.state.shader_program_bindings[0]
             .texture_unit_bindings
             .is_empty());
+        assert_eq!(executor.state.shader_commands.len(), 7);
+        assert_eq!(
+            executor.state.shader_commands[0],
+            super::DesktopGraphicsOpenGlBackendShaderCommand::UseProgram {
+                program_key: "shader:BlockBuild".into(),
+            }
+        );
+        assert_eq!(
+            executor
+                .state
+                .shader_commands
+                .iter()
+                .filter_map(|command| match command {
+                    super::DesktopGraphicsOpenGlBackendShaderCommand::UploadUniform {
+                        uniform,
+                        ..
+                    } => Some(*uniform),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                "u_progress",
+                "u_time",
+                "u_alpha",
+                "u_uv",
+                "u_uv2",
+                "u_texsize"
+            ]
+        );
+        let mut shader_command_sink =
+            super::DesktopGraphicsRecordingOpenGlBackendShaderCommandSink::default();
+        assert_eq!(
+            executor.drive_shader_command_sink(&mut shader_command_sink),
+            executor.state.shader_commands.len()
+        );
+        assert_eq!(shader_command_sink.commands, executor.state.shader_commands);
         assert_eq!(executor.state.sprite_draw_call_plans.len(), 1);
         assert_eq!(
             executor.state.sprite_draw_call_plans[0]
@@ -13464,6 +13607,96 @@ mod tests {
         assert_eq!(
             classifying_adapter.state.current_shader_program,
             executor.state.current_shader_program
+        );
+        assert_eq!(
+            classifying_adapter.state.shader_commands,
+            executor.state.shader_commands
+        );
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_commands_preserve_texture_units_without_implicit_sampler_upload(
+    ) {
+        let mut apply = ShaderApplyPlan::new(ShaderId::Space);
+        apply.operations.push(ShaderApplyOperation::BindTexture {
+            uniform: "u_noise",
+            slot: 1,
+            texture: TextureBinding::Asset("sprites/noise.png".into()),
+        });
+        apply
+            .operations
+            .push(ShaderApplyOperation::SetUniform(UniformBinding::new(
+                "u_noise",
+                UniformValue::Int(1),
+            )));
+        apply.operations.push(ShaderApplyOperation::BindTexture {
+            uniform: "effectBuffer",
+            slot: 0,
+            texture: TextureBinding::EffectBuffer,
+        });
+
+        let mut binding =
+            super::DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
+        let mut location_cache = super::DesktopGraphicsOpenGlBackendLocationCache::default();
+        binding.resolve_locations(&mut location_cache);
+
+        assert_eq!(
+            binding
+                .texture_unit_bindings
+                .iter()
+                .map(|binding| (binding.uniform, binding.slot, binding.uniform_location))
+                .collect::<Vec<_>>(),
+            vec![("u_noise", 1, Some(0)), ("effectBuffer", 0, Some(1))]
+        );
+        let commands = binding.to_opengl_shader_commands();
+        assert_eq!(
+            commands,
+            vec![
+                super::DesktopGraphicsOpenGlBackendShaderCommand::UseProgram {
+                    program_key: "shader:Space".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderCommand::UploadUniform {
+                    program_key: "shader:Space".into(),
+                    uniform: "u_noise",
+                    location: 0,
+                    value: UniformValue::Int(1),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderCommand::ActiveTexture {
+                    program_key: "shader:Space".into(),
+                    slot: 1,
+                    texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0 + 1,
+                },
+                super::DesktopGraphicsOpenGlBackendShaderCommand::BindTexture {
+                    program_key: "shader:Space".into(),
+                    slot: 1,
+                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    texture: TextureBinding::Asset("sprites/noise.png".into()),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderCommand::ActiveTexture {
+                    program_key: "shader:Space".into(),
+                    slot: 0,
+                    texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
+                },
+                super::DesktopGraphicsOpenGlBackendShaderCommand::BindTexture {
+                    program_key: "shader:Space".into(),
+                    slot: 0,
+                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    texture: TextureBinding::EffectBuffer,
+                },
+            ]
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| matches!(
+                    command,
+                    super::DesktopGraphicsOpenGlBackendShaderCommand::UploadUniform {
+                        uniform: "effectBuffer",
+                        ..
+                    }
+                ))
+                .count(),
+            0
         );
     }
 
