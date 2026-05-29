@@ -13119,3 +13119,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 还需要拆出 state action sink / draw action sink 或真实 adapter trait 方法；
   - atlas texture binding、shader program/resource binding、FBO/texture resolve 与窗口化 present 仍待落地；
   - 当前总体迁移约 27.5%，仍未达到完整可玩。
+
+## 12.419 OpenGL action sink 边界
+
+- 2026-05-29：在 executor action 状态机基础上新增 action sink 边界，使 executor 输出的 action 不只停留在状态字段里，而是可以被后续真实 OpenGL adapter 顺序消费。该闭环仍不引入外部 OpenGL/window 依赖。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendActionSink` trait；
+    - 新增 `DesktopGraphicsNullOpenGlBackendActionSink`；
+    - 新增 `DesktopGraphicsRecordingOpenGlBackendActionSink`；
+    - `DesktopGraphicsOpenGlBackendExecutorState::drive_action_sink(...)` 顺序回放 `actions`；
+    - `DesktopGraphicsOpenGlBackendExecutor::drive_action_sink(...)` 暴露 executor 级 action sink 驱动入口；
+    - 回归测试确认 action sink 记录结果与 executor state actions 完全一致。
+- 迁移意义：
+  - 后续真实 OpenGL 后端可以实现 action sink，而不需要依赖测试用 classifying adapter；
+  - 当前链路推进为 `FramePlan -> Step -> ExecutorState -> ActionSink`；
+  - 真实 GL adapter 可以在此边界继续拆分 `Clear / Blend / Clip / Sprite` 等具体执行方法。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - action sink 仍是记录/消费边界，尚未实际调用 OpenGL；
+  - `Clear / SetBlend / SetClip / ClearClip` 还需要继续拆成状态执行器；
+  - `DrawSprite` 的 atlas texture binding、shader/resource binding 与 VBO/mesh 提交仍待落地；
+  - 当前总体迁移约 27.6%，仍未达到完整可玩。

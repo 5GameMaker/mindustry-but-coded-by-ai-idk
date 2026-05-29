@@ -937,6 +937,32 @@ pub enum DesktopGraphicsOpenGlBackendAdapterAction {
     },
 }
 
+pub trait DesktopGraphicsOpenGlBackendActionSink {
+    fn consume_opengl_backend_action(&mut self, action: DesktopGraphicsOpenGlBackendAdapterAction);
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsNullOpenGlBackendActionSink;
+
+impl DesktopGraphicsOpenGlBackendActionSink for DesktopGraphicsNullOpenGlBackendActionSink {
+    fn consume_opengl_backend_action(
+        &mut self,
+        _action: DesktopGraphicsOpenGlBackendAdapterAction,
+    ) {
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendActionSink {
+    pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
+}
+
+impl DesktopGraphicsOpenGlBackendActionSink for DesktopGraphicsRecordingOpenGlBackendActionSink {
+    fn consume_opengl_backend_action(&mut self, action: DesktopGraphicsOpenGlBackendAdapterAction) {
+        self.actions.push(action);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub events_received: usize,
@@ -1230,6 +1256,16 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         }
         self.event_log.len()
     }
+
+    pub fn drive_action_sink<S: DesktopGraphicsOpenGlBackendActionSink>(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for action in &self.actions {
+            sink.consume_opengl_backend_action(action.clone());
+        }
+        self.actions.len()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1240,6 +1276,13 @@ pub struct DesktopGraphicsOpenGlBackendExecutor {
 impl DesktopGraphicsOpenGlBackendExecutor {
     pub fn drive_adapter<A: DesktopGraphicsOpenGlBackendAdapter>(&self, adapter: &mut A) -> usize {
         self.state.drive_adapter(adapter)
+    }
+
+    pub fn drive_action_sink<S: DesktopGraphicsOpenGlBackendActionSink>(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        self.state.drive_action_sink(sink)
     }
 
     fn record_error(&mut self, message: impl Into<String>) {
@@ -9006,6 +9049,10 @@ mod tests {
                 if symbol == "router"
         ));
         assert_eq!(executor.state.actions, classifying_adapter.state.actions);
+        let mut action_sink = super::DesktopGraphicsRecordingOpenGlBackendActionSink::default();
+        let action_count = executor.drive_action_sink(&mut action_sink);
+        assert_eq!(action_count, executor.state.actions.len());
+        assert_eq!(action_sink.actions, executor.state.actions);
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
@@ -9580,6 +9627,10 @@ mod tests {
                 if symbol == "router"
         ));
         assert_eq!(executor.state.actions, classifying_adapter.state.actions);
+        let mut action_sink = super::DesktopGraphicsRecordingOpenGlBackendActionSink::default();
+        let action_count = executor.drive_action_sink(&mut action_sink);
+        assert_eq!(action_count, 6);
+        assert_eq!(action_sink.actions, executor.state.actions);
         let command_events = adapter
             .events
             .iter()
