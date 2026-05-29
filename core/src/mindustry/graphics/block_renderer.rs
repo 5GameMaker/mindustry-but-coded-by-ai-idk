@@ -10,8 +10,9 @@ use crate::mindustry::{
     entities::comp::DecalColor,
     graphics::{
         particle_renderer::{BlockDrawerParticlePlan, ParticleColor, ParticleRendererState},
-        CacheLayer, Layer, RenderBlendMode, RenderCommand, RenderPass, RenderPassKind, RenderPoint,
-        RenderProperty, RenderRect, RenderResolveKind, RenderTarget,
+        CacheLayer, Layer, RenderBlendMode, RenderCamera, RenderCommand, RenderPass,
+        RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderTarget,
+        RenderTextureSamplePlan,
     },
     world::draw::{DrawBlockParticleBlendMode, DrawBlockParticleRenderKind},
     world::point2_pack,
@@ -1533,6 +1534,33 @@ impl BlockRendererPlan {
         passes
     }
 
+    pub fn to_resolve_render_passes_with_camera(
+        &self,
+        tile_size_world: f32,
+        camera: RenderCamera,
+        world_width_tiles: i32,
+        world_height_tiles: i32,
+    ) -> Vec<RenderPass> {
+        let mut passes = Vec::new();
+        if let Some(pass) = self.to_shadow_resolve_pass_with_camera(
+            tile_size_world,
+            camera,
+            world_width_tiles,
+            world_height_tiles,
+        ) {
+            passes.push(pass);
+        }
+        if let Some(pass) = self.to_darkness_resolve_pass_with_camera(
+            tile_size_world,
+            camera,
+            world_width_tiles,
+            world_height_tiles,
+        ) {
+            passes.push(pass);
+        }
+        passes
+    }
+
     pub fn to_block_particle_render_commands(&self, tile_size_world: f32) -> Vec<RenderCommand> {
         self.block_particles
             .iter()
@@ -1569,6 +1597,27 @@ impl BlockRendererPlan {
         Some(pass)
     }
 
+    pub fn to_shadow_resolve_pass_with_camera(
+        &self,
+        tile_size_world: f32,
+        camera: RenderCamera,
+        world_width_tiles: i32,
+        world_height_tiles: i32,
+    ) -> Option<RenderPass> {
+        let mut pass = self.to_shadow_resolve_pass(tile_size_world)?;
+        if let Some(sample) = RenderTextureSamplePlan::fbo_uv_window(
+            camera,
+            world_width_tiles,
+            world_height_tiles,
+            tile_size_world,
+            tile_size_world / 2.0,
+            tile_size_world / 2.0,
+        ) {
+            pass = pass.with_resolve_sample(sample);
+        }
+        Some(pass)
+    }
+
     pub fn to_darkness_resolve_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
         let commands = self.to_darkness_render_commands(tile_size_world);
         if commands.is_empty() {
@@ -1579,6 +1628,27 @@ impl BlockRendererPlan {
             .with_target(RenderTarget::Buffer("block-darkness".into()))
             .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawFboSample);
         pass.extend(commands);
+        Some(pass)
+    }
+
+    pub fn to_darkness_resolve_pass_with_camera(
+        &self,
+        tile_size_world: f32,
+        camera: RenderCamera,
+        world_width_tiles: i32,
+        world_height_tiles: i32,
+    ) -> Option<RenderPass> {
+        let mut pass = self.to_darkness_resolve_pass(tile_size_world)?;
+        if let Some(sample) = RenderTextureSamplePlan::fbo_uv_window(
+            camera,
+            world_width_tiles,
+            world_height_tiles,
+            tile_size_world,
+            tile_size_world / 2.0,
+            tile_size_world / 2.0,
+        ) {
+            pass = pass.with_resolve_sample(sample);
+        }
         Some(pass)
     }
 
@@ -3273,6 +3343,27 @@ mod tests {
                             RenderProperty::new("y", "4"),
                         ]
         ));
+
+        let camera = RenderCamera::new(
+            RenderPoint::new(80.0, 96.0),
+            crate::mindustry::graphics::RenderViewport::new(0.0, 0.0, 32.0, 48.0),
+        );
+        let sampled_passes = plan.to_resolve_render_passes_with_camera(8.0, camera, 20, 30);
+        assert_eq!(sampled_passes.len(), 2);
+        for pass in &sampled_passes {
+            let sample = pass
+                .resolve_sample
+                .expect("shadow/darkness resolve should carry Java Draw.fbo UV sample");
+            assert_eq!(sample.geometry, camera.world_rect());
+            assert_eq!(
+                sample.flip,
+                crate::mindustry::graphics::RenderTextureSampleFlip::UvY
+            );
+            assert!((sample.uv.u - 0.425).abs() < 0.0001);
+            assert!((sample.uv.v - 0.51666665).abs() < 0.0001);
+            assert!((sample.uv.u2 - 0.625).abs() < 0.0001);
+            assert!((sample.uv.v2 - 0.31666666).abs() < 0.0001);
+        }
     }
 
     #[test]

@@ -9284,7 +9284,12 @@ impl DesktopLauncher {
             if let Some(pass) = block_renderer.to_block_particle_render_pass(8.0) {
                 render_frame.push_pass(pass);
             }
-            for pass in block_renderer.to_resolve_render_passes(8.0) {
+            for pass in block_renderer.to_resolve_render_passes_with_camera(
+                8.0,
+                camera,
+                self.game_state.world.width().min(i32::MAX as usize) as i32,
+                self.game_state.world.height().min(i32::MAX as usize) as i32,
+            ) {
                 render_frame.push_pass(pass);
             }
         }
@@ -12603,6 +12608,14 @@ mod tests {
         assert_eq!(shadow.target, RenderTarget::Buffer("block-shadows".into()));
         assert_eq!(shadow.resolve_target, Some(RenderTarget::Screen));
         assert_eq!(shadow.resolve_kind, Some(RenderResolveKind::DrawRectSample));
+        let shadow_sample = shadow
+            .resolve_sample
+            .expect("shadow resolve should carry Java Draw.rect(TextureRegion) sample");
+        assert_eq!(shadow_sample.geometry, camera.world_rect());
+        assert_eq!(
+            shadow_sample.flip,
+            mindustry_core::mindustry::graphics::RenderTextureSampleFlip::UvY
+        );
         assert!(shadow.commands.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, .. } if symbol == "block-shadow"
@@ -12639,6 +12652,14 @@ mod tests {
         assert_eq!(
             darkness.resolve_kind,
             Some(RenderResolveKind::DrawFboSample)
+        );
+        let darkness_sample = darkness
+            .resolve_sample
+            .expect("darkness resolve should carry Java Draw.fbo sample");
+        assert_eq!(darkness_sample.geometry, camera.world_rect());
+        assert_eq!(
+            darkness_sample.flip,
+            mindustry_core::mindustry::graphics::RenderTextureSampleFlip::UvY
         );
         assert!(darkness.commands.iter().any(|command| matches!(
             command,

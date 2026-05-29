@@ -9,7 +9,8 @@
 //! 目标是让不同渲染后端在不依赖 GPU API 的前提下，按同一份计划执行。
 
 use super::{
-    RenderCommand, RenderPass, RenderPassKind, RenderProperty, RenderResolveKind, RenderTarget,
+    RenderCamera, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
+    RenderResolveKind, RenderTarget, RenderTextureSamplePlan, RenderViewport,
 };
 
 pub const DEFAULT_FOG_EVENT_PADDING: i32 = 1;
@@ -116,6 +117,16 @@ impl FogViewport {
             self.camera_y.floor() as i32,
             self.camera_width.ceil() as i32,
             self.camera_height.ceil() as i32,
+        )
+    }
+
+    pub fn render_camera(&self) -> RenderCamera {
+        RenderCamera::new(
+            RenderPoint::new(
+                self.camera_x + self.camera_width / 2.0,
+                self.camera_y + self.camera_height / 2.0,
+            ),
+            RenderViewport::new(0.0, 0.0, self.camera_width, self.camera_height),
         )
     }
 }
@@ -386,6 +397,14 @@ impl FogDrawStage {
     }
 
     pub fn to_render_pass(&self, stage_index: usize) -> RenderPass {
+        self.to_render_pass_with_viewport(stage_index, None)
+    }
+
+    pub fn to_render_pass_with_viewport(
+        &self,
+        stage_index: usize,
+        viewport: Option<FogViewport>,
+    ) -> RenderPass {
         let kind = self.texture_kind();
         let mut pass = RenderPass::new(RenderPassKind::Fog)
             .with_order(RenderPassKind::Fog.default_order() + stage_index as i32)
@@ -429,6 +448,18 @@ impl FogDrawStage {
             }
             Self::Composite(stage) => {
                 pass = pass.with_resolve(RenderTarget::Screen, RenderResolveKind::DrawFboSample);
+                if let Some(viewport) = viewport {
+                    if let Some(sample) = RenderTextureSamplePlan::fbo_uv_window(
+                        viewport.render_camera(),
+                        stage.world_width,
+                        stage.world_height,
+                        stage.tile_size as f32,
+                        stage.offset_x,
+                        stage.offset_y,
+                    ) {
+                        pass = pass.with_resolve_sample(sample);
+                    }
+                }
                 pass.push(RenderCommand::custom(
                     "fog-composite",
                     vec![
@@ -498,7 +529,7 @@ impl FogFramePlan {
         self.stages
             .iter()
             .enumerate()
-            .map(|(index, stage)| stage.to_render_pass(index))
+            .map(|(index, stage)| stage.to_render_pass_with_viewport(index, Some(self.viewport)))
             .collect()
     }
 }
@@ -747,16 +778,45 @@ mod tests {
                 if name == "fog-copy-from-cpu"
                     && properties.iter().any(|property| property.key == "revealed_tiles")
         ));
-        assert!(passes.iter().any(|pass| {
-            pass.target == RenderTarget::Buffer("fog:dynamic".into())
-                && pass.resolve_target == Some(RenderTarget::Screen)
-                && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
-        }));
-        assert!(passes.iter().any(|pass| {
-            pass.target == RenderTarget::Buffer("fog:static".into())
-                && pass.resolve_target == Some(RenderTarget::Screen)
-                && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
-        }));
+        let dynamic_composite = passes
+            .iter()
+            .find(|pass| {
+                pass.target == RenderTarget::Buffer("fog:dynamic".into())
+                    && pass.resolve_target == Some(RenderTarget::Screen)
+                    && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
+            })
+            .expect("dynamic fog composite pass should resolve with Draw.fbo semantics");
+        let dynamic_sample = dynamic_composite
+            .resolve_sample
+            .expect("dynamic fog composite should carry Draw.fbo UV window");
+        assert_eq!(
+            dynamic_sample.flip,
+            crate::mindustry::graphics::RenderTextureSampleFlip::UvY
+        );
+        assert!((dynamic_sample.uv.u - 0.3875).abs() < 0.0001);
+        assert!((dynamic_sample.uv.v - 2.028125).abs() < 0.0001);
+        assert!((dynamic_sample.uv.u2 - 1.325).abs() < 0.0001);
+        assert!((dynamic_sample.uv.v2 - 0.778125).abs() < 0.0001);
+
+        let static_composite = passes
+            .iter()
+            .find(|pass| {
+                pass.target == RenderTarget::Buffer("fog:static".into())
+                    && pass.resolve_target == Some(RenderTarget::Screen)
+                    && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
+            })
+            .expect("static fog composite pass should resolve with Draw.fbo semantics");
+        let static_sample = static_composite
+            .resolve_sample
+            .expect("static fog composite should carry half-tile Draw.fbo UV window");
+        assert_eq!(
+            static_sample.flip,
+            crate::mindustry::graphics::RenderTextureSampleFlip::UvY
+        );
+        assert!((static_sample.uv.u - 0.3875).abs() < 0.0001);
+        assert!((static_sample.uv.v - 2.090625).abs() < 0.0001);
+        assert!((static_sample.uv.u2 - 1.325).abs() < 0.0001);
+        assert!((static_sample.uv.v2 - 0.840625).abs() < 0.0001);
 
         assert!(state.queued_events.is_empty());
         assert_eq!(state.last_team, Some(2));
