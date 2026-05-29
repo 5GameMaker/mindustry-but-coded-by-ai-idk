@@ -9322,3 +9322,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 按 Java `DrawLiquidRegion/DrawLiquidTile/DrawHeat*/DrawWarmupRegion/DrawPower/DrawTurret` 消费 `BuildingDrawPlan.visual_runtime`；
   2. 给 `BlockRendererPlan` 或 `GraphicsFrameBundle` 增加真实 block particle plan 槽位；
   3. 渲染后端继续以 `DesktopGraphicsRenderer` / `run_with_desktop_frame_loop` / `DesktopSurfaceConfig` 为 seam，新增依赖前先补平台层契约测试。
+
+---
+
+## 280. 最新闭环记录：DrawParticles 进入 BlockRendererPlan
+
+- 本轮总体进度更新：约 **23.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BuildingDrawPlan` / `BlockRendererBuildingSnapshot` 新增 `drawer`、`build_id_seed`；
+    - 新增 `BlockRendererBlockParticlePlan`；
+    - `BlockRendererPlan.block_particles` 会收集 `DrawParticles` / `DrawSoftParticles` 生成的 `BlockDrawerParticlePlan`；
+    - warmup/time 来自 `BuildingDrawPlan.visual_runtime`，缺失时不伪造粒子。
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - `GraphicsFrameStats.block_particle_plans` 纳入统计。
+  - `desktop/src/lib.rs`
+    - 从内容块 `Crafting/Power/Effect/Liquid/Turret` 抽取 drawer；
+    - `atmospheric-concentrator` 的真实 content drawer 可通过 `DesktopLauncher::block_render_plan(...)` 进入 `plan.block_particles`。
+- 已验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `cargo test -p mindustry-core block_renderer_plan_collects_draw_particles_from_building_drawer_and_runtime_warmup --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_block_render_plan_collects_content_draw_particles --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core render_bridge --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `git diff --check`
+- 下一步优先：
+  1. 把 `BlockRendererPlan.block_particles` 接到 `DesktopGraphicsFrame` / effect renderer 或真实 backend 消费；
+  2. 给 block particle plan 增加 world-space emission/output 语义，避免停在参数计划；
+  3. 继续实现 liquid/heat/power/turret visual runtime 的动态 draw pass。

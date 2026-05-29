@@ -1118,6 +1118,19 @@ fn block_renderer_visual_runtime_snapshot_from_game_runtime(
     }
 }
 
+fn block_drawer_from_content_block(block: &BlockDef) -> Option<&str> {
+    match block {
+        BlockDef::Turret(turret) => Some(&turret.drawer),
+        BlockDef::Crafting(crafting) => Some(&crafting.drawer),
+        BlockDef::Effect(effect) => Some(&effect.drawer),
+        BlockDef::Liquid(liquid) => Some(&liquid.drawer),
+        BlockDef::Power(power) => Some(&power.drawer),
+        _ => None,
+    }
+    .filter(|drawer| !drawer.is_empty())
+    .map(String::as_str)
+}
+
 fn block_renderer_building_snapshot_from_world(
     coord: TileCoord,
     tile_build: Option<BuildingRef>,
@@ -1146,12 +1159,16 @@ fn block_renderer_building_snapshot_from_world(
     }
 
     if let Some(def) = content_block {
+        if let Some(drawer) = block_drawer_from_content_block(def) {
+            snapshot.drawer = drawer.to_string();
+        }
         snapshot.draw_team_overlay = matches!(def, BlockDef::DefenseWall(_));
         snapshot.draw_status =
             matches!(def, BlockDef::Sandbox(sandbox) if sandbox.enable_draw_status);
     }
 
     if let Some(building) = runtime_building {
+        snapshot.build_id_seed = building.tile_pos;
         snapshot.rotation = building.rotation as i16;
         snapshot.team = building.team.0;
         snapshot.visible = true;
@@ -1160,6 +1177,7 @@ fn block_renderer_building_snapshot_from_world(
             building.health + f32::EPSILON < building.max_health || building.was_damaged;
         snapshot.health_fraction = building_health_fraction(building.health, building.max_health);
     } else if let Some(build_ref) = tile_build {
+        snapshot.build_id_seed = build_ref.tile_pos;
         snapshot.rotation = build_ref.rotation as i16;
         snapshot.team = build_ref.team.clamp(0, u8::MAX as i32) as u8;
         snapshot.visible = true;
@@ -5276,6 +5294,58 @@ mod tests {
         assert_eq!(power.status, Some(0.0));
         assert_eq!(power.production_efficiency, None);
         assert!(visual_runtime.turret.is_none());
+    }
+
+    #[test]
+    fn desktop_launcher_block_render_plan_collects_content_draw_particles() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let concentrator = launcher
+            .content_loader
+            .block_by_name("atmospheric-concentrator")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(4, 4);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = concentrator.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: concentrator.id,
+                team: 1,
+                rotation: 0,
+            });
+            tile_pos
+        };
+
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(tile_pos, concentrator.clone(), TeamId(1)));
+        launcher.runtime.crafting_runtime_states.insert(
+            tile_pos,
+            mindustry_core::mindustry::core::game_runtime::GameRuntimeCraftingBlockState::GenericCrafter(
+                mindustry_core::mindustry::world::blocks::production::GenericCrafterState {
+                    progress: 0.1,
+                    total_progress: 33.0,
+                    warmup: 0.8,
+                },
+            ),
+        );
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let plan = launcher.block_render_plan(camera, viewport).unwrap();
+
+        assert_eq!(plan.block_particles.len(), 1);
+        let particle = &plan.block_particles[0];
+        assert_eq!(particle.coord, TileCoord::new(1, 1));
+        assert_eq!(particle.block, "atmospheric-concentrator");
+        assert_eq!(particle.plan.build_id_seed, tile_pos);
+        assert_eq!(particle.plan.warmup, 0.8);
+        assert_eq!(particle.plan.time, 33.0);
     }
 
     #[test]

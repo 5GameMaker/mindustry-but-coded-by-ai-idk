@@ -12021,3 +12021,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - visual runtime 已进入 building plan，但还需要按 Java draw families 消费 liquid/heat/warmup/power/turret 字段生成真实动态绘制；
   - `BlockDrawerParticlePlan` 仍需接入实际 block/effect/render frame；
   - 当前总体迁移约 22.9%，仍未达到完整可玩。
+
+### 12.378 BlockRenderer 收集内容 drawer 粒子计划
+
+- 2026-05-29：继续推进 `DrawParticles` / `DrawSoftParticles` 从 helper 进入 block render 主链。本轮不把粒子伪装成 atlas sprite，而是在 `BlockRendererPlan` 中新增真实粒子计划槽位，让 desktop frame 的 block renderer bundle 能携带内容 drawer 粒子信息。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBuildingSnapshot` / `BuildingDrawPlan` 新增 `drawer` 与 `build_id_seed`；
+    - 新增 `BlockRendererBlockParticlePlan`；
+    - `BlockRendererPlan` 新增 `block_particles`，并纳入 `clear()` / `is_empty()` / default；
+    - `append_building_passes_from_snapshot(...)` 会按 building drawer、visual runtime warmup/total_progress 生成 `BlockDrawerParticlePlan`；
+    - `DrawParticles` / `DrawSoftParticles` 继续不进入 sprite op，而是进入 `block_particles`。
+  - `core/src/mindustry/graphics/render_bridge.rs`
+    - `GraphicsFrameStats` 新增 `block_particle_plans`，block renderer stats 会统计 block particle plan 数。
+  - `desktop/src/lib.rs`
+    - 从 `BlockDef::Crafting/Power/Effect/Liquid/Turret` 抽取内容 drawer；
+    - block world snapshot 自动把内容 drawer 与 runtime build id seed 写入 renderer snapshot；
+    - `DesktopLauncher::block_render_plan(...)` 现在能从真实内容 `atmospheric-concentrator` 的 `DrawParticles` 生成 block particle plan。
+- 已跑验证：
+  - `cargo test -p mindustry-core block_renderer_plan_collects_draw_particles_from_building_drawer_and_runtime_warmup --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_block_render_plan_collects_content_draw_particles --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core render_bridge --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - `block_particles` 已进入 `BlockRendererPlan` / frame bundle stats，但还需接入真实 effect/render backend 的绘制执行；
+  - 粒子 plan 仍缺 world-space 粒子实例化与 GPU/backend draw call；
+  - 当前总体迁移约 23.0%，仍未达到完整可玩。

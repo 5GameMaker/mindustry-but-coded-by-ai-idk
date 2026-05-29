@@ -9,6 +9,7 @@ use crate::mindustry::{
     ctype::ContentId,
     entities::comp::DecalColor,
     graphics::{
+        particle_renderer::{BlockDrawerParticlePlan, ParticleRendererState},
         CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
     },
     world::point2_pack,
@@ -260,6 +261,8 @@ impl Default for TilePassPlan {
 pub struct BuildingDrawPlan {
     pub coord: TileCoord,
     pub block: String,
+    pub drawer: String,
+    pub build_id_seed: i32,
     pub cache_layer: CacheLayer,
     pub size: u8,
     pub rotation: i16,
@@ -280,6 +283,8 @@ impl Default for BuildingDrawPlan {
         Self {
             coord: TileCoord::default(),
             block: String::new(),
+            drawer: String::new(),
+            build_id_seed: point2_pack(0, 0),
             cache_layer: CacheLayer::None,
             size: 1,
             rotation: 0,
@@ -307,6 +312,8 @@ impl BuildingDrawPlan {
 pub struct BlockRendererBuildingSnapshot {
     pub coord: TileCoord,
     pub block: String,
+    pub drawer: String,
+    pub build_id_seed: i32,
     pub cache_layer: CacheLayer,
     pub size: u8,
     pub rotation: i16,
@@ -361,6 +368,8 @@ impl BlockRendererBuildingSnapshot {
         Self {
             coord,
             block: block.into(),
+            drawer: String::new(),
+            build_id_seed: point2_pack(coord.x, coord.y),
             cache_layer: CacheLayer::None,
             size: 1,
             rotation: 0,
@@ -393,6 +402,8 @@ impl BlockRendererBuildingSnapshot {
         BuildingDrawPlan {
             coord: self.coord,
             block: self.block.clone(),
+            drawer: self.drawer.clone(),
+            build_id_seed: self.build_id_seed,
             cache_layer: self.cache_layer,
             size: self.size.max(1),
             rotation: self.rotation,
@@ -1100,10 +1111,18 @@ pub fn draw_block_dispatch_sprite_ops(
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BlockRendererBlockParticlePlan {
+    pub coord: TileCoord,
+    pub block: String,
+    pub plan: BlockDrawerParticlePlan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockRendererPlan {
     pub sprite_ops: Vec<BlockSpriteOp>,
     pub tile_passes: Vec<TilePassPlan>,
     pub building_passes: Vec<BuildingPassPlan>,
+    pub block_particles: Vec<BlockRendererBlockParticlePlan>,
     pub cracks: Vec<CrackPlan>,
     pub build_previews: Vec<BuildPlanPreview>,
     pub darkness: DarknessPlan,
@@ -1118,6 +1137,7 @@ impl BlockRendererPlan {
         self.sprite_ops.clear();
         self.tile_passes.clear();
         self.building_passes.clear();
+        self.block_particles.clear();
         self.cracks.clear();
         self.build_previews.clear();
         self.darkness.tiles.clear();
@@ -1134,6 +1154,7 @@ impl BlockRendererPlan {
         self.sprite_ops.is_empty()
             && self.tile_passes.is_empty()
             && self.building_passes.is_empty()
+            && self.block_particles.is_empty()
             && self.cracks.is_empty()
             && self.build_previews.is_empty()
             && self.darkness.tiles.is_empty()
@@ -1220,6 +1241,7 @@ impl Default for BlockRendererPlan {
             sprite_ops: Vec::new(),
             tile_passes: Vec::new(),
             building_passes: Vec::new(),
+            block_particles: Vec::new(),
             cracks: Vec::new(),
             build_previews: Vec::new(),
             darkness: DarknessPlan::default(),
@@ -1319,6 +1341,7 @@ fn append_building_passes_from_snapshot(
         BlockDrawStage::BuildingBase,
         buildings.iter().cloned(),
     );
+    append_block_particle_plans(plan, &buildings);
     push_building_pass(
         plan,
         BlockDrawStage::BuildingCracks,
@@ -1358,6 +1381,40 @@ fn append_building_passes_from_snapshot(
         .filter(|building| building.emits_light)
         .map(BlockRendererBuildingSnapshot::to_draw_plan);
     push_building_pass(plan, BlockDrawStage::Light, light_buildings);
+}
+
+fn append_block_particle_plans(plan: &mut BlockRendererPlan, buildings: &[BuildingDrawPlan]) {
+    for building in buildings {
+        if building.drawer.is_empty() {
+            continue;
+        }
+
+        let visual_runtime = building.visual_runtime.as_ref();
+        let warmup = visual_runtime
+            .and_then(|runtime| runtime.warmup)
+            .unwrap_or(0.0);
+        let time = visual_runtime
+            .and_then(|runtime| runtime.total_progress)
+            .unwrap_or(0.0);
+
+        plan.block_particles.extend(
+            ParticleRendererState::block_drawer_particle_plans_from_drawer(
+                &building.block,
+                &building.drawer,
+                building.build_id_seed,
+                warmup,
+                time,
+                Layer::BLOCK,
+            )
+            .into_iter()
+            .filter(|particle_plan| !particle_plan.is_noop())
+            .map(|particle_plan| BlockRendererBlockParticlePlan {
+                coord: building.coord,
+                block: building.block.clone(),
+                plan: particle_plan,
+            }),
+        );
+    }
 }
 
 fn push_building_pass<I>(plan: &mut BlockRendererPlan, stage: BlockDrawStage, buildings: I)
@@ -2079,6 +2136,47 @@ mod tests {
     }
 
     #[test]
+    fn block_renderer_plan_collects_draw_particles_from_building_drawer_and_runtime_warmup() {
+        let coord = TileCoord::new(2, 3);
+        let mut state = BlockRendererState::default();
+        state.cache.tile_view = vec![coord];
+
+        let mut building = BlockRendererBuildingSnapshot::new(coord, "heat-press");
+        building.visible = true;
+        building.drawer = "DrawMulti(DrawParticles, DrawSoftParticles, DrawDefault)".into();
+        building.build_id_seed = 42;
+        building.visual_runtime = Some(BlockRendererBuildingVisualRuntimeSnapshot {
+            warmup: Some(0.75),
+            total_progress: Some(19.0),
+            ..BlockRendererBuildingVisualRuntimeSnapshot::default()
+        });
+
+        let mut tile = BlockRendererTileSnapshot::new(coord, "heat-press");
+        tile.building = Some(building);
+        let snapshot = BlockRendererWorldSnapshot { tiles: vec![tile] };
+
+        let plan = state.build_plan_from_snapshot(&snapshot);
+
+        assert_eq!(plan.block_particles.len(), 2);
+        assert!(plan
+            .block_particles
+            .iter()
+            .all(|particle| particle.coord == coord && particle.block == "heat-press"));
+        assert!(plan
+            .block_particles
+            .iter()
+            .all(|particle| particle.plan.build_id_seed == 42));
+        assert!(plan
+            .block_particles
+            .iter()
+            .all(|particle| particle.plan.warmup == 0.75));
+        assert!(plan
+            .block_particles
+            .iter()
+            .all(|particle| particle.plan.time == 19.0));
+    }
+
+    #[test]
     fn explicit_block_sprite_ops_preserve_region_tint_layer_order_into_draw_sprite() {
         let mut plan = BlockRendererPlan::default();
         let op = BlockSpriteOp::new(
@@ -2372,6 +2470,8 @@ mod tests {
         let building = BuildingDrawPlan {
             coord: TileCoord::new(4, 5),
             block: "duo".into(),
+            drawer: String::new(),
+            build_id_seed: point2_pack(4, 5),
             cache_layer: CacheLayer::Normal,
             size: 2,
             rotation: 1,

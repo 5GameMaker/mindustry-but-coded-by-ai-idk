@@ -35,6 +35,7 @@ mod test_support {
         pub build_previews: Vec<()>,
         pub darkness: DarknessPlan,
         pub overlays: Vec<()>,
+        pub block_particles: Vec<()>,
     }
 
     #[derive(Debug, Clone, PartialEq)]
@@ -92,6 +93,7 @@ pub struct GraphicsFrameStats {
     pub block_build_previews: usize,
     pub block_darkness_tiles: usize,
     pub block_overlays: usize,
+    pub block_particle_plans: usize,
     pub floor_visible_chunks: usize,
     pub floor_stage_plans: usize,
     pub floor_cache_dirty_chunks: usize,
@@ -120,6 +122,7 @@ impl GraphicsFrameStats {
             + self.block_build_previews
             + self.block_darkness_tiles
             + self.block_overlays
+            + self.block_particle_plans
             + self.floor_visible_chunks
             + self.floor_stage_plans
             + self.floor_cache_dirty_chunks
@@ -153,6 +156,7 @@ impl Default for GraphicsFrameStats {
             block_build_previews: 0,
             block_darkness_tiles: 0,
             block_overlays: 0,
+            block_particle_plans: 0,
             floor_visible_chunks: 0,
             floor_stage_plans: 0,
             floor_cache_dirty_chunks: 0,
@@ -205,6 +209,7 @@ impl GraphicsFrameStatsSource for BlockRendererPlan {
         stats.block_build_previews += self.build_previews.len();
         stats.block_darkness_tiles += self.darkness.tiles.len();
         stats.block_overlays += self.overlays.len();
+        stats.block_particle_plans += self.block_particles.len();
     }
 }
 
@@ -217,6 +222,7 @@ impl GraphicsFrameStatsSource for BlockRendererPlan {
         stats.block_build_previews += self.build_previews.len();
         stats.block_darkness_tiles += self.darkness.tiles.len();
         stats.block_overlays += self.overlays.len();
+        stats.block_particle_plans += self.block_particles.len();
     }
 }
 
@@ -763,6 +769,7 @@ mod tests {
                 tiles: vec![(); darkness_tiles],
             },
             overlays: vec![(); overlays],
+            block_particles: Vec::new(),
         }
     }
 
