@@ -646,6 +646,17 @@ pub struct DesktopGraphicsOpenGlBackendMeshBufferPlan {
     pub index_buffer_bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
+    pub batch_index: usize,
+    pub vertex_array_key: String,
+    pub vertex_buffer_key: String,
+    pub index_buffer_key: String,
+    pub vertex_buffer_bytes: usize,
+    pub index_buffer_bytes: usize,
+    pub vertex_stride_bytes: usize,
+}
+
 impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
     pub const SPRITE_VERTEX_FLOATS: usize = 6;
     pub const SPRITE_VERTEX_STRIDE_BYTES: usize =
@@ -662,6 +673,21 @@ impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
             vertex_stride_bytes: Self::SPRITE_VERTEX_STRIDE_BYTES,
             vertex_buffer_bytes: batch.packed_vertices.len() * Self::SPRITE_VERTEX_STRIDE_BYTES,
             index_buffer_bytes: batch.indices.len() * std::mem::size_of::<u32>(),
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
+    pub fn from_buffer_plan(plan: &DesktopGraphicsOpenGlBackendMeshBufferPlan) -> Self {
+        let batch_index = plan.batch_index;
+        Self {
+            batch_index,
+            vertex_array_key: format!("sprite-batch:{batch_index}:vao"),
+            vertex_buffer_key: format!("sprite-batch:{batch_index}:vbo"),
+            index_buffer_key: format!("sprite-batch:{batch_index}:ibo"),
+            vertex_buffer_bytes: plan.vertex_buffer_bytes,
+            index_buffer_bytes: plan.index_buffer_bytes,
+            vertex_stride_bytes: plan.vertex_stride_bytes,
         }
     }
 }
@@ -710,6 +736,15 @@ fn opengl_backend_mesh_buffer_plans_from_batches(
         .map(|(batch_index, batch)| {
             DesktopGraphicsOpenGlBackendMeshBufferPlan::from_sprite_batch(batch_index, batch)
         })
+        .collect()
+}
+
+fn opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
+    plans: &[DesktopGraphicsOpenGlBackendMeshBufferPlan],
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan> {
+    plans
+        .iter()
+        .map(DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan::from_buffer_plan)
         .collect()
 }
 
@@ -1421,6 +1456,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
     pub sprite_mesh_buffer_plans: Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan>,
+    pub sprite_mesh_resource_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan>,
     pub missing_sprite_texture_bindings: usize,
 }
 
@@ -1456,6 +1492,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             sprite_quads: Vec::new(),
             sprite_mesh_batches: Vec::new(),
             sprite_mesh_buffer_plans: Vec::new(),
+            sprite_mesh_resource_plans: Vec::new(),
             missing_sprite_texture_bindings: 0,
         }
     }
@@ -1595,6 +1632,10 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
             opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
         self.sprite_mesh_buffer_plans =
             opengl_backend_mesh_buffer_plans_from_batches(&self.sprite_mesh_batches);
+        self.sprite_mesh_resource_plans =
+            opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
+                &self.sprite_mesh_buffer_plans,
+            );
     }
 }
 
@@ -1745,6 +1786,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
     pub sprite_mesh_buffer_plans: Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan>,
+    pub sprite_mesh_resource_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan>,
     pub missing_sprite_texture_bindings: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
     pub last_command_kind: Option<&'static str>,
@@ -1781,6 +1823,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             sprite_quads: Vec::new(),
             sprite_mesh_batches: Vec::new(),
             sprite_mesh_buffer_plans: Vec::new(),
+            sprite_mesh_resource_plans: Vec::new(),
             missing_sprite_texture_bindings: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
             last_command_kind: None,
@@ -1906,6 +1949,10 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
         self.sprite_mesh_buffer_plans =
             opengl_backend_mesh_buffer_plans_from_batches(&self.sprite_mesh_batches);
+        self.sprite_mesh_resource_plans =
+            opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
+                &self.sprite_mesh_buffer_plans,
+            );
     }
 }
 
@@ -9896,6 +9943,19 @@ mod tests {
                 index_buffer_bytes: 6 * std::mem::size_of::<u32>(),
             }
         );
+        assert_eq!(executor.state.sprite_mesh_resource_plans.len(), 1);
+        assert_eq!(
+            executor.state.sprite_mesh_resource_plans[0],
+            super::DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
+                batch_index: 0,
+                vertex_array_key: "sprite-batch:0:vao".into(),
+                vertex_buffer_key: "sprite-batch:0:vbo".into(),
+                index_buffer_key: "sprite-batch:0:ibo".into(),
+                vertex_buffer_bytes: executor.state.sprite_mesh_buffer_plans[0].vertex_buffer_bytes,
+                index_buffer_bytes: executor.state.sprite_mesh_buffer_plans[0].index_buffer_bytes,
+                vertex_stride_bytes: executor.state.sprite_mesh_buffer_plans[0].vertex_stride_bytes,
+            }
+        );
         assert_eq!(
             executor.state.resolve_events,
             vec![super::DesktopGraphicsOpenGlBackendResolveEvent {
@@ -9934,6 +9994,10 @@ mod tests {
         assert_eq!(
             classifying_adapter.state.sprite_mesh_buffer_plans,
             executor.state.sprite_mesh_buffer_plans
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_mesh_resource_plans,
+            executor.state.sprite_mesh_resource_plans
         );
         assert_eq!(classifying_adapter.state.actions.len(), 3);
         assert!(matches!(

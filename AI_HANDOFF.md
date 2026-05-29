@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **29.0%**。
+- 当前总体迁移完成度：约 **29.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10768,3 +10768,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 推进 VBO/IBO/VAO buffer resource plan；
   2. 接 shader program identity/binding；
   3. 后续把 texture identity 连接到真实 GL texture cache/upload。
+
+---
+
+## 340. 最新闭环记录：Sprite mesh VAO/VBO/IBO resource plan
+
+- 本轮总体进度更新：约 **29.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan`；
+    - 从 mesh buffer plan 生成稳定的 `sprite-batch:{index}:vao/vbo/ibo` resource key；
+    - executor state 与 classifying adapter state 均新增 `sprite_mesh_resource_plans`；
+    - `record_sprite_quad(...)` 同步重建 resource plans；
+    - 回归测试确认 executor/adapter 的 VAO/VBO/IBO resource plan 一致。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 接 shader program identity/binding；
+  2. 后续把 resource plan 映射到真实 GL object 创建/更新；
+  3. 再推进 draw call executor。

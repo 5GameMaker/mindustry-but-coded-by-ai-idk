@@ -13504,5 +13504,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
   - 尚未创建真实 GL texture object，也未把 atlas page 上传到 GPU；
-  - VBO/IBO/VAO、shader program binding 与 draw call 仍待落地；
+  - VBO/IBO/VAO resource plan 已在下一节补齐，真实 GL buffer 创建、shader program binding 与 draw call 仍待落地；
   - 当前总体迁移约 29.0%，仍未达到完整可玩。
+
+## 12.434 Sprite mesh VAO/VBO/IBO resource plan
+
+- 2026-05-29：在 sprite mesh buffer plan 之后继续补真实 OpenGL buffer 前置资源计划。当前仍不调用 GL，但每个 sprite batch 已能映射到稳定的 VAO/VBO/IBO resource key 与对应 buffer byte size。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan`；
+    - `from_buffer_plan(...)` 将 `DesktopGraphicsOpenGlBackendMeshBufferPlan` 映射为 `sprite-batch:{index}:vao/vbo/ibo`；
+    - 新增 `opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(...)`；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 与 `DesktopGraphicsOpenGlBackendAdapterExecutionState` 均新增 `sprite_mesh_resource_plans`；
+    - `record_sprite_quad(...)` 在重建 mesh buffer plan 后同步重建 resource plan；
+    - 回归测试验证 executor 与 adapter 的 resource plan 一致，且 bytes/stride 来自 buffer plan。
+- 迁移意义：
+  - sprite 渲染链路继续推进为 `DrawSprite -> texture identity -> quad -> mesh batch -> packed buffer plan -> VAO/VBO/IBO resource plan`；
+  - 后续真实 GL adapter 可按稳定 key 创建/复用/更新 buffer object，而不是临时从测试结构拼装；
+  - 仍保持 OpenGL/SpriteBatch 方向，不切换渲染引擎。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 尚未真实调用 `glGenBuffers/glBufferData/glVertexAttribPointer` 等 API；
+  - shader program binding 与实际 draw call 仍待落地；
+  - 当前总体迁移约 29.1%，仍未达到完整可玩。
