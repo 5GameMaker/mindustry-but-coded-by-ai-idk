@@ -12452,3 +12452,21 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. light：把 standard effect light primitive 喂进 lighting pass 或独立 light render pass；
   2. triangle：需要新增精确 triangle command/mesh，避免 `DrawPolygon` 失真；
   3. textured-line：需要先定义沿线贴图几何/atlas 语义。
+
+### 2026-05-30：standard effect light 接入 lighting/OpenGL backend
+
+- 当前整体完成度：约 **39.0%**。
+- 已完成：
+  - `DesktopStandardEffectRenderFrame::to_light_render_pass()`；
+  - standard effect light primitive 转成 `LightRendererPlan.circle_lights`；
+  - `graphics_frame_for_render()` 注入 `RenderPassKind::Lighting`；
+  - `desktop_launcher_routes_standard_effect_lights_into_graphics_backend` 覆盖 light primitive 进入 lighting pass 与 OpenGL executor。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_lights_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 下一步：
+  1. triangle：不要用规则 `DrawPolygon` 伪装，优先新增精确 triangle mesh/command；
+  2. textured-line：先定义沿线纹理拉伸/平铺几何；
+  3. block fullIcon textured rect：需要 content registry / atlas symbol 映射。

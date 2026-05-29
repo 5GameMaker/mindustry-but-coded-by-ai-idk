@@ -109,6 +109,28 @@ fn desktop_effect_render_color(color: Option<DecalColor>, alpha: f32) -> [f32; 4
 }
 
 impl DesktopStandardEffectRenderFrame {
+    pub fn to_light_render_pass(&self) -> Option<RenderPass> {
+        let circle_lights = self
+            .light_primitives
+            .iter()
+            .filter(|primitive| primitive.radius > f32::EPSILON && primitive.opacity > 0.0)
+            .map(|primitive| LightPrimitive {
+                center: primitive.center,
+                radius: primitive.radius,
+                color: primitive.color_rgba.unwrap_or(DecalColor::WHITE),
+                opacity: primitive.opacity,
+            })
+            .collect::<Vec<_>>();
+        if circle_lights.is_empty() {
+            return None;
+        }
+        LightRendererPlan {
+            circle_lights,
+            commands: Vec::new(),
+        }
+        .to_render_pass()
+    }
+
     pub fn to_render_pass(&self) -> Option<RenderPass> {
         let mut pass = RenderPass::new(RenderPassKind::Overlay);
         for primitive in &self.circle_primitives {
@@ -10839,6 +10861,9 @@ impl DesktopLauncher {
         let accelerator_launching_pass =
             self.accelerator_launching_render_pass(camera, viewport, 8.0);
         if let Some(light_pass) = self.drain_light_renderer_plan().to_render_pass() {
+            render_frame.push_pass(light_pass);
+        }
+        if let Some(light_pass) = self.standard_effect_render_frame().to_light_render_pass() {
             render_frame.push_pass(light_pass);
         }
         let block_renderer = self.block_render_plan(camera, viewport);
@@ -23297,11 +23322,19 @@ mod tests {
             .passes
             .iter()
             .find(|pass| {
-                pass.kind == RenderPassKind::Overlay
-                    && pass
-                        .commands
-                        .iter()
-                        .any(|command| matches!(command, RenderCommand::DrawCircle { .. }))
+                if pass.kind != RenderPassKind::Overlay {
+                    return false;
+                }
+                pass.commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        RenderCommand::DrawCircle { center, radius, .. } => {
+                            Some((*center, *radius))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    == expected_circles
             })
             .expect("standard effect circles should be routed into an overlay render pass");
         let circle_commands: Vec<_> = effect_pass
@@ -23332,11 +23365,11 @@ mod tests {
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
-        assert_eq!(
+        assert!(
             renderer
                 .last_opengl_backend_executor_state
-                .draw_circle_commands,
-            2
+                .draw_circle_commands
+                >= expected_circles.len()
         );
         assert!(
             renderer
@@ -23344,6 +23377,104 @@ mod tests {
                 .sprite_quads
                 .len()
                 >= 2 * super::DESKTOP_GRAPHICS_OPENGL_CIRCLE_MIN_SEGMENTS
+        );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_draw_call_plans
+            .iter()
+            .any(|plan| plan.target == Some(RenderTarget::Screen)));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_standard_effect_lights_into_graphics_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("fire").unwrap() as u16,
+                    x: 32.0,
+                    y: 48.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+        let expected_lights = launcher
+            .standard_effect_render_frame()
+            .light_primitives
+            .iter()
+            .map(|light| {
+                (
+                    RenderPoint::new(light.center.0, light.center.1),
+                    light.radius,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(!expected_lights.is_empty());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            7,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let light_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, RenderCommand::DrawCircle { .. }))
+            })
+            .expect("standard effect lights should be routed into a lighting render pass");
+        let light_commands = light_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    filled,
+                    layer,
+                    ..
+                } => Some((*center, *radius, *filled, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(light_commands.len(), expected_lights.len());
+        assert!(light_commands.iter().all(|(_, _, filled, layer)| {
+            *filled
+                && (*layer
+                    - mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER)
+                    .abs()
+                    < f32::EPSILON
+        }));
+        assert_eq!(
+            light_commands
+                .iter()
+                .map(|(center, radius, _, _)| (*center, *radius))
+                .collect::<Vec<_>>(),
+            expected_lights
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(
+            renderer
+                .last_opengl_backend_executor_state
+                .draw_circle_commands
+                >= expected_lights.len()
         );
         assert!(renderer
             .last_opengl_backend_executor_state
