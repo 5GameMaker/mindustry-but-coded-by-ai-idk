@@ -151,10 +151,7 @@ impl DesktopStandardEffectRenderFrame {
             ));
         }
         for primitive in &self.line_primitives {
-            if primitive.region.is_some()
-                || primitive.length <= f32::EPSILON
-                || primitive.stroke <= f32::EPSILON
-            {
+            if primitive.length <= f32::EPSILON || primitive.stroke <= f32::EPSILON {
                 continue;
             }
             let angle = primitive.angle.to_radians();
@@ -163,6 +160,21 @@ impl DesktopStandardEffectRenderFrame {
                 primitive.start.0 + angle.cos() * primitive.length,
                 primitive.start.1 + angle.sin() * primitive.length,
             );
+            if let Some(region) = &primitive.region {
+                let rect = RenderRect::from_center(
+                    RenderPoint::new((from.x + to.x) * 0.5, (from.y + to.y) * 0.5),
+                    primitive.length,
+                    primitive.stroke,
+                );
+                pass.push(RenderCommand::draw_sprite(
+                    region.clone(),
+                    rect,
+                    desktop_effect_render_color(primitive.color, primitive.alpha),
+                    primitive.angle,
+                    Layer::EFFECT,
+                ));
+                continue;
+            }
             pass.push(RenderCommand::draw_line(
                 from,
                 to,
@@ -23690,6 +23702,116 @@ mod tests {
                 .len()
                 >= expected_lines.len()
         );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_draw_call_plans
+            .iter()
+            .any(|plan| plan.target == Some(RenderTarget::Screen)));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_standard_effect_textured_lines_into_graphics_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.texture_atlas =
+            TextureAtlasPlan::from_virtual_source_paths(["sprites/crawler-leg.png"]);
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("legDestroy").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 0.0,
+                    color: type_io::RgbaColor::new(0xffffffff_u32 as i32),
+                },
+                data: TypeValue::LegDestroyData(LegDestroyData::new(
+                    IoVec2::new(24.0, 32.0),
+                    IoVec2::new(54.0, 32.0),
+                    TextureRegionRef::with_size("crawler-leg", 16, 8),
+                )),
+            });
+
+        launcher.update();
+        let expected_lines = launcher
+            .standard_effect_render_frame()
+            .line_primitives
+            .iter()
+            .filter_map(|line| {
+                let region = line.region.as_ref()?;
+                let angle = line.angle.to_radians();
+                let from = RenderPoint::new(line.start.0, line.start.1);
+                let to = RenderPoint::new(
+                    line.start.0 + angle.cos() * line.length,
+                    line.start.1 + angle.sin() * line.length,
+                );
+                Some((
+                    region.clone(),
+                    RenderRect::from_center(
+                        RenderPoint::new((from.x + to.x) * 0.5, (from.y + to.y) * 0.5),
+                        line.length,
+                        line.stroke,
+                    ),
+                    line.angle,
+                ))
+            })
+            .collect::<Vec<_>>();
+        assert!(!expected_lines.is_empty());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            9,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let effect_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "crawler-leg")
+                    })
+            })
+            .expect("standard effect textured lines should be routed into an overlay render pass");
+        let textured_line_commands = effect_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    rotation,
+                    layer,
+                    ..
+                } if symbol == "crawler-leg" => Some((symbol.clone(), *rect, *rotation, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(textured_line_commands.len(), expected_lines.len());
+        assert!(textured_line_commands
+            .iter()
+            .all(|(_, _, _, layer)| (*layer - Layer::EFFECT).abs() < f32::EPSILON));
+        assert_eq!(
+            textured_line_commands
+                .iter()
+                .map(|(symbol, rect, rotation, _)| (symbol.clone(), *rect, *rotation))
+                .collect::<Vec<_>>(),
+            expected_lines
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_texture_bindings
+            .iter()
+            .any(|binding| binding.symbol == "crawler-leg"));
         assert!(renderer
             .last_opengl_backend_executor_state
             .sprite_draw_call_plans

@@ -12492,3 +12492,21 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. textured-line：把 `StandardEffectLineRenderPrimitive.region=Some(...)` 的沿线贴图接到 atlas/sprite mesh；
   2. block fullIcon textured rect：把 `block-fullIcon:*` 从占位 region 协议接到真实 content/atlas symbol；
   3. world label：把 runtime snapshot / `WorldLabelDrawPlan` 收口到 render frame，而不是只停在实体状态。
+
+### 2026-05-30：standard effect textured-line 接入 atlas/OpenGL backend
+
+- 当前整体完成度：约 **39.4%**。
+- 已完成：
+  - `DesktopStandardEffectRenderFrame::to_render_pass()` 现在会消费 `line_primitives` 中带 region 的 textured-line；
+  - textured-line 由起点、角度、长度、stroke 计算中点矩形，转成 `RenderCommand::DrawSprite`，rotation 保留 line angle；
+  - `legDestroy` 的 `crawler-leg` region 会进入 atlas sprite binding 和 OpenGL sprite mesh path；
+  - 新增 `desktop_launcher_routes_standard_effect_textured_lines_into_graphics_backend`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_textured_lines_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+- 下一步：
+  1. block fullIcon textured rect：把 `block-fullIcon:*` 映射到真实 content/atlas symbol；
+  2. world label：把 `WorldLabelDrawPlan` 接进 render frame；
+  3. overlay/minimap overlay：继续从 sidecar plan 收口到 `RenderPass`。

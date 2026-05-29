@@ -15158,3 +15158,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - block fullIcon textured rect 仍需 content registry / atlas symbol 映射；
   - overlay / minimap overlay / world label / entity world draw 仍需继续收口到真实 render frame；
   - 当前总体迁移约 39.2%，仍未达到完整可玩。
+
+## 409. 最新闭环记录：standard effect textured-line 接入 atlas/OpenGL backend
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **39.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame::to_render_pass()` 不再跳过 `StandardEffectLineRenderPrimitive.region=Some(...)`；
+    - textured-line 以起点、角度、长度、stroke 计算中点矩形，并转成 `RenderCommand::DrawSprite`；
+    - atlas symbol 保留原 region，例如 `crawler-leg`；
+    - 新增 `desktop_launcher_routes_standard_effect_textured_lines_into_graphics_backend`，覆盖 `legDestroy` event → textured line primitive → overlay render pass → atlas sprite binding → OpenGL executor。
+- 迁移意义：
+  - `Fx.legDestroy` / unit leg destroy 这类 Java `Lines.line(region, ...)` 语义开始进入真实 graphics/OpenGL sprite mesh；
+  - textured-line 不再只停在 `StandardEffectLineRenderPrimitive.region` 缓存层；
+  - 继续复用 atlas/DrawSprite/OpenGL sprite path，没有新增孤立渲染模块。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_textured_lines_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+- 仍未完成：
+  - textured-line 当前按沿线拉伸 sprite 语义接入，后续仍可继续对齐 Arc `Lines.line(TextureRegion, ...)` 的 cap/pad 细节；
+  - block fullIcon textured rect 仍需 content registry / atlas symbol 映射；
+  - world label / overlay / minimap overlay / entity world draw 仍需继续接入 render frame；
+  - 当前总体迁移约 39.4%，仍未达到完整可玩。
