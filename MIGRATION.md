@@ -13092,3 +13092,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - executor 自身还未直接持有/emit action，需要继续把 action 生成从 classifying adapter 上移到执行状态机；
   - atlas texture binding、shader program/resource binding、FBO/texture resolve 与窗口化 present 仍待落地；
   - 当前总体迁移约 27.4%，仍未达到完整可玩。
+
+## 12.418 OpenGL executor action 状态机
+
+- 2026-05-29：将上一节的 adapter action log 继续上移到 OpenGL executor 状态机，使 executor 在消费 `DesktopGraphicsOpenGlBackendStepKind::Command` 时直接生成后续真实 GL adapter 可执行的 action。该闭环仍不引入 `glow/glutin/winit`，只推进无依赖执行边界。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>`；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `last_action` 与 `action_count`；
+    - `DesktopGraphicsOpenGlBackendExecutor::emit_action(...)` 在 command step 消费期间记录 action 顺序；
+    - 抽出 `opengl_backend_adapter_action_from_render_command(...)`，executor 与 `DesktopGraphicsClassifyingOpenGlBackendAdapter` 共享同一套命令到 action 映射，避免 adapter/executor 两套规则漂移；
+    - executor action 与 event log 同步生成，仍保留 adapter 事件回放能力。
+  - 测试增强：
+    - `desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps` 断言 executor 侧 `Clear -> SetBlend -> DrawSprite` action 顺序、`action_count` 与 `last_action`；
+    - `desktop_graphics_opengl_backend_adapter_receives_noop_command_events` 断言 executor 侧 deferred no-op action 与 adapter 输出一致。
+- 迁移意义：
+  - 真实 OpenGL 后端后续可以从 executor state 直接消费 action，而不必先构造 classifying adapter；
+  - 这让 `FramePlan -> Step -> ExecutorState -> Action -> GL adapter` 链路更接近真实 GPU 执行器；
+  - 继续保证渲染实现接在主 runtime/render/backend 链路上，而不是独立 action demo。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - action 仍未映射到真实 OpenGL API 调用；
+  - 还需要拆出 state action sink / draw action sink 或真实 adapter trait 方法；
+  - atlas texture binding、shader program/resource binding、FBO/texture resolve 与窗口化 present 仍待落地；
+  - 当前总体迁移约 27.5%，仍未达到完整可玩。

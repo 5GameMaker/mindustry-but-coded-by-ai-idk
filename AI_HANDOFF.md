@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **27.4%**。
+- 当前总体迁移完成度：约 **27.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10420,3 +10420,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 action 生成上移/并入 executor 状态机，形成 `FramePlan -> ExecutorState -> Action -> GL adapter` 的连续执行边界；
   2. 不新增外部依赖时，先补 `actions / last_action / emit_action(...)` 等无依赖状态机字段；
   3. 若要接真实窗口和 GPU，仍优先保持原版 OpenGL 语义，待确认后再引入 `glow/glutin/winit` 等依赖。
+
+---
+
+## 324. 最新闭环记录：OpenGL executor action 状态机
+
+- 本轮总体进度更新：约 **27.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `actions / last_action / action_count`；
+    - `DesktopGraphicsOpenGlBackendExecutor` 新增 `emit_action(...)`，在消费 `Command` step 时同步生成 action；
+    - 抽出 `opengl_backend_adapter_action_from_render_command(...)`，让 executor 与 classifying adapter 共享同一套 `RenderCommand -> DesktopGraphicsOpenGlBackendAdapterAction` 映射；
+    - 保持 `FramePlan -> Step -> ExecutorState/EventLog -> Adapter` 主链，同时让 executor 自身也具备后续真实 GL backend 可直接消费的 action 输出；
+    - 回归测试断言 executor action 顺序、`last_action`、`action_count`，并与 classifying adapter 输出保持一致。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 继续把 executor action 送入真实 adapter trait 的更细方法边界，例如 state/action sink；
+  2. 优先拆出 `Clear / SetBlend / SetClip / ClearClip` 的 OpenGL 状态执行接口；
+  3. 再推进 `DrawSprite` 的 atlas/resource binding 语义。

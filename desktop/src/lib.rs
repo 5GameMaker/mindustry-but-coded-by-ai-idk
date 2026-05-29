@@ -1002,146 +1002,142 @@ pub struct DesktopGraphicsClassifyingOpenGlBackendAdapter {
 impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
     fn consume_command(&mut self, command: RenderCommand) {
         self.state.command_events += 1;
+        let action = opengl_backend_adapter_action_from_render_command(&command);
         match command {
-            RenderCommand::Clear { color } => {
+            RenderCommand::Clear { .. } => {
                 self.state.state_commands += 1;
                 self.state.clear_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::Clear { color });
             }
             RenderCommand::SetBlend { mode } => {
                 self.state.state_commands += 1;
                 self.state.blend_state_changes += 1;
                 self.state.current_blend = mode;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::SetBlend { mode });
             }
             RenderCommand::SetClip { rect } => {
                 self.state.state_commands += 1;
                 self.state.clip_state_changes += 1;
                 self.state.current_clip = Some(rect);
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::SetClip { rect });
             }
             RenderCommand::ClearClip => {
                 self.state.state_commands += 1;
                 self.state.clip_state_changes += 1;
                 self.state.current_clip = None;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::ClearClip);
             }
-            RenderCommand::DrawSprite {
-                symbol,
-                rect,
-                tint,
-                rotation,
-                layer,
-            } => {
+            RenderCommand::DrawSprite { .. } => {
                 self.state.draw_commands += 1;
                 self.state.draw_sprite_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
-                        symbol,
-                        rect,
-                        tint,
-                        rotation,
-                        layer,
-                    });
             }
-            RenderCommand::DrawCircle {
-                center,
-                radius,
-                color,
-                filled,
-                layer,
-            } => {
+            RenderCommand::DrawCircle { .. } => {
                 self.state.draw_commands += 1;
                 self.state.draw_circle_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
-                        center,
-                        radius,
-                        color,
-                        filled,
-                        layer,
-                    });
             }
-            RenderCommand::DrawText {
-                text,
-                position,
-                color,
-                size,
-                rotation,
-                align,
-                layer,
-            } => {
+            RenderCommand::DrawText { .. } => {
                 self.state.draw_commands += 1;
                 self.state.draw_text_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::DrawText {
-                        text,
-                        position,
-                        color,
-                        size,
-                        rotation,
-                        align,
-                        layer,
-                    });
             }
-            RenderCommand::Custom { name, properties } => {
+            RenderCommand::Custom { name, .. } => {
                 self.state.custom_commands += 1;
-                self.state.custom_markers.push(name.clone());
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::Custom { name, properties });
+                self.state.custom_markers.push(name);
             }
             RenderCommand::FillRect { .. } => {
                 self.state.deferred_noop_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp {
-                        kind: "FillRect",
-                    });
             }
             RenderCommand::StrokeRect { .. } => {
                 self.state.deferred_noop_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp {
-                        kind: "StrokeRect",
-                    });
             }
             RenderCommand::DrawLine { .. } => {
                 self.state.deferred_noop_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp {
-                        kind: "DrawLine",
-                    });
             }
             RenderCommand::DrawPolygon { .. } => {
                 self.state.deferred_noop_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp {
-                        kind: "DrawPolygon",
-                    });
             }
             RenderCommand::DrawPixel { .. } => {
                 self.state.deferred_noop_commands += 1;
-                self.state
-                    .actions
-                    .push(DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp {
-                        kind: "DrawPixel",
-                    });
             }
+        }
+        self.state.actions.push(action);
+    }
+}
+
+fn opengl_backend_adapter_action_from_render_command(
+    command: &RenderCommand,
+) -> DesktopGraphicsOpenGlBackendAdapterAction {
+    match command {
+        RenderCommand::Clear { color } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::Clear { color: *color }
+        }
+        RenderCommand::SetBlend { mode } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::SetBlend { mode: *mode }
+        }
+        RenderCommand::SetClip { rect } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::SetClip { rect: *rect }
+        }
+        RenderCommand::ClearClip => DesktopGraphicsOpenGlBackendAdapterAction::ClearClip,
+        RenderCommand::DrawSprite {
+            symbol,
+            rect,
+            tint,
+            rotation,
+            layer,
+        } => DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
+            symbol: symbol.clone(),
+            rect: *rect,
+            tint: *tint,
+            rotation: *rotation,
+            layer: *layer,
+        },
+        RenderCommand::DrawCircle {
+            center,
+            radius,
+            color,
+            filled,
+            layer,
+        } => DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+            center: *center,
+            radius: *radius,
+            color: *color,
+            filled: *filled,
+            layer: *layer,
+        },
+        RenderCommand::DrawText {
+            text,
+            position,
+            color,
+            size,
+            rotation,
+            align,
+            layer,
+        } => DesktopGraphicsOpenGlBackendAdapterAction::DrawText {
+            text: text.clone(),
+            position: *position,
+            color: *color,
+            size: *size,
+            rotation: *rotation,
+            align: *align,
+            layer: *layer,
+        },
+        RenderCommand::Custom { name, properties } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::Custom {
+                name: name.clone(),
+                properties: properties.clone(),
+            }
+        }
+        RenderCommand::FillRect { .. } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "FillRect" }
+        }
+        RenderCommand::StrokeRect { .. } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "StrokeRect" }
+        }
+        RenderCommand::DrawLine { .. } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "DrawLine" }
+        }
+        RenderCommand::DrawPolygon { .. } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp {
+                kind: "DrawPolygon",
+            }
+        }
+        RenderCommand::DrawPixel { .. } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "DrawPixel" }
         }
     }
 }
@@ -1188,6 +1184,9 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub custom_markers: Vec<String>,
     pub resolve_events: Vec<DesktopGraphicsOpenGlBackendResolveEvent>,
     pub event_log: Vec<DesktopGraphicsOpenGlBackendEvent>,
+    pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
+    pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
+    pub action_count: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
     pub last_command_kind: Option<&'static str>,
     pub errors: Vec<String>,
@@ -1214,6 +1213,9 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             custom_markers: Vec::new(),
             resolve_events: Vec::new(),
             event_log: Vec::new(),
+            actions: Vec::new(),
+            last_action: None,
+            action_count: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
             last_command_kind: None,
             errors: Vec::new(),
@@ -1255,6 +1257,12 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                 self.state.current_target, target
             ));
         }
+    }
+
+    fn emit_action(&mut self, action: DesktopGraphicsOpenGlBackendAdapterAction) {
+        self.state.last_action = Some(action.clone());
+        self.state.action_count += 1;
+        self.state.actions.push(action);
     }
 }
 
@@ -1311,6 +1319,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                 self.record_target_for_pass_step(&target);
                 self.state.commands += 1;
                 self.state.last_command_kind = Some(kind);
+                self.emit_action(opengl_backend_adapter_action_from_render_command(&command));
                 self.state
                     .event_log
                     .push(DesktopGraphicsOpenGlBackendEvent::Command {
@@ -8932,6 +8941,29 @@ mod tests {
         assert_eq!(executor.state.clear_commands, 1);
         assert_eq!(executor.state.draw_sprite_commands, 1);
         assert_eq!(executor.state.current_blend, RenderBlendMode::Additive);
+        assert_eq!(executor.state.action_count, 3);
+        assert_eq!(executor.state.actions.len(), 3);
+        assert!(matches!(
+            executor.state.actions[0],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::Clear {
+                color: [0.0, 0.0, 0.0, 1.0]
+            }
+        ));
+        assert!(matches!(
+            executor.state.actions[1],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::SetBlend {
+                mode: RenderBlendMode::Additive
+            }
+        ));
+        assert!(matches!(
+            &executor.state.actions[2],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { symbol, .. }
+                if symbol == "router"
+        ));
+        assert_eq!(
+            executor.state.last_action.as_ref(),
+            executor.state.actions.last()
+        );
         assert_eq!(
             executor.state.resolve_events,
             vec![super::DesktopGraphicsOpenGlBackendResolveEvent {
@@ -8973,6 +9005,7 @@ mod tests {
             super::DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { symbol, .. }
                 if symbol == "router"
         ));
+        assert_eq!(executor.state.actions, classifying_adapter.state.actions);
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
@@ -9499,6 +9532,17 @@ mod tests {
         );
         assert_eq!(executor.state.draw_sprite_commands, 1);
         assert_eq!(executor.state.commands, 6);
+        assert_eq!(executor.state.action_count, 6);
+        assert_eq!(executor.state.actions.len(), 6);
+        assert!(matches!(
+            executor.state.actions[0],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "FillRect" }
+        ));
+        assert!(matches!(
+            &executor.state.actions[5],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { symbol, .. }
+                if symbol == "router"
+        ));
         let mut classifying_adapter =
             super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
         executor.drive_adapter(&mut classifying_adapter);
@@ -9535,6 +9579,7 @@ mod tests {
             super::DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { symbol, .. }
                 if symbol == "router"
         ));
+        assert_eq!(executor.state.actions, classifying_adapter.state.actions);
         let command_events = adapter
             .events
             .iter()
