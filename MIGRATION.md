@@ -14564,3 +14564,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core loadout --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop`
 - 当前总体迁移约 33.6%，仍未达到完整可玩。
+
+## 12.477 opengl-backend main runtime 路由
+
+- 2026-05-29：将 `opengl-backend` feature 从库层 runtime seam 推进到 `desktop/src/main.rs` 的启动路由。默认无 feature 时仍保持 headless 路径，feature on 时进入 `opengl-backend:null-runtime` 分支，为后续真实窗口/context 接入保留编译期切换点。
+- Rust 新增/接入：
+  - `desktop/src/main.rs`
+    - 新增 `desktop_graphics_backend_label()`，默认返回 `headless`，`opengl-backend` feature 下返回 `opengl-backend:null-runtime`；
+    - 新增 `run_desktop_frame_loop(...)` 的 feature on/off 分支；
+    - feature on 分支实例化 `DesktopGraphicsNullOpenGlBackendRuntime`，但暂时仍复用 headless renderer/frame loop；
+    - 启动日志增加 `graphics_backend=...`。
+- 迁移意义：
+  - `opengl-backend` 不再只是 lib 内部测试 seam，已经进入桌面启动路径；
+  - 默认 headless 不被窗口/GL 依赖污染；
+  - 后续可在 feature 分支替换为真实 OpenGL window/context/event-loop。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo check -p mindustry-desktop --no-default-features`
+  - `cargo check -p mindustry-desktop --features opengl-backend`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_runtime_feature_records_driver_submission --lib --features opengl-backend`
+- 仍未完成：
+  - feature on 分支目前仍是 null runtime + headless renderer；
+  - 真实窗口、GL context、swap/present 尚未接入；
+  - 当前总体迁移约 33.7%，仍未达到完整可玩。

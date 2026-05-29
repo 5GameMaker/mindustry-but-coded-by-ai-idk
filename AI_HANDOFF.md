@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **33.6%**。
+- 当前总体迁移完成度：约 **33.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11938,3 +11938,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续 fullscreen quad VBO/IBO 上传计划；
   2. 并行推进 `save11.rs` 或 `version.rs` 低冲突闭环；
   3. 继续 `opengl-backend` main/runtime 路由。
+
+---
+
+## 383. 最新闭环记录：opengl-backend main runtime 路由
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **33.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 抽出 `desktop_graphics_backend_label()`；
+    - 抽出 `run_desktop_frame_loop(...)`；
+    - 默认分支保持 headless；
+    - `opengl-backend` feature 分支实例化 `DesktopGraphicsNullOpenGlBackendRuntime`；
+    - 启动日志增加 `graphics_backend=headless` 或 `graphics_backend=opengl-backend:null-runtime`。
+- 关键语义：
+  - `opengl-backend` 已进入桌面启动路径，但仍是 null runtime，不是真实 GL；
+  - 默认无 feature 路径不引入窗口/GL 依赖；
+  - 后续真实 runtime 应替换 feature 分支中的 null runtime/headless renderer。
+- 已验证：
+  - `cargo fmt`
+  - `cargo check -p mindustry-desktop --no-default-features`
+  - `cargo check -p mindustry-desktop --features opengl-backend`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_runtime_feature_records_driver_submission --lib --features opengl-backend`
+- 下一步：
+  1. 接真实 fullscreen quad VBO/IBO 上传；
+  2. 接真实 OpenGL window/context/present；
+  3. 并行推进 `save11.rs` 或 `version.rs`。
