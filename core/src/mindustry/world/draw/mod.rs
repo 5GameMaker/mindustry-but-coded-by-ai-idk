@@ -147,18 +147,47 @@ pub struct DrawSoftParticleParams {
     pub color_t: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawBlockParticleRenderKind {
+    Circle,
+    Polygon,
+    SoftSprite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawBlockParticleSizeInterp {
+    Slope,
+    One,
+    Linear,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawBlockParticleBlendMode {
+    Normal,
+    Additive,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawBlockParticleConfig {
+    pub x: f32,
+    pub y: f32,
     pub color_rgba: u32,
     pub secondary_color_rgba: Option<u32>,
     pub alpha: f32,
+    pub sides: usize,
     pub particle_count: usize,
+    pub particle_rotation: f32,
     pub particle_life: f32,
     pub particle_radius: f32,
     pub particle_size: f32,
     pub fade_margin: f32,
     pub rotate_scl: f32,
     pub reverse: bool,
+    pub random_life_range: f32,
+    pub invert_life: bool,
+    pub size_interp: DrawBlockParticleSizeInterp,
+    pub blend_mode: DrawBlockParticleBlendMode,
+    pub render_kind: DrawBlockParticleRenderKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -593,36 +622,92 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
 
 pub fn draw_particles_block_config() -> DrawBlockParticleConfig {
     DrawBlockParticleConfig {
+        x: 0.0,
+        y: 0.0,
         color_rgba: 0xf2d585ff,
         secondary_color_rgba: None,
         alpha: 0.5,
+        sides: 12,
         particle_count: 30,
+        particle_rotation: 0.0,
         particle_life: 70.0,
         particle_radius: 7.0,
         particle_size: 3.0,
         fade_margin: 0.4,
         rotate_scl: 3.0,
         reverse: false,
+        random_life_range: 2.0,
+        invert_life: false,
+        size_interp: DrawBlockParticleSizeInterp::Slope,
+        blend_mode: DrawBlockParticleBlendMode::Normal,
+        render_kind: DrawBlockParticleRenderKind::Circle,
     }
 }
 
 pub fn draw_soft_particles_block_config() -> DrawBlockParticleConfig {
     DrawBlockParticleConfig {
+        x: 0.0,
+        y: 0.0,
         color_rgba: 0xe3ae6fff,
         secondary_color_rgba: Some(0xd04d46ff),
         alpha: 0.5,
+        sides: 0,
         particle_count: 30,
+        particle_rotation: 0.0,
         particle_life: 70.0,
         particle_radius: 7.0,
         particle_size: 3.0,
         fade_margin: 0.4,
         rotate_scl: 1.5,
         reverse: false,
+        random_life_range: 1.0,
+        invert_life: true,
+        size_interp: DrawBlockParticleSizeInterp::Linear,
+        blend_mode: DrawBlockParticleBlendMode::Additive,
+        render_kind: DrawBlockParticleRenderKind::SoftSprite,
     }
 }
 
+pub fn draw_particles_block_config_for(block_name: &str) -> DrawBlockParticleConfig {
+    let mut config = draw_particles_block_config();
+    match block_name {
+        "atmospheric-concentrator" => {
+            config.color_rgba = 0xd4f0ffff;
+            config.alpha = 0.6;
+            config.particle_size = 4.0;
+            config.particle_count = 10;
+            config.particle_radius = 12.0;
+            config.particle_life = 140.0;
+        }
+        "cyanogen-synthesizer" => {
+            config.color_rgba = 0x89e8b6ff;
+            config.alpha = 0.5;
+            config.particle_size = 3.0;
+            config.particle_count = 10;
+            config.particle_radius = 9.0;
+            config.particle_life = 200.0;
+            config.reverse = true;
+            config.size_interp = DrawBlockParticleSizeInterp::One;
+        }
+        _ => {}
+    }
+    config
+}
+
+pub fn draw_soft_particles_block_config_for(block_name: &str) -> DrawBlockParticleConfig {
+    let mut config = draw_soft_particles_block_config();
+    if block_name == "flux-reactor" {
+        config.alpha = 0.35;
+        config.particle_radius = 12.0;
+        config.particle_size = 9.0;
+        config.particle_life = 120.0;
+        config.particle_count = 27;
+    }
+    config
+}
+
 pub fn draw_block_dispatch_particle_configs(
-    _block_name: &str,
+    block_name: &str,
     drawer: &str,
 ) -> Vec<DrawBlockParticleConfig> {
     let drawer = drawer.trim();
@@ -633,14 +718,14 @@ pub fn draw_block_dispatch_particle_configs(
     match split_drawer_call(drawer) {
         Some(("DrawMulti", args)) => split_drawer_args(args)
             .into_iter()
-            .flat_map(|child| draw_block_dispatch_particle_configs(_block_name, child))
+            .flat_map(|child| draw_block_dispatch_particle_configs(block_name, child))
             .collect(),
-        Some(("DrawParticles", _)) => vec![draw_particles_block_config()],
-        Some(("DrawSoftParticles", _)) => vec![draw_soft_particles_block_config()],
+        Some(("DrawParticles", _)) => vec![draw_particles_block_config_for(block_name)],
+        Some(("DrawSoftParticles", _)) => vec![draw_soft_particles_block_config_for(block_name)],
         Some(_) => Vec::new(),
         None => match drawer {
-            "DrawParticles" => vec![draw_particles_block_config()],
-            "DrawSoftParticles" => vec![draw_soft_particles_block_config()],
+            "DrawParticles" => vec![draw_particles_block_config_for(block_name)],
+            "DrawSoftParticles" => vec![draw_soft_particles_block_config_for(block_name)],
             _ => Vec::new(),
         },
     }
@@ -1894,7 +1979,7 @@ mod tests {
         );
         assert_eq!(
             draw_block_dispatch_particle_configs("cyanogen-synthesizer", "DrawParticles"),
-            vec![draw_particles_block_config()]
+            vec![draw_particles_block_config_for("cyanogen-synthesizer")]
         );
         assert_eq!(
             draw_block_dispatch_particle_configs("cyanogen-synthesizer", "DrawSoftParticles"),
@@ -1910,6 +1995,36 @@ mod tests {
                 draw_soft_particles_block_config()
             ]
         );
+
+        let atmospheric =
+            draw_block_dispatch_particle_configs("atmospheric-concentrator", "DrawParticles");
+        assert_eq!(atmospheric[0].color_rgba, 0xd4f0ffff);
+        assert_eq!(atmospheric[0].particle_count, 10);
+        assert_eq!(atmospheric[0].particle_radius, 12.0);
+        assert_eq!(atmospheric[0].particle_life, 140.0);
+        assert_eq!(atmospheric[0].random_life_range, 2.0);
+        assert_eq!(
+            atmospheric[0].render_kind,
+            DrawBlockParticleRenderKind::Circle
+        );
+        assert_eq!(
+            atmospheric[0].size_interp,
+            DrawBlockParticleSizeInterp::Slope
+        );
+
+        let cyanogen =
+            draw_block_dispatch_particle_configs("cyanogen-synthesizer", "DrawParticles");
+        assert_eq!(cyanogen[0].color_rgba, 0x89e8b6ff);
+        assert!(cyanogen[0].reverse);
+        assert_eq!(cyanogen[0].size_interp, DrawBlockParticleSizeInterp::One);
+
+        let flux = draw_block_dispatch_particle_configs("flux-reactor", "DrawSoftParticles");
+        assert_eq!(flux[0].alpha, 0.35);
+        assert_eq!(flux[0].particle_count, 27);
+        assert_eq!(flux[0].particle_size, 9.0);
+        assert_eq!(flux[0].blend_mode, DrawBlockParticleBlendMode::Additive);
+        assert_eq!(flux[0].render_kind, DrawBlockParticleRenderKind::SoftSprite);
+        assert!(flux[0].invert_life);
     }
 
     #[test]

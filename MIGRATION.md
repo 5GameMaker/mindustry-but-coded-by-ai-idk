@@ -12131,3 +12131,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - block particle trace 已可被 backend sink 接收，但仍未实际发出 GPU draw call；
   - 还需要为 multiple particle emitters 的稳定顺序与空输入无噪声补专门测试；
   - 当前总体迁移约 23.4%，仍未达到完整可玩。
+
+### 12.383 DrawParticles 字段语义与 desktop frame-loop 契约
+
+- 2026-05-29：继续推进渲染引擎优先链路。本轮把 Java `DrawParticles` / `DrawSoftParticles` 的关键字段从“隐含公式”提升到 Rust 数据模型，并补齐 desktop frame loop 进入真实窗口后端前需要锁死的无依赖契约测试。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - `DrawBlockParticleConfig` 新增 `x/y`、`sides`、`particle_rotation`、`random_life_range`、`invert_life`、`size_interp`、`blend_mode`、`render_kind`；
+    - 新增 `DrawBlockParticleRenderKind`、`DrawBlockParticleSizeInterp`、`DrawBlockParticleBlendMode`；
+    - 按 Java `Blocks.java` 中的真实初始化补 `atmospheric-concentrator`、`cyanogen-synthesizer`、`flux-reactor` 的 block-specific 粒子配置；
+    - `DrawParticles` 默认保持 normal/circle/slope/random(2f)，`DrawSoftParticles` 默认保持 additive/soft sprite/linear size/反向生命周期。
+  - `core/src/mindustry/graphics/particle_renderer.rs`
+    - `BlockDrawerParticlePlanConfig` / `BlockDrawerParticlePlan` 透传新增字段；
+    - `sample_for_index(...)` 使用 `random_life_range` 与 `invert_life` 区分 regular/soft 生命周期；
+    - `particle_size_for_fin(...)` 支持 Java `Interp.slope`、`Interp.one` 与 soft linear size。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBlockParticleWorldSample` 携带 `render_kind`、`blend_mode`、`sides`、`rotation`；
+    - `world_samples(...)` 在建筑中心与极坐标外加入 Java drawer `x/y` 偏移，为后续真实 backend 分发 circle/poly/soft sprite draw call 做准备。
+  - `desktop/src/lib.rs`
+    - 新增 frame loop 契约测试：paced loop 只在成功 present 后 sleep、closed state 运行前短路、默认 surface 固定为 `Mindustry` / `1280x720` / `1.0` / resizable / visible。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml"`
+  - `cargo test -p mindustry-core block_drawer_particle --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_drawer_soft_particle_plan_uses_java_soft_sprite_life_and_size_semantics --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_renderer_particle --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core draw_particles_and_soft_particles_dispatch_particle_configs_without_sprites --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_frame_loop --manifest-path "Cargo.toml" -- --test-threads=1`
+- 仍未完成：
+  - block particle 已具备 circle/poly/soft sprite 数据语义和 world-space sample，但仍未实际提交 GPU/effect backend draw call；
+  - soft sprite 的 `circle-shadow` region 还需进入真实 atlas/texture draw 执行；
+  - 当前总体迁移约 23.6%，仍未达到完整可玩。

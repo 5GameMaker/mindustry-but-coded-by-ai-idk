@@ -5,7 +5,10 @@
 //! math deterministic and backend-neutral; render backends can upload
 //! `ParticleVertex` values to their preferred GPU abstraction.
 
-use crate::mindustry::world::draw::DrawBlockParticleConfig;
+use crate::mindustry::world::draw::{
+    DrawBlockParticleBlendMode, DrawBlockParticleConfig, DrawBlockParticleRenderKind,
+    DrawBlockParticleSizeInterp,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParticleCamera {
@@ -100,14 +103,23 @@ pub struct BlockDrawerParticlePlanConfig {
     pub build_id_seed: i32,
     pub warmup: f32,
     pub time: f32,
+    pub x: f32,
+    pub y: f32,
     pub alpha: f32,
+    pub sides: usize,
     pub particle_count: usize,
+    pub particle_rotation: f32,
     pub particle_life: f32,
     pub particle_radius: f32,
     pub particle_size: f32,
     pub fade_margin: f32,
     pub rotate_scl: f32,
     pub reverse: bool,
+    pub random_life_range: f32,
+    pub invert_life: bool,
+    pub size_interp: DrawBlockParticleSizeInterp,
+    pub blend_mode: DrawBlockParticleBlendMode,
+    pub render_kind: DrawBlockParticleRenderKind,
     pub layer: f32,
     pub color: ParticleColor,
     pub secondary_color: Option<ParticleColor>,
@@ -129,14 +141,23 @@ pub struct BlockDrawerParticlePlan {
     pub build_id_seed: i32,
     pub warmup: f32,
     pub time: f32,
+    pub x: f32,
+    pub y: f32,
     pub alpha: f32,
+    pub sides: usize,
     pub particle_count: usize,
+    pub particle_rotation: f32,
     pub particle_life: f32,
     pub particle_radius: f32,
     pub particle_size: f32,
     pub fade_margin: f32,
     pub rotate_scl: f32,
     pub reverse: bool,
+    pub random_life_range: f32,
+    pub invert_life: bool,
+    pub size_interp: DrawBlockParticleSizeInterp,
+    pub blend_mode: DrawBlockParticleBlendMode,
+    pub render_kind: DrawBlockParticleRenderKind,
     pub layer: f32,
     pub color: ParticleColor,
     pub secondary_color: Option<ParticleColor>,
@@ -148,14 +169,23 @@ impl BlockDrawerParticlePlan {
             build_id_seed: config.build_id_seed,
             warmup: config.warmup,
             time: config.time,
+            x: config.x,
+            y: config.y,
             alpha: config.alpha,
+            sides: config.sides,
             particle_count: config.particle_count,
+            particle_rotation: config.particle_rotation,
             particle_life: config.particle_life,
             particle_radius: config.particle_radius,
             particle_size: config.particle_size,
             fade_margin: config.fade_margin,
             rotate_scl: config.rotate_scl,
             reverse: config.reverse,
+            random_life_range: config.random_life_range,
+            invert_life: config.invert_life,
+            size_interp: config.size_interp,
+            blend_mode: config.blend_mode,
+            render_kind: config.render_kind,
             layer: config.layer,
             color: config.color,
             secondary_color: config.secondary_color,
@@ -187,7 +217,10 @@ impl BlockDrawerParticlePlan {
             return None;
         }
 
-        let mut fin = (random_life + self.base_time()) % 1.0;
+        let mut fin = (random_life * self.random_life_range.max(0.0) + self.base_time()) % 1.0;
+        if self.invert_life {
+            fin = 1.0 - fin;
+        }
         if self.reverse {
             fin = 1.0 - fin;
         }
@@ -222,6 +255,14 @@ impl BlockDrawerParticlePlan {
         self.particle_size * fin.clamp(0.0, 1.0) * self.warmup * 2.0
     }
 
+    pub fn particle_size_for_fin(&self, fin: f32) -> f32 {
+        match self.size_interp {
+            DrawBlockParticleSizeInterp::Slope => self.particle_size_regular(fin),
+            DrawBlockParticleSizeInterp::One => self.particle_size * self.warmup,
+            DrawBlockParticleSizeInterp::Linear => self.particle_size_soft(fin),
+        }
+    }
+
     pub fn sample_for_index(&self, index: usize) -> Option<BlockDrawerParticleSample> {
         if index >= self.particle_count {
             return None;
@@ -237,11 +278,7 @@ impl BlockDrawerParticlePlan {
         let angle = self.particle_angle(random_angle)?;
         let alpha = self.particle_alpha(fin);
         let length = self.particle_length(fout);
-        let size = if self.secondary_color.is_some() {
-            self.particle_size_soft(fin)
-        } else {
-            self.particle_size_regular(fin)
-        };
+        let size = self.particle_size_for_fin(fin);
 
         Some(BlockDrawerParticleSample {
             fin,
@@ -267,14 +304,23 @@ impl BlockDrawerParticlePlanConfig {
             build_id_seed,
             warmup,
             time,
+            x: config.x,
+            y: config.y,
             alpha: config.alpha,
+            sides: config.sides,
             particle_count: config.particle_count,
+            particle_rotation: config.particle_rotation,
             particle_life: config.particle_life,
             particle_radius: config.particle_radius,
             particle_size: config.particle_size,
             fade_margin: config.fade_margin,
             rotate_scl: config.rotate_scl,
             reverse: config.reverse,
+            random_life_range: config.random_life_range,
+            invert_life: config.invert_life,
+            size_interp: config.size_interp,
+            blend_mode: config.blend_mode,
+            render_kind: config.render_kind,
             layer,
             color: rgba_to_particle_color(config.color_rgba),
             secondary_color: config.secondary_color_rgba.map(rgba_to_particle_color),
@@ -586,14 +632,23 @@ mod tests {
             build_id_seed: 42,
             warmup: 0.5,
             time: 70.0,
+            x: 0.0,
+            y: 0.0,
             alpha: 0.6,
+            sides: 12,
             particle_count: 3,
+            particle_rotation: 0.0,
             particle_life: 70.0,
             particle_radius: 7.0,
             particle_size: 3.0,
             fade_margin: 0.4,
             rotate_scl: 3.0,
             reverse: false,
+            random_life_range: 1.0,
+            invert_life: false,
+            size_interp: DrawBlockParticleSizeInterp::Slope,
+            blend_mode: DrawBlockParticleBlendMode::Normal,
+            render_kind: DrawBlockParticleRenderKind::Circle,
             layer: 12.0,
             color: ParticleColor::new(0.2, 0.4, 0.6, 1.0),
             secondary_color: Some(ParticleColor::new(0.8, 0.1, 0.2, 0.9)),
@@ -611,16 +666,25 @@ mod tests {
     fn block_drawer_particle_plan_from_draw_config_with_zero_warmup_is_noop() {
         let plan = ParticleRendererState::block_drawer_particle_plan_from_draw_config(
             DrawBlockParticleConfig {
+                x: 0.0,
+                y: 0.0,
                 color_rgba: 0xff8040ff,
                 secondary_color_rgba: None,
                 alpha: 0.7,
+                sides: 12,
                 particle_count: 5,
+                particle_rotation: 0.0,
                 particle_life: 70.0,
                 particle_radius: 7.0,
                 particle_size: 3.0,
                 fade_margin: 0.4,
                 rotate_scl: 1.5,
                 reverse: true,
+                random_life_range: 2.0,
+                invert_life: false,
+                size_interp: DrawBlockParticleSizeInterp::Slope,
+                blend_mode: DrawBlockParticleBlendMode::Normal,
+                render_kind: DrawBlockParticleRenderKind::Circle,
             },
             7,
             0.0,
@@ -681,5 +745,53 @@ mod tests {
         assert!(first[1].secondary_color.is_some());
         assert_eq!(first[0].sample_for_index(0), second[0].sample_for_index(0));
         assert_eq!(first[1].sample_for_index(0), second[1].sample_for_index(0));
+    }
+
+    #[test]
+    fn block_drawer_particle_plan_preserves_java_draw_particle_shape_fields() {
+        let mut config = crate::mindustry::world::draw::draw_particles_block_config();
+        config.x = 1.25;
+        config.y = -2.5;
+        config.sides = 6;
+        config.particle_rotation = 45.0;
+        config.render_kind = DrawBlockParticleRenderKind::Polygon;
+        config.blend_mode = DrawBlockParticleBlendMode::Normal;
+
+        let plan = ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+            config, 17, 0.75, 33.0, 8.0,
+        );
+
+        assert_eq!(plan.x, 1.25);
+        assert_eq!(plan.y, -2.5);
+        assert_eq!(plan.sides, 6);
+        assert_eq!(plan.particle_rotation, 45.0);
+        assert_eq!(plan.render_kind, DrawBlockParticleRenderKind::Polygon);
+        assert_eq!(plan.blend_mode, DrawBlockParticleBlendMode::Normal);
+        assert_eq!(plan.random_life_range, 2.0);
+
+        let sample = plan.sample_for_index(0).unwrap();
+        assert_eq!(sample.color_t, None);
+        assert!((sample.size - plan.particle_size_for_fin(sample.fin)).abs() < 0.00001);
+    }
+
+    #[test]
+    fn block_drawer_soft_particle_plan_uses_java_soft_sprite_life_and_size_semantics() {
+        let config = crate::mindustry::world::draw::draw_soft_particles_block_config();
+        let plan = ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+            config, 17, 0.5, 21.0, 8.0,
+        );
+
+        assert_eq!(plan.render_kind, DrawBlockParticleRenderKind::SoftSprite);
+        assert_eq!(plan.blend_mode, DrawBlockParticleBlendMode::Additive);
+        assert_eq!(plan.size_interp, DrawBlockParticleSizeInterp::Linear);
+        assert!(plan.invert_life);
+        assert_eq!(plan.random_life_range, 1.0);
+
+        let sample = plan.sample_for_index(0).unwrap();
+        assert!(sample.color_t.is_some());
+        assert!((sample.fout - (1.0 - sample.fin)).abs() < 0.00001);
+        assert!(
+            (sample.size - config.particle_size * sample.fin * plan.warmup * 2.0).abs() < 0.00001
+        );
     }
 }

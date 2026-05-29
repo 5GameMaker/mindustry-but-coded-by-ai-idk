@@ -12,6 +12,7 @@ use crate::mindustry::{
         particle_renderer::{BlockDrawerParticlePlan, ParticleColor, ParticleRendererState},
         CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
     },
+    world::draw::{DrawBlockParticleBlendMode, DrawBlockParticleRenderKind},
     world::point2_pack,
 };
 
@@ -1129,6 +1130,10 @@ pub struct BlockRendererBlockParticleWorldSample {
     pub layer: f32,
     pub color: ParticleColor,
     pub color_t: Option<f32>,
+    pub render_kind: DrawBlockParticleRenderKind,
+    pub blend_mode: DrawBlockParticleBlendMode,
+    pub sides: usize,
+    pub rotation: f32,
 }
 
 impl BlockRendererBlockParticlePlan {
@@ -1148,13 +1153,17 @@ impl BlockRendererBlockParticlePlan {
                 Some(BlockRendererBlockParticleWorldSample {
                     coord: self.coord,
                     index,
-                    x: center.x + radians.cos() * sample.length,
-                    y: center.y + radians.sin() * sample.length,
+                    x: center.x + self.plan.x + radians.cos() * sample.length,
+                    y: center.y + self.plan.y + radians.sin() * sample.length,
                     size: sample.size,
                     alpha: sample.alpha,
                     layer: self.plan.layer,
                     color: self.plan.color,
                     color_t: sample.color_t,
+                    render_kind: self.plan.render_kind,
+                    blend_mode: self.plan.blend_mode,
+                    sides: self.plan.sides,
+                    rotation: self.plan.particle_rotation,
                 })
             })
             .collect()
@@ -2227,6 +2236,42 @@ mod tests {
             && sample.y.is_finite()
             && sample.size > 0.0
             && sample.alpha > 0.0));
+    }
+
+    #[test]
+    fn block_renderer_particle_world_samples_apply_draw_offsets_and_shape_fields() {
+        let coord = TileCoord::new(2, 3);
+        let mut config = crate::mindustry::world::draw::draw_particles_block_config();
+        config.x = 1.5;
+        config.y = -2.0;
+        config.sides = 5;
+        config.particle_rotation = 30.0;
+        config.particle_radius = 0.0;
+        config.particle_count = 1;
+        config.render_kind = DrawBlockParticleRenderKind::Polygon;
+
+        let plan = BlockRendererBlockParticlePlan {
+            coord,
+            block: "offset-particle-test".into(),
+            size: 2,
+            plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                config,
+                1,
+                1.0,
+                0.0,
+                Layer::BLOCK,
+            ),
+        };
+
+        let samples = plan.world_samples(8.0);
+
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].x, 17.5);
+        assert_eq!(samples[0].y, 22.0);
+        assert_eq!(samples[0].render_kind, DrawBlockParticleRenderKind::Polygon);
+        assert_eq!(samples[0].blend_mode, DrawBlockParticleBlendMode::Normal);
+        assert_eq!(samples[0].sides, 5);
+        assert_eq!(samples[0].rotation, 30.0);
     }
 
     #[test]

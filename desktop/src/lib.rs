@@ -3926,9 +3926,9 @@ mod tests {
         DesktopGraphicsLiveBackendDrawSpriteSink, DesktopGraphicsLiveBackendDrawSpriteTrace,
         DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
         DesktopGraphicsShaderApplyExecutionTrace, DesktopGraphicsTextureSamplerTrace,
-        DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceSize, HeadlessDesktopAudioRenderer,
-        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
-        HeadlessDesktopGraphicsRenderer,
+        DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceConfig, DesktopSurfaceSize,
+        HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
+        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -4215,6 +4215,86 @@ mod tests {
         assert_eq!(frame_loop.surface.size, resized);
         assert_eq!(frame_loop.input_events_seen, 1);
         assert_eq!(frame_loop.next_frame_index, 1);
+    }
+
+    #[test]
+    fn desktop_frame_loop_paced_sleep_only_after_successful_present() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut frame_loop = DesktopFrameLoopState::new(
+            Default::default(),
+            DesktopFramePacing::new(std::time::Duration::from_millis(16)),
+        );
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let mut sleep_durations = Vec::new();
+        let mut poll_count = 0u32;
+
+        let summary = launcher.run_with_desktop_frame_loop(
+            &mut frame_loop,
+            &mut graphics_renderer,
+            &mut effect_renderer,
+            None,
+            |_| {
+                poll_count += 1;
+                match poll_count {
+                    1 => vec![DesktopFrameLoopEvent::Tick],
+                    2 => vec![DesktopFrameLoopEvent::CloseRequested],
+                    _ => panic!("paced loop should stop after the close request"),
+                }
+            },
+            |_| {},
+            |duration| sleep_durations.push(duration),
+        );
+
+        assert_eq!(summary.exit_reason, DesktopFrameLoopExitReason::Closed);
+        assert_eq!(summary.steps, 2);
+        assert_eq!(summary.frames_presented, 1);
+        assert_eq!(summary.last_frame_index, Some(0));
+        assert_eq!(poll_count, 2);
+        assert_eq!(graphics_renderer.frames_rendered, 1);
+        assert_eq!(effect_renderer.frames_rendered, 1);
+        assert_eq!(sleep_durations, vec![std::time::Duration::from_millis(16)]);
+    }
+
+    #[test]
+    fn desktop_frame_loop_closed_state_short_circuits_without_poll_render_or_sleep() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut frame_loop = DesktopFrameLoopState::new(
+            Default::default(),
+            DesktopFramePacing::new(std::time::Duration::from_millis(16)),
+        );
+        frame_loop.closed = true;
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+
+        let summary = launcher.run_with_desktop_frame_loop(
+            &mut frame_loop,
+            &mut graphics_renderer,
+            &mut effect_renderer,
+            None,
+            |_| panic!("closed loop state should short-circuit before polling"),
+            |_| panic!("closed loop state should not reach after-present"),
+            |_| panic!("closed loop state should not sleep"),
+        );
+
+        assert_eq!(summary.exit_reason, DesktopFrameLoopExitReason::Closed);
+        assert_eq!(summary.steps, 0);
+        assert_eq!(summary.frames_presented, 0);
+        assert_eq!(summary.last_frame_index, None);
+        assert!(frame_loop.closed);
+        assert_eq!(graphics_renderer.frames_rendered, 0);
+        assert_eq!(effect_renderer.frames_rendered, 0);
+    }
+
+    #[test]
+    fn desktop_surface_config_default_uses_fixed_desktop_contract() {
+        let config = DesktopSurfaceConfig::default();
+
+        assert_eq!(config.title, "Mindustry");
+        assert_eq!(config.size, DesktopSurfaceSize::new(1280, 720));
+        assert_eq!(config.scale_factor, 1.0);
+        assert!(config.resizable);
+        assert!(config.visible);
     }
 
     #[test]

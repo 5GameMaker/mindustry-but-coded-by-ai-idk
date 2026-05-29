@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **22.6%**。
+- 当前总体迁移完成度：约 **23.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9437,3 +9437,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 补 block particle trace 空输入/多 emitter 顺序稳定测试；
   2. 补 Java `DrawParticles` 的 `x/y`、`poly/sides/particleRotation`；
   3. 补 desktop frame loop pacing / already-closed / surface default 契约测试。
+
+---
+
+## 285. 最新闭环记录：DrawParticles 字段语义与 desktop frame-loop 契约
+
+- 本轮总体进度更新：约 **23.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - `DrawBlockParticleConfig` 补 `x/y`、`sides`、`particle_rotation`、`random_life_range`、`invert_life`、`size_interp`、`blend_mode`、`render_kind`；
+    - 增加 `DrawBlockParticleRenderKind` / `DrawBlockParticleSizeInterp` / `DrawBlockParticleBlendMode`；
+    - 对照 Java `Blocks.java` 为 `atmospheric-concentrator`、`cyanogen-synthesizer`、`flux-reactor` 写入 block-specific 粒子默认值。
+  - `core/src/mindustry/graphics/particle_renderer.rs`
+    - `BlockDrawerParticlePlan` 透传新增字段；
+    - regular 使用 Java `DrawParticles` 的 `random(2f)` 生命周期范围；
+    - soft 使用 Java `DrawSoftParticles` 的反向生命周期、additive blend、soft sprite/linear size 语义。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBlockParticleWorldSample` 携带 render kind、blend、sides、rotation；
+    - world sample 坐标加入 Java drawer `x/y` 偏移。
+  - `desktop/src/lib.rs`
+    - 补 desktop frame loop paced sleep、already-closed short-circuit、surface default 契约测试。
+- 已验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml"`
+  - `cargo test -p mindustry-core block_drawer_particle --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_drawer_soft_particle_plan_uses_java_soft_sprite_life_and_size_semantics --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_renderer_particle --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core draw_particles_and_soft_particles_dispatch_particle_configs_without_sprites --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_frame_loop --manifest-path "Cargo.toml" -- --test-threads=1`
+- 下一步：
+  1. 把 block particle sample trace 继续推进到真实 effect/GPU backend draw call；
+  2. 按渲染优先级继续做 Renderer pass 顺序、BlockRenderer darkness/cache、Pixelator 或 MultiPacker/TextureAtlas 闭环；
+  3. 为 multi emitter 稳定顺序、空输入无 trace、soft sprite region 接入补更细测试。
