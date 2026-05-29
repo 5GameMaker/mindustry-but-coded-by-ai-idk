@@ -128,6 +128,8 @@ struct DesktopNativeOpenGlRuntime {
     shader_sources: std::collections::BTreeMap<u32, String>,
     uniform_locations: std::collections::BTreeMap<(u32, String), glow::NativeUniformLocation>,
     shader_asset_root: std::path::PathBuf,
+    current_program: Option<u32>,
+    current_vertex_array: Option<u32>,
     native_errors: Vec<String>,
 }
 
@@ -220,6 +222,8 @@ impl DesktopNativeOpenGlRuntime {
             shader_sources: std::collections::BTreeMap::new(),
             uniform_locations: std::collections::BTreeMap::new(),
             shader_asset_root: desktop_native_opengl_shader_asset_root(),
+            current_program: None,
+            current_vertex_array: None,
             native_errors: Vec::new(),
         };
         runtime.resize_native_surface(runtime.window_surface_size());
@@ -274,6 +278,8 @@ struct DesktopNativeOpenGlDriver<'a> {
     uniform_locations:
         &'a mut std::collections::BTreeMap<(u32, String), glow::NativeUniformLocation>,
     shader_asset_root: &'a std::path::Path,
+    current_program: &'a mut Option<u32>,
+    current_vertex_array: &'a mut Option<u32>,
     native_errors: &'a mut Vec<String>,
 }
 
@@ -615,6 +621,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                     unsafe {
                         self.gl.use_program(Some(program));
                     }
+                    *self.current_program = Some(*program_handle);
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand::UploadUniform {
@@ -811,6 +818,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                     unsafe {
                         self.gl.bind_vertex_array(Some(vertex_array));
                     }
+                    *self.current_vertex_array = Some(*vertex_array_handle);
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::BindBuffer {
@@ -880,6 +888,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                     unsafe {
                         self.gl.bind_vertex_array(Some(vertex_array));
                     }
+                    *self.current_vertex_array = Some(*vertex_array_handle);
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BindBuffer {
@@ -942,6 +951,16 @@ impl DesktopNativeOpenGlDriver<'_> {
         command: &mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand,
     ) {
         match command {
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
+                program_handle,
+            } => {
+                if let Some(program) = self.existing_program(*program_handle) {
+                    unsafe {
+                        self.gl.use_program(Some(program));
+                    }
+                    *self.current_program = Some(*program_handle);
+                }
+            }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
                 texture_unit,
             } => unsafe {
@@ -964,10 +983,33 @@ impl DesktopNativeOpenGlDriver<'_> {
                     unsafe {
                         self.gl.bind_vertex_array(Some(vertex_array));
                     }
+                    *self.current_vertex_array = Some(*vertex_array_handle);
                 }
             }
-            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { .. }
-            | mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. } => {}
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
+                primitive_type,
+                index_count,
+                index_type,
+                index_offset_bytes,
+            } => {
+                if self.current_program.is_some() && self.current_vertex_array.is_some() {
+                    if let (Ok(index_count), Ok(index_offset_bytes)) = (
+                        i32::try_from(*index_count),
+                        i32::try_from(*index_offset_bytes),
+                    ) {
+                        if index_count > 0 {
+                            unsafe {
+                                self.gl.draw_elements(
+                                    *primitive_type,
+                                    index_count,
+                                    *index_type,
+                                    index_offset_bytes,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1101,6 +1143,8 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             shader_sources: &mut self.shader_sources,
             uniform_locations: &mut self.uniform_locations,
             shader_asset_root: &self.shader_asset_root,
+            current_program: &mut self.current_program,
+            current_vertex_array: &mut self.current_vertex_array,
             native_errors: &mut self.native_errors,
         };
         let driver_state = executor.drive_driver(&mut driver);
