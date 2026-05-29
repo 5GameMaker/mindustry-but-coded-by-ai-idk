@@ -187,4 +187,25 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn rebuild_from_entries_roundtrips_compact_indices_after_removal() {
+        let mut markers = MapMarkers::new();
+        markers.add(1, ObjectiveMarker::Point(PointMarker::default()));
+        markers.add(2, ObjectiveMarker::Shape(ShapeMarker::default()));
+        markers.add(3, ObjectiveMarker::Text(TextMarker::default()));
+
+        markers.remove(2);
+        markers.add(4, ObjectiveMarker::Point(PointMarker::default()));
+
+        let rebuilt = MapMarkers::rebuild_from_entries(
+            markers.entries().map(|(id, marker)| (id, marker.clone())),
+        );
+
+        assert_eq!(rebuilt, markers);
+        assert_eq!(rebuilt.ids().collect::<Vec<_>>(), vec![1, 3, 4]);
+        assert_eq!(rebuilt.get(1).unwrap().common().array_index, 0);
+        assert_eq!(rebuilt.get(3).unwrap().common().array_index, 1);
+        assert_eq!(rebuilt.get(4).unwrap().common().array_index, 2);
+    }
 }

@@ -14421,3 +14421,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ShaderBlit` / `DrawRectSample` / `DrawFboSample` 尚未展开为真实 blit 或 screen-quad draw；
   - feature-gated real OpenGL window/context 尚未接入；
   - 当前总体迁移约 32.9%，仍未达到完整可玩。
+
+## 12.470 MapMarkers entries rebuild 回归
+
+- 2026-05-29：并行收口 `MapMarkers` 容器快照闭环，补充 remove 后重新导出/重建的数组索引连续性回归。
+- Rust 新增/接入：
+  - `core/src/mindustry/game/map_markers.rs`
+    - 新增测试 `rebuild_from_entries_roundtrips_compact_indices_after_removal`；
+    - 覆盖 `remove(...)` 后新增 marker、`entries()` 导出、`MapMarkers::rebuild_from_entries(...)` 重建；
+    - 断言 rebuilt 与原容器一致，且 marker `array_index` 重新压紧为 `0,1,2`。
+- 迁移意义：
+  - 对齐 Java `MapMarkers` 无序移除后仍按紧凑数组槽位维护 marker index 的运行时语义；
+  - 为 save/load marker region materialize 后回填 runtime container 提供更稳定的容器级回归。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core rebuild_from_entries_roundtrips_compact_indices_after_removal --lib`
+  - `cargo test -p mindustry-core marker_region_ --lib`
+- 当前总体迁移约 33.0%，仍未达到完整可玩。

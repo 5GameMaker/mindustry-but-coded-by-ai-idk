@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **32.9%**。
+- 当前总体迁移完成度：约 **33.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11763,3 +11763,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 resolve command 展开为 `ShaderBlit` fullscreen quad / `DrawRectSample` region quad / `DrawFboSample` camera-world UV quad；
   2. 新增 feature-gated `opengl-backend` runtime 壳层；
   3. 并行收口 `map_markers.rs` / `save.rs` worker 结果。
+
+---
+
+## 376. 最新闭环记录：MapMarkers entries rebuild 回归
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **33.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/game/map_markers.rs`
+    - 新增 `rebuild_from_entries_roundtrips_compact_indices_after_removal`；
+    - 覆盖 `remove` 后槽位迁移、`entries()` 导出、`rebuild_from_entries()` 重建；
+    - 断言 rebuilt 容器等于原容器，且 `array_index` 保持紧凑连续。
+- 关键语义：
+  - `MapMarkers` 容器快照/重建不应保留被删除 marker 的旧槽位空洞；
+  - 该行为为 marker region save/load 后重建 runtime container 提供回归保护。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core rebuild_from_entries_roundtrips_compact_indices_after_removal --lib`
+  - `cargo test -p mindustry-core marker_region_ --lib`
+- 下一步：
+  1. 提交 `save.rs` 的 full snapshot backup fallback 闭环；
+  2. 继续 OpenGL resolve command 展开为真实 blit/screen-quad；
+  3. 继续筛选 `network_io.rs` 低冲突联机协议闭环。
