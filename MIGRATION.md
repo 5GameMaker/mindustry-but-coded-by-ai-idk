@@ -15127,3 +15127,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - triangle 需要精确 width/length mesh 或新 RenderCommand；
   - textured-line 需要沿线贴图几何与 atlas 语义；
   - 当前总体迁移约 39.0%，仍未达到完整可玩。
+
+## 408. 最新闭环记录：standard effect triangle 精确接入 graphics/OpenGL backend
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **39.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderCommand::DrawTriangle` 与 `RenderCommand::draw_triangle(...)`，保留 `center / width / length / rotation / color / layer` 语义；
+    - triangle 不触发额外 flush boundary，继续作为普通 draw-like command 进入 backend。
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame::to_render_pass()` 将 `StandardEffectTriangleRenderPrimitive` 转成 `RenderCommand::DrawTriangle`；
+    - OpenGL adapter 新增 `DrawTriangle` action；
+    - primitive lowering 使用 Java `Drawf.tri(x, y, width, length, rotation)` 同款顶点语义：底边两点 + 尖端点，复用 `primitive-white` sprite mesh path 进入 draw call；
+    - 新增 `desktop_graphics_opengl_triangle_primitive_matches_java_drawf_tri_vertices`，锁定 Java 顶点公式；
+    - 新增 `desktop_launcher_routes_standard_effect_triangles_into_graphics_backend`，覆盖 `shootSmall` event → triangle primitive → overlay render pass → OpenGL executor。
+- 迁移意义：
+  - `shootSmall` / `shootTitan` / `inst*` / `rail*` 等已缓存 triangle primitive 的 standard effect 不再只停在 headless stats；
+  - triangle 不是用规则 `DrawPolygon { sides: 3 }` 伪装，保留 Java `Drawf.tri` 的 width/length/rotation 语义；
+  - 继续走现有 graphics/OpenGL backend 主链路，没有新增孤立 renderer。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_triangle_primitive_matches_java_drawf_tri_vertices --features opengl-backend`
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data`
+  - `cargo test -p mindustry-core render_pass_backend_execution_steps_mark_state_flush_boundaries`
+- 仍未完成：
+  - textured-line 仍需沿线贴图几何与 atlas/region 语义；
+  - block fullIcon textured rect 仍需 content registry / atlas symbol 映射；
+  - overlay / minimap overlay / world label / entity world draw 仍需继续收口到真实 render frame；
+  - 当前总体迁移约 39.2%，仍未达到完整可玩。

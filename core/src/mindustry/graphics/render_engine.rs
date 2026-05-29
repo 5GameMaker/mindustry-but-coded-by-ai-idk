@@ -544,6 +544,14 @@ pub enum RenderCommand {
         filled: bool,
         layer: f32,
     },
+    DrawTriangle {
+        center: RenderPoint,
+        width: f32,
+        length: f32,
+        rotation: f32,
+        color: [f32; 4],
+        layer: f32,
+    },
     DrawPixel {
         x: i32,
         y: i32,
@@ -716,6 +724,24 @@ impl RenderCommand {
         }
     }
 
+    pub fn draw_triangle(
+        center: RenderPoint,
+        width: f32,
+        length: f32,
+        rotation: f32,
+        color: [f32; 4],
+        layer: f32,
+    ) -> Self {
+        Self::DrawTriangle {
+            center,
+            width,
+            length,
+            rotation,
+            color,
+            layer,
+        }
+    }
+
     pub fn draw_pixel(x: i32, y: i32, color: [f32; 4], layer: f32) -> Self {
         Self::DrawPixel { x, y, color, layer }
     }
@@ -781,6 +807,7 @@ impl RenderCommand {
             | Self::DrawLine { .. }
             | Self::DrawCircle { .. }
             | Self::DrawPolygon { .. }
+            | Self::DrawTriangle { .. }
             | Self::DrawPixel { .. }
             | Self::DrawText { .. } => None,
         }
@@ -1666,6 +1693,14 @@ mod tests {
             true,
             70.0,
         );
+        let triangle = RenderCommand::draw_triangle(
+            RenderPoint::new(12.0, 13.0),
+            7.5,
+            14.0,
+            30.0,
+            [0.6, 0.5, 0.4, 0.3],
+            71.0,
+        );
         let custom = RenderCommand::custom(
             "module-bridge",
             vec![
@@ -1802,6 +1837,25 @@ mod tests {
             other => panic!("unexpected command: {other:?}"),
         }
 
+        match triangle {
+            RenderCommand::DrawTriangle {
+                center,
+                width,
+                length,
+                rotation,
+                color,
+                layer,
+            } => {
+                assert_eq!(center, RenderPoint::new(12.0, 13.0));
+                assert_eq!(width, 7.5);
+                assert_eq!(length, 14.0);
+                assert_eq!(rotation, 30.0);
+                assert_eq!(color, [0.6, 0.5, 0.4, 0.3]);
+                assert_eq!(layer, 71.0);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
         match custom {
             RenderCommand::Custom { name, properties } => {
                 assert_eq!(name, "module-bridge");
@@ -1911,6 +1965,14 @@ mod tests {
             true,
             31.0,
         ));
+        pass.push(RenderCommand::draw_triangle(
+            RenderPoint::new(9.0, 10.0),
+            6.0,
+            12.0,
+            45.0,
+            [0.4, 0.5, 0.6, 0.7],
+            32.0,
+        ));
         pass.push(RenderCommand::custom(
             "backend-marker",
             vec![RenderProperty::new("stage", "block")],
@@ -1926,6 +1988,7 @@ mod tests {
                 None,
                 Some(RenderBackendFlushBoundary::BlendState),
                 Some(RenderBackendFlushBoundary::ClipState),
+                None,
                 None,
                 None,
                 Some(RenderBackendFlushBoundary::Custom),
@@ -1948,7 +2011,8 @@ mod tests {
                 Some(3),
                 Some(4),
                 Some(5),
-                Some(6)
+                Some(6),
+                Some(7)
             ]
         );
         assert_eq!(
@@ -1973,7 +2037,7 @@ mod tests {
                 (Some(0), "clear"),
                 (Some(2), "blend_state"),
                 (Some(3), "clip_state"),
-                (Some(6), "custom"),
+                (Some(7), "custom"),
             ]
         );
     }

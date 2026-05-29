@@ -215,6 +215,19 @@ impl DesktopStandardEffectRenderFrame {
                 _ => {}
             }
         }
+        for primitive in &self.triangle_primitives {
+            if primitive.width <= f32::EPSILON || primitive.length <= f32::EPSILON {
+                continue;
+            }
+            pass.push(RenderCommand::draw_triangle(
+                RenderPoint::new(primitive.center.0, primitive.center.1),
+                primitive.width,
+                primitive.length,
+                primitive.rotation,
+                desktop_effect_render_color(primitive.color, primitive.alpha),
+                Layer::EFFECT,
+            ));
+        }
         (!pass.commands.is_empty()).then_some(pass)
     }
 }
@@ -3285,6 +3298,27 @@ fn opengl_backend_polygon_primitive_points(
         .collect()
 }
 
+fn opengl_backend_triangle_primitive_positions(
+    center: RenderPoint,
+    width: f32,
+    length: f32,
+    rotation: f32,
+) -> Option<[RenderPoint; 4]> {
+    if width <= f32::EPSILON || length <= f32::EPSILON {
+        return None;
+    }
+    let rotation = rotation.to_radians();
+    let tip = RenderPoint::new(
+        center.x + rotation.cos() * length,
+        center.y + rotation.sin() * length,
+    );
+    let half_width = width * 0.5;
+    let base_offset = RenderPoint::new(rotation.sin() * half_width, -rotation.cos() * half_width);
+    let base_a = RenderPoint::new(center.x + base_offset.x, center.y + base_offset.y);
+    let base_b = RenderPoint::new(center.x - base_offset.x, center.y - base_offset.y);
+    Some([base_a, tip, base_b, base_a])
+}
+
 fn opengl_backend_circle_primitive_segment_count(radius: f32) -> usize {
     if radius <= f32::EPSILON {
         return 0;
@@ -3483,6 +3517,28 @@ fn opengl_backend_primitive_quads_from_action(
                     .collect()
             }
         }
+        DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
+            center,
+            width,
+            length,
+            rotation,
+            color,
+            layer,
+        } => opengl_backend_triangle_primitive_positions(*center, *width, *length, *rotation)
+            .into_iter()
+            .map(|positions| {
+                DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                    "primitive:DrawTriangle",
+                    target.clone(),
+                    shader_program.clone(),
+                    blend_state,
+                    clip,
+                    *layer,
+                    *color,
+                    positions,
+                )
+            })
+            .collect(),
         DesktopGraphicsOpenGlBackendAdapterAction::DrawPixel { x, y, color, layer } => {
             vec![
                 DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
@@ -4674,6 +4730,14 @@ pub enum DesktopGraphicsOpenGlBackendAdapterAction {
         rotation: f32,
         color: [f32; 4],
         filled: bool,
+        layer: f32,
+    },
+    DrawTriangle {
+        center: RenderPoint,
+        width: f32,
+        length: f32,
+        rotation: f32,
+        color: [f32; 4],
         layer: f32,
     },
     DrawPixel {
@@ -6598,6 +6662,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
             | RenderCommand::StrokeRect { .. }
             | RenderCommand::DrawLine { .. }
             | RenderCommand::DrawPolygon { .. }
+            | RenderCommand::DrawTriangle { .. }
             | RenderCommand::DrawPixel { .. } => {
                 self.state.draw_commands += 1;
             }
@@ -6844,6 +6909,21 @@ fn opengl_backend_adapter_action_from_render_command(
             rotation: *rotation,
             color: *color,
             filled: *filled,
+            layer: *layer,
+        },
+        RenderCommand::DrawTriangle {
+            center,
+            width,
+            length,
+            rotation,
+            color,
+            layer,
+        } => DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
+            center: *center,
+            width: *width,
+            length: *length,
+            rotation: *rotation,
+            color: *color,
             layer: *layer,
         },
         RenderCommand::DrawPixel { x, y, color, layer } => {
@@ -7272,6 +7352,7 @@ impl DesktopGraphicsOpenGlBackendExecutor {
             | DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::DrawLine { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon { .. }
+            | DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::DrawPixel { .. } => {
                 let target = self.state.current_target.clone();
                 self.state.record_primitive_quads(target, action);
@@ -7532,6 +7613,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                     | RenderCommand::StrokeRect { .. }
                     | RenderCommand::DrawLine { .. }
                     | RenderCommand::DrawPolygon { .. }
+                    | RenderCommand::DrawTriangle { .. }
                     | RenderCommand::DrawPixel { .. } => {
                         self.state
                             .ensure_framebuffer_attachment_plan_for_target(&target);
@@ -8442,6 +8524,7 @@ fn render_command_trace_kind(command: &RenderCommand) -> &'static str {
         RenderCommand::DrawLine { .. } => "DrawLine",
         RenderCommand::DrawCircle { .. } => "DrawCircle",
         RenderCommand::DrawPolygon { .. } => "DrawPolygon",
+        RenderCommand::DrawTriangle { .. } => "DrawTriangle",
         RenderCommand::DrawPixel { .. } => "DrawPixel",
         RenderCommand::DrawText { .. } => "DrawText",
         RenderCommand::Custom { .. } => "Custom",
@@ -15860,6 +15943,36 @@ mod tests {
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[0].texture_identity.gl_handle, Some(101));
         assert_eq!(batches[1].texture_identity.gl_handle, Some(102));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_triangle_primitive_matches_java_drawf_tri_vertices() {
+        let positions = super::opengl_backend_triangle_primitive_positions(
+            RenderPoint::new(0.0, 0.0),
+            10.0,
+            20.0,
+            30.0,
+        )
+        .expect("triangle with positive width and length should emit primitive vertices");
+        let expected = [
+            RenderPoint::new(2.5, -4.330127),
+            RenderPoint::new(17.320509, 10.0),
+            RenderPoint::new(-2.5, 4.330127),
+            RenderPoint::new(2.5, -4.330127),
+        ];
+        for (actual, expected) in positions.iter().zip(expected.iter()) {
+            assert!(
+                (actual.x - expected.x).abs() < 0.0001 && (actual.y - expected.y).abs() < 0.0001,
+                "expected Java Drawf.tri point {expected:?}, got {actual:?}"
+            );
+        }
+        assert!(super::opengl_backend_triangle_primitive_positions(
+            RenderPoint::new(0.0, 0.0),
+            0.0,
+            20.0,
+            30.0,
+        )
+        .is_none());
     }
 
     #[test]
@@ -23676,6 +23789,106 @@ mod tests {
                 .sprite_quads
                 .len()
                 >= expected_squares.len() * 4
+        );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_draw_call_plans
+            .iter()
+            .any(|plan| plan.target == Some(RenderTarget::Screen)));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_standard_effect_triangles_into_graphics_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("shootSmall").unwrap() as u16,
+                    x: 24.0,
+                    y: 32.0,
+                    rotation: 90.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+        let expected_triangles = launcher
+            .standard_effect_render_frame()
+            .triangle_primitives
+            .iter()
+            .map(|triangle| {
+                (
+                    RenderPoint::new(triangle.center.0, triangle.center.1),
+                    triangle.width,
+                    triangle.length,
+                    triangle.rotation,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(!expected_triangles.is_empty());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let minimap_camera = MinimapCamera::new(32.0, 32.0, 64.0, 64.0);
+        let frame = launcher.graphics_frame_for_render(
+            8,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let effect_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, RenderCommand::DrawTriangle { .. }))
+            })
+            .expect("standard effect triangles should be routed into an overlay render pass");
+        let triangle_commands = effect_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawTriangle {
+                    center,
+                    width,
+                    length,
+                    rotation,
+                    layer,
+                    ..
+                } => Some((*center, *width, *length, *rotation, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(triangle_commands.len(), expected_triangles.len());
+        assert!(triangle_commands
+            .iter()
+            .all(|(_, _, _, _, layer)| (*layer - Layer::EFFECT).abs() < f32::EPSILON));
+        assert_eq!(
+            triangle_commands
+                .iter()
+                .map(|(center, width, length, rotation, _)| {
+                    (*center, *width, *length, *rotation)
+                })
+                .collect::<Vec<_>>(),
+            expected_triangles
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(
+            renderer
+                .last_opengl_backend_executor_state
+                .sprite_quads
+                .len()
+                >= expected_triangles.len()
         );
         assert!(renderer
             .last_opengl_backend_executor_state

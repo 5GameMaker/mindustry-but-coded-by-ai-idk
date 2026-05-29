@@ -12470,3 +12470,25 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. triangle：不要用规则 `DrawPolygon` 伪装，优先新增精确 triangle mesh/command；
   2. textured-line：先定义沿线纹理拉伸/平铺几何；
   3. block fullIcon textured rect：需要 content registry / atlas symbol 映射。
+
+### 2026-05-30：standard effect triangle 精确接入 graphics/OpenGL backend
+
+- 当前整体完成度：约 **39.2%**。
+- 已完成：
+  - `RenderCommand::DrawTriangle` / `RenderCommand::draw_triangle(...)` 已加入 core render command schema；
+  - `DesktopStandardEffectRenderFrame::to_render_pass()` 已把 triangle primitive 转成 `DrawTriangle`，进入 `RenderPassKind::Overlay`；
+  - desktop OpenGL adapter 新增 `DrawTriangle` action；
+  - triangle lowering 按 Java `Drawf.tri` 顶点公式计算底边两点与尖端点，保留 `width / length / rotation`，不再用规则三角形近似；
+  - 复用 `primitive-white` sprite mesh path 进入 OpenGL executor / draw call，不新增孤立 renderer；
+  - 新增 geometry 测试和 standard effect route 测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_triangle_primitive_matches_java_drawf_tri_vertices --features opengl-backend`
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data`
+  - `cargo test -p mindustry-core render_pass_backend_execution_steps_mark_state_flush_boundaries`
+- 下一步：
+  1. textured-line：把 `StandardEffectLineRenderPrimitive.region=Some(...)` 的沿线贴图接到 atlas/sprite mesh；
+  2. block fullIcon textured rect：把 `block-fullIcon:*` 从占位 region 协议接到真实 content/atlas symbol；
+  3. world label：把 runtime snapshot / `WorldLabelDrawPlan` 收口到 render frame，而不是只停在实体状态。
