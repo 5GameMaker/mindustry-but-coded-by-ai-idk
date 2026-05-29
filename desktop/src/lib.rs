@@ -366,6 +366,8 @@ fn minimap_overlay_render_pass(
             MinimapOverlayCommand::Spawn {
                 x,
                 y,
+                icon_region,
+                icon_size,
                 radius,
                 pulse,
                 team_color,
@@ -374,13 +376,32 @@ fn minimap_overlay_render_pass(
                 else {
                     continue;
                 };
+                let color = rgba8888_to_render_color(*team_color, 1.0);
+                let icon_size = minimap_overlay_world_len_to_screen(plan, *icon_size);
+                pass.push(RenderCommand::draw_sprite(
+                    icon_region.clone(),
+                    RenderRect::from_center(center, icon_size, icon_size),
+                    color,
+                    0.0,
+                    Layer::END - 0.02,
+                ));
+                let radius = minimap_overlay_world_len_to_screen(plan, *radius);
                 pass.push(RenderCommand::draw_circle(
                     center,
-                    minimap_overlay_world_len_to_screen(plan, *radius) + pulse * 4.0,
-                    rgba8888_to_render_color(*team_color, 1.0),
+                    radius,
+                    color,
                     false,
-                    Layer::END,
+                    Layer::END - 0.01,
                 ));
+                if *pulse > f32::EPSILON {
+                    pass.push(RenderCommand::draw_circle(
+                        center,
+                        radius * *pulse,
+                        color,
+                        false,
+                        Layer::END,
+                    ));
+                }
             }
             MinimapOverlayCommand::CameraBounds(rect) => {
                 if let Some(rect) = minimap_overlay_world_rect_to_screen(plan, screen_rect, *rect) {
@@ -13195,12 +13216,12 @@ mod tests {
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
         MinimapCamera, MinimapEntitySnapshot, MinimapFullUpdatePlan, MinimapIndicatorSnapshot,
-        MinimapMarkerSnapshot, MinimapOverlayInput, MinimapPlayerSnapshot, MinimapTextureFramePlan,
-        MinimapTexturePixelUpdate, MinimapTextureSize, MinimapTilePos, PageType,
-        ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode,
-        RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan, RenderPass,
-        RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize,
-        RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
+        MinimapMarkerSnapshot, MinimapOverlayInput, MinimapPlayerSnapshot, MinimapSpawnSnapshot,
+        MinimapTextureFramePlan, MinimapTexturePixelUpdate, MinimapTextureSize, MinimapTilePos,
+        PageType, ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor,
+        RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan,
+        RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind,
+        RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
         RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect, RenderViewport,
         ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCatalog,
         ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureBinding, TileCoord, UniformBinding,
@@ -15017,12 +15038,20 @@ mod tests {
     fn desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.game_state.world.resize(16, 16);
-        launcher.texture_atlas =
-            TextureAtlasPlan::from_virtual_source_paths(["sprites/dagger.png"]);
+        launcher.texture_atlas = TextureAtlasPlan::from_virtual_source_paths([
+            "sprites/dagger.png",
+            "sprites/units.png",
+        ]);
 
         let mut minimap_input = sample_minimap_overlay_input(true);
         minimap_input.net_active = true;
         minimap_input.show_pings = true;
+        minimap_input.show_spawns = true;
+        minimap_input.has_spawns = true;
+        minimap_input.waves = true;
+        minimap_input.wave_team_color = 0xff00ffff;
+        minimap_input.drop_zone_radius = 20.0;
+        minimap_input.time = 180.0;
         minimap_input.global_time = 15.0;
         minimap_input.units.push(MinimapEntitySnapshot {
             entity_id: 42,
@@ -15058,6 +15087,9 @@ mod tests {
             time: 35.0,
             block_offset_tiles: 1.0,
         });
+        minimap_input
+            .spawns
+            .push(MinimapSpawnSnapshot { x: 32.0, y: 40.0 });
 
         let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
         let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
@@ -15166,6 +15198,45 @@ mod tests {
                     && *color == expected_indicator_color
             )
         }));
+        assert!(minimap_pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    tint,
+                    ..
+                } if symbol == "units"
+                    && *rect == RenderRect::from_center(RenderPoint::new(32.0, 40.0), 10.0, 10.0)
+                    && *tint == super::rgba8888_to_render_color(0xff00ffff, 1.0)
+            )
+        }));
+        assert!(minimap_pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    color,
+                    filled: false,
+                    ..
+                } if *center == RenderPoint::new(32.0, 40.0)
+                    && (*radius - 20.0).abs() < f32::EPSILON
+                    && *color == super::rgba8888_to_render_color(0xff00ffff, 1.0)
+            )
+        }));
+        assert!(minimap_pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    filled: false,
+                    ..
+                } if *center == RenderPoint::new(32.0, 40.0)
+                    && (*radius - 17.5).abs() < 0.001
+            )
+        }));
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
@@ -15174,6 +15245,11 @@ mod tests {
             .sprite_texture_bindings
             .iter()
             .any(|binding| binding.symbol == "dagger"));
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_texture_bindings
+            .iter()
+            .any(|binding| binding.symbol == "units"));
         assert!(
             renderer
                 .last_opengl_backend_executor_state

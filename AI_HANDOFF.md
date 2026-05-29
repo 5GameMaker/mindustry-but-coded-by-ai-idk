@@ -12607,3 +12607,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. minimap spawn：补 `Icon.units` sprite、drop zone circle、pulse circle；
   2. minimap fog：从 `FillRect` 过渡到动态/静态 fog texture/shader 语义；
   3. entity/world draw：按 explorer 建议，Fire 是下一条低风险实体渲染闭环候选。
+
+### 2026-05-30：minimap spawn 图标与 drop-zone pulse
+
+- 当前整体完成度：约 **40.3%**。
+- 已完成：
+  - `MinimapOverlayCommand::Spawn` 新增 `icon_region` / `icon_size`；
+  - core overlay plan 用 `units` atlas symbol 表达 Java `Icon.units`，图标尺寸按上游 `core/assets-raw/icons/units.png` 的 10x10 记录；
+  - `minimap_overlay_render_pass(...)` 输出 `DrawSprite("units")`、drop-zone 圆和 pulse 圆；
+  - pulse 半径从旧的 `radius + pulse * 4` 修正为 Java 的 `radius * pow3Out(curve)` 语义；
+  - 回归测试覆盖 spawn icon、drop-zone 半径、pulse 半径和 `units` atlas binding。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core overlay_plan_emits_full_view_entities_fog_spawns_camera_and_markers`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. minimap fog：把 dynamic/static fog 从 `FillRect` 过渡到 texture/shader 语义；
+  2. minimap marker：逐步拆 `MapObjectives` 多态 marker；
+  3. entity/world draw：优先 Fire 的 draw plan + render command 样板闭环。

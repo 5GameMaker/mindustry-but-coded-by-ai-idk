@@ -256,6 +256,8 @@ pub enum MinimapOverlayCommand {
     Spawn {
         x: f32,
         y: f32,
+        icon_region: String,
+        icon_size: f32,
         radius: f32,
         pulse: f32,
         team_color: u32,
@@ -633,6 +635,8 @@ impl MinimapRendererState {
                 commands.push(MinimapOverlayCommand::Spawn {
                     x: spawn.x,
                     y: spawn.y,
+                    icon_region: "units".into(),
+                    icon_size: 10.0,
                     radius: input.drop_zone_radius,
                     pulse,
                     team_color: input.wave_team_color,
@@ -1130,10 +1134,16 @@ mod tests {
                 ..
             }
         )));
-        assert!(plan
-            .commands
-            .iter()
-            .any(|cmd| matches!(cmd, MinimapOverlayCommand::Spawn { .. })));
+        assert!(plan.commands.iter().any(|cmd| matches!(
+            cmd,
+            MinimapOverlayCommand::Spawn {
+                icon_region,
+                icon_size: 10.0,
+                radius: 30.0,
+                team_color: 0xff00ffff,
+                ..
+            } if icon_region == "units"
+        )));
         assert!(plan
             .commands
             .iter()

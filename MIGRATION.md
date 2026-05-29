@@ -15315,3 +15315,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - minimap spawn icon/pulse、fog shader/texture、`MapObjectives` 多态 marker 仍需继续迁移；
   - entity/world draw、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.2%，仍未达到完整可玩。
+
+## 415. 最新闭环记录：minimap spawn 图标与 drop-zone pulse
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/minimap_renderer.rs`
+    - `MinimapOverlayCommand::Spawn` 新增 `icon_region` 与 `icon_size`；
+    - `overlay_plan(...)` 以 Java `Icon.units` 对应的 `units` atlas symbol 和 10x10 图标尺寸生成 spawn 命令；
+    - 保留 `drop_zone_radius` 与 `pow3Out(curve)` pulse 比例。
+  - `desktop/src/lib.rs`
+    - spawn 从“单个圆近似”升级为 `DrawSprite("units") + drop-zone circle + pulse circle`；
+    - drop-zone 圆使用原始半径，pulse 圆使用 `radius * pulse`，对齐 Java `Lines.circle(tx, ty, rad * Interp.pow3Out.apply(curve))`；
+    - minimap render pass 回归测试覆盖 spawn icon atlas binding、drop-zone 半径和 pulse 半径。
+- 迁移意义：
+  - Java `MinimapRenderer.drawSpawns()` 的核心图标/范围/脉冲结构进入 `RenderPassKind::Minimap`；
+  - spawn 覆盖层复用现有 `DrawSprite`/atlas/OpenGL sprite path 和 primitive path，没有形成孤立 renderer。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core overlay_plan_emits_full_view_entities_fog_spawns_camera_and_markers`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - spawn 的 Java `Draw.color(team, team.value(1.2), absin(...))` 亮度脉动仍需补精确颜色；
+  - minimap fog shader/texture、`MapObjectives` 多态 marker 仍需继续迁移；
+  - entity/world draw、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.3%，仍未达到完整可玩。
