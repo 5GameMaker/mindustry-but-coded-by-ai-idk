@@ -12941,3 +12941,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - executor 仍是无依赖状态机，尚未绑定真实 OpenGL FBO/VAO/VBO/texture/shader；
   - `mixcol`、atlas `TextureRegion`、additive light 的真实 GPU 状态仍需后续落地；
   - 当前总体迁移约 26.8%，仍未达到完整可玩。
+
+## 12.412 OpenGL executor event log 与错误路径校验
+
+- 2026-05-29：在上一节 stateful executor 基础上继续细化无依赖执行边界，新增可回放事件流与 active pass 上下文，并补齐最小错误路径测试。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendPassContext`，记录 active pass 的 source、target、pass kind 与 order；
+    - 新增 `DesktopGraphicsOpenGlBackendEvent`，覆盖 `BeginPass / FlushBoundary / ShaderApply / Command / EndPass / Resolve / Error`；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `active_pass` 与 `event_log`；
+    - executor 在每个 step 消费时写入 event log，错误也同步写入 `errors` 与 `Event::Error`；
+    - 所有 RenderCommand 均进入统一 `Command` event，避免后续真实 GL adapter 缺少回放入口。
+  - 新增错误路径测试：
+    - `desktop_graphics_opengl_backend_executor_rejects_nested_pass_begin`；
+    - `desktop_graphics_opengl_backend_executor_rejects_end_pass_without_begin`；
+    - `desktop_graphics_opengl_backend_executor_rejects_resolve_while_pass_active`；
+    - `desktop_graphics_opengl_backend_executor_rejects_target_mismatch_during_active_pass`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo test -p mindustry-desktop accelerator_launch --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - event log 仍是 stateful executor 的内部记录，尚未分离成真实 GL adapter trait；
+  - 真实 OpenGL resource table、shader program、atlas texture binding、FBO resolve 仍未落地；
+  - 当前总体迁移约 26.9%，仍未达到完整可玩。

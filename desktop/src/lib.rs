@@ -719,8 +719,75 @@ pub struct DesktopGraphicsOpenGlBackendResolveEvent {
     pub resolve_kind: RenderResolveKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendPassContext {
+    pub source: DesktopGraphicsOpenGlBackendStepSource,
+    pub target: RenderTarget,
+    pub pass_kind: Option<RenderPassKind>,
+    pub pass_order: Option<i32>,
+}
+
+impl DesktopGraphicsOpenGlBackendPassContext {
+    fn from_source(source: DesktopGraphicsOpenGlBackendStepSource, target: RenderTarget) -> Self {
+        let (pass_kind, pass_order) = match &source {
+            DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                pass_kind,
+                pass_order,
+                ..
+            } => (Some(pass_kind.clone()), Some(*pass_order)),
+            DesktopGraphicsOpenGlBackendStepSource::BlockParticles { .. } => (None, None),
+        };
+        Self {
+            source,
+            target,
+            pass_kind,
+            pass_order,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopGraphicsOpenGlBackendEvent {
+    BeginPass {
+        source: DesktopGraphicsOpenGlBackendStepSource,
+        target: RenderTarget,
+    },
+    FlushBoundary {
+        source: DesktopGraphicsOpenGlBackendStepSource,
+        target: RenderTarget,
+        boundary: RenderBackendFlushBoundary,
+        label: &'static str,
+    },
+    ShaderApply {
+        source: DesktopGraphicsOpenGlBackendStepSource,
+        target: RenderTarget,
+        shader: ShaderId,
+        operation_count: usize,
+        error_count: usize,
+    },
+    Command {
+        source: DesktopGraphicsOpenGlBackendStepSource,
+        target: RenderTarget,
+        kind: &'static str,
+    },
+    EndPass {
+        source: DesktopGraphicsOpenGlBackendStepSource,
+        target: RenderTarget,
+    },
+    Resolve {
+        source: DesktopGraphicsOpenGlBackendStepSource,
+        source_target: RenderTarget,
+        resolve_target: RenderTarget,
+        resolve_kind: RenderResolveKind,
+    },
+    Error {
+        message: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendExecutorState {
+    pub active_pass: Option<DesktopGraphicsOpenGlBackendPassContext>,
     pub current_target: Option<RenderTarget>,
     pub pass_active: bool,
     pub current_blend: RenderBlendMode,
@@ -737,6 +804,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub draw_text_commands: usize,
     pub custom_markers: Vec<String>,
     pub resolve_events: Vec<DesktopGraphicsOpenGlBackendResolveEvent>,
+    pub event_log: Vec<DesktopGraphicsOpenGlBackendEvent>,
     pub last_command_kind: Option<&'static str>,
     pub errors: Vec<String>,
 }
@@ -744,6 +812,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
 impl Default for DesktopGraphicsOpenGlBackendExecutorState {
     fn default() -> Self {
         Self {
+            active_pass: None,
             current_target: None,
             pass_active: false,
             current_blend: RenderBlendMode::Normal,
@@ -760,6 +829,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             draw_text_commands: 0,
             custom_markers: Vec::new(),
             resolve_events: Vec::new(),
+            event_log: Vec::new(),
             last_command_kind: None,
             errors: Vec::new(),
         }
@@ -772,9 +842,17 @@ pub struct DesktopGraphicsOpenGlBackendExecutor {
 }
 
 impl DesktopGraphicsOpenGlBackendExecutor {
+    fn record_error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.state.errors.push(message.clone());
+        self.state
+            .event_log
+            .push(DesktopGraphicsOpenGlBackendEvent::Error { message });
+    }
+
     fn record_target_for_pass_step(&mut self, target: &RenderTarget) {
         if self.state.pass_active && self.state.current_target.as_ref() != Some(target) {
-            self.state.errors.push(format!(
+            self.record_error(format!(
                 "opengl backend step target changed during active pass: {:?} -> {:?}",
                 self.state.current_target, target
             ));
@@ -784,31 +862,62 @@ impl DesktopGraphicsOpenGlBackendExecutor {
 
 impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecutor {
     fn consume_opengl_backend_step(&mut self, step: DesktopGraphicsOpenGlBackendStep) {
+        let source = step.source.clone();
         let target = step.target.clone();
         match step.kind {
             DesktopGraphicsOpenGlBackendStepKind::BeginPass => {
                 if self.state.pass_active {
-                    self.state
-                        .errors
-                        .push("opengl backend began a pass while another pass was active".into());
+                    self.record_error("opengl backend began a pass while another pass was active");
                 }
                 self.state.pass_active = true;
-                self.state.current_target = Some(target);
+                self.state.active_pass =
+                    Some(DesktopGraphicsOpenGlBackendPassContext::from_source(
+                        source.clone(),
+                        target.clone(),
+                    ));
+                self.state.current_target = Some(target.clone());
                 self.state.begin_passes += 1;
+                self.state
+                    .event_log
+                    .push(DesktopGraphicsOpenGlBackendEvent::BeginPass { source, target });
             }
-            DesktopGraphicsOpenGlBackendStepKind::FlushBoundary { .. } => {
+            DesktopGraphicsOpenGlBackendStepKind::FlushBoundary { boundary, label } => {
                 self.record_target_for_pass_step(&target);
                 self.state.flush_boundaries += 1;
+                self.state
+                    .event_log
+                    .push(DesktopGraphicsOpenGlBackendEvent::FlushBoundary {
+                        source,
+                        target,
+                        boundary,
+                        label,
+                    });
             }
             DesktopGraphicsOpenGlBackendStepKind::ShaderApply { apply } => {
                 self.record_target_for_pass_step(&target);
                 self.state.current_shader = Some(apply.shader);
                 self.state.shader_applies += 1;
+                self.state
+                    .event_log
+                    .push(DesktopGraphicsOpenGlBackendEvent::ShaderApply {
+                        source,
+                        target,
+                        shader: apply.shader,
+                        operation_count: apply.operations.len(),
+                        error_count: apply.errors.len(),
+                    });
             }
             DesktopGraphicsOpenGlBackendStepKind::Command { kind, command } => {
                 self.record_target_for_pass_step(&target);
                 self.state.commands += 1;
                 self.state.last_command_kind = Some(kind);
+                self.state
+                    .event_log
+                    .push(DesktopGraphicsOpenGlBackendEvent::Command {
+                        source,
+                        target,
+                        kind,
+                    });
                 match command {
                     RenderCommand::Clear { .. } => {
                         self.state.clear_commands += 1;
@@ -844,26 +953,34 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
             DesktopGraphicsOpenGlBackendStepKind::EndPass => {
                 self.record_target_for_pass_step(&target);
                 if !self.state.pass_active {
-                    self.state
-                        .errors
-                        .push("opengl backend ended a pass while no pass was active".into());
+                    self.record_error("opengl backend ended a pass while no pass was active");
                 }
                 self.state.pass_active = false;
-                self.state.current_target = Some(target);
+                self.state.active_pass = None;
+                self.state.current_target = Some(target.clone());
                 self.state.end_passes += 1;
+                self.state
+                    .event_log
+                    .push(DesktopGraphicsOpenGlBackendEvent::EndPass { source, target });
             }
             DesktopGraphicsOpenGlBackendStepKind::Resolve {
                 resolve_target,
                 resolve_kind,
             } => {
                 if self.state.pass_active {
-                    self.state
-                        .errors
-                        .push("opengl backend resolved while a pass was active".into());
+                    self.record_error("opengl backend resolved while a pass was active");
                 }
                 self.state
                     .resolve_events
                     .push(DesktopGraphicsOpenGlBackendResolveEvent {
+                        source_target: target.clone(),
+                        resolve_target: resolve_target.clone(),
+                        resolve_kind,
+                    });
+                self.state
+                    .event_log
+                    .push(DesktopGraphicsOpenGlBackendEvent::Resolve {
+                        source,
                         source_target: target,
                         resolve_target,
                         resolve_kind,
@@ -8718,6 +8835,23 @@ mod tests {
         }
     }
 
+    fn opengl_backend_test_step(
+        pass_index: usize,
+        target: RenderTarget,
+        kind: DesktopGraphicsOpenGlBackendStepKind,
+    ) -> DesktopGraphicsOpenGlBackendStep {
+        DesktopGraphicsOpenGlBackendStep {
+            source: DesktopGraphicsOpenGlBackendStepSource::RenderPass {
+                pass_index,
+                command_index: None,
+                pass_kind: RenderPassKind::Block,
+                pass_order: RenderPassKind::Block.default_order(),
+            },
+            target,
+            kind,
+        }
+    }
+
     #[test]
     fn desktop_graphics_opengl_backend_executor_drives_shader_apply_steps() {
         let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
@@ -8773,6 +8907,138 @@ mod tests {
             state.last_step.as_ref().map(|step| &step.kind),
             Some(DesktopGraphicsOpenGlBackendStepKind::EndPass)
         ));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_rejects_nested_pass_begin() {
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            RenderTarget::Screen,
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            1,
+            RenderTarget::Texture("nested".into()),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+
+        assert_eq!(executor.state.begin_passes, 2);
+        assert!(executor.state.pass_active);
+        assert_eq!(
+            executor.state.current_target,
+            Some(RenderTarget::Texture("nested".into()))
+        );
+        assert_eq!(
+            executor
+                .state
+                .active_pass
+                .as_ref()
+                .map(|pass| pass.target.clone()),
+            Some(RenderTarget::Texture("nested".into()))
+        );
+        assert!(executor
+            .state
+            .errors
+            .iter()
+            .any(|error| error == "opengl backend began a pass while another pass was active"));
+        assert!(executor.state.event_log.iter().any(
+            |event| matches!(event, super::DesktopGraphicsOpenGlBackendEvent::Error { message }
+                if message == "opengl backend began a pass while another pass was active")
+        ));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_rejects_end_pass_without_begin() {
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            RenderTarget::Buffer("orphan".into()),
+            DesktopGraphicsOpenGlBackendStepKind::EndPass,
+        ));
+
+        assert_eq!(executor.state.end_passes, 1);
+        assert!(!executor.state.pass_active);
+        assert!(executor.state.active_pass.is_none());
+        assert_eq!(
+            executor.state.current_target,
+            Some(RenderTarget::Buffer("orphan".into()))
+        );
+        assert!(executor
+            .state
+            .errors
+            .iter()
+            .any(|error| error == "opengl backend ended a pass while no pass was active"));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_rejects_resolve_while_pass_active() {
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            RenderTarget::Buffer("active".into()),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            RenderTarget::Buffer("active".into()),
+            DesktopGraphicsOpenGlBackendStepKind::Resolve {
+                resolve_target: RenderTarget::Screen,
+                resolve_kind: RenderResolveKind::DrawFboSample,
+            },
+        ));
+
+        assert!(executor.state.pass_active);
+        assert_eq!(executor.state.resolve_events.len(), 1);
+        assert_eq!(
+            executor.state.resolve_events[0],
+            super::DesktopGraphicsOpenGlBackendResolveEvent {
+                source_target: RenderTarget::Buffer("active".into()),
+                resolve_target: RenderTarget::Screen,
+                resolve_kind: RenderResolveKind::DrawFboSample,
+            }
+        );
+        assert!(executor
+            .state
+            .errors
+            .iter()
+            .any(|error| error == "opengl backend resolved while a pass was active"));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_rejects_target_mismatch_during_active_pass() {
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            RenderTarget::Screen,
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            RenderTarget::Buffer("wrong-target".into()),
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "DrawSprite",
+                command: RenderCommand::draw_sprite(
+                    "router",
+                    RenderRect::new(0.0, 0.0, 8.0, 8.0),
+                    [1.0, 1.0, 1.0, 1.0],
+                    0.0,
+                    Layer::BLOCK,
+                ),
+            },
+        ));
+
+        assert_eq!(executor.state.commands, 1);
+        assert!(executor
+            .state
+            .errors
+            .iter()
+            .any(|error| error.contains("opengl backend step target changed during active pass")));
+        assert_eq!(executor.state.draw_sprite_commands, 1);
     }
 
     #[test]

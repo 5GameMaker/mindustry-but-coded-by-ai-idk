@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **26.8%**。
+- 当前总体迁移完成度：约 **26.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10288,3 +10288,25 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续给 executor 加 `event_log / active_pass` 细化状态，并补 nested begin、end without begin、resolve while active、active pass target mismatch 的错误路径测试；
   2. 继续推进真实 OpenGL adapter 边界，但仍先不擅自引入 `glow/glutin/winit`；
   3. 把 `mixcol`、fullIcon atlas region、additive light 从 marker/trace 继续向真实 GPU 状态收口。
+
+---
+
+## 318. 最新闭环记录：OpenGL executor event log 与错误路径校验
+
+- 本轮总体进度更新：约 **26.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendPassContext`；
+    - 新增 `DesktopGraphicsOpenGlBackendEvent`，覆盖 begin/flush/shader/command/end/resolve/error；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `active_pass` 与 `event_log`；
+    - executor 现在每个 step 都能落到 event log，错误同步写入 `errors` 和 `Event::Error`；
+    - 新增 nested begin、end without begin、resolve while active、active pass target mismatch 四条错误路径测试。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo test -p mindustry-desktop accelerator_launch --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 把 event log 进一步拆成真实 GL adapter trait 的输入边界；
+  2. 继续补 `DrawCircle / DrawText / FillRect / DrawLine / DrawPolygon / DrawPixel` 到 OpenGL adapter 的语义映射；
+  3. 继续推进 atlas texture binding、shader program/resource table、FBO resolve，仍保持原版 OpenGL 路线。
