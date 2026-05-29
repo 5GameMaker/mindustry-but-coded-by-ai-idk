@@ -14296,3 +14296,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 未执行真实 `glBindFramebuffer/glFramebufferTexture2D/glViewport`；
   - `ShaderBlit` / `DrawFboSample` 仍未消费该 attachment 执行真实 resolve；
   - 当前总体迁移约 32.3%，仍未达到完整可玩。
+
+## 12.465 EffectBuffer surface size 自动注入
+
+- 2026-05-29：继续对齐 Java `renderer.effectBuffer.resize(graphics.getWidth(), graphics.getHeight())`。本轮把 effectBuffer attachment resize 的尺寸来源从孤立测试推进到 desktop frame loop：`DesktopFrameLoopState.surface.size` 会在 surface-aware graphics render 路径中生成 `DesktopGraphicsEffectBufferSurface`，再转成 `DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::effect_buffer_with_size(...)`。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsEffectBufferSurface { size, generation }` 与 `to_attachment_plan()`；
+    - `DesktopFrameLoopState` 新增 `effect_buffer_generation`，仅在 `DesktopFrameLoopEvent::Resize(size)` 且尺寸真实变化时递增；
+    - `DesktopGraphicsOpenGlBackendFramePlan` 新增 `framebuffer_attachment_plans`，并提供 `from_frame_with_effect_buffer_surface(...)`；
+    - 新增 `DesktopGraphicsOpenGlBackendFramebufferAttachmentSink`、null/recording sink 与 execution state；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 记录 `framebuffer_attachment_plans` 和 `resolved_framebuffer_attachments`；
+    - `HeadlessDesktopGraphicsRenderer` 在 surface-aware 路径中先驱动 framebuffer attachment sink，再驱动 backend step sink；
+    - `step_desktop_frame_loop(...)` 将当前 `DesktopSurfaceSize` 与 generation 注入 graphics renderer；
+    - 扩展 `desktop_frame_loop_applies_resize_and_input_tick_events`，锁定 resize 后 effectBuffer attachment 使用 `800x600/generation=1`。
+- 迁移意义：
+  - effectBuffer 资源生命周期首次从 desktop surface resize 事件进入 OpenGL backend state，不再只靠手写 plan 测试；
+  - generation 不使用 frame index，避免每帧重建 FBO，贴近 Java 只在尺寸变化时 resize 的语义；
+  - attachment plan 在 shader/draw step 前被驱动，为后续 `TextureBinding::EffectBuffer` 和 resolve pass 共用同一 handle cache 打基础。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_applies_resize --lib`
+  - `cargo test -p mindustry-desktop effect_buffer --lib`
+- 仍未完成：
+  - `ShaderBlit` / `DrawFboSample` resolve 仍未真正消费 attachment texture identity/handle；
+  - 真实 `glBindFramebuffer/glFramebufferTexture2D/glViewport/glBlitFramebuffer/SwapBuffers` 尚未接入；
+  - renderer -> executor state -> shared resolver 端到端测试仍待补；
+  - 当前总体迁移约 32.4%，仍未达到完整可玩。

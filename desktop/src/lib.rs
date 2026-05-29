@@ -1039,6 +1039,12 @@ pub struct DesktopGraphicsOpenGlBackendTextureUploadSinkExecutionState {
     pub last_texture_upload: Option<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendFramebufferAttachmentSinkExecutionState {
+    pub framebuffer_attachments_emitted: usize,
+    pub last_framebuffer_attachment: Option<DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan>,
+}
+
 impl DesktopGraphicsOpenGlBackendTextureResource {
     pub fn from_binding(binding: &DesktopGraphicsOpenGlBackendTextureBinding) -> Self {
         Self {
@@ -3072,16 +3078,48 @@ pub struct DesktopGraphicsOpenGlBackendStep {
     pub kind: DesktopGraphicsOpenGlBackendStepKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopGraphicsEffectBufferSurface {
+    pub size: DesktopSurfaceSize,
+    pub generation: u64,
+}
+
+impl DesktopGraphicsEffectBufferSurface {
+    pub const fn new(size: DesktopSurfaceSize, generation: u64) -> Self {
+        Self { size, generation }
+    }
+
+    pub fn to_attachment_plan(self) -> DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan {
+        DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::effect_buffer_with_size(
+            self.size.width,
+            self.size.height,
+            self.generation,
+        )
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendFramePlan {
     pub steps: Vec<DesktopGraphicsOpenGlBackendStep>,
     pub texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
+    pub framebuffer_attachment_plans: Vec<DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan>,
 }
 
 impl DesktopGraphicsOpenGlBackendFramePlan {
     pub fn from_frame(frame: &DesktopGraphicsFrame) -> Self {
+        Self::from_frame_with_effect_buffer_surface(frame, None)
+    }
+
+    pub fn from_frame_with_effect_buffer_surface(
+        frame: &DesktopGraphicsFrame,
+        effect_buffer_surface: Option<DesktopGraphicsEffectBufferSurface>,
+    ) -> Self {
         let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
         let mut plan = trace.to_opengl_backend_plan();
+        if let Some(effect_buffer_surface) = effect_buffer_surface {
+            plan.framebuffer_attachment_plans
+                .push(effect_buffer_surface.to_attachment_plan());
+        }
         if let Some(minimap_texture_frame) = &frame.minimap_texture_frame {
             plan.texture_upload_plans.extend(
                 opengl_backend_texture_upload_plans_from_minimap_texture_frame(
@@ -3124,6 +3162,22 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
             sink.consume_opengl_texture_upload(upload.clone());
             state.texture_uploads_emitted += 1;
             state.last_texture_upload = Some(upload.clone());
+        }
+        state
+    }
+
+    pub fn drive_framebuffer_attachment_sink<
+        S: DesktopGraphicsOpenGlBackendFramebufferAttachmentSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendFramebufferAttachmentSinkExecutionState {
+        let mut state =
+            DesktopGraphicsOpenGlBackendFramebufferAttachmentSinkExecutionState::default();
+        for plan in &self.framebuffer_attachment_plans {
+            sink.consume_opengl_framebuffer_attachment(plan.clone());
+            state.framebuffer_attachments_emitted += 1;
+            state.last_framebuffer_attachment = Some(plan.clone());
         }
         state
     }
@@ -3757,6 +3811,42 @@ pub struct DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
 pub struct DesktopGraphicsOpenGlBackendSpriteMeshUploadSinkExecutionState {
     pub mesh_uploads_emitted: usize,
     pub last_mesh_upload: Option<DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>,
+}
+
+pub trait DesktopGraphicsOpenGlBackendFramebufferAttachmentSink {
+    fn consume_opengl_framebuffer_attachment(
+        &mut self,
+        plan: DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    );
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsNullOpenGlBackendFramebufferAttachmentSink;
+
+impl DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
+    for DesktopGraphicsNullOpenGlBackendFramebufferAttachmentSink
+{
+    fn consume_opengl_framebuffer_attachment(
+        &mut self,
+        _plan: DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    ) {
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendFramebufferAttachmentSink {
+    pub plans: Vec<DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan>,
+}
+
+impl DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
+    for DesktopGraphicsRecordingOpenGlBackendFramebufferAttachmentSink
+{
+    fn consume_opengl_framebuffer_attachment(
+        &mut self,
+        plan: DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    ) {
+        self.plans.push(plan);
+    }
 }
 
 pub trait DesktopGraphicsOpenGlBackendTextureUploadSink {
@@ -5278,6 +5368,9 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub resolve_events: Vec<DesktopGraphicsOpenGlBackendResolveEvent>,
     pub event_log: Vec<DesktopGraphicsOpenGlBackendEvent>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
+    pub framebuffer_attachment_plans: Vec<DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan>,
+    pub resolved_framebuffer_attachments:
+        Vec<DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment>,
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub shader_commands: Vec<DesktopGraphicsOpenGlBackendShaderCommand>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
@@ -5328,6 +5421,8 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             resolve_events: Vec::new(),
             event_log: Vec::new(),
             actions: Vec::new(),
+            framebuffer_attachment_plans: Vec::new(),
+            resolved_framebuffer_attachments: Vec::new(),
             shader_program_bindings: Vec::new(),
             shader_commands: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
@@ -5435,6 +5530,22 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         state
     }
 
+    pub fn drive_framebuffer_attachment_sink<
+        S: DesktopGraphicsOpenGlBackendFramebufferAttachmentSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendFramebufferAttachmentSinkExecutionState {
+        let mut state =
+            DesktopGraphicsOpenGlBackendFramebufferAttachmentSinkExecutionState::default();
+        for plan in &self.framebuffer_attachment_plans {
+            sink.consume_opengl_framebuffer_attachment(plan.clone());
+            state.framebuffer_attachments_emitted += 1;
+            state.last_framebuffer_attachment = Some(plan.clone());
+        }
+        state
+    }
+
     pub fn drive_texture_upload_sink<S: DesktopGraphicsOpenGlBackendTextureUploadSink>(
         &self,
         sink: &mut S,
@@ -5492,6 +5603,15 @@ impl DesktopGraphicsOpenGlBackendExecutor {
         sink: &mut S,
     ) -> DesktopGraphicsOpenGlBackendSpriteMeshUploadSinkExecutionState {
         self.state.drive_sprite_mesh_upload_sink(sink)
+    }
+
+    pub fn drive_framebuffer_attachment_sink<
+        S: DesktopGraphicsOpenGlBackendFramebufferAttachmentSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendFramebufferAttachmentSinkExecutionState {
+        self.state.drive_framebuffer_attachment_sink(sink)
     }
 
     pub fn drive_texture_upload_sink<S: DesktopGraphicsOpenGlBackendTextureUploadSink>(
@@ -5613,6 +5733,22 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             &self.sprite_mesh_batches,
             &self.sprite_mesh_resource_plans,
         );
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
+    for DesktopGraphicsOpenGlBackendExecutor
+{
+    fn consume_opengl_framebuffer_attachment(
+        &mut self,
+        plan: DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    ) {
+        let resolved = self
+            .state
+            .shader_texture_handle_cache
+            .resolve_framebuffer_attachment(&plan, &mut self.state.shader_texture_handle_allocator);
+        self.state.framebuffer_attachment_plans.push(plan);
+        self.state.resolved_framebuffer_attachments.push(resolved);
     }
 }
 
@@ -6764,6 +6900,21 @@ impl DesktopSurfaceSize {
     pub const fn new(width: u32, height: u32) -> Self {
         Self { width, height }
     }
+
+    pub fn from_render_viewport(viewport: RenderViewport) -> Self {
+        Self {
+            width: desktop_surface_dimension_from_viewport(viewport.width),
+            height: desktop_surface_dimension_from_viewport(viewport.height),
+        }
+    }
+}
+
+fn desktop_surface_dimension_from_viewport(value: f32) -> u32 {
+    if !value.is_finite() || value <= 0.0 {
+        0
+    } else {
+        value.ceil().min(u32::MAX as f32) as u32
+    }
 }
 
 impl Default for DesktopSurfaceSize {
@@ -6845,6 +6996,7 @@ pub enum DesktopFrameLoopEvent {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopFrameLoopState {
     pub surface: DesktopSurfaceConfig,
+    pub effect_buffer_generation: u64,
     pub pacing: DesktopFramePacing,
     pub next_frame_index: u64,
     pub closed: bool,
@@ -6855,6 +7007,7 @@ impl DesktopFrameLoopState {
     pub fn new(surface: DesktopSurfaceConfig, pacing: DesktopFramePacing) -> Self {
         Self {
             surface,
+            effect_buffer_generation: 0,
             pacing,
             next_frame_index: 0,
             closed: false,
@@ -6921,6 +7074,14 @@ pub struct DesktopFrameLoopRunSummary {
 
 pub trait DesktopGraphicsRenderer {
     fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats;
+
+    fn render_graphics_frame_for_surface(
+        &mut self,
+        frame: &DesktopGraphicsFrame,
+        _effect_buffer_surface: DesktopGraphicsEffectBufferSurface,
+    ) -> GraphicsFrameStats {
+        self.render_graphics_frame(frame)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -6937,11 +7098,34 @@ pub struct HeadlessDesktopGraphicsRenderer {
 
 impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
     fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats {
+        self.render_graphics_frame_with_effect_buffer_surface(frame, None)
+    }
+
+    fn render_graphics_frame_for_surface(
+        &mut self,
+        frame: &DesktopGraphicsFrame,
+        effect_buffer_surface: DesktopGraphicsEffectBufferSurface,
+    ) -> GraphicsFrameStats {
+        self.render_graphics_frame_with_effect_buffer_surface(frame, Some(effect_buffer_surface))
+    }
+}
+
+impl HeadlessDesktopGraphicsRenderer {
+    fn render_graphics_frame_with_effect_buffer_surface(
+        &mut self,
+        frame: &DesktopGraphicsFrame,
+        effect_buffer_surface: Option<DesktopGraphicsEffectBufferSurface>,
+    ) -> GraphicsFrameStats {
         let stats = frame.stats().clone();
         let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
-        let opengl_backend_plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(frame);
+        let opengl_backend_plan =
+            DesktopGraphicsOpenGlBackendFramePlan::from_frame_with_effect_buffer_surface(
+                frame,
+                effect_buffer_surface,
+            );
         let execution = DesktopGraphicsExecutionSummary::from_trace(frame, &trace);
         let mut opengl_backend_step_sink = DesktopGraphicsOpenGlBackendExecutor::default();
+        opengl_backend_plan.drive_framebuffer_attachment_sink(&mut opengl_backend_step_sink);
         let opengl_backend_execution_state =
             opengl_backend_plan.drive_step_sink(&mut opengl_backend_step_sink);
         opengl_backend_step_sink
@@ -8727,6 +8911,33 @@ impl DesktopLauncher {
         renderer.render_graphics_frame(&frame)
     }
 
+    pub fn render_graphics_frame_for_surface_with<R>(
+        &mut self,
+        frame_index: u64,
+        camera: RenderCamera,
+        viewport: RenderViewport,
+        minimap_camera: MinimapCamera,
+        minimap_input: MinimapOverlayInput,
+        surface_size: DesktopSurfaceSize,
+        effect_buffer_generation: u64,
+        renderer: &mut R,
+    ) -> GraphicsFrameStats
+    where
+        R: DesktopGraphicsRenderer,
+    {
+        let frame = self.graphics_frame_for_render(
+            frame_index,
+            camera,
+            viewport,
+            minimap_camera,
+            minimap_input,
+        );
+        renderer.render_graphics_frame_for_surface(
+            &frame,
+            DesktopGraphicsEffectBufferSurface::new(surface_size, effect_buffer_generation),
+        )
+    }
+
     pub fn render_default_graphics_frame_with<R>(
         &mut self,
         frame_index: u64,
@@ -8745,6 +8956,32 @@ impl DesktopLauncher {
             viewport,
             minimap_camera,
             minimap_input,
+            renderer,
+        )
+    }
+
+    pub fn render_default_graphics_frame_for_surface_with<R>(
+        &mut self,
+        frame_index: u64,
+        surface_size: DesktopSurfaceSize,
+        effect_buffer_generation: u64,
+        renderer: &mut R,
+    ) -> GraphicsFrameStats
+    where
+        R: DesktopGraphicsRenderer,
+    {
+        let viewport = self.default_render_viewport();
+        let camera = self.default_render_camera();
+        let minimap_camera = self.default_minimap_camera();
+        let minimap_input = self.default_minimap_overlay_input();
+        self.render_graphics_frame_for_surface_with(
+            frame_index,
+            camera,
+            viewport,
+            minimap_camera,
+            minimap_input,
+            surface_size,
+            effect_buffer_generation,
             renderer,
         )
     }
@@ -8782,6 +9019,10 @@ impl DesktopLauncher {
             match event {
                 DesktopFrameLoopEvent::Tick => {}
                 DesktopFrameLoopEvent::Resize(size) => {
+                    if loop_state.surface.size != *size {
+                        loop_state.effect_buffer_generation =
+                            loop_state.effect_buffer_generation.wrapping_add(1);
+                    }
                     loop_state.surface.size = *size;
                     resized_to = Some(*size);
                 }
@@ -8809,8 +9050,12 @@ impl DesktopLauncher {
         }
 
         self.update();
-        let graphics_stats =
-            self.render_default_graphics_frame_with(frame_index, graphics_renderer);
+        let graphics_stats = self.render_default_graphics_frame_for_surface_with(
+            frame_index,
+            loop_state.surface.size,
+            loop_state.effect_buffer_generation,
+            graphics_renderer,
+        );
         let effect_stats = self.render_standard_effect_frame_with(effect_renderer);
         loop_state.next_frame_index = loop_state.next_frame_index.wrapping_add(1);
 
@@ -10656,8 +10901,36 @@ mod tests {
         assert_eq!(result.surface.size, resized);
         assert_eq!(result.input_events, vec![input]);
         assert_eq!(frame_loop.surface.size, resized);
+        assert_eq!(frame_loop.effect_buffer_generation, 1);
         assert_eq!(frame_loop.input_events_seen, 1);
         assert_eq!(frame_loop.next_frame_index, 1);
+        assert_eq!(
+            graphics_renderer
+                .last_opengl_backend_plan
+                .framebuffer_attachment_plans
+                .len(),
+            1
+        );
+        let attachment = &graphics_renderer
+            .last_opengl_backend_plan
+            .framebuffer_attachment_plans[0];
+        assert_eq!(attachment.width, 800);
+        assert_eq!(attachment.height, 600);
+        assert_eq!(attachment.generation, 1);
+        assert_eq!(
+            graphics_renderer
+                .last_opengl_backend_executor_state
+                .resolved_framebuffer_attachments[0]
+                .color_texture_key,
+            "framebuffer-attachment:renderer.effectBuffer:color0"
+        );
+        assert_eq!(
+            graphics_renderer
+                .last_opengl_backend_executor_state
+                .resolved_framebuffer_attachments[0]
+                .width,
+            800
+        );
     }
 
     #[test]

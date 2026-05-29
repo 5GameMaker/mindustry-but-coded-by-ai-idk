@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **32.3%**。
+- 当前总体迁移完成度：约 **32.4%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11630,3 +11630,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 effectBuffer size 从 `DesktopSurfaceSize` / render frame 自动注入；
   2. 把 `ShaderBlit` / `DrawFboSample` resolve 接到 attachment texture；
   3. 再考虑 feature-gated real OpenGL context/window。
+
+---
+
+## 371. 最新闭环记录：EffectBuffer surface size 自动注入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **32.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsEffectBufferSurface { size, generation }`；
+    - `DesktopFrameLoopState` 新增 `effect_buffer_generation`，窗口 resize 且尺寸真实变化时递增；
+    - `DesktopGraphicsOpenGlBackendFramePlan` 新增 `framebuffer_attachment_plans`；
+    - 新增 framebuffer attachment sink/recording sink/execution state；
+    - `HeadlessDesktopGraphicsRenderer` 在 surface-aware render 路径中先驱动 effectBuffer attachment plan，再执行 OpenGL backend step；
+    - `step_desktop_frame_loop(...)` 将 `DesktopSurfaceConfig.size` 和 `effect_buffer_generation` 注入 graphics renderer；
+    - 测试 `desktop_frame_loop_applies_resize_and_input_tick_events` 已扩展断言 resize 后 attachment plan/resolved attachment 使用 `800x600/generation=1`。
+- 关键语义：
+  - Java `renderer.effectBuffer.resize(graphics.getWidth(), graphics.getHeight())` 的尺寸来源开始从 desktop surface 进入 Rust OpenGL backend；
+  - 生成号只在尺寸变化时递增，避免把 `frame_index` 当 generation 导致每帧重建；
+  - attachment plan 先于 shader/draw backend step 被驱动，后续 `TextureBinding::EffectBuffer` 可复用同一 attachment handle cache。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_applies_resize --lib`
+  - `cargo test -p mindustry-desktop effect_buffer --lib`
+- 下一步：
+  1. 把 `ShaderBlit` / `DrawFboSample` resolve 接到 attachment texture identity/handle；
+  2. 补 renderer -> executor state -> shared resolver 的端到端测试；
+  3. 再进入 feature-gated real OpenGL context/window seam。
