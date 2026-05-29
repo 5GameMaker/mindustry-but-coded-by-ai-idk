@@ -5766,6 +5766,20 @@ mod tests {
                 .count(),
             1
         );
+        let walls_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| {
+                pass.kind == RenderPassKind::BlockWalls
+                    && pass.target == RenderTarget::Buffer("cache-layer:walls:floor".into())
+            })
+            .expect("walls cache layer should render in BlockWalls stage");
+        let block_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::Block)
+            .expect("block sprite pass should be present");
+        assert!(walls_index < block_index);
         assert_eq!(
             render_frame
                 .passes
@@ -5863,12 +5877,19 @@ mod tests {
             .iter()
             .position(|pass| pass.kind == RenderPassKind::Block)
             .expect("block sprite pass should be present");
+        let walls_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::BlockWalls)
+            .expect("walls cache layer pass should be present");
         let darkness_index = render_frame
             .passes
             .iter()
             .position(|pass| pass.kind == RenderPassKind::Darkness)
             .expect("darkness resolve pass should be indexed");
         assert!(shadow_index < block_index);
+        assert!(shadow_index < walls_index);
+        assert!(walls_index < block_index);
         assert!(block_index < darkness_index);
         assert_eq!(
             darkness.target,

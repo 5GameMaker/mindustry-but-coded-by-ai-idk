@@ -12490,3 +12490,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `BlockWalls` / `BlockOverdraw` 尚未成为独立 `RenderPassKind`；
   - 真实 OpenGL/glow backend 尚未消费排序后的 pass；
   - 当前总体迁移约 25.2%，仍未达到完整可玩。
+
+### 12.396 CacheLayer.walls 接入 BlockWalls render stage
+
+- 2026-05-29：继续对齐 Java `Renderer.draw()` 中 `Draw.draw(Layer.block - 0.09f, () -> blocks.floor.drawLayer(CacheLayer.walls))`。本轮新增 `RenderPassKind::BlockWalls`，并让 `CacheLayer::Walls` 生成 `BlockWalls` pass，而不是继续复用 `Floor` pass。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind` 新增 `BlockWalls`；
+    - `BlockWalls.label() = "block_walls"`，`default_order() = 30`，`java_renderer_draw_stage() = RendererDrawStage::BlockWalls`；
+    - `block_pass_sorts_after_shadows_and_before_lighting_like_java_renderer` 扩展为 `Floor -> BlockShadows -> BlockWalls -> Block -> Lighting`。
+  - `core/src/mindustry/graphics/cache_layer.rs`
+    - `CacheLayerEntry::render_pass_kind()` 对 `CacheLayer::Walls` 返回 `RenderPassKind::BlockWalls`，其余 builtin cache layer 仍返回 `RenderPassKind::Floor`；
+    - `cache_layer_pass_metadata_maps_to_render_pass_resolve_kind` 确认 walls target 仍是 `cache-layer:walls:floor`，但 kind 已是 `BlockWalls`。
+  - `core/src/mindustry/graphics/floor_renderer.rs`
+    - cache layer pass 列表仍按 Java builtin 顺序产出 9 个 pass；
+    - 测试确认前 8 个是 `Floor`，最后 walls 是 `BlockWalls`。
+  - `desktop/src/lib.rs`
+    - world graphics frame 测试确认 `cache-layer:walls:floor` 以 `BlockWalls` pass 出现，并排在 `Block` pass 前。
+- Java 对照要点：
+  - `CacheLayer.walls` 在 Java 中不是 floor stage，而是 `Layer.block - 0.09f`；
+  - 当前仍是 pass/target seam，真实 walls cache tile 绘制命令与 GPU FBO 仍待后续接入。
+- 已跑验证：
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-core cache_layer --lib`
+  - `cargo test -p mindustry-core floor_renderer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `BlockOverdraw` 仍未成为独立 `RenderPassKind`；
+  - `BlockWalls` pass 暂时只有 cache layer target/resolve seam，未填真实 wall tile draw commands；
+  - 真实 OpenGL/glow backend 尚未消费这些 pass；
+  - 当前总体迁移约 25.3%，仍未达到完整可玩。

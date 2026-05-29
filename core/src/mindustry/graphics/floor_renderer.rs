@@ -917,7 +917,7 @@ mod tests {
                     None,
                 ),
                 (
-                    RenderPassKind::Floor,
+                    RenderPassKind::BlockWalls,
                     RenderTarget::Buffer("cache-layer:walls:floor".into()),
                     None,
                     None,
@@ -942,42 +942,54 @@ mod tests {
             frame
                 .passes
                 .iter()
-                .map(|pass| (pass.target.clone(), pass.resolve_kind))
+                .map(|pass| (pass.kind.clone(), pass.target.clone(), pass.resolve_kind))
                 .collect::<Vec<_>>(),
             vec![
                 (
+                    RenderPassKind::Floor,
                     RenderTarget::Buffer("cache-layer:water:effect".into()),
                     Some(RenderResolveKind::ShaderBlit),
                 ),
                 (
+                    RenderPassKind::Floor,
                     RenderTarget::Buffer("cache-layer:mud:effect".into()),
                     Some(RenderResolveKind::ShaderBlit),
                 ),
                 (
+                    RenderPassKind::Floor,
                     RenderTarget::Buffer("cache-layer:tar:effect".into()),
                     Some(RenderResolveKind::ShaderBlit),
                 ),
                 (
+                    RenderPassKind::Floor,
                     RenderTarget::Buffer("cache-layer:slag:effect".into()),
                     Some(RenderResolveKind::ShaderBlit),
                 ),
                 (
+                    RenderPassKind::Floor,
                     RenderTarget::Buffer("cache-layer:arkycite:effect".into()),
                     Some(RenderResolveKind::ShaderBlit),
                 ),
                 (
+                    RenderPassKind::Floor,
                     RenderTarget::Buffer("cache-layer:cryofluid:effect".into()),
                     Some(RenderResolveKind::ShaderBlit),
                 ),
                 (
+                    RenderPassKind::Floor,
                     RenderTarget::Buffer("cache-layer:space:effect".into()),
                     Some(RenderResolveKind::ShaderBlit),
                 ),
                 (
+                    RenderPassKind::Floor,
                     RenderTarget::Buffer("cache-layer:normal:floor".into()),
                     None,
                 ),
-                (RenderTarget::Buffer("cache-layer:walls:floor".into()), None,),
+                (
+                    RenderPassKind::BlockWalls,
+                    RenderTarget::Buffer("cache-layer:walls:floor".into()),
+                    None,
+                ),
             ]
         );
     }

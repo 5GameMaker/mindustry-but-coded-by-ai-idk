@@ -571,6 +571,7 @@ pub enum RenderPassKind {
     Background,
     Floor,
     BlockShadows,
+    BlockWalls,
     Block,
     Overlay,
     Minimap,
@@ -586,6 +587,7 @@ impl RenderPassKind {
             Self::Background => "background",
             Self::Floor => "floor",
             Self::BlockShadows => "block_shadows",
+            Self::BlockWalls => "block_walls",
             Self::Block => "block",
             Self::Overlay => "overlay",
             Self::Minimap => "minimap",
@@ -601,6 +603,7 @@ impl RenderPassKind {
             Self::Background => 0,
             Self::Floor => 10,
             Self::BlockShadows => 20,
+            Self::BlockWalls => 30,
             Self::Block => 20,
             Self::Overlay => 30,
             Self::Minimap => 40,
@@ -616,6 +619,7 @@ impl RenderPassKind {
             Self::Background => RendererDrawStage::Background,
             Self::Floor => RendererDrawStage::Floor,
             Self::BlockShadows => RendererDrawStage::BlockShadows,
+            Self::BlockWalls => RendererDrawStage::BlockWalls,
             Self::Block => RendererDrawStage::BlockBuild,
             Self::Overlay => RendererDrawStage::Overlay,
             Self::Minimap => RendererDrawStage::Debug,
@@ -1130,6 +1134,7 @@ mod tests {
 
         plan.push_pass(RenderPass::new(RenderPassKind::Lighting).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::Block).with_order(0));
+        plan.push_pass(RenderPass::new(RenderPassKind::BlockWalls).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::BlockShadows).with_order(99));
         plan.push_pass(RenderPass::new(RenderPassKind::Floor).with_order(100));
         plan.sort_passes_like_java_renderer_draw();
@@ -1142,6 +1147,7 @@ mod tests {
             vec![
                 RenderPassKind::Floor,
                 RenderPassKind::BlockShadows,
+                RenderPassKind::BlockWalls,
                 RenderPassKind::Block,
                 RenderPassKind::Lighting,
             ]
@@ -1194,6 +1200,12 @@ mod tests {
                 "block_shadows",
                 20,
                 RendererDrawStage::BlockShadows,
+            ),
+            (
+                RenderPassKind::BlockWalls,
+                "block_walls",
+                30,
+                RendererDrawStage::BlockWalls,
             ),
             (
                 RenderPassKind::Block,

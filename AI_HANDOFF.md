@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **25.2%**。
+- 当前总体迁移完成度：约 **25.3%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9886,3 +9886,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步：
   1. 继续新增/拆分 `BlockWalls`、`BlockOverdraw` 等 `RenderPassKind`，逐步把 Java `Renderer.draw()` 的 block 相关 stage 从单一 `Block` 中拆出；
   2. 继续准备真实 OpenGL/glow backend 消费排序后的 pass，而不是依赖 trace 顺序。
+
+---
+
+## 302. 最新闭环记录：CacheLayer.walls 接入 BlockWalls stage
+
+- 本轮总体进度更新：约 **25.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderPassKind::BlockWalls`；
+    - `BlockWalls` 映射到 `RendererDrawStage::BlockWalls`，label 为 `block_walls`；
+    - 排序测试扩展为 `Floor -> BlockShadows -> BlockWalls -> Block -> Lighting`。
+  - `core/src/mindustry/graphics/cache_layer.rs`
+    - `CacheLayerEntry::render_pass_kind()` 让 `CacheLayer::Walls` 生成 `RenderPassKind::BlockWalls`；
+    - 其余 cache layer 继续走 `RenderPassKind::Floor`。
+  - `core/src/mindustry/graphics/floor_renderer.rs`
+    - floor renderer cache layer pass 测试确认最后的 walls pass kind 是 `BlockWalls`。
+  - `desktop/src/lib.rs`
+    - graphics frame 测试确认 `cache-layer:walls:floor` 位于 `BlockWalls` stage，且排在 block sprite pass 之前。
+- 已验证：
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-core cache_layer --lib`
+  - `cargo test -p mindustry-core floor_renderer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 继续拆 `BlockOverdraw` 或更细 `BlockBuild` pass；
+  2. 给 `BlockWalls` pass 填入真实 walls cache tile commands，并最终由 OpenGL/glow backend 消费。

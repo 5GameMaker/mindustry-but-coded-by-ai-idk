@@ -174,8 +174,16 @@ impl CacheLayerEntry {
         Self::new(id, name, layer, liquid, CacheLayerPassMetadata::direct())
     }
 
+    pub fn render_pass_kind(self) -> RenderPassKind {
+        match self.layer {
+            CacheLayer::Walls => RenderPassKind::BlockWalls,
+            _ => RenderPassKind::Floor,
+        }
+    }
+
     pub fn to_render_pass(self) -> RenderPass {
-        self.pass.to_render_pass(self.name)
+        self.pass
+            .apply_to_render_pass(self.name, RenderPass::new(self.render_pass_kind()))
     }
 }
 
@@ -429,7 +437,7 @@ mod tests {
         assert_eq!(space.resolve_kind, Some(RenderResolveKind::ShaderBlit));
 
         let walls = CacheLayer::Walls.entry().unwrap().to_render_pass();
-        assert_eq!(walls.kind, RenderPassKind::Floor);
+        assert_eq!(walls.kind, RenderPassKind::BlockWalls);
         assert_eq!(
             walls.target,
             RenderTarget::Buffer("cache-layer:walls:floor".into())
