@@ -244,6 +244,7 @@ pub enum MinimapOverlayCommand {
         player_id: u64,
         x: f32,
         y: f32,
+        name: String,
         text: Option<String>,
         color: u32,
     },
@@ -602,6 +603,7 @@ impl MinimapRendererState {
                         player_id: player.player_id,
                         x: player.ping_x,
                         y: player.ping_y,
+                        name: player.name.clone(),
                         text: player.ping_text.clone(),
                         color: player.color,
                     });
@@ -1111,10 +1113,15 @@ mod tests {
             .commands
             .iter()
             .any(|cmd| matches!(cmd, MinimapOverlayCommand::PlayerLabel { player_id: 1, .. })));
-        assert!(plan
-            .commands
-            .iter()
-            .any(|cmd| matches!(cmd, MinimapOverlayCommand::Ping { player_id: 1, .. })));
+        assert!(plan.commands.iter().any(|cmd| matches!(
+            cmd,
+            MinimapOverlayCommand::Ping {
+                player_id: 1,
+                name,
+                text: Some(text),
+                ..
+            } if name == "player" && text == "go"
+        )));
         assert!(plan.commands.iter().any(|cmd| matches!(
             cmd,
             MinimapOverlayCommand::FogTexture {

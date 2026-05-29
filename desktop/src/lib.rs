@@ -177,6 +177,14 @@ fn minimap_overlay_lerp_color(from: u32, to: u32, progress: f32) -> [f32; 4] {
     ]
 }
 
+fn minimap_overlay_dark_color(rgba: u32) -> [f32; 4] {
+    let mut color = rgba8888_to_render_color(rgba, 1.0);
+    color[0] *= 0.25;
+    color[1] *= 0.25;
+    color[2] *= 0.25;
+    color
+}
+
 fn minimap_overlay_world_rect_to_screen(
     plan: &MinimapOverlayPlan,
     screen_rect: RenderRect,
@@ -261,24 +269,76 @@ fn minimap_overlay_render_pass(
                 ));
             }
             MinimapOverlayCommand::Ping {
-                x, y, text, color, ..
+                x,
+                y,
+                name,
+                text,
+                color,
+                ..
             } => {
                 let Some(position) = minimap_overlay_world_to_screen(plan, screen_rect, *x, *y)
                 else {
                     continue;
                 };
-                pass.push(RenderCommand::draw_circle(
+                let dark_color = minimap_overlay_dark_color(*color);
+                let ping_color = rgba8888_to_render_color(*color, 1.0);
+                pass.push(RenderCommand::draw_polygon(
                     position,
-                    6.0,
-                    rgba8888_to_render_color(*color, 1.0),
+                    12.0,
+                    4,
+                    0.0,
+                    dark_color,
                     false,
+                    Layer::END - 0.03,
+                ));
+                pass.push(RenderCommand::draw_polygon(
+                    RenderPoint::new(position.x, position.y + 30.0),
+                    16.0,
+                    3,
+                    -90.0,
+                    dark_color,
+                    true,
+                    Layer::END - 0.02,
+                ));
+                pass.push(RenderCommand::draw_polygon(
+                    position,
+                    12.0,
+                    4,
+                    0.0,
+                    ping_color,
+                    false,
+                    Layer::END - 0.01,
+                ));
+                pass.push(RenderCommand::draw_polygon(
+                    RenderPoint::new(position.x, position.y + 30.0),
+                    10.0,
+                    3,
+                    -90.0,
+                    ping_color,
+                    true,
+                    Layer::END,
+                ));
+                let (name_y, name_size) = if text.is_some() {
+                    (65.0, 7.0)
+                } else {
+                    (50.0, 10.0)
+                };
+                pass.push(RenderCommand::draw_text_styled(
+                    name.clone(),
+                    RenderPoint::new(position.x, position.y + name_y),
+                    ping_color,
+                    name_size,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_outline(true),
                     Layer::END,
                 ));
                 if let Some(text) = text {
                     pass.push(RenderCommand::draw_text_styled(
                         text.clone(),
-                        RenderPoint::new(position.x, position.y + 10.0),
-                        rgba8888_to_render_color(*color, 1.0),
+                        RenderPoint::new(position.x, position.y + 50.0),
+                        [1.0, 1.0, 1.0, 1.0],
                         10.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
@@ -15048,6 +15108,50 @@ mod tests {
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::DrawText { text, .. } if text == "A")));
+        assert!(minimap_pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawPolygon {
+                    center,
+                    radius,
+                    sides: 4,
+                    filled: false,
+                    ..
+                } if *center == RenderPoint::new(80.0, 88.0)
+                    && (*radius - 12.0).abs() < f32::EPSILON
+            )
+        }));
+        assert!(minimap_pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawPolygon {
+                    center,
+                    radius,
+                    sides: 3,
+                    rotation,
+                    filled: true,
+                    ..
+                } if *center == RenderPoint::new(80.0, 118.0)
+                    && (*radius - 10.0).abs() < f32::EPSILON
+                    && (*rotation + 90.0).abs() < f32::EPSILON
+            )
+        }));
+        let expected_ping_color = super::rgba8888_to_render_color(0xffffffff, 1.0);
+        assert!(minimap_pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText {
+                    text,
+                    position,
+                    size,
+                    color,
+                    ..
+                } if text == "pilot"
+                    && *position == RenderPoint::new(80.0, 153.0)
+                    && (*size - 7.0).abs() < f32::EPSILON
+                    && *color == expected_ping_color
+            )
+        }));
         let expected_indicator_color =
             super::minimap_overlay_lerp_color(0xffa500ff, 0xff2400ff, 0.5);
         assert!(minimap_pass.commands.iter().any(|command| {
@@ -15074,7 +15178,7 @@ mod tests {
             renderer
                 .last_opengl_backend_executor_state
                 .draw_text_commands
-                >= 3
+                >= 4
         );
     }
 

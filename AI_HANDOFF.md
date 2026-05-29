@@ -12588,3 +12588,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. minimap ping：补 Java diamond + triangle 指示器和 pingText/name 双层布局；
   2. minimap spawn：补 `Icon.units`、drop zone circle、pulse circle；
   3. 然后回到 entity/world draw 主线，优先 Unit/Bullet/Weather/Fire/Puddle 的 plan→pass 接入。
+
+### 2026-05-30：minimap ping 几何与双层标签语义
+
+- 当前整体完成度：约 **40.2%**。
+- 已完成：
+  - `MinimapOverlayCommand::Ping` 新增 `name` 字段，core overlay plan 保留玩家名和 `ping_text`；
+  - `minimap_overlay_render_pass(...)` 将 ping 从单个圆升级为 Java 风格的四边形指示器 + 三角指示器；
+  - ping 现在有暗色底层与队伍色前景层；
+  - `ping_text` 存在时输出玩家名小号标签和 ping 文本标签，对齐 Java `+65f` / `+50f` 的双层布局；
+  - 回归测试覆盖 ping diamond、triangle、玩家名标签位置/字号，以及 headless/OpenGL 文本统计。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core overlay_plan_emits_full_view_entities_fog_spawns_camera_and_markers`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass --features opengl-native-runtime`
+- 下一步：
+  1. minimap spawn：补 `Icon.units` sprite、drop zone circle、pulse circle；
+  2. minimap fog：从 `FillRect` 过渡到动态/静态 fog texture/shader 语义；
+  3. entity/world draw：按 explorer 建议，Fire 是下一条低风险实体渲染闭环候选。

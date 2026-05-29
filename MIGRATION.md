@@ -15288,3 +15288,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - minimap ping 的 diamond/triangle 几何、spawn icon/pulse、fog shader/texture、`MapObjectives` 多态 marker 仍需继续迁移；
   - entity/world draw、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.1%，仍未达到完整可玩。
+
+## 414. 最新闭环记录：minimap ping 几何与双层标签语义
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/minimap_renderer.rs`
+    - `MinimapOverlayCommand::Ping` 新增 `name` 字段；
+    - `overlay_plan(...)` 在 ping 命令里保留玩家名与 `ping_text`，为 Java `player.name + player.pingText` 双层标签语义提供数据。
+  - `desktop/src/lib.rs`
+    - ping 不再用单个 `DrawCircle` 近似；
+    - 现在输出 Java minimap ping 的四边形指示器、三角指示器、暗色底层和队伍色前景层；
+    - `ping_text != None` 时输出玩家名小号标签和 ping 文本标签，位置对齐 Java 的 `+65f` / `+50f` 布局；
+    - minimap render pass 回归测试覆盖 diamond、triangle、ping 玩家名标签和 OpenGL/headless 文本统计。
+- 迁移意义：
+  - ping 覆盖层继续在 `RenderPassKind::Minimap` 主链路内细化，不新建孤立 renderer；
+  - Java `MinimapRenderer.drawEntities()` 中 ping 几何和双层文字开始有可执行命令表达。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core overlay_plan_emits_full_view_entities_fog_spawns_camera_and_markers`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass --features opengl-native-runtime`
+- 仍未完成：
+  - ping stroke 宽度仍受当前 `DrawPolygon` command 能力限制，后续可补 stroke thickness；
+  - minimap spawn icon/pulse、fog shader/texture、`MapObjectives` 多态 marker 仍需继续迁移；
+  - entity/world draw、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.2%，仍未达到完整可玩。
