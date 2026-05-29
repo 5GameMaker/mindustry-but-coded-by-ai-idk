@@ -13439,6 +13439,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop opengl_backend --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop`
 - 仍未完成：
-  - Arc SpriteBatch 的 packed color / packed mixColor、顶点/UV 顺序和 index 顺序仍待进一步对齐；
+  - Arc SpriteBatch 的 packed color / packed mixColor 仍待进一步对齐，顶点/UV 顺序和 index 顺序已在下一节继续补齐；
   - 真实 GPU texture handle、VBO/IBO/VAO、shader program binding 与 draw call 仍待落地；
   - 当前总体迁移约 28.7%，仍未达到完整可玩。
+
+## 12.431 Arc SpriteBatch 顶点/UV/索引顺序
+
+- 2026-05-29：继续对齐 Java/Arc `SpriteBatch.constructVertices(...)` 的 quad 写入顺序与标准 index 顺序。此前 Rust quad 使用 `BL -> BR -> TR -> TL` 与 `0,1,2,0,2,3`，和 Arc 的 `BL -> TL -> TR -> BR`、`0,1,2,2,3,0` 不一致，会影响后续真实 VBO/IBO 与 shader attribute 绑定。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `opengl_backend_sprite_quad_positions(...)` 的基础顶点顺序改为 `bottom-left / top-left / top-right / bottom-right`；
+    - `DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(...)` 的 UV 顺序改为 `(u,v2) / (u,v) / (u2,v) / (u2,v2)`；
+    - `DesktopGraphicsOpenGlBackendSpriteMeshBatch::push_quad(...)` 的 triangle indices 改为 `0,1,2,2,3,0`；
+    - 回归测试同步验证 Arc 顺序、中心/非中心 pivot 旋转结果、UV 顺序与 index 顺序。
+- 迁移意义：
+  - sprite quad 进入 mesh batch 前的 CPU 顶点排列更接近 Arc `SpriteBatch`；
+  - 为后续把 `DesktopGraphicsOpenGlBackendSpriteVertex` 压成 Arc 风格 `position + packed color + texCoord + packed mixColor` 布局做准备；
+  - 避免真实 OpenGL 后端落地后再大幅重排 buffer 写入逻辑。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - CPU 结构仍使用展开 RGBA 数组，尚未改成 Arc 的 packed color / packed mixColor float 语义；
+  - 真实 GPU texture handle、VBO/IBO/VAO、shader program binding 与 draw call 仍待落地；
+  - 当前总体迁移约 28.8%，仍未达到完整可玩。

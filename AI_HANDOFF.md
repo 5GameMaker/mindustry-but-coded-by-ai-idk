@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **28.7%**。
+- 当前总体迁移完成度：约 **28.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10712,3 +10712,21 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 对齐 Arc SpriteBatch 的顶点/UV 顺序与 triangle index 顺序；
   2. 推进 packed color / packed mixColor 与 shader attribute layout；
   3. 再把 texture binding 映射到真实 GL texture handle/resource table。
+
+---
+
+## 337. 最新闭环记录：Arc SpriteBatch 顶点/UV/索引顺序
+
+- 本轮总体进度更新：约 **28.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `opengl_backend_sprite_quad_positions(...)` 的顶点顺序对齐 Arc：`BL -> TL -> TR -> BR`；
+    - `DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(...)` 的 UV 顺序改为 `(u,v2) / (u,v) / (u2,v) / (u2,v2)`；
+    - `DesktopGraphicsOpenGlBackendSpriteMeshBatch::push_quad(...)` 的 index 顺序改为 `0,1,2,2,3,0`；
+    - 更新 OpenGL backend 回归测试，覆盖中心/非中心 pivot、UV 顺序和 indices。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 继续推进 Arc packed color / packed mixColor 顶点布局；
+  2. 增加 texture handle/resource identity，避免把 page path 当成真实 GL 纹理身份；
+  3. 后续落地 VBO/IBO/VAO 与 shader program binding。

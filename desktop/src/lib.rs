@@ -536,25 +536,25 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
             vertices: [
                 DesktopGraphicsOpenGlBackendSpriteVertex {
                     position: positions[0],
-                    uv: [u, v],
+                    uv: [u, v2],
                     color: tint,
                     mix_color,
                 },
                 DesktopGraphicsOpenGlBackendSpriteVertex {
                     position: positions[1],
-                    uv: [u2, v],
+                    uv: [u, v],
                     color: tint,
                     mix_color,
                 },
                 DesktopGraphicsOpenGlBackendSpriteVertex {
                     position: positions[2],
-                    uv: [u2, v2],
+                    uv: [u2, v],
                     color: tint,
                     mix_color,
                 },
                 DesktopGraphicsOpenGlBackendSpriteVertex {
                     position: positions[3],
-                    uv: [u, v2],
+                    uv: [u2, v2],
                     color: tint,
                     mix_color,
                 },
@@ -625,7 +625,7 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshBatch {
         let base = self.vertices.len() as u32;
         self.vertices.extend_from_slice(&quad.vertices);
         self.indices
-            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            .extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 3, base]);
         self.quad_count += 1;
         self.min_layer = self.min_layer.min(quad.layer);
         self.max_layer = self.max_layer.max(quad.layer);
@@ -673,9 +673,9 @@ fn opengl_backend_sprite_quad_positions(
 ) -> [RenderPoint; 4] {
     let positions = [
         RenderPoint::new(rect.x, rect.y),
-        RenderPoint::new(rect.right(), rect.y),
-        RenderPoint::new(rect.right(), rect.bottom()),
         RenderPoint::new(rect.x, rect.bottom()),
+        RenderPoint::new(rect.right(), rect.bottom()),
+        RenderPoint::new(rect.right(), rect.y),
     ];
     if rotation.abs() <= f32::EPSILON {
         return positions;
@@ -9451,9 +9451,9 @@ mod tests {
             &center_positions,
             &[
                 RenderPoint::new(24.0, 8.0),
-                RenderPoint::new(24.0, 24.0),
-                RenderPoint::new(8.0, 24.0),
                 RenderPoint::new(8.0, 8.0),
+                RenderPoint::new(8.0, 24.0),
+                RenderPoint::new(24.0, 24.0),
             ],
         );
 
@@ -9479,9 +9479,9 @@ mod tests {
             &lower_left_positions,
             &[
                 RenderPoint::new(8.0, 8.0),
-                RenderPoint::new(8.0, 24.0),
-                RenderPoint::new(-8.0, 24.0),
                 RenderPoint::new(-8.0, 8.0),
+                RenderPoint::new(-8.0, 24.0),
+                RenderPoint::new(8.0, 24.0),
             ],
         );
     }
@@ -9688,9 +9688,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 RenderPoint::new(8.0, 8.0),
-                RenderPoint::new(24.0, 8.0),
-                RenderPoint::new(24.0, 24.0),
                 RenderPoint::new(8.0, 24.0),
+                RenderPoint::new(24.0, 24.0),
+                RenderPoint::new(24.0, 8.0),
             ]
         );
         assert_eq!(
@@ -9700,10 +9700,10 @@ mod tests {
                 .map(|vertex| vertex.uv)
                 .collect::<Vec<_>>(),
             vec![
+                [0.0, 1.0 / 4096.0],
                 [0.0, 0.0],
                 [1.0 / 4096.0, 0.0],
                 [1.0 / 4096.0, 1.0 / 4096.0],
-                [0.0, 1.0 / 4096.0],
             ]
         );
         assert!(executor.state.sprite_quads[0]
@@ -9722,7 +9722,7 @@ mod tests {
         assert_eq!(mesh_batch.page_source_path, "sprites.png");
         assert_eq!(mesh_batch.quad_count, 1);
         assert_eq!(mesh_batch.vertices.len(), 4);
-        assert_eq!(mesh_batch.indices, vec![0, 1, 2, 0, 2, 3]);
+        assert_eq!(mesh_batch.indices, vec![0, 1, 2, 2, 3, 0]);
         assert_eq!(mesh_batch.min_layer, 8.0);
         assert_eq!(mesh_batch.max_layer, 8.0);
         assert_eq!(executor.state.sprite_mesh_buffer_plans.len(), 1);
