@@ -4437,10 +4437,13 @@ pub enum DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DesktopGraphicsOpenGlBackendDrawCommand {
     BindFramebuffer {
         target: Option<RenderTarget>,
+    },
+    Clear {
+        color: [f32; 4],
     },
     UseProgram {
         program_handle: u32,
@@ -4467,7 +4470,7 @@ pub trait DesktopGraphicsOpenGlBackendDrawCommandSink {
     fn consume_opengl_draw_command(&mut self, command: DesktopGraphicsOpenGlBackendDrawCommand);
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsRecordingOpenGlBackendDrawCommandSink {
     pub commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
 }
@@ -4721,6 +4724,18 @@ impl DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
             }],
         }
     }
+}
+
+fn opengl_backend_clear_to_draw_commands(
+    target: &RenderTarget,
+    color: [f32; 4],
+) -> Vec<DesktopGraphicsOpenGlBackendDrawCommand> {
+    vec![
+        DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+            target: Some(target.clone()),
+        },
+        DesktopGraphicsOpenGlBackendDrawCommand::Clear { color },
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -5314,7 +5329,7 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshUploadSink
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
@@ -5632,6 +5647,13 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             .cache
             .resolve_shader_command(command, &mut self.allocator);
         self.resolved_shader_commands.push(resolved);
+    }
+
+    pub fn consume_opengl_draw_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendDrawCommand,
+    ) {
+        self.draw_commands.push(command);
     }
 
     pub fn consume_opengl_sprite_draw_call(
@@ -6318,6 +6340,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub sprite_texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
+    pub draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub action_count: usize,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
@@ -6371,6 +6394,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
             sprite_texture_upload_plans: Vec::new(),
+            draw_commands: Vec::new(),
             last_action: None,
             action_count: 0,
             sprite_texture_bindings: Vec::new(),
@@ -6438,6 +6462,9 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         for command in &self.shader_commands {
             executor.consume_opengl_shader_command(command.clone());
             state.shader_commands_emitted += 1;
+        }
+        for command in &self.draw_commands {
+            executor.consume_opengl_draw_command(command.clone());
         }
         for draw_call in &self.sprite_draw_call_plans {
             executor.consume_opengl_sprite_draw_call(draw_call.clone());
@@ -6654,6 +6681,30 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         self.sprite_texture_upload_plans = self.sprite_texture_resource_table.full_upload_plans();
     }
 
+    fn ensure_framebuffer_attachment_plan_for_target(&mut self, target: &RenderTarget) {
+        let Some(attachment_plan) =
+            opengl_backend_framebuffer_attachment_plan_for_render_target(target)
+        else {
+            return;
+        };
+        if self
+            .framebuffer_attachment_plans
+            .iter()
+            .any(|plan| plan.framebuffer_key == attachment_plan.framebuffer_key)
+        {
+            return;
+        }
+        let resolved_attachment = self
+            .shader_texture_handle_cache
+            .resolve_framebuffer_attachment(
+                &attachment_plan,
+                &mut self.shader_texture_handle_allocator,
+            );
+        self.framebuffer_attachment_plans.push(attachment_plan);
+        self.resolved_framebuffer_attachments
+            .push(resolved_attachment);
+    }
+
     fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
         self.sprite_quads.push(quad);
         self.sprite_mesh_batches =
@@ -6779,14 +6830,19 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                     .event_log
                     .push(DesktopGraphicsOpenGlBackendEvent::Command {
                         source,
-                        target,
+                        target: target.clone(),
                         kind,
                         command: command.clone(),
                         resolved_sprite,
                     });
                 match command {
-                    RenderCommand::Clear { .. } => {
+                    RenderCommand::Clear { color } => {
                         self.state.clear_commands += 1;
+                        self.state
+                            .ensure_framebuffer_attachment_plan_for_target(&target);
+                        self.state
+                            .draw_commands
+                            .extend(opengl_backend_clear_to_draw_commands(&target, color));
                     }
                     RenderCommand::SetBlend { mode } => {
                         self.state.current_blend = mode;
@@ -16750,6 +16806,74 @@ mod tests {
             target,
             kind,
         }
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_clear_emits_targeted_draw_commands_and_driver_records_them() {
+        let target = RenderTarget::Buffer("offscreen-clear".into());
+        let clear_color = [0.25, 0.5, 0.75, 1.0];
+        let expected_bind = super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+            target: Some(target.clone()),
+        };
+        let expected_clear =
+            super::DesktopGraphicsOpenGlBackendDrawCommand::Clear { color: clear_color };
+
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "Clear",
+                command: RenderCommand::clear(clear_color),
+                resolved_sprite: None,
+            },
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::EndPass,
+        ));
+
+        assert_eq!(executor.state.clear_commands, 1);
+        assert_eq!(
+            executor.state.draw_commands,
+            vec![expected_bind.clone(), expected_clear.clone()]
+        );
+        assert_eq!(executor.state.framebuffer_attachment_plans.len(), 1);
+        assert_eq!(
+            executor.state.framebuffer_attachment_plans[0].framebuffer_key,
+            "framebuffer:buffer:offscreen-clear"
+        );
+
+        let mut resolving_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        executor.drive_resolving_command_executor(&mut resolving_executor);
+        assert_eq!(
+            resolving_executor.draw_commands,
+            vec![expected_bind.clone(), expected_clear.clone()]
+        );
+
+        let mut driver = super::DesktopGraphicsRecordingOpenGlBackendDriver::default();
+        let driver_state = resolving_executor.drive_driver(&mut driver);
+        assert_eq!(driver_state.framebuffer_attachment_plans, 1);
+        assert_eq!(driver_state.draw_commands, 2);
+        assert!(matches!(
+            driver.commands[0],
+            super::DesktopGraphicsOpenGlBackendDriverCommand::FramebufferAttachment(_)
+        ));
+        assert_eq!(
+            driver.commands[1],
+            super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(expected_bind)
+        );
+        assert_eq!(
+            driver.commands[2],
+            super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(expected_clear)
+        );
     }
 
     #[test]

@@ -14897,7 +14897,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 ## 398. 最新闭环记录：native OpenGL target framebuffer bind / viewport 闭环
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
-- 本轮总体进度更新：约 **36.8%**，仍未达到完整可玩。
+- 本轮总体进度更新：约 **37.0%**，仍未达到完整可玩。
 - 本轮主改动：
   - `desktop/src/lib.rs`
     - draw / resolve 计划新增 `BindFramebuffer`；
@@ -14908,12 +14908,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
     - source / resolve target 的有序切换已从“记录”推进到“驱动侧执行”；
     - 非 screen target 缺失 FBO 时不再静默当成默认 backbuffer，而是记录问题并按目标尺寸惰性创建 attachment。
 - 仍未完成：
-  - clear command native 化；
   - viewport / scissor / blend 的完整接管；
   - primitive mesh / entity / UI 的真实 draw path 仍需继续推进。
 - 已验证：
   - `cargo fmt --all --check`
   - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_clear_emits_targeted_draw_commands_and_driver_records_them --lib --features opengl-backend`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime --no-run`
+  - `git diff --check`
+
+## 399. 最新闭环记录：native OpenGL clear 命令闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **37.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `RenderCommand::Clear` 现在会下沉成 `BindFramebuffer + Clear` 的 OpenGL draw command 序列；
+    - offscreen target clear 会先确保对应 framebuffer attachment plan，避免清到默认 backbuffer；
+    - 新增 `desktop_graphics_opengl_clear_emits_targeted_draw_commands_and_driver_records_them` 测试覆盖。
+  - `desktop/src/main.rs`
+    - native driver 的 `consume_native_draw_command()` 已执行 `glClearColor + glClear(COLOR_BUFFER_BIT)`；
+    - clear 现在真正进入 native OpenGL 执行层，不再只停留在统计/记录阶段。
+- 仍未完成：
+  - viewport / scissor / blend 的完整接管；
+  - primitive mesh / entity / UI 的真实 draw path 仍需继续推进。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_clear_emits_targeted_draw_commands_and_driver_records_them --lib --features opengl-backend`
   - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
   - `cargo test -p mindustry-desktop --features opengl-native-runtime --no-run`
   - `git diff --check`

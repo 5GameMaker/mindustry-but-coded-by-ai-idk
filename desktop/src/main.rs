@@ -1320,6 +1320,15 @@ impl DesktopNativeOpenGlDriver<'_> {
             } => {
                 self.draw_target_available = self.bind_framebuffer_target(target.as_ref());
             }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::Clear { color } => {
+                if !self.draw_target_available {
+                    return;
+                }
+                unsafe {
+                    self.gl.clear_color(color[0], color[1], color[2], color[3]);
+                    self.gl.clear(glow::COLOR_BUFFER_BIT);
+                }
+            }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
                 program_handle,
             } => {
