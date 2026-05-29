@@ -12048,3 +12048,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 让 `BlockRenderer.to_shadow_resolve_pass`、`to_darkness_resolve_pass` 与 `FogRenderer` composite 生产路径自动填充 `resolve_sample`；
   2. 把 `resolve_sample.uv` 下沉到 resolve draw mesh / quad upload；
   3. 继续准备 `native-opengl-backend` 真窗口/context/present。
+
+---
+
+## 387. 最新闭环记录：BlockRenderer / FogRenderer resolve_sample 生产路径接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **34.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/fog_renderer.rs`
+    - `FogViewport::render_camera()`；
+    - `FogDrawStage::to_render_pass_with_viewport(...)`；
+    - dynamic/static fog composite 自动写入 `RenderTextureSamplePlan::fbo_uv_window(...)`。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `to_resolve_render_passes_with_camera(...)`；
+    - `to_shadow_resolve_pass_with_camera(...)`；
+    - `to_darkness_resolve_pass_with_camera(...)`；
+    - shadows/darkness resolve 在有 camera/world size 时自动带 Java UV-Y 翻转 sample。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 改用带 camera/world size 的 block resolve 入口；
+    - desktop smoke 断言 shadow/darkness resolve pass 已携带 `resolve_sample`。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core block_renderer_plan_emits_shadow_and_darkness_resolve_passes`
+  - `cargo test -p mindustry-core fog_renderer_draw_plan_respects_team_switch_and_consumes_events`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 渲染优先：把 `resolve_sample.geometry/uv/flip` 下沉到 `DesktopGraphicsOpenGlBackendResolveCommand::source_texture_sample_to_opengl_draw_commands(...)` / resolve quad mesh upload；
+  2. 继续补 `Renderer.backgroundBuffer` 生产 pass 的 `background_buffer_geometry_flip(...)`；
+  3. 准备 `native-opengl-backend` feature：`glow + glutin + glutin-winit + winit`；
+  4. 可并行推进 core runtime：liquid junction 路由闭环、liquid turret ammo 闭环，注意 helper 必须接进 `GameRuntime` 主链。

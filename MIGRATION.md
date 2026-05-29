@@ -14685,3 +14685,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - BlockRenderer/FogRenderer 生产路径尚未全部自动填充 `resolve_sample`；
   - fullscreen quad / viewport quad 的真实 VBO/IBO/UV 上传仍待接入；
   - 当前总体迁移约 34.6%，仍未达到完整可玩。
+
+## 12.481 BlockRenderer / FogRenderer 采样计划接入生产路径
+
+- 2026-05-30：把上一轮 `RenderTextureSamplePlan` 从 helper/metadata 推进到实际渲染生产路径。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/fog_renderer.rs`
+    - `FogViewport::render_camera()` 将 fog viewport 转回 Java `Core.camera` 等价窗口；
+    - `FogFramePlan::to_render_passes()` 调用 `to_render_pass_with_viewport(...)`；
+    - dynamic/static fog composite pass 自动填充 `resolve_sample`，分别对应 Java `Draw.fbo(dynamicFog, ..., tilesize)` 与 `Draw.fbo(staticFog, ..., tilesize, tilesize/2f)`。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `to_resolve_render_passes_with_camera(...)`、`to_shadow_resolve_pass_with_camera(...)`、`to_darkness_resolve_pass_with_camera(...)`；
+    - shadows / darkness resolve pass 在有 camera/world size 时自动填充 Java UV-Y 翻转窗口。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 改用带 camera/world 尺寸的 block resolve pass 入口，让 runtime 合帧时写入真实 sample。
+- 迁移意义：
+  - fog / shadow / darkness 不再只把 `resolve_sample` 当手写测试 metadata，而是从实际 frame plan 生成链路产出；
+  - Java `BlockRenderer.drawShadows()`、`BlockRenderer.drawDarkness()`、`FogRenderer.drawFog()` 的 camera/world UV 窗口进入 Rust runtime/render/backend 主链。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core block_renderer_plan_emits_shadow_and_darkness_resolve_passes`
+  - `cargo test -p mindustry-core fog_renderer_draw_plan_respects_team_switch_and_consumes_events`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - `resolve_sample.uv` 仍需继续下沉到真实 resolve quad/mesh 顶点上传；
+  - `Renderer.backgroundBuffer` 的生产 pass 还未自动填充 `background_buffer_geometry_flip(...)`；
+  - 真实 `glow/glutin/winit` window/context/swap/present 尚未接入；
+  - 当前总体迁移约 34.7%，仍未达到完整可玩。
