@@ -18781,6 +18781,152 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_preserves_begin_end_pass_targets_through_resolve_and_driver()
+    {
+        let source_target = RenderTarget::Buffer("roundtrip-fbo".into());
+        let resolve_target = RenderTarget::Screen;
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 32.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(42, RenderSize::new(32.0, 32.0), camera, viewport);
+        render_frame.push_pass(
+            RenderPass::new(RenderPassKind::Lighting)
+                .with_order(8)
+                .with_target(source_target.clone())
+                .with_resolve(resolve_target.clone(), RenderResolveKind::ShaderBlit),
+        );
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        assert_eq!(plan.steps.len(), 3);
+        assert!(matches!(
+            plan.steps[0],
+            DesktopGraphicsOpenGlBackendStep {
+                kind: DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+                target: RenderTarget::Buffer(ref target_name),
+                ..
+            } if target_name == "roundtrip-fbo"
+        ));
+        assert!(matches!(
+            plan.steps[1],
+            DesktopGraphicsOpenGlBackendStep {
+                kind: DesktopGraphicsOpenGlBackendStepKind::EndPass,
+                target: RenderTarget::Buffer(ref target_name),
+                ..
+            } if target_name == "roundtrip-fbo"
+        ));
+        assert!(matches!(
+            plan.steps[2],
+            DesktopGraphicsOpenGlBackendStep {
+                kind: DesktopGraphicsOpenGlBackendStepKind::Resolve { .. },
+                target: RenderTarget::Buffer(ref target_name),
+                ..
+            } if target_name == "roundtrip-fbo"
+        ));
+
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        executor.consume_opengl_backend_step(plan.steps[0].clone());
+        assert!(executor.state.pass_active);
+        assert_eq!(
+            executor
+                .state
+                .active_pass
+                .as_ref()
+                .map(|pass| pass.target.clone()),
+            Some(source_target.clone())
+        );
+        assert!(matches!(
+            executor.state.event_log.last(),
+            Some(super::DesktopGraphicsOpenGlBackendEvent::BeginPass { target, .. })
+                if target == &source_target
+        ));
+
+        executor.consume_opengl_backend_step(plan.steps[1].clone());
+        assert!(!executor.state.pass_active);
+        assert!(executor.state.active_pass.is_none());
+        assert_eq!(executor.state.current_target, Some(source_target.clone()));
+        assert!(matches!(
+            executor.state.event_log.last(),
+            Some(super::DesktopGraphicsOpenGlBackendEvent::EndPass { target, .. })
+                if target == &source_target
+        ));
+
+        executor.consume_opengl_backend_step(plan.steps[2].clone());
+        assert_eq!(executor.state.resolve_events.len(), 1);
+        assert_eq!(executor.state.event_log.len(), 3);
+        assert_eq!(
+            executor
+                .state
+                .resource_table
+                .get(&source_target)
+                .expect("source target should remain addressable")
+                .resolve_source_count,
+            1
+        );
+        assert_eq!(
+            executor
+                .state
+                .resource_table
+                .get(&resolve_target)
+                .expect("resolve target should remain addressable")
+                .resolve_target_count,
+            1
+        );
+        assert!(matches!(
+            executor.state.event_log.last(),
+            Some(super::DesktopGraphicsOpenGlBackendEvent::Resolve {
+                source_target: logged_source_target,
+                resolve_target: logged_resolve_target,
+                resolve_kind: logged_resolve_kind,
+                ..
+            }) if logged_source_target == &source_target
+                && logged_resolve_target == &resolve_target
+                && *logged_resolve_kind == RenderResolveKind::ShaderBlit
+        ));
+
+        let resolve_event = executor.state.resolve_events[0].clone();
+        assert_eq!(resolve_event.source_target, source_target);
+        assert_eq!(resolve_event.resolve_target, resolve_target);
+        assert_eq!(resolve_event.resolve_kind, RenderResolveKind::ShaderBlit);
+
+        let mut resolving_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        resolving_executor.consume_opengl_resolve_event(resolve_event);
+        assert_eq!(resolving_executor.resolve_commands.len(), 1);
+        assert_eq!(
+            resolving_executor.resolve_commands[0].source_target,
+            RenderTarget::Buffer("roundtrip-fbo".into())
+        );
+        assert_eq!(
+            resolving_executor.resolve_commands[0].resolve_target,
+            RenderTarget::Screen
+        );
+        assert_eq!(
+            resolving_executor.resolve_commands[0].resolve_kind,
+            RenderResolveKind::ShaderBlit
+        );
+
+        let mut driver = super::DesktopGraphicsRecordingOpenGlBackendDriver::default();
+        let driver_state = resolving_executor.drive_driver(&mut driver);
+        assert_eq!(driver_state.resolve_commands, 1);
+        assert!(matches!(
+            driver.commands.last(),
+            Some(super::DesktopGraphicsOpenGlBackendDriverCommand::Resolve(command))
+                if command.source_target == RenderTarget::Buffer("roundtrip-fbo".into())
+                    && command.resolve_target == RenderTarget::Screen
+                    && command.resolve_kind == RenderResolveKind::ShaderBlit
+        ));
+    }
+
+    #[test]
     fn desktop_launcher_graphics_frame_includes_environment_pass_before_lighting() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.game_state.rules.env = GraphicsEnv::UNDERWATER;
