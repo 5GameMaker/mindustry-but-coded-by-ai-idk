@@ -3436,6 +3436,45 @@ pub struct DesktopGraphicsOpenGlBackendResolveCommand {
     pub source_attachment: Option<DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment>,
 }
 
+impl DesktopGraphicsOpenGlBackendResolveCommand {
+    pub const FULLSCREEN_QUAD_INDEX_COUNT: usize = 6;
+    pub const FULLSCREEN_QUAD_INDEX_OFFSET_BYTES: usize = 0;
+
+    pub fn shader_blit_to_opengl_draw_commands(
+        &self,
+        shader_program_handle: u32,
+        fullscreen_quad_vertex_array_handle: u32,
+    ) -> Vec<DesktopGraphicsOpenGlBackendDrawCommand> {
+        if self.resolve_kind != RenderResolveKind::ShaderBlit {
+            return Vec::new();
+        }
+        let Some(source_attachment) = self.source_attachment.as_ref() else {
+            return Vec::new();
+        };
+        vec![
+            DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
+                program_handle: shader_program_handle,
+            },
+            DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
+                texture_unit: DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
+            },
+            DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                target: DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: source_attachment.color_texture_handle,
+            },
+            DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                vertex_array_handle: fullscreen_quad_vertex_array_handle,
+            },
+            DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
+                primitive_type: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                index_count: Self::FULLSCREEN_QUAD_INDEX_COUNT,
+                index_type: DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT,
+                index_offset_bytes: Self::FULLSCREEN_QUAD_INDEX_OFFSET_BYTES,
+            },
+        ]
+    }
+}
+
 pub trait DesktopGraphicsOpenGlBackendResolveCommandSink {
     fn consume_opengl_resolve_command(
         &mut self,
@@ -18687,6 +18726,71 @@ mod tests {
                 }
             ))
         ));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_resolve_shader_blit_translates_to_fullscreen_quad_draw_commands() {
+        let command = super::DesktopGraphicsOpenGlBackendResolveCommand {
+            source_target: RenderTarget::Buffer("shader-blit-source".into()),
+            resolve_target: RenderTarget::Screen,
+            resolve_kind: RenderResolveKind::ShaderBlit,
+            source_attachment: Some(
+                super::DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
+                    framebuffer_key: "framebuffer:buffer:shader-blit-source".into(),
+                    framebuffer_handle: 41,
+                    previous_framebuffer_handle: None,
+                    framebuffer_was_recreated: true,
+                    framebuffer_target: super::DESKTOP_GRAPHICS_OPENGL_FRAMEBUFFER,
+                    color_attachment: super::DESKTOP_GRAPHICS_OPENGL_COLOR_ATTACHMENT0,
+                    color_texture_key: "framebuffer-attachment:buffer:shader-blit-source:color0"
+                        .into(),
+                    color_texture_handle: 43,
+                    previous_color_texture_handle: None,
+                    color_texture_was_recreated: true,
+                    width: 800,
+                    height: 600,
+                    generation: 9,
+                },
+            ),
+        };
+
+        assert_eq!(
+            command.shader_blit_to_opengl_draw_commands(17, 23),
+            vec![
+                super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 17 },
+                super::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
+                    texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    texture_handle: 43,
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
+                    vertex_array_handle: 23,
+                },
+                super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
+                    primitive_type:
+                        super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                    index_count:
+                        super::DesktopGraphicsOpenGlBackendResolveCommand::FULLSCREEN_QUAD_INDEX_COUNT,
+                    index_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT,
+                    index_offset_bytes:
+                        super::DesktopGraphicsOpenGlBackendResolveCommand::FULLSCREEN_QUAD_INDEX_OFFSET_BYTES,
+                },
+            ]
+        );
+
+        let mut fbo_sample = command.clone();
+        fbo_sample.resolve_kind = RenderResolveKind::DrawFboSample;
+        assert!(fbo_sample
+            .shader_blit_to_opengl_draw_commands(17, 23)
+            .is_empty());
+
+        let mut missing_source = command;
+        missing_source.source_attachment = None;
+        assert!(missing_source
+            .shader_blit_to_opengl_draw_commands(17, 23)
+            .is_empty());
     }
 
     #[cfg(feature = "opengl-backend")]

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **33.3%**。
+- 当前总体迁移完成度：约 **33.4%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11863,3 +11863,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续 `ResolveCommand::ShaderBlit` 到 fullscreen quad draw command 的翻译层；
   2. 继续 `opengl-backend` main/runtime 路由；
   3. 按 Java 文件清单继续挑选低冲突模块并行补齐。
+
+---
+
+## 380. 最新闭环记录：ShaderBlit resolve fullscreen quad 翻译层
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **33.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendResolveCommand` 新增 fullscreen quad index 常量；
+    - 新增 `shader_blit_to_opengl_draw_commands(shader_program_handle, fullscreen_quad_vertex_array_handle)`；
+    - `ShaderBlit` + source attachment 会翻译为 `UseProgram -> ActiveTexture -> BindTexture -> BindVertexArray -> DrawElements`；
+    - 非 `ShaderBlit` 或 source attachment 缺失时返回空命令，避免伪造 `DrawRectSample` / `DrawFboSample`；
+    - 新增测试 `desktop_graphics_opengl_resolve_shader_blit_translates_to_fullscreen_quad_draw_commands`。
+- 关键语义：
+  - 这是 `ResolveCommand` 到低层 draw command 的第一条翻译链路；
+  - 贴近 Java/Arc `FrameBuffer.blit(shader)` / `Draw.blit` / `ScreenQuad.render` 的 OpenGL 形状；
+  - fullscreen quad shader program / VAO handle 仍由调用方提供，后续要接入资源准备器。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_resolve_shader_blit_translates --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 为 fullscreen quad 建资源准备/句柄分配闭环；
+  2. 再展开 `DrawRectSample` / `DrawFboSample`；
+  3. 可并行推进 `loadouts.rs`、`save11.rs`、`version.rs` 低冲突闭环。

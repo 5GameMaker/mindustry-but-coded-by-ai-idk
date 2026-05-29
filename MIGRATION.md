@@ -14500,3 +14500,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt`
   - `cargo test -p mindustry-core network_ --lib`
 - 当前总体迁移约 33.3%，仍未达到完整可玩。
+
+## 12.474 ShaderBlit resolve fullscreen quad 翻译层
+
+- 2026-05-29：在保留 `ResolveCommand` 作为语义记录的前提下，新增 `ShaderBlit` resolve 到低层 draw command 的最小翻译函数，向 Java `FrameBuffer.blit(shader)` / Arc `Draw.blit -> ScreenQuad.render` 的真实 GL 路径继续靠拢。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendResolveCommand` 新增 `FULLSCREEN_QUAD_INDEX_COUNT` 与 `FULLSCREEN_QUAD_INDEX_OFFSET_BYTES`；
+    - 新增 `shader_blit_to_opengl_draw_commands(shader_program_handle, fullscreen_quad_vertex_array_handle)`；
+    - `ShaderBlit` 且存在 source attachment 时输出 `UseProgram -> ActiveTexture -> BindTexture -> BindVertexArray -> DrawElements`；
+    - 非 `ShaderBlit` 或缺少 source attachment 时不伪造 draw commands，继续保留 resolve 语义记录；
+    - 新增测试 `desktop_graphics_opengl_resolve_shader_blit_translates_to_fullscreen_quad_draw_commands`。
+- 迁移意义：
+  - resolve 不再只停在 driver command 记录层，开始有“语义命令 -> 低层 GL draw command”的翻译边界；
+  - `DrawRectSample` / `DrawFboSample` 仍等待几何/UV 上下文补齐，避免提前硬套 sprite quad 语义；
+  - 后续真实 GL backend 可在 fullscreen quad VAO / shader program 准备好后直接消费该命令序列。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_resolve_shader_blit_translates --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - fullscreen quad mesh/VAO 目前仍由调用方提供 handle，尚未进入资源准备器；
+  - `DrawRectSample` / `DrawFboSample` 尚未展开；
+  - 当前总体迁移约 33.4%，仍未达到完整可玩。
