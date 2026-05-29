@@ -13621,6 +13621,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 已跑验证：
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
-  - 尚未真实查询/绑定 attribute location；
+  - shader uniform/texture unit binding plan 已在下一节补齐，尚未真实查询/绑定 attribute location；
   - 尚未真实提交 GL draw call；
   - 当前总体迁移约 29.5%，仍未达到完整可玩。
+
+## 12.439 Shader uniform / texture unit binding plan
+
+- 2026-05-29：继续把 `ShaderApplyPlan` 的 backend-neutral operation 拆成 OpenGL 后端可消费的 uniform 与 texture unit binding 列表。此前 shader program binding 只记录 operation/error count，现在保留具体 uniform 名称、值与 texture slot。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderUniformBindingPlan`；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan`；
+    - `DesktopGraphicsOpenGlBackendShaderProgramBinding` 新增 `uniform_bindings` 与 `texture_unit_bindings`；
+    - `from_apply(...)` 从 `ShaderApplyOperation::SetUniform / SetUniformIfPresent` 提取 uniform binding；
+    - `from_apply(...)` 从 `ShaderApplyOperation::BindTexture` 提取 uniform、slot、texture；
+    - 回归测试验证 BlockBuild shader 的 `u_progress/u_time/u_alpha/u_uv/u_uv2/u_texsize` 顺序进入 binding plan，且无 texture unit binding。
+- 迁移意义：
+  - 后续真实 GL adapter 可直接遍历 uniform/texture unit binding plan 做 `glUniform*` 与 texture unit 绑定；
+  - shader program identity 与 shader apply payload 不再只剩统计值；
+  - 为 blockbuild、surface、space、shockwave 等 shader 的真实 uniform/texture 绑定打基础。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 尚未真实解析 uniform location，也未执行 `glUniform*`；
+  - texture unit binding 尚未连接真实 GL texture cache；
+  - 当前总体迁移约 29.6%，仍未达到完整可玩。

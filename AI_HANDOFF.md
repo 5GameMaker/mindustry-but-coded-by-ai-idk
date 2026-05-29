@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **29.5%**。
+- 当前总体迁移完成度：约 **29.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10864,3 +10864,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 draw call plan 映射到真实 GL action sink/executor；
   2. 补 uniform/texture unit binding plan；
   3. 后续连接真实 GL attribute location。
+
+---
+
+## 345. 最新闭环记录：Shader uniform / texture unit binding plan
+
+- 本轮总体进度更新：约 **29.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderUniformBindingPlan`；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan`；
+    - `DesktopGraphicsOpenGlBackendShaderProgramBinding` 保留 uniform 与 texture unit binding 列表；
+    - 从 `ShaderApplyOperation` 提取 uniform/texture 绑定；
+    - 测试验证 BlockBuild shader 的 6 个 uniform 名称顺序。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 把 draw call plan 映射到真实 GL action sink/executor；
+  2. 连接 uniform/attribute location；
+  3. 后续把 texture unit binding 接到真实 texture cache。

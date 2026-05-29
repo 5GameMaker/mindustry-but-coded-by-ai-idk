@@ -46,10 +46,10 @@ use mindustry_core::mindustry::graphics::{
     RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
     RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
     RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle,
-    RenderViewport, ShaderApplyContext, ShaderApplyPlan, ShaderCamera, ShaderCatalog,
-    ShaderDispatchFrame, ShaderId, ShaderParameters, ShaderTextureRegion, ShaderViewport,
-    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord,
-    Viewport as FloorViewport,
+    RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCamera,
+    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderParameters, ShaderTextureRegion,
+    ShaderViewport, TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TextureBinding,
+    TileBounds, TileCoord, UniformValue, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -697,11 +697,26 @@ pub struct DesktopGraphicsOpenGlBackendShaderProgramIdentity {
     pub gl_program: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendShaderProgramBinding {
     pub identity: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
     pub operation_count: usize,
     pub error_count: usize,
+    pub uniform_bindings: Vec<DesktopGraphicsOpenGlBackendShaderUniformBindingPlan>,
+    pub texture_unit_bindings: Vec<DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendShaderUniformBindingPlan {
+    pub name: &'static str,
+    pub value: UniformValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan {
+    pub uniform: &'static str,
+    pub slot: u8,
+    pub texture: TextureBinding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -851,10 +866,42 @@ impl DesktopGraphicsOpenGlBackendShaderProgramIdentity {
 
 impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
     pub fn from_apply(apply: &ShaderApplyPlan) -> Self {
+        let uniform_bindings = apply
+            .operations
+            .iter()
+            .filter_map(|operation| match operation {
+                ShaderApplyOperation::SetUniform(binding)
+                | ShaderApplyOperation::SetUniformIfPresent(binding) => {
+                    Some(DesktopGraphicsOpenGlBackendShaderUniformBindingPlan {
+                        name: binding.name,
+                        value: binding.value.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+        let texture_unit_bindings = apply
+            .operations
+            .iter()
+            .filter_map(|operation| match operation {
+                ShaderApplyOperation::BindTexture {
+                    uniform,
+                    slot,
+                    texture,
+                } => Some(DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan {
+                    uniform,
+                    slot: *slot,
+                    texture: texture.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
         Self {
             identity: DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(apply.shader),
             operation_count: apply.operations.len(),
             error_count: apply.errors.len(),
+            uniform_bindings,
+            texture_unit_bindings,
         }
     }
 }
@@ -10981,8 +11028,30 @@ mod tests {
                 },
                 operation_count: 6,
                 error_count: 0,
+                uniform_bindings: executor.state.shader_program_bindings[0]
+                    .uniform_bindings
+                    .clone(),
+                texture_unit_bindings: Vec::new(),
             }
         );
+        assert_eq!(
+            executor.state.shader_program_bindings[0]
+                .uniform_bindings
+                .iter()
+                .map(|binding| binding.name)
+                .collect::<Vec<_>>(),
+            vec![
+                "u_progress",
+                "u_time",
+                "u_alpha",
+                "u_uv",
+                "u_uv2",
+                "u_texsize"
+            ]
+        );
+        assert!(executor.state.shader_program_bindings[0]
+            .texture_unit_bindings
+            .is_empty());
         assert_eq!(executor.state.sprite_draw_call_plans.len(), 1);
         assert_eq!(
             executor.state.sprite_draw_call_plans[0]
