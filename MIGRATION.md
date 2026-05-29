@@ -14220,3 +14220,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 共享 executor 当前只按 `shader_commands` 后接 `sprite_draw_call_plans` 的聚合顺序驱动，尚未恢复完整 frame event interleaving；
   - 真实 `glUseProgram/glUniform*/glActiveTexture/glBindTexture/glDrawElements` 尚未执行；
   - 当前总体迁移约 31.9%，仍未达到完整可玩。
+
+## 12.462 EffectBuffer framebuffer attachment 身份接入
+
+- 2026-05-29：继续把 `TextureBinding::EffectBuffer` 从普通 runtime texture identity 推进到 framebuffer color attachment 语义。当前仍未创建真实 FBO，但后端资源模型已经能区分 atlas/runtime texture 与 framebuffer attachment，并能在同一 handle cache 中解析 framebuffer handle 与 color texture handle。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendTextureResourceKind` 新增 `FramebufferAttachment`；
+    - `DesktopGraphicsOpenGlBackendTextureResourceIdentity` 新增 `from_framebuffer_color_attachment(...)` 与 `from_effect_buffer_attachment()`；
+    - `TextureBinding::EffectBuffer` 现在解析为 `framebuffer-attachment:renderer.effectBuffer:color0`，不再解析为普通 `runtime-texture:renderer.effectBuffer.texture`；
+    - 新增 `DESKTOP_GRAPHICS_OPENGL_FRAMEBUFFER` / `DESKTOP_GRAPHICS_OPENGL_COLOR_ATTACHMENT0` 常量；
+    - 新增 `DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan` 与 `DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment`；
+    - `DesktopGraphicsOpenGlBackendHandleCache` 新增 framebuffer handle 表与 `resolve_framebuffer_attachment(...)`；
+    - 新增 `desktop_graphics_opengl_effect_buffer_binding_uses_framebuffer_attachment_identity`，确认 effectBuffer shader binding 与 framebuffer attachment color texture 共用同一 texture handle。
+- 迁移意义：
+  - Java/Arc 的 `renderer.effectBuffer.begin/end/blit(shader)` 语义开始在 Rust backend 层具备明确 FBO + color attachment 边界；
+  - `SpaceShader` / `SurfaceShader` 中 slot 0 的 `effectBuffer` 采样源现在有独立 framebuffer attachment 身份，为后续真实 `glFramebufferTexture2D` / resolve / shader blit 做准备；
+  - 仍保持 `BindTexture` 与 sampler uniform 分离，不隐式补 uniform upload。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop effect_buffer --lib`
+  - `cargo test -p mindustry-desktop shader_commands --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - 尚未执行真实 `glGenFramebuffers/glBindFramebuffer/glFramebufferTexture2D`；
+  - attachment 尺寸/resize/generation 仍未接 surface size 与 pass target；
+  - `ShaderBlit` / `DrawFboSample` 还没有统一消费 attachment 纹理并执行真实回填；
+  - 当前总体迁移约 32.0%，仍未达到完整可玩。

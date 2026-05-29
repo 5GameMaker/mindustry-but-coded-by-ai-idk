@@ -477,6 +477,7 @@ pub struct DesktopGraphicsOpenGlBackendTextureBinding {
 pub enum DesktopGraphicsOpenGlBackendTextureResourceKind {
     AtlasPage,
     RuntimeTexture,
+    FramebufferAttachment,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -515,15 +516,30 @@ impl DesktopGraphicsOpenGlBackendTextureResourceIdentity {
         }
     }
 
+    pub fn from_framebuffer_color_attachment(name: impl Into<String>) -> Self {
+        let name = name.into();
+        let page_source_path = format!("framebuffer:{name}:color0");
+        Self {
+            key: format!("framebuffer-attachment:{name}:color0"),
+            resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind::FramebufferAttachment,
+            page_type: PageType::Ui,
+            page_source_path,
+            generation: 0,
+            gl_handle: None,
+        }
+    }
+
+    pub fn from_effect_buffer_attachment() -> Self {
+        Self::from_framebuffer_color_attachment("renderer.effectBuffer")
+    }
+
     pub fn from_shader_texture_binding(texture: &TextureBinding) -> Self {
         match texture {
             TextureBinding::Asset(source_path) => Self::from_atlas_page(
                 opengl_backend_texture_page_type_from_source_path(source_path),
                 source_path.clone(),
             ),
-            TextureBinding::EffectBuffer => {
-                Self::from_runtime_texture("renderer.effectBuffer.texture")
-            }
+            TextureBinding::EffectBuffer => Self::from_effect_buffer_attachment(),
         }
     }
 
@@ -638,6 +654,45 @@ pub const DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW: u32 = 0x88e8;
 pub const DESKTOP_GRAPHICS_OPENGL_FLOAT: u32 = 0x1406;
 pub const DESKTOP_GRAPHICS_OPENGL_UNSIGNED_INT: u32 = 0x1405;
 pub const DESKTOP_GRAPHICS_OPENGL_TEXTURE0: u32 = 0x84c0;
+pub const DESKTOP_GRAPHICS_OPENGL_FRAMEBUFFER: u32 = 0x8d40;
+pub const DESKTOP_GRAPHICS_OPENGL_COLOR_ATTACHMENT0: u32 = 0x8ce0;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan {
+    pub framebuffer_key: String,
+    pub framebuffer_target: u32,
+    pub color_attachment: u32,
+    pub color_texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
+    pub framebuffer_key: String,
+    pub framebuffer_handle: u32,
+    pub framebuffer_target: u32,
+    pub color_attachment: u32,
+    pub color_texture_key: String,
+    pub color_texture_handle: u32,
+}
+
+impl DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan {
+    pub fn from_buffer_name(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            framebuffer_key: format!("framebuffer:{name}"),
+            framebuffer_target: DESKTOP_GRAPHICS_OPENGL_FRAMEBUFFER,
+            color_attachment: DESKTOP_GRAPHICS_OPENGL_COLOR_ATTACHMENT0,
+            color_texture_identity:
+                DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_framebuffer_color_attachment(
+                    name,
+                ),
+        }
+    }
+
+    pub fn effect_buffer() -> Self {
+        Self::from_buffer_name("renderer.effectBuffer")
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
@@ -823,6 +878,14 @@ impl DesktopGraphicsOpenGlBackendResolvedTextureUpload {
                 }
             }
             DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture => {
+                DesktopGraphicsOpenGlBackendTextureUploadPixelSource::RuntimeTexture {
+                    texture_key: self.texture_key.clone(),
+                    page_source_path: self.page_source_path.clone(),
+                    width: self.page_width,
+                    height: self.page_height,
+                }
+            }
+            DesktopGraphicsOpenGlBackendTextureResourceKind::FramebufferAttachment => {
                 DesktopGraphicsOpenGlBackendTextureUploadPixelSource::RuntimeTexture {
                     texture_key: self.texture_key.clone(),
                     page_source_path: self.page_source_path.clone(),
@@ -3867,6 +3930,7 @@ pub struct DesktopGraphicsOpenGlBackendHandleCache {
     pub programs: BTreeMap<String, u32>,
     pub shaders: BTreeMap<String, u32>,
     pub textures: BTreeMap<String, u32>,
+    pub framebuffers: BTreeMap<String, u32>,
     pub vertex_arrays: BTreeMap<String, u32>,
     pub buffers: BTreeMap<String, u32>,
 }
@@ -3960,6 +4024,36 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
         let texture_handle = allocator.allocate();
         let previous_texture_handle = self.textures.insert(key, texture_handle);
         (previous_texture_handle, texture_handle)
+    }
+
+    pub fn framebuffer_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> u32 {
+        let key = key.into();
+        *self
+            .framebuffers
+            .entry(key)
+            .or_insert_with(|| allocator.allocate())
+    }
+
+    pub fn resolve_framebuffer_attachment(
+        &mut self,
+        plan: &DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
+        let framebuffer_handle = self.framebuffer_handle(plan.framebuffer_key.clone(), allocator);
+        let color_texture_handle =
+            self.texture_handle_for_identity(&plan.color_texture_identity, allocator);
+        DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
+            framebuffer_key: plan.framebuffer_key.clone(),
+            framebuffer_handle,
+            framebuffer_target: plan.framebuffer_target,
+            color_attachment: plan.color_attachment,
+            color_texture_key: plan.color_texture_identity.key.clone(),
+            color_texture_handle,
+        }
     }
 
     pub fn vertex_array_handle(
@@ -15065,11 +15159,11 @@ mod tests {
         assert_eq!(
             binding.texture_unit_bindings[1].resolved_texture_identity,
             Some(super::DesktopGraphicsOpenGlBackendTextureResourceIdentity {
-                key: "runtime-texture:renderer.effectBuffer.texture".into(),
+                key: "framebuffer-attachment:renderer.effectBuffer:color0".into(),
                 resource_kind:
-                    super::DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture,
+                    super::DesktopGraphicsOpenGlBackendTextureResourceKind::FramebufferAttachment,
                 page_type: PageType::Ui,
-                page_source_path: "runtime:renderer.effectBuffer.texture".into(),
+                page_source_path: "framebuffer:renderer.effectBuffer:color0".into(),
                 generation: 0,
                 gl_handle: Some(2),
             })
@@ -15174,7 +15268,7 @@ mod tests {
                     slot: 0,
                     target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
                     texture: TextureBinding::EffectBuffer,
-                    texture_key: "runtime-texture:renderer.effectBuffer.texture".into(),
+                    texture_key: "framebuffer-attachment:renderer.effectBuffer:color0".into(),
                     texture_handle: 3,
                 },
             ]
@@ -15186,6 +15280,59 @@ mod tests {
             resolving_executor.commands.len()
         );
         assert_eq!(resolved_sink.commands, resolving_executor.commands);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_effect_buffer_binding_uses_framebuffer_attachment_identity() {
+        let attachment =
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::effect_buffer();
+        let binding_identity =
+            super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_shader_texture_binding(
+                &TextureBinding::EffectBuffer,
+            );
+        assert_eq!(binding_identity, attachment.color_texture_identity);
+
+        let mut cache = super::DesktopGraphicsOpenGlBackendHandleCache::default();
+        let mut allocator = super::DesktopGraphicsOpenGlBackendHandleAllocator::default();
+        let resolved_attachment = cache.resolve_framebuffer_attachment(&attachment, &mut allocator);
+        assert_eq!(
+            resolved_attachment,
+            super::DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
+                framebuffer_key: "framebuffer:renderer.effectBuffer".into(),
+                framebuffer_handle: 1,
+                framebuffer_target: super::DESKTOP_GRAPHICS_OPENGL_FRAMEBUFFER,
+                color_attachment: super::DESKTOP_GRAPHICS_OPENGL_COLOR_ATTACHMENT0,
+                color_texture_key: "framebuffer-attachment:renderer.effectBuffer:color0".into(),
+                color_texture_handle: 2,
+            }
+        );
+        assert_eq!(cache.framebuffers["framebuffer:renderer.effectBuffer"], 1);
+        assert_eq!(
+            cache.textures["framebuffer-attachment:renderer.effectBuffer:color0"],
+            2
+        );
+
+        let resolved_bind = cache.resolve_shader_command(
+            super::DesktopGraphicsOpenGlBackendShaderCommand::BindTexture {
+                program_key: "shader:Space".into(),
+                slot: 0,
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture: TextureBinding::EffectBuffer,
+            },
+            &mut allocator,
+        );
+        assert_eq!(
+            resolved_bind,
+            super::DesktopGraphicsOpenGlBackendResolvedShaderCommand::BindTexture {
+                program_key: "shader:Space".into(),
+                program_handle: 3,
+                slot: 0,
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture: TextureBinding::EffectBuffer,
+                texture_key: "framebuffer-attachment:renderer.effectBuffer:color0".into(),
+                texture_handle: 2,
+            }
+        );
     }
 
     #[test]

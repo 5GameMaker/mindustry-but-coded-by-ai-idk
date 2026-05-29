@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **31.9%**。
+- 当前总体迁移完成度：约 **32.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11548,3 +11548,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 把 `EffectBuffer` 从 runtime texture identity 推进到 framebuffer attachment；
   3. 开始 feature-gated real OpenGL backend/window/context；
   4. 继续保持 `README.md` 只更新百分比。
+
+---
+
+## 368. 最新闭环记录：EffectBuffer framebuffer attachment 身份接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **32.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendTextureResourceKind` 新增 `FramebufferAttachment`；
+    - `TextureBinding::EffectBuffer` 改为解析到 `framebuffer-attachment:renderer.effectBuffer:color0`；
+    - 新增 framebuffer / color attachment OpenGL 常量；
+    - 新增 `DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan` / `ResolvedFramebufferAttachment`；
+    - `HandleCache` 新增 `framebuffers` 与 `resolve_framebuffer_attachment(...)`；
+    - 测试确认 effectBuffer shader binding 与 framebuffer attachment color texture 共用 texture handle。
+- 关键语义：
+  - effectBuffer 不再只是普通 runtime texture key；
+  - 当前表达的是 Java `renderer.effectBuffer.getTexture()` 对应的 FBO color attachment；
+  - 仍未真实创建 FBO，下一步要接 `glFramebufferTexture2D` / resize / resolve。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop effect_buffer --lib`
+  - `cargo test -p mindustry-desktop shader_commands --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 接 effectBuffer attachment 的尺寸/generation/resize；
+  2. 接 `ShaderBlit` / `DrawFboSample` 对 attachment texture 的真实 resolve；
+  3. 继续把 texture upload / mesh upload 纳入 shared real GL state；
+  4. 准备 feature-gated real OpenGL backend。
