@@ -895,6 +895,22 @@ pub fn read_deflated_save_snapshot<R: Read>(read: R) -> io::Result<SaveSnapshot>
     SaveSnapshot::from_envelope(&envelope)
 }
 
+pub fn read_deflated_save_snapshot_with_backup(
+    primary: &[u8],
+    backup: Option<&[u8]>,
+) -> io::Result<SaveSnapshot> {
+    match read_deflated_save_snapshot(primary) {
+        Ok(snapshot) => Ok(snapshot),
+        Err(primary_error) => {
+            if let Some(backup) = backup {
+                read_deflated_save_snapshot(backup)
+            } else {
+                Err(primary_error)
+            }
+        }
+    }
+}
+
 pub fn read_deflated_map_info<R: Read>(read: R, custom: bool) -> io::Result<SaveMapInfo> {
     let mut decoder = ZlibDecoder::new(read);
     let version = read_header(&mut decoder)?;
@@ -2517,6 +2533,61 @@ mod tests {
         assert_eq!(decoded, backup_envelope);
         assert!(is_deflated_save_valid_with_backup(b"broken", Some(&backup)));
         assert!(read_deflated_raw_save_envelope_with_backup(b"broken", None).is_err());
+    }
+
+    #[test]
+    fn deflated_save_snapshot_falls_back_to_backup_like_save_io_load() {
+        use std::io::Write as _;
+
+        let mut tags = BTreeMap::new();
+        tags.insert("version".into(), "157".into());
+        tags.insert("mapname".into(), "snapshot-backup".into());
+        tags.insert("saved".into(), "4242".into());
+
+        let mut chunks = CustomChunkSet::default();
+        chunks.insert_or_replace(CUSTOM_CHUNK_STATIC_FOG_DATA, vec![1, 2, 3]);
+        chunks.insert_or_replace("modded", b"payload".to_vec());
+
+        let snapshot = SaveSnapshot {
+            version: LATEST_SAVE_VERSION,
+            meta: SaveMeta::from_tags(tags.clone()),
+            content_header: None,
+            content_patches: None,
+            map: None,
+            entities: None,
+            marker_region: None,
+            custom_chunks: Some(chunks),
+        };
+
+        let mut backup = Vec::new();
+        write_deflated_save_snapshot(&mut backup, &snapshot).unwrap();
+
+        let mut primary = Vec::new();
+        {
+            let mut encoder = ZlibEncoder::new(&mut primary, Compression::default());
+            encoder.write_all(b"BAD!").unwrap();
+            encoder.finish().unwrap();
+        }
+
+        let decoded = read_deflated_save_snapshot_with_backup(primary.as_slice(), Some(&backup))
+            .expect("backup snapshot should load when primary header is invalid");
+        assert_eq!(decoded.version, LATEST_SAVE_VERSION);
+        assert_eq!(decoded.meta.map_name.as_deref(), Some("snapshot-backup"));
+        assert_eq!(
+            decoded
+                .custom_chunks
+                .as_ref()
+                .and_then(|chunks| chunks.get(CUSTOM_CHUNK_STATIC_FOG_DATA)),
+            Some(&[1, 2, 3][..])
+        );
+        assert_eq!(
+            decoded
+                .custom_chunks
+                .as_ref()
+                .and_then(|chunks| chunks.get("modded")),
+            Some(&b"payload"[..])
+        );
+        assert!(read_deflated_save_snapshot_with_backup(primary.as_slice(), None).is_err());
     }
 
     #[test]

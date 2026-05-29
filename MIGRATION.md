@@ -14438,3 +14438,21 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core rebuild_from_entries_roundtrips_compact_indices_after_removal --lib`
   - `cargo test -p mindustry-core marker_region_ --lib`
 - 当前总体迁移约 33.0%，仍未达到完整可玩。
+
+## 12.471 SaveSnapshot backup fallback
+
+- 2026-05-29：补齐 full `SaveSnapshot` 读取的 backup fallback 闭环，使结构化 snapshot 读取也具备 Java `SaveIO.load(...)` 风格的主文件失败后回退备份行为。
+- Rust 新增/接入：
+  - `core/src/mindustry/io/save.rs`
+    - 新增 `read_deflated_save_snapshot_with_backup(primary, backup)`；
+    - 主 snapshot 解码成功时直接返回主文件结果；
+    - 主 snapshot 解码失败且存在 backup 时读取 backup；
+    - 无 backup 时保留 primary error；
+    - 新增测试 `deflated_save_snapshot_falls_back_to_backup_like_save_io_load`，使用可 zlib 解压但 header 错误的 primary 触发回退，并验证 backup snapshot 的 meta 与 custom chunks 保留。
+- 迁移意义：
+  - `SaveMeta` / raw envelope 已有 backup fallback，本轮把完整 `SaveSnapshot` 入口也补齐；
+  - 为后续真实 save slot load / world load runtime 接入提供更接近 Java SaveIO 的容错行为。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core save_ --lib`
+- 当前总体迁移约 33.1%，仍未达到完整可玩。
