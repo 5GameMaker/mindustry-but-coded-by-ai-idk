@@ -62,12 +62,14 @@ use crate::mindustry::{
         write_launch_pad_state, AcceleratorState, LandingPadState, LaunchPadState,
     },
     world::blocks::defense::turrets::{
-        continuous_turret_read_child, continuous_turret_write_child, item_turret_read_ammo,
-        item_turret_write_ammo, liquid_turret_accept_liquid, liquid_turret_unit_ammo_fraction,
+        continuous_liquid_read_child, continuous_liquid_write_child, continuous_turret_read_child,
+        continuous_turret_write_child, item_turret_read_ammo, item_turret_write_ammo,
+        liquid_turret_accept_liquid, liquid_turret_unit_ammo_fraction,
         payload_ammo_turret_read_payloads, payload_ammo_turret_write_payloads,
         point_defense_read_child, point_defense_write_child, tractor_beam_read_child,
-        tractor_beam_write_child, turret_read_child, turret_write_child, ContinuousTurretState,
-        ItemAmmoEntry, PointDefenseState, TractorBeamState, TurretState,
+        tractor_beam_write_child, turret_read_child, turret_write_child,
+        ContinuousLiquidTurretState, ContinuousTurretState, ItemAmmoEntry, PointDefenseState,
+        TractorBeamState, TurretState,
     },
     world::blocks::defense::{
         build_turret_read_child_with_loader, build_turret_write_child_with_loader,
@@ -304,7 +306,26 @@ fn write_network_map_block_state_tail<W: io::Write>(
                 payload_ammo_turret_write_payloads(write, payloads)?;
             }
             (
-                TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret,
+                TurretBlockKind::ContinuousTurret,
+                GameRuntimeTurretBlockState::Continuous { turret, continuous },
+            ) => {
+                turret_write_child(write, turret)?;
+                continuous_turret_write_child(write, continuous)?;
+            }
+            (
+                TurretBlockKind::ContinuousLiquidTurret,
+                GameRuntimeTurretBlockState::ContinuousLiquid {
+                    turret,
+                    continuous,
+                    continuous_liquid,
+                },
+            ) => {
+                turret_write_child(write, turret)?;
+                continuous_turret_write_child(write, continuous)?;
+                continuous_liquid_write_child(write, continuous_liquid)?;
+            }
+            (
+                TurretBlockKind::ContinuousLiquidTurret,
                 GameRuntimeTurretBlockState::Continuous { turret, continuous },
             ) => {
                 turret_write_child(write, turret)?;
@@ -764,8 +785,15 @@ fn network_map_building_revision(
     {
         match (turret.kind, state) {
             (TurretBlockKind::ItemTurret, GameRuntimeTurretBlockState::Item { .. }) => return 2,
+            (TurretBlockKind::ContinuousTurret, GameRuntimeTurretBlockState::Continuous { .. }) => {
+                return 3
+            }
             (
-                TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret,
+                TurretBlockKind::ContinuousLiquidTurret,
+                GameRuntimeTurretBlockState::ContinuousLiquid { .. },
+            ) => return 4,
+            (
+                TurretBlockKind::ContinuousLiquidTurret,
                 GameRuntimeTurretBlockState::Continuous { .. },
             ) => return 3,
             (
@@ -972,7 +1000,8 @@ fn client_block_snapshot_revision(block: &BlockDef) -> u8 {
     match block {
         BlockDef::Turret(turret) => match turret.kind {
             TurretBlockKind::ItemTurret => 2,
-            TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret => 3,
+            TurretBlockKind::ContinuousTurret => 3,
+            TurretBlockKind::ContinuousLiquidTurret => 4,
             TurretBlockKind::PayloadAmmoTurret
             | TurretBlockKind::LiquidTurret
             | TurretBlockKind::PowerTurret
@@ -1694,6 +1723,11 @@ pub enum GameRuntimeTurretBlockState {
         turret: TurretState,
         continuous: ContinuousTurretState,
     },
+    ContinuousLiquid {
+        turret: TurretState,
+        continuous: ContinuousTurretState,
+        continuous_liquid: ContinuousLiquidTurretState,
+    },
     PointDefense(PointDefenseState),
     TractorBeam(TractorBeamState),
 }
@@ -1703,7 +1737,8 @@ fn game_runtime_turret_state(state: &GameRuntimeTurretBlockState) -> Option<&Tur
         GameRuntimeTurretBlockState::Generic(turret)
         | GameRuntimeTurretBlockState::Item { turret, .. }
         | GameRuntimeTurretBlockState::PayloadAmmo { turret, .. }
-        | GameRuntimeTurretBlockState::Continuous { turret, .. } => Some(turret),
+        | GameRuntimeTurretBlockState::Continuous { turret, .. }
+        | GameRuntimeTurretBlockState::ContinuousLiquid { turret, .. } => Some(turret),
         GameRuntimeTurretBlockState::PointDefense(_)
         | GameRuntimeTurretBlockState::TractorBeam(_) => None,
     }
@@ -1716,7 +1751,8 @@ fn game_runtime_turret_state_mut(
         GameRuntimeTurretBlockState::Generic(turret)
         | GameRuntimeTurretBlockState::Item { turret, .. }
         | GameRuntimeTurretBlockState::PayloadAmmo { turret, .. }
-        | GameRuntimeTurretBlockState::Continuous { turret, .. } => Some(turret),
+        | GameRuntimeTurretBlockState::Continuous { turret, .. }
+        | GameRuntimeTurretBlockState::ContinuousLiquid { turret, .. } => Some(turret),
         GameRuntimeTurretBlockState::PointDefense(_)
         | GameRuntimeTurretBlockState::TractorBeam(_) => None,
     }
@@ -1867,7 +1903,8 @@ fn game_runtime_visual_apply_turret_state(
         GameRuntimeTurretBlockState::Generic(turret)
         | GameRuntimeTurretBlockState::Item { turret, .. }
         | GameRuntimeTurretBlockState::PayloadAmmo { turret, .. }
-        | GameRuntimeTurretBlockState::Continuous { turret, .. } => {
+        | GameRuntimeTurretBlockState::Continuous { turret, .. }
+        | GameRuntimeTurretBlockState::ContinuousLiquid { turret, .. } => {
             let visual = game_runtime_visual_turret_snapshot_mut(snapshot);
             game_runtime_visual_set_once(&mut visual.rotation, turret.rotation);
             game_runtime_visual_set_once(&mut visual.recoil, turret.cur_recoil);
@@ -10967,7 +11004,7 @@ impl GameRuntime {
                     payloads,
                 }))
             }
-            TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret => {
+            TurretBlockKind::ContinuousTurret => {
                 let turret_state = turret_read_child(building_payload, revision)
                     .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
                 let continuous =
@@ -10976,6 +11013,20 @@ impl GameRuntime {
                 Ok(Some(GameRuntimeTurretBlockState::Continuous {
                     turret: turret_state,
                     continuous,
+                }))
+            }
+            TurretBlockKind::ContinuousLiquidTurret => {
+                let turret_state = turret_read_child(building_payload, revision)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let continuous =
+                    continuous_turret_read_child(building_payload, revision, turret.base.size)
+                        .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                let continuous_liquid = continuous_liquid_read_child(building_payload, revision)
+                    .map_err(|_| GameRuntimeBlockStateReadError::Parse)?;
+                Ok(Some(GameRuntimeTurretBlockState::ContinuousLiquid {
+                    turret: turret_state,
+                    continuous,
+                    continuous_liquid,
                 }))
             }
             TurretBlockKind::PointDefenseTurret => point_defense_read_child(building_payload)
@@ -21419,9 +21470,10 @@ mod tests {
                 AcceleratorState,
             },
             blocks::defense::turrets::{
-                continuous_turret_write_child, item_turret_write_ammo, liquid_turret_has_ammo,
-                liquid_turret_use_ammo, payload_ammo_turret_write_payloads,
-                point_defense_write_child, tractor_beam_write_child, turret_write_child,
+                continuous_liquid_write_child, continuous_turret_write_child,
+                item_turret_write_ammo, liquid_turret_has_ammo, liquid_turret_use_ammo,
+                payload_ammo_turret_write_payloads, point_defense_write_child,
+                tractor_beam_write_child, turret_write_child, ContinuousLiquidTurretState,
                 ContinuousTurretState, ItemAmmoEntry, PointDefenseState, TractorBeamState,
                 TurretState,
             },
@@ -22805,7 +22857,7 @@ mod tests {
     }
 
     #[test]
-    fn game_runtime_applies_client_continuous_liquid_turret_snapshot_preserving_rotation_reload_with_content(
+    fn game_runtime_applies_client_continuous_liquid_turret_snapshot_preserving_activation_with_content(
     ) {
         let content = ContentLoader::create_base_content().unwrap();
         let turret = content
@@ -22824,12 +22876,13 @@ mod tests {
         };
         runtime.turret_runtime_states.insert(
             tile_pos,
-            GameRuntimeTurretBlockState::Continuous {
+            GameRuntimeTurretBlockState::ContinuousLiquid {
                 turret: existing_turret.clone(),
                 continuous: ContinuousTurretState {
                     last_length: 16.0,
                     bullets: 1,
                 },
+                continuous_liquid: ContinuousLiquidTurretState { activated: false },
             },
         );
 
@@ -22845,10 +22898,12 @@ mod tests {
             last_length: 42.0,
             bullets: 3,
         };
+        let incoming_continuous_liquid = ContinuousLiquidTurretState { activated: true };
         let mut sync_bytes = Vec::new();
         synced_building.write_base(&mut sync_bytes, false).unwrap();
         turret_write_child(&mut sync_bytes, &incoming_turret).unwrap();
         continuous_turret_write_child(&mut sync_bytes, &incoming_continuous).unwrap();
+        continuous_liquid_write_child(&mut sync_bytes, &incoming_continuous_liquid).unwrap();
 
         let report = runtime.apply_client_block_snapshot_record_with_content(
             &content, tile_pos, turret.id, sync_bytes,
@@ -22870,12 +22925,13 @@ mod tests {
         expected_turret.reload_counter = existing_turret.reload_counter;
         assert_eq!(
             runtime.turret_runtime_states.get(&tile_pos),
-            Some(&GameRuntimeTurretBlockState::Continuous {
+            Some(&GameRuntimeTurretBlockState::ContinuousLiquid {
                 turret: expected_turret,
                 continuous: ContinuousTurretState {
                     bullets: 0,
                     ..incoming_continuous
                 },
+                continuous_liquid: incoming_continuous_liquid,
             })
         );
     }
@@ -32156,8 +32212,15 @@ mod tests {
 
         match (turret.kind, state) {
             (TurretBlockKind::ItemTurret, GameRuntimeTurretBlockState::Item { .. }) => 2,
+            (TurretBlockKind::ContinuousTurret, GameRuntimeTurretBlockState::Continuous { .. }) => {
+                3
+            }
             (
-                TurretBlockKind::ContinuousTurret | TurretBlockKind::ContinuousLiquidTurret,
+                TurretBlockKind::ContinuousLiquidTurret,
+                GameRuntimeTurretBlockState::ContinuousLiquid { .. },
+            ) => 4,
+            (
+                TurretBlockKind::ContinuousLiquidTurret,
                 GameRuntimeTurretBlockState::Continuous { .. },
             ) => 3,
             (
@@ -32293,11 +32356,34 @@ mod tests {
                 },
             ),
             Some(GameRuntimeTurretBlockState::Continuous {
+                turret: continuous_turret.clone(),
+                continuous: ContinuousTurretState {
+                    bullets: 0,
+                    ..continuous
+                },
+            })
+        );
+
+        let continuous_liquid = ContinuousLiquidTurretState { activated: true };
+        assert_eq!(
+            roundtrip_exported_turret_state(
+                &content,
+                "sublimate",
+                8,
+                30,
+                GameRuntimeTurretBlockState::ContinuousLiquid {
+                    turret: continuous_turret.clone(),
+                    continuous,
+                    continuous_liquid,
+                },
+            ),
+            Some(GameRuntimeTurretBlockState::ContinuousLiquid {
                 turret: continuous_turret,
                 continuous: ContinuousTurretState {
                     bullets: 0,
                     ..continuous
                 },
+                continuous_liquid,
             })
         );
 
@@ -33623,6 +33709,51 @@ mod tests {
         assert_eq!(
             runtime.turret_runtime_states.get(&tile_pos),
             Some(&GameRuntimeTurretBlockState::Continuous { turret, continuous })
+        );
+    }
+
+    #[test]
+    fn game_runtime_loads_continuous_liquid_turret_state_from_network_map_building_payload() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let turret_def = content.block_by_name("sublimate").unwrap();
+        let tile_pos = point2_pack(4, 1);
+        let saved = BuildingComp::new(tile_pos, turret_def.base().clone(), TeamId(1));
+        let turret = TurretState {
+            reload_counter: 7.0,
+            rotation: 150.0,
+            ..TurretState::default()
+        };
+        let continuous = ContinuousTurretState {
+            last_length: 40.0,
+            bullets: 1,
+        };
+        let continuous_liquid = ContinuousLiquidTurretState { activated: true };
+        let mut building_bytes = Vec::new();
+        building_bytes.push(4);
+        saved.write_base(&mut building_bytes, false).unwrap();
+        turret_write_child(&mut building_bytes, &turret).unwrap();
+        continuous_turret_write_child(&mut building_bytes, &continuous).unwrap();
+        continuous_liquid_write_child(&mut building_bytes, &continuous_liquid).unwrap();
+
+        let mut runtime = GameRuntime::default();
+        let report = runtime.load_network_map_with_buildings(
+            &content,
+            &single_building_network_map(6, 6, 10, turret_def.base().id, building_bytes),
+        );
+
+        assert_eq!(report.buildings_added, 1);
+        assert_eq!(report.block_states_added, 1);
+        assert_eq!(report.block_state_parse_errors, 0);
+        assert_eq!(
+            runtime.turret_runtime_states.get(&tile_pos),
+            Some(&GameRuntimeTurretBlockState::ContinuousLiquid {
+                turret,
+                continuous: ContinuousTurretState {
+                    bullets: 0,
+                    ..continuous
+                },
+                continuous_liquid,
+            })
         );
     }
 
