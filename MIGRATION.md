@@ -12556,3 +12556,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - fog pass 内仍有 custom marker，未完全拆成 primitive/texture upload commands；
   - `fog:static` / `fog:dynamic` 仍未绑定真实 FBO/texture；
   - 当前总体迁移约 25.4%，仍未达到完整可玩。
+
+### 12.398 BlockBuild / BlockOverdraw render stage 语义拆分
+
+- 2026-05-29：继续收紧 Java `Renderer.draw()` block 相关 stage。上一轮临时把 `RenderPassKind::Block` 放到 `BlockBuild`，本轮改为更贴近 Java 末尾 `Trigger.drawOver -> blocks.drawBlocks()` 的 `BlockOverdraw`；真正的建造/施工视觉保留独立 `RenderPassKind::BlockBuild`。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind` 新增 `BlockBuild` 与 `BlockOverdraw`；
+    - `RenderPassKind::BlockBuild` 映射到 `RendererDrawStage::BlockBuild`；
+    - `RenderPassKind::Block` 与 `RenderPassKind::BlockOverdraw` 映射到 `RendererDrawStage::BlockOverdraw`；
+    - Java stage 排序测试锁定 `Floor -> BlockShadows -> BlockWalls -> BlockBuild -> Lighting -> Darkness -> Fog -> Block`。
+  - `desktop/src/lib.rs`
+    - block shadow/darkness graphics frame 断言从旧的 `block < darkness` 改为 `BlockShadows < BlockWalls < Darkness < Block`，对齐 Java 尾段 overdraw 顺序。
+- Java 对照要点：
+  - `Layer.block - 1` 对应 shadow，已由 `BlockShadows` 表达；
+  - `Layer.block - 0.09f` 对应 walls cache，已由 `BlockWalls` 表达；
+  - `Layer.blockBuilding` 对应建造/施工 shader 路径，保留 `BlockBuild`；
+  - `blocks.drawBlocks()` 位于 fog/overlay 后的 drawOver 尾段，当前由 `Block`/`BlockOverdraw` stage 表达。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 OpenGL/glow backend 尚未消费这些 pass；
+  - `BlockBuild` 还需要接入真实建造/施工视觉命令；
+  - 当前总体迁移约 25.5%，仍未达到完整可玩。

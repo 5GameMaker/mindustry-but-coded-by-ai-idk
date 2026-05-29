@@ -5892,10 +5892,9 @@ mod tests {
             .iter()
             .position(|pass| pass.kind == RenderPassKind::Darkness)
             .expect("darkness resolve pass should be indexed");
-        assert!(shadow_index < block_index);
         assert!(shadow_index < walls_index);
-        assert!(walls_index < block_index);
-        assert!(block_index < darkness_index);
+        assert!(walls_index < darkness_index);
+        assert!(darkness_index < block_index);
         assert_eq!(
             darkness.target,
             RenderTarget::Buffer("block-darkness".into())

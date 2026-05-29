@@ -9941,3 +9941,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步：
   1. 继续把 Fog pass 的 custom marker 下沉成更具体的 geometry/texture commands；
   2. 真实 OpenGL/glow backend 需要创建 `fog:static` / `fog:dynamic` FBO 并执行 `DrawFboSample`。
+
+---
+
+## 304. 最新闭环记录：BlockBuild / BlockOverdraw stage 语义拆分
+
+- 本轮总体进度更新：约 **25.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPassKind` 新增 `BlockBuild` 与 `BlockOverdraw`；
+    - `BlockBuild` 映射到 `RendererDrawStage::BlockBuild`；
+    - `Block` 和 `BlockOverdraw` 映射到 `RendererDrawStage::BlockOverdraw`，用于 Java `Trigger.drawOver -> blocks.drawBlocks()` 尾段；
+    - Java renderer 排序测试改为 `Floor -> BlockShadows -> BlockWalls -> BlockBuild -> Lighting -> Darkness -> Fog -> Block`。
+  - `desktop/src/lib.rs`
+    - graphics frame 顺序断言改为 `BlockShadows < BlockWalls < Darkness < Block`，不再把普通 block sprite pass 当作 darkness 之前的 build 阶段。
+- 已验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core render_engine --lib`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 把真实建造/施工视觉命令接入 `RenderPassKind::BlockBuild`；
+  2. 继续把 fog/block 里的 custom marker 下沉为真实 primitive/texture/FBO 命令；
+  3. 真实 OpenGL/glow backend 仍是渲染可玩化 P0，当前仍是 OpenGL 语义的 backend-neutral seam。

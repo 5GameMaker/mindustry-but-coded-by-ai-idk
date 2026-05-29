@@ -572,7 +572,9 @@ pub enum RenderPassKind {
     Floor,
     BlockShadows,
     BlockWalls,
+    BlockBuild,
     Block,
+    BlockOverdraw,
     Overlay,
     Fog,
     Minimap,
@@ -589,7 +591,9 @@ impl RenderPassKind {
             Self::Floor => "floor",
             Self::BlockShadows => "block_shadows",
             Self::BlockWalls => "block_walls",
+            Self::BlockBuild => "block_build",
             Self::Block => "block",
+            Self::BlockOverdraw => "block_overdraw",
             Self::Overlay => "overlay",
             Self::Fog => "fog",
             Self::Minimap => "minimap",
@@ -606,7 +610,9 @@ impl RenderPassKind {
             Self::Floor => 10,
             Self::BlockShadows => 20,
             Self::BlockWalls => 30,
+            Self::BlockBuild => 40,
             Self::Block => 20,
+            Self::BlockOverdraw => 100,
             Self::Overlay => 30,
             Self::Fog => 90,
             Self::Minimap => 40,
@@ -623,7 +629,9 @@ impl RenderPassKind {
             Self::Floor => RendererDrawStage::Floor,
             Self::BlockShadows => RendererDrawStage::BlockShadows,
             Self::BlockWalls => RendererDrawStage::BlockWalls,
-            Self::Block => RendererDrawStage::BlockBuild,
+            Self::BlockBuild => RendererDrawStage::BlockBuild,
+            Self::Block => RendererDrawStage::BlockOverdraw,
+            Self::BlockOverdraw => RendererDrawStage::BlockOverdraw,
             Self::Overlay => RendererDrawStage::Overlay,
             Self::Fog => RendererDrawStage::Fog,
             Self::Minimap => RendererDrawStage::Debug,
@@ -1125,19 +1133,22 @@ mod tests {
                 .iter()
                 .map(|pass| pass.kind.label())
                 .collect::<Vec<_>>(),
-            vec!["background", "floor", "block", "lighting", "overlay", "ui"]
+            vec!["background", "floor", "lighting", "overlay", "block", "ui"]
         );
         assert!(plan.matches_java_renderer_draw_order());
     }
 
     #[test]
-    fn block_pass_sorts_after_shadows_and_before_lighting_like_java_renderer() {
+    fn block_pass_sorts_after_fog_like_java_draw_blocks_overdraw() {
         let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
         let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
         let mut plan = RenderFramePlan::new(7, RenderSize::new(64.0, 64.0), camera, viewport);
 
         plan.push_pass(RenderPass::new(RenderPassKind::Lighting).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::Block).with_order(0));
+        plan.push_pass(RenderPass::new(RenderPassKind::Fog).with_order(0));
+        plan.push_pass(RenderPass::new(RenderPassKind::Darkness).with_order(0));
+        plan.push_pass(RenderPass::new(RenderPassKind::BlockBuild).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::BlockWalls).with_order(0));
         plan.push_pass(RenderPass::new(RenderPassKind::BlockShadows).with_order(99));
         plan.push_pass(RenderPass::new(RenderPassKind::Floor).with_order(100));
@@ -1152,13 +1163,16 @@ mod tests {
                 RenderPassKind::Floor,
                 RenderPassKind::BlockShadows,
                 RenderPassKind::BlockWalls,
-                RenderPassKind::Block,
+                RenderPassKind::BlockBuild,
                 RenderPassKind::Lighting,
+                RenderPassKind::Darkness,
+                RenderPassKind::Fog,
+                RenderPassKind::Block,
             ]
         );
         assert_eq!(
             RenderPassKind::Block.java_renderer_draw_stage(),
-            RendererDrawStage::BlockBuild
+            RendererDrawStage::BlockOverdraw
         );
         assert!(plan.matches_java_renderer_draw_order());
     }
@@ -1212,10 +1226,22 @@ mod tests {
                 RendererDrawStage::BlockWalls,
             ),
             (
+                RenderPassKind::BlockBuild,
+                "block_build",
+                40,
+                RendererDrawStage::BlockBuild,
+            ),
+            (
                 RenderPassKind::Block,
                 "block",
                 20,
-                RendererDrawStage::BlockBuild,
+                RendererDrawStage::BlockOverdraw,
+            ),
+            (
+                RenderPassKind::BlockOverdraw,
+                "block_overdraw",
+                100,
+                RendererDrawStage::BlockOverdraw,
             ),
             (
                 RenderPassKind::Overlay,
