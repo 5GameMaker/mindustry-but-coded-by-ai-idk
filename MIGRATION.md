@@ -13001,6 +13001,10 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 尚未把 `DesktopGraphicsOpenGlBackendEvent` 拆成真实 adapter trait；
   - 当前总体迁移约 27.0%，仍未达到完整可玩。
 
+### BindFramebuffer / target bind 接入记录
+
+- 当前 `BeginPass/EndPass` 已从 resource table 与 resolve 计数前置数据链推进到 draw / resolve draw 前的显式 `BindFramebuffer`；native driver 已开始执行 `glBindFramebuffer` / viewport。下一步仍需把 per-target clear、viewport/scissor/blend state 与 primitive mesh/entity/UI 的 draw path 串成更完整的 pass 时序。
+
 ## 12.414 OpenGL backend adapter trait 边界
 
 - 2026-05-29：继续收口 OpenGL 后端执行边界，新增无依赖 backend adapter trait，使 executor 的 event log 可以被 adapter 顺序消费。该层仍不引入 `glow/glutin/winit`，只定义后续真实 OpenGL adapter 的输入边界。
@@ -14889,3 +14893,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - DirectionLiquidBridge / reinforced bridge conduit 仍应按 Java `DirectionBridge` 独立 runtime 补齐，不能混入 LiquidBridge sidecar；
   - 液体网络完整 updateTile / flow / bridge 占用关系仍需继续迁移；
   - 当前总体迁移约 35.4%，仍未达到完整可玩。
+
+## 398. 最新闭环记录：native OpenGL target framebuffer bind / viewport 闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **36.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - draw / resolve 计划新增 `BindFramebuffer`；
+    - target bind 现在作为显式步骤进入 frame plan 与 resolve 链路，不再仅靠数据层隐式保存。
+  - `desktop/src/main.rs`
+    - native driver 开始执行 target bind 闭环；
+    - resolve 与 draw 路径会按顺序调用 `glBindFramebuffer`，并在绑定后同步 `viewport`；
+    - source / resolve target 的有序切换已从“记录”推进到“驱动侧执行”；
+    - 非 screen target 缺失 FBO 时不再静默当成默认 backbuffer，而是记录问题并按目标尺寸惰性创建 attachment。
+- 仍未完成：
+  - clear command native 化；
+  - viewport / scissor / blend 的完整接管；
+  - primitive mesh / entity / UI 的真实 draw path 仍需继续推进。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime --no-run`
+  - `git diff --check`

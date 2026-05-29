@@ -12325,3 +12325,17 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 真正解决 pass 时序：把 BeginPass/EndPass 有序 target bind 下沉到 native driver，而不是只在数据层保存；
   2. resolve draw 前显式绑定 resolve target，支持非 screen resolve target；
   3. primitive mesh：优先把 `FillRect/StrokeRect/DrawLine/DrawPixel` 接入 draw path。
+  4. `BindFramebuffer` / target bind 已推进到 native driver 的 `glBindFramebuffer` / viewport；clear 顺序仍需继续下沉。
+
+### 2026-05-30：native OpenGL target framebuffer bind 闭环
+
+- 当前整体完成度：约 **36.8%**。
+- 这轮需要交接给下一位的重点：
+  - draw / resolve 计划已经新增 `BindFramebuffer`；
+  - native driver 将负责真实执行 `glBindFramebuffer + viewport` 的有序闭环；
+  - 非 screen target 缺失 FBO 时会记录问题并按目标尺寸惰性创建 attachment，不再静默落到默认 backbuffer；
+  - 还没完成的部分依次是：
+    1. clear command native 化；
+    2. viewport / scissor / blend 的完整接管；
+    3. primitive mesh / entity / UI 的真实 draw path。
+- 建议下一步继续围绕 render target 链路推进，先把 bind / clear 的驱动侧时序打牢，再向 primitive draw 扩展。

@@ -1882,6 +1882,7 @@ pub struct DesktopGraphicsOpenGlBackendShaderBuildExecutor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
     pub batch_index: usize,
+    pub target: Option<RenderTarget>,
     pub shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
     pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
     pub vertex_array_key: String,
@@ -2838,6 +2839,7 @@ impl DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
     ) -> Self {
         Self {
             batch_index: resource_plan.batch_index,
+            target: batch.target.clone(),
             shader_program: batch.shader_program.clone(),
             texture_identity: batch.texture_identity.clone(),
             vertex_array_key: resource_plan.vertex_array_key.clone(),
@@ -3783,6 +3785,9 @@ impl DesktopGraphicsOpenGlBackendResolveCommand {
             return Vec::new();
         };
         vec![
+            DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                target: Some(self.resolve_target.clone()),
+            },
             DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
                 program_handle: shader_program_handle,
             },
@@ -4350,6 +4355,9 @@ impl DesktopGraphicsOpenGlBackendTextureUploadSink
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendDrawCallAction {
+    BindFramebuffer {
+        target: Option<RenderTarget>,
+    },
     UseProgram {
         program_key: String,
     },
@@ -4378,6 +4386,11 @@ impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
         &mut self,
         draw_call: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan,
     ) {
+        self.actions.push(
+            DesktopGraphicsOpenGlBackendDrawCallAction::BindFramebuffer {
+                target: draw_call.target.clone(),
+            },
+        );
         self.actions
             .push(DesktopGraphicsOpenGlBackendDrawCallAction::UseProgram {
                 program_key: draw_call.shader_program.program_key,
@@ -4402,6 +4415,9 @@ impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
+    BindFramebuffer {
+        target: Option<RenderTarget>,
+    },
     UseProgram {
         program_handle: u32,
         program_key: String,
@@ -4423,6 +4439,9 @@ pub enum DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendDrawCommand {
+    BindFramebuffer {
+        target: Option<RenderTarget>,
+    },
     UseProgram {
         program_handle: u32,
     },
@@ -4665,6 +4684,11 @@ impl DesktopGraphicsOpenGlBackendRuntime for DesktopGraphicsNullOpenGlBackendRun
 impl DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
     pub fn to_opengl_draw_commands(&self) -> Vec<DesktopGraphicsOpenGlBackendDrawCommand> {
         match self {
+            Self::BindFramebuffer { target } => {
+                vec![DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                    target: target.clone(),
+                }]
+            }
             Self::UseProgram { program_handle, .. } => {
                 vec![DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
                     program_handle: *program_handle,
@@ -5012,6 +5036,9 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
         allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
     ) -> DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
         match action {
+            DesktopGraphicsOpenGlBackendDrawCallAction::BindFramebuffer { target } => {
+                DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindFramebuffer { target }
+            }
             DesktopGraphicsOpenGlBackendDrawCallAction::UseProgram { program_key } => {
                 let program_handle = self.program_handle(program_key.clone(), allocator);
                 DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
@@ -16076,6 +16103,7 @@ mod tests {
             executor.state.sprite_draw_call_plans[0],
             super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
                 batch_index: 0,
+                target: Some(RenderTarget::Buffer("lighting-buffer".into())),
                 shader_program: super::DesktopGraphicsOpenGlBackendShaderProgramIdentity {
                     shader: ShaderId::Mesh,
                     program_key: "shader:Mesh".into(),
@@ -16252,6 +16280,9 @@ mod tests {
         assert_eq!(
             draw_call_executor.actions,
             vec![
+                super::DesktopGraphicsOpenGlBackendDrawCallAction::BindFramebuffer {
+                    target: Some(RenderTarget::Buffer("lighting-buffer".into())),
+                },
                 super::DesktopGraphicsOpenGlBackendDrawCallAction::UseProgram {
                     program_key: "shader:Mesh".into(),
                 },
@@ -16287,6 +16318,9 @@ mod tests {
         assert_eq!(
             resolving_executor.actions,
             vec![
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindFramebuffer {
+                    target: Some(RenderTarget::Buffer("lighting-buffer".into())),
+                },
                 super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
                     program_handle: 1,
                     program_key: "shader:Mesh".into(),
@@ -16310,6 +16344,9 @@ mod tests {
         assert_eq!(
             resolving_executor.commands,
             vec![
+                super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                    target: Some(RenderTarget::Buffer("lighting-buffer".into())),
+                },
                 super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 1 },
                 super::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
                     texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
@@ -17453,6 +17490,7 @@ mod tests {
             ],
             sprite_draw_call_plans: vec![super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
                 batch_index: 0,
+                target: None,
                 shader_program:
                     super::DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(
                         ShaderId::Space,
@@ -17504,6 +17542,9 @@ mod tests {
         assert_eq!(
             executor.resolved_draw_actions,
             vec![
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindFramebuffer {
+                    target: None,
+                },
                 super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
                     program_handle: 1,
                     program_key: "shader:Space".into(),
@@ -17526,10 +17567,14 @@ mod tests {
         );
         assert_eq!(
             executor.draw_commands[0],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer { target: None }
+        );
+        assert_eq!(
+            executor.draw_commands[1],
             super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 1 }
         );
         assert_eq!(
-            executor.draw_commands[2],
+            executor.draw_commands[3],
             super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
                 target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
                 texture_handle: 2,
@@ -17593,6 +17638,7 @@ mod tests {
         };
         let draw_call = super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
             batch_index: 0,
+            target: None,
             shader_program: super::DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(
                 ShaderId::Mesh,
             ),
@@ -17636,6 +17682,9 @@ mod tests {
         assert_eq!(
             executor.resolved_draw_actions,
             vec![
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindFramebuffer {
+                    target: None,
+                },
                 super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
                     program_handle: 5,
                     program_key: "shader:Mesh".into(),
@@ -17670,14 +17719,22 @@ mod tests {
             }
         );
         assert_eq!(
-            executor.draw_commands[2],
+            executor.draw_commands[0],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer { target: None }
+        );
+        assert_eq!(
+            executor.draw_commands[1],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 5 }
+        );
+        assert_eq!(
+            executor.draw_commands[3],
             super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
                 target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
                 texture_handle: 1,
             }
         );
         assert_eq!(
-            executor.draw_commands[3],
+            executor.draw_commands[4],
             super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
                 vertex_array_handle: 2,
             }
@@ -20168,6 +20225,9 @@ mod tests {
         };
 
         let expected = vec![
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                target: Some(RenderTarget::Screen),
+            },
             super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 17 },
             super::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
                 texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
@@ -20256,6 +20316,9 @@ mod tests {
         assert_eq!(
             executor.resolve_draw_commands,
             vec![
+                super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                    target: Some(RenderTarget::Screen),
+                },
                 super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 3 },
                 super::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
                     texture_unit: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE0,
@@ -20281,7 +20344,7 @@ mod tests {
         assert!(executor.resolve_sample_quads.is_empty());
 
         let mut sink = super::DesktopGraphicsRecordingOpenGlBackendDrawCommandSink::default();
-        assert_eq!(executor.drive_resolve_draw_command_sink(&mut sink), 5);
+        assert_eq!(executor.drive_resolve_draw_command_sink(&mut sink), 6);
         assert_eq!(sink.commands, executor.resolve_draw_commands);
     }
 
@@ -20338,7 +20401,7 @@ mod tests {
         });
 
         assert_eq!(executor.resolve_commands.len(), 2);
-        assert_eq!(executor.resolve_draw_commands.len(), 10);
+        assert_eq!(executor.resolve_draw_commands.len(), 12);
         assert_eq!(
             executor.resolve_sample_quads,
             vec![
@@ -20494,23 +20557,29 @@ mod tests {
             ))
         );
 
-        let rect_commands = &executor.resolve_draw_commands[0..5];
-        let fbo_commands = &executor.resolve_draw_commands[5..10];
+        let rect_commands = &executor.resolve_draw_commands[0..6];
+        let fbo_commands = &executor.resolve_draw_commands[6..12];
         assert_eq!(
             rect_commands[0],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                target: Some(RenderTarget::Screen),
+            }
+        );
+        assert_eq!(
+            rect_commands[1],
             super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
                 program_handle: rect_program
             }
         );
         assert_eq!(
-            rect_commands[2],
+            rect_commands[3],
             super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
                 target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
                 texture_handle: rect_texture,
             }
         );
         assert_eq!(
-            rect_commands[3],
+            rect_commands[4],
             super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
                 vertex_array_handle: rect_quad_vertex_array,
             }
@@ -20534,19 +20603,25 @@ mod tests {
         );
         assert_eq!(
             fbo_commands[0],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                target: Some(RenderTarget::Screen),
+            }
+        );
+        assert_eq!(
+            fbo_commands[1],
             super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
                 program_handle: fbo_program
             }
         );
         assert_eq!(
-            fbo_commands[2],
+            fbo_commands[3],
             super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
                 target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
                 texture_handle: fbo_texture,
             }
         );
         assert_eq!(
-            fbo_commands[3],
+            fbo_commands[4],
             super::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
                 vertex_array_handle: fbo_quad_vertex_array,
             }
@@ -20566,7 +20641,7 @@ mod tests {
             [fbo_sample.uv.u2, fbo_sample.uv.v2]
         );
         assert_eq!(
-            fbo_commands[4],
+            fbo_commands[5],
             super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
                 primitive_type:
                     super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
@@ -20579,7 +20654,7 @@ mod tests {
         );
 
         let mut sink = super::DesktopGraphicsRecordingOpenGlBackendDrawCommandSink::default();
-        assert_eq!(executor.drive_resolve_draw_command_sink(&mut sink), 10);
+        assert_eq!(executor.drive_resolve_draw_command_sink(&mut sink), 12);
         assert_eq!(sink.commands, executor.resolve_draw_commands);
     }
 
@@ -20632,7 +20707,7 @@ mod tests {
         assert!(executor.resolved_resolve_mesh_uploads.is_empty());
         assert!(executor.resolve_mesh_upload_commands.is_empty());
         assert!(executor.resolve_sample_quads.is_empty());
-        assert_eq!(executor.resolve_draw_commands.len(), 15);
+        assert_eq!(executor.resolve_draw_commands.len(), 18);
         assert_eq!(
             executor.cache.vertex_arrays.len(),
             1,
@@ -20679,7 +20754,7 @@ mod tests {
         super::DesktopGraphicsOpenGlBackendRuntime::present_frame(&mut runtime);
 
         assert_eq!(driver_state.framebuffer_attachment_plans, 1);
-        assert_eq!(driver_state.resolve_draw_commands, 5);
+        assert_eq!(driver_state.resolve_draw_commands, 6);
         assert_eq!(driver_state.resolve_commands, 1);
         assert_eq!(
             runtime.state.surface_size,
@@ -20693,6 +20768,9 @@ mod tests {
             runtime.driver.commands.as_slice(),
             [
                 super::DesktopGraphicsOpenGlBackendDriverCommand::FramebufferAttachment(_),
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer { .. }
+                ),
                 super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
                     super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { .. }
                 ),

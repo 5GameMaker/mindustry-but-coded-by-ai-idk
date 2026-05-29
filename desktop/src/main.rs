@@ -267,6 +267,14 @@ impl DesktopNativeOpenGlRuntime {
 
     fn clear_backbuffer(&self) {
         unsafe {
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            let size = self.window_surface_size();
+            self.gl.viewport(
+                0,
+                0,
+                size.width.min(i32::MAX as u32) as i32,
+                size.height.min(i32::MAX as u32) as i32,
+            );
             self.gl.clear_color(0.015, 0.018, 0.025, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
@@ -289,9 +297,11 @@ struct DesktopNativeOpenGlDriver<'a> {
     framebuffer_handle_cache: &'a mut mindustry_desktop::DesktopGraphicsOpenGlBackendHandleCache,
     framebuffer_handle_allocator:
         &'a mut mindustry_desktop::DesktopGraphicsOpenGlBackendHandleAllocator,
+    surface_size: mindustry_desktop::DesktopSurfaceSize,
     shader_asset_root: &'a std::path::Path,
     current_program: &'a mut Option<u32>,
     current_vertex_array: &'a mut Option<u32>,
+    draw_target_available: bool,
     native_errors: &'a mut Vec<String>,
 }
 
@@ -355,6 +365,111 @@ impl DesktopNativeOpenGlDriver<'_> {
                 None
             }
         }
+    }
+
+    fn framebuffer_key_for_render_target(
+        target: &mindustry_core::mindustry::graphics::RenderTarget,
+    ) -> Option<String> {
+        match target {
+            mindustry_core::mindustry::graphics::RenderTarget::Screen => None,
+            mindustry_core::mindustry::graphics::RenderTarget::Texture(name) => {
+                Some(format!("framebuffer:texture:{name}"))
+            }
+            mindustry_core::mindustry::graphics::RenderTarget::Buffer(name) => {
+                Some(format!("framebuffer:buffer:{name}"))
+            }
+        }
+    }
+
+    fn framebuffer_attachment_key_for_render_target(
+        target: &mindustry_core::mindustry::graphics::RenderTarget,
+    ) -> Option<String> {
+        match target {
+            mindustry_core::mindustry::graphics::RenderTarget::Screen => None,
+            mindustry_core::mindustry::graphics::RenderTarget::Texture(name) => {
+                Some(format!("framebuffer-attachment:texture:{name}:color0"))
+            }
+            mindustry_core::mindustry::graphics::RenderTarget::Buffer(name) => {
+                Some(format!("framebuffer-attachment:buffer:{name}:color0"))
+            }
+        }
+    }
+
+    fn native_framebuffer_for_bound_render_target(
+        &mut self,
+        target: Option<&mindustry_core::mindustry::graphics::RenderTarget>,
+    ) -> Result<Option<glow::NativeFramebuffer>, ()> {
+        let Some(target) = target else {
+            return Ok(None);
+        };
+        let Some(framebuffer_key) = Self::framebuffer_key_for_render_target(target) else {
+            return Ok(None);
+        };
+        if let Some(logical_handle) = self
+            .framebuffer_handle_cache
+            .framebuffers
+            .get(&framebuffer_key)
+            .copied()
+        {
+            return self
+                .framebuffer_for_handle(logical_handle)
+                .map(Some)
+                .ok_or(());
+        }
+
+        let (width, height) = self.viewport_for_render_target(Some(target));
+        let width = u32::try_from(width.max(1)).unwrap_or(1);
+        let height = u32::try_from(height.max(1)).unwrap_or(1);
+        self.native_errors.push(format!(
+            "native OpenGL framebuffer for target {:?} was missing; lazily creating {}x{} attachment instead of binding the default framebuffer",
+            target, width, height
+        ));
+        self.native_framebuffer_for_render_target(target, width, height)
+            .map(Some)
+            .ok_or(())
+    }
+
+    fn viewport_for_render_target(
+        &self,
+        target: Option<&mindustry_core::mindustry::graphics::RenderTarget>,
+    ) -> (i32, i32) {
+        let fallback_width = self.surface_size.width.min(i32::MAX as u32) as i32;
+        let fallback_height = self.surface_size.height.min(i32::MAX as u32) as i32;
+        let Some(target) = target else {
+            return (fallback_width, fallback_height);
+        };
+        let Some(attachment_key) = Self::framebuffer_attachment_key_for_render_target(target)
+        else {
+            return (fallback_width, fallback_height);
+        };
+        let Some(attachment) = self
+            .framebuffer_handle_cache
+            .framebuffer_attachments
+            .get(&attachment_key)
+        else {
+            return (fallback_width, fallback_height);
+        };
+        (
+            attachment.width.min(i32::MAX as u32) as i32,
+            attachment.height.min(i32::MAX as u32) as i32,
+        )
+    }
+
+    fn bind_framebuffer_target(
+        &mut self,
+        target: Option<&mindustry_core::mindustry::graphics::RenderTarget>,
+    ) -> bool {
+        let Ok(framebuffer) = self.native_framebuffer_for_bound_render_target(target) else {
+            *self.current_program = None;
+            *self.current_vertex_array = None;
+            return false;
+        };
+        let (width, height) = self.viewport_for_render_target(target);
+        unsafe {
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+            self.gl.viewport(0, 0, width, height);
+        }
+        true
     }
 
     fn delete_framebuffer_handle(&mut self, framebuffer_handle: u32) {
@@ -1200,9 +1315,17 @@ impl DesktopNativeOpenGlDriver<'_> {
         command: &mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand,
     ) {
         match command {
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
+                target,
+            } => {
+                self.draw_target_available = self.bind_framebuffer_target(target.as_ref());
+            }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {
                 program_handle,
             } => {
+                if !self.draw_target_available {
+                    return;
+                }
                 if let Some(program) = self.existing_program(*program_handle) {
                     unsafe {
                         self.gl.use_program(Some(program));
@@ -1213,12 +1336,18 @@ impl DesktopNativeOpenGlDriver<'_> {
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
                 texture_unit,
             } => unsafe {
+                if !self.draw_target_available {
+                    return;
+                }
                 self.gl.active_texture(*texture_unit);
             },
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
                 target,
                 texture_handle,
             } => {
+                if !self.draw_target_available {
+                    return;
+                }
                 if let Some(texture) = self.texture_for_handle(*texture_handle) {
                     unsafe {
                         self.gl.bind_texture(*target, Some(texture));
@@ -1228,6 +1357,9 @@ impl DesktopNativeOpenGlDriver<'_> {
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
                 vertex_array_handle,
             } => {
+                if !self.draw_target_available {
+                    return;
+                }
                 if let Some(vertex_array) = self.vertex_array_for_handle(*vertex_array_handle) {
                     unsafe {
                         self.gl.bind_vertex_array(Some(vertex_array));
@@ -1241,6 +1373,9 @@ impl DesktopNativeOpenGlDriver<'_> {
                 index_type,
                 index_offset_bytes,
             } => {
+                if !self.draw_target_available {
+                    return;
+                }
                 if self.current_program.is_some() && self.current_vertex_array.is_some() {
                     if let (Ok(index_count), Ok(index_offset_bytes)) = (
                         i32::try_from(*index_count),
@@ -1383,6 +1518,10 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
         executor: &mindustry_desktop::DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
     ) -> mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
         self.clear_backbuffer();
+        let surface_size = self
+            .state
+            .surface_size
+            .unwrap_or_else(|| self.window_surface_size());
         let mut driver = DesktopNativeOpenGlDriver {
             gl: &self.gl,
             recording: &mut self.driver,
@@ -1396,9 +1535,11 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             uniform_locations: &mut self.uniform_locations,
             framebuffer_handle_cache: &mut self.framebuffer_handle_cache,
             framebuffer_handle_allocator: &mut self.framebuffer_handle_allocator,
+            surface_size,
             shader_asset_root: &self.shader_asset_root,
             current_program: &mut self.current_program,
             current_vertex_array: &mut self.current_vertex_array,
+            draw_target_available: true,
             native_errors: &mut self.native_errors,
         };
         let driver_state = executor.drive_driver(&mut driver);
