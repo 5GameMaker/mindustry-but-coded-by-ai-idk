@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **30.0%**。
+- 当前总体迁移完成度：约 **30.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10962,3 +10962,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 优先推进 texture upload/resource table，让 `texture_identity.gl_handle` 接入 `BindTexture`；
   2. 继续推进真实 GL backend 对 `glUniform* / glVertexAttribPointer / glDrawElements` 的 adapter trait；
   3. 之后补 window/context/present 闭环，保持原版 OpenGL/Arc 语义。
+
+---
+
+## 350. 最新闭环记录：Texture resource table / BindTexture handle hint
+
+- 本轮总体进度更新：约 **30.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendTextureResource`；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureResourceTable`；
+    - executor 与 classifying adapter 记录 sprite texture binding 时同步注册 texture resource；
+    - `DrawCallAction::BindTexture` 改为携带完整 `texture_identity`；
+    - `HandleCache::texture_handle_for_identity(...)` 优先消费 `gl_handle`，没有真实 handle 时才回退模拟分配；
+    - 测试覆盖 atlas page texture resource table 与真实 texture handle hint。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 补 atlas page generation / dirty invalidation / upload plan；
+  2. 把 texture resource table 与真实 `glTexImage2D` 上传边界对齐；
+  3. 继续推进真实 OpenGL executor/present，不切换到 wgpu/Bevy。

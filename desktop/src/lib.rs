@@ -494,6 +494,59 @@ impl DesktopGraphicsOpenGlBackendTextureResourceIdentity {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendTextureResource {
+    pub key: String,
+    pub identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
+    pub page_type: PageType,
+    pub page_source_path: String,
+    pub page_width: u32,
+    pub page_height: u32,
+    pub sampler: DesktopGraphicsTextureSamplerTrace,
+    pub bind_count: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendTextureResourceTable {
+    pub resources: BTreeMap<String, DesktopGraphicsOpenGlBackendTextureResource>,
+}
+
+impl DesktopGraphicsOpenGlBackendTextureResource {
+    pub fn from_binding(binding: &DesktopGraphicsOpenGlBackendTextureBinding) -> Self {
+        Self {
+            key: binding.texture_identity.key.clone(),
+            identity: binding.texture_identity.clone(),
+            page_type: binding.page_type,
+            page_source_path: binding.page_source_path.clone(),
+            page_width: binding.page_width,
+            page_height: binding.page_height,
+            sampler: binding.sampler,
+            bind_count: 0,
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendTextureResourceTable {
+    pub fn register_binding(&mut self, binding: &DesktopGraphicsOpenGlBackendTextureBinding) {
+        let key = binding.texture_identity.key.clone();
+        let resource = self
+            .resources
+            .entry(key)
+            .or_insert_with(|| DesktopGraphicsOpenGlBackendTextureResource::from_binding(binding));
+        resource.identity = binding.texture_identity.clone();
+        resource.page_type = binding.page_type;
+        resource.page_source_path = binding.page_source_path.clone();
+        resource.page_width = binding.page_width;
+        resource.page_height = binding.page_height;
+        resource.sampler = binding.sampler;
+        resource.bind_count += 1;
+    }
+
+    pub fn get(&self, key: &str) -> Option<&DesktopGraphicsOpenGlBackendTextureResource> {
+        self.resources.get(key)
+    }
+}
+
 impl DesktopGraphicsOpenGlBackendTextureBinding {
     pub fn from_resolved_sprite(sprite: &DesktopGraphicsResolvedSpriteTrace) -> Option<Self> {
         if sprite.missing {
@@ -1795,7 +1848,7 @@ pub enum DesktopGraphicsOpenGlBackendDrawCallAction {
         program_key: String,
     },
     BindTexture {
-        texture_key: String,
+        texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
     },
     BindVertexArray {
         vertex_array_key: String,
@@ -1825,7 +1878,7 @@ impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
             });
         self.actions
             .push(DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture {
-                texture_key: draw_call.texture_identity.key,
+                texture_identity: draw_call.texture_identity,
             });
         self.actions.push(
             DesktopGraphicsOpenGlBackendDrawCallAction::BindVertexArray {
@@ -1913,6 +1966,19 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
             .or_insert_with(|| allocator.allocate())
     }
 
+    pub fn texture_handle_for_identity(
+        &mut self,
+        identity: &DesktopGraphicsOpenGlBackendTextureResourceIdentity,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> u32 {
+        if let Some(handle) = identity.gl_handle {
+            self.textures.insert(identity.key.clone(), handle);
+            handle
+        } else {
+            self.texture_handle(identity.key.clone(), allocator)
+        }
+    }
+
     pub fn vertex_array_handle(
         &mut self,
         key: impl Into<String>,
@@ -1938,8 +2004,9 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
                     program_key,
                 }
             }
-            DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture { texture_key } => {
-                let texture_handle = self.texture_handle(texture_key.clone(), allocator);
+            DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture { texture_identity } => {
+                let texture_key = texture_identity.key.clone();
+                let texture_handle = self.texture_handle_for_identity(&texture_identity, allocator);
                 DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindTexture {
                     texture_handle,
                     texture_key,
@@ -2019,6 +2086,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
+    pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
     pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
@@ -2060,6 +2128,8 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             actions: Vec::new(),
             shader_program_bindings: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
+            sprite_texture_resource_table:
+                DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
             sprite_texture_bindings: Vec::new(),
             sprite_quads: Vec::new(),
             sprite_mesh_batches: Vec::new(),
@@ -2191,6 +2261,9 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                             ),
                         );
                     }
+                    self.state
+                        .sprite_texture_resource_table
+                        .register_binding(&binding);
                     self.state.sprite_texture_bindings.push(binding);
                 } else {
                     self.state.missing_sprite_texture_bindings += 1;
@@ -2377,6 +2450,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
+    pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub action_count: usize,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
@@ -2419,6 +2493,8 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             actions: Vec::new(),
             shader_program_bindings: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
+            sprite_texture_resource_table:
+                DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
             last_action: None,
             action_count: 0,
             sprite_texture_bindings: Vec::new(),
@@ -2558,6 +2634,9 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                             ),
                         );
                     }
+                    self.state
+                        .sprite_texture_resource_table
+                        .register_binding(&binding);
                     self.state.sprite_texture_bindings.push(binding);
                 } else {
                     self.state.missing_sprite_texture_bindings += 1;
@@ -10335,6 +10414,39 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_handle_cache_prefers_texture_identity_gl_handle() {
+        let mut cache = super::DesktopGraphicsOpenGlBackendHandleCache::default();
+        let mut allocator = super::DesktopGraphicsOpenGlBackendHandleAllocator::default();
+        let texture_identity =
+            super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                PageType::Main,
+                "sprites.png",
+            )
+            .with_gl_handle(101, 1);
+
+        let resolved = cache.resolve_action(
+            super::DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture {
+                texture_identity: texture_identity.clone(),
+            },
+            &mut allocator,
+        );
+
+        assert_eq!(
+            resolved,
+            super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindTexture {
+                texture_handle: 101,
+                texture_key: texture_identity.key.clone(),
+            }
+        );
+        assert_eq!(cache.textures[&texture_identity.key], 101);
+        assert_eq!(
+            cache.texture_handle_for_identity(&texture_identity, &mut allocator),
+            101
+        );
+        assert_eq!(allocator.next_handle, 1);
+    }
+
+    #[test]
     fn desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps() {
         let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
         let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
@@ -10520,6 +10632,20 @@ mod tests {
             executor.state.sprite_texture_bindings[0].uv,
             [0.0, 0.0, 1.0 / 4096.0, 1.0 / 4096.0]
         );
+        assert_eq!(
+            executor.state.sprite_texture_resource_table.resources.len(),
+            1
+        );
+        let texture_resource = executor
+            .state
+            .sprite_texture_resource_table
+            .get("atlas:Main:sprites.png")
+            .expect("resolved sprite texture should be registered as a resource");
+        assert_eq!(texture_resource.page_source_path, "sprites.png");
+        assert_eq!(texture_resource.page_width, 4096);
+        assert_eq!(texture_resource.page_height, 4096);
+        assert_eq!(texture_resource.identity.gl_handle, None);
+        assert_eq!(texture_resource.bind_count, 1);
         assert_eq!(executor.state.sprite_quads.len(), 1);
         assert_eq!(executor.state.sprite_quads[0].symbol, "router");
         assert_eq!(
@@ -10705,6 +10831,10 @@ mod tests {
             executor.state.sprite_texture_bindings
         );
         assert_eq!(
+            classifying_adapter.state.sprite_texture_resource_table,
+            executor.state.sprite_texture_resource_table
+        );
+        assert_eq!(
             classifying_adapter.state.sprite_quads,
             executor.state.sprite_quads
         );
@@ -10778,7 +10908,9 @@ mod tests {
                     program_key: "shader:Mesh".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture {
-                    texture_key: "atlas:Main:sprites.png".into(),
+                    texture_identity: executor.state.sprite_draw_call_plans[0]
+                        .texture_identity
+                        .clone(),
                 },
                 super::DesktopGraphicsOpenGlBackendDrawCallAction::BindVertexArray {
                     vertex_array_key: "sprite-batch:0:vao".into(),

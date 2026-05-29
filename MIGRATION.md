@@ -13742,3 +13742,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - location 仍为模拟顺序分配，不是真实 GL program 返回值；
   - 尚未接真实 `glUniform*`、`glVertexAttribPointer`、texture upload/cache 与 window/context present；
   - 当前总体迁移约 30.0%，仍未达到完整可玩。
+
+## 12.444 Texture resource table / BindTexture handle hint
+
+- 2026-05-29：在 shader uniform / vertex attribute location 解析之后继续补纹理资源表与 `BindTexture` 真实 handle hint。当前仍不做真实 PNG upload / `glTexImage2D`，但 sprite resolved texture binding 已注册到 OpenGL backend texture resource table，draw call action 也不再丢弃 `texture_identity`。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendTextureResource`；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureResourceTable`；
+    - executor / classifying adapter 在记录 `DrawSprite` texture binding 时同步注册 texture resource；
+    - `DesktopGraphicsOpenGlBackendDrawCallAction::BindTexture` 改为携带完整 `DesktopGraphicsOpenGlBackendTextureResourceIdentity`；
+    - `DesktopGraphicsOpenGlBackendHandleCache::texture_handle_for_identity(...)` 优先使用 `texture_identity.gl_handle`，没有真实 handle 时才回退到模拟 allocator；
+    - 回归测试验证 atlas page texture resource 记录、bind count、尺寸、sampler/identity 信息稳定；
+    - 回归测试验证带 `gl_handle` 的 texture identity 不会被 allocator 重新分配 fake handle。
+- 迁移意义：
+  - Rust OpenGL texture 语义从“字符串 key 直接分配 fake handle”推进到“texture identity / resource table /真实 handle hint”；
+  - 更接近 Java Arc 的 `TextureRegion -> Texture -> bind()` 语义：region/UV 是视图，texture identity 才是最终绑定对象；
+  - 后续接入真实 atlas page upload/cache 时，可以把上传结果写回 `texture_identity.gl_handle` 或 texture resource table，再由 `BindTexture` 直接消费。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - texture resource table 仍未执行真实 GPU 上传；
+  - atlas page generation / dirty invalidation / upload lifecycle 尚未完整接入；
+  - 当前总体迁移约 30.1%，仍未达到完整可玩。
