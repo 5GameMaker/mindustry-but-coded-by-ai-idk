@@ -13481,5 +13481,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
   - 尚未真正创建/更新 VBO/IBO/VAO；
-  - 真实 GPU texture handle、shader program binding 与 draw call 仍待落地；
+  - texture resource identity 已在下一节补齐，真实 GPU handle 分配、shader program binding 与 draw call 仍待落地；
   - 当前总体迁移约 28.9%，仍未达到完整可玩。
+
+## 12.433 DrawSprite texture resource identity
+
+- 2026-05-29：根据 Java/Arc `TextureRegion.texture` 与 `SpriteBatch.lastTexture` 语义，先把 Rust 侧 texture binding 的“资源身份”从 `page_source_path` provenance 中拆出来。当前仍不创建真实 OpenGL texture，但后续 batch/handle 不再只能依赖路径字符串。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendTextureResourceIdentity`，保留 `key / page_type / page_source_path / generation / gl_handle`；
+    - `from_atlas_page(...)` 用 atlas page provenance 生成初始 identity；
+    - `with_gl_handle(...)` 预留真实 GL handle 与 generation 进入 identity 的路径；
+    - `DesktopGraphicsOpenGlBackendTextureBinding` 新增 `texture_identity`；
+    - `DesktopGraphicsOpenGlBackendSpriteQuad` 与 `DesktopGraphicsOpenGlBackendSpriteMeshBatch` 继续透传 `texture_identity`；
+    - sprite mesh batch 分组条件新增 `texture_identity`，避免后续同路径不同 GL texture instance 被错误合批；
+    - 回归测试验证 atlas identity provenance、无真实 handle 时的状态，以及同路径不同 handle 会拆成不同 batch。
+- 迁移意义：
+  - 更接近 Arc `SpriteBatch` “按 Texture 对象/handle 切换”的语义，而不是把路径当作最终绑定身份；
+  - 为热重载、atlas page 重建、mod override 和真实 GL texture cache 预留 generation/handle；
+  - 保留 `page_source_path` 作为调试来源，同时让后续真实 backend 可改用 `texture_identity` 提交 draw call。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 尚未创建真实 GL texture object，也未把 atlas page 上传到 GPU；
+  - VBO/IBO/VAO、shader program binding 与 draw call 仍待落地；
+  - 当前总体迁移约 29.0%，仍未达到完整可玩。

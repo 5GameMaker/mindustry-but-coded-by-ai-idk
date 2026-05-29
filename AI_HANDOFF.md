@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **28.9%**。
+- 当前总体迁移完成度：约 **29.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10749,3 +10749,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 增加 texture handle/resource identity，避免 page path 被误当成 GL texture；
   2. 推进 VBO/IBO/VAO buffer resource plan；
   3. 接 shader program binding 与实际 draw call executor。
+
+---
+
+## 339. 最新闭环记录：DrawSprite texture resource identity
+
+- 本轮总体进度更新：约 **29.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendTextureResourceIdentity`；
+    - `DesktopGraphicsOpenGlBackendTextureBinding` 新增 `texture_identity`；
+    - `DesktopGraphicsOpenGlBackendSpriteQuad` / `DesktopGraphicsOpenGlBackendSpriteMeshBatch` 透传 texture identity；
+    - sprite mesh batch 分组新增 `texture_identity` 条件；
+    - 测试覆盖 atlas page provenance、无 handle 状态、同路径不同 GL handle 拆 batch。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 推进 VBO/IBO/VAO buffer resource plan；
+  2. 接 shader program identity/binding；
+  3. 后续把 texture identity 连接到真实 GL texture cache/upload。

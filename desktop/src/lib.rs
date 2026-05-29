@@ -454,6 +454,7 @@ pub struct DesktopGraphicsResolvedSpriteTrace {
 pub struct DesktopGraphicsOpenGlBackendTextureBinding {
     pub command_index: Option<usize>,
     pub symbol: String,
+    pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
     pub page_type: PageType,
     pub page_source_path: String,
     pub page_width: u32,
@@ -464,16 +465,51 @@ pub struct DesktopGraphicsOpenGlBackendTextureBinding {
     pub region_height: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendTextureResourceIdentity {
+    pub key: String,
+    pub page_type: PageType,
+    pub page_source_path: String,
+    pub generation: u64,
+    pub gl_handle: Option<u32>,
+}
+
+impl DesktopGraphicsOpenGlBackendTextureResourceIdentity {
+    pub fn from_atlas_page(page_type: PageType, page_source_path: impl Into<String>) -> Self {
+        let page_source_path = page_source_path.into();
+        Self {
+            key: format!("atlas:{page_type:?}:{page_source_path}"),
+            page_type,
+            page_source_path,
+            generation: 0,
+            gl_handle: None,
+        }
+    }
+
+    pub fn with_gl_handle(mut self, gl_handle: u32, generation: u64) -> Self {
+        self.generation = generation;
+        self.gl_handle = Some(gl_handle);
+        self.key = format!("gl-texture:{gl_handle}:generation:{generation}");
+        self
+    }
+}
+
 impl DesktopGraphicsOpenGlBackendTextureBinding {
     pub fn from_resolved_sprite(sprite: &DesktopGraphicsResolvedSpriteTrace) -> Option<Self> {
         if sprite.missing {
             return None;
         }
+        let page_type = sprite.page_type?;
+        let page_source_path = sprite.page_source_path.clone()?;
         Some(Self {
             command_index: sprite.command_index,
             symbol: sprite.symbol.clone(),
-            page_type: sprite.page_type?,
-            page_source_path: sprite.page_source_path.clone()?,
+            texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                page_type,
+                page_source_path.clone(),
+            ),
+            page_type,
+            page_source_path,
             page_width: sprite.page_width?,
             page_height: sprite.page_height?,
             sampler: sprite.sampler,
@@ -518,6 +554,7 @@ pub struct DesktopGraphicsOpenGlBackendSpriteQuad {
     pub target: Option<RenderTarget>,
     pub blend_state: DesktopGraphicsOpenGlBackendBlendState,
     pub clip: Option<RenderRect>,
+    pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
     pub page_source_path: String,
     pub sampler: DesktopGraphicsTextureSamplerTrace,
     pub layer: f32,
@@ -547,6 +584,7 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
             target,
             blend_state,
             clip,
+            texture_identity: binding.texture_identity.clone(),
             page_source_path: binding.page_source_path.clone(),
             sampler: binding.sampler,
             layer,
@@ -587,6 +625,7 @@ pub struct DesktopGraphicsOpenGlBackendSpriteMeshBatch {
     pub target: Option<RenderTarget>,
     pub blend_state: DesktopGraphicsOpenGlBackendBlendState,
     pub clip: Option<RenderRect>,
+    pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
     pub page_source_path: String,
     pub sampler: DesktopGraphicsTextureSamplerTrace,
     pub quad_count: usize,
@@ -633,6 +672,7 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshBatch {
             target: quad.target.clone(),
             blend_state: quad.blend_state,
             clip: quad.clip,
+            texture_identity: quad.texture_identity.clone(),
             page_source_path: quad.page_source_path.clone(),
             sampler: quad.sampler,
             quad_count: 0,
@@ -682,6 +722,7 @@ fn opengl_backend_sprite_mesh_batches_from_quads(
             batch.target == quad.target
                 && batch.blend_state == quad.blend_state
                 && batch.clip == quad.clip
+                && batch.texture_identity == quad.texture_identity
                 && batch.page_source_path == quad.page_source_path
                 && batch.sampler == quad.sampler
         }) {
@@ -9463,6 +9504,11 @@ mod tests {
         let binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
             command_index: Some(7),
             symbol: "pivot-router".into(),
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Main,
+                    "sprites.png",
+                ),
             page_type: PageType::Main,
             page_source_path: "sprites.png".into(),
             page_width: 64,
@@ -9529,6 +9575,54 @@ mod tests {
                 RenderPoint::new(8.0, 24.0),
             ],
         );
+
+        let handle_a_binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Main,
+                    "sprites.png",
+                )
+                .with_gl_handle(101, 1),
+            ..binding.clone()
+        };
+        let handle_b_binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Main,
+                    "sprites.png",
+                )
+                .with_gl_handle(102, 1),
+            ..binding
+        };
+        let handle_a_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            &handle_a_binding,
+            Some(RenderTarget::Screen),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            rect,
+            rect.center_origin(),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            0.0,
+            Layer::BLOCK,
+        );
+        let handle_b_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            &handle_b_binding,
+            Some(RenderTarget::Screen),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            rect,
+            rect.center_origin(),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            0.0,
+            Layer::BLOCK,
+        );
+        let batches =
+            super::opengl_backend_sprite_mesh_batches_from_quads(&[handle_a_quad, handle_b_quad]);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].texture_identity.gl_handle, Some(101));
+        assert_eq!(batches[1].texture_identity.gl_handle, Some(102));
     }
 
     #[test]
@@ -9697,6 +9791,18 @@ mod tests {
         assert_eq!(executor.state.sprite_texture_bindings[0].symbol, "router");
         assert_eq!(
             executor.state.sprite_texture_bindings[0]
+                .texture_identity
+                .page_source_path,
+            "sprites.png"
+        );
+        assert_eq!(
+            executor.state.sprite_texture_bindings[0]
+                .texture_identity
+                .gl_handle,
+            None
+        );
+        assert_eq!(
+            executor.state.sprite_texture_bindings[0]
                 .page_source_path
                 .as_str(),
             "sprites.png"
@@ -9764,6 +9870,7 @@ mod tests {
         );
         assert_eq!(mesh_batch.blend_state.mode, RenderBlendMode::Additive);
         assert_eq!(mesh_batch.clip, None);
+        assert_eq!(mesh_batch.texture_identity.page_source_path, "sprites.png");
         assert_eq!(mesh_batch.page_source_path, "sprites.png");
         assert_eq!(mesh_batch.quad_count, 1);
         assert_eq!(mesh_batch.vertices.len(), 4);
