@@ -3502,6 +3502,19 @@ fn opengl_backend_render_target_key(target: &RenderTarget) -> String {
     }
 }
 
+fn opengl_backend_framebuffer_attachment_plan_for_render_target(
+    target: &RenderTarget,
+) -> Option<DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan> {
+    match target {
+        RenderTarget::Screen => None,
+        RenderTarget::Texture(_) | RenderTarget::Buffer(_) => Some(
+            DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::from_buffer_name(
+                opengl_backend_render_target_key(target),
+            ),
+        ),
+    }
+}
+
 fn opengl_backend_render_target_kind(
     target: &RenderTarget,
 ) -> DesktopGraphicsOpenGlBackendResourceKind {
@@ -5891,6 +5904,23 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
             } => {
                 if self.state.pass_active {
                     self.record_error("opengl backend resolved while a pass was active");
+                }
+                if let Some(attachment_plan) =
+                    opengl_backend_framebuffer_attachment_plan_for_render_target(&target)
+                {
+                    let resolved_attachment = self
+                        .state
+                        .shader_texture_handle_cache
+                        .resolve_framebuffer_attachment(
+                            &attachment_plan,
+                            &mut self.state.shader_texture_handle_allocator,
+                        );
+                    self.state
+                        .framebuffer_attachment_plans
+                        .push(attachment_plan);
+                    self.state
+                        .resolved_framebuffer_attachments
+                        .push(resolved_attachment);
                 }
                 self.state
                     .resolve_events
@@ -15022,6 +15052,24 @@ mod tests {
         assert_eq!(screen_resource.bind_count, 0);
         assert_eq!(screen_resource.resolve_source_count, 0);
         assert_eq!(screen_resource.resolve_target_count, 1);
+        assert_eq!(executor.state.framebuffer_attachment_plans.len(), 1);
+        assert_eq!(
+            executor.state.framebuffer_attachment_plans[0].framebuffer_key,
+            "framebuffer:buffer:offscreen-fbo"
+        );
+        assert_eq!(executor.state.resolved_framebuffer_attachments.len(), 1);
+        assert_eq!(
+            executor.state.resolved_framebuffer_attachments[0].color_texture_key,
+            "framebuffer-attachment:buffer:offscreen-fbo:color0"
+        );
+        assert_eq!(
+            executor.state.resolved_framebuffer_attachments[0].framebuffer_handle,
+            1
+        );
+        assert_eq!(
+            executor.state.resolved_framebuffer_attachments[0].color_texture_handle,
+            2
+        );
         assert!(executor.state.errors.is_empty());
     }
 

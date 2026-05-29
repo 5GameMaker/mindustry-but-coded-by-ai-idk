@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **32.4%**。
+- 当前总体迁移完成度：约 **32.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11658,3 +11658,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 `ShaderBlit` / `DrawFboSample` resolve 接到 attachment texture identity/handle；
   2. 补 renderer -> executor state -> shared resolver 的端到端测试；
   3. 再进入 feature-gated real OpenGL context/window seam。
+
+---
+
+## 372. 最新闭环记录：Resolve source attachment handle 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **32.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `opengl_backend_framebuffer_attachment_plan_for_render_target(...)`；
+    - `DesktopGraphicsOpenGlBackendStepKind::Resolve` 分支不再只更新 `resource_table`，会先把 `RenderTarget::Buffer/Texture` source target 解析为 framebuffer color attachment plan；
+    - resolve source attachment 通过 `shader_texture_handle_cache.resolve_framebuffer_attachment(...)` 进入同一 handle cache；
+    - `desktop_graphics_opengl_backend_executor_keeps_resolve_source_target_counts` 扩展断言 resolve source attachment 的 framebuffer key、color texture key 和 handle。
+- 关键语义：
+  - `ShaderBlit` / `DrawFboSample` / `DrawRectSample` 的 source target 开始具备可采样 attachment identity/handle，不再只是 resolve metadata；
+  - `Screen` 仍不生成 attachment；
+  - 这仍是纯 Rust backend 状态层，还未执行真实 GL blit/draw。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_keeps_resolve --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 让真实 shader/draw resolved command 流消费这些 resolve attachment；
+  2. 补 renderer -> executor state -> shared resolver 的端到端测试；
+  3. 后续再接 feature-gated real OpenGL context/window。

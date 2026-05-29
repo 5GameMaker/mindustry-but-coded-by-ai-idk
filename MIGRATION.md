@@ -14323,3 +14323,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 `glBindFramebuffer/glFramebufferTexture2D/glViewport/glBlitFramebuffer/SwapBuffers` 尚未接入；
   - renderer -> executor state -> shared resolver 端到端测试仍待补；
   - 当前总体迁移约 32.4%，仍未达到完整可玩。
+
+## 12.466 Resolve source attachment handle 接入
+
+- 2026-05-29：继续推进 Java `effectBuffer.blit(shader)`、`Draw.rect(texture)`、`Draw.fbo(texture)` 对应的 resolve 资源消费。本轮不再让 desktop OpenGL executor 的 `Resolve` step 只停留在 metadata/resource-table 计数，而是把非 screen source target 解析成 framebuffer color attachment plan，并进入 handle cache。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `opengl_backend_framebuffer_attachment_plan_for_render_target(...)`，将 `RenderTarget::Buffer/Texture` 映射到 framebuffer attachment plan，`RenderTarget::Screen` 保持无 attachment；
+    - `DesktopGraphicsOpenGlBackendExecutor::consume_opengl_backend_step(...)` 的 `Resolve` 分支会先解析 source attachment，再记录 resolve event 和 resource table；
+    - source attachment 使用 `shader_texture_handle_cache.resolve_framebuffer_attachment(...)`，与 shader texture binding / effectBuffer attachment 处在同一 handle cache 边界；
+    - 扩展 `desktop_graphics_opengl_backend_executor_keeps_resolve_source_target_counts`，断言 `buffer:offscreen-fbo` resolve source 生成 `framebuffer:buffer:offscreen-fbo` 与 `framebuffer-attachment:buffer:offscreen-fbo:color0`。
+- 迁移意义：
+  - `RenderResolveKind::{ShaderBlit, DrawRectSample, DrawFboSample}` 在 desktop executor 中开始具备 source attachment identity/handle，不再只是透传标签；
+  - 为后续真实 `glBindFramebuffer/glFramebufferTexture2D/glBlitFramebuffer` 或 textured quad resolve 提供 source texture handle；
+  - 仍保持 headless/pure Rust 验证，没有引入 OpenGL 依赖。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_keeps_resolve --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - resolve attachment 尚未被真实 draw/shader command executor 执行成 GL blit 或 screen quad；
+  - pass target attachment 的实际尺寸仍需从 pass viewport / surface 策略补齐；
+  - renderer -> executor state -> shared resolver 端到端测试仍待补；
+  - 当前总体迁移约 32.5%，仍未达到完整可玩。
