@@ -280,7 +280,15 @@ core/src/mindustry/game/rules.rs
 git -C "D:/MDT/rust-mindustry" checkout -- "core/src/mindustry/game/rules.rs"
 ```
 
-### 6.5 提交与推送
+### 6.5 渲染主线补充记录
+
+- 目前真实渲染链路尚未接入 OpenGL；当前新增/使用的是 `RenderCommand` 到 backend sink 的过渡 seam，用于先把渲染意图从上层稳定下沉。
+- `DesktopGraphicsLiveBackendRenderCommandSink` 必须消费完整 `RenderCommand` payload；`command_trace` 仍只作为审计摘要，不能反推真实 backend 输入。
+- 混合帧中的 backend 命令顺序已按 `execution_steps` 固定为 block particle render commands 先于 render pass commands，后续接 OpenGL backend 时不要让 trace 顺序与实际执行顺序分叉。
+- 后续真实 backend 方向预期保持 OpenGL-compatible，倾向 `winit + glow` 组合。
+- 迁移时需要持续对齐原版 Java / Arc 的 GL 渲染语义，避免只做接口替换而丢失实际绘制行为。
+
+### 6.6 提交与推送
 
 ```bash
 git -C "D:/MDT/rust-mindustry" add <files>

@@ -636,6 +636,13 @@ pub struct DarknessPlan {
 }
 
 impl DarknessPlan {
+    pub fn clear(&mut self) {
+        self.tiles.clear();
+        self.dirty_tiles.clear();
+        self.limited_map_area = None;
+        self.fill = DarknessFill::White;
+    }
+
     pub fn effective_fill(&self) -> DarknessFill {
         if self.limited_map_area.is_some() {
             DarknessFill::Black
@@ -813,6 +820,8 @@ impl CameraCache {
     pub fn invalidate(&mut self) {
         self.avg_x = DEFAULT_CAMERA_INVALIDATION;
         self.avg_y = DEFAULT_CAMERA_INVALIDATION;
+        self.range_x = 0;
+        self.range_y = 0;
     }
 }
 
@@ -1201,10 +1210,7 @@ impl BlockRendererPlan {
         self.block_particles.clear();
         self.cracks.clear();
         self.build_previews.clear();
-        self.darkness.tiles.clear();
-        self.darkness.dirty_tiles.clear();
-        self.darkness.limited_map_area = None;
-        self.darkness.fill = DarknessFill::White;
+        self.darkness.clear();
         self.overlays.clear();
         self.update_floors.clear();
         self.draw_quadtree_debug = false;
@@ -1816,6 +1822,82 @@ mod tests {
             Some(TileBounds::new(0, 0, 16, 16))
         );
         assert_eq!(plan.darkness.effective_fill(), DarknessFill::Black);
+    }
+
+    #[test]
+    fn darkness_plan_clear_resets_fill_tiles_and_dirty_tiles() {
+        let mut plan = DarknessPlan::default();
+        plan.fill = DarknessFill::Black;
+        plan.limited_map_area = Some(TileBounds::new(2, 3, 4, 5));
+        plan.push_tile(TileCoord::new(1, 1), 0.75);
+        plan.push_dirty_tile(TileCoord::new(7, 8));
+
+        assert_eq!(plan.effective_fill(), DarknessFill::Black);
+        assert!(!plan.tiles.is_empty());
+        assert!(!plan.dirty_tiles.is_empty());
+
+        plan.clear();
+
+        assert!(plan.tiles.is_empty());
+        assert!(plan.dirty_tiles.is_empty());
+        assert!(plan.limited_map_area.is_none());
+        assert_eq!(plan.effective_fill(), DarknessFill::White);
+    }
+
+    #[test]
+    fn clear_frame_queues_clears_dark_events_without_touching_plan_tiles() {
+        let mut cache = BlockRendererCache::default();
+        cache.block_tree.bounds = TileBounds::new(1, 2, 3, 4);
+        cache.block_light_tree.bounds = TileBounds::new(5, 6, 7, 8);
+        cache.overlay_tree.bounds = TileBounds::new(9, 10, 11, 12);
+        cache.floor_tree.bounds = TileBounds::new(13, 14, 15, 16);
+        cache.tile_view.push(TileCoord::new(1, 1));
+        cache.light_view.push(TileCoord::new(2, 2));
+        cache.update_floors.push(TileCoord::new(3, 3));
+        cache.shadow_events.insert(TileCoord::new(4, 4));
+        cache.dark_events.insert(TileCoord::new(5, 5));
+        cache.proc_links.insert(6);
+        cache.proc_lights.insert(7);
+
+        cache.clear_frame_queues();
+
+        assert!(cache.tile_view.is_empty());
+        assert!(cache.light_view.is_empty());
+        assert!(cache.update_floors.is_empty());
+        assert!(cache.shadow_events.is_empty());
+        assert!(cache.dark_events.is_empty());
+        assert!(cache.proc_links.is_empty());
+        assert!(cache.proc_lights.is_empty());
+        assert_eq!(cache.block_tree.bounds, TileBounds::new(1, 2, 3, 4));
+        assert_eq!(cache.block_light_tree.bounds, TileBounds::new(5, 6, 7, 8));
+        assert_eq!(cache.overlay_tree.bounds, TileBounds::new(9, 10, 11, 12));
+        assert_eq!(cache.floor_tree.bounds, TileBounds::new(13, 14, 15, 16));
+    }
+
+    #[test]
+    fn reload_resets_camera_and_darkness_queues() {
+        let mut state = BlockRendererState::default();
+        state.last_camera = CameraCache::new(9, 8, 7, 6);
+        state.cache.dark_events.insert(TileCoord::new(4, 4));
+        state.cache.tile_view.push(TileCoord::new(5, 5));
+        state.cache.light_view.push(TileCoord::new(6, 6));
+        state.cache.update_floors.push(TileCoord::new(7, 7));
+        state.cache.shadow_events.insert(TileCoord::new(8, 8));
+        state.cache.proc_links.insert(9);
+        state.cache.proc_lights.insert(10);
+
+        state = BlockRendererState::reload(TileBounds::new(0, 0, 32, 32), true);
+
+        assert_eq!(state.last_camera, CameraCache::default());
+        assert!(state.cache.dark_events.is_empty());
+        assert!(state.cache.tile_view.is_empty());
+        assert!(state.cache.light_view.is_empty());
+        assert!(state.cache.update_floors.is_empty());
+        assert!(state.cache.shadow_events.is_empty());
+        assert!(state.cache.proc_links.is_empty());
+        assert!(state.cache.proc_lights.is_empty());
+        assert_eq!(state.cache.block_tree.bounds, TileBounds::new(0, 0, 32, 32));
+        assert!(state.had_map_limit);
     }
 
     #[test]

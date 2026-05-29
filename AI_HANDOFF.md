@@ -9547,3 +9547,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步：
   1. 继续补 `DarknessPlan::clear`、limited map fill/clear、reload/clear_frame_queues 的缓存闭环；
   2. 将 particle `RenderCommand` 交给真实 OpenGL/glow backend 消费。
+
+---
+
+## 290. 最新闭环记录：RenderCommand backend sink 与 puddle ripple 可见性
+
+- 本轮总体进度更新：约 **24.1%**，仍未达到完整可玩。
+- 固定路径提醒：Rust 仓库继续使用 `D:/MDT/rust-mindustry`；Java 参考继续使用 `D:/MDT/mindustry-upstream-v157.4`（当前迁移目标行为按 v158.1 记录）；禁止回到废案 `D:/MDT/mindustry-rust`；遇到文字乱码优先 UTF-8。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsPassExecutionTrace` 保留完整 `commands: Vec<RenderCommand>`，避免从降维的 `command_trace` 反推真实 backend 输入；
+    - 新增 `DesktopGraphicsLiveBackendRenderCommandSink`、`DesktopGraphicsLiveBackendRenderCommandTrace` 与 source 枚举；
+    - `HeadlessDesktopGraphicsRenderer` 现在驱动完整 `RenderCommand` sink；
+    - 混合帧顺序锁定为 `BlockParticles -> RenderPass`，与 `execution_steps` 一致，防止后续 OpenGL backend 顺序和 trace 分叉。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `DarknessPlan::clear()` 抽出并复用；
+    - `CameraCache::invalidate()` 同步清掉 range；
+    - 补 clear/reload 相关回归测试。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - puddle particle 使用 `Fx.ripple` 时默认 rotation/scale 为 `1.0`，避免动态 lifetime/radius 在 desktop draw 阶段被压成 0。
+  - `MIGRATION.md` 与 `README.md`
+    - 记录当前真实渲染尚未接 OpenGL，当前为 `RenderCommand` 到 backend sink 的过渡 seam；
+    - README 总进度更新到 **24.1%**。
+- 已验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-desktop render_command_sink -- --nocapture`
+  - `cargo test -p mindustry-desktop`
+  - `cargo test -p mindustry-core game_runtime_queues_puddle_particle_payloads_into_client_local_effects -- --nocapture`
+  - `cargo test -p mindustry-core game_runtime_ticks_client_puddle_snapshot_particle_effects -- --nocapture`
+  - `cargo test -p mindustry-core darkness -- --nocapture`
+  - `cargo test -p mindustry-core clear_frame_queues -- --nocapture`
+  - `cargo test -p mindustry-core reload_resets_camera -- --nocapture`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 继续沿 `DesktopGraphicsLiveBackendRenderCommandSink` 做真实 OpenGL/glow backend 的最小执行器；
+  2. 优先把 `RenderTarget`/FBO、TextureAtlas GPU upload、ShaderCatalog compile/bind 三条线接到同一个 desktop backend，不要继续堆孤立 headless seam；
+  3. polygon particle 当前仍是 `Custom("block-particle-polygon")` 占位，真实 backend 需要三角扇/mesh 绘制。

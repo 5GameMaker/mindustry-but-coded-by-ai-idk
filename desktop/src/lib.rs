@@ -374,6 +374,7 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub order: i32,
     pub target: RenderTarget,
     pub command_count: usize,
+    pub commands: Vec<RenderCommand>,
     pub command_trace: Vec<DesktopGraphicsCommandExecutionTrace>,
     pub draw_sprite_symbols: Vec<String>,
     pub resolved_sprites: Vec<DesktopGraphicsResolvedSpriteTrace>,
@@ -426,6 +427,27 @@ pub struct DesktopGraphicsLiveBackendDrawSpriteTrace {
     pub target: RenderTarget,
     pub symbol: String,
     pub resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopGraphicsLiveBackendRenderCommandSource {
+    RenderPass {
+        pass_index: usize,
+        command_index: usize,
+        pass_kind: RenderPassKind,
+        pass_order: i32,
+        target: RenderTarget,
+    },
+    BlockParticles {
+        command_index: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsLiveBackendRenderCommandTrace {
+    pub source: DesktopGraphicsLiveBackendRenderCommandSource,
+    pub kind: &'static str,
+    pub command: RenderCommand,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -587,6 +609,10 @@ pub trait DesktopGraphicsLiveBackendBlockParticleDrawCallSink {
     fn consume_block_particle_draw_call(&mut self, draw_call: DesktopGraphicsBlockParticleDrawCall);
 }
 
+pub trait DesktopGraphicsLiveBackendRenderCommandSink {
+    fn consume_render_command_trace(&mut self, trace: DesktopGraphicsLiveBackendRenderCommandTrace);
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct DesktopGraphicsNullLiveBackendBlockParticleSink;
 
@@ -609,10 +635,25 @@ impl DesktopGraphicsLiveBackendBlockParticleDrawCallSink
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DesktopGraphicsNullLiveBackendRenderCommandSink;
+
+impl DesktopGraphicsLiveBackendRenderCommandSink
+    for DesktopGraphicsNullLiveBackendRenderCommandSink
+{
+    fn consume_render_command_trace(
+        &mut self,
+        _trace: DesktopGraphicsLiveBackendRenderCommandTrace,
+    ) {
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsLiveBackendExecutionState {
     pub render_passes_visited: usize,
     pub render_commands_visited: usize,
+    pub backend_render_commands_emitted: usize,
+    pub last_backend_render_command: Option<DesktopGraphicsLiveBackendRenderCommandTrace>,
     pub draw_sprite_traces_emitted: usize,
     pub last_draw_sprite_trace: Option<DesktopGraphicsLiveBackendDrawSpriteTrace>,
     pub block_particle_traces_emitted: usize,
@@ -690,15 +731,59 @@ impl DesktopGraphicsExecutionTrace {
         state
     }
 
+    pub fn drive_render_command_sink<S: DesktopGraphicsLiveBackendRenderCommandSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsLiveBackendExecutionState {
+        let mut state = DesktopGraphicsLiveBackendExecutionState::default();
+
+        for (command_index, command) in self.block_particle_render_commands.iter().enumerate() {
+            let trace = DesktopGraphicsLiveBackendRenderCommandTrace {
+                source: DesktopGraphicsLiveBackendRenderCommandSource::BlockParticles {
+                    command_index,
+                },
+                kind: render_command_trace_kind(command),
+                command: command.clone(),
+            };
+            sink.consume_render_command_trace(trace.clone());
+            state.backend_render_commands_emitted += 1;
+            state.last_backend_render_command = Some(trace);
+        }
+
+        for (pass_index, pass) in self.render_passes.iter().enumerate() {
+            state.render_passes_visited += 1;
+            for (command_index, command) in pass.commands.iter().enumerate() {
+                let trace = DesktopGraphicsLiveBackendRenderCommandTrace {
+                    source: DesktopGraphicsLiveBackendRenderCommandSource::RenderPass {
+                        pass_index,
+                        command_index,
+                        pass_kind: pass.kind.clone(),
+                        pass_order: pass.order,
+                        target: pass.target.clone(),
+                    },
+                    kind: render_command_trace_kind(command),
+                    command: command.clone(),
+                };
+                sink.consume_render_command_trace(trace.clone());
+                state.backend_render_commands_emitted += 1;
+                state.last_backend_render_command = Some(trace);
+            }
+        }
+
+        state
+    }
+
     pub fn drive_live_backend_sinks<
         S: DesktopGraphicsLiveBackendDrawSpriteSink,
         P: DesktopGraphicsLiveBackendBlockParticleSink,
         D: DesktopGraphicsLiveBackendBlockParticleDrawCallSink,
+        R: DesktopGraphicsLiveBackendRenderCommandSink,
     >(
         &self,
         draw_sprite_sink: &mut S,
         block_particle_sink: &mut P,
         block_particle_draw_call_sink: &mut D,
+        render_command_sink: &mut R,
     ) -> DesktopGraphicsLiveBackendExecutionState {
         let mut state = self.drive_draw_sprite_sink(draw_sprite_sink);
 
@@ -713,6 +798,11 @@ impl DesktopGraphicsExecutionTrace {
             state.block_particle_draw_calls_emitted += 1;
             state.last_block_particle_draw_call = Some(draw_call.clone());
         }
+
+        let render_command_state = self.drive_render_command_sink(render_command_sink);
+        state.backend_render_commands_emitted =
+            render_command_state.backend_render_commands_emitted;
+        state.last_backend_render_command = render_command_state.last_backend_render_command;
 
         state
     }
@@ -841,6 +931,7 @@ impl DesktopGraphicsExecutionTrace {
                                 order: pass.order,
                                 target: pass.target.clone(),
                                 command_count: pass.commands.len(),
+                                commands: pass.commands.clone(),
                                 command_trace,
                                 draw_sprite_symbols,
                                 resolved_sprites,
@@ -1236,10 +1327,12 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
         let mut block_particle_sink = DesktopGraphicsNullLiveBackendBlockParticleSink;
         let mut block_particle_draw_call_sink =
             DesktopGraphicsNullLiveBackendBlockParticleDrawCallSink;
+        let mut render_command_sink = DesktopGraphicsNullLiveBackendRenderCommandSink;
         let live_backend_state = trace.drive_live_backend_sinks(
             &mut live_backend_sink,
             &mut block_particle_sink,
             &mut block_particle_draw_call_sink,
+            &mut render_command_sink,
         );
         self.frames_rendered += 1;
         self.last_stats = stats.clone();
@@ -4119,11 +4212,13 @@ mod tests {
         DesktopGraphicsExecutionStepTrace, DesktopGraphicsExecutionSummary,
         DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
         DesktopGraphicsLiveBackendDrawSpriteSink, DesktopGraphicsLiveBackendDrawSpriteTrace,
-        DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
-        DesktopGraphicsShaderApplyExecutionTrace, DesktopGraphicsTextureSamplerTrace,
-        DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceConfig, DesktopSurfaceSize,
-        HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
-        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
+        DesktopGraphicsLiveBackendRenderCommandSink, DesktopGraphicsLiveBackendRenderCommandSource,
+        DesktopGraphicsLiveBackendRenderCommandTrace, DesktopGraphicsRenderer,
+        DesktopGraphicsResolvedSpriteTrace, DesktopGraphicsShaderApplyExecutionTrace,
+        DesktopGraphicsTextureSamplerTrace, DesktopInputTickEvent, DesktopLauncher,
+        DesktopSurfaceConfig, DesktopSurfaceSize, HeadlessDesktopAudioRenderer,
+        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
+        HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
@@ -4147,8 +4242,9 @@ mod tests {
         LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput, MinimapCamera,
         MinimapOverlayInput, PageType, ParticleRendererState, RenderBlendMode, RenderBridge,
         RenderCamera, RenderCommand, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
-        RenderRect, RenderSize, RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext,
-        ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
+        RenderProperty, RenderRect, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
+        ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId,
+        TextureAtlasPlan, TileCoord,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -6000,6 +6096,220 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_render_command_sink_includes_block_particle_commands() {
+        #[derive(Default)]
+        struct RecordingLiveBackendRenderCommandSink {
+            traces: Vec<DesktopGraphicsLiveBackendRenderCommandTrace>,
+        }
+
+        impl DesktopGraphicsLiveBackendRenderCommandSink for RecordingLiveBackendRenderCommandSink {
+            fn consume_render_command_trace(
+                &mut self,
+                trace: DesktopGraphicsLiveBackendRenderCommandTrace,
+            ) {
+                self.traces.push(trace);
+            }
+        }
+
+        let mut regular = mindustry_core::mindustry::world::draw::draw_particles_block_config();
+        regular.particle_count = 1;
+        regular.particle_radius = 0.0;
+
+        let mut block_renderer = BlockRendererPlan::default();
+        block_renderer.block_particles = vec![BlockRendererBlockParticlePlan {
+            coord: TileCoord::new(4, 5),
+            block: "backend-particle-emitter".into(),
+            size: 2,
+            plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                regular,
+                21,
+                1.0,
+                0.0,
+                Layer::BLOCK,
+            ),
+        }];
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_block_renderer(block_renderer);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        let mut sink = RecordingLiveBackendRenderCommandSink::default();
+        let state = trace.drive_render_command_sink(&mut sink);
+
+        assert_eq!(trace.block_particle_render_commands.len(), 2);
+        assert_eq!(state.render_passes_visited, 0);
+        assert_eq!(
+            state.backend_render_commands_emitted,
+            trace.block_particle_render_commands.len()
+        );
+        assert_eq!(
+            sink.traces.len(),
+            trace.block_particle_render_commands.len()
+        );
+        assert_eq!(
+            sink.traces
+                .iter()
+                .map(|trace| trace.command.clone())
+                .collect::<Vec<_>>(),
+            trace.block_particle_render_commands
+        );
+        assert_eq!(
+            sink.traces[0].source,
+            DesktopGraphicsLiveBackendRenderCommandSource::BlockParticles { command_index: 0 }
+        );
+        assert_eq!(
+            sink.traces[1].source,
+            DesktopGraphicsLiveBackendRenderCommandSource::BlockParticles { command_index: 1 }
+        );
+        assert!(matches!(
+            &sink.traces[0].command,
+            RenderCommand::SetBlend { mode } if *mode == RenderBlendMode::Normal
+        ));
+        assert!(matches!(
+            &sink.traces[1].command,
+            RenderCommand::DrawCircle { filled: true, .. }
+        ));
+        assert_eq!(
+            state.last_backend_render_command.as_ref(),
+            sink.traces.last()
+        );
+    }
+
+    #[test]
+    fn desktop_graphics_render_command_sink_matches_execution_step_order_for_particles_and_passes()
+    {
+        #[derive(Default)]
+        struct RecordingLiveBackendRenderCommandSink {
+            traces: Vec<DesktopGraphicsLiveBackendRenderCommandTrace>,
+        }
+
+        impl DesktopGraphicsLiveBackendRenderCommandSink for RecordingLiveBackendRenderCommandSink {
+            fn consume_render_command_trace(
+                &mut self,
+                trace: DesktopGraphicsLiveBackendRenderCommandTrace,
+            ) {
+                self.traces.push(trace);
+            }
+        }
+
+        let mut regular = mindustry_core::mindustry::world::draw::draw_particles_block_config();
+        regular.particle_count = 1;
+        regular.particle_radius = 0.0;
+        let mut block_renderer = BlockRendererPlan::default();
+        block_renderer.block_particles = vec![BlockRendererBlockParticlePlan {
+            coord: TileCoord::new(6, 7),
+            block: "mixed-order-emitter".into(),
+            size: 2,
+            plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                regular,
+                29,
+                1.0,
+                0.0,
+                Layer::BLOCK,
+            ),
+        }];
+
+        let viewport = RenderViewport::new(0.0, 0.0, 32.0, 32.0);
+        let camera = RenderCamera::new(RenderPoint::new(16.0, 16.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(31, RenderSize::new(32.0, 32.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Block).with_order(12);
+        pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        pass.push(RenderCommand::draw_text(
+            "after-particles",
+            RenderPoint::new(1.0, 2.0),
+            [1.0, 1.0, 1.0, 1.0],
+            8.0,
+            0.0,
+            RenderTextAlign::Start,
+            13.0,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_block_renderer(block_renderer);
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        assert!(matches!(
+            trace.execution_steps.as_slice(),
+            [
+                DesktopGraphicsExecutionStepTrace::BlockParticles { .. },
+                DesktopGraphicsExecutionStepTrace::RenderPass { .. }
+            ]
+        ));
+
+        let mut sink = RecordingLiveBackendRenderCommandSink::default();
+        let state = trace.drive_render_command_sink(&mut sink);
+
+        assert_eq!(state.render_passes_visited, 1);
+        assert_eq!(
+            state.backend_render_commands_emitted,
+            trace.block_particle_render_commands.len() + trace.render_passes[0].commands.len()
+        );
+        assert_eq!(
+            sink.traces
+                .iter()
+                .map(|trace| trace.source.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                DesktopGraphicsLiveBackendRenderCommandSource::BlockParticles { command_index: 0 },
+                DesktopGraphicsLiveBackendRenderCommandSource::BlockParticles { command_index: 1 },
+                DesktopGraphicsLiveBackendRenderCommandSource::RenderPass {
+                    pass_index: 0,
+                    command_index: 0,
+                    pass_kind: RenderPassKind::Block,
+                    pass_order: 12,
+                    target: RenderTarget::Screen,
+                },
+                DesktopGraphicsLiveBackendRenderCommandSource::RenderPass {
+                    pass_index: 0,
+                    command_index: 1,
+                    pass_kind: RenderPassKind::Block,
+                    pass_order: 12,
+                    target: RenderTarget::Screen,
+                },
+            ]
+        );
+        assert!(matches!(
+            state.last_backend_render_command.as_ref().map(|trace| &trace.command),
+            Some(RenderCommand::DrawText { text, .. }) if text == "after-particles"
+        ));
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert_eq!(
+            renderer
+                .last_live_backend_state
+                .backend_render_commands_emitted,
+            state.backend_render_commands_emitted
+        );
+        assert_eq!(
+            renderer
+                .last_live_backend_state
+                .last_backend_render_command
+                .as_ref()
+                .map(|trace| trace.source.clone()),
+            state
+                .last_backend_render_command
+                .as_ref()
+                .map(|trace| trace.source.clone())
+        );
+    }
+
+    #[test]
     fn desktop_launcher_default_texture_atlas_contains_block_crack_regions() {
         let launcher = DesktopLauncher::new(Vec::new());
 
@@ -7205,6 +7515,154 @@ mod tests {
         assert_eq!(sink.traces[2].pass_kind, RenderPassKind::Ui);
         assert_eq!(sink.traces[2].pass_order, 33);
         assert_eq!(sink.traces[2].target, RenderTarget::Screen);
+    }
+
+    #[test]
+    fn desktop_graphics_execution_trace_drives_render_command_sink_with_full_payload() {
+        #[derive(Default)]
+        struct RecordingLiveBackendRenderCommandSink {
+            traces: Vec<DesktopGraphicsLiveBackendRenderCommandTrace>,
+        }
+
+        impl DesktopGraphicsLiveBackendRenderCommandSink for RecordingLiveBackendRenderCommandSink {
+            fn consume_render_command_trace(
+                &mut self,
+                trace: DesktopGraphicsLiveBackendRenderCommandTrace,
+            ) {
+                self.traces.push(trace);
+            }
+        }
+
+        let viewport = RenderViewport::new(0.0, 0.0, 80.0, 60.0);
+        let camera = RenderCamera::new(RenderPoint::new(40.0, 30.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(25, RenderSize::new(80.0, 60.0), camera, viewport);
+
+        let mut world_pass = RenderPass::new(RenderPassKind::Block)
+            .with_order(20)
+            .with_target(RenderTarget::Buffer("world-buffer".into()));
+        let world_commands = vec![
+            RenderCommand::clear([0.05, 0.06, 0.07, 1.0]),
+            RenderCommand::set_clip(RenderRect::new(1.0, 2.0, 30.0, 20.0)),
+            RenderCommand::stroke_rect(
+                RenderRect::new(3.0, 4.0, 5.0, 6.0),
+                [0.1, 0.2, 0.3, 0.4],
+                2.5,
+                7.0,
+            ),
+            RenderCommand::draw_line(
+                RenderPoint::new(7.0, 8.0),
+                RenderPoint::new(9.0, 10.0),
+                1.5,
+                [0.4, 0.3, 0.2, 0.1],
+                11.0,
+            ),
+            RenderCommand::custom(
+                "backend-marker",
+                vec![RenderProperty::new("stage", "world")],
+            ),
+        ];
+        for command in &world_commands {
+            world_pass.push(command.clone());
+        }
+        render_frame.push_pass(world_pass);
+
+        let mut ui_pass = RenderPass::new(RenderPassKind::Ui).with_order(200);
+        let ui_commands = vec![
+            RenderCommand::draw_sprite(
+                "ui-button",
+                RenderRect::new(12.0, 13.0, 14.0, 15.0),
+                [1.0, 0.9, 0.8, 0.7],
+                45.0,
+                201.0,
+            ),
+            RenderCommand::draw_text(
+                "ready",
+                RenderPoint::new(16.0, 17.0),
+                [0.2, 0.4, 0.6, 1.0],
+                18.0,
+                0.25,
+                RenderTextAlign::Center,
+                202.0,
+            ),
+            RenderCommand::clear_clip(),
+        ];
+        for command in &ui_commands {
+            ui_pass.push(command.clone());
+        }
+        render_frame.push_pass(ui_pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/ui-button.png"]),
+        };
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        let mut sink = RecordingLiveBackendRenderCommandSink::default();
+        let state = trace.drive_render_command_sink(&mut sink);
+
+        let expected_commands = world_commands
+            .iter()
+            .chain(ui_commands.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(state.render_passes_visited, 2);
+        assert_eq!(
+            state.backend_render_commands_emitted,
+            expected_commands.len()
+        );
+        assert_eq!(sink.traces.len(), expected_commands.len());
+        assert_eq!(
+            sink.traces
+                .iter()
+                .map(|trace| trace.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                "Clear",
+                "SetClip",
+                "StrokeRect",
+                "DrawLine",
+                "Custom",
+                "DrawSprite",
+                "DrawText",
+                "ClearClip"
+            ]
+        );
+        assert_eq!(
+            sink.traces
+                .iter()
+                .map(|trace| trace.command.clone())
+                .collect::<Vec<_>>(),
+            expected_commands
+        );
+        assert_eq!(
+            sink.traces[0].source,
+            DesktopGraphicsLiveBackendRenderCommandSource::RenderPass {
+                pass_index: 0,
+                command_index: 0,
+                pass_kind: RenderPassKind::Block,
+                pass_order: 20,
+                target: RenderTarget::Buffer("world-buffer".into()),
+            }
+        );
+        assert_eq!(
+            sink.traces[5].source,
+            DesktopGraphicsLiveBackendRenderCommandSource::RenderPass {
+                pass_index: 1,
+                command_index: 0,
+                pass_kind: RenderPassKind::Ui,
+                pass_order: 200,
+                target: RenderTarget::Screen,
+            }
+        );
+        assert_eq!(
+            state.last_backend_render_command.as_ref(),
+            sink.traces.last()
+        );
     }
 
     #[test]

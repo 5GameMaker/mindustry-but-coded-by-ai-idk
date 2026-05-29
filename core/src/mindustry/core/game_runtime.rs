@@ -35,7 +35,7 @@ use crate::mindustry::{
         },
         entity_class_id, entity_class_kind, standard_effect, standard_effect_id, Effect,
         EntityClassKind, Fires, PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent,
-        Puddles, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LIFETIME, FX_UNIT_ASSEMBLE_ID,
+        Puddles, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LIFETIME, FX_RIPPLE_ID, FX_UNIT_ASSEMBLE_ID,
     },
     game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo, Trigger},
     input::input_handler::ItemRemoveStackPlan,
@@ -3022,6 +3022,17 @@ impl Default for GameRuntime {
     }
 }
 
+fn client_puddle_particle_effect_rotation(effect_id: i32) -> f32 {
+    if effect_id == FX_RIPPLE_ID {
+        // `Fx.ripple` rewrites its render lifetime and radius from rotation.
+        // Puddle particle events without an explicit scale must therefore use
+        // the same visible default scale as Java's direct puddle ripple calls.
+        1.0
+    } else {
+        0.0
+    }
+}
+
 impl GameRuntime {
     pub fn new(state: GameState) -> Self {
         Self {
@@ -4875,7 +4886,7 @@ impl GameRuntime {
                     effect_id: effect_id as u16,
                     x: particle.x + offset_x.clamp(-range, range),
                     y: particle.y + offset_y.clamp(-range, range),
-                    rotation: 0.0,
+                    rotation: client_puddle_particle_effect_rotation(effect_id),
                     color: type_io::RgbaColor::new(-1),
                 },
                 data: TypeValue::Null,
@@ -4932,7 +4943,7 @@ impl GameRuntime {
                     effect_id: effect_id as u16,
                     x: particle.x + offset_x.clamp(-range, range),
                     y: particle.y + offset_y.clamp(-range, range),
-                    rotation: 0.0,
+                    rotation: client_puddle_particle_effect_rotation(effect_id),
                     color: type_io::RgbaColor::new(-1),
                 },
                 data: TypeValue::Null,
@@ -27360,7 +27371,7 @@ mod tests {
             standard_effect_id("ripple").unwrap() as u16
         );
         assert_eq!((effect.effect.x, effect.effect.y), (11.0, 13.0));
-        assert_eq!(effect.effect.rotation, 0.0);
+        assert_eq!(effect.effect.rotation, 1.0);
         assert_eq!(effect.effect.color, type_io::RgbaColor::new(-1));
         assert_eq!(effect.data, TypeValue::Null);
     }
