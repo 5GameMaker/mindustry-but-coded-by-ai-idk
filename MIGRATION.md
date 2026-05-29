@@ -12914,3 +12914,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Time.runTask(launchDuration() - 6f)` 对应的 sector switch / loadout / launch resources 流程仍未接入；
   - fullIcon/mixcol/additive light 仍需要真实 atlas region 与 OpenGL backend executor 承接；
   - 当前总体迁移约 26.7%，仍未达到完整可玩。
+
+## 12.411 OpenGL backend executor stateful 消费链路
+
+- 2026-05-29：继续推进渲染引擎优先项。在不引入 `glow/glutin/winit` 等新依赖的前提下，把现有 OpenGL backend step plan 从“空 sink + 统计计数”推进到无依赖 stateful executor，可消费当前渲染链并记录 pass/target/blend/clip/shader/custom/resolve 状态。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolveEvent`；
+    - 新增 `DesktopGraphicsOpenGlBackendExecutorState`，记录 `current_target`、`pass_active`、`current_blend`、`current_clip`、`current_shader`、命令计数、custom marker、resolve events 与 errors；
+    - 新增 `DesktopGraphicsOpenGlBackendExecutor`，实现 `DesktopGraphicsOpenGlBackendStepSink`，消费 `BeginPass / FlushBoundary / ShaderApply / Command / EndPass / Resolve`；
+    - `HeadlessDesktopGraphicsRenderer` 改为使用 stateful executor，并保存 `last_opengl_backend_executor_state`；
+    - `DesktopGraphicsNullOpenGlBackendStepSink` 保留为公开 no-op sink，供后续对照/测试使用。
+  - 测试新增/增强：
+    - `desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps` 现在同时断言 executor 的 blend、draw sprite、resolve event 与无错误；
+    - 新增 `desktop_graphics_opengl_backend_executor_keeps_resolve_source_target_counts`，锁定 `Texture`/`Buffer` 源 target 与 `resolve_target` 的统计口径；
+    - `desktop_launcher_accelerator_launching_draws_full_icon_and_additive_light` 增补 OpenGL step plan/executor 断言，覆盖 `accelerator-launch-light`、`accelerator-launch-mixcol`、Additive/Normal blend 与两个 fullIcon `DrawSprite`。
+- 迁移意义：
+  - 这仍不是最终真实 GPU OpenGL 调用层，但已经从“只生成 plan”推进到“可被 executor 顺序消费并校验状态”的后端闭环；
+  - 后续接真实 GL crate 时，可把当前 executor event/state 作为 adapter 边界，而不是重新设计渲染链。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo test -p mindustry-desktop accelerator_launch --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - executor 仍是无依赖状态机，尚未绑定真实 OpenGL FBO/VAO/VBO/texture/shader；
+  - `mixcol`、atlas `TextureRegion`、additive light 的真实 GPU 状态仍需后续落地；
+  - 当前总体迁移约 26.8%，仍未达到完整可玩。

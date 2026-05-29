@@ -706,10 +706,171 @@ pub trait DesktopGraphicsOpenGlBackendStepSink {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct DesktopGraphicsNullOpenGlBackendStepSink;
+pub struct DesktopGraphicsNullOpenGlBackendStepSink;
 
 impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsNullOpenGlBackendStepSink {
     fn consume_opengl_backend_step(&mut self, _step: DesktopGraphicsOpenGlBackendStep) {}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendResolveEvent {
+    pub source_target: RenderTarget,
+    pub resolve_target: RenderTarget,
+    pub resolve_kind: RenderResolveKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendExecutorState {
+    pub current_target: Option<RenderTarget>,
+    pub pass_active: bool,
+    pub current_blend: RenderBlendMode,
+    pub current_clip: Option<RenderRect>,
+    pub current_shader: Option<ShaderId>,
+    pub begin_passes: usize,
+    pub end_passes: usize,
+    pub flush_boundaries: usize,
+    pub shader_applies: usize,
+    pub commands: usize,
+    pub clear_commands: usize,
+    pub draw_sprite_commands: usize,
+    pub draw_circle_commands: usize,
+    pub draw_text_commands: usize,
+    pub custom_markers: Vec<String>,
+    pub resolve_events: Vec<DesktopGraphicsOpenGlBackendResolveEvent>,
+    pub last_command_kind: Option<&'static str>,
+    pub errors: Vec<String>,
+}
+
+impl Default for DesktopGraphicsOpenGlBackendExecutorState {
+    fn default() -> Self {
+        Self {
+            current_target: None,
+            pass_active: false,
+            current_blend: RenderBlendMode::Normal,
+            current_clip: None,
+            current_shader: None,
+            begin_passes: 0,
+            end_passes: 0,
+            flush_boundaries: 0,
+            shader_applies: 0,
+            commands: 0,
+            clear_commands: 0,
+            draw_sprite_commands: 0,
+            draw_circle_commands: 0,
+            draw_text_commands: 0,
+            custom_markers: Vec::new(),
+            resolve_events: Vec::new(),
+            last_command_kind: None,
+            errors: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendExecutor {
+    pub state: DesktopGraphicsOpenGlBackendExecutorState,
+}
+
+impl DesktopGraphicsOpenGlBackendExecutor {
+    fn record_target_for_pass_step(&mut self, target: &RenderTarget) {
+        if self.state.pass_active && self.state.current_target.as_ref() != Some(target) {
+            self.state.errors.push(format!(
+                "opengl backend step target changed during active pass: {:?} -> {:?}",
+                self.state.current_target, target
+            ));
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecutor {
+    fn consume_opengl_backend_step(&mut self, step: DesktopGraphicsOpenGlBackendStep) {
+        let target = step.target.clone();
+        match step.kind {
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass => {
+                if self.state.pass_active {
+                    self.state
+                        .errors
+                        .push("opengl backend began a pass while another pass was active".into());
+                }
+                self.state.pass_active = true;
+                self.state.current_target = Some(target);
+                self.state.begin_passes += 1;
+            }
+            DesktopGraphicsOpenGlBackendStepKind::FlushBoundary { .. } => {
+                self.record_target_for_pass_step(&target);
+                self.state.flush_boundaries += 1;
+            }
+            DesktopGraphicsOpenGlBackendStepKind::ShaderApply { apply } => {
+                self.record_target_for_pass_step(&target);
+                self.state.current_shader = Some(apply.shader);
+                self.state.shader_applies += 1;
+            }
+            DesktopGraphicsOpenGlBackendStepKind::Command { kind, command } => {
+                self.record_target_for_pass_step(&target);
+                self.state.commands += 1;
+                self.state.last_command_kind = Some(kind);
+                match command {
+                    RenderCommand::Clear { .. } => {
+                        self.state.clear_commands += 1;
+                    }
+                    RenderCommand::SetBlend { mode } => {
+                        self.state.current_blend = mode;
+                    }
+                    RenderCommand::SetClip { rect } => {
+                        self.state.current_clip = Some(rect);
+                    }
+                    RenderCommand::ClearClip => {
+                        self.state.current_clip = None;
+                    }
+                    RenderCommand::DrawSprite { .. } => {
+                        self.state.draw_sprite_commands += 1;
+                    }
+                    RenderCommand::DrawCircle { .. } => {
+                        self.state.draw_circle_commands += 1;
+                    }
+                    RenderCommand::DrawText { .. } => {
+                        self.state.draw_text_commands += 1;
+                    }
+                    RenderCommand::Custom { name, .. } => {
+                        self.state.custom_markers.push(name);
+                    }
+                    RenderCommand::FillRect { .. }
+                    | RenderCommand::StrokeRect { .. }
+                    | RenderCommand::DrawLine { .. }
+                    | RenderCommand::DrawPolygon { .. }
+                    | RenderCommand::DrawPixel { .. } => {}
+                }
+            }
+            DesktopGraphicsOpenGlBackendStepKind::EndPass => {
+                self.record_target_for_pass_step(&target);
+                if !self.state.pass_active {
+                    self.state
+                        .errors
+                        .push("opengl backend ended a pass while no pass was active".into());
+                }
+                self.state.pass_active = false;
+                self.state.current_target = Some(target);
+                self.state.end_passes += 1;
+            }
+            DesktopGraphicsOpenGlBackendStepKind::Resolve {
+                resolve_target,
+                resolve_kind,
+            } => {
+                if self.state.pass_active {
+                    self.state
+                        .errors
+                        .push("opengl backend resolved while a pass was active".into());
+                }
+                self.state
+                    .resolve_events
+                    .push(DesktopGraphicsOpenGlBackendResolveEvent {
+                        source_target: target,
+                        resolve_target,
+                        resolve_kind,
+                    });
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1863,6 +2024,7 @@ pub struct HeadlessDesktopGraphicsRenderer {
     pub last_trace: DesktopGraphicsExecutionTrace,
     pub last_opengl_backend_plan: DesktopGraphicsOpenGlBackendFramePlan,
     pub last_opengl_backend_execution_state: DesktopGraphicsOpenGlBackendExecutionState,
+    pub last_opengl_backend_executor_state: DesktopGraphicsOpenGlBackendExecutorState,
     pub last_live_backend_state: DesktopGraphicsLiveBackendExecutionState,
 }
 
@@ -1872,7 +2034,7 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
         let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
         let opengl_backend_plan = trace.to_opengl_backend_plan();
         let execution = DesktopGraphicsExecutionSummary::from_trace(frame, &trace);
-        let mut opengl_backend_step_sink = DesktopGraphicsNullOpenGlBackendStepSink;
+        let mut opengl_backend_step_sink = DesktopGraphicsOpenGlBackendExecutor::default();
         let opengl_backend_execution_state =
             opengl_backend_plan.drive_step_sink(&mut opengl_backend_step_sink);
         let mut live_backend_sink = DesktopGraphicsNullLiveBackendDrawSpriteSink;
@@ -1894,6 +2056,7 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
         self.last_trace = trace;
         self.last_opengl_backend_plan = opengl_backend_plan;
         self.last_opengl_backend_execution_state = opengl_backend_execution_state;
+        self.last_opengl_backend_executor_state = opengl_backend_step_sink.state;
         self.last_live_backend_state = live_backend_state;
         stats
     }
@@ -5283,14 +5446,14 @@ mod tests {
         DesktopGraphicsLiveBackendRenderCommandTrace,
         DesktopGraphicsLiveBackendRenderTargetEventKind,
         DesktopGraphicsLiveBackendRenderTargetSink, DesktopGraphicsLiveBackendRenderTargetTrace,
-        DesktopGraphicsOpenGlBackendFramePlan, DesktopGraphicsOpenGlBackendStep,
-        DesktopGraphicsOpenGlBackendStepKind, DesktopGraphicsOpenGlBackendStepSink,
-        DesktopGraphicsOpenGlBackendStepSource, DesktopGraphicsRenderer,
-        DesktopGraphicsResolvedSpriteTrace, DesktopGraphicsShaderApplyExecutionTrace,
-        DesktopGraphicsTextureSamplerTrace, DesktopInputTickEvent, DesktopLauncher,
-        DesktopSurfaceConfig, DesktopSurfaceSize, HeadlessDesktopAudioRenderer,
-        HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
-        HeadlessDesktopGraphicsRenderer,
+        DesktopGraphicsOpenGlBackendExecutor, DesktopGraphicsOpenGlBackendFramePlan,
+        DesktopGraphicsOpenGlBackendStep, DesktopGraphicsOpenGlBackendStepKind,
+        DesktopGraphicsOpenGlBackendStepSink, DesktopGraphicsOpenGlBackendStepSource,
+        DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
+        DesktopGraphicsShaderApplyExecutionTrace, DesktopGraphicsTextureSamplerTrace,
+        DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceConfig, DesktopSurfaceSize,
+        HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
+        HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
     };
     use mindustry_core::mindustry::content::blocks::BlockDef;
     use mindustry_core::mindustry::core::game_runtime::{
@@ -7261,6 +7424,72 @@ mod tests {
                 && (color[3] - 0.5).abs() < 0.0001
                 && *filled
         )));
+
+        let launch_pass_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| std::ptr::eq(pass, launch_pass))
+            .expect("launch pass should be part of the render frame");
+        let opengl_plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        let launch_step_commands = opengl_plan
+            .steps
+            .iter()
+            .filter(|step| {
+                matches!(
+                    step.source,
+                    DesktopGraphicsOpenGlBackendStepSource::RenderPass { pass_index, .. }
+                        if pass_index == launch_pass_index
+                )
+            })
+            .filter_map(|step| match &step.kind {
+                DesktopGraphicsOpenGlBackendStepKind::Command { kind, command } => {
+                    Some((*kind, command))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(launch_step_commands.iter().any(|(_, command)| matches!(
+            command,
+            RenderCommand::SetBlend {
+                mode: RenderBlendMode::Additive
+            }
+        )));
+        assert!(launch_step_commands.iter().any(|(_, command)| matches!(
+            command,
+            RenderCommand::SetBlend {
+                mode: RenderBlendMode::Normal
+            }
+        )));
+        assert_eq!(
+            launch_step_commands
+                .iter()
+                .filter(|(_, command)| matches!(command, RenderCommand::DrawSprite { .. }))
+                .count(),
+            2
+        );
+        assert!(launch_step_commands.iter().any(|(_, command)| matches!(
+            command,
+            RenderCommand::Custom { name, .. } if name == "accelerator-launch-light"
+        )));
+        assert!(launch_step_commands.iter().any(|(_, command)| matches!(
+            command,
+            RenderCommand::Custom { name, .. } if name == "accelerator-launch-mixcol"
+        )));
+
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        opengl_plan.drive_step_sink(&mut executor);
+        assert!(executor.state.errors.is_empty());
+        assert!(executor
+            .state
+            .custom_markers
+            .iter()
+            .any(|name| name == "accelerator-launch-light"));
+        assert!(executor
+            .state
+            .custom_markers
+            .iter()
+            .any(|name| name == "accelerator-launch-mixcol"));
     }
 
     #[test]
@@ -8176,6 +8405,24 @@ mod tests {
             })
         ));
 
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        let executor_execution_state = plan.drive_step_sink(&mut executor);
+        assert_eq!(executor_execution_state.steps_visited, plan.steps.len());
+        assert_eq!(executor.state.begin_passes, 1);
+        assert_eq!(executor.state.end_passes, 1);
+        assert_eq!(executor.state.clear_commands, 1);
+        assert_eq!(executor.state.draw_sprite_commands, 1);
+        assert_eq!(executor.state.current_blend, RenderBlendMode::Additive);
+        assert_eq!(
+            executor.state.resolve_events,
+            vec![super::DesktopGraphicsOpenGlBackendResolveEvent {
+                source_target: RenderTarget::Buffer("lighting-buffer".into()),
+                resolve_target: RenderTarget::Screen,
+                resolve_kind: RenderResolveKind::ShaderBlit,
+            }]
+        );
+        assert!(executor.state.errors.is_empty());
+
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
         assert_eq!(renderer.last_opengl_backend_plan, plan);
@@ -8183,6 +8430,123 @@ mod tests {
             renderer.last_opengl_backend_execution_state.resolve_steps,
             1
         );
+        assert_eq!(
+            renderer
+                .last_opengl_backend_executor_state
+                .resolve_events
+                .len(),
+            1
+        );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .errors
+            .is_empty());
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_keeps_resolve_source_target_counts() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(44, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut texture_pass = RenderPass::new(RenderPassKind::Overlay)
+            .with_order(1)
+            .with_target(RenderTarget::Texture("offscreen-tex".into()));
+        texture_pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(0.0, 0.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            1.0,
+        ));
+        let mut buffer_pass = RenderPass::new(RenderPassKind::Lighting)
+            .with_order(2)
+            .with_target(RenderTarget::Buffer("offscreen-fbo".into()))
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::ShaderBlit);
+        buffer_pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(16.0, 0.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            2.0,
+        ));
+        render_frame.push_pass(texture_pass);
+        render_frame.push_pass(buffer_pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        assert_eq!(plan.steps.len(), 7);
+        assert!(matches!(
+            plan.steps[0].kind,
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass
+        ));
+        assert!(matches!(
+            plan.steps[1].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "DrawSprite",
+                ..
+            }
+        ));
+        assert!(matches!(
+            plan.steps[2].kind,
+            DesktopGraphicsOpenGlBackendStepKind::EndPass
+        ));
+        assert!(matches!(
+            plan.steps[3].kind,
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass
+        ));
+        assert!(matches!(
+            plan.steps[4].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "DrawSprite",
+                ..
+            }
+        ));
+        assert!(matches!(
+            plan.steps[5].kind,
+            DesktopGraphicsOpenGlBackendStepKind::EndPass
+        ));
+        assert_eq!(
+            plan.steps[6].target,
+            RenderTarget::Buffer("offscreen-fbo".into())
+        );
+        assert!(matches!(
+            plan.steps[6].kind,
+            DesktopGraphicsOpenGlBackendStepKind::Resolve {
+                resolve_target: RenderTarget::Screen,
+                resolve_kind: RenderResolveKind::ShaderBlit
+            }
+        ));
+
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        let state = plan.drive_step_sink(&mut executor);
+        assert_eq!(state.steps_visited, 7);
+        assert_eq!(state.begin_pass_steps, 2);
+        assert_eq!(state.end_pass_steps, 2);
+        assert_eq!(state.command_steps, 2);
+        assert_eq!(state.flush_boundary_steps, 0);
+        assert_eq!(state.shader_apply_steps, 0);
+        assert_eq!(state.resolve_steps, 1);
+        assert_eq!(state.texture_target_steps, 3);
+        assert_eq!(state.buffer_target_steps, 4);
+        assert_eq!(state.screen_target_steps, 0);
+        assert_eq!(
+            executor.state.resolve_events,
+            vec![super::DesktopGraphicsOpenGlBackendResolveEvent {
+                source_target: RenderTarget::Buffer("offscreen-fbo".into()),
+                resolve_target: RenderTarget::Screen,
+                resolve_kind: RenderResolveKind::ShaderBlit,
+            }]
+        );
+        assert!(executor.state.errors.is_empty());
     }
 
     #[test]
