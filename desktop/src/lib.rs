@@ -27,7 +27,7 @@ use mindustry_core::mindustry::entities::{
     StandardEffectDrawKind, StandardEffectDrawPlan, StandardEffectLightRenderPrimitive,
     StandardEffectLineRenderPrimitive, StandardEffectRectRenderPrimitive,
     StandardEffectShieldArcBreak, StandardEffectSquareRenderPrimitive,
-    StandardEffectTriangleRenderPrimitive, PLAYER_CLASS_ID,
+    StandardEffectTriangleRenderPrimitive, WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::{
@@ -45,14 +45,15 @@ use mindustry_core::mindustry::graphics::{
     MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, PageType, Pal, PixelatorCamera,
     PixelatorFramePlan, PixelatorInput, PixelatorState, PngRgba8888DecodeError,
     RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
-    RenderCommand, RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
-    RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
-    RenderTextStyle, RenderTextVerticalAlign, RenderTextureSampleFlip, RenderTextureSamplePlan,
-    RenderUvRect, RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan,
-    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask,
-    ShaderParameters, ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport,
-    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord,
-    UniformValue, Viewport as FloorViewport,
+    RenderCommand, RenderEngineState, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind,
+    RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget,
+    RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderTextureSampleFlip,
+    RenderTextureSamplePlan, RenderUvRect, RenderViewport, ShaderApplyContext,
+    ShaderApplyOperation, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
+    ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
+    ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
+    TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -113,6 +114,28 @@ fn desktop_block_full_icon_region_content_id(region: &str) -> Option<ContentId> 
     region
         .strip_prefix("block-fullIcon:")
         .and_then(|id| id.parse::<ContentId>().ok())
+}
+
+fn desktop_world_label_align(align: WorldLabelAlign) -> RenderTextAlign {
+    match align {
+        WorldLabelAlign::Left => RenderTextAlign::Start,
+        WorldLabelAlign::Center => RenderTextAlign::Center,
+        WorldLabelAlign::Right => RenderTextAlign::End,
+    }
+}
+
+fn desktop_world_label_text_size(font_size: f32) -> f32 {
+    (font_size.max(0.0) * 12.0).max(1.0)
+}
+
+fn desktop_world_label_background_rect(
+    text: &str,
+    position: RenderPoint,
+    font_size: f32,
+) -> RenderRect {
+    let width = (text.len() as f32 * 10.0 * font_size.max(0.0)).max(1.0) + 8.0;
+    let height = desktop_world_label_text_size(font_size) + 6.0;
+    RenderRect::from_center(position, width, height)
 }
 
 impl DesktopStandardEffectRenderFrame {
@@ -10960,6 +10983,51 @@ impl DesktopLauncher {
         (!pass.commands.is_empty()).then_some(pass)
     }
 
+    fn world_label_render_pass(&self) -> Option<RenderPass> {
+        let mut pass = RenderPass::new(RenderPassKind::Overlay)
+            .with_order(RenderPassKind::Overlay.default_order());
+        for label in self.runtime.client_world_label_snapshot_entities.values() {
+            if label.is_removed() || label.text.is_empty() {
+                continue;
+            }
+            if label.flags & WorldLabelComp::FLAG_ONLY_PARENT_VISIBLE != 0
+                && label.parent_id.is_some()
+                && label.parent.is_none()
+            {
+                continue;
+            }
+            let plan = label.draw();
+            let position = RenderPoint::new(plan.x, plan.y);
+            let text_align = desktop_world_label_align(plan.line_align);
+            if plan.flags & WorldLabelComp::FLAG_BACKGROUND != 0 {
+                pass.push(RenderCommand::fill_rect(
+                    desktop_world_label_background_rect(&plan.text, position, plan.font_size),
+                    [0.0, 0.0, 0.0, 0.3],
+                    plan.layer - 0.01,
+                ));
+            }
+            let outline = plan.flags & WorldLabelComp::FLAG_OUTLINE != 0;
+            let style = RenderTextStyle::new(text_align)
+                .with_font(if outline {
+                    RenderFontId::Outline
+                } else {
+                    RenderFontId::Default
+                })
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_outline(outline);
+            pass.push(RenderCommand::draw_text_styled(
+                plan.text,
+                position,
+                [1.0, 1.0, 1.0, 1.0],
+                desktop_world_label_text_size(plan.font_size),
+                0.0,
+                style,
+                plan.layer,
+            ));
+        }
+        (!pass.commands.is_empty()).then_some(pass)
+    }
+
     pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
         let plan = self.load_renderer_state.build_plan(input);
         DesktopFrame {
@@ -11034,6 +11102,9 @@ impl DesktopLauncher {
             }
         }
         if let Some(pass) = self.standard_effect_render_frame().to_render_pass() {
+            render_frame.push_pass(pass);
+        }
+        if let Some(pass) = self.world_label_render_pass() {
             render_frame.push_pass(pass);
         }
         if let Some(ui_pass) = self.desktop_ui_render_pass(viewport) {
@@ -12851,7 +12922,7 @@ mod tests {
         entities::{
             comp::{
                 BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, PuddleComp,
-                UnitComp, UnitControllerState,
+                UnitComp, UnitControllerState, WorldLabelComp,
             },
             entity_class_id, standard_effect_id, LegDestroyData, PlayerComp, PuddleLiquidInfo,
             StandardEffectDrawKind, TextureRegionRef, BULLET_CLASS_ID, DECAL_CLASS_ID,
@@ -14551,6 +14622,88 @@ mod tests {
                     && style.outline
                     && *layer == Layer::END
         )));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_world_label_snapshot_entities_into_overlay_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut label = WorldLabelComp::new(9904, 40.0, 56.0);
+        label.text = "rally".into();
+        label.font_size = 1.5;
+        label.z = 155.0;
+        label.flags = WorldLabelComp::FLAG_BACKGROUND
+            | WorldLabelComp::FLAG_OUTLINE
+            | WorldLabelComp::FLAG_ALIGN_RIGHT;
+        launcher
+            .runtime
+            .client_world_label_snapshot_entities
+            .insert(label.id, label);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 120.0, 80.0);
+        let camera = RenderCamera::new(RenderPoint::new(60.0, 40.0), viewport);
+        let minimap_camera = MinimapCamera::new(60.0, 40.0, 120.0, 80.0);
+        let frame = launcher.graphics_frame_for_render(
+            15,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawText { text, .. } if text == "rally")
+                    })
+            })
+            .expect("world label should be routed into an overlay render pass");
+        let text_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawText { text, .. } if text == "rally")
+            })
+            .expect("world label overlay pass should contain DrawText");
+        assert!(
+            overlay.commands[..text_index]
+                .iter()
+                .any(|command| matches!(command, RenderCommand::FillRect { .. })),
+            "world label background should be emitted before DrawText"
+        );
+        match &overlay.commands[text_index] {
+            RenderCommand::DrawText {
+                text,
+                position,
+                size,
+                align,
+                style,
+                layer,
+                ..
+            } => {
+                assert_eq!(text, "rally");
+                assert_eq!(*position, RenderPoint::new(40.0, 56.0));
+                assert_eq!(*size, 18.0);
+                assert_eq!(*align, RenderTextAlign::End);
+                assert_eq!(style.horizontal_align, RenderTextAlign::End);
+                assert_eq!(style.vertical_align, RenderTextVerticalAlign::Center);
+                assert_eq!(style.font, RenderFontId::Outline);
+                assert!(style.outline);
+                assert_eq!(*layer, 155.0);
+            }
+            other => panic!("expected world label DrawText, got {other:?}"),
+        }
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(
+            renderer
+                .last_opengl_backend_executor_state
+                .draw_text_commands
+                >= 1
+        );
     }
 
     #[test]

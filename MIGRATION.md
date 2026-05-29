@@ -15209,3 +15209,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - overlay / minimap overlay 仍有 sidecar plan 未 lower 成真实 `RenderPass`；
   - entity world draw、更多 native runtime smoke、联机可玩 smoke 仍未完成；
   - 当前总体迁移约 39.6%，仍未达到完整可玩。
+
+## 411. 最新闭环记录：world label snapshot 接入 overlay/OpenGL backend
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **39.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 world label 到 `RenderPassKind::Overlay` 的最小 bridge；
+    - `client_world_label_snapshot_entities` 中的 `WorldLabelComp::draw()` 现在会生成 overlay pass 命令；
+    - `FLAG_BACKGROUND` 会先输出 `FillRect` 背景，再输出 `DrawText`；
+    - `FLAG_OUTLINE` 映射到 `RenderFontId::Outline` 与 `RenderTextStyle::outline=true`；
+    - `FLAG_ALIGN_LEFT/RIGHT` 映射到 `RenderTextAlign::Start/End`；
+    - `FLAG_ONLY_PARENT_VISIBLE` 且 parent 尚不可解析时先跳过，避免在父实体不可见语义未完全接入前误画。
+- 迁移意义：
+  - world label 不再只停留在 runtime typed snapshot；
+  - `WorldLabelDrawPlan` 开始接入真实 render frame / OpenGL backend；
+  - 仍复用现有 `DrawText` / `FillRect` 命令与 overlay pass，而不是新造孤立 label renderer。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_world_label_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+- 仍未完成：
+  - Java `WorldLabelComp` 的 autoscale / parent local visibility / 精确 font layout 细节仍需继续对齐；
+  - minimap overlay 仍需从 sidecar lower 到 `RenderPassKind::Minimap`；
+  - entity world draw、更多 native runtime smoke、联机可玩 smoke 仍未完成；
+  - 当前总体迁移约 39.8%，仍未达到完整可玩。

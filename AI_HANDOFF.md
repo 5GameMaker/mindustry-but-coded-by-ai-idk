@@ -12530,3 +12530,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. world label：把 runtime snapshot / `WorldLabelDrawPlan` 接进 `RenderPassKind::Overlay`；
   2. minimap overlay：独立 lower 到 `RenderPassKind::Minimap`，不要污染 standard effect overlay；
   3. entity/world draw：继续从 sidecar/state 进入真实 render frame。
+
+### 2026-05-30：world label snapshot 接入 overlay/OpenGL backend
+
+- 当前整体完成度：约 **39.8%**。
+- 已完成：
+  - `DesktopLauncher::world_label_render_pass()` 将 `runtime.client_world_label_snapshot_entities` 转成 `RenderPassKind::Overlay`；
+  - world label `FLAG_BACKGROUND` 输出 `FillRect` 背景，随后输出 `DrawText`；
+  - `FLAG_OUTLINE` 映射到 `RenderFontId::Outline` / `RenderTextStyle::outline`；
+  - align flags 映射到 `RenderTextAlign`；
+  - `graphics_frame_for_render()` 已 push world label overlay pass；
+  - 新增 `desktop_launcher_routes_world_label_snapshot_entities_into_overlay_pass`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_world_label_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+- 下一步：
+  1. 补 Java world label autoscale / parent local visibility / 精确 font layout；
+  2. minimap overlay：按子代理建议独立接成 `RenderPassKind::Minimap`；
+  3. entity world draw：继续把 bullet/unit/player 等渲染从 snapshot/state 收口到 render frame。
