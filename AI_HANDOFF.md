@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **27.8%**。
+- 当前总体迁移完成度：约 **27.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10511,3 +10511,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 `DesktopGraphicsOpenGlBackendBlendState` 下沉到真实 GL state action sink；
   2. 后续继续补 `DrawText` 的 font/layout/align 信息；
   3. 再回到 `DrawSprite` 的 atlas/resource binding。
+
+---
+
+## 328. 最新闭环记录：DrawText 样式语义
+
+- 本轮总体进度更新：约 **27.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderTextVerticalAlign`；
+    - 新增 `RenderFontId`；
+    - 新增 `RenderTextStyle`，记录 font、horizontal/vertical align、wrap_width、markup、integer_position、outline；
+    - `RenderCommand::DrawText` 新增 `style` 字段；
+    - `RenderCommand::draw_text(...)` 自动生成兼容旧调用的默认 style；
+    - 新增 `RenderCommand::draw_text_styled(...)`。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendAdapterAction::DrawText` 新增 `style`；
+    - `RenderCommand -> Action` 映射保留 text style；
+    - 新增 `desktop_graphics_opengl_backend_executor_preserves_draw_text_style`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 后续真实 text backend 需要把 `RenderFontId` 对接字体资源；
+  2. 继续扩展 Java `Align` 位掩码/旋转锚点/markup layout 细节；
+  3. 渲染主线可回到 `DrawSprite` 的 atlas/resource binding。

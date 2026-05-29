@@ -277,6 +277,82 @@ pub enum RenderTextAlign {
     End,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderTextVerticalAlign {
+    Top,
+    Center,
+    Bottom,
+    Baseline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderFontId {
+    Default,
+    Outline,
+    Logic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderTextStyle {
+    pub font: RenderFontId,
+    pub horizontal_align: RenderTextAlign,
+    pub vertical_align: RenderTextVerticalAlign,
+    pub wrap_width: Option<f32>,
+    pub markup: bool,
+    pub integer_position: bool,
+    pub outline: bool,
+}
+
+impl RenderTextStyle {
+    pub const fn new(horizontal_align: RenderTextAlign) -> Self {
+        Self {
+            font: RenderFontId::Default,
+            horizontal_align,
+            vertical_align: RenderTextVerticalAlign::Baseline,
+            wrap_width: None,
+            markup: false,
+            integer_position: false,
+            outline: false,
+        }
+    }
+
+    pub const fn with_font(mut self, font: RenderFontId) -> Self {
+        self.font = font;
+        self
+    }
+
+    pub const fn with_vertical_align(mut self, vertical_align: RenderTextVerticalAlign) -> Self {
+        self.vertical_align = vertical_align;
+        self
+    }
+
+    pub const fn with_wrap_width(mut self, wrap_width: f32) -> Self {
+        self.wrap_width = Some(wrap_width);
+        self
+    }
+
+    pub const fn with_markup(mut self, markup: bool) -> Self {
+        self.markup = markup;
+        self
+    }
+
+    pub const fn with_integer_position(mut self, integer_position: bool) -> Self {
+        self.integer_position = integer_position;
+        self
+    }
+
+    pub const fn with_outline(mut self, outline: bool) -> Self {
+        self.outline = outline;
+        self
+    }
+}
+
+impl Default for RenderTextStyle {
+    fn default() -> Self {
+        Self::new(RenderTextAlign::Start)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RenderTarget {
     Screen,
@@ -390,6 +466,7 @@ pub enum RenderCommand {
         size: f32,
         rotation: f32,
         align: RenderTextAlign,
+        style: RenderTextStyle,
         layer: f32,
     },
     Custom {
@@ -516,6 +593,28 @@ impl RenderCommand {
             size,
             rotation,
             align,
+            style: RenderTextStyle::new(align),
+            layer,
+        }
+    }
+
+    pub fn draw_text_styled(
+        text: impl Into<String>,
+        position: RenderPoint,
+        color: [f32; 4],
+        size: f32,
+        rotation: f32,
+        style: RenderTextStyle,
+        layer: f32,
+    ) -> Self {
+        Self::DrawText {
+            text: text.into(),
+            position,
+            color,
+            size,
+            rotation,
+            align: style.horizontal_align,
+            style,
             layer,
         }
     }
@@ -1448,6 +1547,7 @@ mod tests {
                 position,
                 size,
                 align,
+                style,
                 layer,
                 ..
             } => {
@@ -1455,9 +1555,46 @@ mod tests {
                 assert_eq!(position, RenderPoint::new(6.0, 7.0));
                 assert_eq!(size, 12.0);
                 assert_eq!(align, RenderTextAlign::Center);
+                assert_eq!(style.horizontal_align, RenderTextAlign::Center);
+                assert_eq!(style.font, RenderFontId::Default);
+                assert_eq!(style.vertical_align, RenderTextVerticalAlign::Baseline);
                 assert_eq!(layer, 60.0);
             }
             other => panic!("unexpected command: {other:?}"),
+        }
+
+        let styled_text = RenderCommand::draw_text_styled(
+            "logic",
+            RenderPoint::new(10.0, 11.0),
+            [0.8, 0.9, 1.0, 1.0],
+            9.0,
+            15.0,
+            RenderTextStyle::new(RenderTextAlign::End)
+                .with_font(RenderFontId::Logic)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width(96.0)
+                .with_markup(true)
+                .with_integer_position(true)
+                .with_outline(true),
+            80.0,
+        );
+        match styled_text {
+            RenderCommand::DrawText {
+                align,
+                style,
+                layer,
+                ..
+            } => {
+                assert_eq!(align, RenderTextAlign::End);
+                assert_eq!(style.font, RenderFontId::Logic);
+                assert_eq!(style.vertical_align, RenderTextVerticalAlign::Center);
+                assert_eq!(style.wrap_width, Some(96.0));
+                assert!(style.markup);
+                assert!(style.integer_position);
+                assert!(style.outline);
+                assert_eq!(layer, 80.0);
+            }
+            other => panic!("unexpected styled text command: {other:?}"),
         }
 
         match polygon {

@@ -13206,3 +13206,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 暂未覆盖 Java 更复杂的 separate RGB/alpha factor；
   - `DrawText` 的 font/layout/align 与 `DrawSprite` 的 atlas/resource binding 仍待补齐；
   - 当前总体迁移约 27.8%，仍未达到完整可玩。
+
+## 12.422 DrawText 样式语义
+
+- 2026-05-29：根据 Java `Drawf.text` / `Font.draw` / `Fonts.outline` / `Fonts.logic` 等语义，扩展 backend-neutral `RenderCommand::DrawText`。此前 Rust 只保留 text、position、color、size、rotation、align、layer，不足以让 OpenGL 后端选择字体、处理垂直对齐、wrap、markup、整数坐标和 outline。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `RenderTextVerticalAlign`；
+    - 新增 `RenderFontId`；
+    - 新增 `RenderTextStyle`；
+    - `RenderCommand::DrawText` 新增 `style: RenderTextStyle`；
+    - `RenderCommand::draw_text(...)` 保持旧调用兼容，并把 `align` 转成默认 style；
+    - 新增 `RenderCommand::draw_text_styled(...)`，可显式传入 font、vertical align、wrap_width、markup、integer_position、outline。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendAdapterAction::DrawText` 新增 `style`；
+    - `opengl_backend_adapter_action_from_render_command(...)` 保留 DrawText style；
+    - 新增 `desktop_graphics_opengl_backend_executor_preserves_draw_text_style`。
+- 迁移意义：
+  - 这补上子代理标出的高风险项：文本渲染不能只记录字符串和坐标；
+  - 后续真实 OpenGL/text backend 可以按 `RenderFontId` 选择字体 atlas/cache，按 `wrap_width/markup/integer_position/outline` 决定 layout；
+  - 旧 `draw_text(...)` 调用不需要批量重写，默认 style 可逐步替换成更精确的 Java 语义。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core command_payloads_round_trip_for_overlay_and_custom_data --lib`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `RenderFontId` 尚未绑定真实字体资源/字体 atlas；
+  - Java `Align` 位掩码、旋转锚点、font cache layout 仍待继续细化；
+  - `DrawSprite` 的 atlas texture binding 与真实 GL draw call 仍待落地；
+  - 当前总体迁移约 27.9%，仍未达到完整可玩。

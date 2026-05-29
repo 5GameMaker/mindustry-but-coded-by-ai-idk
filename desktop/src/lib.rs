@@ -45,10 +45,11 @@ use mindustry_core::mindustry::graphics::{
     PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBackendFlushBoundary,
     RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
     RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
-    RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
-    ShaderApplyContext, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
-    ShaderId, ShaderParameters, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
-    TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord, Viewport as FloorViewport,
+    RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle,
+    RenderViewport, ShaderApplyContext, ShaderApplyPlan, ShaderCamera, ShaderCatalog,
+    ShaderDispatchFrame, ShaderId, ShaderParameters, ShaderTextureRegion, ShaderViewport,
+    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -1006,6 +1007,7 @@ pub enum DesktopGraphicsOpenGlBackendAdapterAction {
         size: f32,
         rotation: f32,
         align: RenderTextAlign,
+        style: RenderTextStyle,
         layer: f32,
     },
     Custom {
@@ -1218,6 +1220,7 @@ fn opengl_backend_adapter_action_from_render_command(
             size,
             rotation,
             align,
+            style,
             layer,
         } => DesktopGraphicsOpenGlBackendAdapterAction::DrawText {
             text: text.clone(),
@@ -1226,6 +1229,7 @@ fn opengl_backend_adapter_action_from_render_command(
             size: *size,
             rotation: *rotation,
             align: *align,
+            style: *style,
             layer: *layer,
         },
         RenderCommand::Custom { name, properties } => {
@@ -6141,10 +6145,11 @@ mod tests {
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
         MinimapCamera, MinimapOverlayInput, PageType, ParticleRendererState,
         RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
-        RenderCommand, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
-        RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderViewport,
-        ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId,
-        TextureAtlasPlan, TileCoord, UniformValue,
+        RenderCommand, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
+        RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
+        RenderTextStyle, RenderTextVerticalAlign, RenderViewport, ShaderApplyContext,
+        ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
+        UniformValue,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -9645,6 +9650,65 @@ mod tests {
             classifying_adapter.state.current_blend_state,
             executor.state.current_blend_state
         );
+        assert_eq!(executor.state.actions, classifying_adapter.state.actions);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_preserves_draw_text_style() {
+        let target = RenderTarget::Screen;
+        let style = RenderTextStyle::new(RenderTextAlign::Center)
+            .with_font(RenderFontId::Outline)
+            .with_vertical_align(RenderTextVerticalAlign::Top)
+            .with_wrap_width(128.0)
+            .with_markup(true)
+            .with_integer_position(true)
+            .with_outline(true);
+
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target,
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "DrawText",
+                command: RenderCommand::draw_text_styled(
+                    "capture zone",
+                    RenderPoint::new(24.0, 32.0),
+                    [0.9, 0.8, 0.7, 1.0],
+                    18.0,
+                    5.0,
+                    style,
+                    Layer::OVERLAY_UI,
+                ),
+            },
+        ));
+
+        assert_eq!(executor.state.draw_text_commands, 1);
+        assert_eq!(executor.state.action_count, 1);
+        assert!(matches!(
+            &executor.state.actions[0],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawText {
+                text,
+                position: RenderPoint { x: 24.0, y: 32.0 },
+                size: 18.0,
+                rotation: 5.0,
+                align: RenderTextAlign::Center,
+                style: action_style,
+                layer,
+                ..
+            } if text == "capture zone"
+                && *action_style == style
+                && (*layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+
+        let mut classifying_adapter =
+            super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
+        executor.drive_adapter(&mut classifying_adapter);
+        assert_eq!(classifying_adapter.state.draw_text_commands, 1);
         assert_eq!(executor.state.actions, classifying_adapter.state.actions);
     }
 
