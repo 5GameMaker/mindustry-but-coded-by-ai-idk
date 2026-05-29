@@ -46,10 +46,10 @@ use mindustry_core::mindustry::graphics::{
     RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
     RenderCommand, RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
     RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
-    RenderTextStyle, RenderTextureSamplePlan, RenderViewport, ShaderApplyContext,
-    ShaderApplyOperation, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
-    ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
-    ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
+    RenderTextStyle, RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect,
+    RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCamera,
+    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters,
+    ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
     TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
     Viewport as FloorViewport,
 };
@@ -3439,7 +3439,25 @@ pub struct DesktopGraphicsOpenGlBackendResolveCommand {
     pub resolve_target: RenderTarget,
     pub resolve_kind: RenderResolveKind,
     pub resolve_sample: Option<RenderTextureSamplePlan>,
+    pub resolve_sample_trace: Option<DesktopGraphicsOpenGlBackendResolveSampleTrace>,
     pub source_attachment: Option<DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendResolveSampleTrace {
+    pub geometry: RenderRect,
+    pub uv: RenderUvRect,
+    pub flip: RenderTextureSampleFlip,
+}
+
+impl From<RenderTextureSamplePlan> for DesktopGraphicsOpenGlBackendResolveSampleTrace {
+    fn from(sample: RenderTextureSamplePlan) -> Self {
+        Self {
+            geometry: sample.geometry,
+            uv: sample.uv,
+            flip: sample.flip,
+        }
+    }
 }
 
 impl DesktopGraphicsOpenGlBackendResolveCommand {
@@ -5064,6 +5082,7 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             resolve_target: event.resolve_target,
             resolve_kind: event.resolve_kind,
             resolve_sample: event.resolve_sample,
+            resolve_sample_trace: event.resolve_sample.map(Into::into),
             source_attachment,
         };
         if let Some(program_key) = Self::resolve_draw_program_key(command.resolve_kind) {
@@ -18847,6 +18866,7 @@ mod tests {
             resolve_target: RenderTarget::Screen,
             resolve_kind: RenderResolveKind::ShaderBlit,
             resolve_sample: None,
+            resolve_sample_trace: None,
             source_attachment: Some(
                 super::DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
                     framebuffer_key: "framebuffer:buffer:shader-blit-source".into(),
@@ -18998,17 +19018,42 @@ mod tests {
             ),
         );
 
+        let rect_sample = RenderTextureSamplePlan::fbo_uv_window(
+            RenderCamera::new(
+                RenderPoint::new(32.0, 48.0),
+                RenderViewport::new(0.0, 0.0, 64.0, 96.0),
+            ),
+            16,
+            24,
+            4.0,
+            3.0,
+            -2.0,
+        )
+        .unwrap();
+        let fbo_sample = RenderTextureSamplePlan::fbo_uv_window(
+            RenderCamera::new(
+                RenderPoint::new(40.0, 24.0),
+                RenderViewport::new(0.0, 0.0, 80.0, 48.0),
+            ),
+            20,
+            12,
+            4.0,
+            -4.0,
+            1.0,
+        )
+        .unwrap();
+
         executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
             source_target: RenderTarget::Buffer("draw-rect-source".into()),
             resolve_target: RenderTarget::Screen,
             resolve_kind: RenderResolveKind::DrawRectSample,
-            resolve_sample: None,
+            resolve_sample: Some(rect_sample),
         });
         executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
             source_target: RenderTarget::Buffer("draw-fbo-source".into()),
             resolve_target: RenderTarget::Screen,
             resolve_kind: RenderResolveKind::DrawFboSample,
-            resolve_sample: None,
+            resolve_sample: Some(fbo_sample),
         });
 
         assert_eq!(executor.resolve_commands.len(), 2);
@@ -19026,11 +19071,31 @@ mod tests {
             .as_ref()
             .expect("draw-rect resolve should retain source attachment")
             .color_texture_handle;
+        assert_eq!(
+            executor.resolve_commands[0].resolve_sample,
+            Some(rect_sample)
+        );
+        assert_eq!(
+            executor.resolve_commands[0].resolve_sample_trace,
+            Some(super::DesktopGraphicsOpenGlBackendResolveSampleTrace::from(
+                rect_sample
+            ))
+        );
         let fbo_texture = executor.resolve_commands[1]
             .source_attachment
             .as_ref()
             .expect("draw-fbo resolve should retain source attachment")
             .color_texture_handle;
+        assert_eq!(
+            executor.resolve_commands[1].resolve_sample,
+            Some(fbo_sample)
+        );
+        assert_eq!(
+            executor.resolve_commands[1].resolve_sample_trace,
+            Some(super::DesktopGraphicsOpenGlBackendResolveSampleTrace::from(
+                fbo_sample
+            ))
+        );
 
         let rect_commands = &executor.resolve_draw_commands[0..5];
         let fbo_commands = &executor.resolve_draw_commands[5..10];
