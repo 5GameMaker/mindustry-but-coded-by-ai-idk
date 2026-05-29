@@ -13,6 +13,7 @@ fn free_local_port() -> u16 {
     for _ in 0..128 {
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = tcp.local_addr().unwrap().port();
+        drop(tcp);
         if UdpSocket::bind(("127.0.0.1", port)).is_ok() {
             return port;
         }

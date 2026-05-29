@@ -9349,3 +9349,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 `BlockRendererPlan.block_particles` 接到 `DesktopGraphicsFrame` / effect renderer 或真实 backend 消费；
   2. 给 block particle plan 增加 world-space emission/output 语义，避免停在参数计划；
   3. 继续实现 liquid/heat/power/turret visual runtime 的动态 draw pass。
+
+---
+
+## 281. 最新闭环记录：真实 server↔desktop loopback world stream smoke
+
+- 本轮总体进度更新：约 **23.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `tests/src/lib.rs`
+    - 修复 `free_local_port()`：TCP ephemeral listener 取到端口后先释放，再做 UDP 同端口绑定检查；
+    - 避免 Windows 下测试 helper 因 TCP listener 未释放而误判无法预留 TCP/UDP 端口对。
+- 已验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `cargo test -p mindustry-tests real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream --manifest-path "Cargo.toml" -- --nocapture --test-threads=1`
+- 结果：
+  - Rust server ↔ Rust desktop loopback world stream smoke 通过；
+  - 当前链路至少能覆盖 server update flush pending world data、desktop read world stream、connect confirm 后的 preview snapshot cache 更新。
+- 下一步：
+  1. 增加更小的失败定位 smoke，分别断言 connect/world stream/confirm/materialization 阶段；
+  2. 准备 Java server ↔ Rust desktop 或 Rust server ↔ Java client 的外部进程 smoke；
+  3. 渲染侧继续把 `block_particles` 接到 DesktopGraphicsFrame/renderer 可消费层。

@@ -12048,3 +12048,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `block_particles` 已进入 `BlockRendererPlan` / frame bundle stats，但还需接入真实 effect/render backend 的绘制执行；
   - 粒子 plan 仍缺 world-space 粒子实例化与 GPU/backend draw call；
   - 当前总体迁移约 23.0%，仍未达到完整可玩。
+
+### 12.379 修复 loopback 端口预留并跑通真实 server↔desktop world stream smoke
+
+- 2026-05-29：继续推进 Rust 客户端/服务端联机兼容的真实 smoke，不再只依赖内存 packet roundtrip。本轮修复 Windows 下测试 helper 对 TCP/UDP 同端口预留过严导致的误失败，并跑通真实 `mindustry-server` ↔ `mindustry-desktop` loopback world stream 测试。
+- Rust 新增/接入：
+  - `tests/src/lib.rs`
+    - `free_local_port()` 在取得 TCP ephemeral port 后显式 `drop(tcp)`，再检查同端口 UDP 可绑定；
+    - 避免 Windows 环境下 TCP listener 仍持有端口时导致 UDP 预留检查 128 次全部失败；
+    - 保持测试目标不变：server 与 desktop 仍使用同一端口进行真实 loopback。
+- 已跑验证：
+  - `cargo test -p mindustry-tests real_server_desktop_preview_snapshot_forwarding_updates_remote_player_cache_after_world_stream --manifest-path "Cargo.toml" -- --nocapture --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+- 验证结果：
+  - 真实 server↔desktop loopback smoke 通过；
+  - 覆盖 `Connect` → server pending world data flush → `StreamBegin/StreamChunk` → desktop `read_world_data` → confirm 后的 preview snapshot remote player cache 链路。
+- 仍未完成：
+  - 还需扩大到 Java 服务端/客户端互通 smoke；
+  - world stream 后的更多 snapshot/materialization 行为仍需逐项对照 Java；
+  - 当前总体迁移约 23.1%，仍未达到完整可玩。
