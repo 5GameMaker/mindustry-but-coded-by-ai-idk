@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **26.6%**。
+- 当前总体迁移完成度：约 **26.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10235,3 +10235,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 `launch_time` 接进完整 `LaunchAnimator` / renderer land-time 更新链；
   2. 继续推进真实 OpenGL backend 对 `mixcol`、additive light、fullIcon atlas region 的执行；
   3. 后续清理 `Accelerator.launching` 相关 custom marker，让它们变成真实 GPU 状态而不是仅 trace/plan seam。
+
+---
+
+## 316. 最新闭环记录：LaunchAnimator land-time state 接入
+
+- 本轮总体进度更新：约 **26.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/world/blocks/launch_animator.rs`
+    - 新增 `LaunchAnimationState` 与 `LaunchAnimationStep`；
+    - `show_launch/show_landing/get_land_time_in/tick` 对齐 Java `Renderer.landTime` 与 `getLandTimeIn()` 语义；
+    - 保持 `LaunchAnimator` trait 只表达 Java 接口行为，不把 `Accelerator.launch_time` 上提到 trait，避免污染后续 `CoreBlock` 迁移。
+  - `core/src/mindustry/world/blocks/mod.rs`
+    - 导出 `LaunchAnimationState` / `LaunchAnimationStep`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `launch_animation_state`；
+    - 新增 `tick_accelerator_launch_animations_for_render(delta)`，从 active accelerator 读取 `launch_duration + charge_duration`，推进 renderer land-time，并写回 `AcceleratorState.launch_time`；
+    - `update()` 每帧推进该状态，同时同步 `cutscene / land_scale`；
+    - 结束时清理视觉 `launching=false / launch_time=0`，但 sector switch / loadout / launch resources 仍待迁移。
+- 已验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core launch_animator --lib`
+  - `cargo test -p mindustry-desktop accelerator_launch --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 优先继续渲染引擎：真实 OpenGL executor 最小消费 `BeginPass/EndPass/FlushBoundary/DrawSprite/DrawCircle/Resolve`；
+  2. 继续把 `Accelerator.drawLaunch()` 的云层、ring、lightning、landing core 细节拆为 Rust render pass；
+  3. 补 `Time.runTask(launchDuration() - 6f)` 对应 sector switch / resources / loadout 流程；
+  4. 继续保持路径：Rust 工作区 `D:\MDT\rust-mindustry`，参考仓库 `D:\MDT\mindustry-upstream-v157.4`，禁止使用废案 `D:\MDT\mindustry-rust`。

@@ -1,6 +1,6 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::content::blocks::{
-    BlockDef, CampaignBlockKind, DistributionBlockKind,
+    BlockDef, CampaignBlockData, CampaignBlockKind, DistributionBlockKind,
 };
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeBlockVisualRuntimeSnapshot, GameRuntimeCampaignBlockState,
@@ -72,8 +72,8 @@ use mindustry_core::mindustry::world::draw::{
     draw_block_dispatch_icons, DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
 };
 use mindustry_core::mindustry::world::{
-    blocks::campaign::AcceleratorState, point2_x, point2_y, BuildingRef,
-    CacheLayer as WorldCacheLayer, Tile,
+    blocks::{campaign::AcceleratorState, LaunchAnimationState, LaunchAnimationStep},
+    point2_x, point2_y, BuildingRef, CacheLayer as WorldCacheLayer, Tile,
 };
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
@@ -1933,6 +1933,7 @@ pub struct DesktopLauncher {
     pub renderer_scale: f32,
     pub land_scale: f32,
     pub cutscene: bool,
+    pub launch_animation_state: LaunchAnimationState,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
     pub mods_directory_arg: Option<String>,
@@ -2170,6 +2171,79 @@ fn accelerator_launch_charge_ratio(state: &AcceleratorState, charge_duration: f3
 fn accelerator_launch_overlay_alpha(charge_ratio: f32) -> f32 {
     let value = (charge_ratio * 0.7).clamp(0.0, 1.0);
     value * value
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DesktopAcceleratorLaunchAnimationConfig {
+    tile_pos: i32,
+    total_duration: f32,
+    charge_duration: f32,
+    land_zoom_from: f32,
+    land_zoom_to: f32,
+    charge_zoom_to: f32,
+}
+
+fn accelerator_launch_animation_config(
+    tile_pos: i32,
+    campaign_block: &CampaignBlockData,
+) -> Option<DesktopAcceleratorLaunchAnimationConfig> {
+    if campaign_block.kind != CampaignBlockKind::Accelerator {
+        return None;
+    }
+
+    let total_duration = (campaign_block.launch_duration + campaign_block.charge_duration).max(0.0);
+    (total_duration > 0.0).then_some(DesktopAcceleratorLaunchAnimationConfig {
+        tile_pos,
+        total_duration,
+        charge_duration: campaign_block.charge_duration.max(0.0),
+        land_zoom_from: campaign_block.land_zoom_from,
+        land_zoom_to: campaign_block.land_zoom_to,
+        charge_zoom_to: campaign_block.charge_zoom_to,
+    })
+}
+
+fn desktop_interp_pow4_in(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    value * value * value * value
+}
+
+fn desktop_lerp(from: f32, to: f32, progress: f32) -> f32 {
+    from + (to - from) * progress.clamp(0.0, 1.0)
+}
+
+fn accelerator_launch_zoom_scale(
+    config: DesktopAcceleratorLaunchAnimationConfig,
+    land_time: f32,
+    land_time_in: f32,
+) -> f32 {
+    if config.total_duration <= 0.0 {
+        return 1.0;
+    }
+
+    let raw_time = (config.total_duration - land_time).max(0.0);
+    if config.charge_duration > 0.0 && raw_time < config.charge_duration {
+        let fin = raw_time / config.charge_duration;
+        return desktop_lerp(
+            config.land_zoom_to,
+            config.charge_zoom_to,
+            desktop_interp_pow4_in(fin),
+        )
+        .max(0.0);
+    }
+
+    let charge_fraction = if config.total_duration > 0.0 {
+        (config.charge_duration / config.total_duration).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let denom = (1.0 - charge_fraction).max(f32::EPSILON);
+    let fin = 1.0 - (((1.0 - land_time_in) - charge_fraction).clamp(0.0, 1.0) / denom);
+    desktop_lerp(
+        config.land_zoom_from,
+        config.land_zoom_to,
+        desktop_interp_pow4_in(fin),
+    )
+    .max(0.0)
 }
 
 fn desktop_building_center(coord: TileCoord, size: u8, tile_size_world: f32) -> RenderPoint {
@@ -2430,6 +2504,7 @@ impl DesktopLauncher {
             renderer_scale: 1.0,
             land_scale: 1.0,
             cutscene: false,
+            launch_animation_state: LaunchAnimationState::default(),
             connect_target,
             connect_error: None,
             mods_directory_arg,
@@ -2545,6 +2620,103 @@ impl DesktopLauncher {
         merged
     }
 
+    fn active_accelerator_launch_animation_config(
+        &self,
+    ) -> Option<DesktopAcceleratorLaunchAnimationConfig> {
+        for (tile_pos, state) in &self.runtime.campaign_runtime_states {
+            let GameRuntimeCampaignBlockState::Accelerator(state) = state else {
+                continue;
+            };
+            if !state.launching {
+                continue;
+            }
+
+            let Some(block_id) = self
+                .runtime
+                .buildings
+                .iter()
+                .find(|building| building.tile_pos == *tile_pos)
+                .map(|building| building.block.id)
+                .or_else(|| {
+                    self.game_state
+                        .world
+                        .tile(point2_x(*tile_pos) as i32, point2_y(*tile_pos) as i32)
+                        .map(|tile| tile.block)
+                })
+            else {
+                continue;
+            };
+            let Some(BlockDef::Campaign(campaign_block)) = self.content_loader.block(block_id)
+            else {
+                continue;
+            };
+            if let Some(config) = accelerator_launch_animation_config(*tile_pos, campaign_block) {
+                return Some(config);
+            }
+        }
+
+        None
+    }
+
+    pub fn tick_accelerator_launch_animations_for_render(
+        &mut self,
+        delta: f32,
+    ) -> Option<LaunchAnimationStep> {
+        let Some(config) = self.active_accelerator_launch_animation_config() else {
+            self.launch_animation_state.clear();
+            self.cutscene = false;
+            self.land_scale = 1.0;
+            return None;
+        };
+
+        if !self.launch_animation_state.active
+            || !self.launch_animation_state.launching
+            || (self.launch_animation_state.launch_duration - config.total_duration).abs()
+                > f32::EPSILON
+        {
+            self.launch_animation_state
+                .show_launch(config.total_duration);
+        }
+
+        let step = self
+            .launch_animation_state
+            .tick(delta, self.game_state.is_paused());
+
+        if step.should_update_launch {
+            if let Some(GameRuntimeCampaignBlockState::Accelerator(state)) = self
+                .runtime
+                .campaign_runtime_states
+                .get_mut(&config.tile_pos)
+            {
+                let launch_time = config.total_duration - step.land_time_in * config.total_duration;
+                state.launch_time = launch_time.clamp(0.0, config.total_duration);
+            }
+        }
+
+        if step.ended {
+            if let Some(GameRuntimeCampaignBlockState::Accelerator(state)) = self
+                .runtime
+                .campaign_runtime_states
+                .get_mut(&config.tile_pos)
+            {
+                state.launching = false;
+                state.launch_time = 0.0;
+            }
+            self.cutscene = false;
+            self.land_scale = 1.0;
+            return Some(step);
+        }
+
+        self.cutscene = self.launch_animation_state.is_cutscene();
+        self.land_scale = if self.cutscene {
+            accelerator_launch_zoom_scale(config, step.land_time, step.land_time_in)
+        } else {
+            1.0
+        };
+
+        Some(step)
+    }
+
     pub fn update(&mut self) {
         self.client.update();
         self.net_client.update();
@@ -2571,6 +2743,7 @@ impl DesktopLauncher {
         self.sync_remote_preview_plan_packets(now_millis);
         self.rebuild_other_player_preview_overlays_at(now_millis, 1.0, None);
         self.runtime.tick_client_move_effect_abilities(1.0, false);
+        self.tick_accelerator_launch_animations_for_render(1.0);
         let mut puddle_particle_rand_state = self.puddle_particle_rand_state;
         self.runtime
             .tick_client_puddle_snapshot_particle_effects(1.0, |particle| {
@@ -5119,6 +5292,7 @@ mod tests {
         HeadlessDesktopCameraShakeRenderer, HeadlessDesktopEffectRenderer,
         HeadlessDesktopGraphicsRenderer,
     };
+    use mindustry_core::mindustry::content::blocks::BlockDef;
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
@@ -5131,7 +5305,7 @@ mod tests {
         ClientUnitItemMirror, ClientUnitPayloadMirror,
     };
     use mindustry_core::mindustry::core::{
-        GameRuntime, GameRuntimeNetworkContext, WorldLoadEventKind,
+        GameRuntime, GameRuntimeNetworkContext, GameStateState, WorldLoadEventKind,
     };
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::ctype::{Content, ContentId};
@@ -7080,13 +7254,109 @@ mod tests {
             .find(|pass| pass.kind == RenderPassKind::Lighting)
             .expect("launching accelerator should add an additive light primitive");
         assert!(lighting_pass.commands.iter().any(|command| matches!(
-            command,
-            RenderCommand::DrawCircle { center, radius, color, filled, .. }
-                if *center == RenderPoint::new(12.0, 12.0)
-                    && (*radius - expected_light_radius).abs() < 0.0001
-                    && (color[3] - 0.5).abs() < 0.0001
-                    && *filled
+        command,
+        RenderCommand::DrawCircle { center, radius, color, filled, .. }
+            if *center == RenderPoint::new(12.0, 12.0)
+                && (*radius - expected_light_radius).abs() < 0.0001
+                && (color[3] - 0.5).abs() < 0.0001
+                && *filled
         )));
+    }
+
+    #[test]
+    fn desktop_launcher_ticks_accelerator_launch_time_from_land_time_state() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.set(GameStateState::Playing);
+        let (accelerator, total_duration, land_zoom_to) = {
+            let accelerator_def = launcher
+                .content_loader
+                .block_by_name("interplanetary-accelerator")
+                .unwrap();
+            let BlockDef::Campaign(campaign_block) = accelerator_def else {
+                panic!("interplanetary accelerator should be a campaign block");
+            };
+            (
+                accelerator_def.base().clone(),
+                campaign_block.launch_duration + campaign_block.charge_duration,
+                campaign_block.land_zoom_to,
+            )
+        };
+        assert_eq!(total_duration, 340.0);
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(4, 4);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = accelerator.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: accelerator.id,
+                team: 3,
+                rotation: 0,
+            });
+            tile_pos
+        };
+
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(tile_pos, accelerator, TeamId(3)));
+        launcher.runtime.campaign_runtime_states.insert(
+            tile_pos,
+            GameRuntimeCampaignBlockState::Accelerator(AcceleratorState {
+                progress: 1.0,
+                launching: true,
+                launch_time: 99.0,
+            }),
+        );
+
+        let first = launcher
+            .tick_accelerator_launch_animations_for_render(55.0)
+            .unwrap();
+        assert!(first.should_update_launch);
+        assert!(!first.ended);
+        assert_eq!(first.land_time, 340.0);
+        assert_eq!(first.land_time_in, 1.0);
+        assert!(launcher.cutscene);
+        assert!((launcher.land_scale - land_zoom_to).abs() < 0.0001);
+        match launcher.runtime.campaign_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeCampaignBlockState::Accelerator(state)) => {
+                assert_eq!(state.launch_time, 0.0);
+                assert!(state.launching);
+            }
+            other => panic!("expected accelerator state after first launch tick, got {other:?}"),
+        }
+
+        let second = launcher
+            .tick_accelerator_launch_animations_for_render(55.0)
+            .unwrap();
+        assert!(second.should_update_launch);
+        assert!(!second.ended);
+        assert_eq!(second.land_time, 285.0);
+        assert!((second.land_time_in - (285.0 / 340.0)).abs() < 0.0001);
+        assert!(launcher.land_scale > land_zoom_to);
+        match launcher.runtime.campaign_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeCampaignBlockState::Accelerator(state)) => {
+                assert!((state.launch_time - 55.0).abs() < 0.0001);
+                assert!(state.launching);
+            }
+            other => panic!("expected accelerator state after second launch tick, got {other:?}"),
+        }
+
+        let final_step = launcher
+            .tick_accelerator_launch_animations_for_render(400.0)
+            .unwrap();
+        assert!(final_step.ended);
+        assert!(!launcher.launch_animation_state.active);
+        assert!(!launcher.cutscene);
+        assert_eq!(launcher.land_scale, 1.0);
+        match launcher.runtime.campaign_runtime_states.get(&tile_pos) {
+            Some(GameRuntimeCampaignBlockState::Accelerator(state)) => {
+                assert!(!state.launching);
+                assert_eq!(state.launch_time, 0.0);
+            }
+            other => panic!("expected accelerator state after final launch tick, got {other:?}"),
+        }
     }
 
     #[test]

@@ -23,7 +23,7 @@ pub mod sandbox;
 pub mod storage;
 pub mod units;
 
-pub use launch_animator::LaunchAnimator;
+pub use launch_animator::{LaunchAnimationState, LaunchAnimationStep, LaunchAnimator};
 
 pub trait UnitTetherBlock {
     fn spawned(&mut self, id: i32);

@@ -12880,3 +12880,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `launch_time` 尚未接入完整 `LaunchAnimator` / renderer land-time 生命周期；
   - fullIcon/mixcol 仍需真实 atlas region 与 OpenGL backend 状态实现；
   - 当前总体迁移约 26.6%，仍未达到完整可玩。
+
+## 12.410 LaunchAnimator land-time state 接入
+
+- 2026-05-29：对照 Java `Renderer.landTime / launchAnimator` 与 `AcceleratorBuild.updateLaunch()`，补上 Rust 侧最小 renderer land-time 状态机，并把 `AcceleratorState.launch_time` 接入该时间轴。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/blocks/launch_animator.rs`
+    - 新增 `LaunchAnimationState`，保存 `active / launching / land_time / launch_duration`；
+    - 新增 `LaunchAnimationStep`，暴露 `should_update_launch / ended / land_time / land_time_in / remaining_land_time`；
+    - `show_launch(...)`、`show_landing(...)`、`get_land_time_in(...)`、`tick(...)` 对齐 Java renderer 的倒计时与 landing 反向 `fin` 语义；
+    - 测试覆盖 launch、landing、暂停 tick 与结束清理。
+  - `core/src/mindustry/world/blocks/mod.rs`
+    - 导出 `LaunchAnimationState` 与 `LaunchAnimationStep`，方便 desktop renderer 接线。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `launch_animation_state`；
+    - 新增 `tick_accelerator_launch_animations_for_render(delta)`，扫描 active accelerator，按 `launch_duration + charge_duration` 创建 renderer land-time，使用 `land_time_in` 写回 `AcceleratorState.launch_time`；
+    - `update()` 每帧推进该状态，并同步 `cutscene / land_scale`，使 pixelator/renderer 过场输入开始由发射时间轴驱动；
+    - 发射结束时按 Java `endLaunch()` 的视觉状态清理 `launching=false / launch_time=0`，sector switch 与资源迁移仍标为后续项；
+    - 新增 desktop 测试验证首帧 `launch_time=0`、第二 tick 按 renderer land-time 推进到 55、结束后清理状态。
+- Java 对照要点：
+  - `Renderer.showLaunch()` 设置 `launching=true` 与 `landTime=launchDuration()`；
+  - `Renderer.update()` 在 `landTime > 0` 时先调用 `launchAnimator.updateLaunch()`，再扣减 `Time.delta`；
+  - `AcceleratorBuild.updateLaunch()` 使用 `renderer.getLandTimeIn() * launchDuration()` 反推 `launchTime`。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core launch_animator --lib`
+  - `cargo test -p mindustry-desktop accelerator_launch --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `Accelerator.drawLaunch()` 的云层、ring、lightning、landing core 细节尚未完整迁移；
+  - `Time.runTask(launchDuration() - 6f)` 对应的 sector switch / loadout / launch resources 流程仍未接入；
+  - fullIcon/mixcol/additive light 仍需要真实 atlas region 与 OpenGL backend executor 承接；
+  - 当前总体迁移约 26.7%，仍未达到完整可玩。
