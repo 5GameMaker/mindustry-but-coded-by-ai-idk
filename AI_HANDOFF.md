@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **28.0%**。
+- 当前总体迁移完成度：约 **28.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10560,3 +10560,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 `resolved_sprite` 中的 page/UV/filter/sampler 继续下沉到真实 texture binding；
   2. 扩展 duplicate symbol 时的 command-index 精确匹配，避免只按 symbol 找第一项；
   3. 再推进真实 VBO/mesh draw call 边界。
+
+---
+
+## 330. 最新闭环记录：DrawSprite command-index atlas 关联
+
+- 本轮总体进度更新：约 **28.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsResolvedSpriteTrace` 新增 `command_index`；
+    - render trace 生成 resolved sprite 时写入对应 command index；
+    - `opengl_backend_resolved_sprite_for_command(...)` 优先按 `(command_index, symbol)` 精确匹配，才 fallback 到 symbol；
+    - 更新 atlas trace 相关断言，确认 resolved sprite 与原始 draw command 绑定。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_frame_resolves_default_block_crack_sprite_from_atlas --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 继续把 atlas page/UV/sampler 转成真实 texture binding 输入；
+  2. 推进 VBO/mesh draw call 边界；
+  3. 保持 resolved sprite payload 不脱离 OpenGL executor/action 主链。

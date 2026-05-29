@@ -13261,3 +13261,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `resolved_sprite` 尚未映射到真实 GPU texture id / UV buffer；
   - `DrawSprite` 的 VBO/mesh 提交与 shader binding 仍待落地；
   - 当前总体迁移约 28.0%，仍未达到完整可玩。
+
+## 12.424 DrawSprite command-index atlas 关联
+
+- 2026-05-29：继续细化 DrawSprite atlas payload。上一节 action 已能携带 resolved sprite，但 resolver 仍按 symbol 匹配；当同一 symbol 在同一 pass 中多次出现时，后续真实 GL backend 需要知道 atlas payload 对应哪一个 command。现在 resolved sprite trace 带 command index，并在 OpenGL plan 阶段优先精确匹配。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsResolvedSpriteTrace` 新增 `command_index: Option<usize>`；
+    - render trace 遍历 command 时对 `DrawSprite` 写入 `command_index`；
+    - `opengl_backend_resolved_sprite_for_command(command_index, command, resolved_sprites)` 优先按 command index 与 symbol 匹配；
+    - 保留 symbol fallback 作为兼容旧 trace/缺 index 的过渡行为；
+    - 更新 atlas trace 与 live backend draw sprite trace 的 expected payload。
+- 迁移意义：
+  - atlas payload 不再只是“这个 symbol 的某个解析结果”，而能关联到具体 draw command；
+  - 为后续按 command 构造 quad/VBO、绑定 texture page 与 UV 提供稳定输入；
+  - 继续避免真实 OpenGL adapter 重新扫描整个 trace。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_frame_resolves_default_block_crack_sprite_from_atlas --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `DesktopGraphicsResolvedSpriteTrace` 仍是 CPU-side trace，尚未转成 GPU texture handle；
+  - VBO/mesh 顶点生成、UV buffer、shader binding 仍待落地；
+  - 当前总体迁移约 28.1%，仍未达到完整可玩。

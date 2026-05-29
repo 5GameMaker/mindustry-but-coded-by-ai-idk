@@ -430,6 +430,7 @@ impl DesktopGraphicsTextureSamplerTrace {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsResolvedSpriteTrace {
+    pub command_index: Option<usize>,
     pub symbol: String,
     pub page_type: Option<PageType>,
     pub page_source_path: Option<String>,
@@ -698,6 +699,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
                     kind: render_command_trace_kind(command),
                     command: command.clone(),
                     resolved_sprite: opengl_backend_resolved_sprite_for_command(
+                        command_index,
                         command,
                         resolved_sprites,
                     ),
@@ -708,6 +710,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
 }
 
 fn opengl_backend_resolved_sprite_for_command(
+    command_index: usize,
     command: &RenderCommand,
     resolved_sprites: &[DesktopGraphicsResolvedSpriteTrace],
 ) -> Option<DesktopGraphicsResolvedSpriteTrace> {
@@ -716,7 +719,12 @@ fn opengl_backend_resolved_sprite_for_command(
     };
     resolved_sprites
         .iter()
-        .find(|sprite| sprite.symbol == *symbol)
+        .find(|sprite| sprite.command_index == Some(command_index) && sprite.symbol == *symbol)
+        .or_else(|| {
+            resolved_sprites
+                .iter()
+                .find(|sprite| sprite.symbol == *symbol)
+        })
         .cloned()
 }
 
@@ -2223,7 +2231,7 @@ impl DesktopGraphicsExecutionTrace {
                             let mut resolved_sprites = Vec::new();
                             let mut draw_texts = Vec::new();
                             let mut draw_polygon_sides = Vec::new();
-                            for command in &pass.commands {
+                            for (command_index, command) in pass.commands.iter().enumerate() {
                                 match command {
                                     RenderCommand::DrawSprite { symbol, .. } => {
                                         command_trace.push(
@@ -2233,8 +2241,9 @@ impl DesktopGraphicsExecutionTrace {
                                         );
                                         draw_sprite_symbols.push(symbol.clone());
                                         if let Some(atlas) = atlas {
-                                            resolved_sprites
-                                                .push(resolve_sprite_symbol(atlas, symbol));
+                                            let mut resolved = resolve_sprite_symbol(atlas, symbol);
+                                            resolved.command_index = Some(command_index);
+                                            resolved_sprites.push(resolved);
                                         }
                                     }
                                     RenderCommand::DrawText { text, .. } => {
@@ -2359,6 +2368,7 @@ fn resolve_sprite_symbol<T>(
         Ok(located) => {
             let page = atlas.page(located.page_type);
             DesktopGraphicsResolvedSpriteTrace {
+                command_index: None,
                 symbol: symbol.to_string(),
                 page_type: Some(located.page_type),
                 page_source_path: Some(located.page_source_path.to_string()),
@@ -2379,6 +2389,7 @@ fn resolve_sprite_symbol<T>(
             }
         }
         Err(miss) => DesktopGraphicsResolvedSpriteTrace {
+            command_index: None,
             symbol: symbol.to_string(),
             page_type: miss.page_type,
             page_source_path: miss.page_source_path,
@@ -10919,6 +10930,7 @@ mod tests {
         assert_eq!(
             renderer.last_trace.render_passes[0].resolved_sprites[0],
             DesktopGraphicsResolvedSpriteTrace {
+                command_index: Some(0),
                 symbol: "router".to_string(),
                 page_type: Some(mindustry_core::mindustry::graphics::PageType::Main),
                 page_source_path: Some("sprites.png".to_string()),
@@ -11466,6 +11478,7 @@ mod tests {
                 target: RenderTarget::Buffer("backend-buffer".into()),
                 symbol: "alpha".to_string(),
                 resolved_sprite: Some(DesktopGraphicsResolvedSpriteTrace {
+                    command_index: Some(1),
                     symbol: "alpha".to_string(),
                     page_type: Some(PageType::Main),
                     page_source_path: Some("sprites.png".to_string()),
