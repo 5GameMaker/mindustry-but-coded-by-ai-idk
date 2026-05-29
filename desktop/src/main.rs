@@ -121,12 +121,15 @@ struct DesktopNativeOpenGlRuntime {
     state: mindustry_desktop::DesktopGraphicsOpenGlBackendRuntimeState,
     driver: mindustry_desktop::DesktopGraphicsRecordingOpenGlBackendDriver,
     textures: std::collections::BTreeMap<u32, glow::NativeTexture>,
+    framebuffers: std::collections::BTreeMap<u32, glow::NativeFramebuffer>,
     buffers: std::collections::BTreeMap<u32, glow::NativeBuffer>,
     vertex_arrays: std::collections::BTreeMap<u32, glow::NativeVertexArray>,
     shaders: std::collections::BTreeMap<u32, glow::NativeShader>,
     programs: std::collections::BTreeMap<u32, glow::NativeProgram>,
     shader_sources: std::collections::BTreeMap<u32, String>,
     uniform_locations: std::collections::BTreeMap<(u32, String), glow::NativeUniformLocation>,
+    framebuffer_handle_cache: mindustry_desktop::DesktopGraphicsOpenGlBackendHandleCache,
+    framebuffer_handle_allocator: mindustry_desktop::DesktopGraphicsOpenGlBackendHandleAllocator,
     shader_asset_root: std::path::PathBuf,
     current_program: Option<u32>,
     current_vertex_array: Option<u32>,
@@ -215,12 +218,17 @@ impl DesktopNativeOpenGlRuntime {
             state: mindustry_desktop::DesktopGraphicsOpenGlBackendRuntimeState::default(),
             driver: mindustry_desktop::DesktopGraphicsRecordingOpenGlBackendDriver::default(),
             textures: std::collections::BTreeMap::new(),
+            framebuffers: std::collections::BTreeMap::new(),
             buffers: std::collections::BTreeMap::new(),
             vertex_arrays: std::collections::BTreeMap::new(),
             shaders: std::collections::BTreeMap::new(),
             programs: std::collections::BTreeMap::new(),
             shader_sources: std::collections::BTreeMap::new(),
             uniform_locations: std::collections::BTreeMap::new(),
+            framebuffer_handle_cache:
+                mindustry_desktop::DesktopGraphicsOpenGlBackendHandleCache::default(),
+            framebuffer_handle_allocator:
+                mindustry_desktop::DesktopGraphicsOpenGlBackendHandleAllocator::default(),
             shader_asset_root: desktop_native_opengl_shader_asset_root(),
             current_program: None,
             current_vertex_array: None,
@@ -270,6 +278,7 @@ struct DesktopNativeOpenGlDriver<'a> {
     gl: &'a glow::Context,
     recording: &'a mut mindustry_desktop::DesktopGraphicsRecordingOpenGlBackendDriver,
     textures: &'a mut std::collections::BTreeMap<u32, glow::NativeTexture>,
+    framebuffers: &'a mut std::collections::BTreeMap<u32, glow::NativeFramebuffer>,
     buffers: &'a mut std::collections::BTreeMap<u32, glow::NativeBuffer>,
     vertex_arrays: &'a mut std::collections::BTreeMap<u32, glow::NativeVertexArray>,
     shaders: &'a mut std::collections::BTreeMap<u32, glow::NativeShader>,
@@ -277,6 +286,9 @@ struct DesktopNativeOpenGlDriver<'a> {
     shader_sources: &'a mut std::collections::BTreeMap<u32, String>,
     uniform_locations:
         &'a mut std::collections::BTreeMap<(u32, String), glow::NativeUniformLocation>,
+    framebuffer_handle_cache: &'a mut mindustry_desktop::DesktopGraphicsOpenGlBackendHandleCache,
+    framebuffer_handle_allocator:
+        &'a mut mindustry_desktop::DesktopGraphicsOpenGlBackendHandleAllocator,
     shader_asset_root: &'a std::path::Path,
     current_program: &'a mut Option<u32>,
     current_vertex_array: &'a mut Option<u32>,
@@ -311,6 +323,44 @@ impl DesktopNativeOpenGlDriver<'_> {
                     "failed to create native OpenGL texture for logical handle {texture_handle}: {error}"
                 ));
                 None
+            }
+        }
+    }
+
+    fn delete_texture_handle(&mut self, texture_handle: u32) {
+        if let Some(texture) = self.textures.remove(&texture_handle) {
+            unsafe {
+                self.gl.delete_texture(texture);
+            }
+        }
+    }
+
+    fn framebuffer_for_handle(
+        &mut self,
+        framebuffer_handle: u32,
+    ) -> Option<glow::NativeFramebuffer> {
+        if let Some(framebuffer) = self.framebuffers.get(&framebuffer_handle) {
+            return Some(*framebuffer);
+        }
+        let framebuffer = unsafe { self.gl.create_framebuffer() };
+        match framebuffer {
+            Ok(framebuffer) => {
+                self.framebuffers.insert(framebuffer_handle, framebuffer);
+                Some(framebuffer)
+            }
+            Err(error) => {
+                self.native_errors.push(format!(
+                    "failed to create native OpenGL framebuffer for logical handle {framebuffer_handle}: {error}"
+                ));
+                None
+            }
+        }
+    }
+
+    fn delete_framebuffer_handle(&mut self, framebuffer_handle: u32) {
+        if let Some(framebuffer) = self.framebuffers.remove(&framebuffer_handle) {
+            unsafe {
+                self.gl.delete_framebuffer(framebuffer);
             }
         }
     }
@@ -496,6 +546,104 @@ impl DesktopNativeOpenGlDriver<'_> {
                 None
             }
         }
+    }
+
+    fn consume_native_resolved_framebuffer_attachment(
+        &mut self,
+        attachment: &mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment,
+    ) {
+        if let Some(previous_framebuffer_handle) = attachment.previous_framebuffer_handle {
+            self.delete_framebuffer_handle(previous_framebuffer_handle);
+        }
+        if let Some(previous_color_texture_handle) = attachment.previous_color_texture_handle {
+            self.delete_texture_handle(previous_color_texture_handle);
+        }
+
+        let texture_needs_storage = attachment.color_texture_was_recreated
+            || !self.textures.contains_key(&attachment.color_texture_handle);
+        let Some(framebuffer) = self.framebuffer_for_handle(attachment.framebuffer_handle) else {
+            return;
+        };
+        let Some(texture) = self.texture_for_handle(attachment.color_texture_handle) else {
+            return;
+        };
+        let (Ok(width), Ok(height)) = (
+            i32::try_from(attachment.width),
+            i32::try_from(attachment.height),
+        ) else {
+            self.native_errors.push(format!(
+                "native OpenGL framebuffer attachment {} has invalid size {}x{}",
+                attachment.framebuffer_key, attachment.width, attachment.height
+            ));
+            return;
+        };
+
+        unsafe {
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::LINEAR as i32,
+            );
+            self.gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::LINEAR as i32,
+            );
+            self.gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_S,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            self.gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_T,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            if texture_needs_storage {
+                self.gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA as i32,
+                    width,
+                    height,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(None),
+                );
+            }
+            self.gl
+                .bind_framebuffer(attachment.framebuffer_target, Some(framebuffer));
+            self.gl.framebuffer_texture_2d(
+                attachment.framebuffer_target,
+                attachment.color_attachment,
+                glow::TEXTURE_2D,
+                Some(texture),
+                0,
+            );
+            let status = self
+                .gl
+                .check_framebuffer_status(attachment.framebuffer_target);
+            if status != glow::FRAMEBUFFER_COMPLETE {
+                self.native_errors.push(format!(
+                    "native OpenGL framebuffer {} is incomplete: status=0x{status:04x}",
+                    attachment.framebuffer_key
+                ));
+            }
+            self.gl
+                .bind_framebuffer(attachment.framebuffer_target, None);
+        }
+    }
+
+    fn consume_native_framebuffer_attachment_plan(
+        &mut self,
+        plan: &mindustry_desktop::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
+    ) {
+        let attachment = self
+            .framebuffer_handle_cache
+            .resolve_framebuffer_attachment(plan, self.framebuffer_handle_allocator);
+        self.consume_native_resolved_framebuffer_attachment(&attachment);
     }
 
     fn consume_native_resolved_shader_lifecycle_command(
@@ -703,11 +851,7 @@ impl DesktopNativeOpenGlDriver<'_> {
             mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::DeleteTexture {
                 texture_handle,
             } => {
-                if let Some(texture) = self.textures.remove(texture_handle) {
-                    unsafe {
-                        self.gl.delete_texture(texture);
-                    }
-                }
+                self.delete_texture_handle(*texture_handle);
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::BindTexture {
                 target,
@@ -1092,6 +1236,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
         &mut self,
         plan: mindustry_desktop::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan,
     ) {
+        self.consume_native_framebuffer_attachment_plan(&plan);
         self.recording.consume_opengl_framebuffer_attachment(plan);
     }
 }
@@ -1136,12 +1281,15 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             gl: &self.gl,
             recording: &mut self.driver,
             textures: &mut self.textures,
+            framebuffers: &mut self.framebuffers,
             buffers: &mut self.buffers,
             vertex_arrays: &mut self.vertex_arrays,
             shaders: &mut self.shaders,
             programs: &mut self.programs,
             shader_sources: &mut self.shader_sources,
             uniform_locations: &mut self.uniform_locations,
+            framebuffer_handle_cache: &mut self.framebuffer_handle_cache,
+            framebuffer_handle_allocator: &mut self.framebuffer_handle_allocator,
             shader_asset_root: &self.shader_asset_root,
             current_program: &mut self.current_program,
             current_vertex_array: &mut self.current_vertex_array,
