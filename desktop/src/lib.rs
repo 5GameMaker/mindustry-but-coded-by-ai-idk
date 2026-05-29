@@ -645,9 +645,18 @@ pub struct DesktopGraphicsOpenGlBackendMeshBufferPlan {
     pub batch_index: usize,
     pub vertex_count: usize,
     pub index_count: usize,
+    pub vertex_attributes: Vec<DesktopGraphicsOpenGlBackendVertexAttributePlan>,
     pub vertex_stride_bytes: usize,
     pub vertex_buffer_bytes: usize,
     pub index_buffer_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendVertexAttributePlan {
+    pub name: &'static str,
+    pub components: usize,
+    pub offset_bytes: usize,
+    pub packed_color: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -715,6 +724,39 @@ impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
     pub const SPRITE_VERTEX_FLOATS: usize = 6;
     pub const SPRITE_VERTEX_STRIDE_BYTES: usize =
         Self::SPRITE_VERTEX_FLOATS * std::mem::size_of::<f32>();
+    pub const SPRITE_POSITION_OFFSET_BYTES: usize = 0;
+    pub const SPRITE_COLOR_OFFSET_BYTES: usize = 2 * std::mem::size_of::<f32>();
+    pub const SPRITE_TEXCOORD_OFFSET_BYTES: usize = 3 * std::mem::size_of::<f32>();
+    pub const SPRITE_MIX_COLOR_OFFSET_BYTES: usize = 5 * std::mem::size_of::<f32>();
+
+    pub fn sprite_vertex_attributes() -> Vec<DesktopGraphicsOpenGlBackendVertexAttributePlan> {
+        vec![
+            DesktopGraphicsOpenGlBackendVertexAttributePlan {
+                name: "a_position",
+                components: 2,
+                offset_bytes: Self::SPRITE_POSITION_OFFSET_BYTES,
+                packed_color: false,
+            },
+            DesktopGraphicsOpenGlBackendVertexAttributePlan {
+                name: "a_color",
+                components: 4,
+                offset_bytes: Self::SPRITE_COLOR_OFFSET_BYTES,
+                packed_color: true,
+            },
+            DesktopGraphicsOpenGlBackendVertexAttributePlan {
+                name: "a_texCoord0",
+                components: 2,
+                offset_bytes: Self::SPRITE_TEXCOORD_OFFSET_BYTES,
+                packed_color: false,
+            },
+            DesktopGraphicsOpenGlBackendVertexAttributePlan {
+                name: "a_mix_color",
+                components: 4,
+                offset_bytes: Self::SPRITE_MIX_COLOR_OFFSET_BYTES,
+                packed_color: true,
+            },
+        ]
+    }
 
     pub fn from_sprite_batch(
         batch_index: usize,
@@ -724,6 +766,7 @@ impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
             batch_index,
             vertex_count: batch.packed_vertices.len(),
             index_count: batch.indices.len(),
+            vertex_attributes: Self::sprite_vertex_attributes(),
             vertex_stride_bytes: Self::SPRITE_VERTEX_STRIDE_BYTES,
             vertex_buffer_bytes: batch.packed_vertices.len() * Self::SPRITE_VERTEX_STRIDE_BYTES,
             index_buffer_bytes: batch.indices.len() * std::mem::size_of::<u32>(),
@@ -10144,11 +10187,21 @@ mod tests {
         assert_eq!(mesh_batch.max_layer, 8.0);
         assert_eq!(executor.state.sprite_mesh_buffer_plans.len(), 1);
         assert_eq!(
+            executor.state.sprite_mesh_buffer_plans[0]
+                .vertex_attributes
+                .iter()
+                .map(|attribute| attribute.name)
+                .collect::<Vec<_>>(),
+            vec!["a_position", "a_color", "a_texCoord0", "a_mix_color"]
+        );
+        assert_eq!(
             executor.state.sprite_mesh_buffer_plans[0],
             super::DesktopGraphicsOpenGlBackendMeshBufferPlan {
                 batch_index: 0,
                 vertex_count: 4,
                 index_count: 6,
+                vertex_attributes:
+                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::sprite_vertex_attributes(),
                 vertex_stride_bytes:
                     super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
                 vertex_buffer_bytes: 4

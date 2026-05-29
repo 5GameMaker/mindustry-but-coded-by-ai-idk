@@ -13597,5 +13597,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
   - 尚未真实分配/上传 VAO/VBO/IBO；
-  - draw call plan 尚未映射到真实 action sink；
+  - vertex attribute layout 已在下一节补齐，draw call plan 尚未映射到真实 action sink；
   - 当前总体迁移约 29.4%，仍未达到完整可玩。
+
+## 12.438 Arc SpriteBatch vertex attribute layout
+
+- 2026-05-29：继续把 sprite mesh buffer plan 对齐 Arc `SpriteBatch.createShader()` 与 `Mesh` 属性顺序。Arc 默认 shader 依赖 `a_position / a_color / a_texCoord0 / a_mix_color`，当前 Rust 已把这些 attribute 的组件数、offset 与 packed color 标记写入 buffer plan。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendVertexAttributePlan`；
+    - `DesktopGraphicsOpenGlBackendMeshBufferPlan` 新增 `vertex_attributes`；
+    - 新增 `SPRITE_POSITION_OFFSET_BYTES / SPRITE_COLOR_OFFSET_BYTES / SPRITE_TEXCOORD_OFFSET_BYTES / SPRITE_MIX_COLOR_OFFSET_BYTES`；
+    - 新增 `sprite_vertex_attributes()`，按 Arc 顺序生成四个 attribute：
+      - `a_position`：2 components，offset 0；
+      - `a_color`：packed color，4 components，offset 2 floats；
+      - `a_texCoord0`：2 components，offset 3 floats；
+      - `a_mix_color`：packed color，4 components，offset 5 floats；
+    - 回归测试验证 attribute 名称顺序和 buffer plan equality。
+- 迁移意义：
+  - 后续真实 GL adapter 可以直接把 buffer plan 映射到 `glVertexAttribPointer`；
+  - packed vertex layout 与 shader attribute layout 现在在同一 plan 中闭合；
+  - 继续沿用原版 Arc/OpenGL SpriteBatch 语义。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 尚未真实查询/绑定 attribute location；
+  - 尚未真实提交 GL draw call；
+  - 当前总体迁移约 29.5%，仍未达到完整可玩。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **29.4%**。
+- 当前总体迁移完成度：约 **29.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10845,3 +10845,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 draw call plan 映射到真实 GL action sink/executor；
   2. 继续补 attribute/uniform/texture unit 绑定；
   3. 后续连接真实 GL object handle 分配。
+
+---
+
+## 344. 最新闭环记录：Arc SpriteBatch vertex attribute layout
+
+- 本轮总体进度更新：约 **29.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendVertexAttributePlan`；
+    - `DesktopGraphicsOpenGlBackendMeshBufferPlan` 新增 `vertex_attributes`；
+    - 记录 Arc attribute 顺序：`a_position / a_color / a_texCoord0 / a_mix_color`；
+    - 记录 packed color offset 与 texCoord offset；
+    - 测试验证 attribute 名称顺序进入 buffer plan。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 把 draw call plan 映射到真实 GL action sink/executor；
+  2. 补 uniform/texture unit binding plan；
+  3. 后续连接真实 GL attribute location。
