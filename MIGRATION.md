@@ -12966,3 +12966,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - event log 仍是 stateful executor 的内部记录，尚未分离成真实 GL adapter trait；
   - 真实 OpenGL resource table、shader program、atlas texture binding、FBO resolve 仍未落地；
   - 当前总体迁移约 26.9%，仍未达到完整可玩。
+
+## 12.413 OpenGL render target resource table
+
+- 2026-05-29：继续把 OpenGL executor 往真实 GL adapter 前置状态推进，新增无依赖 render target resource table，用于记录 Screen/Texture/Buffer 的绑定与 resolve 来源/目标关系。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResourceKind`，区分 `Screen / Texture / Buffer`；
+    - 新增 `DesktopGraphicsOpenGlBackendRenderTargetResource`，记录 target key、target、kind、bind count、resolve source count、resolve target count；
+    - 新增 `DesktopGraphicsOpenGlBackendResourceTable`，按 target key 管理资源；
+    - executor 在 `BeginPass` 时注册并 bind source target；
+    - executor 在 `Resolve` 时同时注册 source target 与 resolve target，并记录 source/target resolve 计数。
+  - 测试增强：
+    - `desktop_graphics_opengl_backend_executor_keeps_resolve_source_target_counts` 同时断言 texture/buffer/screen 三类 resource；
+    - 明确 `Buffer -> Screen` resolve 中 buffer 是 source，screen 是 resolve target，避免后续 FBO/texture binding 口径混淆。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - resource table 仍未映射到真实 OpenGL object id / FBO / texture handle；
+  - 尚未把 `DesktopGraphicsOpenGlBackendEvent` 拆成真实 adapter trait；
+  - 当前总体迁移约 27.0%，仍未达到完整可玩。

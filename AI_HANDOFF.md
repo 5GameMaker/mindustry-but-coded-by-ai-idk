@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **26.9%**。
+- 当前总体迁移完成度：约 **27.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10310,3 +10310,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 event log 进一步拆成真实 GL adapter trait 的输入边界；
   2. 继续补 `DrawCircle / DrawText / FillRect / DrawLine / DrawPolygon / DrawPixel` 到 OpenGL adapter 的语义映射；
   3. 继续推进 atlas texture binding、shader program/resource table、FBO resolve，仍保持原版 OpenGL 路线。
+
+---
+
+## 319. 最新闭环记录：OpenGL render target resource table
+
+- 本轮总体进度更新：约 **27.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResourceKind`；
+    - 新增 `DesktopGraphicsOpenGlBackendRenderTargetResource`；
+    - 新增 `DesktopGraphicsOpenGlBackendResourceTable`；
+    - executor 在 `BeginPass` 注册/bind source target；
+    - executor 在 `Resolve` 注册 source 与 resolve target，并记录 resolve source/target 计数；
+    - 增强 `desktop_graphics_opengl_backend_executor_keeps_resolve_source_target_counts`，断言 texture/buffer/screen 三类资源的 bind/resolve 口径。
+- 已验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 将 resource table 的 target resource 继续扩展到真实 GL object handle 的 adapter 边界；
+  2. 拆出无依赖 `DesktopGraphicsOpenGlBackendAdapter` trait；
+  3. 继续把 draw command 的语义从 event log 推进到 adapter 调用层。

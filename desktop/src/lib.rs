@@ -719,6 +719,90 @@ pub struct DesktopGraphicsOpenGlBackendResolveEvent {
     pub resolve_kind: RenderResolveKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendResourceKind {
+    Screen,
+    Texture,
+    Buffer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendRenderTargetResource {
+    pub key: String,
+    pub target: RenderTarget,
+    pub kind: DesktopGraphicsOpenGlBackendResourceKind,
+    pub bind_count: usize,
+    pub resolve_source_count: usize,
+    pub resolve_target_count: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendResourceTable {
+    pub resources: BTreeMap<String, DesktopGraphicsOpenGlBackendRenderTargetResource>,
+}
+
+impl DesktopGraphicsOpenGlBackendResourceTable {
+    pub fn get(
+        &self,
+        target: &RenderTarget,
+    ) -> Option<&DesktopGraphicsOpenGlBackendRenderTargetResource> {
+        self.resources
+            .get(&opengl_backend_render_target_key(target))
+    }
+
+    pub fn bind_target(&mut self, target: &RenderTarget) {
+        self.ensure_target(target).bind_count += 1;
+    }
+
+    pub fn resolve(&mut self, source_target: &RenderTarget, resolve_target: &RenderTarget) {
+        self.ensure_target(source_target).resolve_source_count += 1;
+        self.ensure_target(resolve_target).resolve_target_count += 1;
+    }
+
+    pub fn resource_count_by_kind(&self, kind: DesktopGraphicsOpenGlBackendResourceKind) -> usize {
+        self.resources
+            .values()
+            .filter(|resource| resource.kind == kind)
+            .count()
+    }
+
+    fn ensure_target(
+        &mut self,
+        target: &RenderTarget,
+    ) -> &mut DesktopGraphicsOpenGlBackendRenderTargetResource {
+        let key = opengl_backend_render_target_key(target);
+        let kind = opengl_backend_render_target_kind(target);
+        self.resources.entry(key.clone()).or_insert_with(|| {
+            DesktopGraphicsOpenGlBackendRenderTargetResource {
+                key,
+                target: target.clone(),
+                kind,
+                bind_count: 0,
+                resolve_source_count: 0,
+                resolve_target_count: 0,
+            }
+        })
+    }
+}
+
+fn opengl_backend_render_target_key(target: &RenderTarget) -> String {
+    match target {
+        RenderTarget::Screen => "screen".into(),
+        RenderTarget::Texture(name) => format!("texture:{name}"),
+        RenderTarget::Buffer(name) => format!("buffer:{name}"),
+    }
+}
+
+fn opengl_backend_render_target_kind(
+    target: &RenderTarget,
+) -> DesktopGraphicsOpenGlBackendResourceKind {
+    match target {
+        RenderTarget::Screen => DesktopGraphicsOpenGlBackendResourceKind::Screen,
+        RenderTarget::Texture(_) => DesktopGraphicsOpenGlBackendResourceKind::Texture,
+        RenderTarget::Buffer(_) => DesktopGraphicsOpenGlBackendResourceKind::Buffer,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendPassContext {
     pub source: DesktopGraphicsOpenGlBackendStepSource,
@@ -805,6 +889,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub custom_markers: Vec<String>,
     pub resolve_events: Vec<DesktopGraphicsOpenGlBackendResolveEvent>,
     pub event_log: Vec<DesktopGraphicsOpenGlBackendEvent>,
+    pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
     pub last_command_kind: Option<&'static str>,
     pub errors: Vec<String>,
 }
@@ -830,6 +915,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             custom_markers: Vec::new(),
             resolve_events: Vec::new(),
             event_log: Vec::new(),
+            resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
             last_command_kind: None,
             errors: Vec::new(),
         }
@@ -875,6 +961,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                         source.clone(),
                         target.clone(),
                     ));
+                self.state.resource_table.bind_target(&target);
                 self.state.current_target = Some(target.clone());
                 self.state.begin_passes += 1;
                 self.state
@@ -977,6 +1064,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                         resolve_target: resolve_target.clone(),
                         resolve_kind,
                     });
+                self.state.resource_table.resolve(&target, &resolve_target);
                 self.state
                     .event_log
                     .push(DesktopGraphicsOpenGlBackendEvent::Resolve {
@@ -8663,6 +8751,51 @@ mod tests {
                 resolve_kind: RenderResolveKind::ShaderBlit,
             }]
         );
+        assert_eq!(
+            executor
+                .state
+                .resource_table
+                .resource_count_by_kind(super::DesktopGraphicsOpenGlBackendResourceKind::Texture),
+            1
+        );
+        assert_eq!(
+            executor
+                .state
+                .resource_table
+                .resource_count_by_kind(super::DesktopGraphicsOpenGlBackendResourceKind::Buffer),
+            1
+        );
+        assert_eq!(
+            executor
+                .state
+                .resource_table
+                .resource_count_by_kind(super::DesktopGraphicsOpenGlBackendResourceKind::Screen),
+            1
+        );
+        let texture_resource = executor
+            .state
+            .resource_table
+            .get(&RenderTarget::Texture("offscreen-tex".into()))
+            .unwrap();
+        assert_eq!(texture_resource.bind_count, 1);
+        assert_eq!(texture_resource.resolve_source_count, 0);
+        assert_eq!(texture_resource.resolve_target_count, 0);
+        let buffer_resource = executor
+            .state
+            .resource_table
+            .get(&RenderTarget::Buffer("offscreen-fbo".into()))
+            .unwrap();
+        assert_eq!(buffer_resource.bind_count, 1);
+        assert_eq!(buffer_resource.resolve_source_count, 1);
+        assert_eq!(buffer_resource.resolve_target_count, 0);
+        let screen_resource = executor
+            .state
+            .resource_table
+            .get(&RenderTarget::Screen)
+            .unwrap();
+        assert_eq!(screen_resource.bind_count, 0);
+        assert_eq!(screen_resource.resolve_source_count, 0);
+        assert_eq!(screen_resource.resolve_target_count, 1);
         assert!(executor.state.errors.is_empty());
     }
 
