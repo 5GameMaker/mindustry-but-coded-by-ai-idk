@@ -347,7 +347,7 @@ impl NetworkWorldData {
             && self.custom_chunks_snapshot.is_none()
             && !self.marker_custom_tail.is_empty()
             && self.custom_chunks.is_empty();
-        let (markers, custom_chunks) = if preserve_raw_marker_custom_tail {
+        let (markers, mut custom_chunks) = if preserve_raw_marker_custom_tail {
             (self.marker_custom_tail.clone(), Vec::new())
         } else {
             let markers = match &self.markers_snapshot {
@@ -371,6 +371,10 @@ impl NetworkWorldData {
             };
             (markers, custom_chunks)
         };
+
+        if !preserve_raw_marker_custom_tail && !self.marker_custom_tail.is_empty() {
+            custom_chunks.extend_from_slice(&self.marker_custom_tail);
+        }
 
         Ok(NetworkWorldTailSections {
             content_header,
@@ -674,16 +678,18 @@ fn parse_save_tail(remaining: &mut &[u8], out: &mut ParsedWorldTail) -> io::Resu
     out.team_blocks_snapshot = Some(team_blocks);
 
     // Java follows with `MapMarkers` UBJSON bytes and then custom chunks.
-    // Prefer an exact split when the UBJSON payload is valid; otherwise keep
-    // the whole tail opaque so legacy/bootstrap payloads continue to round-trip
-    // unchanged.
+    // Prefer an exact split when the UBJSON payload is valid, but keep any
+    // trailing opaque bytes so the full tail can still be replayed unchanged.
     out.marker_custom_tail = remaining.to_vec();
-    if let Some((markers, custom_chunks)) = split_marker_region_and_custom_chunks(remaining) {
+    if let Some((markers, custom_chunks, opaque_tail)) =
+        split_marker_region_and_custom_chunks(remaining)
+    {
         out.markers_snapshot = parse_marker_region_bytes(&markers).ok();
         out.marker_summary = summarize_marker_region_bytes(&markers).ok();
         out.custom_chunks_snapshot = read_custom_chunks(&mut custom_chunks.as_slice()).ok();
         out.markers = markers;
         out.custom_chunks = custom_chunks;
+        out.marker_custom_tail = opaque_tail;
     } else {
         out.markers = remaining.to_vec();
         out.custom_chunks.clear();
@@ -988,9 +994,9 @@ fn parse_ubjson_size_with_first_byte(
     Ok(size)
 }
 
-fn split_marker_region_and_custom_chunks(bytes: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+fn split_marker_region_and_custom_chunks(bytes: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
     if bytes.is_empty() {
-        return Some((Vec::new(), Vec::new()));
+        return Some((Vec::new(), Vec::new(), Vec::new()));
     }
 
     let mut cursor = UbjsonCursor::new(bytes);
@@ -1008,11 +1014,11 @@ fn split_marker_region_and_custom_chunks(bytes: &[u8]) -> Option<(Vec<u8>, Vec<u
         return None;
     };
 
-    if !remaining_after_markers.is_empty() {
-        return None;
-    }
-
-    Some((bytes[..markers_len].to_vec(), custom_chunks))
+    Some((
+        bytes[..markers_len].to_vec(),
+        custom_chunks,
+        remaining_after_markers.to_vec(),
+    ))
 }
 
 fn read_network_player<R: Read>(read: &mut R) -> io::Result<NetworkPlayerData> {
@@ -2092,9 +2098,91 @@ mod tests {
         assert!(decoded.tail_parse_error.is_none());
         assert_eq!(decoded.markers, markers);
         assert_eq!(decoded.custom_chunks, custom_chunks);
-        let mut expected_tail = markers.clone();
-        expected_tail.extend_from_slice(&custom_chunks);
-        assert_eq!(decoded.marker_custom_tail, expected_tail);
+        assert!(decoded.marker_custom_tail.is_empty());
+    }
+
+    #[test]
+    fn world_data_reader_preserves_opaque_tail_after_custom_chunks() {
+        let mut player = Vec::new();
+        write_io_i16(&mut player, 2).unwrap();
+        write_io_bool(&mut player, true).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_io_i32(&mut player, 0x11223344).unwrap();
+        write_command_id(&mut player, Some(7)).unwrap();
+        write_io_f32(&mut player, 12.0).unwrap();
+        write_io_f32(&mut player, 13.0).unwrap();
+        write_io_string(&mut player, Some("frog")).unwrap();
+        write_io_i16(&mut player, 99).unwrap();
+        write_io_i32(&mut player, 3).unwrap();
+        write_io_bool(&mut player, true).unwrap();
+        write_team(&mut player, Some(TeamId(6))).unwrap();
+        write_io_bool(&mut player, false).unwrap();
+        write_unit_ref(&mut player, UnitRef::Unit { id: 123 }).unwrap();
+        write_io_f32(&mut player, 40.0).unwrap();
+        write_io_f32(&mut player, 41.0).unwrap();
+
+        let content_header_snapshot = ContentHeaderSnapshot {
+            entries: vec![ContentHeaderEntry {
+                content_type: 1,
+                names: vec!["copper".into()],
+            }],
+        };
+        let mut content_header = Vec::new();
+        write_content_header_snapshot(&mut content_header, &content_header_snapshot).unwrap();
+
+        let content_patches_snapshot = ContentPatchSet {
+            patches: vec![b"patch".to_vec()],
+        };
+        let mut content_patches = Vec::new();
+        write_content_patches(&mut content_patches, &content_patches_snapshot).unwrap();
+
+        let mut map_bytes = Vec::new();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_u16(&mut map_bytes, 1).unwrap();
+        write_io_i16(&mut map_bytes, 2).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_i16(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+        write_io_u8(&mut map_bytes, 0).unwrap();
+
+        let mut team_blocks = Vec::new();
+        write_io_i32(&mut team_blocks, 0).unwrap();
+
+        let markers = ubjson_marker_region_with_classes(&["Minimap"]);
+        let mut custom_chunk_set = crate::mindustry::io::CustomChunkSet::default();
+        custom_chunk_set.insert_or_replace("mod-a", vec![1, 2, 3]);
+        custom_chunk_set
+            .insert_or_replace(crate::mindustry::io::CUSTOM_CHUNK_STATIC_FOG_DATA, vec![4]);
+        let mut custom_chunks = Vec::new();
+        crate::mindustry::io::write_custom_chunks(&mut custom_chunks, &custom_chunk_set).unwrap();
+
+        let data = NetworkWorldData {
+            player_id: 42,
+            player_bytes: player.clone(),
+            content_header: content_header.clone(),
+            content_patches: content_patches.clone(),
+            map_bytes: map_bytes.clone(),
+            team_blocks: team_blocks.clone(),
+            markers: markers.clone(),
+            custom_chunks: custom_chunks.clone(),
+            ..NetworkWorldData::default()
+        };
+
+        let mut raw = write_world_data_raw(&data).unwrap();
+        let opaque_tail = vec![0xde, 0xad, 0xbe, 0xef];
+        raw.extend_from_slice(&opaque_tail);
+
+        let decoded = read_world_data(&deflate_world_data(&raw).unwrap()).unwrap();
+
+        assert!(decoded.tail_parse_error.is_none());
+        assert_eq!(decoded.markers, markers);
+        assert_eq!(decoded.custom_chunks, custom_chunks);
+        assert_eq!(decoded.marker_custom_tail, opaque_tail);
+        assert!(decoded.markers_snapshot.is_some());
+        assert!(decoded.custom_chunks_snapshot.is_some());
+        let reencoded = write_world_data_raw(&decoded).unwrap();
+        assert!(reencoded.ends_with(&opaque_tail));
     }
 
     #[test]
