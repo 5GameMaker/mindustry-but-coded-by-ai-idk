@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **29.2%**。
+- 当前总体迁移完成度：约 **29.3%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10806,3 +10806,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 增加 sprite draw call plan，把 shader/texture/mesh resource 串成一次可提交 draw；
   2. 后续接真实 GL program/attribute/uniform location；
   3. 再落地 draw call executor。
+
+---
+
+## 342. 最新闭环记录：Sprite draw call plan
+
+- 本轮总体进度更新：约 **29.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendSpriteQuad` 与 `SpriteMeshBatch` 新增 `shader_program`；
+    - batch key 纳入 shader program；
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteDrawCallPlan`；
+    - 默认 sprite shader program 为 `ShaderId::Mesh`；
+    - executor/adapter state 均新增 `sprite_draw_call_plans`；
+    - 测试覆盖默认 Mesh draw call 与 BlockBuild shader 下的 sprite draw call。
+- 已验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 下一步：
+  1. 继续把 draw call plan 映射到真实 GL action sink/executor；
+  2. 补 attribute/uniform/texture unit 绑定细节；
+  3. 后续再推进真实窗口 OpenGL present。

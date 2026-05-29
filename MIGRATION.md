@@ -13549,5 +13549,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
   - 尚未真实编译/链接 GLSL program，也未绑定 attribute/uniform location；
-  - 实际 GL draw call executor 仍待落地；
+  - sprite draw call plan 已在下一节补齐，真实 GL draw call executor 仍待落地；
   - 当前总体迁移约 29.2%，仍未达到完整可玩。
+
+## 12.436 Sprite draw call plan
+
+- 2026-05-29：把前面已经形成的 shader program identity、texture resource identity、sprite mesh resource plan 串成可提交 draw call 描述。当前仍不调用 GL，但每个 sprite batch 已能生成包含 shader/texture/VAO/index count/primitive 的 draw call plan。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendSpriteQuad` 新增 `shader_program`；
+    - `DesktopGraphicsOpenGlBackendSpriteMeshBatch` 新增 `shader_program`，batch key 同步纳入 shader program，避免不同 shader 错误合批；
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteDrawCallPlan`，记录 `batch_index / shader_program / texture_identity / vertex_array_key / index_count / index_offset / primitive_type`；
+    - 新增 `opengl_backend_default_sprite_shader_program()`，无显式 shader 时默认使用 `ShaderId::Mesh`；
+    - 新增 `opengl_backend_sprite_draw_call_plans_from_batches(...)`；
+    - executor 与 classifying adapter state 均新增 `sprite_draw_call_plans`；
+    - `record_sprite_quad(...)` 在 mesh resource plan 后同步生成 draw call plan；
+    - 回归测试验证默认 Mesh shader 的 sprite draw call，以及 BlockBuild shader apply 后的 sprite draw call 使用 `ShaderId::BlockBuild`。
+- 迁移意义：
+  - sprite 渲染链路推进为 `DrawSprite -> shader program -> texture identity -> packed mesh -> VAO/VBO/IBO resource -> draw call plan`；
+  - 真实 GL adapter 后续可直接消费 draw call plan，逐步替换为 `glBindVertexArray/glBindTexture/glUseProgram/glDrawElements`；
+  - 继续保持所有模块接在现有 RenderFrame/OpenGL backend 主链路上。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 尚未真实执行 GL draw call，也未创建真实 GL object handle；
+  - draw call plan 尚未细化 uniform/attribute location 与 texture unit 绑定；
+  - 当前总体迁移约 29.3%，仍未达到完整可玩。

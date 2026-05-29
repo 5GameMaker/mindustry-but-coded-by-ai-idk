@@ -552,6 +552,7 @@ pub struct DesktopGraphicsOpenGlBackendSpriteQuad {
     pub command_index: Option<usize>,
     pub symbol: String,
     pub target: Option<RenderTarget>,
+    pub shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
     pub blend_state: DesktopGraphicsOpenGlBackendBlendState,
     pub clip: Option<RenderRect>,
     pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
@@ -567,6 +568,7 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
     pub fn from_draw_sprite(
         binding: &DesktopGraphicsOpenGlBackendTextureBinding,
         target: Option<RenderTarget>,
+        shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
         blend_state: DesktopGraphicsOpenGlBackendBlendState,
         clip: Option<RenderRect>,
         rect: RenderRect,
@@ -582,6 +584,7 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
             command_index: binding.command_index,
             symbol: binding.symbol.clone(),
             target,
+            shader_program,
             blend_state,
             clip,
             texture_identity: binding.texture_identity.clone(),
@@ -623,6 +626,7 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteMeshBatch {
     pub target: Option<RenderTarget>,
+    pub shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
     pub blend_state: DesktopGraphicsOpenGlBackendBlendState,
     pub clip: Option<RenderRect>,
     pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
@@ -670,6 +674,22 @@ pub struct DesktopGraphicsOpenGlBackendShaderProgramBinding {
     pub identity: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
     pub operation_count: usize,
     pub error_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
+    pub batch_index: usize,
+    pub shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+    pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
+    pub vertex_array_key: String,
+    pub index_count: usize,
+    pub index_offset: usize,
+    pub primitive_type: u32,
+}
+
+fn opengl_backend_default_sprite_shader_program(
+) -> DesktopGraphicsOpenGlBackendShaderProgramIdentity {
+    DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(ShaderId::Mesh)
 }
 
 impl DesktopGraphicsOpenGlBackendMeshBufferPlan {
@@ -735,10 +755,30 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
     }
 }
 
+impl DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
+    pub const TRIANGLES_PRIMITIVE: u32 = 4;
+
+    fn from_batch_and_resource_plan(
+        batch: &DesktopGraphicsOpenGlBackendSpriteMeshBatch,
+        resource_plan: &DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan,
+    ) -> Self {
+        Self {
+            batch_index: resource_plan.batch_index,
+            shader_program: batch.shader_program.clone(),
+            texture_identity: batch.texture_identity.clone(),
+            vertex_array_key: resource_plan.vertex_array_key.clone(),
+            index_count: batch.indices.len(),
+            index_offset: 0,
+            primitive_type: Self::TRIANGLES_PRIMITIVE,
+        }
+    }
+}
+
 impl DesktopGraphicsOpenGlBackendSpriteMeshBatch {
     fn new(quad: &DesktopGraphicsOpenGlBackendSpriteQuad) -> Self {
         Self {
             target: quad.target.clone(),
+            shader_program: quad.shader_program.clone(),
             blend_state: quad.blend_state,
             clip: quad.clip,
             texture_identity: quad.texture_identity.clone(),
@@ -791,6 +831,22 @@ fn opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
         .collect()
 }
 
+fn opengl_backend_sprite_draw_call_plans_from_batches(
+    batches: &[DesktopGraphicsOpenGlBackendSpriteMeshBatch],
+    resource_plans: &[DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan],
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan> {
+    batches
+        .iter()
+        .zip(resource_plans.iter())
+        .map(|(batch, resource_plan)| {
+            DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::from_batch_and_resource_plan(
+                batch,
+                resource_plan,
+            )
+        })
+        .collect()
+}
+
 fn opengl_backend_sprite_mesh_batches_from_quads(
     quads: &[DesktopGraphicsOpenGlBackendSpriteQuad],
 ) -> Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch> {
@@ -798,6 +854,7 @@ fn opengl_backend_sprite_mesh_batches_from_quads(
     for quad in quads {
         if let Some(batch) = batches.iter_mut().find(|batch| {
             batch.target == quad.target
+                && batch.shader_program == quad.shader_program
                 && batch.blend_state == quad.blend_state
                 && batch.clip == quad.clip
                 && batch.texture_identity == quad.texture_identity
@@ -1502,6 +1559,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
     pub sprite_mesh_buffer_plans: Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan>,
     pub sprite_mesh_resource_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan>,
+    pub sprite_draw_call_plans: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
     pub missing_sprite_texture_bindings: usize,
 }
 
@@ -1540,6 +1598,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             sprite_mesh_batches: Vec::new(),
             sprite_mesh_buffer_plans: Vec::new(),
             sprite_mesh_resource_plans: Vec::new(),
+            sprite_draw_call_plans: Vec::new(),
             missing_sprite_texture_bindings: 0,
         }
     }
@@ -1648,6 +1707,10 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                             DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
                                 &binding,
                                 Some(target.clone()),
+                                self.state
+                                    .current_shader_program
+                                    .clone()
+                                    .unwrap_or_else(opengl_backend_default_sprite_shader_program),
                                 self.state.current_blend_state,
                                 self.state.current_clip,
                                 *rect,
@@ -1683,6 +1746,10 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
             opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
                 &self.sprite_mesh_buffer_plans,
             );
+        self.sprite_draw_call_plans = opengl_backend_sprite_draw_call_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &self.sprite_mesh_resource_plans,
+        );
     }
 }
 
@@ -1839,6 +1906,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
     pub sprite_mesh_buffer_plans: Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan>,
     pub sprite_mesh_resource_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan>,
+    pub sprite_draw_call_plans: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
     pub missing_sprite_texture_bindings: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
     pub last_command_kind: Option<&'static str>,
@@ -1878,6 +1946,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             sprite_mesh_batches: Vec::new(),
             sprite_mesh_buffer_plans: Vec::new(),
             sprite_mesh_resource_plans: Vec::new(),
+            sprite_draw_call_plans: Vec::new(),
             missing_sprite_texture_bindings: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
             last_command_kind: None,
@@ -1972,6 +2041,10 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                             DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
                                 &binding,
                                 self.state.current_target.clone(),
+                                self.state
+                                    .current_shader_program
+                                    .clone()
+                                    .unwrap_or_else(opengl_backend_default_sprite_shader_program),
                                 self.state.current_blend_state,
                                 self.state.current_clip,
                                 *rect,
@@ -2007,6 +2080,10 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
                 &self.sprite_mesh_buffer_plans,
             );
+        self.sprite_draw_call_plans = opengl_backend_sprite_draw_call_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &self.sprite_mesh_resource_plans,
+        );
     }
 }
 
@@ -9627,6 +9704,7 @@ mod tests {
         let center_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
             &binding,
             Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
             super::DesktopGraphicsOpenGlBackendBlendState::default(),
             None,
             rect,
@@ -9655,6 +9733,7 @@ mod tests {
         let lower_left_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
             &binding,
             Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
             super::DesktopGraphicsOpenGlBackendBlendState::default(),
             None,
             rect,
@@ -9701,6 +9780,7 @@ mod tests {
         let handle_a_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
             &handle_a_binding,
             Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
             super::DesktopGraphicsOpenGlBackendBlendState::default(),
             None,
             rect,
@@ -9713,6 +9793,7 @@ mod tests {
         let handle_b_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
             &handle_b_binding,
             Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
             super::DesktopGraphicsOpenGlBackendBlendState::default(),
             None,
             rect,
@@ -10013,6 +10094,27 @@ mod tests {
                 vertex_stride_bytes: executor.state.sprite_mesh_buffer_plans[0].vertex_stride_bytes,
             }
         );
+        assert_eq!(executor.state.sprite_draw_call_plans.len(), 1);
+        assert_eq!(
+            executor.state.sprite_draw_call_plans[0],
+            super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
+                batch_index: 0,
+                shader_program: super::DesktopGraphicsOpenGlBackendShaderProgramIdentity {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                    generation: 0,
+                    gl_program: None,
+                },
+                texture_identity: executor.state.sprite_mesh_batches[0]
+                    .texture_identity
+                    .clone(),
+                vertex_array_key: "sprite-batch:0:vao".into(),
+                index_count: 6,
+                index_offset: 0,
+                primitive_type:
+                    super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+            }
+        );
         assert_eq!(
             executor.state.resolve_events,
             vec![super::DesktopGraphicsOpenGlBackendResolveEvent {
@@ -10055,6 +10157,10 @@ mod tests {
         assert_eq!(
             classifying_adapter.state.sprite_mesh_resource_plans,
             executor.state.sprite_mesh_resource_plans
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_draw_call_plans,
+            executor.state.sprite_draw_call_plans
         );
         assert_eq!(classifying_adapter.state.actions.len(), 3);
         assert!(matches!(
@@ -10728,6 +10834,13 @@ mod tests {
                 operation_count: 6,
                 error_count: 0,
             }
+        );
+        assert_eq!(executor.state.sprite_draw_call_plans.len(), 1);
+        assert_eq!(
+            executor.state.sprite_draw_call_plans[0]
+                .shader_program
+                .shader,
+            ShaderId::BlockBuild
         );
         let mut adapter = super::DesktopGraphicsRecordingOpenGlBackendAdapter::default();
         let event_count = executor.drive_adapter(&mut adapter);
