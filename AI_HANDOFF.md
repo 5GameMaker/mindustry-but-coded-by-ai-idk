@@ -12433,3 +12433,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. rect：先接 `FilledRect` 零旋转，textured rect 单独接 atlas；
   2. triangle：需要更精确三角形 mesh 或临时 DrawPolygon 表达，避免丢 width/length 语义；
   3. light/textured-line 后置，分别需要光照层与 atlas region 支持。
+
+### 2026-05-30：standard effect textured rect 接入 graphics/OpenGL backend
+
+- 当前整体完成度：约 **38.8%**。
+- 已完成：
+  - `DesktopStandardEffectRenderFrame::to_render_pass()` 继续处理 rect；
+  - `TexturedRect(region=\"casing\")` 转成 `RenderCommand::DrawSprite`，复用 atlas/OpenGL sprite path；
+  - 零旋转 `FilledRect` 可转成 `RenderCommand::FillRect`；
+  - `desktop_launcher_routes_standard_effect_textured_rects_into_graphics_backend` 覆盖 casing textured rect 进入 graphics frame 与 OpenGL executor；
+  - `block-fullIcon:*` 暂不伪造，等待 block icon atlas/content registry bridge。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_textured_rects_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 下一步：
+  1. light：把 standard effect light primitive 喂进 lighting pass 或独立 light render pass；
+  2. triangle：需要新增精确 triangle command/mesh，避免 `DrawPolygon` 失真；
+  3. textured-line：需要先定义沿线贴图几何/atlas 语义。

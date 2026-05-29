@@ -15081,3 +15081,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - rect / triangle / textured-line / light primitives 还需继续 bridge；
   - stroked square 的线宽当前仍受 `RenderCommand::DrawPolygon` 表达能力限制；
   - 当前总体迁移约 38.6%，仍未达到完整可玩。
+
+## 406. 最新闭环记录：standard effect textured rect 接入 graphics/OpenGL backend
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **38.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame::to_render_pass()` 继续 bridge rect primitive；
+    - `TexturedRect(region="casing")` 转成 `RenderCommand::DrawSprite`，复用 atlas sprite / OpenGL sprite mesh path；
+    - `FilledRect` 在零旋转时可转成 `RenderCommand::FillRect`；
+    - `block-fullIcon:*` 暂时保留后置，避免在未完成 block icon atlas 映射时伪造纹理；
+    - 新增 `desktop_launcher_routes_standard_effect_textured_rects_into_graphics_backend`，覆盖 casing effect → textured rect primitive → overlay render pass → OpenGL executor sprite quad。
+- 迁移意义：
+  - `casing*` 系列标准特效的 atlas rect 开始进入真实 graphics/OpenGL backend；
+  - rect primitive 不再全停在 headless stats。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_textured_rects_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 仍未完成：
+  - block fullIcon textured rect、rotated filled rect、triangle、textured-line、light 还需后续 bridge；
+  - 当前总体迁移约 38.8%，仍未达到完整可玩。

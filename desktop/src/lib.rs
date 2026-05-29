@@ -163,6 +163,36 @@ impl DesktopStandardEffectRenderFrame {
                 Layer::EFFECT,
             ));
         }
+        for primitive in &self.rect_primitives {
+            if primitive.width <= f32::EPSILON || primitive.height <= f32::EPSILON {
+                continue;
+            }
+            let rect = RenderRect::from_center(
+                RenderPoint::new(primitive.center.0, primitive.center.1),
+                primitive.width,
+                primitive.height,
+            );
+            let color = desktop_effect_render_color(primitive.color, primitive.alpha);
+            match (&primitive.kind, &primitive.region) {
+                (StandardEffectDrawKind::TexturedRect, Some(region))
+                    if !region.starts_with("block-fullIcon:") =>
+                {
+                    pass.push(RenderCommand::draw_sprite(
+                        region.clone(),
+                        rect,
+                        color,
+                        primitive.rotation,
+                        Layer::EFFECT,
+                    ));
+                }
+                (StandardEffectDrawKind::FilledRect, _)
+                    if primitive.rotation.abs() <= f32::EPSILON =>
+                {
+                    pass.push(RenderCommand::fill_rect(rect, color, Layer::EFFECT));
+                }
+                _ => {}
+            }
+        }
         (!pass.commands.is_empty()).then_some(pass)
     }
 }
@@ -23521,6 +23551,109 @@ mod tests {
             .sprite_draw_call_plans
             .iter()
             .any(|plan| plan.target == Some(RenderTarget::Screen)));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_standard_effect_textured_rects_into_graphics_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.texture_atlas =
+            TextureAtlasPlan::from_virtual_source_paths(["sprites/casing.png"]);
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("casing2").unwrap() as u16,
+                    x: 40.0,
+                    y: 48.0,
+                    rotation: 90.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+        let expected_rects = launcher
+            .standard_effect_render_frame()
+            .rect_primitives
+            .iter()
+            .filter_map(|rect| {
+                let region = rect.region.as_ref()?;
+                (!region.starts_with("block-fullIcon:")).then(|| {
+                    (
+                        region.clone(),
+                        RenderRect::from_center(
+                            RenderPoint::new(rect.center.0, rect.center.1),
+                            rect.width,
+                            rect.height,
+                        ),
+                        rect.rotation,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        assert!(!expected_rects.is_empty());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            6,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let effect_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "casing")
+                    })
+            })
+            .expect("standard effect textured rects should be routed into an overlay render pass");
+        let sprite_commands = effect_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    rotation,
+                    layer,
+                    ..
+                } if symbol == "casing" => Some((symbol.clone(), *rect, *rotation, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sprite_commands.len(), expected_rects.len());
+        assert!(sprite_commands
+            .iter()
+            .all(|(_, _, _, layer)| (*layer - Layer::EFFECT).abs() < f32::EPSILON));
+        assert_eq!(
+            sprite_commands
+                .iter()
+                .map(|(symbol, rect, rotation, _)| (symbol.clone(), *rect, *rotation))
+                .collect::<Vec<_>>(),
+            expected_rects
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(
+            renderer
+                .last_opengl_backend_executor_state
+                .draw_sprite_commands
+                >= expected_rects.len()
+        );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "casing"));
     }
 
     #[test]
