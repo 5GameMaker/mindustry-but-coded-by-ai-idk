@@ -13766,3 +13766,24 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - texture resource table 仍未执行真实 GPU 上传；
   - atlas page generation / dirty invalidation / upload lifecycle 尚未完整接入；
   - 当前总体迁移约 30.1%，仍未达到完整可玩。
+
+## 12.445 Sprite batch draw call layer/z 输出排序
+
+- 2026-05-29：在 texture resource table 之后继续对齐 Java `Layer` / `Draw.z` 的 z 语义。当前先不修改 `Layer` 常量、不改 render pass 粗粒度排序、不强拆 batch，只在 sprite batch 生成 draw call plan 时按 `min_layer` 做稳定输出排序。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `opengl_backend_sprite_draw_call_plans_from_batches(...)` 先按 batch 的 `min_layer` 升序排序，再用原始 batch index 做稳定 tie-break；
+    - 保持 `sprite_mesh_batches` 原始生成顺序与 resource plan batch key 不变，避免破坏现有 texture/shader/blend/clip 合批；
+    - 新增回归测试：先插入高 layer batch，再插入低 layer batch，验证最终 `sprite_draw_call_plans` 输出顺序为低 layer 在前；
+    - 测试同时验证排序后仍能通过 `batch_index` 回链到原始 resource plan 与 texture identity。
+- 迁移意义：
+  - Rust OpenGL sprite 输出从“先遇到的 batch 先 draw”推进到“按 layer/z 输出 draw call”；
+  - 更接近 Java `Draw.sort(true)` 与 `Layer` 浮点 z 空间语义；
+  - 本轮只处理 batch 间排序，保留 batch 内原始 quad 顺序，避免过早重写 flush/batch/state 边界。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 同一个 batch 内混合多个 layer 的 quad 仍未强拆或内部重排；
+  - 全局 `Draw.drawRange/Draw.z` 的完整排序语义还需要继续从 render command/pass 层往下接；
+  - 当前总体迁移约 30.2%，仍未达到完整可玩。

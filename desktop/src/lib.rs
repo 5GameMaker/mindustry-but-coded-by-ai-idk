@@ -1110,13 +1110,23 @@ fn opengl_backend_sprite_draw_call_plans_from_batches(
     batches: &[DesktopGraphicsOpenGlBackendSpriteMeshBatch],
     resource_plans: &[DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan],
 ) -> Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan> {
-    batches
-        .iter()
-        .zip(resource_plans.iter())
-        .map(|(batch, resource_plan)| {
-            DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::from_batch_and_resource_plan(
-                batch,
-                resource_plan,
+    let mut batch_order = (0..batches.len()).collect::<Vec<_>>();
+    batch_order.sort_by(|left, right| {
+        batches[*left]
+            .min_layer
+            .total_cmp(&batches[*right].min_layer)
+            .then_with(|| left.cmp(right))
+    });
+    batch_order
+        .into_iter()
+        .filter_map(|batch_index| {
+            let batch = batches.get(batch_index)?;
+            let resource_plan = resource_plans.get(batch_index)?;
+            Some(
+                DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::from_batch_and_resource_plan(
+                    batch,
+                    resource_plan,
+                ),
             )
         })
         .collect()
@@ -10397,6 +10407,94 @@ mod tests {
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[0].texture_identity.gl_handle, Some(101));
         assert_eq!(batches[1].texture_identity.gl_handle, Some(102));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_sprite_draw_call_plans_sort_batches_by_min_layer() {
+        let rect = RenderRect::new(8.0, 8.0, 16.0, 16.0);
+        let base_binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
+            command_index: Some(9),
+            symbol: "layer-router".into(),
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Main,
+                    "sprites.png",
+                ),
+            page_type: PageType::Main,
+            page_source_path: "sprites.png".into(),
+            page_width: 64,
+            page_height: 64,
+            sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+            uv: [0.0, 0.0, 0.25, 0.25],
+            region_width: 16,
+            region_height: 16,
+        };
+        let high_binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Main,
+                    "sprites.png",
+                )
+                .with_gl_handle(201, 1),
+            ..base_binding.clone()
+        };
+        let low_binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Main,
+                    "sprites.png",
+                )
+                .with_gl_handle(202, 1),
+            ..base_binding
+        };
+        let high_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            &high_binding,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            rect,
+            rect.center_origin(),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            0.0,
+            Layer::EFFECT,
+        );
+        let low_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            &low_binding,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            rect,
+            rect.center_origin(),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            0.0,
+            Layer::BLOCK,
+        );
+        let batches = super::opengl_backend_sprite_mesh_batches_from_quads(&[high_quad, low_quad]);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].min_layer, Layer::EFFECT);
+        assert_eq!(batches[1].min_layer, Layer::BLOCK);
+
+        let mut location_cache = super::DesktopGraphicsOpenGlBackendLocationCache::default();
+        let buffer_plans =
+            super::opengl_backend_mesh_buffer_plans_from_batches(&batches, &mut location_cache);
+        let resource_plans =
+            super::opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(&buffer_plans);
+        let draw_call_plans =
+            super::opengl_backend_sprite_draw_call_plans_from_batches(&batches, &resource_plans);
+
+        assert_eq!(
+            draw_call_plans
+                .iter()
+                .map(|plan| plan.batch_index)
+                .collect::<Vec<_>>(),
+            vec![1, 0]
+        );
+        assert_eq!(draw_call_plans[0].texture_identity.gl_handle, Some(202));
+        assert_eq!(draw_call_plans[1].texture_identity.gl_handle, Some(201));
     }
 
     #[test]
