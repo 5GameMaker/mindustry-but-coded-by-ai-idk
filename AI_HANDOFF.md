@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **28.3%**。
+- 当前总体迁移完成度：约 **28.4%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10623,3 +10623,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 sprite quad 输入对接真实 VBO/IBO 或 mesh buffer；
   2. 继续把 texture binding 映射到 GL texture handle/resource table；
   3. 之后接 shader program binding 与 draw call。
+
+---
+
+## 333. 最新闭环记录：OpenGL sprite mesh/batch 输入
+
+- 本轮总体进度更新：约 **28.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshBatch`；
+    - 基于 `sprite_quads` 生成 vertices/indices 批处理输入；
+    - batch key 保留 target、blend_state、clip、page_source_path、sampler，避免跨 GL 状态错误合批；
+    - executor state 与 classifying adapter state 均新增 `sprite_mesh_batches`；
+    - 回归测试断言 vertices、indices、target、blend、clip 与 adapter/executor 状态一致。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 将 sprite mesh batch 对接真实 VBO/IBO/VAO 或 mesh buffer；
+  2. 将 texture binding 映射到 GL texture handle/resource table；
+  3. 再接 shader program binding 与 draw call。

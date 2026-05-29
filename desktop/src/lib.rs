@@ -495,6 +495,9 @@ pub struct DesktopGraphicsOpenGlBackendSpriteVertex {
 pub struct DesktopGraphicsOpenGlBackendSpriteQuad {
     pub command_index: Option<usize>,
     pub symbol: String,
+    pub target: Option<RenderTarget>,
+    pub blend_state: DesktopGraphicsOpenGlBackendBlendState,
+    pub clip: Option<RenderRect>,
     pub page_source_path: String,
     pub sampler: DesktopGraphicsTextureSamplerTrace,
     pub layer: f32,
@@ -505,6 +508,9 @@ pub struct DesktopGraphicsOpenGlBackendSpriteQuad {
 impl DesktopGraphicsOpenGlBackendSpriteQuad {
     pub fn from_draw_sprite(
         binding: &DesktopGraphicsOpenGlBackendTextureBinding,
+        target: Option<RenderTarget>,
+        blend_state: DesktopGraphicsOpenGlBackendBlendState,
+        clip: Option<RenderRect>,
         rect: RenderRect,
         tint: [f32; 4],
         rotation: f32,
@@ -515,6 +521,9 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
         Self {
             command_index: binding.command_index,
             symbol: binding.symbol.clone(),
+            target,
+            blend_state,
+            clip,
             page_source_path: binding.page_source_path.clone(),
             sampler: binding.sampler,
             layer,
@@ -543,6 +552,69 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
             ],
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteMeshBatch {
+    pub target: Option<RenderTarget>,
+    pub blend_state: DesktopGraphicsOpenGlBackendBlendState,
+    pub clip: Option<RenderRect>,
+    pub page_source_path: String,
+    pub sampler: DesktopGraphicsTextureSamplerTrace,
+    pub quad_count: usize,
+    pub min_layer: f32,
+    pub max_layer: f32,
+    pub vertices: Vec<DesktopGraphicsOpenGlBackendSpriteVertex>,
+    pub indices: Vec<u32>,
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshBatch {
+    fn new(quad: &DesktopGraphicsOpenGlBackendSpriteQuad) -> Self {
+        Self {
+            target: quad.target.clone(),
+            blend_state: quad.blend_state,
+            clip: quad.clip,
+            page_source_path: quad.page_source_path.clone(),
+            sampler: quad.sampler,
+            quad_count: 0,
+            min_layer: quad.layer,
+            max_layer: quad.layer,
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
+
+    fn push_quad(&mut self, quad: &DesktopGraphicsOpenGlBackendSpriteQuad) {
+        let base = self.vertices.len() as u32;
+        self.vertices.extend_from_slice(&quad.vertices);
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        self.quad_count += 1;
+        self.min_layer = self.min_layer.min(quad.layer);
+        self.max_layer = self.max_layer.max(quad.layer);
+    }
+}
+
+fn opengl_backend_sprite_mesh_batches_from_quads(
+    quads: &[DesktopGraphicsOpenGlBackendSpriteQuad],
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch> {
+    let mut batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch> = Vec::new();
+    for quad in quads {
+        if let Some(batch) = batches.iter_mut().find(|batch| {
+            batch.target == quad.target
+                && batch.blend_state == quad.blend_state
+                && batch.clip == quad.clip
+                && batch.page_source_path == quad.page_source_path
+                && batch.sampler == quad.sampler
+        }) {
+            batch.push_quad(quad);
+        } else {
+            let mut batch = DesktopGraphicsOpenGlBackendSpriteMeshBatch::new(quad);
+            batch.push_quad(quad);
+            batches.push(batch);
+        }
+    }
+    batches
 }
 
 fn opengl_backend_sprite_quad_positions(rect: RenderRect, rotation: f32) -> [RenderPoint; 4] {
@@ -1220,6 +1292,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
     pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
+    pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
     pub missing_sprite_texture_bindings: usize,
 }
 
@@ -1253,6 +1326,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             actions: Vec::new(),
             sprite_texture_bindings: Vec::new(),
             sprite_quads: Vec::new(),
+            sprite_mesh_batches: Vec::new(),
             missing_sprite_texture_bindings: 0,
         }
     }
@@ -1266,12 +1340,13 @@ pub struct DesktopGraphicsClassifyingOpenGlBackendAdapter {
 impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
     fn consume_command(
         &mut self,
+        target: RenderTarget,
         command: RenderCommand,
         resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
     ) {
         self.state.command_events += 1;
         let action = opengl_backend_adapter_action_from_render_command(&command, resolved_sprite);
-        self.consume_sprite_texture_binding(&command, &action);
+        self.consume_sprite_texture_binding(&target, &command, &action);
         match command {
             RenderCommand::Clear { .. } => {
                 self.state.state_commands += 1;
@@ -1331,6 +1406,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
 
     fn consume_sprite_texture_binding(
         &mut self,
+        target: &RenderTarget,
         command: &RenderCommand,
         action: &DesktopGraphicsOpenGlBackendAdapterAction,
     ) {
@@ -1353,9 +1429,16 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                         ..
                     } = action
                     {
-                        self.state.sprite_quads.push(
+                        self.state.record_sprite_quad(
                             DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
-                                &binding, *rect, *tint, *rotation, *layer,
+                                &binding,
+                                Some(target.clone()),
+                                self.state.current_blend_state,
+                                self.state.current_clip,
+                                *rect,
+                                *tint,
+                                *rotation,
+                                *layer,
                             ),
                         );
                     }
@@ -1369,6 +1452,14 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
             }
             _ => {}
         }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
+    fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
+        self.sprite_quads.push(quad);
+        self.sprite_mesh_batches =
+            opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
     }
 }
 
@@ -1472,11 +1563,12 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
                 self.state.current_shader = Some(apply.shader);
             }
             DesktopGraphicsOpenGlBackendEvent::Command {
+                target,
                 command,
                 resolved_sprite,
                 ..
             } => {
-                self.consume_command(command, resolved_sprite);
+                self.consume_command(target, command, resolved_sprite);
             }
             DesktopGraphicsOpenGlBackendEvent::EndPass { .. } => self.state.end_passes += 1,
             DesktopGraphicsOpenGlBackendEvent::Resolve { .. } => self.state.resolves += 1,
@@ -1512,6 +1604,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub action_count: usize,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
     pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
+    pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
     pub missing_sprite_texture_bindings: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
     pub last_command_kind: Option<&'static str>,
@@ -1546,6 +1639,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             action_count: 0,
             sprite_texture_bindings: Vec::new(),
             sprite_quads: Vec::new(),
+            sprite_mesh_batches: Vec::new(),
             missing_sprite_texture_bindings: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
             last_command_kind: None,
@@ -1634,9 +1728,16 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                         ..
                     } = action
                     {
-                        self.state.sprite_quads.push(
+                        self.state.record_sprite_quad(
                             DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
-                                &binding, *rect, *tint, *rotation, *layer,
+                                &binding,
+                                self.state.current_target.clone(),
+                                self.state.current_blend_state,
+                                self.state.current_clip,
+                                *rect,
+                                *tint,
+                                *rotation,
+                                *layer,
                             ),
                         );
                     }
@@ -1650,6 +1751,14 @@ impl DesktopGraphicsOpenGlBackendExecutor {
             }
             _ => {}
         }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendExecutorState {
+    fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
+        self.sprite_quads.push(quad);
+        self.sprite_mesh_batches =
+            opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
     }
 }
 
@@ -9398,6 +9507,15 @@ mod tests {
         assert_eq!(executor.state.sprite_quads.len(), 1);
         assert_eq!(executor.state.sprite_quads[0].symbol, "router");
         assert_eq!(
+            executor.state.sprite_quads[0].target,
+            Some(RenderTarget::Buffer("lighting-buffer".into()))
+        );
+        assert_eq!(
+            executor.state.sprite_quads[0].blend_state.mode,
+            RenderBlendMode::Additive
+        );
+        assert_eq!(executor.state.sprite_quads[0].clip, None);
+        assert_eq!(
             executor.state.sprite_quads[0].page_source_path,
             "sprites.png"
         );
@@ -9428,6 +9546,20 @@ mod tests {
                 [0.0, 1.0 / 4096.0],
             ]
         );
+        assert_eq!(executor.state.sprite_mesh_batches.len(), 1);
+        let mesh_batch = &executor.state.sprite_mesh_batches[0];
+        assert_eq!(
+            mesh_batch.target,
+            Some(RenderTarget::Buffer("lighting-buffer".into()))
+        );
+        assert_eq!(mesh_batch.blend_state.mode, RenderBlendMode::Additive);
+        assert_eq!(mesh_batch.clip, None);
+        assert_eq!(mesh_batch.page_source_path, "sprites.png");
+        assert_eq!(mesh_batch.quad_count, 1);
+        assert_eq!(mesh_batch.vertices.len(), 4);
+        assert_eq!(mesh_batch.indices, vec![0, 1, 2, 0, 2, 3]);
+        assert_eq!(mesh_batch.min_layer, 8.0);
+        assert_eq!(mesh_batch.max_layer, 8.0);
         assert_eq!(
             executor.state.resolve_events,
             vec![super::DesktopGraphicsOpenGlBackendResolveEvent {
@@ -9458,6 +9590,10 @@ mod tests {
         assert_eq!(
             classifying_adapter.state.sprite_quads,
             executor.state.sprite_quads
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_mesh_batches,
+            executor.state.sprite_mesh_batches
         );
         assert_eq!(classifying_adapter.state.actions.len(), 3);
         assert!(matches!(

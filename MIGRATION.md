@@ -13337,3 +13337,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 尚未将 texture binding 转为 GL texture handle；
   - shader program binding 与 draw call 仍待落地；
   - 当前总体迁移约 28.3%，仍未达到完整可玩。
+
+## 12.427 OpenGL sprite mesh/batch 输入
+
+- 2026-05-29：在 `DrawSprite` 已经具备 texture binding 与 quad/vertex 输入的基础上，继续组织为后续真实 OpenGL 可消费的 mesh/batch 输入。当前仍不调用 GL，只把 quad 按关键 GL 状态分组，并生成 vertices/indices。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshBatch`；
+    - batch 保存 `target / blend_state / clip / page_source_path / sampler`，避免跨 render target、blend、scissor 或 texture page 错误合批；
+    - batch 保存 `quad_count / min_layer / max_layer / vertices / indices`；
+    - 新增 `opengl_backend_sprite_mesh_batches_from_quads(...)`；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `sprite_mesh_batches`；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增 `sprite_mesh_batches`；
+    - executor 与 classifying adapter 在记录 `sprite_quads` 后同步重建 mesh batch 输入。
+- 迁移意义：
+  - `DrawSprite` 从单 quad 输入继续推进到可批量提交的 mesh/batch 输入；
+  - 后续真实 OpenGL backend 可直接把 batch 写入 VBO/IBO/VAO 或 mesh buffer；
+  - batch key 显式包含 target/blend/clip/page/sampler，减少后续真实渲染状态错乱风险。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - 尚未创建真实 VBO/IBO/VAO 或 mesh batch 提交；
+  - 尚未把 texture binding 转成真实 GPU texture handle；
+  - shader program binding 与实际 draw call 仍待落地；
+  - 当前总体迁移约 28.4%，仍未达到完整可玩。
