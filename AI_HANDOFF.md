@@ -11002,3 +11002,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续补 batch 内多 layer quad 的保真策略；
   2. 推进 `Draw.drawRange/Draw.z` 的更完整排序模型；
   3. 继续推进真实 OpenGL texture upload / shader uniform / draw executor。
+
+---
+
+## 352. 最新闭环记录：OpenGL atlas texture upload plan 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前本地 HEAD 已是 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **30.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 OpenGL texture upload plan / resolved upload 数据结构；
+    - texture resource table 可从已登记 atlas page 生成 full upload plan；
+    - 新增 texture upload sink 与 resolving executor，复用 `HandleCache` 分配/复用 texture handle；
+    - executor / classifying adapter 在 `DrawSprite -> texture binding -> resource table` 后刷新 `sprite_texture_upload_plans`；
+    - 新增测试覆盖 `atlas:Main:sprites.png` full upload plan、bind count、generation、handle 解析与写回后不再需要 full upload。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 upload plan 接到真实 PNG/Pixmap 解码与 `glTexImage2D/glTexSubImage2D` 边界；
+  2. 补 minimap/darkness/floor cache 等 dirty texture update 到统一 upload plan；
+  3. 继续推进真实 OpenGL executor/window/context/present，保持原版 Arc/LWJGL/OpenGL 语义，不切 wgpu/Bevy。

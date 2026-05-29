@@ -13787,3 +13787,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 同一个 batch 内混合多个 layer 的 quad 仍未强拆或内部重排；
   - 全局 `Draw.drawRange/Draw.z` 的完整排序语义还需要继续从 render command/pass 层往下接；
   - 当前总体迁移约 30.2%，仍未达到完整可玩。
+
+## 12.446 OpenGL atlas texture upload plan 接入
+
+- 2026-05-29：在 texture resource table / draw call handle hint 之后，继续把 atlas page texture 从“资源已登记”推进到“可上传计划”。当前仍不调用真实 `glTexImage2D`，但 OpenGL executor / classifying adapter 在记录 `DrawSprite` texture binding 后会生成 per-atlas-page full upload plan，并提供 texture upload sink / resolving executor，把上传计划解析为稳定 texture handle，再写回 texture resource table。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadKind`、`DesktopGraphicsOpenGlBackendTextureUploadPlan`、`DesktopGraphicsOpenGlBackendResolvedTextureUpload`；
+    - `DesktopGraphicsOpenGlBackendTextureResource` 增加 `needs_full_upload(...)`、`to_full_upload_plan(...)`、`apply_resolved_upload(...)`；
+    - `DesktopGraphicsOpenGlBackendTextureResourceTable` 增加 `full_upload_plans(...)` 与 resolved upload 应用方法；
+    - 新增 `DesktopGraphicsOpenGlBackendTextureUploadSink`、recording/null sink 与 `DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor`；
+    - `DesktopGraphicsOpenGlBackendExecutorState` / `DesktopGraphicsOpenGlBackendAdapterExecutionState` 增加 `sprite_texture_upload_plans`，接在现有 `DrawSprite -> texture binding -> resource table` 主链路内；
+    - 新增回归测试验证同一 atlas page 两次 sprite bind 只产生一个 `atlas:Main:sprites.png` full upload plan，并能解析为 handle 后写回 resource table，使后续 `full_upload_plans()` 为空。
+- 迁移意义：
+  - Rust OpenGL texture 语义从“资源表知道 atlas page”推进到“资源表能给真实 GL upload 边界提供 full page upload plan”；
+  - texture handle 仍通过已有 `DesktopGraphicsOpenGlBackendHandleCache` 分配/复用，避免新建孤立资源系统；
+  - 继续对齐 Java Arc 的 `Texture` 生命周期：atlas page 是 texture 对象，region/UV 只是 view，upload 成功后由 texture handle 被 `BindTexture` 消费。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 PNG/Pixmap 解码、atlas page 像素合成、`glTexImage2D/glTexSubImage2D` 尚未接入；
+  - dirty/sub-image invalidation 仍需继续与 minimap/darkness/floor cache 等 texture update plan 统一；
+  - window/context/present 与真实 GL executor 仍未完成；
+  - 当前总体迁移约 30.3%，仍未达到完整可玩。

@@ -492,6 +492,12 @@ impl DesktopGraphicsOpenGlBackendTextureResourceIdentity {
         self.key = format!("gl-texture:{gl_handle}:generation:{generation}");
         self
     }
+
+    pub fn with_uploaded_gl_handle(mut self, gl_handle: u32, generation: u64) -> Self {
+        self.generation = generation;
+        self.gl_handle = Some(gl_handle);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -511,6 +517,44 @@ pub struct DesktopGraphicsOpenGlBackendTextureResourceTable {
     pub resources: BTreeMap<String, DesktopGraphicsOpenGlBackendTextureResource>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendTextureUploadKind {
+    FullPage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendTextureUploadPlan {
+    pub texture_key: String,
+    pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
+    pub page_type: PageType,
+    pub page_source_path: String,
+    pub page_width: u32,
+    pub page_height: u32,
+    pub sampler: DesktopGraphicsTextureSamplerTrace,
+    pub generation: u64,
+    pub bind_count: usize,
+    pub kind: DesktopGraphicsOpenGlBackendTextureUploadKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendResolvedTextureUpload {
+    pub texture_key: String,
+    pub texture_handle: u32,
+    pub page_type: PageType,
+    pub page_source_path: String,
+    pub page_width: u32,
+    pub page_height: u32,
+    pub sampler: DesktopGraphicsTextureSamplerTrace,
+    pub generation: u64,
+    pub kind: DesktopGraphicsOpenGlBackendTextureUploadKind,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendTextureUploadSinkExecutionState {
+    pub texture_uploads_emitted: usize,
+    pub last_texture_upload: Option<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
+}
+
 impl DesktopGraphicsOpenGlBackendTextureResource {
     pub fn from_binding(binding: &DesktopGraphicsOpenGlBackendTextureBinding) -> Self {
         Self {
@@ -523,6 +567,35 @@ impl DesktopGraphicsOpenGlBackendTextureResource {
             sampler: binding.sampler,
             bind_count: 0,
         }
+    }
+
+    pub fn needs_full_upload(&self) -> bool {
+        self.identity.gl_handle.is_none()
+    }
+
+    pub fn to_full_upload_plan(&self) -> DesktopGraphicsOpenGlBackendTextureUploadPlan {
+        DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            texture_key: self.key.clone(),
+            texture_identity: self.identity.clone(),
+            page_type: self.page_type,
+            page_source_path: self.page_source_path.clone(),
+            page_width: self.page_width,
+            page_height: self.page_height,
+            sampler: self.sampler,
+            generation: self.identity.generation.saturating_add(1),
+            bind_count: self.bind_count,
+            kind: DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage,
+        }
+    }
+
+    pub fn apply_resolved_upload(
+        &mut self,
+        upload: &DesktopGraphicsOpenGlBackendResolvedTextureUpload,
+    ) {
+        self.identity = self
+            .identity
+            .clone()
+            .with_uploaded_gl_handle(upload.texture_handle, upload.generation);
     }
 }
 
@@ -544,6 +617,32 @@ impl DesktopGraphicsOpenGlBackendTextureResourceTable {
 
     pub fn get(&self, key: &str) -> Option<&DesktopGraphicsOpenGlBackendTextureResource> {
         self.resources.get(key)
+    }
+
+    pub fn full_upload_plans(&self) -> Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan> {
+        self.resources
+            .values()
+            .filter(|resource| resource.needs_full_upload())
+            .map(DesktopGraphicsOpenGlBackendTextureResource::to_full_upload_plan)
+            .collect()
+    }
+
+    pub fn apply_resolved_upload(
+        &mut self,
+        upload: &DesktopGraphicsOpenGlBackendResolvedTextureUpload,
+    ) {
+        if let Some(resource) = self.resources.get_mut(&upload.texture_key) {
+            resource.apply_resolved_upload(upload);
+        }
+    }
+
+    pub fn apply_resolved_uploads<I>(&mut self, uploads: I)
+    where
+        I: IntoIterator<Item = DesktopGraphicsOpenGlBackendResolvedTextureUpload>,
+    {
+        for upload in uploads {
+            self.apply_resolved_upload(&upload);
+        }
     }
 }
 
@@ -1852,6 +1951,42 @@ pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
     pub last_draw_call: Option<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
 }
 
+pub trait DesktopGraphicsOpenGlBackendTextureUploadSink {
+    fn consume_opengl_texture_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendTextureUploadPlan,
+    );
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsNullOpenGlBackendTextureUploadSink;
+
+impl DesktopGraphicsOpenGlBackendTextureUploadSink
+    for DesktopGraphicsNullOpenGlBackendTextureUploadSink
+{
+    fn consume_opengl_texture_upload(
+        &mut self,
+        _upload: DesktopGraphicsOpenGlBackendTextureUploadPlan,
+    ) {
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendTextureUploadSink {
+    pub uploads: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
+}
+
+impl DesktopGraphicsOpenGlBackendTextureUploadSink
+    for DesktopGraphicsRecordingOpenGlBackendTextureUploadSink
+{
+    fn consume_opengl_texture_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendTextureUploadPlan,
+    ) {
+        self.uploads.push(upload);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendDrawCallAction {
     UseProgram {
@@ -2044,6 +2179,38 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor {
+    pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub uploads: Vec<DesktopGraphicsOpenGlBackendResolvedTextureUpload>,
+}
+
+impl DesktopGraphicsOpenGlBackendTextureUploadSink
+    for DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor
+{
+    fn consume_opengl_texture_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendTextureUploadPlan,
+    ) {
+        let texture_handle = self
+            .cache
+            .texture_handle_for_identity(&upload.texture_identity, &mut self.allocator);
+        self.uploads
+            .push(DesktopGraphicsOpenGlBackendResolvedTextureUpload {
+                texture_key: upload.texture_key,
+                texture_handle,
+                page_type: upload.page_type,
+                page_source_path: upload.page_source_path,
+                page_width: upload.page_width,
+                page_height: upload.page_height,
+                sampler: upload.sampler,
+                generation: upload.generation,
+                kind: upload.kind,
+            });
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsResolvingOpenGlBackendDrawCallExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
@@ -2097,6 +2264,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
+    pub sprite_texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
     pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
@@ -2140,6 +2308,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
+            sprite_texture_upload_plans: Vec::new(),
             sprite_texture_bindings: Vec::new(),
             sprite_quads: Vec::new(),
             sprite_mesh_batches: Vec::new(),
@@ -2274,6 +2443,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                     self.state
                         .sprite_texture_resource_table
                         .register_binding(&binding);
+                    self.state.refresh_sprite_texture_upload_plans();
                     self.state.sprite_texture_bindings.push(binding);
                 } else {
                     self.state.missing_sprite_texture_bindings += 1;
@@ -2288,6 +2458,10 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
 }
 
 impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
+    fn refresh_sprite_texture_upload_plans(&mut self) {
+        self.sprite_texture_upload_plans = self.sprite_texture_resource_table.full_upload_plans();
+    }
+
     fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
         self.sprite_quads.push(quad);
         self.sprite_mesh_batches =
@@ -2461,6 +2635,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
+    pub sprite_texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub action_count: usize,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
@@ -2505,6 +2680,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
+            sprite_texture_upload_plans: Vec::new(),
             last_action: None,
             action_count: 0,
             sprite_texture_bindings: Vec::new(),
@@ -2553,6 +2729,19 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         }
         state
     }
+
+    pub fn drive_texture_upload_sink<S: DesktopGraphicsOpenGlBackendTextureUploadSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendTextureUploadSinkExecutionState {
+        let mut state = DesktopGraphicsOpenGlBackendTextureUploadSinkExecutionState::default();
+        for upload in &self.sprite_texture_upload_plans {
+            sink.consume_opengl_texture_upload(upload.clone());
+            state.texture_uploads_emitted += 1;
+            state.last_texture_upload = Some(upload.clone());
+        }
+        state
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -2577,6 +2766,13 @@ impl DesktopGraphicsOpenGlBackendExecutor {
         sink: &mut S,
     ) -> DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
         self.state.drive_sprite_draw_call_sink(sink)
+    }
+
+    pub fn drive_texture_upload_sink<S: DesktopGraphicsOpenGlBackendTextureUploadSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendTextureUploadSinkExecutionState {
+        self.state.drive_texture_upload_sink(sink)
     }
 
     fn record_error(&mut self, message: impl Into<String>) {
@@ -2647,6 +2843,7 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                     self.state
                         .sprite_texture_resource_table
                         .register_binding(&binding);
+                    self.state.refresh_sprite_texture_upload_plans();
                     self.state.sprite_texture_bindings.push(binding);
                 } else {
                     self.state.missing_sprite_texture_bindings += 1;
@@ -2661,6 +2858,10 @@ impl DesktopGraphicsOpenGlBackendExecutor {
 }
 
 impl DesktopGraphicsOpenGlBackendExecutorState {
+    fn refresh_sprite_texture_upload_plans(&mut self) {
+        self.sprite_texture_upload_plans = self.sprite_texture_resource_table.full_upload_plans();
+    }
+
     fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
         self.sprite_quads.push(quad);
         self.sprite_mesh_batches =
@@ -10542,6 +10743,77 @@ mod tests {
             101
         );
         assert_eq!(allocator.next_handle, 1);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_emits_texture_upload_plan_for_sprite_atlas_page() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(42, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Block).with_target(RenderTarget::Screen);
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(8.0, 8.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::BLOCK,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(24.0, 8.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::BLOCK + 0.01,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        plan.drive_step_sink(&mut executor);
+
+        assert_eq!(
+            executor.state.sprite_texture_resource_table.resources.len(),
+            1
+        );
+        assert_eq!(executor.state.sprite_texture_upload_plans.len(), 1);
+        let upload = &executor.state.sprite_texture_upload_plans[0];
+        assert_eq!(upload.texture_key, "atlas:Main:sprites.png");
+        assert_eq!(upload.page_type, PageType::Main);
+        assert_eq!(upload.page_source_path, "sprites.png");
+        assert_eq!(upload.page_width, 4096);
+        assert_eq!(upload.page_height, 4096);
+        assert_eq!(upload.sampler, DesktopGraphicsTextureSamplerTrace::Linear);
+        assert_eq!(upload.generation, 1);
+        assert_eq!(upload.bind_count, 2);
+        assert_eq!(
+            upload.kind,
+            super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage
+        );
+
+        let mut upload_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor::default();
+        let upload_state = executor.drive_texture_upload_sink(&mut upload_executor);
+        assert_eq!(upload_state.texture_uploads_emitted, 1);
+        assert_eq!(upload_executor.uploads.len(), 1);
+        assert_eq!(upload_executor.uploads[0].texture_handle, 1);
+        assert_eq!(upload_executor.uploads[0].texture_key, upload.texture_key);
+
+        let mut uploaded_table = executor.state.sprite_texture_resource_table.clone();
+        uploaded_table.apply_resolved_uploads(upload_executor.uploads.clone());
+        let uploaded_resource = uploaded_table.get(&upload.texture_key).unwrap();
+        assert_eq!(uploaded_resource.identity.gl_handle, Some(1));
+        assert_eq!(uploaded_resource.identity.generation, 1);
+        assert!(uploaded_table.full_upload_plans().is_empty());
     }
 
     #[test]
