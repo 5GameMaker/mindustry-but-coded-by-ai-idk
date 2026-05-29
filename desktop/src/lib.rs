@@ -996,6 +996,9 @@ pub struct DesktopLauncher {
     pub cutscene: bool,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
+    pub mods_directory_arg: Option<String>,
+    pub mods_directory_error: Option<String>,
+    pub last_mods_directory_merge_count: Option<usize>,
     pub args: Vec<String>,
     pub texture_atlas: TextureAtlasPlan<bool>,
     content_loader: ContentLoader,
@@ -1243,6 +1246,7 @@ fn block_renderer_tile_snapshot_from_world(
 impl DesktopLauncher {
     pub fn new(args: Vec<String>) -> Self {
         let connect_target = parse_connect_target(&args);
+        let mods_directory_arg = parse_mods_directory_arg(&args);
         let block_renderer_state = BlockRendererState::default();
         let content_loader = ContentLoader::create_base_content_or_panic();
         let texture_atlas = default_desktop_texture_atlas(&block_renderer_state, &content_loader);
@@ -1280,6 +1284,9 @@ impl DesktopLauncher {
             cutscene: false,
             connect_target,
             connect_error: None,
+            mods_directory_arg,
+            mods_directory_error: None,
+            last_mods_directory_merge_count: None,
             args,
             texture_atlas,
             content_loader,
@@ -1342,6 +1349,27 @@ impl DesktopLauncher {
             .iter()
             .map(|mod_dir| self.merge_mod_resource_plan_into_texture_atlas(&mod_dir.resource_plan))
             .sum()
+    }
+
+    pub fn merge_mods_directory_arg_into_texture_atlas(&mut self) -> io::Result<usize> {
+        let Some(mods_dir) = self.mods_directory_arg.clone() else {
+            self.last_mods_directory_merge_count = Some(0);
+            self.mods_directory_error = None;
+            return Ok(0);
+        };
+
+        match self.merge_mods_directory_into_texture_atlas(&mods_dir, false) {
+            Ok(count) => {
+                self.last_mods_directory_merge_count = Some(count);
+                self.mods_directory_error = None;
+                Ok(count)
+            }
+            Err(error) => {
+                self.last_mods_directory_merge_count = None;
+                self.mods_directory_error = Some(error.to_string());
+                Err(error)
+            }
+        }
     }
 
     pub fn merge_mod_resource_plan_into_texture_atlas(&mut self, plan: &ModResourcePlan) -> usize {
@@ -3638,6 +3666,7 @@ impl DesktopLauncher {
 pub fn run(args: Vec<String>) -> DesktopLauncher {
     let mut launcher = DesktopLauncher::new(args);
     launcher.client.setup();
+    let _ = launcher.merge_mods_directory_arg_into_texture_atlas();
     launcher.connect_from_args();
     launcher
 }
@@ -3690,6 +3719,26 @@ fn parse_connect_target(args: &[String]) -> Option<DesktopConnectTarget> {
         } else if let Some(value) = arg.strip_prefix("--connect=") {
             if let Some(target) = parse_host_port(value) {
                 return Some(target);
+            }
+        }
+    }
+    None
+}
+
+fn parse_mods_directory_arg(args: &[String]) -> Option<String> {
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--mods" || arg == "--mods-dir" {
+            if let Some(next) = args.get(index + 1) {
+                if !next.is_empty() {
+                    return Some(next.clone());
+                }
+            }
+        } else if let Some(value) = arg
+            .strip_prefix("--mods=")
+            .or_else(|| arg.strip_prefix("--mods-dir="))
+        {
+            if !value.is_empty() {
+                return Some(value.to_string());
             }
         }
     }
@@ -4015,6 +4064,38 @@ mod tests {
         assert_eq!(launcher.args, vec!["mindustry-desktop".to_string()]);
         assert_eq!(launcher.connect_target, None);
         assert_eq!(launcher.connect_error, None);
+        assert_eq!(launcher.mods_directory_arg, None);
+        assert_eq!(launcher.mods_directory_error, None);
+        assert_eq!(launcher.last_mods_directory_merge_count, Some(0));
+    }
+
+    #[test]
+    fn desktop_run_merges_explicit_mods_directory_without_default_scan() {
+        let root = create_mods_container_sprite_fixture_root();
+        let launcher = run(vec![
+            "mindustry-desktop".into(),
+            "--mods-dir".into(),
+            root.display().to_string(),
+        ]);
+
+        assert_eq!(
+            launcher.mods_directory_arg.as_deref(),
+            Some(root.to_string_lossy().as_ref())
+        );
+        assert_eq!(launcher.mods_directory_error, None);
+        assert_eq!(launcher.last_mods_directory_merge_count, Some(2));
+        assert!(launcher.texture_atlas.lookup("alpha-alpha-router").is_ok());
+        assert_eq!(
+            launcher
+                .texture_atlas
+                .lookup("router")
+                .unwrap()
+                .region
+                .source_path,
+            "sprites-override/router.png"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

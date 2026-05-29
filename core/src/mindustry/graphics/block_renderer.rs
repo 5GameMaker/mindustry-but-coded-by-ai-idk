@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::mindustry::{
+    ctype::ContentId,
     entities::comp::DecalColor,
     graphics::{
         CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
@@ -271,6 +272,7 @@ pub struct BuildingDrawPlan {
     pub draw_team_overlay: bool,
     pub draw_status: bool,
     pub emits_light: bool,
+    pub visual_runtime: Option<BlockRendererBuildingVisualRuntimeSnapshot>,
 }
 
 impl Default for BuildingDrawPlan {
@@ -290,6 +292,7 @@ impl Default for BuildingDrawPlan {
             draw_team_overlay: false,
             draw_status: false,
             emits_light: false,
+            visual_runtime: None,
         }
     }
 }
@@ -316,6 +319,41 @@ pub struct BlockRendererBuildingSnapshot {
     pub draw_team_overlay: bool,
     pub draw_status: bool,
     pub emits_light: bool,
+    pub visual_runtime: Option<BlockRendererBuildingVisualRuntimeSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BlockRendererBuildingVisualRuntimeLiquidSnapshot {
+    pub current: Option<ContentId>,
+    pub amount: Option<f32>,
+    pub capacity: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BlockRendererBuildingVisualRuntimePowerSnapshot {
+    pub status: Option<f32>,
+    pub production_efficiency: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BlockRendererBuildingVisualRuntimeTurretSnapshot {
+    pub rotation: Option<f32>,
+    pub recoil: Option<f32>,
+    pub heat: Option<f32>,
+    pub charge: Option<f32>,
+    pub side_heat: Option<[f32; 4]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BlockRendererBuildingVisualRuntimeSnapshot {
+    pub liquid: Option<BlockRendererBuildingVisualRuntimeLiquidSnapshot>,
+    pub progress: Option<f32>,
+    pub heat: Option<f32>,
+    pub warmup: Option<f32>,
+    pub total_progress: Option<f32>,
+    pub charge: Option<f32>,
+    pub power: Option<BlockRendererBuildingVisualRuntimePowerSnapshot>,
+    pub turret: Option<BlockRendererBuildingVisualRuntimeTurretSnapshot>,
 }
 
 impl BlockRendererBuildingSnapshot {
@@ -335,11 +373,20 @@ impl BlockRendererBuildingSnapshot {
             draw_team_overlay: false,
             draw_status: false,
             emits_light: false,
+            visual_runtime: None,
         }
     }
 
     pub fn should_draw_base(&self) -> bool {
         self.visible || self.was_visible
+    }
+
+    pub fn with_visual_runtime(
+        mut self,
+        visual_runtime: BlockRendererBuildingVisualRuntimeSnapshot,
+    ) -> Self {
+        self.visual_runtime = Some(visual_runtime);
+        self
     }
 
     pub fn to_draw_plan(&self) -> BuildingDrawPlan {
@@ -358,6 +405,7 @@ impl BlockRendererBuildingSnapshot {
             draw_team_overlay: self.draw_team_overlay,
             draw_status: self.draw_status,
             emits_light: self.emits_light,
+            visual_runtime: self.visual_runtime.clone(),
         }
     }
 }
@@ -1818,7 +1866,31 @@ mod tests {
         ];
         state.cache.light_view = vec![TileCoord::new(4, 4)];
 
-        let mut damaged_building = BlockRendererBuildingSnapshot::new(TileCoord::new(4, 4), "duo");
+        let damaged_building = BlockRendererBuildingSnapshot::new(TileCoord::new(4, 4), "duo")
+            .with_visual_runtime(BlockRendererBuildingVisualRuntimeSnapshot {
+                liquid: Some(BlockRendererBuildingVisualRuntimeLiquidSnapshot {
+                    current: Some(11),
+                    amount: Some(4.5),
+                    capacity: Some(10.0),
+                }),
+                progress: Some(0.25),
+                heat: Some(0.75),
+                warmup: Some(0.5),
+                total_progress: Some(0.9),
+                charge: Some(0.6),
+                power: Some(BlockRendererBuildingVisualRuntimePowerSnapshot {
+                    status: Some(0.8),
+                    production_efficiency: Some(0.7),
+                }),
+                turret: Some(BlockRendererBuildingVisualRuntimeTurretSnapshot {
+                    rotation: Some(135.0),
+                    recoil: Some(0.4),
+                    heat: Some(0.3),
+                    charge: Some(0.2),
+                    side_heat: Some([0.1, 0.2, 0.3, 0.4]),
+                }),
+            });
+        let mut damaged_building = damaged_building;
         damaged_building.cache_layer = CacheLayer::Normal;
         damaged_building.size = 2;
         damaged_building.rotation = 3;
@@ -1891,6 +1963,32 @@ mod tests {
         assert!(duo.draw_team_overlay);
         assert!(duo.draw_status);
         assert!(duo.emits_light);
+        assert_eq!(
+            duo.visual_runtime,
+            Some(BlockRendererBuildingVisualRuntimeSnapshot {
+                liquid: Some(BlockRendererBuildingVisualRuntimeLiquidSnapshot {
+                    current: Some(11),
+                    amount: Some(4.5),
+                    capacity: Some(10.0),
+                }),
+                progress: Some(0.25),
+                heat: Some(0.75),
+                warmup: Some(0.5),
+                total_progress: Some(0.9),
+                charge: Some(0.6),
+                power: Some(BlockRendererBuildingVisualRuntimePowerSnapshot {
+                    status: Some(0.8),
+                    production_efficiency: Some(0.7),
+                }),
+                turret: Some(BlockRendererBuildingVisualRuntimeTurretSnapshot {
+                    rotation: Some(135.0),
+                    recoil: Some(0.4),
+                    heat: Some(0.3),
+                    charge: Some(0.2),
+                    side_heat: Some([0.1, 0.2, 0.3, 0.4]),
+                }),
+            })
+        );
 
         let remembered = &plan.building_passes[0].buildings[1];
         assert_eq!(remembered.block, "mender");
@@ -1898,6 +1996,7 @@ mod tests {
         assert!(remembered.was_visible);
         assert_eq!(remembered.rotation, 1);
         assert_eq!(remembered.team, 2);
+        assert!(remembered.visual_runtime.is_none());
 
         assert_eq!(
             plan.building_passes[1].stage,
@@ -1935,6 +2034,48 @@ mod tests {
             .iter()
             .flat_map(|pass| pass.buildings.iter())
             .all(|building| building.block != "hidden-core"));
+    }
+
+    #[test]
+    fn building_visual_runtime_snapshot_roundtrips_into_draw_plan_and_keeps_missing_fields_none() {
+        let visual_runtime = BlockRendererBuildingVisualRuntimeSnapshot {
+            liquid: Some(BlockRendererBuildingVisualRuntimeLiquidSnapshot {
+                current: Some(3),
+                amount: None,
+                capacity: Some(12.0),
+            }),
+            progress: Some(0.2),
+            heat: None,
+            warmup: Some(0.6),
+            total_progress: None,
+            charge: Some(0.8),
+            power: Some(BlockRendererBuildingVisualRuntimePowerSnapshot {
+                status: Some(0.9),
+                production_efficiency: None,
+            }),
+            turret: Some(BlockRendererBuildingVisualRuntimeTurretSnapshot {
+                rotation: Some(45.0),
+                recoil: None,
+                heat: Some(0.4),
+                charge: Some(0.5),
+                side_heat: None,
+            }),
+        };
+
+        let snapshot = BlockRendererBuildingSnapshot::new(TileCoord::new(8, 9), "reactor")
+            .with_visual_runtime(visual_runtime.clone());
+        let plan = snapshot.to_draw_plan();
+
+        assert_eq!(plan.coord, TileCoord::new(8, 9));
+        assert_eq!(plan.block, "reactor");
+        assert_eq!(plan.visual_runtime, Some(visual_runtime));
+
+        let missing_runtime_plan =
+            BlockRendererBuildingSnapshot::new(TileCoord::new(10, 11), "router").to_draw_plan();
+        assert!(missing_runtime_plan.visual_runtime.is_none());
+        assert_eq!(missing_runtime_plan.coord, TileCoord::new(10, 11));
+        assert_eq!(missing_runtime_plan.block, "router");
+        assert!(missing_runtime_plan.draw_cracks);
     }
 
     #[test]
@@ -2243,6 +2384,7 @@ mod tests {
             draw_team_overlay: true,
             draw_status: true,
             emits_light: true,
+            visual_runtime: None,
         };
         plan.cracks
             .push(CrackPlan::from_building(&building, &CrackAtlasPlan::default()).unwrap());

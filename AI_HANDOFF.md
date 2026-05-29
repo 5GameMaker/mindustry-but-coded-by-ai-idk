@@ -9267,3 +9267,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 把 `BlockDrawerParticlePlan` 接到 DrawParticles/DrawSoftParticles 的非 sprite 渲染链；
   3. 为 Desktop mods container 加显式 CLI/run config，不要默认扫描真实 `data/mods`；
   4. 真实 backend 需先确认是否引入 `sdl2 + glow` 依赖。
+
+---
+
+## 278. 最新闭环记录：BlockRenderer visual runtime / DrawParticles config / Desktop mods CLI
+
+- 本轮总体进度更新：约 **22.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - renderer 侧新增 building visual runtime snapshot 数据结构；
+    - `BlockRendererBuildingSnapshot` / `BuildingDrawPlan` 可携带 `visual_runtime`；
+    - `to_draw_plan()` 已透传 dynamic runtime 字段，缺失字段保持 `None`。
+  - `core/src/mindustry/world/draw/mod.rs`
+    - `DrawParticles` / `DrawSoftParticles` 新增独立 `DrawBlockParticleConfig` 收集入口；
+    - 继续不把粒子 drawer 伪装成 atlas sprite。
+  - `core/src/mindustry/graphics/particle_renderer.rs`
+    - `DrawBlockParticleConfig` 可转换为 `BlockDrawerParticlePlanConfig`；
+    - `ParticleRendererState` 可从 drawer 字符串构造 deterministic block particle plans。
+  - `desktop/src/lib.rs`
+    - `run(args)` 显式支持 `--mods` / `--mods-dir` 参数；
+    - 显式 mods 目录会合并 texture atlas；
+    - 默认空参数仍不扫描真实 `data/mods`。
+- 本轮应验证/已验证命令：
+  - `cargo test -p mindustry-core building_visual_runtime_snapshot_roundtrips_into_draw_plan_and_keeps_missing_fields_none --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core build_plan_from_snapshot_populates_building_pass_fields --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_renderer_plan_converts_sprite_passes_with_stable_symbols_and_rotation --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core draw_particles --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core particle_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_run_merges_explicit_mods_directory --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_default_run_keeps_headless_data_path_without_mod_scan_flags --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 下一步优先：
+  1. 自动把 `GameRuntimeBlockVisualRuntimeSnapshot` 映射进 `BlockRendererBuildingSnapshot.visual_runtime`；
+  2. 把 `BlockDrawerParticlePlan` 接进实际 effect/render 消费链；
+  3. 渲染后端优先走 `sdl2 + glow`：窗口/surface/context/present、texture upload/sampler、shader uniform、Pixelator/CacheLayer FBO；
+  4. 继续推进 Java↔Rust 进程级 handshake/world stream smoke。

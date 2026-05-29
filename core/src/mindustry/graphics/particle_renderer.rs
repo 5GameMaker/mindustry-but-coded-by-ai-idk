@@ -1,9 +1,11 @@
-/// Data-only port of upstream `ParticleRenderer`.
-///
-/// The Java class owns an OpenGL point-sprite mesh and may update particles on
-/// a background executor.  This Rust core module keeps the queue/update/vertex
-/// math deterministic and backend-neutral; render backends can upload
-/// `ParticleVertex` values to their preferred GPU abstraction.
+//! Data-only port of upstream `ParticleRenderer`.
+//!
+//! The Java class owns an OpenGL point-sprite mesh and may update particles on
+//! a background executor.  This Rust core module keeps the queue/update/vertex
+//! math deterministic and backend-neutral; render backends can upload
+//! `ParticleVertex` values to their preferred GPU abstraction.
+
+use crate::mindustry::world::draw::DrawBlockParticleConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParticleCamera {
@@ -253,6 +255,33 @@ impl BlockDrawerParticlePlan {
     }
 }
 
+impl BlockDrawerParticlePlanConfig {
+    pub fn from_draw_config(
+        config: DrawBlockParticleConfig,
+        build_id_seed: i32,
+        warmup: f32,
+        time: f32,
+        layer: f32,
+    ) -> Self {
+        Self {
+            build_id_seed,
+            warmup,
+            time,
+            alpha: config.alpha,
+            particle_count: config.particle_count,
+            particle_life: config.particle_life,
+            particle_radius: config.particle_radius,
+            particle_size: config.particle_size,
+            fade_margin: config.fade_margin,
+            rotate_scl: config.rotate_scl,
+            reverse: config.reverse,
+            layer,
+            color: rgba_to_particle_color(config.color_rgba),
+            secondary_color: config.secondary_color_rgba.map(rgba_to_particle_color),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleRenderPlan {
     pub vertices: Vec<ParticleVertex>,
@@ -350,6 +379,44 @@ impl ParticleRendererState {
         BlockDrawerParticlePlan::new(config)
     }
 
+    pub fn block_drawer_particle_plan_from_draw_config(
+        config: DrawBlockParticleConfig,
+        build_id_seed: i32,
+        warmup: f32,
+        time: f32,
+        layer: f32,
+    ) -> BlockDrawerParticlePlan {
+        BlockDrawerParticlePlan::new(BlockDrawerParticlePlanConfig::from_draw_config(
+            config,
+            build_id_seed,
+            warmup,
+            time,
+            layer,
+        ))
+    }
+
+    pub fn block_drawer_particle_plans_from_drawer(
+        block_name: &str,
+        drawer: &str,
+        build_id_seed: i32,
+        warmup: f32,
+        time: f32,
+        layer: f32,
+    ) -> Vec<BlockDrawerParticlePlan> {
+        crate::mindustry::world::draw::draw_block_dispatch_particle_configs(block_name, drawer)
+            .into_iter()
+            .map(|config| {
+                Self::block_drawer_particle_plan_from_draw_config(
+                    config,
+                    build_id_seed,
+                    warmup,
+                    time,
+                    layer,
+                )
+            })
+            .collect()
+    }
+
     fn append_pending_like_java(&mut self) {
         let space = self.max_particles.saturating_sub(self.particles.len());
         let max_added = space.min(self.pending.len());
@@ -440,9 +507,21 @@ fn curve(value: f32, start: f32, end: f32) -> f32 {
     ((value - start) / (end - start)).clamp(0.0, 1.0)
 }
 
+fn rgba_to_particle_color(rgba: u32) -> ParticleColor {
+    ParticleColor::new(
+        ((rgba >> 24) & 0xff) as f32 / 255.0,
+        ((rgba >> 16) & 0xff) as f32 / 255.0,
+        ((rgba >> 8) & 0xff) as f32 / 255.0,
+        (rgba & 0xff) as f32 / 255.0,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::world::draw::{
+        draw_block_dispatch_icons, draw_block_dispatch_particle_configs, DrawBlockParticleConfig,
+    };
 
     #[test]
     fn particle_constants_match_upstream_shape() {
@@ -529,12 +608,11 @@ mod tests {
     }
 
     #[test]
-    fn block_drawer_particle_plan_with_zero_warmup_is_noop() {
-        let plan =
-            ParticleRendererState::block_drawer_particle_plan(BlockDrawerParticlePlanConfig {
-                build_id_seed: 7,
-                warmup: 0.0,
-                time: 10.0,
+    fn block_drawer_particle_plan_from_draw_config_with_zero_warmup_is_noop() {
+        let plan = ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+            DrawBlockParticleConfig {
+                color_rgba: 0xff8040ff,
+                secondary_color_rgba: None,
                 alpha: 0.7,
                 particle_count: 5,
                 particle_life: 70.0,
@@ -543,10 +621,12 @@ mod tests {
                 fade_margin: 0.4,
                 rotate_scl: 1.5,
                 reverse: true,
-                layer: 9.0,
-                color: ParticleColor::new(1.0, 0.5, 0.25, 1.0),
-                secondary_color: None,
-            });
+            },
+            7,
+            0.0,
+            10.0,
+            9.0,
+        );
 
         assert!(plan.is_noop());
         assert_eq!(plan.effective_alpha(), 0.0);
@@ -554,35 +634,52 @@ mod tests {
     }
 
     #[test]
-    fn block_drawer_particle_plan_changes_with_build_id_seed() {
-        let base = BlockDrawerParticlePlanConfig {
-            build_id_seed: 1,
-            warmup: 0.8,
-            time: 90.0,
-            alpha: 0.5,
-            particle_count: 2,
-            particle_life: 70.0,
-            particle_radius: 7.0,
-            particle_size: 3.0,
-            fade_margin: 0.4,
-            rotate_scl: 3.0,
-            reverse: false,
-            layer: 7.0,
-            color: ParticleColor::new(0.4, 0.6, 0.8, 1.0),
-            secondary_color: None,
-        };
-        let other = BlockDrawerParticlePlanConfig {
-            build_id_seed: 2,
-            ..base
-        };
-
-        let base_plan = ParticleRendererState::block_drawer_particle_plan(base);
-        let other_plan = ParticleRendererState::block_drawer_particle_plan(other);
-
-        assert_ne!(base_plan.particle_seed(0), other_plan.particle_seed(0));
-        assert_ne!(
-            base_plan.sample_for_index(0),
-            other_plan.sample_for_index(0)
+    fn block_drawer_particle_plans_from_drawer_collects_configs_and_is_deterministic() {
+        assert_eq!(
+            draw_block_dispatch_icons("surge-crucible", "DrawParticles"),
+            Vec::<String>::new()
         );
+        assert_eq!(
+            draw_block_dispatch_icons("surge-crucible", "DrawSoftParticles"),
+            Vec::<String>::new()
+        );
+
+        let configs = draw_block_dispatch_particle_configs(
+            "surge-crucible",
+            "DrawMulti(DrawParticles, DrawSoftParticles)",
+        );
+        assert_eq!(configs.len(), 2);
+        assert_eq!(
+            configs[0],
+            crate::mindustry::world::draw::draw_particles_block_config()
+        );
+        assert_eq!(
+            configs[1],
+            crate::mindustry::world::draw::draw_soft_particles_block_config()
+        );
+
+        let first = ParticleRendererState::block_drawer_particle_plans_from_drawer(
+            "surge-crucible",
+            "DrawMulti(DrawParticles, DrawSoftParticles)",
+            1,
+            0.8,
+            90.0,
+            7.0,
+        );
+        let second = ParticleRendererState::block_drawer_particle_plans_from_drawer(
+            "surge-crucible",
+            "DrawMulti(DrawParticles, DrawSoftParticles)",
+            1,
+            0.8,
+            90.0,
+            7.0,
+        );
+
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 2);
+        assert!(first[0].secondary_color.is_none());
+        assert!(first[1].secondary_color.is_some());
+        assert_eq!(first[0].sample_for_index(0), second[0].sample_for_index(0));
+        assert_eq!(first[1].sample_for_index(0), second[1].sample_for_index(0));
     }
 }

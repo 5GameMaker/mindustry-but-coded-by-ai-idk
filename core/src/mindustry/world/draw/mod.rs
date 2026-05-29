@@ -147,6 +147,20 @@ pub struct DrawSoftParticleParams {
     pub color_t: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawBlockParticleConfig {
+    pub color_rgba: u32,
+    pub secondary_color_rgba: Option<u32>,
+    pub alpha: f32,
+    pub particle_count: usize,
+    pub particle_life: f32,
+    pub particle_radius: f32,
+    pub particle_size: f32,
+    pub fade_margin: f32,
+    pub rotate_scl: f32,
+    pub reverse: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawTurretRegionNames {
     pub preview: String,
@@ -577,8 +591,70 @@ pub fn draw_block_dispatch_icons(block_name: &str, drawer: &str) -> Vec<String> 
     }
 }
 
+pub fn draw_particles_block_config() -> DrawBlockParticleConfig {
+    DrawBlockParticleConfig {
+        color_rgba: 0xf2d585ff,
+        secondary_color_rgba: None,
+        alpha: 0.5,
+        particle_count: 30,
+        particle_life: 70.0,
+        particle_radius: 7.0,
+        particle_size: 3.0,
+        fade_margin: 0.4,
+        rotate_scl: 3.0,
+        reverse: false,
+    }
+}
+
+pub fn draw_soft_particles_block_config() -> DrawBlockParticleConfig {
+    DrawBlockParticleConfig {
+        color_rgba: 0xe3ae6fff,
+        secondary_color_rgba: Some(0xd04d46ff),
+        alpha: 0.5,
+        particle_count: 30,
+        particle_life: 70.0,
+        particle_radius: 7.0,
+        particle_size: 3.0,
+        fade_margin: 0.4,
+        rotate_scl: 1.5,
+        reverse: false,
+    }
+}
+
+pub fn draw_block_dispatch_particle_configs(
+    _block_name: &str,
+    drawer: &str,
+) -> Vec<DrawBlockParticleConfig> {
+    let drawer = drawer.trim();
+    if drawer.is_empty() {
+        return Vec::new();
+    }
+
+    match split_drawer_call(drawer) {
+        Some(("DrawMulti", args)) => split_drawer_args(args)
+            .into_iter()
+            .flat_map(|child| draw_block_dispatch_particle_configs(_block_name, child))
+            .collect(),
+        Some(("DrawParticles", _)) => vec![draw_particles_block_config()],
+        Some(("DrawSoftParticles", _)) => vec![draw_soft_particles_block_config()],
+        Some(_) => Vec::new(),
+        None => match drawer {
+            "DrawParticles" => vec![draw_particles_block_config()],
+            "DrawSoftParticles" => vec![draw_soft_particles_block_config()],
+            _ => Vec::new(),
+        },
+    }
+}
+
 pub fn draw_block_drawer_icons(block_name: &str, drawer: &str) -> Vec<String> {
     draw_block_dispatch_icons(block_name, drawer)
+}
+
+pub fn draw_block_drawer_particle_configs(
+    block_name: &str,
+    drawer: &str,
+) -> Vec<DrawBlockParticleConfig> {
+    draw_block_dispatch_particle_configs(block_name, drawer)
 }
 
 pub fn draw_side_region_names(block_name: &str) -> (String, String) {
@@ -1802,6 +1878,36 @@ mod tests {
                 "surge-crucible-top",
                 "surge-crucible-vents",
                 "surge-crucible"
+            ]
+        );
+    }
+
+    #[test]
+    fn draw_particles_and_soft_particles_dispatch_particle_configs_without_sprites() {
+        assert_eq!(
+            draw_block_dispatch_icons("cyanogen-synthesizer", "DrawParticles"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            draw_block_dispatch_icons("cyanogen-synthesizer", "DrawSoftParticles"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            draw_block_dispatch_particle_configs("cyanogen-synthesizer", "DrawParticles"),
+            vec![draw_particles_block_config()]
+        );
+        assert_eq!(
+            draw_block_dispatch_particle_configs("cyanogen-synthesizer", "DrawSoftParticles"),
+            vec![draw_soft_particles_block_config()]
+        );
+        assert_eq!(
+            draw_block_dispatch_particle_configs(
+                "surge-crucible",
+                "DrawMulti(DrawParticles, DrawSoftParticles, DrawDefault)"
+            ),
+            vec![
+                draw_particles_block_config(),
+                draw_soft_particles_block_config()
             ]
         );
     }

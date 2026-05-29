@@ -11964,3 +11964,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - particle plan 尚未接 `DrawParticles` / `DrawSoftParticles` 真实 block drawer；
   - Desktop mods container 仍是显式 API，未接 CLI/run-time flag；
   - 当前总体迁移约 22.6%，仍未达到完整可玩。
+
+### 12.376 BlockRenderer visual runtime 消费前置、DrawParticles 独立链路与 Desktop mods CLI
+
+- 2026-05-29：继续把上一轮已迁移的动态绘制/粒子/mod 容器 helper 接进可消费主链，避免停留在彼此独立的 plan。当前仍是过渡层，但入口已从 core/desktop 暴露到后续真实 runtime/render/backend 可以接线的位置。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 renderer 侧 `BlockRendererBuildingVisualRuntimeSnapshot` 及 liquid/power/turret 子快照；
+    - `BlockRendererBuildingSnapshot` 与 `BuildingDrawPlan` 新增 `visual_runtime`；
+    - `BlockRendererBuildingSnapshot::with_visual_runtime(...)` 与 `to_draw_plan()` 透传 visual runtime；
+    - 缺失字段保持 `None`，不伪造 Java runtime 中没有观察到的动态状态。
+  - `core/src/mindustry/world/draw/mod.rs`
+    - 新增 `DrawBlockParticleConfig`；
+    - 新增 `draw_particles_block_config()`、`draw_soft_particles_block_config()`；
+    - 新增 `draw_block_dispatch_particle_configs(...)`、`draw_block_drawer_particle_configs(...)`；
+    - `DrawParticles` / `DrawSoftParticles` 仍不生成 atlas sprite icon，改由独立 particle config 链路承载。
+  - `core/src/mindustry/graphics/particle_renderer.rs`
+    - 新增 `BlockDrawerParticlePlanConfig::from_draw_config(...)`；
+    - 新增 `ParticleRendererState::block_drawer_particle_plan_from_draw_config(...)`；
+    - 新增 `ParticleRendererState::block_drawer_particle_plans_from_drawer(...)`；
+    - 允许从 draw drawer 字符串收集 deterministic block particle plans，后续接 effect/render backend。
+  - `desktop/src/lib.rs`
+    - `run(args)` 显式支持 `--mods <path>`、`--mods-dir <path>`、`--mods=<path>`、`--mods-dir=<path>`；
+    - 新增 CLI 解析结果与错误记录字段；
+    - 显式 mods 目录会合并到 texture atlas；默认无参数仍不扫描真实 `data/mods`。
+- 已跑验证：
+  - `cargo test -p mindustry-core building_visual_runtime_snapshot_roundtrips_into_draw_plan_and_keeps_missing_fields_none --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core build_plan_from_snapshot_populates_building_pass_fields --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_renderer_plan_converts_sprite_passes_with_stable_symbols_and_rotation --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core draw_particles --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core particle_renderer --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_run_merges_explicit_mods_directory --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_default_run_keeps_headless_data_path_without_mod_scan_flags --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - `GameRuntimeBlockVisualRuntimeSnapshot` 仍需在创建 `BlockRendererBuildingSnapshot` 的路径上自动映射进 `visual_runtime`；
+  - `BlockDrawerParticlePlan` 仍需接入实际 block renderer/effect renderer 消费，不应停在测试 helper；
+  - Desktop mods CLI 已显式接入 run 参数，但还需继续补错误提示、文档化与真实内容生命周期；
+  - 下一阶段优先推进真实窗口/surface/GPU backend、atlas page upload、shader uniform、Pixelator/CacheLayer FBO 执行；
+  - 当前总体迁移约 22.8%，仍未达到完整可玩。
