@@ -105,8 +105,8 @@ use crate::mindustry::{
         write_legacy_mech_pad_extra, write_legacy_unit_factory_extra, LegacyUnitFactoryExtra,
     },
     world::blocks::liquid::{
-        accept_same_or_low_amount, calc_dump_transfer, read_liquid_bridge_state,
-        write_liquid_bridge_state, LiquidBridgeState,
+        accept_same_or_low_amount, calc_dump_transfer, choose_liquid_destination,
+        read_liquid_bridge_state, write_liquid_bridge_state, LiquidBridgeState, LiquidJunctionNode,
     },
     world::blocks::logic::{
         read_canvas_state, read_logic_display_state, read_logic_processor_state, read_memory_state,
@@ -17570,48 +17570,102 @@ impl GameRuntime {
             return None;
         }
 
+        if !self.building_is_liquid_junction(content, target_index) {
+            return Some(target_index);
+        }
+
+        let path = self.liquid_junction_route_path(content, source_index, target_index)?;
+        let nodes = self.liquid_junction_route_nodes(content, source_index, &path, liquid_id);
+        let chosen = choose_liquid_destination(&nodes, 0);
+        path.get(chosen).copied()
+    }
+
+    fn building_is_liquid_junction(&self, content: &ContentLoader, index: usize) -> bool {
+        self.buildings
+            .get(index)
+            .and_then(|building| content.block(building.block.id))
+            .is_some_and(|block| {
+                matches!(
+                    block,
+                    BlockDef::Liquid(liquid) if liquid.kind == LiquidBlockKind::LiquidJunction
+                )
+            })
+    }
+
+    fn liquid_junction_route_path(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        target_index: usize,
+    ) -> Option<Vec<usize>> {
+        let mut path = vec![target_index];
+        let mut seen = BTreeSet::from([target_index]);
         let mut from_index = source_index;
         let mut current_index = target_index;
-        for _ in 0..=self.buildings.len() {
-            if !matches!(
-                content.block(self.buildings[current_index].block.id),
-                Some(BlockDef::Liquid(liquid)) if liquid.kind == LiquidBlockKind::LiquidJunction
-            ) {
-                return Some(current_index);
-            }
 
-            if !self.buildings[current_index].enabled {
+        for _ in 0..=self.buildings.len() {
+            let Some(current) = self.buildings.get(current_index) else {
+                break;
+            };
+            if !current.enabled {
                 return None;
+            }
+            if !self.building_is_liquid_junction(content, current_index) {
+                break;
             }
 
             let dir = self.relative_direction_between_buildings(from_index, current_index)?;
-            let (dx, dy) = autotiler_direction(dir);
-            let next_tile_pos = self
-                .state
-                .world
-                .build(
-                    self.buildings[current_index].tile_x() + dx,
-                    self.buildings[current_index].tile_y() + dy,
-                )
-                .map(|target| target.tile_pos)?;
-            let next_index = self
-                .buildings
-                .iter()
-                .position(|building| building.tile_pos == next_tile_pos)?;
-
-            if !matches!(
-                content.block(self.buildings[next_index].block.id),
-                Some(BlockDef::Liquid(liquid)) if liquid.kind == LiquidBlockKind::LiquidJunction
-            ) && !self.dump_liquid_target_accepts(content, source_index, next_index, liquid_id)
-            {
-                return None;
+            let next_index = self.neighbor_building_index(current_index, dir)?;
+            if !seen.insert(next_index) {
+                break;
             }
 
+            path.push(next_index);
             from_index = current_index;
             current_index = next_index;
         }
 
-        None
+        Some(path)
+    }
+
+    fn liquid_junction_route_nodes(
+        &self,
+        content: &ContentLoader,
+        source_index: usize,
+        path: &[usize],
+        liquid_id: ContentId,
+    ) -> Vec<LiquidJunctionNode> {
+        path.iter()
+            .enumerate()
+            .map(|(index, building_index)| {
+                let enabled = self
+                    .buildings
+                    .get(*building_index)
+                    .is_some_and(|building| building.enabled);
+                let Some(next_index) = path.get(index + 1).copied() else {
+                    return LiquidJunctionNode {
+                        enabled,
+                        next: None,
+                        next_accepts: false,
+                        next_is_junction: false,
+                    };
+                };
+                let next_is_junction = self.building_is_liquid_junction(content, next_index);
+                let next_accepts = next_is_junction
+                    || self.dump_liquid_target_accepts(
+                        content,
+                        source_index,
+                        next_index,
+                        liquid_id,
+                    );
+                LiquidJunctionNode {
+                    enabled,
+                    next: Some(index + 1),
+                    next_accepts,
+                    next_is_junction,
+                }
+            })
+            .collect()
     }
 
     fn relative_direction_between_buildings(
@@ -37879,6 +37933,159 @@ mod tests {
         assert!((runtime.buildings[0].liquids.as_ref().unwrap().get(water) - 20.0).abs() < 0.001);
         assert!((runtime.buildings[1].liquids.as_ref().unwrap().get(water)).abs() < 0.001);
         assert!((runtime.buildings[2].liquids.as_ref().unwrap().get(water) - 20.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn game_runtime_liquid_junction_routes_to_terminal_acceptor() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let unloader_def = content.block_by_name("payload-unloader").unwrap();
+        let liquid_junction_def = content.block_by_name("liquid-junction").unwrap();
+        let liquid_container_def = content.block_by_name("liquid-container").unwrap();
+        let water = content
+            .liquid_by_name("water")
+            .unwrap()
+            .base
+            .mappable
+            .base
+            .id;
+        let unloader_tile = point2_pack(4, 4);
+        let junction1_tile = point2_pack(4 + unloader_def.base().size / 2 + 1, 4);
+        let junction2_tile = point2_pack(point2_x(junction1_tile) as i32 + 1, 4);
+        let terminal_tile = point2_pack(point2_x(junction2_tile) as i32 + 1, 4);
+
+        let run_case = |terminal_full: bool, disable_first_junction: bool| {
+            let mut runtime = GameRuntime::default();
+            runtime.state.set(GameStateState::Playing);
+            runtime.state.world.resize(16, 10);
+            runtime.add_building(BuildingComp::new(
+                unloader_tile,
+                unloader_def.base().clone(),
+                TeamId(6),
+            ));
+            let mut junction1 = BuildingComp::new(
+                junction1_tile,
+                liquid_junction_def.base().clone(),
+                TeamId(6),
+            );
+            junction1.enabled = !disable_first_junction;
+            runtime.add_building(junction1);
+            runtime.add_building(BuildingComp::new(
+                junction2_tile,
+                liquid_junction_def.base().clone(),
+                TeamId(6),
+            ));
+            let mut terminal_building = BuildingComp::new(
+                terminal_tile,
+                liquid_container_def.base().clone(),
+                TeamId(6),
+            );
+            if terminal_full {
+                terminal_building
+                    .liquids
+                    .as_mut()
+                    .unwrap()
+                    .set(water, liquid_container_def.base().liquid_capacity);
+            }
+            runtime.add_building(terminal_building);
+            runtime.payload_runtime_states.insert(
+                unloader_tile,
+                GameRuntimePayloadBlockState::Loader {
+                    common: PayloadBlockBuildState {
+                        payload: Some(build_payload_ref_with(
+                            &content,
+                            "liquid-container",
+                            |building| {
+                                building.liquids.as_mut().unwrap().add(water, 80.0);
+                            },
+                        )),
+                        pay_vector: Vec2::ZERO,
+                        pay_rotation: 0.0,
+                        carried: false,
+                    },
+                    loader: PayloadLoaderState::default(),
+                },
+            );
+
+            let report = runtime
+                .advance_owned_payload_loaders(&content, 1.0 / 60.0)
+                .unwrap();
+            (runtime, report)
+        };
+
+        let (runtime, report) = run_case(false, false);
+        assert_eq!(report.dumped_liquid_events, 1);
+        assert!((runtime.buildings[0].liquids.as_ref().unwrap().get(water) - 20.0).abs() < 0.001);
+        assert!((runtime.buildings[1].liquids.as_ref().unwrap().get(water)).abs() < 0.001);
+        assert!((runtime.buildings[2].liquids.as_ref().unwrap().get(water)).abs() < 0.001);
+        assert!((runtime.buildings[3].liquids.as_ref().unwrap().get(water) - 20.0).abs() < 0.001);
+
+        let (runtime_blocked, report_blocked) = run_case(true, false);
+        assert_eq!(report_blocked.dumped_liquid_events, 1);
+        assert!(
+            runtime_blocked.buildings[0]
+                .liquids
+                .as_ref()
+                .unwrap()
+                .get(water)
+                > 0.0
+        );
+        assert!(
+            (runtime_blocked.buildings[1]
+                .liquids
+                .as_ref()
+                .unwrap()
+                .get(water))
+            .abs()
+                < 0.001
+        );
+        assert!(
+            runtime_blocked.buildings[2]
+                .liquids
+                .as_ref()
+                .unwrap()
+                .get(water)
+                > 0.0
+        );
+        assert!(
+            (runtime_blocked.buildings[3]
+                .liquids
+                .as_ref()
+                .unwrap()
+                .get(water)
+                - liquid_container_def.base().liquid_capacity)
+                .abs()
+                < 0.001
+        );
+
+        let (runtime_disabled, report_disabled) = run_case(false, true);
+        assert_eq!(report_disabled.dumped_liquid_events, 0);
+        assert!(
+            (runtime_disabled.buildings[1]
+                .liquids
+                .as_ref()
+                .unwrap()
+                .get(water))
+            .abs()
+                < 0.001
+        );
+        assert!(
+            (runtime_disabled.buildings[2]
+                .liquids
+                .as_ref()
+                .unwrap()
+                .get(water))
+            .abs()
+                < 0.001
+        );
+        assert!(
+            (runtime_disabled.buildings[3]
+                .liquids
+                .as_ref()
+                .unwrap()
+                .get(water))
+            .abs()
+                < 0.001
+        );
     }
 
     #[test]

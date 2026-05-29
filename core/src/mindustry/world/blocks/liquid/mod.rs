@@ -358,6 +358,44 @@ mod tests {
         ];
         assert_eq!(choose_liquid_destination(&nodes, 0), 2);
 
+        let blocked_terminal = [
+            LiquidJunctionNode {
+                enabled: true,
+                next: Some(1),
+                next_accepts: true,
+                next_is_junction: true,
+            },
+            LiquidJunctionNode {
+                enabled: true,
+                next: Some(2),
+                next_accepts: false,
+                next_is_junction: false,
+            },
+            LiquidJunctionNode {
+                enabled: true,
+                next: None,
+                next_accepts: false,
+                next_is_junction: false,
+            },
+        ];
+        assert_eq!(choose_liquid_destination(&blocked_terminal, 0), 1);
+
+        let cycle = [
+            LiquidJunctionNode {
+                enabled: true,
+                next: Some(1),
+                next_accepts: true,
+                next_is_junction: true,
+            },
+            LiquidJunctionNode {
+                enabled: true,
+                next: Some(0),
+                next_accepts: true,
+                next_is_junction: true,
+            },
+        ];
+        assert_eq!(choose_liquid_destination(&cycle, 0), 1);
+
         let crop = calc_tiled_frame_crop(8.0, 1.0);
         assert_eq!(crop.width, 6.0);
         assert!(crop.draw);
