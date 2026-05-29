@@ -37,17 +37,18 @@ use mindustry_core::mindustry::graphics::{
     BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer,
     Env as GraphicsEnv, EnvRendererContext, EnvRendererPlan, EnvRendererRegistry, FloorRenderPlan,
     FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState, FogViewport,
-    GraphicsFrameBundle, GraphicsFrameStats, LightRendererPlan, LightRendererState, LoadFrameInput,
-    LoadFramePlan, LoadRendererState, MenuFrameInput, MenuFramePlan, MenuRendererConfig,
-    MenuRendererState, MinimapCamera, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect,
-    MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize, OverlayRendererPlan,
-    OverlayRendererState, PageType, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
-    PixelatorState, RenderBackendFlushBoundary, RenderBlendMode, RenderBridge, RenderCamera,
-    RenderCommand, RenderEngineState, RenderFramePlan, RenderPassKind, RenderPoint, RenderProperty,
-    RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderViewport, ShaderApplyContext,
-    ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderParameters,
-    ShaderTextureRegion, ShaderViewport, TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor,
-    TileBounds, TileCoord, Viewport as FloorViewport,
+    GraphicsFrameBundle, GraphicsFrameStats, Layer, LightPrimitive, LightRendererPlan,
+    LightRendererState, LoadFrameInput, LoadFramePlan, LoadRendererState, MenuFrameInput,
+    MenuFramePlan, MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput,
+    MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapTextureFramePlan,
+    MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, PageType, Pal, PixelatorCamera,
+    PixelatorFramePlan, PixelatorInput, PixelatorState, RenderBackendFlushBoundary,
+    RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderEngineState, RenderFramePlan,
+    RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind,
+    RenderSize, RenderTarget, RenderViewport, ShaderApplyContext, ShaderApplyPlan, ShaderCamera,
+    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderParameters, ShaderTextureRegion,
+    ShaderViewport, TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TileBounds, TileCoord,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -70,7 +71,10 @@ use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
     draw_block_dispatch_icons, DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
 };
-use mindustry_core::mindustry::world::{BuildingRef, CacheLayer as WorldCacheLayer, Tile};
+use mindustry_core::mindustry::world::{
+    blocks::campaign::AcceleratorState, point2_x, point2_y, BuildingRef,
+    CacheLayer as WorldCacheLayer, Tile,
+};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
 use std::io;
@@ -2083,6 +2087,39 @@ fn unit_full_icon_region_symbol(unit_name: &str, content_loader: &ContentLoader)
     candidates.full_candidates.into_iter().next()
 }
 
+fn block_full_icon_region_symbol(block: &BlockDef) -> Option<String> {
+    let base = block.base();
+    let content = UnlockableContentBase::new(base.id, ContentType::Block, base.name.clone());
+    let candidates = content.icon_candidates(None);
+    candidates
+        .full_candidates
+        .into_iter()
+        .next()
+        .or_else(|| (!base.name.is_empty()).then(|| base.name.clone()))
+}
+
+fn accelerator_launch_block_def<'a>(
+    block: &BlockDef,
+    content_loader: &'a ContentLoader,
+) -> Option<&'a BlockDef> {
+    let BlockDef::Campaign(campaign_block) = block else {
+        return None;
+    };
+    if campaign_block.kind != CampaignBlockKind::Accelerator {
+        return None;
+    }
+
+    campaign_block
+        .launch_block
+        .and_then(|id| content_loader.block(id))
+        .or_else(|| {
+            campaign_block
+                .launch_block_name
+                .as_deref()
+                .and_then(|name| content_loader.block_by_name(name))
+        })
+}
+
 fn unit_assembler_block_build_region_symbols(
     block: &BlockDef,
     unit_runtime_state: Option<&GameRuntimeUnitBlockState>,
@@ -2119,16 +2156,30 @@ fn accelerator_launch_block_build_region_symbols(
         return None;
     }
 
-    let launch_block = campaign_block
-        .launch_block
-        .and_then(|id| content_loader.block(id))
-        .or_else(|| {
-            campaign_block
-                .launch_block_name
-                .as_deref()
-                .and_then(|name| content_loader.block_by_name(name))
-        })?;
+    let launch_block = accelerator_launch_block_def(block, content_loader)?;
     Some(block_build_region_symbols_from_content_block(launch_block))
+}
+
+fn accelerator_launch_charge_ratio(state: &AcceleratorState) -> f32 {
+    state.progress.clamp(0.0, 1.0)
+}
+
+fn accelerator_launch_overlay_alpha(charge_ratio: f32) -> f32 {
+    let value = (charge_ratio * 0.7).clamp(0.0, 1.0);
+    value * value
+}
+
+fn desktop_building_center(coord: TileCoord, size: u8, tile_size_world: f32) -> RenderPoint {
+    let size = i32::from(size.max(1));
+    let center_offset = if size % 2 == 1 {
+        tile_size_world / 2.0
+    } else {
+        0.0
+    };
+    RenderPoint::new(
+        coord.x as f32 * tile_size_world + center_offset,
+        coord.y as f32 * tile_size_world + center_offset,
+    )
 }
 
 fn block_build_region_symbols_for_content_block(
@@ -3178,6 +3229,133 @@ impl DesktopLauncher {
         BlockRendererWorldSnapshot::new(tiles)
     }
 
+    fn accelerator_launching_render_pass(
+        &mut self,
+        mut camera: RenderCamera,
+        viewport: RenderViewport,
+        tile_size_world: f32,
+    ) -> Option<RenderPass> {
+        let world = self.current_minimap_world_size();
+        if world.width <= 0 || world.height <= 0 {
+            return None;
+        }
+
+        camera.viewport = viewport;
+        let visible_tiles = visible_block_tiles(camera, viewport, world, tile_size_world);
+        let runtime_buildings = self
+            .runtime
+            .buildings
+            .iter()
+            .map(|building| (building.tile_pos, building))
+            .collect::<BTreeMap<_, _>>();
+        let mut pass = RenderPass::new(RenderPassKind::BlockOverdraw)
+            .with_order(RenderPassKind::BlockOverdraw.default_order());
+
+        for coord in visible_tiles {
+            let Some(tile) = self.game_state.world.tile(coord.x, coord.y) else {
+                continue;
+            };
+            let runtime_building = tile
+                .build
+                .and_then(|build| runtime_buildings.get(&build.tile_pos).copied())
+                .or_else(|| runtime_buildings.get(&tile.pos()).copied());
+            let runtime_tile_pos = runtime_building
+                .map(|building| building.tile_pos)
+                .or_else(|| tile.build.map(|build| build.tile_pos))
+                .unwrap_or_else(|| tile.pos());
+            let Some(GameRuntimeCampaignBlockState::Accelerator(state)) =
+                self.runtime.campaign_runtime_states.get(&runtime_tile_pos)
+            else {
+                continue;
+            };
+            if !state.launching {
+                continue;
+            }
+
+            let block_id = tile
+                .build
+                .map(|build| build.block)
+                .or_else(|| runtime_building.map(|building| building.block.id))
+                .unwrap_or(tile.block);
+            let Some(content_block) = self.content_loader.block(block_id) else {
+                continue;
+            };
+            let Some(launch_block) =
+                accelerator_launch_block_def(content_block, &self.content_loader)
+            else {
+                continue;
+            };
+            let Some(full_icon) = block_full_icon_region_symbol(launch_block) else {
+                continue;
+            };
+
+            let accelerator_size = content_block.base().size.max(1).min(u8::MAX as i32) as u8;
+            let launch_size = launch_block.base().size.max(1) as f32 * tile_size_world;
+            let building_coord = TileCoord::new(
+                point2_x(runtime_tile_pos) as i32,
+                point2_y(runtime_tile_pos) as i32,
+            );
+            let center = desktop_building_center(building_coord, accelerator_size, tile_size_world);
+            let rect = RenderRect::from_center(center, launch_size, launch_size);
+            let charge_ratio = accelerator_launch_charge_ratio(state);
+            let overlay_alpha = accelerator_launch_overlay_alpha(charge_ratio);
+            let light_radius = launch_block.base().size.max(1) as f32 * tile_size_world;
+
+            self.light_renderer_state.add_circle(
+                center.x,
+                center.y,
+                light_radius,
+                LightPrimitive {
+                    center: (center.x, center.y),
+                    radius: light_radius,
+                    color: Pal::ACCENT,
+                    opacity: charge_ratio,
+                },
+            );
+
+            pass.push(RenderCommand::set_blend(RenderBlendMode::Additive));
+            pass.push(RenderCommand::custom(
+                "accelerator-launch-light",
+                vec![
+                    RenderProperty::new("x", center.x.to_string()),
+                    RenderProperty::new("y", center.y.to_string()),
+                    RenderProperty::new("segments", "15"),
+                    RenderProperty::new("radius", light_radius.to_string()),
+                    RenderProperty::new("accent_alpha", charge_ratio.to_string()),
+                    RenderProperty::new("outer_alpha", "0"),
+                    RenderProperty::new("launch_block", launch_block.base().name.clone()),
+                    RenderProperty::new("region", full_icon.clone()),
+                ],
+            ));
+            pass.push(RenderCommand::set_blend(RenderBlendMode::Normal));
+            pass.push(RenderCommand::draw_sprite(
+                full_icon.clone(),
+                rect,
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                Layer::BLOCK,
+            ));
+            pass.push(RenderCommand::custom(
+                "accelerator-launch-mixcol",
+                vec![
+                    RenderProperty::new("color", "Pal.accent"),
+                    RenderProperty::new("mix", charge_ratio.to_string()),
+                    RenderProperty::new("alpha", overlay_alpha.to_string()),
+                    RenderProperty::new("region", full_icon.clone()),
+                ],
+            ));
+            pass.push(RenderCommand::draw_sprite(
+                full_icon,
+                rect,
+                [1.0, 1.0, 1.0, overlay_alpha],
+                0.0,
+                Layer::BULLET,
+            ));
+        }
+
+        (!pass.commands.is_empty()).then_some(pass)
+    }
+
     pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
         let plan = self.load_renderer_state.build_plan(input);
         DesktopFrame {
@@ -3195,6 +3373,8 @@ impl DesktopLauncher {
         minimap_input: MinimapOverlayInput,
     ) -> DesktopGraphicsFrame {
         let mut render_frame = self.render_frame_plan(frame_index, camera, viewport);
+        let accelerator_launching_pass =
+            self.accelerator_launching_render_pass(camera, viewport, 8.0);
         if let Some(light_pass) = self.drain_light_renderer_plan().to_render_pass() {
             render_frame.push_pass(light_pass);
         }
@@ -3214,6 +3394,9 @@ impl DesktopLauncher {
             for pass in block_renderer.to_resolve_render_passes(8.0) {
                 render_frame.push_pass(pass);
             }
+        }
+        if let Some(pass) = accelerator_launching_pass {
+            render_frame.push_pass(pass);
         }
         let floor_renderer = self.floor_render_plan(camera, viewport);
         if let Some(floor_renderer) = &floor_renderer {
@@ -6740,6 +6923,161 @@ mod tests {
         assert_eq!(block_build.regions, vec![String::from("core-nucleus")]);
         assert_eq!(block_build.progress, 0.6);
         assert_eq!(block_build.alpha, 1.0);
+    }
+
+    #[test]
+    fn desktop_launcher_accelerator_launching_draws_full_icon_and_additive_light() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let accelerator = launcher
+            .content_loader
+            .block_by_name("interplanetary-accelerator")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(4, 4);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = accelerator.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: accelerator.id,
+                team: 3,
+                rotation: 0,
+            });
+            tile_pos
+        };
+
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(tile_pos, accelerator, TeamId(3)));
+        launcher.runtime.campaign_runtime_states.insert(
+            tile_pos,
+            GameRuntimeCampaignBlockState::Accelerator(AcceleratorState {
+                progress: 0.5,
+                launching: true,
+            }),
+        );
+        let expected_icon = super::block_full_icon_region_symbol(
+            launcher
+                .content_loader
+                .block_by_name("core-nucleus")
+                .unwrap(),
+        )
+        .unwrap();
+        let expected_light_radius = launcher
+            .content_loader
+            .block_by_name("core-nucleus")
+            .unwrap()
+            .base()
+            .size as f32
+            * 8.0;
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let minimap_camera = MinimapCamera::new(12.0, 12.0, 8.0, 8.0);
+        let frame = launcher.graphics_frame_for_render(
+            14,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+
+        assert!(!render_frame
+            .passes
+            .iter()
+            .any(|pass| pass.kind == RenderPassKind::BlockBuild));
+
+        let launch_pass =
+            render_frame
+                .passes
+                .iter()
+                .find(|pass| {
+                    pass.kind == RenderPassKind::BlockOverdraw
+                    && pass.commands.iter().any(|command| matches!(
+                        command,
+                        RenderCommand::Custom { name, .. } if name == "accelerator-launch-light"
+                    ))
+                })
+                .expect("launching accelerator should emit fullIcon overdraw pass");
+        assert!(matches!(
+            launch_pass.commands[0],
+            RenderCommand::SetBlend {
+                mode: RenderBlendMode::Additive
+            }
+        ));
+        match &launch_pass.commands[1] {
+            RenderCommand::Custom { name, properties } => {
+                assert_eq!(name, "accelerator-launch-light");
+                assert!(properties
+                    .iter()
+                    .any(|property| { property.key == "accent_alpha" && property.value == "0.5" }));
+                assert!(properties.iter().any(|property| {
+                    property.key == "launch_block" && property.value == "core-nucleus"
+                }));
+                assert!(properties
+                    .iter()
+                    .any(|property| property.key == "region" && property.value == expected_icon));
+            }
+            other => panic!("expected accelerator launch light marker, got {other:?}"),
+        }
+        assert!(matches!(
+            launch_pass.commands[2],
+            RenderCommand::SetBlend {
+                mode: RenderBlendMode::Normal
+            }
+        ));
+        match &launch_pass.commands[3] {
+            RenderCommand::DrawSprite {
+                symbol,
+                tint,
+                layer,
+                ..
+            } => {
+                assert_eq!(symbol, &expected_icon);
+                assert_eq!(*tint, [1.0, 1.0, 1.0, 1.0]);
+                assert_eq!(*layer, Layer::BLOCK);
+            }
+            other => panic!("expected base launch fullIcon draw, got {other:?}"),
+        }
+        match (&launch_pass.commands[4], &launch_pass.commands[5]) {
+            (
+                RenderCommand::Custom { name, properties },
+                RenderCommand::DrawSprite {
+                    symbol,
+                    tint,
+                    layer,
+                    ..
+                },
+            ) => {
+                assert_eq!(name, "accelerator-launch-mixcol");
+                assert!(properties
+                    .iter()
+                    .any(|property| property.key == "mix" && property.value == "0.5"));
+                assert_eq!(symbol, &expected_icon);
+                assert!((tint[3] - 0.1225).abs() < 0.0001);
+                assert_eq!(*layer, Layer::BULLET);
+            }
+            other => panic!("expected mixcol marker and bullet overlay draw, got {other:?}"),
+        }
+
+        let lighting_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Lighting)
+            .expect("launching accelerator should add an additive light primitive");
+        assert!(lighting_pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawCircle { center, radius, color, filled, .. }
+                if *center == RenderPoint::new(12.0, 12.0)
+                    && (*radius - expected_light_radius).abs() < 0.0001
+                    && (color[3] - 0.5).abs() < 0.0001
+                    && *filled
+        )));
     }
 
     #[test]

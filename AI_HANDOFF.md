@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **26.4%**。
+- 当前总体迁移完成度：约 **26.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10184,3 +10184,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把这个 step sink 下沉到真实 OpenGL/glow program/context/FBO executor；
   2. 迁移 `Accelerator.launching` 的 fullIcon 直绘、mix color 与 additive light；
   3. 保持渲染路线为原版 OpenGL/Arc/LWJGL 语义，不切 `wgpu`。
+
+---
+
+## 314. 最新闭环记录：Accelerator launching 分支过渡渲染接入
+
+- 本轮总体进度更新：约 **26.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 launch block/full icon 解析 helper；
+    - 新增 `DesktopLauncher::accelerator_launching_render_pass(...)`；
+    - `graphics_frame_for_render(...)` 先收集 accelerator launching，再 drain lighting pass；
+    - launching accelerator 现在会输出 `BlockOverdraw` pass：`accelerator-launch-light` marker、fullIcon 直绘、`accelerator-launch-mixcol` marker、`Layer::BULLET` fullIcon overlay；
+    - 同帧向 `LightRendererState` 注入 `Pal::ACCENT` 圆形 light primitive；
+    - 新测试 `desktop_launcher_accelerator_launching_draws_full_icon_and_additive_light` 覆盖 launching 分支。
+- 已验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop accelerator_launching --lib`
+  - `cargo test -p mindustry-desktop block_build_regions --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 为 `AcceleratorState` 补 Java `launchTime` 等价 runtime 更新链，替代当前 `progress` 作为 charge ratio 的过渡输入；
+  2. 继续把 fullIcon candidate 绑定到真实 atlas/backend region handle；
+  3. 真实 OpenGL backend 后续需要实现 `mixcol` 与 additive light 的实际 GPU 状态。

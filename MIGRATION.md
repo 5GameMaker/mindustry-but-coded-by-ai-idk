@@ -12825,3 +12825,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 OpenGL 后端还需要资源表、shader program cache、atlas texture 上传、FBO/resolve、window/context/present；
   - `Accelerator.launching` 分支的 fullIcon 直绘、mix color、additive light 仍待迁移；
   - 当前总体迁移约 26.4%，仍未达到完整可玩。
+
+### 12.408 Accelerator launching 分支过渡渲染接入
+
+- 2026-05-29：继续对齐 Java `Accelerator.draw()` 的 launching 分支。本轮在不新增 GPU/window 依赖的前提下，把 `launchBlock.fullIcon` 直绘、`Draw.mixcol(Pal.accent, ...)` 语义 marker、以及 `Fill.light(..., Blending.additive)` 对应的 light primitive 接入 desktop render frame 主链。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 launch block 解析 helper，复用 `CampaignBlockData.launch_block` / `launch_block_name` 找到 Java `launchBlock` 对应 block；
+    - 新增 block full icon candidate 解析，当前以 `block-{name}-full` 等 Java `loadIcon()` fallback 候选名作为过渡 atlas symbol；
+    - 新增 `DesktopLauncher::accelerator_launching_render_pass(...)`，扫描可见世界 tile 与 campaign runtime state，遇到 `Accelerator { launching: true }` 时输出 `BlockOverdraw` pass；
+    - launching pass 输出 additive light marker、基础 fullIcon `DrawSprite`、mixcol marker、`Layer::BULLET` fullIcon overlay；
+    - 同一帧向 `LightRendererState` 注入 `Pal::ACCENT` 圆形 light primitive，并在 `graphics_frame_for_render(...)` 中先收集 accelerator launching 再 drain lighting pass，避免光效延迟到下一帧；
+    - 新测试覆盖 launching 时不再产生 `BlockBuild` pass、会产生 fullIcon overdraw pass、mixcol marker 与 lighting `DrawCircle`。
+- Java 对照要点：
+  - Java launching 分支不是 `Shaders.blockbuild` 路径，而是 `Draw.rect(launchBlock.fullIcon)` 两次叠绘、`Draw.mixcol(Pal.accent, clamp(...))`、`Draw.color(... pow2In(...))` 与 `Fill.light(...)`；
+  - Rust 当前以 `RenderCommand::Custom("accelerator-launch-light")` / `Custom("accelerator-launch-mixcol")` 保留 Java 语义边界，并用 `DrawSprite`/`Lighting` pass 提供可执行过渡表达。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop accelerator_launching --lib`
+  - `cargo test -p mindustry-desktop block_build_regions --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `AcceleratorState` 仍缺 Java `launchTime` 的完整 runtime 更新链，本轮暂用 `progress` 作为 launching charge ratio 的过渡输入；
+  - fullIcon 仍是 atlas candidate symbol，尚不是真实 GPU `TextureRegion` handle；
+  - `mixcol` 仍是 custom marker + overlay tint 近似表达，真实 OpenGL backend 后续需实现 Java `Draw.mixcol` 等价状态；
+  - 当前总体迁移约 26.5%，仍未达到完整可玩。
