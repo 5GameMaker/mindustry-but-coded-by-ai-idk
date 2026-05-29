@@ -2871,7 +2871,9 @@ impl DesktopLauncher {
         }
         let block_renderer = self.block_render_plan(camera, viewport);
         if let Some(block_renderer) = &block_renderer {
-            if let Some(pass) = block_renderer.to_block_build_render_pass(8.0) {
+            if let Some(pass) = block_renderer
+                .to_block_build_render_pass_with_time(8.0, Some(self.game_state.tick as f32))
+            {
                 render_frame.push_pass(pass);
             }
             for pass in block_renderer.to_sprite_render_passes(8.0) {
@@ -6258,7 +6260,6 @@ mod tests {
                 },
             ),
         );
-
         let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
         let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
         let plan = launcher.block_render_plan(camera, viewport).unwrap();
@@ -6333,6 +6334,7 @@ mod tests {
                 },
             ),
         );
+        launcher.game_state.tick = 77.0;
 
         let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
         let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
@@ -6375,6 +6377,18 @@ mod tests {
             block_build_pass.commands[0],
             RenderCommand::Custom { ref name, .. } if name == "blockbuild-shader"
         ));
+        match &block_build_pass.commands[0] {
+            RenderCommand::Custom { properties, .. } => {
+                assert_eq!(
+                    properties
+                        .iter()
+                        .find(|property| property.key == "u_time")
+                        .map(|property| property.value.as_str()),
+                    Some("77")
+                );
+            }
+            other => panic!("expected blockbuild shader custom command, got {other:?}"),
+        }
         match &block_build_pass.commands[1] {
             RenderCommand::DrawSprite {
                 symbol,

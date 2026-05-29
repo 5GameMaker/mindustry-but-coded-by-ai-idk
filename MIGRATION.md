@@ -12661,7 +12661,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
     - headless graphics trace 可观察到 `BlockBuild` pass 和对应 `DrawSprite`。
 - Java 对照要点：
   - Java `Renderer.draw()` 中 `Draw.drawRange(Layer.blockBuilding, () -> Draw.shader(Shaders.blockbuild, true), Draw::shader)` 已有 Rust pass 落点；
-  - `Shaders.blockbuild` 的 `u_progress/u_time/u_alpha` 参数已由 Rust plan 携带；
+  - `Shaders.blockbuild` 的 `u_progress/u_alpha` 参数已由 Rust plan 携带，desktop 主链的 `u_time` 已接 `game_state.tick`；
   - 当前 region 仍先复用 building block sprite symbol，`ConstructBlock.current.getGeneratedIcons()`、`BlockProducer.recipe.getGeneratedIcons()`、`UnitAssembler.plan.unit.fullIcon`、`Accelerator.launchBlock.getGeneratedIcons()` 的精确 region resolver 仍待后续接入。
 - 已跑验证：
   - `cargo fmt`
@@ -12673,6 +12673,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo check -p mindustry-core -p mindustry-desktop`
 - 仍未完成：
   - `BlockBuildPlan` 的 region 仍是过渡 symbol，尚未精确解析 Java 四类 blockbuild 使用点的 generated icons/full icon；
-  - `time` 目前来自 runtime `total_progress` 近似，后续应接统一 world render frame clock；
+  - 非 desktop 直接调用 `BlockRendererPlan::to_block_build_render_pass(...)` 时仍会使用 plan 内的 fallback `time`，后续应逐步迁移到显式 frame clock；
   - `blockbuild-shader` custom command 尚未由真实 OpenGL/glow backend 编译/绑定 shader 并提交 GPU draw call；
   - 当前总体迁移约 25.8%，仍未达到完整可玩。
+
+### 12.402 BlockBuild 时间源对齐 Java Time.time
+
+- 2026-05-29：继续收紧 `Layer.blockBuilding` 的 Java 语义。本轮把 desktop 主渲染链中的 `BlockBuild` shader command 时间源从 `visual_runtime.total_progress` fallback 改为 `GameState.tick`，更接近 Java `Shaders.blockbuild.time = Time.time`。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockBuildPlan` 新增 `shader_command_with_time(...)` / `render_commands_with_time(...)`；
+    - `BlockRendererPlan` 新增 `to_block_build_render_commands_with_time(...)` 与 `to_block_build_render_pass_with_time(...)`；
+    - 旧的 `to_block_build_render_pass(...)` 继续保留为 fallback，不破坏现有调用。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 调用 `to_block_build_render_pass_with_time(8.0, Some(self.game_state.tick as f32))`；
+    - graphics frame 测试断言 `blockbuild-shader` 的 `u_time` 来自 world tick。
+- Java 对照要点：
+  - `ConstructBlock` / `BlockProducer` / `UnitAssembler` / `Accelerator` 都把 `Shaders.blockbuild.time` 设为全局时间，而不是 per-building `total_progress`；
+  - Rust desktop 主链现在已按同一方向走，剩余差距主要是 precise region resolver 和真实 shader backend。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+- 仍未完成：
+  - `ConstructBlock.current`、`BlockProducer.recipe`、`UnitAssembler.plan.unit`、`Accelerator.launchBlock` 的 atlas/full icon region 仍未精确解析；
+  - `blockbuild-shader` custom command 仍需真实 OpenGL/glow backend 消费；
+  - 当前总体迁移约 25.9%，仍未达到完整可玩。

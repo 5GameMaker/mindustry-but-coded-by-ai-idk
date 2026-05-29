@@ -1184,6 +1184,14 @@ impl BlockBuildPlan {
     }
 
     pub fn shader_command(&self, tile_size_world: f32) -> Option<RenderCommand> {
+        self.shader_command_with_time(tile_size_world, self.time)
+    }
+
+    pub fn shader_command_with_time(
+        &self,
+        tile_size_world: f32,
+        time: f32,
+    ) -> Option<RenderCommand> {
         let rect = self.rect(tile_size_world)?;
         Some(RenderCommand::custom(
             "blockbuild-shader",
@@ -1204,7 +1212,7 @@ impl BlockBuildPlan {
                 ),
                 RenderProperty::new("layer", Layer::BLOCK_BUILDING.to_string()),
                 RenderProperty::new("u_progress", self.progress.to_string()),
-                RenderProperty::new("u_time", self.time.to_string()),
+                RenderProperty::new("u_time", finite_or_zero(time).to_string()),
                 RenderProperty::new("u_alpha", self.alpha.to_string()),
             ],
         ))
@@ -1221,8 +1229,12 @@ impl BlockBuildPlan {
     }
 
     pub fn render_commands(&self, tile_size_world: f32) -> Vec<RenderCommand> {
+        self.render_commands_with_time(tile_size_world, self.time)
+    }
+
+    pub fn render_commands_with_time(&self, tile_size_world: f32, time: f32) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
-        if let Some(command) = self.shader_command(tile_size_world) {
+        if let Some(command) = self.shader_command_with_time(tile_size_world, time) {
             commands.push(command);
         }
         if let Some(command) = self.draw_command(tile_size_world) {
@@ -1441,14 +1453,33 @@ impl BlockRendererPlan {
     }
 
     pub fn to_block_build_render_commands(&self, tile_size_world: f32) -> Vec<RenderCommand> {
+        self.to_block_build_render_commands_with_time(tile_size_world, None)
+    }
+
+    pub fn to_block_build_render_commands_with_time(
+        &self,
+        tile_size_world: f32,
+        frame_time: Option<f32>,
+    ) -> Vec<RenderCommand> {
         self.block_builds
             .iter()
-            .flat_map(|build| build.render_commands(tile_size_world))
+            .flat_map(|build| match frame_time {
+                Some(time) => build.render_commands_with_time(tile_size_world, time),
+                None => build.render_commands(tile_size_world),
+            })
             .collect()
     }
 
     pub fn to_block_build_render_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
-        let commands = self.to_block_build_render_commands(tile_size_world);
+        self.to_block_build_render_pass_with_time(tile_size_world, None)
+    }
+
+    pub fn to_block_build_render_pass_with_time(
+        &self,
+        tile_size_world: f32,
+        frame_time: Option<f32>,
+    ) -> Option<RenderPass> {
+        let commands = self.to_block_build_render_commands_with_time(tile_size_world, frame_time);
         if commands.is_empty() {
             return None;
         }
@@ -2826,6 +2857,33 @@ mod tests {
             pass.commands[0],
             RenderCommand::Custom { ref name, .. } if name == "blockbuild-shader"
         ));
+        match &pass.commands[0] {
+            RenderCommand::Custom { properties, .. } => {
+                assert_eq!(
+                    properties
+                        .iter()
+                        .find(|property| property.key == "u_time")
+                        .map(|property| property.value.as_str()),
+                    Some("42")
+                );
+            }
+            other => panic!("expected blockbuild shader custom command, got {other:?}"),
+        }
+        let pass_with_frame_time = plan
+            .to_block_build_render_pass_with_time(8.0, Some(77.0))
+            .expect("frame time override should keep the blockbuild pass");
+        match &pass_with_frame_time.commands[0] {
+            RenderCommand::Custom { properties, .. } => {
+                assert_eq!(
+                    properties
+                        .iter()
+                        .find(|property| property.key == "u_time")
+                        .map(|property| property.value.as_str()),
+                    Some("77")
+                );
+            }
+            other => panic!("expected blockbuild shader custom command, got {other:?}"),
+        }
         match &pass.commands[1] {
             RenderCommand::DrawSprite {
                 symbol,

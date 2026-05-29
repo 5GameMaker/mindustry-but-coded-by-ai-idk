@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **25.8%**。
+- 当前总体迁移完成度：约 **25.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10042,5 +10042,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo check -p mindustry-core -p mindustry-desktop`
 - 下一步：
   1. 补 Java 四类 blockbuild 使用点的精确 region resolver：`ConstructBlock.current.getGeneratedIcons()`、`BlockProducer.recipe.getGeneratedIcons()`、`UnitAssembler.plan.unit.fullIcon`、`Accelerator.launchBlock.getGeneratedIcons()`；
-  2. 把 `u_time` 改接统一 world render frame clock，而不是长期依赖 runtime `total_progress` 近似；
+  2. `u_time` desktop 主链已由 308 改接 `GameState.tick`，非 desktop fallback 仍需逐步收敛；
   3. 真实 OpenGL/glow backend 仍需消费 `blockbuild-shader` custom 边界并绑定 `Shaders.blockbuild`。
+
+---
+
+## 308. 最新闭环记录：BlockBuild 时间源接 GameState.tick
+
+- 本轮总体进度更新：约 **25.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockBuildPlan` 新增 `shader_command_with_time(...)` / `render_commands_with_time(...)`；
+    - `BlockRendererPlan` 新增 `to_block_build_render_commands_with_time(...)` / `to_block_build_render_pass_with_time(...)`；
+    - 保留旧 `to_block_build_render_pass(...)` fallback，避免破坏其他调用。
+  - `desktop/src/lib.rs`
+    - `graphics_frame_for_render(...)` 现在把 `self.game_state.tick as f32` 传给 `BlockBuild` pass；
+    - graphics frame 测试断言 `blockbuild-shader` custom command 的 `u_time` 为 world tick。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+- 下一步：
+  1. 继续补四类 Java blockbuild region resolver；
+  2. 继续把 `blockbuild-shader` custom marker 接到真实 OpenGL/glow shader 绑定；
+  3. 保持 `BlockBuild -> Environment -> Lighting` 的 Java renderer stage 顺序。
