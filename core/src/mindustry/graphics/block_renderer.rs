@@ -1134,6 +1134,7 @@ pub struct BlockRendererBlockParticleWorldSample {
     pub blend_mode: DrawBlockParticleBlendMode,
     pub sides: usize,
     pub rotation: f32,
+    pub region: Option<&'static str>,
 }
 
 impl BlockRendererBlockParticlePlan {
@@ -1164,6 +1165,7 @@ impl BlockRendererBlockParticlePlan {
                     blend_mode: self.plan.blend_mode,
                     sides: self.plan.sides,
                     rotation: self.plan.particle_rotation,
+                    region: self.plan.region,
                 })
             })
             .collect()
@@ -2272,6 +2274,38 @@ mod tests {
         assert_eq!(samples[0].blend_mode, DrawBlockParticleBlendMode::Normal);
         assert_eq!(samples[0].sides, 5);
         assert_eq!(samples[0].rotation, 30.0);
+        assert_eq!(samples[0].region, None);
+    }
+
+    #[test]
+    fn block_renderer_soft_particle_world_samples_carry_circle_shadow_region() {
+        let coord = TileCoord::new(1, 1);
+        let mut config = crate::mindustry::world::draw::draw_soft_particles_block_config();
+        config.particle_radius = 0.0;
+        config.particle_count = 1;
+
+        let plan = BlockRendererBlockParticlePlan {
+            coord,
+            block: "soft-particle-test".into(),
+            size: 3,
+            plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                config,
+                2,
+                1.0,
+                0.0,
+                Layer::BLOCK,
+            ),
+        };
+
+        let samples = plan.world_samples(8.0);
+
+        assert_eq!(samples.len(), 1);
+        assert_eq!(
+            samples[0].render_kind,
+            DrawBlockParticleRenderKind::SoftSprite
+        );
+        assert_eq!(samples[0].blend_mode, DrawBlockParticleBlendMode::Additive);
+        assert_eq!(samples[0].region, Some("circle-shadow"));
     }
 
     #[test]

@@ -12161,3 +12161,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - block particle 已具备 circle/poly/soft sprite 数据语义和 world-space sample，但仍未实际提交 GPU/effect backend draw call；
   - soft sprite 的 `circle-shadow` region 还需进入真实 atlas/texture draw 执行；
   - 当前总体迁移约 23.6%，仍未达到完整可玩。
+
+### 12.384 Soft particle region 进入 backend trace
+
+- 2026-05-29：继续把 soft block particle 从“知道是 soft sprite”推进到“backend trace 能看到要绘制的 atlas region”。这一步仍不引入 GPU 依赖，但把 Java `DrawSoftParticles.load()` 中固定的 `circle-shadow` region 写入 Rust plan/world sample/desktop trace，后续真实 backend 可以按 sample.region 做 atlas lookup 或 sprite draw。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/draw/mod.rs`
+    - `DrawBlockParticleConfig.region: Option<&'static str>`；
+    - `DrawSoftParticles` 默认 `Some(draw_soft_particle_region_name())`，即 `circle-shadow`；
+    - regular `DrawParticles` 默认 `None`，避免 circle/poly 几何粒子被误当成 atlas sprite。
+  - `core/src/mindustry/graphics/particle_renderer.rs`
+    - `BlockDrawerParticlePlanConfig` / `BlockDrawerParticlePlan` 透传 `region`。
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBlockParticleWorldSample.region` 透传到 world-space sample；
+    - 增加 soft world sample 携带 `circle-shadow` 的测试。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsExecutionTrace` 通过现有 `DesktopGraphicsBlockParticleTrace.sample` 直接暴露 region；
+    - 增加空 block particle 输入不产生 `BlockParticles` step 的测试；
+    - 增加 multi emitter 顺序稳定与 soft region 透传测试。
+- 已跑验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml"`
+  - `cargo test -p mindustry-core block_renderer_soft_particle_world_samples_carry_circle_shadow_region --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_drawer_soft_particle_plan_uses_java_soft_sprite_life_and_size_semantics --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core draw_particles_and_soft_particles_dispatch_particle_configs_without_sprites --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_ --manifest-path "Cargo.toml" -- --test-threads=1`
+- 仍未完成：
+  - soft sample region 已进入 trace，但仍未做真实 atlas lookup / GPU draw；
+  - block particle circle/poly/soft sprite 仍需进入真正 renderer backend；
+  - 当前总体迁移约 23.7%，仍未达到完整可玩。

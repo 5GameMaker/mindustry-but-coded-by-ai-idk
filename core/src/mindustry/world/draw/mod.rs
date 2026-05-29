@@ -188,6 +188,7 @@ pub struct DrawBlockParticleConfig {
     pub size_interp: DrawBlockParticleSizeInterp,
     pub blend_mode: DrawBlockParticleBlendMode,
     pub render_kind: DrawBlockParticleRenderKind,
+    pub region: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -641,6 +642,7 @@ pub fn draw_particles_block_config() -> DrawBlockParticleConfig {
         size_interp: DrawBlockParticleSizeInterp::Slope,
         blend_mode: DrawBlockParticleBlendMode::Normal,
         render_kind: DrawBlockParticleRenderKind::Circle,
+        region: None,
     }
 }
 
@@ -665,6 +667,7 @@ pub fn draw_soft_particles_block_config() -> DrawBlockParticleConfig {
         size_interp: DrawBlockParticleSizeInterp::Linear,
         blend_mode: DrawBlockParticleBlendMode::Additive,
         render_kind: DrawBlockParticleRenderKind::SoftSprite,
+        region: Some(draw_soft_particle_region_name()),
     }
 }
 
@@ -2024,6 +2027,7 @@ mod tests {
         assert_eq!(flux[0].particle_size, 9.0);
         assert_eq!(flux[0].blend_mode, DrawBlockParticleBlendMode::Additive);
         assert_eq!(flux[0].render_kind, DrawBlockParticleRenderKind::SoftSprite);
+        assert_eq!(flux[0].region, Some(draw_soft_particle_region_name()));
         assert!(flux[0].invert_life);
     }
 

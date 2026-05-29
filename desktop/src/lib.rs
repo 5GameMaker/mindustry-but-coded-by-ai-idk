@@ -3948,11 +3948,12 @@ mod tests {
     use mindustry_core::mindustry::ctype::{Content, ContentId};
     use mindustry_core::mindustry::entities::comp::DecalColor;
     use mindustry_core::mindustry::graphics::{
-        BlockDrawStage, CacheLayer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
-        MinimapCamera, MinimapOverlayInput, PageType, RenderBridge, RenderCamera, RenderCommand,
-        RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderRect, RenderSize,
-        RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext, ShaderApplyPlan,
-        ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
+        BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer, Layer,
+        LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput, MinimapCamera,
+        MinimapOverlayInput, PageType, ParticleRendererState, RenderBridge, RenderCamera,
+        RenderCommand, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderRect,
+        RenderSize, RenderTarget, RenderTextAlign, RenderViewport, ShaderApplyContext,
+        ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -5617,6 +5618,96 @@ mod tests {
                 step,
                 DesktopGraphicsExecutionStepTrace::BlockParticles { plan_count: 1 }
             )));
+    }
+
+    #[test]
+    fn desktop_graphics_trace_omits_empty_block_particle_steps() {
+        let mut bridge = RenderBridge::new();
+        bridge.set_block_renderer(BlockRendererPlan::default());
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+
+        assert_eq!(trace.block_particle_plans, 0);
+        assert_eq!(trace.block_particle_world_samples, 0);
+        assert!(trace.block_particle_traces.is_empty());
+        assert!(!trace.execution_steps.iter().any(|step| matches!(
+            step,
+            DesktopGraphicsExecutionStepTrace::BlockParticles { .. }
+        )));
+    }
+
+    #[test]
+    fn desktop_graphics_trace_preserves_block_particle_order_and_soft_region() {
+        let mut regular = mindustry_core::mindustry::world::draw::draw_particles_block_config();
+        regular.particle_count = 1;
+        regular.particle_radius = 0.0;
+        let mut soft = mindustry_core::mindustry::world::draw::draw_soft_particles_block_config();
+        soft.particle_count = 1;
+        soft.particle_radius = 0.0;
+
+        let mut block_renderer = BlockRendererPlan::default();
+        block_renderer.block_particles = vec![
+            BlockRendererBlockParticlePlan {
+                coord: TileCoord::new(1, 1),
+                block: "regular-emitter".into(),
+                size: 2,
+                plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                    regular,
+                    10,
+                    1.0,
+                    0.0,
+                    Layer::BLOCK,
+                ),
+            },
+            BlockRendererBlockParticlePlan {
+                coord: TileCoord::new(2, 2),
+                block: "soft-emitter".into(),
+                size: 2,
+                plan: ParticleRendererState::block_drawer_particle_plan_from_draw_config(
+                    soft,
+                    11,
+                    1.0,
+                    0.0,
+                    Layer::BLOCK,
+                ),
+            },
+        ];
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_block_renderer(block_renderer);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+
+        assert_eq!(trace.block_particle_plans, 2);
+        assert_eq!(trace.block_particle_world_samples, 2);
+        assert_eq!(trace.block_particle_traces.len(), 2);
+        assert_eq!(
+            trace
+                .block_particle_traces
+                .iter()
+                .map(|trace| (trace.plan_index, trace.block.as_str(), trace.sample.region))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, "regular-emitter", None),
+                (1, "soft-emitter", Some("circle-shadow"))
+            ]
+        );
+        assert!(trace.execution_steps.iter().any(|step| matches!(
+            step,
+            DesktopGraphicsExecutionStepTrace::BlockParticles { plan_count: 2 }
+        )));
     }
 
     #[test]

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **23.6%**。
+- 当前总体迁移完成度：约 **23.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9468,3 +9468,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 block particle sample trace 继续推进到真实 effect/GPU backend draw call；
   2. 按渲染优先级继续做 Renderer pass 顺序、BlockRenderer darkness/cache、Pixelator 或 MultiPacker/TextureAtlas 闭环；
   3. 为 multi emitter 稳定顺序、空输入无 trace、soft sprite region 接入补更细测试。
+
+---
+
+## 286. 最新闭环记录：Soft particle region 进入 backend trace
+
+- 本轮总体进度更新：约 **23.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `DrawBlockParticleConfig` / `BlockDrawerParticlePlan` / `BlockRendererBlockParticleWorldSample` 新增 `region: Option<&'static str>`；
+  - `DrawSoftParticles` 默认携带 Java `load()` 使用的 `circle-shadow` region，regular/poly 粒子保持 `None`；
+  - desktop block particle trace 增加空输入无 BlockParticles step、multi emitter 顺序稳定、soft region 透传测试。
+- 已验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml"`
+  - `cargo test -p mindustry-core block_renderer_soft_particle_world_samples_carry_circle_shadow_region --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core block_drawer_soft_particle_plan_uses_java_soft_sprite_life_and_size_semantics --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-core draw_particles_and_soft_particles_dispatch_particle_configs_without_sprites --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_ --manifest-path "Cargo.toml" -- --test-threads=1`
+- 下一步：
+  1. 将 `region=Some("circle-shadow")` 的 soft sample 接到真实 atlas lookup / sprite draw 或 effect backend draw call；
+  2. 继续推进 Renderer pass 顺序与 BlockRenderer darkness/cache 闭环，避免粒子链路成为孤岛。

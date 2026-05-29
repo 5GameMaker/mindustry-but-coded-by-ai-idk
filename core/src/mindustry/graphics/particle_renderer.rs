@@ -120,6 +120,7 @@ pub struct BlockDrawerParticlePlanConfig {
     pub size_interp: DrawBlockParticleSizeInterp,
     pub blend_mode: DrawBlockParticleBlendMode,
     pub render_kind: DrawBlockParticleRenderKind,
+    pub region: Option<&'static str>,
     pub layer: f32,
     pub color: ParticleColor,
     pub secondary_color: Option<ParticleColor>,
@@ -158,6 +159,7 @@ pub struct BlockDrawerParticlePlan {
     pub size_interp: DrawBlockParticleSizeInterp,
     pub blend_mode: DrawBlockParticleBlendMode,
     pub render_kind: DrawBlockParticleRenderKind,
+    pub region: Option<&'static str>,
     pub layer: f32,
     pub color: ParticleColor,
     pub secondary_color: Option<ParticleColor>,
@@ -186,6 +188,7 @@ impl BlockDrawerParticlePlan {
             size_interp: config.size_interp,
             blend_mode: config.blend_mode,
             render_kind: config.render_kind,
+            region: config.region,
             layer: config.layer,
             color: config.color,
             secondary_color: config.secondary_color,
@@ -321,6 +324,7 @@ impl BlockDrawerParticlePlanConfig {
             size_interp: config.size_interp,
             blend_mode: config.blend_mode,
             render_kind: config.render_kind,
+            region: config.region,
             layer,
             color: rgba_to_particle_color(config.color_rgba),
             secondary_color: config.secondary_color_rgba.map(rgba_to_particle_color),
@@ -649,6 +653,7 @@ mod tests {
             size_interp: DrawBlockParticleSizeInterp::Slope,
             blend_mode: DrawBlockParticleBlendMode::Normal,
             render_kind: DrawBlockParticleRenderKind::Circle,
+            region: None,
             layer: 12.0,
             color: ParticleColor::new(0.2, 0.4, 0.6, 1.0),
             secondary_color: Some(ParticleColor::new(0.8, 0.1, 0.2, 0.9)),
@@ -685,6 +690,7 @@ mod tests {
                 size_interp: DrawBlockParticleSizeInterp::Slope,
                 blend_mode: DrawBlockParticleBlendMode::Normal,
                 render_kind: DrawBlockParticleRenderKind::Circle,
+                region: None,
             },
             7,
             0.0,
@@ -767,6 +773,7 @@ mod tests {
         assert_eq!(plan.particle_rotation, 45.0);
         assert_eq!(plan.render_kind, DrawBlockParticleRenderKind::Polygon);
         assert_eq!(plan.blend_mode, DrawBlockParticleBlendMode::Normal);
+        assert_eq!(plan.region, None);
         assert_eq!(plan.random_life_range, 2.0);
 
         let sample = plan.sample_for_index(0).unwrap();
@@ -783,6 +790,7 @@ mod tests {
 
         assert_eq!(plan.render_kind, DrawBlockParticleRenderKind::SoftSprite);
         assert_eq!(plan.blend_mode, DrawBlockParticleBlendMode::Additive);
+        assert_eq!(plan.region, Some("circle-shadow"));
         assert_eq!(plan.size_interp, DrawBlockParticleSizeInterp::Linear);
         assert!(plan.invert_life);
         assert_eq!(plan.random_life_range, 1.0);
