@@ -3519,6 +3519,230 @@ impl From<RenderTextureSamplePlan> for DesktopGraphicsOpenGlBackendResolveQuad {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendResolveMeshUploadPlan {
+    pub resolve_index: usize,
+    pub resolve_kind: RenderResolveKind,
+    pub vertex_array_key: String,
+    pub vertex_buffer_key: String,
+    pub index_buffer_key: String,
+    pub vertex_count: usize,
+    pub index_count: usize,
+    pub vertex_stride_bytes: usize,
+    pub vertex_attributes: Vec<DesktopGraphicsOpenGlBackendVertexAttributePlan>,
+    pub vertex_bytes: Vec<u8>,
+    pub index_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendResolvedResolveMeshUpload {
+    pub resolve_index: usize,
+    pub resolve_kind: RenderResolveKind,
+    pub vertex_array_key: String,
+    pub vertex_array_handle: u32,
+    pub vertex_buffer_key: String,
+    pub vertex_buffer_handle: u32,
+    pub index_buffer_key: String,
+    pub index_buffer_handle: u32,
+    pub vertex_count: usize,
+    pub index_count: usize,
+    pub vertex_stride_bytes: usize,
+    pub vertex_attributes: Vec<DesktopGraphicsOpenGlBackendVertexAttributePlan>,
+    pub vertex_bytes: Vec<u8>,
+    pub index_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopGraphicsOpenGlBackendResolveMeshUploadCommand {
+    BindVertexArray {
+        vertex_array_handle: u32,
+    },
+    BindBuffer {
+        target: u32,
+        buffer_handle: u32,
+    },
+    BufferData {
+        target: u32,
+        usage: u32,
+        bytes: Vec<u8>,
+    },
+    EnableVertexAttributeArray {
+        attribute_location: i32,
+    },
+    VertexAttributePointer {
+        attribute_location: i32,
+        components: usize,
+        gl_type: u32,
+        normalized: bool,
+        stride_bytes: usize,
+        offset_bytes: usize,
+    },
+}
+
+pub trait DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink {
+    fn consume_opengl_resolve_mesh_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendResolveMeshUploadCommand,
+    );
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendResolveMeshUploadCommandSink {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendResolveMeshUploadCommand>,
+}
+
+impl DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendResolveMeshUploadCommandSink
+{
+    fn consume_opengl_resolve_mesh_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendResolveMeshUploadCommand,
+    ) {
+        self.commands.push(command);
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolveQuadVertex {
+    fn append_to_vertex_bytes(self, bytes: &mut Vec<u8>) {
+        bytes.extend_from_slice(&self.position[0].to_le_bytes());
+        bytes.extend_from_slice(&self.position[1].to_le_bytes());
+        bytes.extend_from_slice(&self.uv[0].to_le_bytes());
+        bytes.extend_from_slice(&self.uv[1].to_le_bytes());
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolveQuad {
+    pub const VERTEX_COUNT: usize = 4;
+    pub const INDEX_COUNT: usize = 6;
+    pub const VERTEX_FLOATS: usize = 4;
+    pub const VERTEX_STRIDE_BYTES: usize = Self::VERTEX_FLOATS * std::mem::size_of::<f32>();
+    pub const POSITION_OFFSET_BYTES: usize = 0;
+    pub const TEXCOORD_OFFSET_BYTES: usize = 2 * std::mem::size_of::<f32>();
+
+    pub fn vertex_attributes(
+        program_key: &str,
+        location_cache: &mut DesktopGraphicsOpenGlBackendLocationCache,
+    ) -> Vec<DesktopGraphicsOpenGlBackendVertexAttributePlan> {
+        vec![
+            DesktopGraphicsOpenGlBackendVertexAttributePlan {
+                name: "a_position",
+                components: 2,
+                offset_bytes: Self::POSITION_OFFSET_BYTES,
+                packed_color: false,
+                attribute_location: Some(
+                    location_cache.attribute_location(program_key, "a_position"),
+                ),
+            },
+            DesktopGraphicsOpenGlBackendVertexAttributePlan {
+                name: "a_texCoord0",
+                components: 2,
+                offset_bytes: Self::TEXCOORD_OFFSET_BYTES,
+                packed_color: false,
+                attribute_location: Some(
+                    location_cache.attribute_location(program_key, "a_texCoord0"),
+                ),
+            },
+        ]
+    }
+
+    pub fn to_vertex_bytes(self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(Self::VERTEX_COUNT * Self::VERTEX_STRIDE_BYTES);
+        for vertex in self.vertices {
+            vertex.append_to_vertex_bytes(&mut bytes);
+        }
+        bytes
+    }
+
+    pub fn to_index_bytes(self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(Self::INDEX_COUNT * std::mem::size_of::<u32>());
+        for index in self.indices {
+            bytes.extend_from_slice(&index.to_le_bytes());
+        }
+        bytes
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolveMeshUploadPlan {
+    pub fn from_quad(
+        resolve_index: usize,
+        resolve_kind: RenderResolveKind,
+        vertex_array_key: String,
+        quad: DesktopGraphicsOpenGlBackendResolveQuad,
+        program_key: &str,
+        location_cache: &mut DesktopGraphicsOpenGlBackendLocationCache,
+    ) -> Self {
+        Self {
+            resolve_index,
+            resolve_kind,
+            vertex_buffer_key: format!("{vertex_array_key}:vertices"),
+            index_buffer_key: format!("{vertex_array_key}:indices"),
+            vertex_array_key,
+            vertex_count: DesktopGraphicsOpenGlBackendResolveQuad::VERTEX_COUNT,
+            index_count: DesktopGraphicsOpenGlBackendResolveQuad::INDEX_COUNT,
+            vertex_stride_bytes: DesktopGraphicsOpenGlBackendResolveQuad::VERTEX_STRIDE_BYTES,
+            vertex_attributes: DesktopGraphicsOpenGlBackendResolveQuad::vertex_attributes(
+                program_key,
+                location_cache,
+            ),
+            vertex_bytes: quad.to_vertex_bytes(),
+            index_bytes: quad.to_index_bytes(),
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolvedResolveMeshUpload {
+    pub fn to_opengl_resolve_mesh_upload_commands(
+        &self,
+    ) -> Vec<DesktopGraphicsOpenGlBackendResolveMeshUploadCommand> {
+        let mut commands = vec![
+            DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BindVertexArray {
+                vertex_array_handle: self.vertex_array_handle,
+            },
+            DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BindBuffer {
+                target: DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                buffer_handle: self.vertex_buffer_handle,
+            },
+            DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BufferData {
+                target: DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                usage: DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                bytes: self.vertex_bytes.clone(),
+            },
+            DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BindBuffer {
+                target: DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER,
+                buffer_handle: self.index_buffer_handle,
+            },
+            DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BufferData {
+                target: DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER,
+                usage: DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                bytes: self.index_bytes.clone(),
+            },
+        ];
+
+        for attribute in &self.vertex_attributes {
+            let Some(attribute_location) = attribute.attribute_location else {
+                continue;
+            };
+            commands.push(
+                DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::EnableVertexAttributeArray {
+                    attribute_location,
+                },
+            );
+            commands.push(
+                DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::VertexAttributePointer {
+                    attribute_location,
+                    components: attribute.components,
+                    gl_type: DESKTOP_GRAPHICS_OPENGL_FLOAT,
+                    normalized: attribute.packed_color,
+                    stride_bytes: self.vertex_stride_bytes,
+                    offset_bytes: attribute.offset_bytes,
+                },
+            );
+        }
+
+        commands
+    }
+}
+
 impl DesktopGraphicsOpenGlBackendResolveCommand {
     pub const FULLSCREEN_QUAD_INDEX_COUNT: usize = 6;
     pub const FULLSCREEN_QUAD_INDEX_OFFSET_BYTES: usize = 0;
@@ -3534,10 +3758,22 @@ impl DesktopGraphicsOpenGlBackendResolveCommand {
         )
     }
 
+    pub const fn resolve_kind_uses_sample_quad_mesh(resolve_kind: RenderResolveKind) -> bool {
+        matches!(
+            resolve_kind,
+            RenderResolveKind::DrawRectSample | RenderResolveKind::DrawFboSample
+        )
+    }
+
+    pub fn uses_sample_quad_mesh(&self) -> bool {
+        Self::resolve_kind_uses_sample_quad_mesh(self.resolve_kind)
+            && self.resolve_sample_quad.is_some()
+    }
+
     pub fn source_texture_sample_to_opengl_draw_commands(
         &self,
         shader_program_handle: u32,
-        fullscreen_quad_vertex_array_handle: u32,
+        quad_vertex_array_handle: u32,
     ) -> Vec<DesktopGraphicsOpenGlBackendDrawCommand> {
         if !Self::resolve_kind_uses_source_texture_sample_draw_commands(self.resolve_kind) {
             return Vec::new();
@@ -3557,7 +3793,7 @@ impl DesktopGraphicsOpenGlBackendResolveCommand {
                 texture_handle: source_attachment.color_texture_handle,
             },
             DesktopGraphicsOpenGlBackendDrawCommand::BindVertexArray {
-                vertex_array_handle: fullscreen_quad_vertex_array_handle,
+                vertex_array_handle: quad_vertex_array_handle,
             },
             DesktopGraphicsOpenGlBackendDrawCommand::DrawElements {
                 primitive_type: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
@@ -4194,6 +4430,7 @@ impl DesktopGraphicsOpenGlBackendDrawCommandSink
 pub trait DesktopGraphicsOpenGlBackendDriver:
     DesktopGraphicsOpenGlBackendTextureUploadCommandSink
     + DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink
+    + DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink
     + DesktopGraphicsOpenGlBackendResolvedShaderCommandSink
     + DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink
     + DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
@@ -4205,6 +4442,7 @@ pub trait DesktopGraphicsOpenGlBackendDriver:
 impl<T> DesktopGraphicsOpenGlBackendDriver for T where
     T: DesktopGraphicsOpenGlBackendTextureUploadCommandSink
         + DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink
+        + DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink
         + DesktopGraphicsOpenGlBackendResolvedShaderCommandSink
         + DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink
         + DesktopGraphicsOpenGlBackendFramebufferAttachmentSink
@@ -4218,6 +4456,7 @@ pub enum DesktopGraphicsOpenGlBackendDriverCommand {
     FramebufferAttachment(DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan),
     TextureUpload(DesktopGraphicsOpenGlBackendTextureUploadCommand),
     SpriteMeshUpload(DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand),
+    ResolveMeshUpload(DesktopGraphicsOpenGlBackendResolveMeshUploadCommand),
     Shader(DesktopGraphicsOpenGlBackendResolvedShaderCommand),
     ShaderLifecycle(DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand),
     Draw(DesktopGraphicsOpenGlBackendDrawCommand),
@@ -4229,6 +4468,7 @@ pub struct DesktopGraphicsOpenGlBackendDriverExecutionState {
     pub framebuffer_attachment_plans: usize,
     pub texture_upload_commands: usize,
     pub sprite_mesh_upload_commands: usize,
+    pub resolve_mesh_upload_commands: usize,
     pub shader_commands: usize,
     pub draw_commands: usize,
     pub resolve_draw_commands: usize,
@@ -4265,6 +4505,18 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshUploadCommandSink
             .push(DesktopGraphicsOpenGlBackendDriverCommand::SpriteMeshUpload(
                 command,
             ));
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendDriver
+{
+    fn consume_opengl_resolve_mesh_upload_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendResolveMeshUploadCommand,
+    ) {
+        self.commands
+            .push(DesktopGraphicsOpenGlBackendDriverCommand::ResolveMeshUpload(command));
     }
 }
 
@@ -5085,6 +5337,7 @@ impl DesktopGraphicsOpenGlBackendShaderCommandSink
 pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
     pub framebuffer_attachment_plans: Vec<DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan>,
     pub resolved_framebuffer_attachments:
         Vec<DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment>,
@@ -5092,6 +5345,8 @@ pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     pub texture_upload_commands: Vec<DesktopGraphicsOpenGlBackendTextureUploadCommand>,
     pub resolved_sprite_mesh_uploads: Vec<DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload>,
     pub sprite_mesh_upload_commands: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand>,
+    pub resolved_resolve_mesh_uploads: Vec<DesktopGraphicsOpenGlBackendResolvedResolveMeshUpload>,
+    pub resolve_mesh_upload_commands: Vec<DesktopGraphicsOpenGlBackendResolveMeshUploadCommand>,
     pub resolved_shader_commands: Vec<DesktopGraphicsOpenGlBackendResolvedShaderCommand>,
     pub resolved_draw_actions: Vec<DesktopGraphicsOpenGlBackendResolvedDrawCallAction>,
     pub draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
@@ -5117,11 +5372,13 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
     }
 
     pub fn resolve_sample_quad_vertex_array_key(
+        resolve_index: usize,
         command: &DesktopGraphicsOpenGlBackendResolveCommand,
     ) -> String {
         format!(
-            "{}:{:?}:{:?}",
+            "{}:{}:{:?}:{:?}",
             Self::SAMPLE_QUAD_VERTEX_ARRAY_KEY_PREFIX,
+            resolve_index,
             command.source_target,
             command.resolve_kind
         )
@@ -5142,6 +5399,7 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         &mut self,
         event: DesktopGraphicsOpenGlBackendResolveEvent,
     ) {
+        let resolve_index = self.resolve_commands.len();
         let source_attachment = opengl_backend_framebuffer_attachment_plan_for_render_target(
             &event.source_target,
         )
@@ -5162,17 +5420,31 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             let shader_program_handle = self
                 .cache
                 .program_handle(program_key.to_string(), &mut self.allocator);
-            let vertex_array_key = if command.resolve_sample_quad.is_some() {
-                Self::resolve_sample_quad_vertex_array_key(&command)
+            let uses_sample_quad_mesh =
+                command.uses_sample_quad_mesh() && command.source_attachment.is_some();
+            let vertex_array_key = if uses_sample_quad_mesh {
+                let vertex_array_key =
+                    Self::resolve_sample_quad_vertex_array_key(resolve_index, &command);
+                let quad = command
+                    .resolve_sample_quad
+                    .expect("sample quad mesh resolve should retain generated quad");
+                let upload = DesktopGraphicsOpenGlBackendResolveMeshUploadPlan::from_quad(
+                    resolve_index,
+                    command.resolve_kind,
+                    vertex_array_key.clone(),
+                    quad,
+                    program_key,
+                    &mut self.location_cache,
+                );
+                self.consume_opengl_resolve_mesh_upload(upload);
+                self.resolve_sample_quads.push(quad);
+                vertex_array_key
             } else {
                 Self::FULLSCREEN_QUAD_VERTEX_ARRAY_KEY.to_string()
             };
             let fullscreen_quad_vertex_array_handle = self
                 .cache
                 .vertex_array_handle(vertex_array_key, &mut self.allocator);
-            if let Some(quad) = command.resolve_sample_quad {
-                self.resolve_sample_quads.push(quad);
-            }
             self.resolve_draw_commands.extend(
                 command.source_texture_sample_to_opengl_draw_commands(
                     shader_program_handle,
@@ -5257,6 +5529,40 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         self.resolved_sprite_mesh_uploads.push(resolved_upload);
     }
 
+    pub fn consume_opengl_resolve_mesh_upload(
+        &mut self,
+        upload: DesktopGraphicsOpenGlBackendResolveMeshUploadPlan,
+    ) {
+        let vertex_array_handle = self
+            .cache
+            .vertex_array_handle(upload.vertex_array_key.clone(), &mut self.allocator);
+        let vertex_buffer_handle = self
+            .cache
+            .buffer_handle(upload.vertex_buffer_key.clone(), &mut self.allocator);
+        let index_buffer_handle = self
+            .cache
+            .buffer_handle(upload.index_buffer_key.clone(), &mut self.allocator);
+        let resolved_upload = DesktopGraphicsOpenGlBackendResolvedResolveMeshUpload {
+            resolve_index: upload.resolve_index,
+            resolve_kind: upload.resolve_kind,
+            vertex_array_key: upload.vertex_array_key,
+            vertex_array_handle,
+            vertex_buffer_key: upload.vertex_buffer_key,
+            vertex_buffer_handle,
+            index_buffer_key: upload.index_buffer_key,
+            index_buffer_handle,
+            vertex_count: upload.vertex_count,
+            index_count: upload.index_count,
+            vertex_stride_bytes: upload.vertex_stride_bytes,
+            vertex_attributes: upload.vertex_attributes,
+            vertex_bytes: upload.vertex_bytes,
+            index_bytes: upload.index_bytes,
+        };
+        self.resolve_mesh_upload_commands
+            .extend(resolved_upload.to_opengl_resolve_mesh_upload_commands());
+        self.resolved_resolve_mesh_uploads.push(resolved_upload);
+    }
+
     pub fn consume_opengl_shader_command(
         &mut self,
         command: DesktopGraphicsOpenGlBackendShaderCommand,
@@ -5329,6 +5635,18 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         self.sprite_mesh_upload_commands.len()
     }
 
+    pub fn drive_resolve_mesh_upload_command_sink<
+        S: DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.resolve_mesh_upload_commands {
+            sink.consume_opengl_resolve_mesh_upload_command(command.clone());
+        }
+        self.resolve_mesh_upload_commands.len()
+    }
+
     pub fn drive_draw_command_sink<S: DesktopGraphicsOpenGlBackendDrawCommandSink>(
         &self,
         sink: &mut S,
@@ -5367,6 +5685,7 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
         state.framebuffer_attachment_plans = self.drive_framebuffer_attachment_sink(driver);
         state.texture_upload_commands = self.drive_texture_upload_command_sink(driver);
         state.sprite_mesh_upload_commands = self.drive_sprite_mesh_upload_command_sink(driver);
+        state.resolve_mesh_upload_commands = self.drive_resolve_mesh_upload_command_sink(driver);
         state.shader_commands = self.drive_resolved_shader_command_sink(driver);
         state.draw_commands = self.drive_draw_command_sink(driver);
         state.resolve_draw_commands = self.drive_resolve_draw_command_sink(driver);
@@ -19006,6 +19325,7 @@ mod tests {
                 framebuffer_attachment_plans: resolving_executor.framebuffer_attachment_plans.len(),
                 texture_upload_commands: resolving_executor.texture_upload_commands.len(),
                 sprite_mesh_upload_commands: resolving_executor.sprite_mesh_upload_commands.len(),
+                resolve_mesh_upload_commands: resolving_executor.resolve_mesh_upload_commands.len(),
                 shader_commands: resolving_executor.resolved_shader_commands.len(),
                 draw_commands: resolving_executor.draw_commands.len(),
                 resolve_draw_commands: resolving_executor.resolve_draw_commands.len(),
@@ -19017,6 +19337,7 @@ mod tests {
             driver_state.framebuffer_attachment_plans
                 + driver_state.texture_upload_commands
                 + driver_state.sprite_mesh_upload_commands
+                + driver_state.resolve_mesh_upload_commands
                 + driver_state.shader_commands
                 + driver_state.draw_commands
                 + driver_state.resolve_draw_commands
@@ -19261,14 +19582,104 @@ mod tests {
             [super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::DRAW_FBO_SAMPLE_PROGRAM_KEY];
         let rect_quad_vertex_array = executor.cache.vertex_arrays
             [&super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::resolve_sample_quad_vertex_array_key(
+                0,
                 &executor.resolve_commands[0],
             )];
         let fbo_quad_vertex_array = executor.cache.vertex_arrays
             [&super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::resolve_sample_quad_vertex_array_key(
+                1,
                 &executor.resolve_commands[1],
             )];
         assert_ne!(rect_program, fbo_program);
         assert_ne!(rect_quad_vertex_array, fbo_quad_vertex_array);
+        assert_eq!(executor.resolved_resolve_mesh_uploads.len(), 2);
+        assert_eq!(executor.resolve_mesh_upload_commands.len(), 18);
+
+        let expected_rect_quad = super::DesktopGraphicsOpenGlBackendResolveQuad::from(rect_sample);
+        let expected_fbo_quad = super::DesktopGraphicsOpenGlBackendResolveQuad::from(fbo_sample);
+        let rect_upload = &executor.resolved_resolve_mesh_uploads[0];
+        let fbo_upload = &executor.resolved_resolve_mesh_uploads[1];
+        assert_eq!(rect_upload.resolve_index, 0);
+        assert_eq!(rect_upload.resolve_kind, RenderResolveKind::DrawRectSample);
+        assert_eq!(rect_upload.vertex_array_handle, rect_quad_vertex_array);
+        assert_eq!(
+            rect_upload.vertex_count,
+            super::DesktopGraphicsOpenGlBackendResolveQuad::VERTEX_COUNT
+        );
+        assert_eq!(
+            rect_upload.index_count,
+            super::DesktopGraphicsOpenGlBackendResolveQuad::INDEX_COUNT
+        );
+        assert_eq!(
+            rect_upload.vertex_stride_bytes,
+            super::DesktopGraphicsOpenGlBackendResolveQuad::VERTEX_STRIDE_BYTES
+        );
+        assert_eq!(
+            rect_upload.vertex_bytes,
+            expected_rect_quad.to_vertex_bytes()
+        );
+        assert_eq!(rect_upload.index_bytes, expected_rect_quad.to_index_bytes());
+        assert_eq!(
+            rect_upload
+                .vertex_attributes
+                .iter()
+                .map(|attribute| (attribute.name, attribute.components, attribute.offset_bytes))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "a_position",
+                    2,
+                    super::DesktopGraphicsOpenGlBackendResolveQuad::POSITION_OFFSET_BYTES
+                ),
+                (
+                    "a_texCoord0",
+                    2,
+                    super::DesktopGraphicsOpenGlBackendResolveQuad::TEXCOORD_OFFSET_BYTES
+                ),
+            ]
+        );
+        assert_eq!(
+            rect_upload
+                .vertex_attributes
+                .iter()
+                .map(|attribute| attribute.attribute_location)
+                .collect::<Vec<_>>(),
+            vec![Some(0), Some(1)]
+        );
+        assert_eq!(fbo_upload.resolve_index, 1);
+        assert_eq!(fbo_upload.resolve_kind, RenderResolveKind::DrawFboSample);
+        assert_eq!(fbo_upload.vertex_array_handle, fbo_quad_vertex_array);
+        assert_eq!(fbo_upload.vertex_bytes, expected_fbo_quad.to_vertex_bytes());
+        assert_eq!(fbo_upload.index_bytes, expected_fbo_quad.to_index_bytes());
+
+        assert_eq!(
+            executor.resolve_mesh_upload_commands[0],
+            super::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BindVertexArray {
+                vertex_array_handle: rect_quad_vertex_array,
+            }
+        );
+        assert_eq!(
+            executor.resolve_mesh_upload_commands[2],
+            super::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BufferData {
+                target: super::DESKTOP_GRAPHICS_OPENGL_ARRAY_BUFFER,
+                usage: super::DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                bytes: rect_upload.vertex_bytes.clone(),
+            }
+        );
+        assert_eq!(
+            executor.resolve_mesh_upload_commands[4],
+            super::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BufferData {
+                target: super::DESKTOP_GRAPHICS_OPENGL_ELEMENT_ARRAY_BUFFER,
+                usage: super::DESKTOP_GRAPHICS_OPENGL_DYNAMIC_DRAW,
+                bytes: rect_upload.index_bytes.clone(),
+            }
+        );
+        assert_eq!(
+            executor.resolve_mesh_upload_commands[9],
+            super::DesktopGraphicsOpenGlBackendResolveMeshUploadCommand::BindVertexArray {
+                vertex_array_handle: fbo_quad_vertex_array,
+            }
+        );
 
         let rect_texture = executor.resolve_commands[0]
             .source_attachment
@@ -19400,6 +19811,74 @@ mod tests {
         let mut sink = super::DesktopGraphicsRecordingOpenGlBackendDrawCommandSink::default();
         assert_eq!(executor.drive_resolve_draw_command_sink(&mut sink), 10);
         assert_eq!(sink.commands, executor.resolve_draw_commands);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_resolve_mesh_uploads_skip_shader_blit_and_missing_samples() {
+        let mut executor = super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        for buffer_name in [
+            "buffer:shader-blit-source",
+            "buffer:draw-rect-missing-sample",
+            "buffer:draw-fbo-missing-sample",
+        ] {
+            executor.consume_opengl_framebuffer_attachment(
+                super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::from_buffer_name(
+                    buffer_name,
+                ),
+            );
+        }
+        let shader_blit_sample = RenderTextureSamplePlan::fbo_uv_window(
+            RenderCamera::new(
+                RenderPoint::new(16.0, 16.0),
+                RenderViewport::new(0.0, 0.0, 32.0, 32.0),
+            ),
+            8,
+            8,
+            2.0,
+            2.0,
+            0.0,
+        )
+        .unwrap();
+
+        executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
+            source_target: RenderTarget::Buffer("shader-blit-source".into()),
+            resolve_target: RenderTarget::Screen,
+            resolve_kind: RenderResolveKind::ShaderBlit,
+            resolve_sample: Some(shader_blit_sample),
+        });
+        executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
+            source_target: RenderTarget::Buffer("draw-rect-missing-sample".into()),
+            resolve_target: RenderTarget::Screen,
+            resolve_kind: RenderResolveKind::DrawRectSample,
+            resolve_sample: None,
+        });
+        executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
+            source_target: RenderTarget::Buffer("draw-fbo-missing-sample".into()),
+            resolve_target: RenderTarget::Screen,
+            resolve_kind: RenderResolveKind::DrawFboSample,
+            resolve_sample: None,
+        });
+
+        assert!(executor.resolved_resolve_mesh_uploads.is_empty());
+        assert!(executor.resolve_mesh_upload_commands.is_empty());
+        assert!(executor.resolve_sample_quads.is_empty());
+        assert_eq!(executor.resolve_draw_commands.len(), 15);
+        assert_eq!(
+            executor.cache.vertex_arrays.len(),
+            1,
+            "ShaderBlit and missing-sample sample resolves should all reuse fullscreen VAO"
+        );
+        assert!(executor.cache.vertex_arrays.contains_key(
+            super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::FULLSCREEN_QUAD_VERTEX_ARRAY_KEY
+        ));
+
+        let mut upload_sink =
+            super::DesktopGraphicsRecordingOpenGlBackendResolveMeshUploadCommandSink::default();
+        assert_eq!(
+            executor.drive_resolve_mesh_upload_command_sink(&mut upload_sink),
+            0
+        );
+        assert!(upload_sink.commands.is_empty());
     }
 
     #[cfg(feature = "opengl-backend")]
