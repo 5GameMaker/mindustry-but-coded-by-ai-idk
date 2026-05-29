@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **24.8%**。
+- 当前总体迁移完成度：约 **24.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9791,3 +9791,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 tile shadow draw commands 真正写入 `block-shadows` target，而不是只建 resolve seam；
   2. 完善 darkness FBO 写入、dirty tile cache 重绘与 shader 参数；
   3. 继续推进真实 OpenGL/glow backend 消费 `RenderTarget::Buffer("block-*")`。
+
+---
+
+## 298. 最新闭环记录：TileShadow 写入 block-shadows target
+
+- 本轮总体进度更新：约 **24.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - 新增 `BlockRendererPlan::to_shadow_sprite_ops(...)`；
+    - `to_shadow_resolve_pass(...)` 现在携带真实 `DrawSprite("block-shadow")` 命令；
+    - `to_block_sprite_ops(...)` 跳过 `TileShadow`，避免普通 block pass 重复绘制 shadow；
+    - block renderer 测试确认 shadow command 进入 `BlockShadows` pass。
+  - `desktop/src/lib.rs`
+    - desktop graphics frame 测试确认 `BlockShadows` pass 中存在 `block-shadow` sprite。
+- 已验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 对 darkness 执行同样处理：把可计算的 darkness tile/fill 写入 `block-darkness` target，并细化 dirty tile cache 生命周期；
+  2. 继续准备真实 OpenGL/glow backend 消费 `block-shadows` / `block-darkness` FBO。

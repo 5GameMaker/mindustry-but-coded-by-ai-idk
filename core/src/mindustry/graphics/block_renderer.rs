@@ -1259,7 +1259,7 @@ impl BlockRendererPlan {
 
     pub fn to_resolve_render_passes(&self, tile_size_world: f32) -> Vec<RenderPass> {
         let mut passes = Vec::new();
-        if let Some(pass) = self.to_shadow_resolve_pass() {
+        if let Some(pass) = self.to_shadow_resolve_pass(tile_size_world) {
             passes.push(pass);
         }
         if let Some(pass) = self.to_darkness_resolve_pass(tile_size_world) {
@@ -1268,20 +1268,21 @@ impl BlockRendererPlan {
         passes
     }
 
-    pub fn to_shadow_resolve_pass(&self) -> Option<RenderPass> {
-        let has_shadow_tiles = self
-            .tile_passes
-            .iter()
-            .any(|pass| pass.stage == BlockDrawStage::TileShadow && !pass.tiles.is_empty());
-        if !has_shadow_tiles {
+    pub fn to_shadow_resolve_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
+        let shadow_ops = self.to_shadow_sprite_ops(tile_size_world);
+        if shadow_ops.is_empty() {
             return None;
         }
 
-        Some(
-            RenderPass::new(RenderPassKind::BlockShadows)
-                .with_target(RenderTarget::Buffer("block-shadows".into()))
-                .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawRectSample),
-        )
+        let mut pass = RenderPass::new(RenderPassKind::BlockShadows)
+            .with_target(RenderTarget::Buffer("block-shadows".into()))
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawRectSample);
+        for op in shadow_ops {
+            if let Some(command) = op.to_draw_sprite_command() {
+                pass.push(command);
+            }
+        }
+        Some(pass)
     }
 
     pub fn to_darkness_resolve_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
@@ -1339,6 +1340,9 @@ impl BlockRendererPlan {
         let mut order = RenderPassKind::Block.default_order();
 
         for pass in &self.tile_passes {
+            if pass.stage == BlockDrawStage::TileShadow {
+                continue;
+            }
             if pass.append_sprite_ops(tile_size_world, order, &mut ops) {
                 order += 1;
             }
@@ -1354,6 +1358,24 @@ impl BlockRendererPlan {
             }
         }
 
+        ops.sort_by_key(|op| op.order);
+        ops
+    }
+
+    pub fn to_shadow_sprite_ops(&self, tile_size_world: f32) -> Vec<BlockSpriteOp> {
+        if tile_size_world <= 0.0 {
+            return Vec::new();
+        }
+
+        let mut ops = Vec::new();
+        let mut order = RenderPassKind::BlockShadows.default_order();
+        for pass in &self.tile_passes {
+            if pass.stage == BlockDrawStage::TileShadow
+                && pass.append_sprite_ops(tile_size_world, order, &mut ops)
+            {
+                order += 1;
+            }
+        }
         ops.sort_by_key(|op| op.order);
         ops
     }
@@ -2582,7 +2604,14 @@ mod tests {
             passes[0].resolve_kind,
             Some(RenderResolveKind::DrawRectSample)
         );
-        assert!(passes[0].commands.is_empty());
+        assert_eq!(passes[0].commands.len(), 1);
+        assert!(matches!(
+            &passes[0].commands[0],
+            RenderCommand::DrawSprite { symbol, rect, layer, .. }
+                if symbol == SPRITE_SYMBOL_BLOCK_SHADOW
+                    && *rect == RenderRect::new(16.0, 24.0, 8.0, 8.0)
+                    && *layer == BlockDrawStage::TileShadow.layer()
+        ));
 
         assert_eq!(passes[1].kind, RenderPassKind::Darkness);
         assert_eq!(
@@ -2905,8 +2934,14 @@ mod tests {
             });
         }
 
+        let shadow_ops = plan.to_shadow_sprite_ops(8.0);
+        assert_eq!(shadow_ops.len(), 1);
+        assert_eq!(shadow_ops[0].symbol(), SPRITE_SYMBOL_BLOCK_SHADOW);
+        assert_eq!(shadow_ops[0].rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
+        assert_eq!(shadow_ops[0].layer, BlockDrawStage::TileShadow.layer());
+
         let ops = plan.to_block_sprite_ops(8.0);
-        assert_eq!(ops.len(), 8);
+        assert_eq!(ops.len(), 7);
         assert!(ops.windows(2).all(|pair| pair[0].order <= pair[1].order));
         assert!(ops
             .iter()
@@ -2916,13 +2951,13 @@ mod tests {
         assert_eq!(ops[0].rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
         assert_eq!(ops[0].rotation, 0.0);
         assert_eq!(ops[0].layer, BlockDrawStage::TileBase.layer());
-        assert_eq!(ops[3].symbol(), "duo");
-        assert_eq!(ops[3].rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
-        assert_eq!(ops[3].rotation, 90.0);
-        assert_eq!(ops[3].layer, BlockDrawStage::BuildingBase.layer());
+        assert_eq!(ops[2].symbol(), "duo");
+        assert_eq!(ops[2].rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
+        assert_eq!(ops[2].rotation, 90.0);
+        assert_eq!(ops[2].layer, BlockDrawStage::BuildingBase.layer());
 
         let passes = plan.to_sprite_render_passes(8.0);
-        assert_eq!(passes.len(), 8);
+        assert_eq!(passes.len(), 7);
         assert!(passes.windows(2).all(|pair| pair[0].order < pair[1].order));
 
         let check_sprite = |command: &RenderCommand| -> (String, RenderRect, f32, f32) {
@@ -2945,46 +2980,40 @@ mod tests {
         assert_eq!(layer, BlockDrawStage::TileBase.layer());
 
         let (symbol, rect, rotation, layer) = check_sprite(&passes[1].commands[0]);
-        assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_SHADOW);
-        assert_eq!(rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
-        assert_eq!(rotation, 0.0);
-        assert_eq!(layer, BlockDrawStage::TileShadow.layer());
-
-        let (symbol, rect, rotation, layer) = check_sprite(&passes[2].commands[0]);
         assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_LIGHT);
         assert_eq!(rect, RenderRect::new(16.0, 24.0, 8.0, 8.0));
         assert_eq!(rotation, 0.0);
         assert_eq!(layer, BlockDrawStage::Light.layer());
 
-        let (symbol, rect, rotation, layer) = check_sprite(&passes[3].commands[0]);
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[2].commands[0]);
         assert_eq!(symbol, "duo");
         assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
         assert_eq!(rotation, 90.0);
         assert_eq!(layer, BlockDrawStage::BuildingBase.layer());
 
-        let (symbol, rect, rotation, layer) = check_sprite(&passes[4].commands[0]);
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[3].commands[0]);
         assert_eq!(symbol, "cracks-2-4");
         assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
         assert_eq!(rotation, 90.0);
         assert_eq!(layer, BlockDrawStage::BuildingCracks.layer());
-        match &passes[4].commands[0] {
+        match &passes[3].commands[0] {
             RenderCommand::DrawSprite { tint, .. } => assert_eq!(*tint, [0.2, 0.2, 0.2, 0.4]),
             other => panic!("expected DrawSprite, got {other:?}"),
         }
 
-        let (symbol, rect, rotation, layer) = check_sprite(&passes[5].commands[0]);
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[4].commands[0]);
         assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_TEAM);
         assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
         assert_eq!(rotation, 90.0);
         assert_eq!(layer, BlockDrawStage::BuildingTeamOverlay.layer());
 
-        let (symbol, rect, rotation, layer) = check_sprite(&passes[6].commands[0]);
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[5].commands[0]);
         assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_STATUS);
         assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
         assert_eq!(rotation, 90.0);
         assert_eq!(layer, BlockDrawStage::BuildingStatus.layer());
 
-        let (symbol, rect, rotation, layer) = check_sprite(&passes[7].commands[0]);
+        let (symbol, rect, rotation, layer) = check_sprite(&passes[6].commands[0]);
         assert_eq!(symbol, SPRITE_SYMBOL_BLOCK_LIGHT);
         assert_eq!(rect, RenderRect::new(24.0, 32.0, 16.0, 16.0));
         assert_eq!(rotation, 90.0);

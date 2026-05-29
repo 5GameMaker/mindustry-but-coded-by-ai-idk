@@ -5815,6 +5815,10 @@ mod tests {
         assert_eq!(shadow.target, RenderTarget::Buffer("block-shadows".into()));
         assert_eq!(shadow.resolve_target, Some(RenderTarget::Screen));
         assert_eq!(shadow.resolve_kind, Some(RenderResolveKind::DrawRectSample));
+        assert!(shadow.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol == "block-shadow"
+        )));
 
         let darkness = render_frame
             .passes

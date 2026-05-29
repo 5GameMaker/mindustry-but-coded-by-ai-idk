@@ -12381,3 +12381,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shadow pass 当前只建立 resolve seam，实际阴影 FBO 写入还需与 tile shadow draw command 合并；
   - darkness dirty tile 的真实重绘/缓存生命周期还需继续对照 Java；
   - 当前总体迁移约 24.8%，仍未达到完整可玩。
+
+### 12.392 TileShadow draw commands 写入 block-shadows target
+
+- 2026-05-29：继续把上一轮 shadows resolve pass 从空壳推进到真实命令流。本轮将 `BlockDrawStage::TileShadow` 的 `block-shadow` sprite 从普通 block sprite pass 中拆出，写入 `RenderPassKind::BlockShadows` 的 `Buffer("block-shadows")` target，再通过 `DrawRectSample` 回填到 screen。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererPlan::to_shadow_sprite_ops(tile_size_world)` 专门收集 `TileShadow` sprite ops；
+    - `to_shadow_resolve_pass(tile_size_world)` 现在会把 shadow ops 转成 `DrawSprite` commands 写入 `block-shadows` pass；
+    - `to_block_sprite_ops(...)` 跳过 `TileShadow`，避免同一 shadow 同时出现在普通 block pass 与 shadow FBO pass；
+    - 相关测试更新为确认 `block-shadow` 命令位于 shadows resolve pass，而不是普通 block pass。
+  - `desktop/src/lib.rs`
+    - desktop graphics frame 测试新增断言：`BlockShadows` pass 内存在 `DrawSprite { symbol: "block-shadow" }`。
+- Java 对照要点：
+  - 对齐 `drawShadows()` 的两段式：先写 shadows buffer，再 `Draw.rect(texture)` 采样回填；
+  - 当前 `DrawRectSample` 仍是 metadata，真实 GPU texture/FBO 和 shader state 仍待 OpenGL/glow backend 消费。
+- 已跑验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core block_renderer --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `block-shadows` target 仍未绑定真实 FBO/texture；
+  - darkness FBO 写入与 dirty tile cache 生命周期还需继续推进；
+  - 当前总体迁移约 24.9%，仍未达到完整可玩。
