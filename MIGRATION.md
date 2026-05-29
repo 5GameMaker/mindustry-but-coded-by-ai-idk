@@ -295,6 +295,7 @@ git -C "D:/MDT/rust-mindustry" checkout -- "core/src/mindustry/game/rules.rs"
 - `desktop/src/main.rs` 的 `opengl-native-runtime` 分支已从单纯 winit window/null runtime 推进到 `glutin + glow` runtime skeleton：`resumed()` 创建 GL config/context/surface 与 `glow::Context`，resize 同步 surface/viewport，`present_frame()` 真实调用 `swap_buffers`；当前 driver 仍是 recording + clear backbuffer，基础图元、texture、shader、FBO/resolve 等 sink 尚未真实落到 GPU。
 - native runtime 中已新增第一段真实 GL driver sink：`DesktopNativeOpenGlDriver` 会在保留 recording trace 的同时消费 `TextureUploadCommand`，把逻辑 texture handle 映射为 `glow::NativeTexture`，执行 `bind_texture/tex_parameter/tex_image_2d/tex_sub_image_2d/delete_texture`；shader、mesh、draw、FBO/resolve sink 仍暂时走 recording，需要后续逐项替换。
 - native driver 继续消费 sprite/resolve mesh upload 命令：逻辑 VAO/VBO/IBO handle 会映射为 `glow::NativeVertexArray`/`NativeBuffer`，并执行 `bind_vertex_array/bind_buffer/buffer_data/enable_vertex_attrib_array/vertex_attrib_pointer_f32`；draw sink 已真实执行 `active_texture/bind_texture/bind_vertex_array`，但 `UseProgram` 与最终 `DrawElements` 需等 shader lifecycle sink 完成后再打开。
+- native driver 已补 shader/program 资源表与 shader command/lifecycle sink：逻辑 shader/program handle 现在可映射到 `glow::NativeShader`/`NativeProgram`，并执行 shader source 读取预处理、`shader_source/compile_shader/create_program/attach_shader/link_program/use_program` 与基础 uniform/texture 命令；当前 shader lifecycle 仍需继续接入启动/帧主链后才能稳定打开真实 `DrawElements`。
 - 后续真实 backend 方向预期保持 OpenGL-compatible，倾向 `winit + glow` 组合。
 - 迁移时需要持续对齐原版 Java / Arc 的 GL 渲染语义，避免只做接口替换而丢失实际绘制行为。
 

@@ -123,7 +123,30 @@ struct DesktopNativeOpenGlRuntime {
     textures: std::collections::BTreeMap<u32, glow::NativeTexture>,
     buffers: std::collections::BTreeMap<u32, glow::NativeBuffer>,
     vertex_arrays: std::collections::BTreeMap<u32, glow::NativeVertexArray>,
+    shaders: std::collections::BTreeMap<u32, glow::NativeShader>,
+    programs: std::collections::BTreeMap<u32, glow::NativeProgram>,
+    shader_sources: std::collections::BTreeMap<u32, String>,
+    uniform_locations: std::collections::BTreeMap<(u32, String), glow::NativeUniformLocation>,
+    shader_asset_root: std::path::PathBuf,
     native_errors: Vec<String>,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_shader_asset_root() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("MINDUSTRY_ASSET_ROOT") {
+        return std::path::PathBuf::from(path);
+    }
+    if let Ok(current_dir) = std::env::current_dir() {
+        let local_assets = current_dir.join("core").join("assets");
+        if local_assets.join("shaders").is_dir() {
+            return local_assets;
+        }
+    }
+    let reference_assets = std::path::PathBuf::from("D:/MDT/mindustry-upstream-v157.4/core/assets");
+    if reference_assets.join("shaders").is_dir() {
+        return reference_assets;
+    }
+    std::path::PathBuf::from("core/assets")
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -192,6 +215,11 @@ impl DesktopNativeOpenGlRuntime {
             textures: std::collections::BTreeMap::new(),
             buffers: std::collections::BTreeMap::new(),
             vertex_arrays: std::collections::BTreeMap::new(),
+            shaders: std::collections::BTreeMap::new(),
+            programs: std::collections::BTreeMap::new(),
+            shader_sources: std::collections::BTreeMap::new(),
+            uniform_locations: std::collections::BTreeMap::new(),
+            shader_asset_root: desktop_native_opengl_shader_asset_root(),
             native_errors: Vec::new(),
         };
         runtime.resize_native_surface(runtime.window_surface_size());
@@ -240,11 +268,28 @@ struct DesktopNativeOpenGlDriver<'a> {
     textures: &'a mut std::collections::BTreeMap<u32, glow::NativeTexture>,
     buffers: &'a mut std::collections::BTreeMap<u32, glow::NativeBuffer>,
     vertex_arrays: &'a mut std::collections::BTreeMap<u32, glow::NativeVertexArray>,
+    shaders: &'a mut std::collections::BTreeMap<u32, glow::NativeShader>,
+    programs: &'a mut std::collections::BTreeMap<u32, glow::NativeProgram>,
+    shader_sources: &'a mut std::collections::BTreeMap<u32, String>,
+    uniform_locations:
+        &'a mut std::collections::BTreeMap<(u32, String), glow::NativeUniformLocation>,
+    shader_asset_root: &'a std::path::Path,
     native_errors: &'a mut Vec<String>,
 }
 
 #[cfg(feature = "opengl-native-runtime")]
 impl DesktopNativeOpenGlDriver<'_> {
+    fn shader_type(stage: mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage) -> u32 {
+        match stage {
+            mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Vertex => {
+                glow::VERTEX_SHADER
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Fragment => {
+                glow::FRAGMENT_SHADER
+            }
+        }
+    }
+
     fn texture_for_handle(&mut self, texture_handle: u32) -> Option<glow::NativeTexture> {
         if let Some(texture) = self.textures.get(&texture_handle) {
             return Some(*texture);
@@ -305,6 +350,133 @@ impl DesktopNativeOpenGlDriver<'_> {
         }
     }
 
+    fn existing_program(&mut self, program_handle: u32) -> Option<glow::NativeProgram> {
+        self.programs.get(&program_handle).copied().or_else(|| {
+            self.native_errors.push(format!(
+                "native OpenGL program for logical handle {program_handle} is not initialized"
+            ));
+            None
+        })
+    }
+
+    fn existing_shader(&mut self, shader_handle: u32) -> Option<glow::NativeShader> {
+        self.shaders.get(&shader_handle).copied().or_else(|| {
+            self.native_errors.push(format!(
+                "native OpenGL shader for logical handle {shader_handle} is not initialized"
+            ));
+            None
+        })
+    }
+
+    fn delete_program_handle(&mut self, program_handle: u32) {
+        if let Some(program) = self.programs.remove(&program_handle) {
+            unsafe {
+                self.gl.delete_program(program);
+            }
+        }
+        self.uniform_locations
+            .retain(|(handle, _), _| *handle != program_handle);
+    }
+
+    fn delete_shader_handle(&mut self, shader_handle: u32) {
+        if let Some(shader) = self.shaders.remove(&shader_handle) {
+            unsafe {
+                self.gl.delete_shader(shader);
+            }
+        }
+        self.shader_sources.remove(&shader_handle);
+    }
+
+    fn create_shader_for_handle(
+        &mut self,
+        shader_handle: u32,
+        stage: mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage,
+    ) {
+        self.delete_shader_handle(shader_handle);
+        match unsafe { self.gl.create_shader(Self::shader_type(stage)) } {
+            Ok(shader) => {
+                self.shaders.insert(shader_handle, shader);
+            }
+            Err(error) => self.native_errors.push(format!(
+                "failed to create native OpenGL {stage:?} shader for logical handle {shader_handle}: {error}"
+            )),
+        }
+    }
+
+    fn create_program_for_handle(&mut self, program_handle: u32) {
+        self.delete_program_handle(program_handle);
+        match unsafe { self.gl.create_program() } {
+            Ok(program) => {
+                self.programs.insert(program_handle, program);
+            }
+            Err(error) => self.native_errors.push(format!(
+                "failed to create native OpenGL program for logical handle {program_handle}: {error}"
+            )),
+        }
+    }
+
+    fn load_preprocessed_shader_source(
+        &mut self,
+        shader: mindustry_core::mindustry::graphics::ShaderId,
+        stage: mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: &str,
+    ) -> Option<String> {
+        let loader = mindustry_desktop::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(
+            self.shader_asset_root,
+        );
+        let source = loader.load_stage_source(shader, stage, source_path.to_string());
+        let source = match source {
+            Ok(source) => source,
+            Err(error) => {
+                self.native_errors.push(format!(
+                    "failed to load native OpenGL shader source {source_path}: {error:?}"
+                ));
+                return None;
+            }
+        };
+        let options = mindustry_desktop::DesktopGraphicsOpenGlBackendShaderPreprocessOptions {
+            gl30: true,
+            desktop: true,
+            mobile: false,
+            gl_version_at_least_3_2: true,
+            ..Default::default()
+        };
+        match source.preprocess(&options) {
+            Ok(source) => Some(source.source_text),
+            Err(error) => {
+                self.native_errors.push(format!(
+                    "failed to preprocess native OpenGL shader source {source_path}: {error:?}"
+                ));
+                None
+            }
+        }
+    }
+
+    fn uniform_location(
+        &mut self,
+        program_handle: u32,
+        program: glow::NativeProgram,
+        uniform: &'static str,
+    ) -> Option<glow::NativeUniformLocation> {
+        let key = (program_handle, uniform.to_string());
+        if let Some(location) = self.uniform_locations.get(&key) {
+            return Some(*location);
+        }
+        let location = unsafe { self.gl.get_uniform_location(program, uniform) };
+        match location {
+            Some(location) => {
+                self.uniform_locations.insert(key, location);
+                Some(location)
+            }
+            None => {
+                self.native_errors.push(format!(
+                    "native OpenGL uniform {uniform} was not found for logical program handle {program_handle}"
+                ));
+                None
+            }
+        }
+    }
+
     fn pixel_data_from_source(
         &mut self,
         pixel_source: &mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadPixelSource,
@@ -316,6 +488,202 @@ impl DesktopNativeOpenGlDriver<'_> {
                     "failed to load native OpenGL texture pixel source: {error:?}"
                 ));
                 None
+            }
+        }
+    }
+
+    fn consume_native_resolved_shader_lifecycle_command(
+        &mut self,
+        command: &mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand,
+    ) {
+        match command {
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::DeleteProgram {
+                program_handle,
+                ..
+            } => {
+                if let Some(program_handle) = program_handle {
+                    self.delete_program_handle(*program_handle);
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateShader {
+                stage,
+                shader_handle,
+                previous_shader_handle,
+                ..
+            } => {
+                if let Some(previous_shader_handle) = previous_shader_handle {
+                    self.delete_shader_handle(*previous_shader_handle);
+                }
+                self.create_shader_for_handle(*shader_handle, *stage);
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::ShaderSource {
+                shader,
+                stage,
+                shader_handle,
+                source_path,
+                ..
+            } => {
+                if let Some(native_shader) = self.existing_shader(*shader_handle) {
+                    if let Some(source) =
+                        self.load_preprocessed_shader_source(*shader, *stage, source_path)
+                    {
+                        unsafe {
+                            self.gl.shader_source(native_shader, &source);
+                        }
+                        self.shader_sources.insert(*shader_handle, source);
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CompileShader {
+                stage,
+                shader_handle,
+                ..
+            } => {
+                if let Some(native_shader) = self.existing_shader(*shader_handle) {
+                    unsafe {
+                        self.gl.compile_shader(native_shader);
+                        if !self.gl.get_shader_compile_status(native_shader) {
+                            self.native_errors.push(format!(
+                                "native OpenGL {stage:?} shader compile failed for logical handle {shader_handle}: {}",
+                                self.gl.get_shader_info_log(native_shader)
+                            ));
+                        }
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateProgram {
+                program_handle,
+                previous_program_handle,
+                ..
+            } => {
+                if let Some(previous_program_handle) = previous_program_handle {
+                    self.delete_program_handle(*previous_program_handle);
+                }
+                self.create_program_for_handle(*program_handle);
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::AttachShader {
+                program_handle,
+                shader_handle,
+                ..
+            } => {
+                if let (Some(program), Some(shader)) = (
+                    self.existing_program(*program_handle),
+                    self.existing_shader(*shader_handle),
+                ) {
+                    unsafe {
+                        self.gl.attach_shader(program, shader);
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::LinkProgram {
+                program_handle,
+                ..
+            } => {
+                if let Some(program) = self.existing_program(*program_handle) {
+                    unsafe {
+                        self.gl.link_program(program);
+                        if !self.gl.get_program_link_status(program) {
+                            self.native_errors.push(format!(
+                                "native OpenGL program link failed for logical handle {program_handle}: {}",
+                                self.gl.get_program_info_log(program)
+                            ));
+                        }
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::DeleteShader {
+                shader_handle,
+                ..
+            } => {
+                if let Some(shader_handle) = shader_handle {
+                    self.delete_shader_handle(*shader_handle);
+                }
+            }
+        }
+    }
+
+    fn consume_native_resolved_shader_command(
+        &mut self,
+        command: &mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand,
+    ) {
+        match command {
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand::UseProgram {
+                program_handle,
+                ..
+            } => {
+                if let Some(program) = self.existing_program(*program_handle) {
+                    unsafe {
+                        self.gl.use_program(Some(program));
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand::UploadUniform {
+                program_handle,
+                uniform,
+                value,
+                ..
+            } => {
+                if let Some(program) = self.existing_program(*program_handle) {
+                    if let Some(location) = self.uniform_location(*program_handle, program, uniform)
+                    {
+                        self.upload_uniform_value(&location, uniform, value);
+                    }
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand::ActiveTexture {
+                texture_unit,
+                ..
+            } => unsafe {
+                self.gl.active_texture(*texture_unit);
+            },
+            mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand::BindTexture {
+                target,
+                texture_handle,
+                ..
+            } => {
+                if let Some(texture) = self.texture_for_handle(*texture_handle) {
+                    unsafe {
+                        self.gl.bind_texture(*target, Some(texture));
+                    }
+                }
+            }
+        }
+    }
+
+    fn upload_uniform_value(
+        &mut self,
+        location: &glow::NativeUniformLocation,
+        uniform: &'static str,
+        value: &mindustry_core::mindustry::graphics::UniformValue,
+    ) {
+        match value {
+            mindustry_core::mindustry::graphics::UniformValue::Int(value) => unsafe {
+                self.gl.uniform_1_i32(Some(location), *value);
+            },
+            mindustry_core::mindustry::graphics::UniformValue::Float(value) => unsafe {
+                self.gl.uniform_1_f32(Some(location), *value);
+            },
+            mindustry_core::mindustry::graphics::UniformValue::Vec2(value) => unsafe {
+                self.gl.uniform_2_f32(Some(location), value[0], value[1]);
+            },
+            mindustry_core::mindustry::graphics::UniformValue::Vec3(value) => unsafe {
+                self.gl
+                    .uniform_3_f32(Some(location), value[0], value[1], value[2]);
+            },
+            mindustry_core::mindustry::graphics::UniformValue::Vec4(value) => unsafe {
+                self.gl
+                    .uniform_4_f32(Some(location), value[0], value[1], value[2], value[3]);
+            },
+            mindustry_core::mindustry::graphics::UniformValue::Vec4Array(values) => {
+                let flattened = values.iter().flatten().copied().collect::<Vec<_>>();
+                unsafe {
+                    self.gl.uniform_4_f32_slice(Some(location), &flattened);
+                }
+            }
+            mindustry_core::mindustry::graphics::UniformValue::Mat4(symbolic_matrix) => {
+                self.native_errors.push(format!(
+                    "native OpenGL uniform {uniform} uses unresolved symbolic Mat4 {symbolic_matrix}"
+                ));
             }
         }
     }
@@ -654,6 +1022,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommandSink
         &mut self,
         command: mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand,
     ) {
+        self.consume_native_resolved_shader_command(&command);
         self.recording
             .consume_opengl_resolved_shader_command(command);
     }
@@ -667,6 +1036,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleComma
         &mut self,
         command: mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand,
     ) {
+        self.consume_native_resolved_shader_lifecycle_command(&command);
         self.recording
             .consume_opengl_resolved_shader_lifecycle_command(command);
     }
@@ -726,6 +1096,11 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             textures: &mut self.textures,
             buffers: &mut self.buffers,
             vertex_arrays: &mut self.vertex_arrays,
+            shaders: &mut self.shaders,
+            programs: &mut self.programs,
+            shader_sources: &mut self.shader_sources,
+            uniform_locations: &mut self.uniform_locations,
+            shader_asset_root: &self.shader_asset_root,
             native_errors: &mut self.native_errors,
         };
         let driver_state = executor.drive_driver(&mut driver);
