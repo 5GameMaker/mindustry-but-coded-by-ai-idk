@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **33.1%**。
+- 当前总体迁移完成度：约 **33.2%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11808,3 +11808,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续 OpenGL resolve command 展开为真实 blit/screen-quad；
   2. 启动 feature-gated `opengl-backend` runtime 壳层；
   3. 探索/补齐 `network_io.rs` world payload 与 Java 联机兼容 smoke。
+
+---
+
+## 378. 最新闭环记录：feature-gated OpenGL backend runtime 壳层
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **33.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/Cargo.toml`
+    - 新增 `default = []`；
+    - 新增 `opengl-backend = []`；
+  - `desktop/src/lib.rs`
+    - 新增 feature-gated `DesktopGraphicsOpenGlBackendRuntimeState`；
+    - 新增 `DesktopGraphicsOpenGlBackendRuntime` trait：`resize_surface` / `submit_resolving_executor` / `present_frame`；
+    - 新增 `DesktopGraphicsNullOpenGlBackendRuntime`，通过 recording driver 接住 shared resolver 输出；
+    - 新增 `desktop_graphics_opengl_backend_runtime_feature_records_driver_submission`，验证 feature on 时 runtime 可 resize/submit/present，并记录 framebuffer attachment + resolve command。
+- 关键语义：
+  - 真实 OpenGL 后端有了 feature-gated runtime 边界；
+  - 默认无 feature 仍保持 headless，不引入 `glow/glutin/winit`；
+  - 后续真实 runtime 应替换 null runtime 的 recording driver，并在该边界下接窗口、上下文、swap/present。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_runtime_feature_records_driver_submission --lib --features opengl-backend`
+  - `cargo check -p mindustry-desktop --no-default-features`
+  - `cargo check -p mindustry-desktop --features opengl-backend`
+- 下一步：
+  1. 将 `ResolveCommand::ShaderBlit` 翻译为 fullscreen quad draw command；
+  2. 按 `opengl-backend` feature 给 `main.rs` 增加运行时路由；
+  3. 验收并提交 `network_io.rs` worker 的联机协议回归。

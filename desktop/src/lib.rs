@@ -4177,6 +4177,57 @@ impl DesktopGraphicsOpenGlBackendResolveCommandSink
     }
 }
 
+#[cfg(feature = "opengl-backend")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendRuntimeState {
+    pub surface_size: Option<DesktopSurfaceSize>,
+    pub resize_events: usize,
+    pub frames_submitted: usize,
+    pub present_events: usize,
+    pub last_driver_state: Option<DesktopGraphicsOpenGlBackendDriverExecutionState>,
+}
+
+#[cfg(feature = "opengl-backend")]
+pub trait DesktopGraphicsOpenGlBackendRuntime {
+    fn resize_surface(&mut self, size: DesktopSurfaceSize);
+
+    fn submit_resolving_executor(
+        &mut self,
+        executor: &DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
+    ) -> DesktopGraphicsOpenGlBackendDriverExecutionState;
+
+    fn present_frame(&mut self);
+}
+
+#[cfg(feature = "opengl-backend")]
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsNullOpenGlBackendRuntime {
+    pub state: DesktopGraphicsOpenGlBackendRuntimeState,
+    pub driver: DesktopGraphicsRecordingOpenGlBackendDriver,
+}
+
+#[cfg(feature = "opengl-backend")]
+impl DesktopGraphicsOpenGlBackendRuntime for DesktopGraphicsNullOpenGlBackendRuntime {
+    fn resize_surface(&mut self, size: DesktopSurfaceSize) {
+        self.state.surface_size = Some(size);
+        self.state.resize_events += 1;
+    }
+
+    fn submit_resolving_executor(
+        &mut self,
+        executor: &DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
+    ) -> DesktopGraphicsOpenGlBackendDriverExecutionState {
+        let driver_state = executor.drive_driver(&mut self.driver);
+        self.state.frames_submitted += 1;
+        self.state.last_driver_state = Some(driver_state);
+        driver_state
+    }
+
+    fn present_frame(&mut self) {
+        self.state.present_events += 1;
+    }
+}
+
 impl DesktopGraphicsOpenGlBackendResolvedDrawCallAction {
     pub fn to_opengl_draw_commands(&self) -> Vec<DesktopGraphicsOpenGlBackendDrawCommand> {
         match self {
@@ -18635,6 +18686,51 @@ mod tests {
                     ..
                 }
             ))
+        ));
+    }
+
+    #[cfg(feature = "opengl-backend")]
+    #[test]
+    fn desktop_graphics_opengl_backend_runtime_feature_records_driver_submission() {
+        let mut executor = super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        executor.consume_opengl_framebuffer_attachment(
+            super::DesktopGraphicsOpenGlBackendFramebufferAttachmentPlan::from_buffer_name(
+                "buffer:runtime-feature",
+            ),
+        );
+        executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
+            source_target: RenderTarget::Buffer("runtime-feature".into()),
+            resolve_target: RenderTarget::Screen,
+            resolve_kind: RenderResolveKind::ShaderBlit,
+        });
+
+        let mut runtime = super::DesktopGraphicsNullOpenGlBackendRuntime::default();
+        super::DesktopGraphicsOpenGlBackendRuntime::resize_surface(
+            &mut runtime,
+            DesktopSurfaceSize::new(1280, 720),
+        );
+        let driver_state = super::DesktopGraphicsOpenGlBackendRuntime::submit_resolving_executor(
+            &mut runtime,
+            &executor,
+        );
+        super::DesktopGraphicsOpenGlBackendRuntime::present_frame(&mut runtime);
+
+        assert_eq!(driver_state.framebuffer_attachment_plans, 1);
+        assert_eq!(driver_state.resolve_commands, 1);
+        assert_eq!(
+            runtime.state.surface_size,
+            Some(DesktopSurfaceSize::new(1280, 720))
+        );
+        assert_eq!(runtime.state.resize_events, 1);
+        assert_eq!(runtime.state.frames_submitted, 1);
+        assert_eq!(runtime.state.present_events, 1);
+        assert_eq!(runtime.state.last_driver_state, Some(driver_state));
+        assert!(matches!(
+            runtime.driver.commands.as_slice(),
+            [
+                super::DesktopGraphicsOpenGlBackendDriverCommand::FramebufferAttachment(_),
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Resolve(_)
+            ]
         ));
     }
 

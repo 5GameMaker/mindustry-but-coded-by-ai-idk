@@ -4,5 +4,9 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = []
+opengl-backend = []
+
 [dependencies]
 mindustry-core = { path = "../core" }

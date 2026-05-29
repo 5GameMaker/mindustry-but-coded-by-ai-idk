@@ -14456,3 +14456,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt`
   - `cargo test -p mindustry-core save_ --lib`
 - 当前总体迁移约 33.1%，仍未达到完整可玩。
+
+## 12.472 feature-gated OpenGL backend runtime 壳层
+
+- 2026-05-29：为真实 OpenGL 后端接入新增 `opengl-backend` feature 与最小 runtime 壳层。本轮仍不引入 `glow/glutin/winit`，先保证 feature on/off 编译边界与 driver 提交流可测试。
+- Rust 新增/接入：
+  - `desktop/Cargo.toml`
+    - 新增 `[features] default = []`；
+    - 新增 `opengl-backend = []`；
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendRuntimeState`；
+    - 新增 `DesktopGraphicsOpenGlBackendRuntime` trait，包含 `resize_surface(...)`、`submit_resolving_executor(...)`、`present_frame(...)`；
+    - 新增 `DesktopGraphicsNullOpenGlBackendRuntime`，feature on 时用 recording driver 接住 shared resolving executor 输出；
+    - 新增 feature-gated 测试 `desktop_graphics_opengl_backend_runtime_feature_records_driver_submission`，确认 resize/submit/present 可观测，且 driver 收到 framebuffer attachment + resolve command。
+- 迁移意义：
+  - 真实 OpenGL 后端开始有独立 runtime 边界，后续可在该 trait 下替换为 `glow/glutin/winit` 实现；
+  - 默认 feature off 仍保持 headless 行为，不影响现有测试；
+  - feature on/off 的编译和 smoke test 已成为后续真实窗口/上下文接入前置门槛。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_runtime_feature_records_driver_submission --lib --features opengl-backend`
+  - `cargo check -p mindustry-desktop --no-default-features`
+  - `cargo check -p mindustry-desktop --features opengl-backend`
+- 仍未完成：
+  - `DesktopGraphicsNullOpenGlBackendRuntime` 仍为 recording/null runtime，不创建真实窗口或 GL context；
+  - `desktop/src/main.rs` 仍固定 headless 启动，尚未按 `opengl-backend` 分流；
+  - 当前总体迁移约 33.2%，仍未达到完整可玩。
