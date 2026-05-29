@@ -14097,7 +14097,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 预处理仍是最小模型，未覆盖 Arc 全量平台差异；
   - preprocess 结果尚未与 resolved lifecycle executor 合并为真实 shader build executor；
   - compile/link error log 仍未记录；
-  - 当前总体迁移约 31.6%，仍未达到完整可玩。
+- 当前总体迁移约 31.7%，仍未达到完整可玩。
 
 ## 12.457 Shader build executor 与 compile/link log 边界接入
 
@@ -14126,7 +14126,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - build executor 仍未调用真实 `glCreateShader/glShaderSource/glCompileShader/glLinkProgram`；
   - compile/link log 当前由 override/record 边界表达，尚未来自真实 GL；
   - build report 的 program handle 尚未和 `ShaderApply/DrawCommand` 的 `UseProgram` 合流；
-  - 当前总体迁移约 31.6%，仍未达到完整可玩。
+  - 当前总体迁移约 31.7%，仍未达到完整可玩。
 
 ## 12.458 Shader texture binding 解析闭环
 
@@ -14149,4 +14149,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - shader apply 的 `UseProgram` 仍是 `program_key` 主导，尚未和 draw 侧 `program_handle` 真正合流；
   - `EffectBuffer` 仍是语义上稳定的 runtime texture identity，但还没接到真实 framebuffer attachment 管线；
-  - 当前总体迁移约 31.6%，仍未达到完整可玩。
+  - 当前总体迁移约 31.7%，仍未达到完整可玩。
+
+## 12.459 Shader program handle apply 侧合流
+
+- 2026-05-29：继续收紧 shader apply 与真实 OpenGL program handle 的距离。当前 `ShaderApply` 事件会把 `ShaderProgramIdentity` 从单纯 `program_key` 推进到带 `gl_program` 的 handle-backed identity，同时保留 `program_key` 作为逻辑主键。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendShaderProgramIdentity` 新增 `with_resolved_gl_program(...)`，保留原 `program_key`，只补 `gl_program`；
+    - `DesktopGraphicsOpenGlBackendShaderProgramBinding::resolve_program_handle(...)` 通过 `DesktopGraphicsOpenGlBackendHandleCache::program_handle(...)` 解析 shader program handle；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 与 `DesktopGraphicsOpenGlBackendExecutorState` 新增 shader program handle cache / allocator；
+    - `ShaderApply` 事件处理现在会先 resolve uniform locations，再 resolve program handle，再 resolve texture bindings。
+  - 测试：
+    - 更新 shader apply / OpenGL backend 快照，确认 `current_shader_program` 与 `shader_program_bindings` 携带 `gl_program: Some(handle)`；
+    - `cargo test -p mindustry-desktop opengl --lib`
+    - `cargo fmt`
+- 迁移意义：
+  - shader apply 侧已经从“只有符号 program key”推进到“逻辑 key + 执行 handle”；
+  - 仍保留 `program_key`，避免破坏 uniform location cache、reload 与现有 draw call key 语义；
+  - 这是后续把 `ShaderApply` / `DrawCommand::UseProgram` 合并成统一真实 GL 命令流的前置步骤。
+- 仍未完成：
+  - shader command enum 本身仍是 `UseProgram { program_key }`，尚未输出 resolved `program_handle` 命令；
+  - draw call resolving executor 仍有自己的 handle cache，后续需要进一步共享/合并 cache 边界；
+  - 当前总体迁移约 31.7%，仍未达到完整可玩。

@@ -1971,6 +1971,11 @@ impl DesktopGraphicsOpenGlBackendShaderProgramIdentity {
         self.program_key = format!("gl-program:{gl_program}:generation:{generation}");
         self
     }
+
+    pub fn with_resolved_gl_program(mut self, gl_program: u32) -> Self {
+        self.gl_program = Some(gl_program);
+        self
+    }
 }
 
 impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
@@ -2027,6 +2032,18 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
             binding.uniform_location =
                 Some(cache.uniform_location(&self.identity.program_key, binding.uniform));
         }
+    }
+
+    pub fn resolve_program_handle(
+        &mut self,
+        cache: &mut DesktopGraphicsOpenGlBackendHandleCache,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) {
+        let program_handle = cache.program_handle(self.identity.program_key.clone(), allocator);
+        self.identity = self
+            .identity
+            .clone()
+            .with_resolved_gl_program(program_handle);
     }
 
     pub fn resolve_texture_bindings(
@@ -4295,6 +4312,8 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub shader_commands: Vec<DesktopGraphicsOpenGlBackendShaderCommand>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
+    pub shader_program_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub shader_program_handle_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub shader_texture_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
@@ -4342,6 +4361,8 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             shader_program_bindings: Vec::new(),
             shader_commands: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
+            shader_program_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
+            shader_program_handle_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
             shader_texture_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
             shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
             sprite_texture_resource_table:
@@ -4634,6 +4655,10 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
                 let mut binding =
                     DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
                 binding.resolve_locations(&mut self.state.location_cache);
+                binding.resolve_program_handle(
+                    &mut self.state.shader_program_handle_cache,
+                    &mut self.state.shader_program_handle_allocator,
+                );
                 binding.resolve_texture_bindings(
                     &mut self.state.shader_texture_handle_cache,
                     &mut self.state.shader_texture_handle_allocator,
@@ -4686,6 +4711,8 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub shader_program_bindings: Vec<DesktopGraphicsOpenGlBackendShaderProgramBinding>,
     pub shader_commands: Vec<DesktopGraphicsOpenGlBackendShaderCommand>,
     pub location_cache: DesktopGraphicsOpenGlBackendLocationCache,
+    pub shader_program_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub shader_program_handle_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub shader_texture_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
     pub shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
@@ -4734,6 +4761,8 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             shader_program_bindings: Vec::new(),
             shader_commands: Vec::new(),
             location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
+            shader_program_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
+            shader_program_handle_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
             shader_texture_handle_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
             shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
             sprite_texture_resource_table:
@@ -5026,6 +5055,10 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                 let mut binding =
                     DesktopGraphicsOpenGlBackendShaderProgramBinding::from_apply(&apply);
                 binding.resolve_locations(&mut self.state.location_cache);
+                binding.resolve_program_handle(
+                    &mut self.state.shader_program_handle_cache,
+                    &mut self.state.shader_program_handle_allocator,
+                );
                 binding.resolve_texture_bindings(
                     &mut self.state.shader_texture_handle_cache,
                     &mut self.state.shader_texture_handle_allocator,
@@ -14580,7 +14613,7 @@ mod tests {
                 shader: ShaderId::BlockBuild,
                 program_key: "shader:BlockBuild".into(),
                 generation: 0,
-                gl_program: None,
+                gl_program: Some(1),
             })
         );
         assert_eq!(
@@ -14590,7 +14623,7 @@ mod tests {
                     shader: ShaderId::BlockBuild,
                     program_key: "shader:BlockBuild".into(),
                     generation: 0,
-                    gl_program: None,
+                    gl_program: Some(1),
                 },
                 operation_count: 6,
                 error_count: 0,

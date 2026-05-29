@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **31.6%**。
+- 当前总体迁移完成度：约 **31.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -398,7 +398,7 @@ git -C 'D:/MDT/rust-mindustry' status --short
 - 当前 shader 链路已经从“离散 loader / preprocess / lifecycle helper”推进到“单一 build executor”，后续真实 OpenGL executor 可以直接接这个 report 边界写入 `glCreateShader/glCompileShader/glLinkProgram` 的结果。
 - 仍然保持原版 Arc / OpenGL 路线，没有引入 wgpu / Bevy / Vulkan。
 
-当前总体迁移约 **31.6%**，下一步建议继续推进：
+当前总体迁移约 **31.7%**，下一步建议继续推进：
 
 1. `program handle` 与 `ShaderApply/DrawCommand::UseProgram` 合流。
 2. `TextureBinding::Asset / EffectBuffer` 解析成实际纹理资源句柄。
@@ -434,7 +434,37 @@ git -C 'D:/MDT/rust-mindustry' status --short
 - `EffectBuffer` 不再只是纯符号占位，而是已经有稳定 runtime texture identity；
 - 这一步仍然保持 OpenGL / Arc 路线，没有切换到别的渲染引擎。
 
-当前总体迁移完成度：约 **31.6%**。
+当前总体迁移完成度：约 **31.7%**。
+
+### 2026-05-29 续作：Shader program handle apply 侧合流
+
+文件：
+
+- `desktop/src/lib.rs`
+- `MIGRATION.md`
+- `README.md`
+
+完成内容：
+
+1. `DesktopGraphicsOpenGlBackendShaderProgramIdentity` 新增 `with_resolved_gl_program(...)`，用于保留逻辑 `program_key` 的同时写入 `gl_program`。
+2. `DesktopGraphicsOpenGlBackendShaderProgramBinding::resolve_program_handle(...)` 已通过 `DesktopGraphicsOpenGlBackendHandleCache::program_handle(...)` 给 shader apply 侧解析 program handle。
+3. `DesktopGraphicsOpenGlBackendAdapterExecutionState` 与 `DesktopGraphicsOpenGlBackendExecutorState` 都新增 shader program handle cache / allocator。
+4. `ShaderApply` 事件处理顺序现在是：
+   - resolve uniform locations
+   - resolve program handle
+   - resolve texture bindings
+5. OpenGL backend 快照已更新，`current_shader_program` 与 `shader_program_bindings` 现在会携带 `gl_program: Some(handle)`。
+6. 已验证：
+   - `cargo test -p mindustry-desktop opengl --lib`
+   - `cargo fmt`
+
+迁移意义：
+
+- shader apply 侧从纯 `program_key` 推进到了 `program_key + gl_program`；
+- 仍保留 `program_key`，避免破坏 location cache / shader reload / draw call key 语义；
+- 后续下一步是让 shader command enum / draw resolving executor 进一步共享或合并同一 program handle cache。
+
+当前总体迁移完成度：约 **31.7%**。
 
 ### 较早完成：世界流前置信息
 
