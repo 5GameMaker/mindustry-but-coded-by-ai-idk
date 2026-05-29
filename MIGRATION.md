@@ -12086,3 +12086,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - block particle plan 已被 desktop trace/summary 消费，但仍需生成 world-space particle vertices 或真实 backend draw call；
   - 当前总体迁移约 23.2%，仍未达到完整可玩。
+
+### 12.381 Block particle world-space sample 输出
+
+- 2026-05-29：继续把 `DrawParticles` / `DrawSoftParticles` 从“参数计划”推进到后续 backend 可绘制的 world-space 输出。本轮不引入 GPU 依赖，先在 core `BlockRendererBlockParticlePlan` 上补确定性 world sample 展开，并让 desktop trace/summary 能观察 world sample 数。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBlockParticlePlan` 新增 `size`，用于按 block size 计算建筑中心；
+    - 新增 `BlockRendererBlockParticleWorldSample`；
+    - 新增 `BlockRendererBlockParticlePlan::world_samples(tile_size_world)`；
+    - world sample 使用 `sample.angle.to_radians()` 与 `sample.length` 从建筑中心转换出 `x/y`，携带 `size/alpha/layer/color/color_t`；
+    - 继续复用 `building_sprite_rect(...)` 的建筑中心语义，避免和现有 block sprite 坐标系统分叉。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsExecutionTrace` 新增 `block_particle_world_samples`；
+    - `DesktopGraphicsExecutionSummary` 新增 `block_particle_world_samples`；
+    - trace 构建时从 `frame.bundle.block_renderer.block_particles` 展开 `world_samples(8.0)` 计数，作为后续 live backend 接线前的可观察契约。
+- 已跑验证：
+  - `cargo test -p mindustry-core block_renderer_plan_collects_draw_particles_from_building_drawer_and_runtime_warmup --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - world samples 目前只以计数进入 desktop trace/summary，后续还要暴露完整 sample trace 或直接喂给真实 backend；
+  - `DrawParticles` 的 poly/sides/particleRotation 与 drawer x/y 偏移还未完整建模；
+  - 当前总体迁移约 23.3%，仍未达到完整可玩。

@@ -9390,3 +9390,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 `BlockDrawerParticlePlan` 转成 world-space particle output/vertices；
   2. 把 block particles 接入真实 effect renderer 或未来 GPU backend draw call；
   3. 继续推进真实 window/surface/texture upload 后端准备。
+
+---
+
+## 283. 最新闭环记录：Block particle world-space samples
+
+- 本轮总体进度更新：约 **23.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererBlockParticlePlan.size`；
+    - `BlockRendererBlockParticleWorldSample`；
+    - `BlockRendererBlockParticlePlan::world_samples(tile_size_world)`；
+    - 用建筑中心 + angle/length 生成 world-space `x/y`，携带 size、alpha、layer、color、color_t。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsExecutionTrace.block_particle_world_samples`；
+    - `DesktopGraphicsExecutionSummary.block_particle_world_samples`；
+    - headless renderer trace 可观察 block particle world sample 数。
+- 已验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `cargo test -p mindustry-core block_renderer_plan_collects_draw_particles_from_building_drawer_and_runtime_warmup --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `git diff --check`
+- 下一步：
+  1. desktop trace 增加 block particle sample 明细列表或 live backend sink；
+  2. 补 drawer x/y、poly/sides/particleRotation 等 Java `DrawParticles` 未建模字段；
+  3. 继续补 `DesktopFramePacing` / `AlreadyClosed` / surface 默认契约测试，为真实 `sdl2+glow` 后端做准备。

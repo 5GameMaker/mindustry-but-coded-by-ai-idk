@@ -9,7 +9,7 @@ use crate::mindustry::{
     ctype::ContentId,
     entities::comp::DecalColor,
     graphics::{
-        particle_renderer::{BlockDrawerParticlePlan, ParticleRendererState},
+        particle_renderer::{BlockDrawerParticlePlan, ParticleColor, ParticleRendererState},
         CacheLayer, Layer, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
     },
     world::point2_pack,
@@ -1114,7 +1114,51 @@ pub fn draw_block_dispatch_sprite_ops(
 pub struct BlockRendererBlockParticlePlan {
     pub coord: TileCoord,
     pub block: String,
+    pub size: u8,
     pub plan: BlockDrawerParticlePlan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockRendererBlockParticleWorldSample {
+    pub coord: TileCoord,
+    pub index: usize,
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+    pub alpha: f32,
+    pub layer: f32,
+    pub color: ParticleColor,
+    pub color_t: Option<f32>,
+}
+
+impl BlockRendererBlockParticlePlan {
+    pub fn world_samples(
+        &self,
+        tile_size_world: f32,
+    ) -> Vec<BlockRendererBlockParticleWorldSample> {
+        if tile_size_world <= 0.0 {
+            return Vec::new();
+        }
+
+        let center = building_sprite_rect(self.coord, self.size, tile_size_world).center();
+        (0..self.plan.particle_count)
+            .filter_map(|index| {
+                let sample = self.plan.sample_for_index(index)?;
+                let radians = sample.angle.to_radians();
+                Some(BlockRendererBlockParticleWorldSample {
+                    coord: self.coord,
+                    index,
+                    x: center.x + radians.cos() * sample.length,
+                    y: center.y + radians.sin() * sample.length,
+                    size: sample.size,
+                    alpha: sample.alpha,
+                    layer: self.plan.layer,
+                    color: self.plan.color,
+                    color_t: sample.color_t,
+                })
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1411,6 +1455,7 @@ fn append_block_particle_plans(plan: &mut BlockRendererPlan, buildings: &[Buildi
             .map(|particle_plan| BlockRendererBlockParticlePlan {
                 coord: building.coord,
                 block: building.block.clone(),
+                size: building.size,
                 plan: particle_plan,
             }),
         );
@@ -2174,6 +2219,14 @@ mod tests {
             .block_particles
             .iter()
             .all(|particle| particle.plan.time == 19.0));
+
+        let samples = plan.block_particles[0].world_samples(8.0);
+        assert_eq!(samples.len(), plan.block_particles[0].plan.particle_count);
+        assert!(samples.iter().all(|sample| sample.coord == coord));
+        assert!(samples.iter().all(|sample| sample.x.is_finite()
+            && sample.y.is_finite()
+            && sample.size > 0.0
+            && sample.alpha > 0.0));
     }
 
     #[test]

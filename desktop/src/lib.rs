@@ -447,6 +447,7 @@ impl DesktopGraphicsLiveBackendDrawSpriteSink for DesktopGraphicsNullLiveBackend
 pub struct DesktopGraphicsExecutionTrace {
     pub shader_dispatch: DesktopGraphicsShaderDispatchExecutionTrace,
     pub block_particle_plans: usize,
+    pub block_particle_world_samples: usize,
     pub execution_steps: Vec<DesktopGraphicsExecutionStepTrace>,
     pub render_passes: Vec<DesktopGraphicsPassExecutionTrace>,
 }
@@ -527,6 +528,18 @@ impl DesktopGraphicsExecutionTrace {
             .block_renderer
             .as_ref()
             .map_or(0, |block_renderer| block_renderer.block_particles.len());
+        let block_particle_world_samples =
+            frame
+                .bundle
+                .block_renderer
+                .as_ref()
+                .map_or(0, |block_renderer| {
+                    block_renderer
+                        .block_particles
+                        .iter()
+                        .map(|particle| particle.world_samples(8.0).len())
+                        .sum()
+                });
         if block_particle_plans > 0 {
             execution_steps.push(DesktopGraphicsExecutionStepTrace::BlockParticles {
                 plan_count: block_particle_plans,
@@ -600,6 +613,7 @@ impl DesktopGraphicsExecutionTrace {
         Self {
             shader_dispatch,
             block_particle_plans,
+            block_particle_world_samples,
             execution_steps,
             render_passes,
         }
@@ -694,6 +708,7 @@ pub struct DesktopGraphicsExecutionSummary {
     pub atlas_missing_sprites: usize,
     pub block_renderer_slots: usize,
     pub block_particle_plans: usize,
+    pub block_particle_world_samples: usize,
     pub floor_renderer_slots: usize,
     pub fog_frame_slots: usize,
     pub overlay_renderer_slots: usize,
@@ -751,6 +766,7 @@ impl DesktopGraphicsExecutionSummary {
             .sum();
         summary.block_renderer_slots = usize::from(frame.bundle.block_renderer.is_some());
         summary.block_particle_plans = trace.block_particle_plans;
+        summary.block_particle_world_samples = trace.block_particle_world_samples;
         summary.floor_renderer_slots = usize::from(frame.bundle.floor_renderer.is_some());
         summary.fog_frame_slots = usize::from(frame.bundle.fog_frame.is_some());
         summary.overlay_renderer_slots = usize::from(frame.bundle.overlay_renderer.is_some());
@@ -5422,6 +5438,11 @@ mod tests {
         assert_eq!(stats.block_particle_plans, 1);
         assert_eq!(renderer.last_trace.block_particle_plans, 1);
         assert_eq!(renderer.last_execution.block_particle_plans, 1);
+        assert!(renderer.last_trace.block_particle_world_samples > 0);
+        assert_eq!(
+            renderer.last_execution.block_particle_world_samples,
+            renderer.last_trace.block_particle_world_samples
+        );
         assert!(renderer
             .last_trace
             .execution_steps
