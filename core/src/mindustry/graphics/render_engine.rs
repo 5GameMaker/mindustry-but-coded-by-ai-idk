@@ -97,6 +97,91 @@ impl RenderRect {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RenderUvRect {
+    pub u: f32,
+    pub v: f32,
+    pub u2: f32,
+    pub v2: f32,
+}
+
+impl RenderUvRect {
+    pub const fn new(u: f32, v: f32, u2: f32, v2: f32) -> Self {
+        Self { u, v, u2, v2 }
+    }
+
+    pub const fn full() -> Self {
+        Self::new(0.0, 0.0, 1.0, 1.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderTextureSampleFlip {
+    None,
+    UvY,
+    GeometryY,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderTextureSamplePlan {
+    pub geometry: RenderRect,
+    pub uv: RenderUvRect,
+    pub flip: RenderTextureSampleFlip,
+}
+
+impl RenderTextureSamplePlan {
+    pub const fn new(
+        geometry: RenderRect,
+        uv: RenderUvRect,
+        flip: RenderTextureSampleFlip,
+    ) -> Self {
+        Self { geometry, uv, flip }
+    }
+
+    pub fn fbo_uv_window(
+        camera: RenderCamera,
+        world_width_tiles: i32,
+        world_height_tiles: i32,
+        tile_size: f32,
+        offset_x: f32,
+        offset_y: f32,
+    ) -> Option<Self> {
+        if world_width_tiles <= 0 || world_height_tiles <= 0 || tile_size <= 0.0 {
+            return None;
+        }
+
+        let world_width = world_width_tiles as f32 * tile_size;
+        let world_height = world_height_tiles as f32 * tile_size;
+        if world_width <= 0.0 || world_height <= 0.0 {
+            return None;
+        }
+
+        let rect = camera.world_rect();
+        let sample_center_x = camera.center.x + offset_x;
+        let sample_center_y = camera.center.y + offset_y;
+        let u = (sample_center_x - rect.width / 2.0) / world_width;
+        let v = (sample_center_y - rect.height / 2.0) / world_height;
+        let u2 = (sample_center_x + rect.width / 2.0) / world_width;
+        let v2 = (sample_center_y + rect.height / 2.0) / world_height;
+
+        Some(Self::new(
+            rect,
+            RenderUvRect::new(u, v2, u2, v),
+            RenderTextureSampleFlip::UvY,
+        ))
+    }
+
+    pub fn background_buffer_geometry_flip(camera: RenderCamera) -> Self {
+        let rect = camera.world_rect();
+        let draw_size = rect.width.max(rect.height);
+        Self::new(
+            RenderRect::from_center(camera.center, draw_size, -draw_size),
+            RenderUvRect::full(),
+            RenderTextureSampleFlip::GeometryY,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct RenderViewport {
     pub x: f32,
     pub y: f32,
@@ -945,6 +1030,7 @@ pub struct RenderPass {
     pub target: RenderTarget,
     pub resolve_target: Option<RenderTarget>,
     pub resolve_kind: Option<RenderResolveKind>,
+    pub resolve_sample: Option<RenderTextureSamplePlan>,
     pub viewport: Option<RenderViewport>,
     pub camera: Option<RenderCamera>,
     pub commands: Vec<RenderCommand>,
@@ -959,6 +1045,7 @@ impl RenderPass {
             target: RenderTarget::default(),
             resolve_target: None,
             resolve_kind: None,
+            resolve_sample: None,
             viewport: None,
             camera: None,
             commands: Vec::new(),
@@ -984,6 +1071,11 @@ impl RenderPass {
     pub fn with_resolve(mut self, target: RenderTarget, kind: RenderResolveKind) -> Self {
         self.resolve_target = Some(target);
         self.resolve_kind = Some(kind);
+        self
+    }
+
+    pub fn with_resolve_sample(mut self, sample: RenderTextureSamplePlan) -> Self {
+        self.resolve_sample = Some(sample);
         self
     }
 
@@ -1752,6 +1844,38 @@ mod tests {
 
         assert_eq!(pass.resolve_target, Some(RenderTarget::Screen));
         assert_eq!(pass.resolve_kind, Some(RenderResolveKind::DrawFboSample));
+    }
+
+    #[test]
+    fn render_texture_sample_plan_matches_java_draw_fbo_uv_flip_and_background_geometry_flip() {
+        let camera = RenderCamera::new(
+            RenderPoint::new(50.0, 100.0),
+            RenderViewport::new(0.0, 0.0, 20.0, 40.0),
+        );
+
+        let fbo = RenderTextureSamplePlan::fbo_uv_window(camera, 10, 20, 8.0, 4.0, 4.0).unwrap();
+        assert_eq!(fbo.geometry, RenderRect::new(40.0, 80.0, 20.0, 40.0));
+        assert_eq!(fbo.flip, RenderTextureSampleFlip::UvY);
+        assert!((fbo.uv.u - 0.55).abs() < 0.0001);
+        assert!((fbo.uv.v - 0.775).abs() < 0.0001);
+        assert!((fbo.uv.u2 - 0.8).abs() < 0.0001);
+        assert!((fbo.uv.v2 - 0.525).abs() < 0.0001);
+
+        let pass = RenderPass::new(RenderPassKind::Fog)
+            .with_target(RenderTarget::Buffer("fog-dynamic".into()))
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawFboSample)
+            .with_resolve_sample(fbo);
+        assert_eq!(pass.resolve_sample, Some(fbo));
+
+        let background = RenderTextureSamplePlan::background_buffer_geometry_flip(camera);
+        assert_eq!(
+            background.geometry,
+            RenderRect::new(30.0, 120.0, 40.0, -40.0)
+        );
+        assert_eq!(background.uv, RenderUvRect::full());
+        assert_eq!(background.flip, RenderTextureSampleFlip::GeometryY);
+
+        assert!(RenderTextureSamplePlan::fbo_uv_window(camera, 0, 20, 8.0, 0.0, 0.0).is_none());
     }
 
     #[test]

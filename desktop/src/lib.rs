@@ -46,11 +46,12 @@ use mindustry_core::mindustry::graphics::{
     RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
     RenderCommand, RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
     RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
-    RenderTextStyle, RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan,
-    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask,
-    ShaderParameters, ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport,
-    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord,
-    UniformValue, Viewport as FloorViewport,
+    RenderTextStyle, RenderTextureSamplePlan, RenderViewport, ShaderApplyContext,
+    ShaderApplyOperation, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
+    ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
+    ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
+    TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -403,6 +404,7 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub target: RenderTarget,
     pub resolve_target: Option<RenderTarget>,
     pub resolve_kind: Option<RenderResolveKind>,
+    pub resolve_sample: Option<RenderTextureSamplePlan>,
     pub command_count: usize,
     pub commands: Vec<RenderCommand>,
     pub shader_applies: Vec<DesktopGraphicsShaderApplyCommandTrace>,
@@ -3068,6 +3070,7 @@ pub enum DesktopGraphicsOpenGlBackendStepKind {
     Resolve {
         resolve_target: RenderTarget,
         resolve_kind: RenderResolveKind,
+        resolve_sample: Option<RenderTextureSamplePlan>,
     },
 }
 
@@ -3257,6 +3260,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
                 kind: DesktopGraphicsOpenGlBackendStepKind::Resolve {
                     resolve_target,
                     resolve_kind: pass.resolve_kind.unwrap_or(RenderResolveKind::Blit),
+                    resolve_sample: pass.resolve_sample,
                 },
             });
         }
@@ -3421,18 +3425,20 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsNullOpenGlBackendSt
     fn consume_opengl_backend_step(&mut self, _step: DesktopGraphicsOpenGlBackendStep) {}
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendResolveEvent {
     pub source_target: RenderTarget,
     pub resolve_target: RenderTarget,
     pub resolve_kind: RenderResolveKind,
+    pub resolve_sample: Option<RenderTextureSamplePlan>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendResolveCommand {
     pub source_target: RenderTarget,
     pub resolve_target: RenderTarget,
     pub resolve_kind: RenderResolveKind,
+    pub resolve_sample: Option<RenderTextureSamplePlan>,
     pub source_attachment: Option<DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment>,
 }
 
@@ -3507,7 +3513,7 @@ pub trait DesktopGraphicsOpenGlBackendResolveCommandSink {
     );
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsRecordingOpenGlBackendResolveCommandSink {
     pub commands: Vec<DesktopGraphicsOpenGlBackendResolveCommand>,
 }
@@ -5057,6 +5063,7 @@ impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
             source_target: event.source_target,
             resolve_target: event.resolve_target,
             resolve_kind: event.resolve_kind,
+            resolve_sample: event.resolve_sample,
             source_attachment,
         };
         if let Some(program_key) = Self::resolve_draw_program_key(command.resolve_kind) {
@@ -6314,6 +6321,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
             DesktopGraphicsOpenGlBackendStepKind::Resolve {
                 resolve_target,
                 resolve_kind,
+                resolve_sample,
             } => {
                 if self.state.pass_active {
                     self.record_error("opengl backend resolved while a pass was active");
@@ -6341,6 +6349,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                         source_target: target.clone(),
                         resolve_target: resolve_target.clone(),
                         resolve_kind,
+                        resolve_sample,
                     });
                 self.state.resource_table.resolve(&target, &resolve_target);
                 self.state
@@ -6488,6 +6497,7 @@ pub struct DesktopGraphicsLiveBackendRenderTargetTrace {
     pub target: RenderTarget,
     pub resolve_target: Option<RenderTarget>,
     pub resolve_kind: Option<RenderResolveKind>,
+    pub resolve_sample: Option<RenderTextureSamplePlan>,
     pub event: DesktopGraphicsLiveBackendRenderTargetEventKind,
     pub command_count: usize,
 }
@@ -7075,6 +7085,7 @@ impl DesktopGraphicsExecutionTrace {
                                 target: pass.target.clone(),
                                 resolve_target: pass.resolve_target.clone(),
                                 resolve_kind: pass.resolve_kind,
+                                resolve_sample: pass.resolve_sample,
                                 command_count: pass.commands.len(),
                                 commands: pass.commands.clone(),
                                 shader_applies,
@@ -7108,6 +7119,7 @@ impl DesktopGraphicsExecutionTrace {
                         target: pass.target.clone(),
                         resolve_target: pass.resolve_target.clone(),
                         resolve_kind: pass.resolve_kind,
+                        resolve_sample: pass.resolve_sample,
                         event,
                         command_count: pass.command_count,
                     })
@@ -11080,10 +11092,10 @@ mod tests {
         ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode,
         RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan, RenderPass,
         RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize,
-        RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
-        ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCatalog,
-        ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureBinding, TileCoord, UniformBinding,
-        UniformValue,
+        RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
+        RenderTextureSamplePlan, RenderViewport, ShaderApplyContext, ShaderApplyOperation,
+        ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan,
+        TextureBinding, TileCoord, UniformBinding, UniformValue,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -14682,10 +14694,13 @@ mod tests {
         let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
         let mut render_frame =
             RenderFramePlan::new(41, RenderSize::new(64.0, 64.0), camera, viewport);
+        let resolve_sample =
+            RenderTextureSamplePlan::fbo_uv_window(camera, 16, 16, 4.0, 2.0, 2.0).unwrap();
         let mut pass = RenderPass::new(RenderPassKind::Lighting)
             .with_order(8)
             .with_target(RenderTarget::Buffer("lighting-buffer".into()))
-            .with_resolve(RenderTarget::Screen, RenderResolveKind::ShaderBlit);
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::ShaderBlit)
+            .with_resolve_sample(resolve_sample);
         pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
         pass.push(RenderCommand::set_blend(RenderBlendMode::Additive));
         pass.push(RenderCommand::draw_sprite(
@@ -14764,13 +14779,14 @@ mod tests {
             plan.steps[6].kind,
             DesktopGraphicsOpenGlBackendStepKind::EndPass
         ));
-        assert!(matches!(
-            plan.steps[7].kind,
+        match plan.steps[7].kind {
             DesktopGraphicsOpenGlBackendStepKind::Resolve {
                 resolve_target: RenderTarget::Screen,
-                resolve_kind: RenderResolveKind::ShaderBlit
-            }
-        ));
+                resolve_kind: RenderResolveKind::ShaderBlit,
+                resolve_sample: Some(sample),
+            } => assert_eq!(sample, resolve_sample),
+            ref other => panic!("expected resolve step with sample metadata, got {other:?}"),
+        }
         assert_eq!(
             plan.steps[5].source,
             DesktopGraphicsOpenGlBackendStepSource::RenderPass {
@@ -14799,7 +14815,8 @@ mod tests {
             execution_state.last_step.as_ref().map(|step| &step.kind),
             Some(DesktopGraphicsOpenGlBackendStepKind::Resolve {
                 resolve_target: RenderTarget::Screen,
-                resolve_kind: RenderResolveKind::ShaderBlit
+                resolve_kind: RenderResolveKind::ShaderBlit,
+                ..
             })
         ));
 
@@ -15058,6 +15075,7 @@ mod tests {
                 source_target: RenderTarget::Buffer("lighting-buffer".into()),
                 resolve_target: RenderTarget::Screen,
                 resolve_kind: RenderResolveKind::ShaderBlit,
+                resolve_sample: Some(resolve_sample),
             }]
         );
         assert!(executor.state.errors.is_empty());
@@ -15396,7 +15414,8 @@ mod tests {
             plan.steps[6].kind,
             DesktopGraphicsOpenGlBackendStepKind::Resolve {
                 resolve_target: RenderTarget::Screen,
-                resolve_kind: RenderResolveKind::ShaderBlit
+                resolve_kind: RenderResolveKind::ShaderBlit,
+                ..
             }
         ));
 
@@ -15418,6 +15437,7 @@ mod tests {
                 source_target: RenderTarget::Buffer("offscreen-fbo".into()),
                 resolve_target: RenderTarget::Screen,
                 resolve_kind: RenderResolveKind::ShaderBlit,
+                resolve_sample: None,
             }]
         );
         assert_eq!(
@@ -17533,6 +17553,7 @@ mod tests {
             DesktopGraphicsOpenGlBackendStepKind::Resolve {
                 resolve_target: RenderTarget::Screen,
                 resolve_kind: RenderResolveKind::DrawFboSample,
+                resolve_sample: None,
             },
         ));
 
@@ -17544,6 +17565,7 @@ mod tests {
                 source_target: RenderTarget::Buffer("active".into()),
                 resolve_target: RenderTarget::Screen,
                 resolve_kind: RenderResolveKind::DrawFboSample,
+                resolve_sample: None,
             }
         );
         assert!(executor
@@ -18803,6 +18825,7 @@ mod tests {
             source_target: RenderTarget::Buffer("shader-blit-source".into()),
             resolve_target: RenderTarget::Screen,
             resolve_kind: RenderResolveKind::ShaderBlit,
+            resolve_sample: None,
             source_attachment: Some(
                 super::DesktopGraphicsOpenGlBackendResolvedFramebufferAttachment {
                     framebuffer_key: "framebuffer:buffer:shader-blit-source".into(),
@@ -18896,6 +18919,7 @@ mod tests {
             source_target: RenderTarget::Buffer("shader-blit-source".into()),
             resolve_target: RenderTarget::Screen,
             resolve_kind: RenderResolveKind::ShaderBlit,
+            resolve_sample: None,
         });
 
         assert_eq!(
@@ -18957,11 +18981,13 @@ mod tests {
             source_target: RenderTarget::Buffer("draw-rect-source".into()),
             resolve_target: RenderTarget::Screen,
             resolve_kind: RenderResolveKind::DrawRectSample,
+            resolve_sample: None,
         });
         executor.consume_opengl_resolve_event(super::DesktopGraphicsOpenGlBackendResolveEvent {
             source_target: RenderTarget::Buffer("draw-fbo-source".into()),
             resolve_target: RenderTarget::Screen,
             resolve_kind: RenderResolveKind::DrawFboSample,
+            resolve_sample: None,
         });
 
         assert_eq!(executor.resolve_commands.len(), 2);
@@ -19050,6 +19076,7 @@ mod tests {
             source_target: RenderTarget::Buffer("runtime-feature".into()),
             resolve_target: RenderTarget::Screen,
             resolve_kind: RenderResolveKind::ShaderBlit,
+            resolve_sample: None,
         });
 
         let mut runtime = super::DesktopGraphicsNullOpenGlBackendRuntime::default();
@@ -19818,6 +19845,7 @@ mod tests {
                 target: RenderTarget::Buffer("effect-buffer".into()),
                 resolve_target: Some(RenderTarget::Screen),
                 resolve_kind: Some(RenderResolveKind::ShaderBlit),
+                resolve_sample: None,
                 event: DesktopGraphicsLiveBackendRenderTargetEventKind::Resolve,
                 command_count: 1,
             }]
