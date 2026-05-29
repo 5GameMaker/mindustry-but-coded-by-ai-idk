@@ -894,6 +894,138 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsRecordingOpenGlBacke
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
+    pub events_received: usize,
+    pub begin_passes: usize,
+    pub end_passes: usize,
+    pub flush_boundaries: usize,
+    pub shader_applies: usize,
+    pub resolves: usize,
+    pub errors: usize,
+    pub command_events: usize,
+    pub state_commands: usize,
+    pub draw_commands: usize,
+    pub deferred_noop_commands: usize,
+    pub custom_commands: usize,
+    pub clear_commands: usize,
+    pub blend_state_changes: usize,
+    pub clip_state_changes: usize,
+    pub draw_sprite_commands: usize,
+    pub draw_circle_commands: usize,
+    pub draw_text_commands: usize,
+    pub current_blend: RenderBlendMode,
+    pub current_clip: Option<RenderRect>,
+    pub current_shader: Option<ShaderId>,
+    pub custom_markers: Vec<String>,
+}
+
+impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
+    fn default() -> Self {
+        Self {
+            events_received: 0,
+            begin_passes: 0,
+            end_passes: 0,
+            flush_boundaries: 0,
+            shader_applies: 0,
+            resolves: 0,
+            errors: 0,
+            command_events: 0,
+            state_commands: 0,
+            draw_commands: 0,
+            deferred_noop_commands: 0,
+            custom_commands: 0,
+            clear_commands: 0,
+            blend_state_changes: 0,
+            clip_state_changes: 0,
+            draw_sprite_commands: 0,
+            draw_circle_commands: 0,
+            draw_text_commands: 0,
+            current_blend: RenderBlendMode::Normal,
+            current_clip: None,
+            current_shader: None,
+            custom_markers: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsClassifyingOpenGlBackendAdapter {
+    pub state: DesktopGraphicsOpenGlBackendAdapterExecutionState,
+}
+
+impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
+    fn consume_command(&mut self, command: RenderCommand) {
+        self.state.command_events += 1;
+        match command {
+            RenderCommand::Clear { .. } => {
+                self.state.state_commands += 1;
+                self.state.clear_commands += 1;
+            }
+            RenderCommand::SetBlend { mode } => {
+                self.state.state_commands += 1;
+                self.state.blend_state_changes += 1;
+                self.state.current_blend = mode;
+            }
+            RenderCommand::SetClip { rect } => {
+                self.state.state_commands += 1;
+                self.state.clip_state_changes += 1;
+                self.state.current_clip = Some(rect);
+            }
+            RenderCommand::ClearClip => {
+                self.state.state_commands += 1;
+                self.state.clip_state_changes += 1;
+                self.state.current_clip = None;
+            }
+            RenderCommand::DrawSprite { .. } => {
+                self.state.draw_commands += 1;
+                self.state.draw_sprite_commands += 1;
+            }
+            RenderCommand::DrawCircle { .. } => {
+                self.state.draw_commands += 1;
+                self.state.draw_circle_commands += 1;
+            }
+            RenderCommand::DrawText { .. } => {
+                self.state.draw_commands += 1;
+                self.state.draw_text_commands += 1;
+            }
+            RenderCommand::Custom { name, .. } => {
+                self.state.custom_commands += 1;
+                self.state.custom_markers.push(name);
+            }
+            RenderCommand::FillRect { .. }
+            | RenderCommand::StrokeRect { .. }
+            | RenderCommand::DrawLine { .. }
+            | RenderCommand::DrawPolygon { .. }
+            | RenderCommand::DrawPixel { .. } => {
+                self.state.deferred_noop_commands += 1;
+            }
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBackendAdapter {
+    fn consume_opengl_backend_event(&mut self, event: DesktopGraphicsOpenGlBackendEvent) {
+        self.state.events_received += 1;
+        match event {
+            DesktopGraphicsOpenGlBackendEvent::BeginPass { .. } => self.state.begin_passes += 1,
+            DesktopGraphicsOpenGlBackendEvent::FlushBoundary { .. } => {
+                self.state.flush_boundaries += 1;
+            }
+            DesktopGraphicsOpenGlBackendEvent::ShaderApply { apply, .. } => {
+                self.state.shader_applies += 1;
+                self.state.current_shader = Some(apply.shader);
+            }
+            DesktopGraphicsOpenGlBackendEvent::Command { command, .. } => {
+                self.consume_command(command);
+            }
+            DesktopGraphicsOpenGlBackendEvent::EndPass { .. } => self.state.end_passes += 1,
+            DesktopGraphicsOpenGlBackendEvent::Resolve { .. } => self.state.resolves += 1,
+            DesktopGraphicsOpenGlBackendEvent::Error { .. } => self.state.errors += 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub active_pass: Option<DesktopGraphicsOpenGlBackendPassContext>,
     pub current_target: Option<RenderTarget>,
@@ -8666,6 +8798,20 @@ mod tests {
             }]
         );
         assert!(executor.state.errors.is_empty());
+        let mut classifying_adapter =
+            super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
+        executor.drive_adapter(&mut classifying_adapter);
+        assert_eq!(classifying_adapter.state.begin_passes, 1);
+        assert_eq!(classifying_adapter.state.end_passes, 1);
+        assert_eq!(classifying_adapter.state.flush_boundaries, 2);
+        assert_eq!(classifying_adapter.state.clear_commands, 1);
+        assert_eq!(classifying_adapter.state.blend_state_changes, 1);
+        assert_eq!(classifying_adapter.state.draw_sprite_commands, 1);
+        assert_eq!(classifying_adapter.state.resolves, 1);
+        assert_eq!(
+            classifying_adapter.state.current_blend,
+            RenderBlendMode::Additive
+        );
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
@@ -9192,6 +9338,14 @@ mod tests {
         );
         assert_eq!(executor.state.draw_sprite_commands, 1);
         assert_eq!(executor.state.commands, 6);
+        let mut classifying_adapter =
+            super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
+        executor.drive_adapter(&mut classifying_adapter);
+        assert_eq!(classifying_adapter.state.command_events, 6);
+        assert_eq!(classifying_adapter.state.deferred_noop_commands, 5);
+        assert_eq!(classifying_adapter.state.draw_sprite_commands, 1);
+        assert_eq!(classifying_adapter.state.draw_commands, 1);
+        assert_eq!(classifying_adapter.state.state_commands, 0);
         let command_events = adapter
             .events
             .iter()

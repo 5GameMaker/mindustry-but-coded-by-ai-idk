@@ -13034,3 +13034,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 OpenGL adapter 还未执行这些 payload；
   - shader program/resource binding 与 atlas texture binding 仍待落地；
   - 当前总体迁移约 27.2%，仍未达到完整可玩。
+
+## 12.416 OpenGL adapter command 分类状态
+
+- 2026-05-29：在 payload 保真基础上新增 adapter 侧命令分类执行状态，用于无依赖地区分 state command、draw command、custom command 与暂缓 no-op command。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendAdapterExecutionState`；
+    - 新增 `DesktopGraphicsClassifyingOpenGlBackendAdapter`；
+    - adapter 可统计 begin/end/flush/shader/resolve/error/event 数量；
+    - adapter 可分类 `Clear / SetBlend / SetClip / ClearClip` 为 state commands；
+    - adapter 可分类 `DrawSprite / DrawCircle / DrawText` 为 draw commands；
+    - adapter 可分类 `Custom` marker；
+    - adapter 将 `FillRect / StrokeRect / DrawLine / DrawPolygon / DrawPixel` 标记为 deferred no-op commands，确保它们仍在链路里而不是丢失。
+  - 测试增强：
+    - `desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps` 断言 clear/blend/draw/resolve 分类；
+    - `desktop_graphics_opengl_backend_adapter_receives_noop_command_events` 断言 5 个 deferred no-op 与 1 个 draw sprite。
+- 迁移意义：
+  - 后续真实 OpenGL adapter 可先实现 state/draw 子集，同时保持未实现命令可观测；
+  - 这避免渲染后端变成另一个孤立模块，仍然从 RenderCommand 主链分类推进。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - 分类状态尚未绑定真实 GL 调用；
+  - `DrawSprite / DrawCircle / DrawText` 的 GPU 执行仍待落地；
+  - 当前总体迁移约 27.3%，仍未达到完整可玩。
