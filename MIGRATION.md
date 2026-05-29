@@ -13979,3 +13979,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - texture binding 仍携带 `TextureBinding` 语义对象，尚未解析为真实 GL texture handle；
   - real GL API 调用层、window/context/present 仍未接入；
   - 当前总体迁移约 30.9%，仍未达到完整可玩。
+
+## 12.453 Shader lifecycle compile/link command adapter 接入
+
+- 2026-05-29：按 Arc `Shaders.init()` / `Shader` 生命周期语义，把 shader 编译/链接从 per-apply 中拆出来，新增 shader lifecycle command plan。`ShaderCatalog::init_plan()` 与 `reload_plan()` 现在可以映射为 OpenGL 风格的 program 生命周期命令序列。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderStage`，区分 `Vertex` / `Fragment`；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderLifecycleCommand`，覆盖 `DeleteProgram`、`CreateShader`、`ShaderSource`、`CompileShader`、`CreateProgram`、`AttachShader`、`LinkProgram`、`DeleteShader`；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan`；
+    - 新增 shader lifecycle command sink / recording sink；
+    - `from_load_plan(...)` 只消费 enabled shader load task，保留 `ShaderId::INIT_ORDER` 顺序并默认跳过 `Shockwave`；
+    - `from_reload_plan(...)` 将 reload 映射为 `DeleteProgram -> Recreate(vertex/fragment compile/link)`；
+    - 新增测试锁定 `Mesh` 首个 shader 的 `shaders/planet.vert` + `shaders/mesh.frag` 命令顺序，以及 reload 先 drop 再 recreate。
+- 迁移意义：
+  - shader compile/link 现在成为独立生命周期命令层，不会污染 `ShaderApply` 的每帧 uniform/texture 绑定命令；
+  - 后续 real GL executor 可以把 lifecycle commands 映射到 `glCreateShader/glShaderSource/glCompileShader/glCreateProgram/glAttachShader/glLinkProgram/glDeleteShader/glDeleteProgram`；
+  - shader apply 与 shader lifecycle 两条链路分离，更接近 Arc `Shader` 构造/绑定/`setUniform*` 的职责边界。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_lifecycle --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - lifecycle command 仍是描述层，尚未调用真实 GL 或读取/预处理 GLSL source 文本；
+  - program/shader handle cache 与 compile/link error log 还未落地；
+  - shader attribute/uniform location 的真实查询仍由伪 location cache 代替；
+  - 当前总体迁移约 31.0%，仍未达到完整可玩。

@@ -47,9 +47,10 @@ use mindustry_core::mindustry::graphics::{
     RenderCommand, RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
     RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
     RenderTextStyle, RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan,
-    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderParameters,
-    ShaderTextureRegion, ShaderViewport, TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor,
-    TextureBinding, TileBounds, TileCoord, UniformValue, Viewport as FloorViewport,
+    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask,
+    ShaderParameters, ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport,
+    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord,
+    UniformValue, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -1383,6 +1384,79 @@ impl DesktopGraphicsOpenGlBackendShaderCommandSink
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendShaderStage {
+    Vertex,
+    Fragment,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendShaderLifecycleCommand {
+    DeleteProgram {
+        shader: ShaderId,
+        program_key: String,
+    },
+    CreateShader {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: String,
+    },
+    ShaderSource {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: String,
+    },
+    CompileShader {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+    },
+    CreateProgram {
+        shader: ShaderId,
+        program_key: String,
+    },
+    AttachShader {
+        shader: ShaderId,
+        program_key: String,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+    },
+    LinkProgram {
+        shader: ShaderId,
+        program_key: String,
+    },
+    DeleteShader {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendShaderLifecycleCommand>,
+}
+
+pub trait DesktopGraphicsOpenGlBackendShaderLifecycleCommandSink {
+    fn consume_opengl_shader_lifecycle_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendShaderLifecycleCommand,
+    );
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendShaderLifecycleCommandSink {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendShaderLifecycleCommand>,
+}
+
+impl DesktopGraphicsOpenGlBackendShaderLifecycleCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendShaderLifecycleCommandSink
+{
+    fn consume_opengl_shader_lifecycle_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendShaderLifecycleCommand,
+    ) {
+        self.commands.push(command);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
     pub batch_index: usize,
@@ -1726,6 +1800,134 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
         }
 
         commands
+    }
+}
+
+fn opengl_backend_shader_program_key(shader: ShaderId) -> String {
+    DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(shader).program_key
+}
+
+impl DesktopGraphicsOpenGlBackendShaderLifecycleCommand {
+    pub fn shader(&self) -> ShaderId {
+        match self {
+            Self::DeleteProgram { shader, .. }
+            | Self::CreateShader { shader, .. }
+            | Self::ShaderSource { shader, .. }
+            | Self::CompileShader { shader, .. }
+            | Self::CreateProgram { shader, .. }
+            | Self::AttachShader { shader, .. }
+            | Self::LinkProgram { shader, .. }
+            | Self::DeleteShader { shader, .. } => *shader,
+        }
+    }
+
+    pub fn from_load_task(
+        task: &ShaderLoadTask,
+    ) -> Vec<DesktopGraphicsOpenGlBackendShaderLifecycleCommand> {
+        let program_key = opengl_backend_shader_program_key(task.shader);
+        let vertex_path = task.source.vertex_path();
+        let fragment_path = task.source.fragment_path();
+        vec![
+            Self::CreateShader {
+                shader: task.shader,
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                source_path: vertex_path.clone(),
+            },
+            Self::ShaderSource {
+                shader: task.shader,
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                source_path: vertex_path,
+            },
+            Self::CompileShader {
+                shader: task.shader,
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+            },
+            Self::CreateShader {
+                shader: task.shader,
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                source_path: fragment_path.clone(),
+            },
+            Self::ShaderSource {
+                shader: task.shader,
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                source_path: fragment_path,
+            },
+            Self::CompileShader {
+                shader: task.shader,
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+            },
+            Self::CreateProgram {
+                shader: task.shader,
+                program_key: program_key.clone(),
+            },
+            Self::AttachShader {
+                shader: task.shader,
+                program_key: program_key.clone(),
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+            },
+            Self::AttachShader {
+                shader: task.shader,
+                program_key: program_key.clone(),
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+            },
+            Self::LinkProgram {
+                shader: task.shader,
+                program_key,
+            },
+            Self::DeleteShader {
+                shader: task.shader,
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+            },
+            Self::DeleteShader {
+                shader: task.shader,
+                stage: DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+            },
+        ]
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan {
+    pub fn from_load_plan(plan: &ShaderLoadPlan) -> Self {
+        Self {
+            commands: plan
+                .enabled_tasks()
+                .flat_map(DesktopGraphicsOpenGlBackendShaderLifecycleCommand::from_load_task)
+                .collect(),
+        }
+    }
+
+    pub fn from_reload_plan(plan: &ShaderReloadPlan) -> Self {
+        let mut commands = Vec::new();
+        for action in &plan.actions {
+            match action {
+                ShaderReloadAction::DropCachedProgram(shader) => {
+                    commands.push(
+                        DesktopGraphicsOpenGlBackendShaderLifecycleCommand::DeleteProgram {
+                            shader: *shader,
+                            program_key: opengl_backend_shader_program_key(*shader),
+                        },
+                    );
+                }
+                ShaderReloadAction::Recreate(task) => {
+                    commands.extend(
+                        DesktopGraphicsOpenGlBackendShaderLifecycleCommand::from_load_task(task),
+                    );
+                }
+            }
+        }
+        Self { commands }
+    }
+
+    pub fn drive_shader_lifecycle_command_sink<
+        S: DesktopGraphicsOpenGlBackendShaderLifecycleCommandSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.commands {
+            sink.consume_opengl_shader_lifecycle_command(command.clone());
+        }
+        self.commands.len()
     }
 }
 
@@ -13698,6 +13900,131 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_lifecycle_commands_follow_init_order_and_sources() {
+        let load_plan = ShaderCatalog::init_plan();
+        assert_eq!(
+            load_plan
+                .enabled_tasks()
+                .map(|task| task.shader)
+                .collect::<Vec<_>>(),
+            ShaderId::INIT_ORDER.to_vec()
+        );
+
+        let lifecycle_plan =
+            super::DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan::from_load_plan(
+                &load_plan,
+            );
+        assert_eq!(
+            lifecycle_plan.commands.len(),
+            ShaderId::INIT_ORDER.len() * 12
+        );
+        assert_eq!(
+            lifecycle_plan.commands[..12],
+            [
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                    source_path: "shaders/planet.vert".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::ShaderSource {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                    source_path: "shaders/planet.vert".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CompileShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    source_path: "shaders/mesh.frag".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::ShaderSource {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    source_path: "shaders/mesh.frag".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CompileShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateProgram {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::AttachShader {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::AttachShader {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::LinkProgram {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::DeleteShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                },
+                super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::DeleteShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                },
+            ]
+        );
+        assert!(!lifecycle_plan
+            .commands
+            .iter()
+            .any(|command| command.shader() == ShaderId::Shockwave));
+
+        let mut sink =
+            super::DesktopGraphicsRecordingOpenGlBackendShaderLifecycleCommandSink::default();
+        assert_eq!(
+            lifecycle_plan.drive_shader_lifecycle_command_sink(&mut sink),
+            lifecycle_plan.commands.len()
+        );
+        assert_eq!(sink.commands, lifecycle_plan.commands);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_lifecycle_reload_deletes_before_recreate() {
+        let reload_plan = ShaderCatalog::reload_plan();
+        let lifecycle_plan =
+            super::DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan::from_reload_plan(
+                &reload_plan,
+            );
+
+        assert_eq!(
+            lifecycle_plan.commands.len(),
+            ShaderId::INIT_ORDER.len() * 13
+        );
+        assert_eq!(
+            lifecycle_plan.commands[0],
+            super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::DeleteProgram {
+                shader: ShaderId::Mesh,
+                program_key: "shader:Mesh".into(),
+            }
+        );
+        assert_eq!(
+            lifecycle_plan.commands[1],
+            super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateShader {
+                shader: ShaderId::Mesh,
+                stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                source_path: "shaders/planet.vert".into(),
+            }
+        );
+        assert!(!lifecycle_plan
+            .commands
+            .iter()
+            .any(|command| command.shader() == ShaderId::Shockwave));
     }
 
     #[test]
