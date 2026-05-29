@@ -4150,6 +4150,39 @@ pub enum DesktopGraphicsOpenGlBackendAdapterAction {
         style: RenderTextStyle,
         layer: f32,
     },
+    FillRect {
+        rect: RenderRect,
+        color: [f32; 4],
+        layer: f32,
+    },
+    StrokeRect {
+        rect: RenderRect,
+        color: [f32; 4],
+        thickness: f32,
+        layer: f32,
+    },
+    DrawLine {
+        from: RenderPoint,
+        to: RenderPoint,
+        stroke: f32,
+        color: [f32; 4],
+        layer: f32,
+    },
+    DrawPolygon {
+        center: RenderPoint,
+        radius: f32,
+        sides: usize,
+        rotation: f32,
+        color: [f32; 4],
+        filled: bool,
+        layer: f32,
+    },
+    DrawPixel {
+        x: i32,
+        y: i32,
+        color: [f32; 4],
+        layer: f32,
+    },
     Custom {
         name: String,
         properties: Vec<RenderProperty>,
@@ -5805,6 +5838,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub draw_sprite_commands: usize,
     pub draw_circle_commands: usize,
     pub draw_text_commands: usize,
+    pub pending_gl_draw_commands: usize,
     pub current_blend: RenderBlendMode,
     pub current_blend_state: DesktopGraphicsOpenGlBackendBlendState,
     pub current_clip: Option<RenderRect>,
@@ -5854,6 +5888,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             draw_sprite_commands: 0,
             draw_circle_commands: 0,
             draw_text_commands: 0,
+            pending_gl_draw_commands: 0,
             current_blend: RenderBlendMode::Normal,
             current_blend_state: DesktopGraphicsOpenGlBackendBlendState::default(),
             current_clip: None,
@@ -5939,20 +5974,13 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                 self.state.custom_commands += 1;
                 self.state.custom_markers.push(name);
             }
-            RenderCommand::FillRect { .. } => {
-                self.state.deferred_noop_commands += 1;
-            }
-            RenderCommand::StrokeRect { .. } => {
-                self.state.deferred_noop_commands += 1;
-            }
-            RenderCommand::DrawLine { .. } => {
-                self.state.deferred_noop_commands += 1;
-            }
-            RenderCommand::DrawPolygon { .. } => {
-                self.state.deferred_noop_commands += 1;
-            }
-            RenderCommand::DrawPixel { .. } => {
-                self.state.deferred_noop_commands += 1;
+            RenderCommand::FillRect { .. }
+            | RenderCommand::StrokeRect { .. }
+            | RenderCommand::DrawLine { .. }
+            | RenderCommand::DrawPolygon { .. }
+            | RenderCommand::DrawPixel { .. } => {
+                self.state.draw_commands += 1;
+                self.state.pending_gl_draw_commands += 1;
             }
         }
         self.state.actions.push(action);
@@ -6125,22 +6153,61 @@ fn opengl_backend_adapter_action_from_render_command(
                 properties: properties.clone(),
             }
         }
-        RenderCommand::FillRect { .. } => {
-            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "FillRect" }
-        }
-        RenderCommand::StrokeRect { .. } => {
-            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "StrokeRect" }
-        }
-        RenderCommand::DrawLine { .. } => {
-            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "DrawLine" }
-        }
-        RenderCommand::DrawPolygon { .. } => {
-            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp {
-                kind: "DrawPolygon",
+        RenderCommand::FillRect { rect, color, layer } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::FillRect {
+                rect: *rect,
+                color: *color,
+                layer: *layer,
             }
         }
-        RenderCommand::DrawPixel { .. } => {
-            DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "DrawPixel" }
+        RenderCommand::StrokeRect {
+            rect,
+            color,
+            thickness,
+            layer,
+        } => DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
+            rect: *rect,
+            color: *color,
+            thickness: *thickness,
+            layer: *layer,
+        },
+        RenderCommand::DrawLine {
+            from,
+            to,
+            stroke,
+            color,
+            layer,
+        } => DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+            from: *from,
+            to: *to,
+            stroke: *stroke,
+            color: *color,
+            layer: *layer,
+        },
+        RenderCommand::DrawPolygon {
+            center,
+            radius,
+            sides,
+            rotation,
+            color,
+            filled,
+            layer,
+        } => DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon {
+            center: *center,
+            radius: *radius,
+            sides: *sides,
+            rotation: *rotation,
+            color: *color,
+            filled: *filled,
+            layer: *layer,
+        },
+        RenderCommand::DrawPixel { x, y, color, layer } => {
+            DesktopGraphicsOpenGlBackendAdapterAction::DrawPixel {
+                x: *x,
+                y: *y,
+                color: *color,
+                layer: *layer,
+            }
         }
     }
 }
@@ -18145,7 +18212,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_graphics_opengl_backend_adapter_receives_noop_command_events() {
+    fn desktop_graphics_opengl_backend_adapter_preserves_draw_command_payloads() {
         let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
         let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
         let mut render_frame =
@@ -18236,7 +18303,61 @@ mod tests {
         assert_eq!(executor.state.actions.len(), 6);
         assert!(matches!(
             executor.state.actions[0],
-            super::DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "FillRect" }
+            super::DesktopGraphicsOpenGlBackendAdapterAction::FillRect {
+                rect: RenderRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 8.0,
+                    height: 8.0
+                },
+                color: [0.1, 0.2, 0.3, 1.0],
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            executor.state.actions[1],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
+                rect: RenderRect {
+                    x: 8.0,
+                    y: 0.0,
+                    width: 8.0,
+                    height: 8.0
+                },
+                color: [0.3, 0.2, 0.1, 1.0],
+                thickness: 2.0,
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            executor.state.actions[2],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint { x: 0.0, y: 0.0 },
+                to: RenderPoint { x: 8.0, y: 8.0 },
+                stroke: 1.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            executor.state.actions[3],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon {
+                center: RenderPoint { x: 12.0, y: 12.0 },
+                radius: 4.0,
+                sides: 6,
+                rotation: 0.0,
+                color: [0.8, 0.8, 1.0, 1.0],
+                filled: false,
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            executor.state.actions[4],
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawPixel {
+                x: 3,
+                y: 4,
+                color: [1.0, 0.0, 0.0, 1.0],
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
         ));
         assert!(matches!(
             &executor.state.actions[5],
@@ -18247,32 +18368,69 @@ mod tests {
             super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
         executor.drive_adapter(&mut classifying_adapter);
         assert_eq!(classifying_adapter.state.command_events, 6);
-        assert_eq!(classifying_adapter.state.deferred_noop_commands, 5);
+        assert_eq!(classifying_adapter.state.deferred_noop_commands, 0);
         assert_eq!(classifying_adapter.state.draw_sprite_commands, 1);
-        assert_eq!(classifying_adapter.state.draw_commands, 1);
+        assert_eq!(classifying_adapter.state.draw_commands, 6);
+        assert_eq!(classifying_adapter.state.pending_gl_draw_commands, 5);
         assert_eq!(classifying_adapter.state.state_commands, 0);
         assert_eq!(classifying_adapter.state.actions.len(), 6);
         assert!(matches!(
             classifying_adapter.state.actions[0],
-            super::DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "FillRect" }
+            super::DesktopGraphicsOpenGlBackendAdapterAction::FillRect {
+                rect: RenderRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 8.0,
+                    height: 8.0
+                },
+                color: [0.1, 0.2, 0.3, 1.0],
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
         ));
         assert!(matches!(
             classifying_adapter.state.actions[1],
-            super::DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "StrokeRect" }
+            super::DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
+                rect: RenderRect {
+                    x: 8.0,
+                    y: 0.0,
+                    width: 8.0,
+                    height: 8.0
+                },
+                color: [0.3, 0.2, 0.1, 1.0],
+                thickness: 2.0,
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
         ));
         assert!(matches!(
             classifying_adapter.state.actions[2],
-            super::DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "DrawLine" }
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint { x: 0.0, y: 0.0 },
+                to: RenderPoint { x: 8.0, y: 8.0 },
+                stroke: 1.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
         ));
         assert!(matches!(
             classifying_adapter.state.actions[3],
-            super::DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp {
-                kind: "DrawPolygon"
-            }
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon {
+                center: RenderPoint { x: 12.0, y: 12.0 },
+                radius: 4.0,
+                sides: 6,
+                rotation: 0.0,
+                color: [0.8, 0.8, 1.0, 1.0],
+                filled: false,
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
         ));
         assert!(matches!(
             classifying_adapter.state.actions[4],
-            super::DesktopGraphicsOpenGlBackendAdapterAction::DeferredNoOp { kind: "DrawPixel" }
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawPixel {
+                x: 3,
+                y: 4,
+                color: [1.0, 0.0, 0.0, 1.0],
+                layer
+            } if (layer - Layer::OVERLAY_UI).abs() < 0.0001
         ));
         assert!(matches!(
             &classifying_adapter.state.actions[5],
@@ -18306,6 +18464,63 @@ mod tests {
                         height: 8.0
                     },
                     color: [0.1, 0.2, 0.3, 1.0],
+                    layer
+                }
+            ) if (*layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            command_events[1],
+            (
+                "StrokeRect",
+                RenderCommand::StrokeRect {
+                    rect: RenderRect {
+                        x: 8.0,
+                        y: 0.0,
+                        width: 8.0,
+                        height: 8.0
+                    },
+                    color: [0.3, 0.2, 0.1, 1.0],
+                    thickness: 2.0,
+                    layer
+                }
+            ) if (*layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            command_events[2],
+            (
+                "DrawLine",
+                RenderCommand::DrawLine {
+                    from: RenderPoint { x: 0.0, y: 0.0 },
+                    to: RenderPoint { x: 8.0, y: 8.0 },
+                    stroke: 1.0,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    layer
+                }
+            ) if (*layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            command_events[3],
+            (
+                "DrawPolygon",
+                RenderCommand::DrawPolygon {
+                    center: RenderPoint { x: 12.0, y: 12.0 },
+                    radius: 4.0,
+                    sides: 6,
+                    rotation: 0.0,
+                    color: [0.8, 0.8, 1.0, 1.0],
+                    filled: false,
+                    layer
+                }
+            ) if (*layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            command_events[4],
+            (
+                "DrawPixel",
+                RenderCommand::DrawPixel {
+                    x: 3,
+                    y: 4,
+                    color: [1.0, 0.0, 0.0, 1.0],
                     layer
                 }
             ) if (*layer - Layer::OVERLAY_UI).abs() < 0.0001

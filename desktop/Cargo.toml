@@ -7,6 +7,19 @@ version.workspace = true
 [features]
 default = []
 opengl-backend = []
+opengl-native-runtime = [
+    "opengl-backend",
+    "dep:glow",
+    "dep:glutin",
+    "dep:glutin-winit",
+    "dep:raw-window-handle",
+    "dep:winit",
+]
 
 [dependencies]
+glow = { version = "0.17.0", optional = true }
+glutin = { version = "0.32.3", optional = true }
+glutin-winit = { version = "0.5.0", optional = true }
 mindustry-core = { path = "../core" }
+raw-window-handle = { version = "0.6.2", optional = true }
+winit = { version = "0.30.13", optional = true }
