@@ -845,6 +845,7 @@ pub enum DesktopGraphicsOpenGlBackendEvent {
     ShaderApply {
         source: DesktopGraphicsOpenGlBackendStepSource,
         target: RenderTarget,
+        apply: ShaderApplyPlan,
         shader: ShaderId,
         operation_count: usize,
         error_count: usize,
@@ -853,6 +854,7 @@ pub enum DesktopGraphicsOpenGlBackendEvent {
         source: DesktopGraphicsOpenGlBackendStepSource,
         target: RenderTarget,
         kind: &'static str,
+        command: RenderCommand,
     },
     EndPass {
         source: DesktopGraphicsOpenGlBackendStepSource,
@@ -1024,6 +1026,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                     .push(DesktopGraphicsOpenGlBackendEvent::ShaderApply {
                         source,
                         target,
+                        apply: apply.clone(),
                         shader: apply.shader,
                         operation_count: apply.operations.len(),
                         error_count: apply.errors.len(),
@@ -1039,6 +1042,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                         source,
                         target,
                         kind,
+                        command: command.clone(),
                     });
                 match command {
                     RenderCommand::Clear { .. } => {
@@ -9082,6 +9086,22 @@ mod tests {
         let event_count = executor.drive_adapter(&mut adapter);
         assert_eq!(event_count, executor.state.event_log.len());
         assert_eq!(adapter.events, executor.state.event_log);
+        let shader_event = adapter
+            .events
+            .iter()
+            .find_map(|event| match event {
+                super::DesktopGraphicsOpenGlBackendEvent::ShaderApply { apply, shader, .. } => {
+                    Some((apply, shader))
+                }
+                _ => None,
+            })
+            .expect("adapter should receive the blockbuild shader apply payload");
+        assert_eq!(*shader_event.1, ShaderId::BlockBuild);
+        assert_eq!(shader_event.0.shader, ShaderId::BlockBuild);
+        assert!(shader_event
+            .0
+            .uniforms()
+            .any(|binding| binding.name == "u_time" && binding.value == UniformValue::Float(77.0)));
     }
 
     #[test]
@@ -9172,6 +9192,49 @@ mod tests {
         );
         assert_eq!(executor.state.draw_sprite_commands, 1);
         assert_eq!(executor.state.commands, 6);
+        let command_events = adapter
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                super::DesktopGraphicsOpenGlBackendEvent::Command { kind, command, .. } => {
+                    Some((*kind, command))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            command_events[0],
+            (
+                "FillRect",
+                RenderCommand::FillRect {
+                    rect: RenderRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: 8.0,
+                        height: 8.0
+                    },
+                    color: [0.1, 0.2, 0.3, 1.0],
+                    layer
+                }
+            ) if (*layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
+        assert!(matches!(
+            command_events[5],
+            (
+                "DrawSprite",
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: RenderRect {
+                        x: 16.0,
+                        y: 16.0,
+                        width: 8.0,
+                        height: 8.0
+                    },
+                    layer,
+                    ..
+                }
+            ) if symbol == "router" && (*layer - Layer::OVERLAY_UI).abs() < 0.0001
+        ));
         assert!(executor.state.errors.is_empty());
     }
 

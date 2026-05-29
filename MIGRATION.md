@@ -13012,3 +13012,25 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - adapter 仍是事件消费边界，尚未绑定真实 OpenGL API；
   - `DrawSprite / DrawCircle / DrawText` 的 GPU path 仍待落地；
   - 当前总体迁移约 27.1%，仍未达到完整可玩。
+
+## 12.415 OpenGL adapter payload 保真
+
+- 2026-05-29：修正上一节 adapter event 的信息粒度。`Command` 事件不再只携带命令名，`ShaderApply` 事件也不只携带 shader/count，而是保留完整 payload，确保后续真实 OpenGL adapter 可以直接执行命令而不是重新回查 frame plan。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendEvent::ShaderApply` 新增完整 `ShaderApplyPlan`；
+    - `DesktopGraphicsOpenGlBackendEvent::Command` 新增完整 `RenderCommand`；
+    - executor 写 event log 时 clone 当前 `ShaderApplyPlan` / `RenderCommand`；
+    - `desktop_graphics_opengl_backend_executor_drives_shader_apply_steps` 增补 adapter shader payload 断言；
+    - `desktop_graphics_opengl_backend_adapter_receives_noop_command_events` 增补 `FillRect` 与 `DrawSprite` payload 断言。
+- 迁移意义：
+  - adapter 边界现在具备真实执行所需的命令数据，不再只是 telemetry；
+  - 后续真实 OpenGL 实现可以直接匹配 `RenderCommand` 并执行 clear/blend/clip/sprite/circle/text 等路径。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - 真实 OpenGL adapter 还未执行这些 payload；
+  - shader program/resource binding 与 atlas texture binding 仍待落地；
+  - 当前总体迁移约 27.2%，仍未达到完整可玩。

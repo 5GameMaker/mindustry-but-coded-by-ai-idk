@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **27.1%**。
+- 当前总体迁移完成度：约 **27.2%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10355,3 +10355,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 开始把 adapter event 映射到真实 OpenGL command 分类：clear/blend/clip/sprite/circle/text；
   2. 继续推进 atlas texture binding 与 shader program/resource table；
   3. 仍保持原版 OpenGL 语义路线，不切换 wgpu/Vulkan。
+
+---
+
+## 321. 最新闭环记录：OpenGL adapter payload 保真
+
+- 本轮总体进度更新：约 **27.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendEvent::ShaderApply` 新增完整 `ShaderApplyPlan`；
+    - `DesktopGraphicsOpenGlBackendEvent::Command` 新增完整 `RenderCommand`；
+    - executor 写入 event log 时保留 shader/command payload；
+    - adapter 测试断言 `blockbuild` shader payload、`FillRect` payload 与 `DrawSprite` payload。
+- 已验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 基于完整 payload 开始做 adapter command 分类/执行状态；
+  2. 优先承接 `Clear / SetBlend / SetClip / DrawSprite / DrawCircle / DrawText`；
+  3. 继续保持 OpenGL 原版路线，不切换后端。
