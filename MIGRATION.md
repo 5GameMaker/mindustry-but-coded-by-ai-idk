@@ -14172,3 +14172,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shader command enum 本身仍是 `UseProgram { program_key }`，尚未输出 resolved `program_handle` 命令；
   - draw call resolving executor 仍有自己的 handle cache，后续需要进一步共享/合并 cache 边界；
   - 当前总体迁移约 31.7%，仍未达到完整可玩。
+
+## 12.460 Shader command resolved 句柄流接入
+
+- 2026-05-29：继续把 `ShaderApply` 产出的符号化 shader command 收口为带 program/texture handle 的 resolved command stream。当前仍未调用真实 GL，但 `UseProgram`、uniform upload、texture unit 激活与 texture bind 已能通过同一 handle cache 解析出执行层句柄。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolvedShaderCommand`，在原有 `program_key` / `TextureBinding` 基础上携带 `program_handle`、`texture_key`、`texture_handle`；
+    - 新增 `DesktopGraphicsOpenGlBackendResolvedShaderCommandSink` 与 recording sink；
+    - `DesktopGraphicsOpenGlBackendHandleCache::resolve_shader_command(...)` 将 `UseProgram` / `UploadUniform` / `ActiveTexture` / `BindTexture` 统一解析到 program handle，`BindTexture` 额外解析到 texture resource identity 与 texture handle；
+    - 新增 `DesktopGraphicsResolvingOpenGlBackendShaderCommandExecutor`，可消费符号 shader command 并驱动 resolved shader command sink；
+    - 扩展 `desktop_graphics_opengl_shader_commands_preserve_texture_units_without_implicit_sampler_upload`，锁定 `Space` shader 的 `u_noise`、`effectBuffer` 纹理绑定解析结果，并确认不隐式生成 sampler uniform。
+- 迁移意义：
+  - shader apply command 不再停留在纯 `program_key` / `TextureBinding`，已经具备真实 GL executor 可直接消费的 handle-backed 命令边界；
+  - `TextureBinding::Asset` 与 `TextureBinding::EffectBuffer` 的解析现在既存在于 binding plan，也存在于最终 shader command resolving executor；
+  - 这一步把 shader apply 侧进一步向 `glUseProgram/glUniform*/glActiveTexture/glBindTexture` 的执行序列推进，同时保留 Arc/Mindustry 中 sampler uniform 与 texture bind 分离的语义。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_commands --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - resolved shader command 仍是记录/解析层，尚未落到真实 `glUseProgram/glUniform*/glActiveTexture/glBindTexture`；
+  - draw call resolving executor 与 shader command resolving executor 仍各自持有 cache，后续需要合并到同一 real GL backend 状态边界；
+  - `EffectBuffer` 已有稳定 runtime texture identity/handle，但仍未接真实 FBO attachment / resolve pipeline；
+  - 当前总体迁移约 31.8%，仍未达到完整可玩。

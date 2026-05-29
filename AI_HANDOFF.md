@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **31.7%**。
+- 当前总体迁移完成度：约 **31.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11414,3 +11414,109 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 记录 compile/link error log；
   3. 让 shader program handle 与 `ShaderApply/DrawCommand` 的 `UseProgram` 合流；
   4. 继续接真实 GL API 调用层。
+
+---
+
+## 363. 最新闭环记录：Shader build executor 与 compile/link report 边界
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前本地 HEAD 为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **31.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderBuildExecutor`；
+    - 串起 `ShaderLoadTask -> source loader -> preprocess -> resolved lifecycle executor -> compile/link report`；
+    - 新增 build/source/preprocess 错误边界与 compile/link log override/report；
+    - 测试覆盖成功构建、source load error、preprocess error、compile/link log。
+- 关键语义：
+  - build executor 仍不调用真实 GL；
+  - compile/link log 是 report 边界，后续由真实 `glGetShaderInfoLog/glGetProgramInfoLog` 写入；
+  - shader source、preprocess、resolved lifecycle handles 已经合并为一个可复用构建报告。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_build_executor --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 下一步：
+  1. 将 build executor 的 program handle 与 `ShaderApply/DrawCommand::UseProgram` 合流；
+  2. 继续接 texture/effectBuffer handle；
+  3. 接真实 GL shader compile/link 调用。
+
+---
+
+## 364. 最新闭环记录：Shader texture binding 解析
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **31.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_shader_texture_binding(...)` 支持 `TextureBinding::Asset(path)` 与 `TextureBinding::EffectBuffer`；
+    - `DesktopGraphicsOpenGlBackendShaderTextureUnitBindingPlan` 新增 resolved texture identity/handle；
+    - `DesktopGraphicsOpenGlBackendShaderProgramBinding::resolve_texture_bindings(...)` 接入 adapter/executor 两侧 ShaderApply 处理；
+    - shader apply 的 texture binding 已能解析到 atlas/runtime texture identity 与 handle。
+- 关键语义：
+  - `Asset(path)` 解析为 atlas identity；
+  - `EffectBuffer` 解析为稳定 runtime texture identity：`renderer.effectBuffer.texture`；
+  - 仍不隐式把 `BindTexture` 转成 sampler uniform，sampler uniform 继续由 `SetUniform(Int(slot))` 表达。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_commands --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 让 `UseProgram` 输出 resolved program handle；
+  2. 继续把 `EffectBuffer` 接到真实 FBO attachment；
+  3. 接真实 GL texture bind/upload。
+
+---
+
+## 365. 最新闭环记录：Shader program handle apply 侧合流
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **31.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendShaderProgramIdentity` 新增 `with_resolved_gl_program(...)`；
+    - `DesktopGraphicsOpenGlBackendShaderProgramBinding::resolve_program_handle(...)` 通过 handle cache 解析 program handle；
+    - adapter/executor 的 ShaderApply 处理顺序调整为：resolve uniform locations -> resolve program handle -> resolve texture bindings；
+    - `current_shader_program` 与 `shader_program_bindings` 开始携带 `gl_program: Some(handle)`。
+- 关键语义：
+  - 保留 `program_key` 作为逻辑主键，避免破坏 uniform location cache 与 reload 语义；
+  - `gl_program` 作为执行层实体存在，为真实 `glUseProgram` 链路做准备。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 下一步：
+  1. 新增 resolved shader command stream；
+  2. 合并 shader apply 与 draw call 的 program handle cache 边界；
+  3. 继续 real GL executor/window/context/present。
+
+---
+
+## 366. 最新闭环记录：Shader command resolved 句柄流接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **31.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolvedShaderCommand`；
+    - 新增 resolved shader command sink 与 recording sink；
+    - `DesktopGraphicsOpenGlBackendHandleCache::resolve_shader_command(...)` 可把 `UseProgram` / `UploadUniform` / `ActiveTexture` / `BindTexture` 解析为携带 `program_handle` 的命令；
+    - `BindTexture` 同步解析 `TextureBinding` 到 `texture_key` / `texture_handle`；
+    - 新增 `DesktopGraphicsResolvingOpenGlBackendShaderCommandExecutor`；
+    - 扩展 `desktop_graphics_opengl_shader_commands_preserve_texture_units_without_implicit_sampler_upload`，确认 `Space` shader 的 `u_noise` 与 `effectBuffer` 解析结果稳定。
+- 关键语义：
+  - 这是从符号化 shader apply command 到真实 GL executor 可消费命令的中间层；
+  - sampler uniform 与 texture bind 仍分离，不因为 `BindTexture` 自动补 `Uniform1i`；
+  - 当前仍只是解析/记录层，尚未调用真实 OpenGL。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_commands --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 将 shader resolved command executor 与 draw resolved command executor 合并到统一 real GL backend 状态；
+  2. 让 `EffectBuffer` 接真实 framebuffer attachment / resolve pipeline；
+  3. 引入真实 `glUseProgram/glUniform*/glActiveTexture/glBindTexture` executor；
+  4. 继续 window/context/present。
