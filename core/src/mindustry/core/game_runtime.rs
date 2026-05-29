@@ -1765,7 +1765,10 @@ fn game_runtime_visual_set_once(slot: &mut Option<f32>, value: f32) {
 }
 
 fn game_runtime_liquid_bridge_sidecar_kind(kind: LiquidBlockKind) -> bool {
-    matches!(kind, LiquidBlockKind::LiquidBridge)
+    matches!(
+        kind,
+        LiquidBlockKind::LiquidBridge | LiquidBlockKind::DirectionLiquidBridge
+    )
 }
 
 fn game_runtime_visual_liquid_snapshot(
@@ -32827,6 +32830,33 @@ mod tests {
             roundtrip_exported_liquid_state(
                 &content,
                 "phase-conduit",
+                4,
+                13,
+                GameRuntimeLiquidBlockState::Bridge(state.clone()),
+            ),
+            Some(GameRuntimeLiquidBlockState::Bridge(LiquidBridgeState {
+                was_moved: true,
+                moved: true,
+                ..state
+            }))
+        );
+    }
+
+    #[test]
+    fn game_runtime_exports_reinforced_bridge_conduit_liquid_bridge_state_tail_in_network_map_snapshot(
+    ) {
+        let content = ContentLoader::create_base_content().unwrap();
+        let state = LiquidBridgeState {
+            link: point2_pack(6, 13),
+            warmup: 0.8,
+            incoming: vec![point2_pack(2, 13), point2_pack(3, 13)],
+            was_moved: true,
+            moved: false,
+        };
+        assert_eq!(
+            roundtrip_exported_liquid_state(
+                &content,
+                "reinforced-bridge-conduit",
                 4,
                 13,
                 GameRuntimeLiquidBlockState::Bridge(state.clone()),
