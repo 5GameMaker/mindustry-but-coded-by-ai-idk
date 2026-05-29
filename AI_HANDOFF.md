@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **27.6%**。
+- 当前总体迁移完成度：约 **27.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10463,3 +10463,25 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 在 action sink 基础上继续拆 state action 执行边界；
   2. 优先实现 `Clear / SetBlend / SetClip / ClearClip` 的无依赖执行记录器；
   3. 再将 `DrawSprite` 对接 atlas/resource table。
+
+---
+
+## 326. 最新闭环记录：OpenGL 裁剪栈状态
+
+- 本轮总体进度更新：约 **27.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendClipStackState`；
+    - 新增 `opengl_backend_intersect_clip(...)`，用于嵌套 `SetClip` 时计算与父裁剪矩形的交集；
+    - executor state 和 classifying adapter state 均新增 `clip_stack`；
+    - `SetClip` 现在按栈式 push 语义更新 `current_clip`，嵌套裁剪会变成有效交集；
+    - `ClearClip` 现在按 pop 语义恢复上一层裁剪，而不是直接丢掉全部裁剪；
+    - 新增 `desktop_graphics_opengl_backend_executor_tracks_nested_clip_stack`，覆盖 `SetClip -> SetClip -> ClearClip -> ClearClip` 的 Java ScissorStack 风格行为。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 继续把 `SetClip / ClearClip` 下沉到真实 OpenGL scissor 状态执行器；
+  2. 裁剪栈之后优先推进 `SetBlend` 的 disabled/custom factor 语义；
+  3. 再补 `DrawText` 的 font/layout/align 信息。

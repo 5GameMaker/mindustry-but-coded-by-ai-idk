@@ -13144,3 +13144,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Clear / SetBlend / SetClip / ClearClip` 还需要继续拆成状态执行器；
   - `DrawSprite` 的 atlas texture binding、shader/resource binding 与 VBO/mesh 提交仍待落地；
   - 当前总体迁移约 27.6%，仍未达到完整可玩。
+
+## 12.420 OpenGL 裁剪栈状态
+
+- 2026-05-29：根据 Java/Arc `ScissorStack.push/pop` 语义，补充 OpenGL backend 的无依赖裁剪栈状态。此前 Rust 只保存单个 `current_clip`，嵌套 `SetClip` + `ClearClip` 会丢失父裁剪；现在 executor 与 classifying adapter 均能按栈恢复上一层裁剪。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendClipStackState`；
+    - 新增 `opengl_backend_intersect_clip(parent, child)`；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `clip_stack`；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增 `clip_stack`；
+    - `SetClip` 通过 `push_clip(...)` 记录栈深，并把当前裁剪更新为与父裁剪相交后的有效矩形；
+    - `ClearClip` 通过 `pop_clip(...)` 恢复父裁剪；
+    - 记录 `pushes / pops / underflow_pops / empty_intersections / max_depth`，为后续真实 scissor 执行和异常诊断保留状态。
+  - 测试增强：
+    - 新增 `desktop_graphics_opengl_backend_executor_tracks_nested_clip_stack`；
+    - 覆盖 `outer SetClip -> inner SetClip -> ClearClip -> ClearClip`；
+    - 验证 inner clip 被裁成父子交集，第一次 clear 恢复 outer，第二次 clear 归零；
+    - 验证 executor 与 classifying adapter 的 action 序列保持一致。
+- 迁移意义：
+  - 这补上了子代理对照 Java 后标出的最高风险项之一：裁剪不应只是单个矩形，而应具备栈式语义；
+  - 后续真实 OpenGL backend 可把 `current_clip` 转成 `glScissor`，并用 `clip_stack` 判断嵌套恢复与空交集；
+  - 仍然保持在 `RenderCommand -> OpenGL executor -> action/状态` 主链内推进。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - 裁剪栈尚未绑定真实 `glScissor`；
+  - `SetClip` 还没有表达 Java `ScissorStack.push` 返回 false 后调用方跳过绘制的控制流；
+  - `SetBlend` 的 disabled/custom factor 与 `DrawText` 的 font/layout 语义仍待补齐；
+  - 当前总体迁移约 27.7%，仍未达到完整可玩。

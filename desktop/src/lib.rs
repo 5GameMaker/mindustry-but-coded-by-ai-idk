@@ -830,6 +830,53 @@ impl DesktopGraphicsOpenGlBackendPassContext {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendClipStackState {
+    pub stack: Vec<RenderRect>,
+    pub pushes: usize,
+    pub pops: usize,
+    pub underflow_pops: usize,
+    pub empty_intersections: usize,
+    pub max_depth: usize,
+}
+
+impl DesktopGraphicsOpenGlBackendClipStackState {
+    pub fn current(&self) -> Option<RenderRect> {
+        self.stack.last().copied()
+    }
+
+    pub fn push_clip(&mut self, rect: RenderRect) -> Option<RenderRect> {
+        let effective = self
+            .current()
+            .map(|parent| opengl_backend_intersect_clip(parent, rect))
+            .unwrap_or(rect);
+        if effective.width <= 0.0 || effective.height <= 0.0 {
+            self.empty_intersections += 1;
+        }
+        self.stack.push(effective);
+        self.pushes += 1;
+        self.max_depth = self.max_depth.max(self.stack.len());
+        self.current()
+    }
+
+    pub fn pop_clip(&mut self) -> Option<RenderRect> {
+        if self.stack.pop().is_some() {
+            self.pops += 1;
+        } else {
+            self.underflow_pops += 1;
+        }
+        self.current()
+    }
+}
+
+fn opengl_backend_intersect_clip(parent: RenderRect, child: RenderRect) -> RenderRect {
+    let x = parent.x.max(child.x);
+    let y = parent.y.max(child.y);
+    let right = parent.right().min(child.right());
+    let bottom = parent.bottom().min(child.bottom());
+    RenderRect::new(x, y, (right - x).max(0.0), (bottom - y).max(0.0))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DesktopGraphicsOpenGlBackendEvent {
     BeginPass {
@@ -985,6 +1032,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub draw_text_commands: usize,
     pub current_blend: RenderBlendMode,
     pub current_clip: Option<RenderRect>,
+    pub clip_stack: DesktopGraphicsOpenGlBackendClipStackState,
     pub current_shader: Option<ShaderId>,
     pub custom_markers: Vec<String>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
@@ -1013,6 +1061,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             draw_text_commands: 0,
             current_blend: RenderBlendMode::Normal,
             current_clip: None,
+            clip_stack: DesktopGraphicsOpenGlBackendClipStackState::default(),
             current_shader: None,
             custom_markers: Vec::new(),
             actions: Vec::new(),
@@ -1042,12 +1091,12 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
             RenderCommand::SetClip { rect } => {
                 self.state.state_commands += 1;
                 self.state.clip_state_changes += 1;
-                self.state.current_clip = Some(rect);
+                self.state.current_clip = self.state.clip_stack.push_clip(rect);
             }
             RenderCommand::ClearClip => {
                 self.state.state_commands += 1;
                 self.state.clip_state_changes += 1;
-                self.state.current_clip = None;
+                self.state.current_clip = self.state.clip_stack.pop_clip();
             }
             RenderCommand::DrawSprite { .. } => {
                 self.state.draw_commands += 1;
@@ -1197,6 +1246,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub pass_active: bool,
     pub current_blend: RenderBlendMode,
     pub current_clip: Option<RenderRect>,
+    pub clip_stack: DesktopGraphicsOpenGlBackendClipStackState,
     pub current_shader: Option<ShaderId>,
     pub begin_passes: usize,
     pub end_passes: usize,
@@ -1226,6 +1276,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             pass_active: false,
             current_blend: RenderBlendMode::Normal,
             current_clip: None,
+            clip_stack: DesktopGraphicsOpenGlBackendClipStackState::default(),
             current_shader: None,
             begin_passes: 0,
             end_passes: 0,
@@ -1379,10 +1430,10 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                         self.state.current_blend = mode;
                     }
                     RenderCommand::SetClip { rect } => {
-                        self.state.current_clip = Some(rect);
+                        self.state.current_clip = self.state.clip_stack.push_clip(rect);
                     }
                     RenderCommand::ClearClip => {
-                        self.state.current_clip = None;
+                        self.state.current_clip = self.state.clip_stack.pop_clip();
                     }
                     RenderCommand::DrawSprite { .. } => {
                         self.state.draw_sprite_commands += 1;
@@ -9409,6 +9460,79 @@ mod tests {
             target,
             kind,
         }
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_executor_tracks_nested_clip_stack() {
+        let target = RenderTarget::Screen;
+        let outer = RenderRect::new(0.0, 0.0, 64.0, 64.0);
+        let inner = RenderRect::new(32.0, 16.0, 64.0, 32.0);
+        let intersected = RenderRect::new(32.0, 16.0, 32.0, 32.0);
+
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::BeginPass,
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "SetClip",
+                command: RenderCommand::set_clip(outer),
+            },
+        ));
+        assert_eq!(executor.state.current_clip, Some(outer));
+        assert_eq!(executor.state.clip_stack.stack, vec![outer]);
+        assert_eq!(executor.state.clip_stack.max_depth, 1);
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "SetClip",
+                command: RenderCommand::set_clip(inner),
+            },
+        ));
+        assert_eq!(executor.state.current_clip, Some(intersected));
+        assert_eq!(executor.state.clip_stack.stack, vec![outer, intersected]);
+        assert_eq!(executor.state.clip_stack.pushes, 2);
+        assert_eq!(executor.state.clip_stack.max_depth, 2);
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target.clone(),
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "ClearClip",
+                command: RenderCommand::clear_clip(),
+            },
+        ));
+        assert_eq!(executor.state.current_clip, Some(outer));
+        assert_eq!(executor.state.clip_stack.stack, vec![outer]);
+
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target,
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind: "ClearClip",
+                command: RenderCommand::clear_clip(),
+            },
+        ));
+        assert_eq!(executor.state.current_clip, None);
+        assert!(executor.state.clip_stack.stack.is_empty());
+        assert_eq!(executor.state.clip_stack.pops, 2);
+        assert_eq!(executor.state.clip_stack.underflow_pops, 0);
+        assert_eq!(executor.state.clip_stack.empty_intersections, 0);
+
+        let mut classifying_adapter =
+            super::DesktopGraphicsClassifyingOpenGlBackendAdapter::default();
+        executor.drive_adapter(&mut classifying_adapter);
+        assert_eq!(classifying_adapter.state.current_clip, None);
+        assert_eq!(classifying_adapter.state.clip_stack.pushes, 2);
+        assert_eq!(classifying_adapter.state.clip_stack.pops, 2);
+        assert_eq!(classifying_adapter.state.clip_stack.max_depth, 2);
+        assert_eq!(executor.state.actions, classifying_adapter.state.actions);
     }
 
     #[test]
