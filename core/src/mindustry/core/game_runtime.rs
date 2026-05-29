@@ -1991,6 +1991,20 @@ fn game_runtime_visual_apply_unit_state(
     }
 }
 
+fn game_runtime_visual_apply_campaign_state(
+    snapshot: &mut GameRuntimeBlockVisualRuntimeSnapshot,
+    state: &GameRuntimeCampaignBlockState,
+) {
+    match state {
+        GameRuntimeCampaignBlockState::Accelerator(state) if !state.launching => {
+            game_runtime_visual_set_once(&mut snapshot.progress, state.progress);
+        }
+        GameRuntimeCampaignBlockState::Accelerator(_)
+        | GameRuntimeCampaignBlockState::LaunchPad(_)
+        | GameRuntimeCampaignBlockState::LandingPad(_) => {}
+    }
+}
+
 fn read_client_unit_sync_exact(
     content: &ContentLoader,
     sync_bytes: &[u8],
@@ -3168,6 +3182,9 @@ impl GameRuntime {
         }
         if let Some(state) = self.unit_runtime_states.get(&tile_pos) {
             game_runtime_visual_apply_unit_state(&mut snapshot, state);
+        }
+        if let Some(state) = self.campaign_runtime_states.get(&tile_pos) {
+            game_runtime_visual_apply_campaign_state(&mut snapshot, state);
         }
         if let Some(state) = self.turret_runtime_states.get(&tile_pos) {
             game_runtime_visual_apply_turret_state(&mut snapshot, state);
@@ -21276,6 +21293,7 @@ mod tests {
         world::{
             blocks::campaign::{
                 write_accelerator_state, write_landing_pad_state, write_launch_pad_state,
+                AcceleratorState,
             },
             blocks::defense::turrets::{
                 continuous_turret_write_child, item_turret_write_ammo,
@@ -21532,8 +21550,28 @@ mod tests {
             })
         );
 
+        let accelerator_block = content.block_by_name("interplanetary-accelerator").unwrap();
+        let accelerator_tile = point2_pack(14, 2);
+        runtime.add_building(BuildingComp::new(
+            accelerator_tile,
+            accelerator_block.base().clone(),
+            TeamId(1),
+        ));
+        runtime.campaign_runtime_states.insert(
+            accelerator_tile,
+            GameRuntimeCampaignBlockState::Accelerator(AcceleratorState {
+                progress: 0.6,
+                launching: false,
+            }),
+        );
+
+        let accelerator_snapshot = runtime
+            .block_visual_runtime_snapshot(accelerator_tile)
+            .expect("accelerator building should snapshot");
+        assert_eq!(accelerator_snapshot.progress, Some(0.6));
+
         let snapshots = runtime.export_block_visual_runtime_snapshots();
-        assert_eq!(snapshots.len(), 4);
+        assert_eq!(snapshots.len(), 5);
         assert!(snapshots
             .iter()
             .any(|snapshot| snapshot.tile_pos == turret_tile));

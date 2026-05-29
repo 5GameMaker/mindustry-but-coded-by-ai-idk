@@ -1,9 +1,12 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
-use mindustry_core::mindustry::content::blocks::{BlockDef, DistributionBlockKind};
+use mindustry_core::mindustry::content::blocks::{
+    BlockDef, CampaignBlockKind, DistributionBlockKind,
+};
 use mindustry_core::mindustry::core::game_runtime::{
-    GameRuntimeBlockVisualRuntimeSnapshot, GameRuntimeClientCameraShakeEvent,
-    GameRuntimeClientSnapshotApplyReport, GameRuntimeClientUnitEnteredPayloadApplyReport,
-    GameRuntimeCommandBuildingReport, GameRuntimeReconstructorConfigureResult,
+    GameRuntimeBlockVisualRuntimeSnapshot, GameRuntimeCampaignBlockState,
+    GameRuntimeClientCameraShakeEvent, GameRuntimeClientSnapshotApplyReport,
+    GameRuntimeClientUnitEnteredPayloadApplyReport, GameRuntimeCommandBuildingReport,
+    GameRuntimeReconstructorConfigureResult, GameRuntimeUnitBlockState,
     GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
@@ -1997,11 +2000,84 @@ fn block_build_region_symbols_from_content_block(block: &BlockDef) -> Vec<String
     regions
 }
 
+fn unit_full_icon_region_symbol(unit_name: &str, content_loader: &ContentLoader) -> Option<String> {
+    let unit = content_loader.unit_by_name(unit_name)?;
+    let candidates = unit.base.icon_candidates(None);
+    candidates.full_candidates.into_iter().next()
+}
+
+fn unit_assembler_block_build_region_symbols(
+    block: &BlockDef,
+    unit_runtime_state: Option<&GameRuntimeUnitBlockState>,
+    content_loader: &ContentLoader,
+) -> Option<Vec<String>> {
+    let BlockDef::UnitAssembler(assembler_block) = block else {
+        return None;
+    };
+    let Some(GameRuntimeUnitBlockState::Assembler { assembler, .. }) = unit_runtime_state else {
+        return None;
+    };
+    let current_tier = assembler.current_tier.max(0) as usize;
+    let plan = assembler_block
+        .plans
+        .get(current_tier.min(assembler_block.plans.len().saturating_sub(1)))?;
+    unit_full_icon_region_symbol(&plan.unit, content_loader).map(|symbol| vec![symbol])
+}
+
+fn accelerator_launch_block_build_region_symbols(
+    block: &BlockDef,
+    campaign_runtime_state: Option<&GameRuntimeCampaignBlockState>,
+    content_loader: &ContentLoader,
+) -> Option<Vec<String>> {
+    let BlockDef::Campaign(campaign_block) = block else {
+        return None;
+    };
+    if campaign_block.kind != CampaignBlockKind::Accelerator {
+        return None;
+    }
+    if matches!(
+        campaign_runtime_state,
+        Some(GameRuntimeCampaignBlockState::Accelerator(state)) if state.launching
+    ) {
+        return None;
+    }
+
+    let launch_block = campaign_block
+        .launch_block
+        .and_then(|id| content_loader.block(id))
+        .or_else(|| {
+            campaign_block
+                .launch_block_name
+                .as_deref()
+                .and_then(|name| content_loader.block_by_name(name))
+        })?;
+    Some(block_build_region_symbols_from_content_block(launch_block))
+}
+
+fn block_build_region_symbols_for_content_block(
+    block: &BlockDef,
+    unit_runtime_state: Option<&GameRuntimeUnitBlockState>,
+    campaign_runtime_state: Option<&GameRuntimeCampaignBlockState>,
+    content_loader: &ContentLoader,
+) -> Vec<String> {
+    unit_assembler_block_build_region_symbols(block, unit_runtime_state, content_loader)
+        .or_else(|| {
+            accelerator_launch_block_build_region_symbols(
+                block,
+                campaign_runtime_state,
+                content_loader,
+            )
+        })
+        .unwrap_or_else(|| block_build_region_symbols_from_content_block(block))
+}
+
 fn block_renderer_building_snapshot_from_world(
     coord: TileCoord,
     tile_build: Option<BuildingRef>,
     runtime_building: Option<&BuildingComp>,
     visual_runtime: Option<GameRuntimeBlockVisualRuntimeSnapshot>,
+    unit_runtime_state: Option<&GameRuntimeUnitBlockState>,
+    campaign_runtime_state: Option<&GameRuntimeCampaignBlockState>,
     content_loader: &ContentLoader,
 ) -> Option<BlockRendererBuildingSnapshot> {
     let block_id = tile_build
@@ -2025,7 +2101,12 @@ fn block_renderer_building_snapshot_from_world(
     }
 
     if let Some(def) = content_block {
-        snapshot.block_build_regions = block_build_region_symbols_from_content_block(def);
+        snapshot.block_build_regions = block_build_region_symbols_for_content_block(
+            def,
+            unit_runtime_state,
+            campaign_runtime_state,
+            content_loader,
+        );
         if let Some(drawer) = block_drawer_from_content_block(def) {
             snapshot.drawer = drawer.to_string();
         }
@@ -2142,6 +2223,8 @@ fn block_renderer_tile_snapshot_from_world(
     tile: &Tile,
     runtime_building: Option<&BuildingComp>,
     visual_runtime: Option<GameRuntimeBlockVisualRuntimeSnapshot>,
+    unit_runtime_state: Option<&GameRuntimeUnitBlockState>,
+    campaign_runtime_state: Option<&GameRuntimeCampaignBlockState>,
     content_loader: &ContentLoader,
 ) -> BlockRendererTileSnapshot {
     let coord = TileCoord::new(tile.x as i32, tile.y as i32);
@@ -2169,6 +2252,8 @@ fn block_renderer_tile_snapshot_from_world(
         tile_build,
         runtime_building,
         visual_runtime,
+        unit_runtime_state,
+        campaign_runtime_state,
         content_loader,
     );
     snapshot
@@ -2992,10 +3077,20 @@ impl DesktopLauncher {
                         self.runtime
                             .block_visual_runtime_snapshot_for_building(building)
                     });
+                    let runtime_tile_pos = runtime_building
+                        .map(|building| building.tile_pos)
+                        .or_else(|| tile.build.map(|build| build.tile_pos))
+                        .unwrap_or_else(|| tile.pos());
+                    let unit_runtime_state =
+                        self.runtime.unit_runtime_states.get(&runtime_tile_pos);
+                    let campaign_runtime_state =
+                        self.runtime.campaign_runtime_states.get(&runtime_tile_pos);
                     block_renderer_tile_snapshot_from_world(
                         tile,
                         runtime_building,
                         visual_runtime,
+                        unit_runtime_state,
+                        campaign_runtime_state,
                         &self.content_loader,
                     )
                 })
@@ -4820,7 +4915,7 @@ mod tests {
             TeamId, TypeValue, UnitRef, Vec2 as IoVec2,
         },
         r#type::{ItemStack, PayloadKey, PayloadSeq, Sector, UnitType, Weapon},
-        world::blocks::campaign::LandingPadState,
+        world::blocks::campaign::{AcceleratorState, LandingPadState},
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
         world::blocks::units::{
             ReconstructorState, UnitAssemblerState, UnitBlockState, UnitCargoLoaderState,
@@ -6458,6 +6553,115 @@ mod tests {
         assert_eq!(block_build.progress, 0.25);
         assert_eq!(block_build.time, 13.0);
         assert_eq!(block_build.alpha, 0.5);
+    }
+
+    #[test]
+    fn desktop_launcher_block_build_regions_use_unit_assembler_plan_full_icon() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let assembler = launcher
+            .content_loader
+            .block_by_name("tank-assembler")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(4, 4);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = assembler.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: assembler.id,
+                team: 3,
+                rotation: 0,
+            });
+            tile_pos
+        };
+
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(tile_pos, assembler, TeamId(3)));
+        launcher.runtime.unit_runtime_states.insert(
+            tile_pos,
+            GameRuntimeUnitBlockState::Assembler {
+                common: PayloadBlockBuildState::default(),
+                assembler: UnitAssemblerState {
+                    progress: 0.4,
+                    warmup: 0.7,
+                    current_tier: 1,
+                    ..UnitAssemblerState::default()
+                },
+            },
+        );
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let plan = launcher.block_render_plan(camera, viewport).unwrap();
+        let block_build = plan
+            .block_builds
+            .iter()
+            .find(|build| build.coord == TileCoord::new(1, 1))
+            .expect("unit assembler progress should emit blockbuild plan");
+
+        assert_eq!(block_build.block, "tank-assembler");
+        assert_eq!(block_build.region, "unit-conquer-full");
+        assert_eq!(block_build.regions, vec![String::from("unit-conquer-full")]);
+        assert_eq!(block_build.progress, 0.4);
+        assert_eq!(block_build.alpha, 0.7);
+    }
+
+    #[test]
+    fn desktop_launcher_block_build_regions_use_accelerator_launch_block_icons() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let accelerator = launcher
+            .content_loader
+            .block_by_name("interplanetary-accelerator")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(4, 4);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = accelerator.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: accelerator.id,
+                team: 3,
+                rotation: 0,
+            });
+            tile_pos
+        };
+
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(tile_pos, accelerator, TeamId(3)));
+        launcher.runtime.campaign_runtime_states.insert(
+            tile_pos,
+            GameRuntimeCampaignBlockState::Accelerator(AcceleratorState {
+                progress: 0.6,
+                launching: false,
+            }),
+        );
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let plan = launcher.block_render_plan(camera, viewport).unwrap();
+        let block_build = plan
+            .block_builds
+            .iter()
+            .find(|build| build.coord == TileCoord::new(1, 1))
+            .expect("accelerator progress should emit blockbuild plan");
+
+        assert_eq!(block_build.block, "interplanetary-accelerator");
+        assert_eq!(block_build.region, "core-nucleus");
+        assert_eq!(block_build.regions, vec![String::from("core-nucleus")]);
+        assert_eq!(block_build.progress, 0.6);
+        assert_eq!(block_build.alpha, 1.0);
     }
 
     #[test]

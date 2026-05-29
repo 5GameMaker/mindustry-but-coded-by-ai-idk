@@ -10137,3 +10137,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 `ShaderApplyPlan` 下沉到真实 OpenGL/glow program/cache/context executor；
   2. 并行补 `UnitAssembler.plan.unit.fullIcon` 与 `Accelerator.launchBlock.getGeneratedIcons()` 的特殊 region 入口；
   3. 保持所有渲染 helper 最终接入 `DesktopGraphicsRenderer` 主链。
+
+---
+
+## 312. 最新闭环记录：UnitAssembler 与 Accelerator BlockBuild region 接入
+
+- 本轮总体进度更新：约 **26.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `AcceleratorState` 非 launching 状态的 `progress` 进入 block visual runtime snapshot；
+    - core 测试覆盖 accelerator visual progress 导出。
+  - `desktop/src/lib.rs`
+    - `block_renderer_world_snapshot(...)` 向 building snapshot resolver 传入 unit/campaign runtime state；
+    - UnitAssembler 根据 `current_tier` 选择 plan unit，并映射到 unit full icon candidate；
+    - Accelerator 根据 `launch_block` / `launch_block_name` 解析 launch block generated icon symbols；
+    - 新增 desktop 测试覆盖 `unit-conquer-full` 与 `core-nucleus` 两条 blockbuild region 路径。
+- 已验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core game_runtime_exports_block_visual_runtime_snapshot_from_existing_state --lib`
+  - `cargo test -p mindustry-desktop block_build_regions --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 继续迁移 Accelerator launching 分支的 fullIcon 直绘、additive light 与 mix color；
+  2. 继续把 unit fullIcon candidate 与 atlas/backend resolved region 绑定得更精确；
+  3. 推进真实 OpenGL/glow executor。

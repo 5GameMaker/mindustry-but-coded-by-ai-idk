@@ -12773,3 +12773,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 还没有真实 `glow`/OpenGL context 执行 program bind / uniform upload / draw call；
   - 需要继续把 shader apply trace 接到真实 backend executor；
   - 当前总体迁移约 26.2%，仍未达到完整可玩。
+
+### 12.406 UnitAssembler 与 Accelerator BlockBuild region 接入
+
+- 2026-05-29：继续对齐 Java blockbuild 的特殊 region 来源。本轮把 `UnitAssembler.plan.unit.fullIcon` 与 `Accelerator.launchBlock.getGeneratedIcons()` 接入 Rust desktop 的 `BlockRendererBuildingSnapshot.block_build_regions` 主链，并让 accelerator runtime progress 进入 visual snapshot，避免这两类 Java 绘制点继续 fallback 到自身 block 图标。
+- Rust 新增/接入：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 campaign visual runtime 应用逻辑；
+    - `GameRuntimeCampaignBlockState::Accelerator { launching: false }` 会把 `progress` 写入 `GameRuntimeBlockVisualRuntimeSnapshot.progress`；
+    - `launching: true` 暂不走 blockbuild shader，对应 Java 启动分支中的 fullIcon 直绘仍待后续单独接入。
+  - `desktop/src/lib.rs`
+    - `block_renderer_world_snapshot(...)` 传入 unit/campaign runtime state；
+    - `block_build_region_symbols_for_content_block(...)` 先处理特殊来源，再 fallback 到普通 drawer icons；
+    - UnitAssembler 通过当前 tier 选择 plan unit，并使用 unit full icon 候选符号；
+    - Accelerator 通过 launch block id/name 解析目标 block 的 generated icon symbols。
+- Java 对照要点：
+  - `UnitAssembler.draw()` 使用 `plan.unit.fullIcon`；
+  - `Accelerator.draw()` 的非 launching 分支循环 `launchBlock.getGeneratedIcons()`；
+  - Rust 现在已在渲染 snapshot 层接入这两条来源，没有把图标解析污染到运行时状态机。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core game_runtime_exports_block_visual_runtime_snapshot_from_existing_state --lib`
+  - `cargo test -p mindustry-desktop block_build_regions --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - `Accelerator.launching` 分支的 fullIcon 直绘/加色光效仍待迁移；
+  - Unit fullIcon 当前仍是候选 symbol，还需要真实 atlas/backend 执行层最终绑定；
+  - 当前总体迁移约 26.3%，仍未达到完整可玩。
