@@ -13363,3 +13363,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 尚未把 texture binding 转成真实 GPU texture handle；
   - shader program binding 与实际 draw call 仍待落地；
   - 当前总体迁移约 28.4%，仍未达到完整可玩。
+
+## 12.428 OpenGL sprite mesh buffer plan
+
+- 2026-05-29：在 sprite mesh/batch 输入基础上继续补 VBO/IBO 前置上传计划。当前仍不创建真实 GL buffer，只计算每个 sprite batch 的 vertex/index 数量、stride 与 buffer byte size。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendMeshBufferPlan`；
+    - `DesktopGraphicsOpenGlBackendMeshBufferPlan::from_sprite_batch(...)` 从 batch 生成上传计划；
+    - `opengl_backend_mesh_buffer_plans_from_batches(...)` 将所有 sprite batch 转为 buffer plan；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `sprite_mesh_buffer_plans`；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增同名字段；
+    - `record_sprite_quad(...)` 在重建 batch 后同步重建 buffer plan。
+- 迁移意义：
+  - 后续真实 OpenGL backend 可直接按 buffer plan 分配/更新 VBO/IBO；
+  - sprite 渲染链路推进为 `DrawSprite -> resolved atlas -> texture binding -> quad -> mesh batch -> buffer plan`；
+  - 仍保持原版 OpenGL/SpriteBatch 方向，不切换渲染引擎。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - 尚未创建真实 VBO/IBO/VAO；
+  - Arc SpriteBatch 的 `mixColor`、origin/pivot 与更完整排序语义仍待补齐；
+  - texture handle、shader binding 与 draw call 仍待落地；
+  - 当前总体迁移约 28.5%，仍未达到完整可玩。
