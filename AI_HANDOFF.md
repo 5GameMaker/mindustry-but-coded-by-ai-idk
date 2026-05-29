@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **32.8%**。
+- 当前总体迁移完成度：约 **32.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11736,3 +11736,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 增加 resolve 专用 driver command；
   2. 把 resolve attachment 转成 blit/screen quad command；
   3. 再接 feature-gated window/context。
+
+---
+
+## 375. 最新闭环记录：Resolve driver command seam
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **32.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolveCommand`，携带 `source_target`、`resolve_target`、`resolve_kind` 与可选 `source_attachment`；
+    - 新增 `DesktopGraphicsOpenGlBackendResolveCommandSink` 与 `DesktopGraphicsRecordingOpenGlBackendResolveCommandSink`；
+    - `DesktopGraphicsOpenGlBackendDriver` / `DesktopGraphicsOpenGlBackendDriverCommand` 接入 resolve command；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 新增 `resolve_commands`，并从 `DesktopGraphicsOpenGlBackendResolveEvent` 生成 driver 可消费的 resolve command；
+    - `DesktopGraphicsOpenGlBackendExecutorState::drive_resolving_command_executor(...)` 现在会把 `resolve_events` 下沉到 shared resolver；
+    - `headless_graphics_renderer_roundtrips_opengl_state_to_shared_resolver` 断言 `Buffer("roundtrip-fbo") -> Screen` 的 `ShaderBlit` resolve command 进入 driver，且 source attachment 指向 `framebuffer-attachment:buffer:roundtrip-fbo:color0`。
+- 关键语义：
+  - resolve 不再只是 metadata/计数，已进入 OpenGL driver seam；
+  - 当前 command 仍是 recording 层，真实 GL 后续应在这里实现 `glBlitFramebuffer` 或 fullscreen quad；
+  - 不要扩 `RenderResolveKind`，继续复用 `ShaderBlit` / `DrawRectSample` / `DrawFboSample` 分发。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_roundtrips --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 将 resolve command 展开为 `ShaderBlit` fullscreen quad / `DrawRectSample` region quad / `DrawFboSample` camera-world UV quad；
+  2. 新增 feature-gated `opengl-backend` runtime 壳层；
+  3. 并行收口 `map_markers.rs` / `save.rs` worker 结果。

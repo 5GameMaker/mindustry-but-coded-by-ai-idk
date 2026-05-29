@@ -14395,3 +14395,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - resolve/blit/present 尚未进入 driver command；
   - feature-gated real OpenGL window/context 尚未接入；
   - 当前总体迁移约 32.8%，仍未达到完整可玩。
+
+## 12.469 Resolve driver command seam
+
+- 2026-05-29：继续推进 OpenGL resolve 从“metadata / 计数 / attachment 状态”下沉到 driver 可消费命令。本轮仍不引入真实 GL/window 依赖，而是在 shared resolving executor 与 recording driver 中新增 resolve command 边界。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolveCommand`，记录 `source_target`、`resolve_target`、`resolve_kind` 与可选 `source_attachment`；
+    - 新增 `DesktopGraphicsOpenGlBackendResolveCommandSink` 与 recording sink；
+    - `DesktopGraphicsOpenGlBackendDriver` 增加 resolve command sink；
+    - `DesktopGraphicsOpenGlBackendDriverCommand` 增加 `Resolve(...)`；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 新增 `resolve_commands`，并从 `DesktopGraphicsOpenGlBackendResolveEvent` 生成 resolve command；
+    - `DesktopGraphicsOpenGlBackendExecutorState::drive_resolving_command_executor(...)` 现在会把 `resolve_events` 下沉到 shared resolver；
+    - `headless_graphics_renderer_roundtrips_opengl_state_to_shared_resolver` 扩展断言 `ShaderBlit` 的 `Buffer("roundtrip-fbo") -> Screen` resolve command，并确认 driver 最后一条命令是 `Resolve`。
+- 迁移意义：
+  - `RenderResolveKind::{ShaderBlit, DrawRectSample, DrawFboSample}` 进入 driver seam，不再只停留在 renderer/executor state；
+  - 后续真实 OpenGL backend 可以在该命令处实现 `glBlitFramebuffer` 或 fullscreen textured quad；
+  - source attachment 的 color texture key/handle 已随 resolve command 一起交给 driver 边界。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_roundtrips --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - resolve command 目前只是 recording，不执行真实 GL；
+  - `ShaderBlit` / `DrawRectSample` / `DrawFboSample` 尚未展开为真实 blit 或 screen-quad draw；
+  - feature-gated real OpenGL window/context 尚未接入；
+  - 当前总体迁移约 32.9%，仍未达到完整可玩。
