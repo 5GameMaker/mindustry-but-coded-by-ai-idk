@@ -13572,6 +13572,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 已跑验证：
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
-  - 尚未真实执行 GL draw call，也未创建真实 GL object handle；
+  - sprite mesh resource table 已在下一节补齐，尚未真实执行 GL draw call 或分配真实 GL object handle；
   - draw call plan 尚未细化 uniform/attribute location 与 texture unit 绑定；
   - 当前总体迁移约 29.3%，仍未达到完整可玩。
+
+## 12.437 Sprite mesh resource table
+
+- 2026-05-29：根据 Arc `SpriteBatch` 持有 `Mesh`、flush 时提交同一个 mesh 的语义，把前一节的 VAO/VBO/IBO resource plan 升级成运行期资源记录表。当前仍不分配真实 GL handle，但每个 batch 已对应一套可回查的 mesh resource record。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshResource`，记录 batch index、VAO/VBO/IBO key、可选 handle、buffer bytes 与 stride；
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteMeshResourceTable`；
+    - `SpriteMeshResource::from_plan(...)` 从 resource plan 生成运行期资源记录，初始 handle 均为 `None`；
+    - `SpriteMeshResourceTable::from_plans(...)` 按 VAO key 建表；
+    - `get_by_batch_index(...)` 提供 batch 到 mesh resource 的查询；
+    - executor 与 classifying adapter state 均新增 `sprite_mesh_resource_table`；
+    - `record_sprite_quad(...)` 在 resource plan 后同步重建 resource table；
+    - 回归测试验证 batch resource 可回查、key 稳定、handle 初始为空、bytes 与 buffer plan 一致，且 executor/adapter 对称。
+- 迁移意义：
+  - OpenGL sprite path 从“资源命名计划”推进到“运行期资源记录”；
+  - 后续真实 GL adapter 可在表内填入 VAO/VBO/IBO handles 与 generation，而不是改写上层 batch/plan 结构；
+  - 更接近 Arc 的 `Mesh` 资源实体语义，避免把 flush 当成资源生命周期。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - 尚未真实分配/上传 VAO/VBO/IBO；
+  - draw call plan 尚未映射到真实 action sink；
+  - 当前总体迁移约 29.4%，仍未达到完整可玩。

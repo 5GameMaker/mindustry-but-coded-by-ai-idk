@@ -662,6 +662,25 @@ pub struct DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteMeshResource {
+    pub batch_index: usize,
+    pub vertex_array_key: String,
+    pub vertex_buffer_key: String,
+    pub index_buffer_key: String,
+    pub vertex_array_handle: Option<u32>,
+    pub vertex_buffer_handle: Option<u32>,
+    pub index_buffer_handle: Option<u32>,
+    pub vertex_buffer_bytes: usize,
+    pub index_buffer_bytes: usize,
+    pub vertex_stride_bytes: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteMeshResourceTable {
+    pub resources: BTreeMap<String, DesktopGraphicsOpenGlBackendSpriteMeshResource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendShaderProgramIdentity {
     pub shader: ShaderId,
     pub program_key: String,
@@ -724,6 +743,48 @@ impl DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan {
             index_buffer_bytes: plan.index_buffer_bytes,
             vertex_stride_bytes: plan.vertex_stride_bytes,
         }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshResource {
+    pub fn from_plan(plan: &DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan) -> Self {
+        Self {
+            batch_index: plan.batch_index,
+            vertex_array_key: plan.vertex_array_key.clone(),
+            vertex_buffer_key: plan.vertex_buffer_key.clone(),
+            index_buffer_key: plan.index_buffer_key.clone(),
+            vertex_array_handle: None,
+            vertex_buffer_handle: None,
+            index_buffer_handle: None,
+            vertex_buffer_bytes: plan.vertex_buffer_bytes,
+            index_buffer_bytes: plan.index_buffer_bytes,
+            vertex_stride_bytes: plan.vertex_stride_bytes,
+        }
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteMeshResourceTable {
+    pub fn from_plans(plans: &[DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan]) -> Self {
+        Self {
+            resources: plans
+                .iter()
+                .map(|plan| {
+                    (
+                        plan.vertex_array_key.clone(),
+                        DesktopGraphicsOpenGlBackendSpriteMeshResource::from_plan(plan),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn get_by_batch_index(
+        &self,
+        batch_index: usize,
+    ) -> Option<&DesktopGraphicsOpenGlBackendSpriteMeshResource> {
+        self.resources
+            .values()
+            .find(|resource| resource.batch_index == batch_index)
     }
 }
 
@@ -1559,6 +1620,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
     pub sprite_mesh_buffer_plans: Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan>,
     pub sprite_mesh_resource_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan>,
+    pub sprite_mesh_resource_table: DesktopGraphicsOpenGlBackendSpriteMeshResourceTable,
     pub sprite_draw_call_plans: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
     pub missing_sprite_texture_bindings: usize,
 }
@@ -1598,6 +1660,8 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             sprite_mesh_batches: Vec::new(),
             sprite_mesh_buffer_plans: Vec::new(),
             sprite_mesh_resource_plans: Vec::new(),
+            sprite_mesh_resource_table:
+                DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::default(),
             sprite_draw_call_plans: Vec::new(),
             missing_sprite_texture_bindings: 0,
         }
@@ -1745,6 +1809,10 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
         self.sprite_mesh_resource_plans =
             opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
                 &self.sprite_mesh_buffer_plans,
+            );
+        self.sprite_mesh_resource_table =
+            DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::from_plans(
+                &self.sprite_mesh_resource_plans,
             );
         self.sprite_draw_call_plans = opengl_backend_sprite_draw_call_plans_from_batches(
             &self.sprite_mesh_batches,
@@ -1906,6 +1974,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub sprite_mesh_batches: Vec<DesktopGraphicsOpenGlBackendSpriteMeshBatch>,
     pub sprite_mesh_buffer_plans: Vec<DesktopGraphicsOpenGlBackendMeshBufferPlan>,
     pub sprite_mesh_resource_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshResourcePlan>,
+    pub sprite_mesh_resource_table: DesktopGraphicsOpenGlBackendSpriteMeshResourceTable,
     pub sprite_draw_call_plans: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
     pub missing_sprite_texture_bindings: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
@@ -1946,6 +2015,8 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             sprite_mesh_batches: Vec::new(),
             sprite_mesh_buffer_plans: Vec::new(),
             sprite_mesh_resource_plans: Vec::new(),
+            sprite_mesh_resource_table:
+                DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::default(),
             sprite_draw_call_plans: Vec::new(),
             missing_sprite_texture_bindings: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
@@ -2079,6 +2150,10 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         self.sprite_mesh_resource_plans =
             opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
                 &self.sprite_mesh_buffer_plans,
+            );
+        self.sprite_mesh_resource_table =
+            DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::from_plans(
+                &self.sprite_mesh_resource_plans,
             );
         self.sprite_draw_call_plans = opengl_backend_sprite_draw_call_plans_from_batches(
             &self.sprite_mesh_batches,
@@ -10094,6 +10169,22 @@ mod tests {
                 vertex_stride_bytes: executor.state.sprite_mesh_buffer_plans[0].vertex_stride_bytes,
             }
         );
+        assert_eq!(executor.state.sprite_mesh_resource_table.resources.len(), 1);
+        let mesh_resource = executor
+            .state
+            .sprite_mesh_resource_table
+            .get_by_batch_index(0)
+            .expect("sprite batch should have a mesh resource record");
+        assert_eq!(mesh_resource.vertex_array_key, "sprite-batch:0:vao");
+        assert_eq!(mesh_resource.vertex_buffer_key, "sprite-batch:0:vbo");
+        assert_eq!(mesh_resource.index_buffer_key, "sprite-batch:0:ibo");
+        assert_eq!(mesh_resource.vertex_array_handle, None);
+        assert_eq!(mesh_resource.vertex_buffer_handle, None);
+        assert_eq!(mesh_resource.index_buffer_handle, None);
+        assert_eq!(
+            mesh_resource.vertex_buffer_bytes,
+            executor.state.sprite_mesh_buffer_plans[0].vertex_buffer_bytes
+        );
         assert_eq!(executor.state.sprite_draw_call_plans.len(), 1);
         assert_eq!(
             executor.state.sprite_draw_call_plans[0],
@@ -10157,6 +10248,10 @@ mod tests {
         assert_eq!(
             classifying_adapter.state.sprite_mesh_resource_plans,
             executor.state.sprite_mesh_resource_plans
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_mesh_resource_table,
+            executor.state.sprite_mesh_resource_table
         );
         assert_eq!(
             classifying_adapter.state.sprite_draw_call_plans,
