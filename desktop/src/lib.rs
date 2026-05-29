@@ -353,6 +353,16 @@ pub enum DesktopGraphicsExecutionStepTrace {
     ShaderDispatch {
         apply_count: usize,
     },
+    ShaderApply {
+        pass_index: usize,
+        command_index: usize,
+        pass_kind: RenderPassKind,
+        pass_order: i32,
+        target: RenderTarget,
+        shader: ShaderId,
+        operation_count: usize,
+        error_count: usize,
+    },
     BlockParticles {
         plan_count: usize,
     },
@@ -372,6 +382,12 @@ pub enum DesktopGraphicsCommandExecutionTrace {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsShaderApplyCommandTrace {
+    pub command_index: usize,
+    pub apply: ShaderApplyPlan,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsPassExecutionTrace {
     pub kind: RenderPassKind,
     pub order: i32,
@@ -380,6 +396,7 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub resolve_kind: Option<RenderResolveKind>,
     pub command_count: usize,
     pub commands: Vec<RenderCommand>,
+    pub shader_applies: Vec<DesktopGraphicsShaderApplyCommandTrace>,
     pub command_trace: Vec<DesktopGraphicsCommandExecutionTrace>,
     pub draw_sprite_symbols: Vec<String>,
     pub resolved_sprites: Vec<DesktopGraphicsResolvedSpriteTrace>,
@@ -547,6 +564,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
             },
             commands,
             &[],
+            &[],
         );
         self.steps.push(DesktopGraphicsOpenGlBackendStep {
             source: DesktopGraphicsOpenGlBackendStepSource::BlockParticles {
@@ -579,6 +597,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
             },
             &pass.commands,
             &pass.resolved_sprites,
+            &pass.shader_applies,
         );
 
         self.steps.push(DesktopGraphicsOpenGlBackendStep {
@@ -615,6 +634,7 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
         source: DesktopGraphicsOpenGlBackendStepSource,
         commands: &[RenderCommand],
         resolved_sprites: &[DesktopGraphicsResolvedSpriteTrace],
+        shader_applies: &[DesktopGraphicsShaderApplyCommandTrace],
     ) {
         for (command_index, command) in commands.iter().enumerate() {
             let command_source = match &source {
@@ -647,8 +667,13 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
                 });
             }
 
-            if let Some(apply) =
-                blockbuild_shader_apply_plan_from_render_command(command, resolved_sprites)
+            if let Some(apply) = shader_applies
+                .iter()
+                .find(|trace| trace.command_index == command_index)
+                .map(|trace| trace.apply.clone())
+                .or_else(|| {
+                    blockbuild_shader_apply_plan_from_render_command(command, resolved_sprites)
+                })
             {
                 self.steps.push(DesktopGraphicsOpenGlBackendStep {
                     source: command_source.clone(),
@@ -1240,7 +1265,8 @@ impl DesktopGraphicsExecutionTrace {
                     render_frame
                         .passes
                         .iter()
-                        .map(|pass| {
+                        .enumerate()
+                        .map(|(pass_index, pass)| {
                             execution_steps.push(DesktopGraphicsExecutionStepTrace::RenderPass {
                                 kind: pass.kind.clone(),
                                 order: pass.order,
@@ -1289,6 +1315,35 @@ impl DesktopGraphicsExecutionTrace {
                                     ),
                                 }
                             }
+                            let shader_applies = pass
+                                .commands
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(command_index, command)| {
+                                    blockbuild_shader_apply_plan_from_render_command(
+                                        command,
+                                        &resolved_sprites,
+                                    )
+                                    .map(|apply| {
+                                        execution_steps.push(
+                                            DesktopGraphicsExecutionStepTrace::ShaderApply {
+                                                pass_index,
+                                                command_index,
+                                                pass_kind: pass.kind.clone(),
+                                                pass_order: pass.order,
+                                                target: pass.target.clone(),
+                                                shader: apply.shader,
+                                                operation_count: apply.operations.len(),
+                                                error_count: apply.errors.len(),
+                                            },
+                                        );
+                                        DesktopGraphicsShaderApplyCommandTrace {
+                                            command_index,
+                                            apply,
+                                        }
+                                    })
+                                })
+                                .collect();
 
                             DesktopGraphicsPassExecutionTrace {
                                 kind: pass.kind.clone(),
@@ -1298,6 +1353,7 @@ impl DesktopGraphicsExecutionTrace {
                                 resolve_kind: pass.resolve_kind,
                                 command_count: pass.commands.len(),
                                 commands: pass.commands.clone(),
+                                shader_applies,
                                 command_trace,
                                 draw_sprite_symbols,
                                 resolved_sprites,
@@ -1431,6 +1487,9 @@ pub struct DesktopGraphicsExecutionSummary {
     pub shader_dispatch_applies: usize,
     pub shader_dispatch_operations: usize,
     pub shader_dispatch_errors: usize,
+    pub backend_shader_apply_steps: usize,
+    pub backend_shader_apply_operations: usize,
+    pub backend_shader_apply_errors: usize,
     pub screen_target_passes: usize,
     pub texture_target_passes: usize,
     pub buffer_target_passes: usize,
@@ -1477,6 +1536,17 @@ impl DesktopGraphicsExecutionSummary {
                 .count();
             summary.draw_text_commands += pass.draw_texts.len();
             summary.draw_polygon_commands += pass.draw_polygon_sides.len();
+            summary.backend_shader_apply_steps += pass.shader_applies.len();
+            summary.backend_shader_apply_operations += pass
+                .shader_applies
+                .iter()
+                .map(|trace| trace.apply.operations.len())
+                .sum::<usize>();
+            summary.backend_shader_apply_errors += pass
+                .shader_applies
+                .iter()
+                .map(|trace| trace.apply.errors.len())
+                .sum::<usize>();
             match &pass.target {
                 RenderTarget::Screen => summary.screen_target_passes += 1,
                 RenderTarget::Texture(_) => summary.texture_target_passes += 1,
@@ -7233,6 +7303,33 @@ mod tests {
         let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
         let plan = DesktopGraphicsOpenGlBackendFramePlan::from_trace(&trace);
 
+        assert_eq!(trace.render_passes[0].shader_applies.len(), 1);
+        assert_eq!(trace.render_passes[0].shader_applies[0].command_index, 0);
+        assert_eq!(
+            trace.execution_steps,
+            vec![
+                DesktopGraphicsExecutionStepTrace::RenderPass {
+                    kind: RenderPassKind::BlockBuild,
+                    order: RenderPassKind::BlockBuild.default_order(),
+                    target: RenderTarget::Screen,
+                },
+                DesktopGraphicsExecutionStepTrace::ShaderApply {
+                    pass_index: 0,
+                    command_index: 0,
+                    pass_kind: RenderPassKind::BlockBuild,
+                    pass_order: RenderPassKind::BlockBuild.default_order(),
+                    target: RenderTarget::Screen,
+                    shader: ShaderId::BlockBuild,
+                    operation_count: 6,
+                    error_count: 0,
+                },
+            ]
+        );
+        let summary = DesktopGraphicsExecutionSummary::from_trace(&frame, &trace);
+        assert_eq!(summary.backend_shader_apply_steps, 1);
+        assert_eq!(summary.backend_shader_apply_operations, 6);
+        assert_eq!(summary.backend_shader_apply_errors, 0);
+
         assert_eq!(plan.steps.len(), 6);
         assert!(matches!(
             plan.steps[1].kind,
@@ -7300,6 +7397,13 @@ mod tests {
                 resolved.page_height.unwrap() as f32
             ]))
         );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert_eq!(renderer.last_trace.render_passes[0].shader_applies.len(), 1);
+        assert_eq!(renderer.last_execution.backend_shader_apply_steps, 1);
+        assert_eq!(renderer.last_execution.backend_shader_apply_operations, 6);
+        assert_eq!(renderer.last_opengl_backend_plan, plan);
     }
 
     #[test]

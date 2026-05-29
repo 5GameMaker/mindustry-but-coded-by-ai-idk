@@ -12749,3 +12749,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 这仍是 backend plan/trace 层，不是实际 `glow` GPU draw call；
   - 还需要后续真实 OpenGL program/cache/context 执行 `ShaderApplyPlan`；
   - 当前总体迁移约 26.1%，仍未达到完整可玩。
+
+### 12.405 OpenGL ShaderApply 执行 trace/state 接入
+
+- 2026-05-29：继续把上一轮 `DesktopGraphicsOpenGlBackendStepKind::ShaderApply` 从 plan 层下沉到 renderer 可观测执行链。本轮让 blockbuild shader apply 同时进入 `DesktopGraphicsExecutionTrace`、`DesktopGraphicsExecutionStepTrace`、`DesktopGraphicsExecutionSummary` 和 `HeadlessDesktopGraphicsRenderer` 的 `last_trace/last_execution`，避免只停在孤立 backend plan helper。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsExecutionStepTrace` 新增 `ShaderApply { pass_index, command_index, pass_kind, pass_order, target, shader, operation_count, error_count }`；
+    - `DesktopGraphicsPassExecutionTrace` 新增 `shader_applies`，保存命令索引与完整 `ShaderApplyPlan`；
+    - `DesktopGraphicsExecutionTrace::from_frame_and_atlas(...)` 在 render pass 主路径中复用 blockbuild custom command -> `ShaderApplyPlan` 转换；
+    - `DesktopGraphicsExecutionSummary` 新增 backend shader apply 计数、operation 计数和 error 计数；
+    - `DesktopGraphicsOpenGlBackendFramePlan` 改为优先消费 trace 中的 `shader_applies`，再 fallback 到 command 解析。
+- Java 对照要点：
+  - Java `Draw.flush()` 前的 `Shaders.blockbuild.apply()` 语义现在不只存在于 command property，而是能被 headless backend trace/state 观察；
+  - 仍保持 OpenGL/Arc/LWJGL 语义路线，未引入 `wgpu`。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend_plan --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 仍未完成：
+  - 还没有真实 `glow`/OpenGL context 执行 program bind / uniform upload / draw call；
+  - 需要继续把 shader apply trace 接到真实 backend executor；
+  - 当前总体迁移约 26.2%，仍未达到完整可玩。

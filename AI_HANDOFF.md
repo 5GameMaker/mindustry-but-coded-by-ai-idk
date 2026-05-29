@@ -10114,3 +10114,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 `ShaderApplyPlan` 下沉到真实 OpenGL/glow program/context 执行层；
   2. 继续补 `UnitAssembler` / `Accelerator` 的特殊 fullIcon/generatedIcons 入口；
   3. 后续仍保持 OpenGL/Arc/LWJGL 语义路线，不切 `wgpu`。
+
+---
+
+## 311. 最新闭环记录：OpenGL ShaderApply 执行 trace/state 接入
+
+- 本轮总体进度更新：约 **26.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsExecutionStepTrace` 新增 `ShaderApply`；
+    - `DesktopGraphicsPassExecutionTrace` 新增 `shader_applies`，保存 command index 与完整 `ShaderApplyPlan`；
+    - `DesktopGraphicsExecutionTrace::from_frame_and_atlas(...)` 在 render pass 主链记录 blockbuild shader apply；
+    - `DesktopGraphicsExecutionSummary` 新增 backend shader apply steps/operations/errors；
+    - `DesktopGraphicsOpenGlBackendFramePlan::push_commands(...)` 优先消费 trace 中的 shader apply，而不是只在 plan 层临时解析。
+- 已验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-desktop opengl_backend_plan --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 `ShaderApplyPlan` 下沉到真实 OpenGL/glow program/cache/context executor；
+  2. 并行补 `UnitAssembler.plan.unit.fullIcon` 与 `Accelerator.launchBlock.getGeneratedIcons()` 的特殊 region 入口；
+  3. 保持所有渲染 helper 最终接入 `DesktopGraphicsRenderer` 主链。
