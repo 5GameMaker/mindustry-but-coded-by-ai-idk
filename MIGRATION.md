@@ -291,6 +291,7 @@ git -C "D:/MDT/rust-mindustry" checkout -- "core/src/mindustry/game/rules.rs"
 - `FogRenderer` 的 dynamic/static composite pass 已把 Java `Draw.fbo(...)` 的 UV window 采样语义接到 `RenderPass.resolve_sample`，static fog 保留半 tile y offset；desktop `opengl-backend` 分支也已从“创建后不用的 null runtime + headless renderer”推进为通过 `DesktopOpenGlBackendGraphicsRenderer` 向 OpenGL runtime seam 提交 frame plan 并 present，但 runtime 仍是 null/recording，尚未创建真实窗口、GL context 或 swap buffers。
 - `desktop` 已新增 `opengl-native-runtime` feature，显式挂入 `winit/glutin/glutin-winit/glow/raw-window-handle` 作为真实窗口与 OpenGL context 的后续落点；当前仅完成依赖和 feature 基线，默认构建与 `opengl-backend` null/recording 后备仍保留。
 - `DesktopGraphicsOpenGlBackendAdapterAction` 已不再把 `FillRect/StrokeRect/DrawLine/DrawPolygon/DrawPixel` 仅压成 `DeferredNoOp`，这些基础图元的 rect/point/color/stroke/layer 等 payload 会保留到 adapter action；当前标记为 `pending_gl_draw_commands`，后续需继续把它们 tessellate 到真实 GL mesh/draw path。
+- `opengl-native-runtime` 下已补 `DesktopNativeOpenGlRuntimeConfig` 与 `desktop_frame_loop_events_from_winit_window_event(...)`，把 `DesktopSurfaceConfig` 转为 winit window attributes，并将 `Resized/RedrawRequested/CloseRequested` 映射到现有 `DesktopFrameLoopEvent`；后续仍需把该桥接接进真实 `ApplicationHandler` 与 glutin surface/context 生命周期。
 - 后续真实 backend 方向预期保持 OpenGL-compatible，倾向 `winit + glow` 组合。
 - 迁移时需要持续对齐原版 Java / Arc 的 GL 渲染语义，避免只做接口替换而丢失实际绘制行为。
 

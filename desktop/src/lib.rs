@@ -7888,6 +7888,55 @@ impl Default for DesktopSurfaceConfig {
     }
 }
 
+#[cfg(feature = "opengl-native-runtime")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopNativeOpenGlRuntimeConfig {
+    pub surface: DesktopSurfaceConfig,
+    pub vsync: bool,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl DesktopNativeOpenGlRuntimeConfig {
+    pub fn from_surface(surface: DesktopSurfaceConfig) -> Self {
+        Self {
+            surface,
+            vsync: true,
+        }
+    }
+
+    pub fn window_attributes(&self) -> winit::window::WindowAttributes {
+        winit::window::Window::default_attributes()
+            .with_title(self.surface.title.clone())
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                self.surface.size.width as f64,
+                self.surface.size.height as f64,
+            ))
+            .with_resizable(self.surface.resizable)
+            .with_visible(self.surface.visible)
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl Default for DesktopNativeOpenGlRuntimeConfig {
+    fn default() -> Self {
+        Self::from_surface(DesktopSurfaceConfig::default())
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+pub fn desktop_frame_loop_events_from_winit_window_event(
+    event: &winit::event::WindowEvent,
+) -> Vec<DesktopFrameLoopEvent> {
+    match event {
+        winit::event::WindowEvent::CloseRequested => vec![DesktopFrameLoopEvent::CloseRequested],
+        winit::event::WindowEvent::Resized(size) => vec![DesktopFrameLoopEvent::Resize(
+            DesktopSurfaceSize::new(size.width, size.height),
+        )],
+        winit::event::WindowEvent::RedrawRequested => vec![DesktopFrameLoopEvent::Tick],
+        _ => Vec::new(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopFramePacing {
     pub target_frame_time: Duration,
@@ -12271,6 +12320,57 @@ mod tests {
         assert_eq!(config.scale_factor, 1.0);
         assert!(config.resizable);
         assert!(config.visible);
+    }
+
+    #[cfg(feature = "opengl-native-runtime")]
+    #[test]
+    fn desktop_native_opengl_runtime_config_builds_winit_window_attributes() {
+        let surface = DesktopSurfaceConfig {
+            title: "Rust Mindustry Native".into(),
+            size: DesktopSurfaceSize::new(1024, 576),
+            scale_factor: 1.0,
+            resizable: false,
+            visible: false,
+        };
+
+        let config = super::DesktopNativeOpenGlRuntimeConfig::from_surface(surface);
+        let attrs = config.window_attributes();
+
+        assert_eq!(attrs.title, "Rust Mindustry Native");
+        assert!(!attrs.resizable);
+        assert!(!attrs.visible);
+        match attrs.inner_size {
+            Some(winit::dpi::Size::Logical(size)) => {
+                assert_eq!(size.width, 1024.0);
+                assert_eq!(size.height, 576.0);
+            }
+            other => panic!("native runtime should carry logical window size, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "opengl-native-runtime")]
+    #[test]
+    fn desktop_native_opengl_maps_winit_window_events_to_desktop_frame_loop_events() {
+        assert_eq!(
+            super::desktop_frame_loop_events_from_winit_window_event(
+                &winit::event::WindowEvent::Resized(winit::dpi::PhysicalSize::new(640, 360)),
+            ),
+            vec![DesktopFrameLoopEvent::Resize(DesktopSurfaceSize::new(
+                640, 360
+            ))]
+        );
+        assert_eq!(
+            super::desktop_frame_loop_events_from_winit_window_event(
+                &winit::event::WindowEvent::RedrawRequested,
+            ),
+            vec![DesktopFrameLoopEvent::Tick]
+        );
+        assert_eq!(
+            super::desktop_frame_loop_events_from_winit_window_event(
+                &winit::event::WindowEvent::CloseRequested,
+            ),
+            vec![DesktopFrameLoopEvent::CloseRequested]
+        );
     }
 
     #[test]
