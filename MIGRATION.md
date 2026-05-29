@@ -12802,3 +12802,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Accelerator.launching` 分支的 fullIcon 直绘/加色光效仍待迁移；
   - Unit fullIcon 当前仍是候选 symbol，还需要真实 atlas/backend 执行层最终绑定；
   - 当前总体迁移约 26.3%，仍未达到完整可玩。
+
+### 12.407 OpenGL backend step executor/state 接入
+
+- 2026-05-29：继续推进渲染后端主链。本轮不引入新的窗口或 GPU 依赖，先把 `DesktopGraphicsOpenGlBackendFramePlan` 从“只保存 OpenGL 语义步骤的 plan”推进到“可被 executor/sink 顺序消费并记录执行状态”的过渡层，为后续真实 `glow`/OpenGL backend 消费同一批 step 做准备。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendStepSink`，作为 OpenGL backend step 的执行入口 seam；
+    - 新增 `DesktopGraphicsOpenGlBackendExecutionState`，统计 `BeginPass`、`EndPass`、`Command`、`ShaderApply`、`FlushBoundary`、`Resolve`、target 分布与 `last_step`；
+    - 新增 `DesktopGraphicsOpenGlBackendFramePlan::drive_step_sink(...)`，逐步驱动 sink 并汇总执行状态；
+    - `HeadlessDesktopGraphicsRenderer` 新增 `last_opengl_backend_execution_state`，每帧 render 时同时保存 plan 与执行统计，避免 OpenGL backend helper 停留为孤立数据结构；
+    - 测试覆盖 blockbuild shader apply step 的 executor 驱动，以及 resolve step 的 source target 统计口径。
+- Java 对照要点：
+  - Java `Renderer` / Arc OpenGL 后端最终以 pass 边界、flush 边界、shader apply、draw command、FBO resolve 的顺序驱动 GPU；
+  - Rust 当前仍保持 OpenGL/Arc/LWJGL 语义路线，本轮先把同一顺序变成可执行 step sink，为后续真实 OpenGL context/program/FBO 绑定提供稳定入口。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+- 仍未完成：
+  - 这仍是 executor/sink/state seam，不是实际 `glow`/OpenGL draw call；
+  - 真实 OpenGL 后端还需要资源表、shader program cache、atlas texture 上传、FBO/resolve、window/context/present；
+  - `Accelerator.launching` 分支的 fullIcon 直绘、mix color、additive light 仍待迁移；
+  - 当前总体迁移约 26.4%，仍未达到完整可玩。

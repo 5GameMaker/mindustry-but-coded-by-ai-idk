@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **25.9%**。
+- 当前总体迁移完成度：约 **26.4%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10163,3 +10163,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续迁移 Accelerator launching 分支的 fullIcon 直绘、additive light 与 mix color；
   2. 继续把 unit fullIcon candidate 与 atlas/backend resolved region 绑定得更精确；
   3. 推进真实 OpenGL/glow executor。
+
+---
+
+## 313. 最新闭环记录：OpenGL backend step executor/state 接入
+
+- 本轮总体进度更新：约 **26.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendStepSink`；
+    - 新增 `DesktopGraphicsOpenGlBackendExecutionState`，统计 step 总数、pass begin/end、command、shader apply、flush boundary、resolve、target 分布和 `last_step`；
+    - `DesktopGraphicsOpenGlBackendFramePlan::drive_step_sink(...)` 现在可以顺序驱动 backend sink；
+    - `HeadlessDesktopGraphicsRenderer` 新增 `last_opengl_backend_execution_state`，每帧 render 时记录 OpenGL backend plan 的执行状态；
+    - 测试覆盖 blockbuild shader apply step、resolve step、以及 headless renderer 对 execution state 的保存。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+- 下一步：
+  1. 继续把这个 step sink 下沉到真实 OpenGL/glow program/context/FBO executor；
+  2. 迁移 `Accelerator.launching` 的 fullIcon 直绘、mix color 与 additive light；
+  3. 保持渲染路线为原版 OpenGL/Arc/LWJGL 语义，不切 `wgpu`。
