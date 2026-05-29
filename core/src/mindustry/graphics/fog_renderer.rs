@@ -362,6 +362,7 @@ pub struct FogCompositeStage {
     pub tile_size: i32,
     pub offset_x: f32,
     pub offset_y: f32,
+    pub resolve_sample: Option<RenderTextureSamplePlan>,
     pub color: FogColor,
     pub alpha: f32,
 }
@@ -397,14 +398,6 @@ impl FogDrawStage {
     }
 
     pub fn to_render_pass(&self, stage_index: usize) -> RenderPass {
-        self.to_render_pass_with_viewport(stage_index, None)
-    }
-
-    pub fn to_render_pass_with_viewport(
-        &self,
-        stage_index: usize,
-        viewport: Option<FogViewport>,
-    ) -> RenderPass {
         let kind = self.texture_kind();
         let mut pass = RenderPass::new(RenderPassKind::Fog)
             .with_order(RenderPassKind::Fog.default_order() + stage_index as i32)
@@ -448,17 +441,8 @@ impl FogDrawStage {
             }
             Self::Composite(stage) => {
                 pass = pass.with_resolve(RenderTarget::Screen, RenderResolveKind::DrawFboSample);
-                if let Some(viewport) = viewport {
-                    if let Some(sample) = RenderTextureSamplePlan::fbo_uv_window(
-                        viewport.render_camera(),
-                        stage.world_width,
-                        stage.world_height,
-                        stage.tile_size as f32,
-                        stage.offset_x,
-                        stage.offset_y,
-                    ) {
-                        pass = pass.with_resolve_sample(sample);
-                    }
+                if let Some(sample) = stage.resolve_sample {
+                    pass = pass.with_resolve_sample(sample);
                 }
                 pass.push(RenderCommand::custom(
                     "fog-composite",
@@ -529,7 +513,7 @@ impl FogFramePlan {
         self.stages
             .iter()
             .enumerate()
-            .map(|(index, stage)| stage.to_render_pass_with_viewport(index, Some(self.viewport)))
+            .map(|(index, stage)| stage.to_render_pass(index))
             .collect()
     }
 }
@@ -587,6 +571,7 @@ impl FogRendererState {
         let mut stages = Vec::new();
         let mut clear_static = static_resized || self.static_texture.invalidated;
         let mut team_changed = false;
+        let render_camera = viewport.render_camera();
 
         if input.static_fog_enabled && self.last_team != Some(input.team) {
             team_changed = true;
@@ -641,6 +626,14 @@ impl FogRendererState {
             tile_size,
             offset_x: 0.0,
             offset_y: 0.0,
+            resolve_sample: RenderTextureSamplePlan::fbo_uv_window(
+                render_camera,
+                world_width,
+                world_height,
+                tile_size as f32,
+                0.0,
+                0.0,
+            ),
             color: input.dynamic_color,
             alpha: input.dynamic_color.dynamic_alpha(),
         }));
@@ -653,6 +646,14 @@ impl FogRendererState {
                 tile_size,
                 offset_x: 0.0,
                 offset_y: tile_size as f32 / 2.0,
+                resolve_sample: RenderTextureSamplePlan::fbo_uv_window(
+                    render_camera,
+                    world_width,
+                    world_height,
+                    tile_size as f32,
+                    0.0,
+                    tile_size as f32 / 2.0,
+                ),
                 color: input.static_color,
                 alpha: 1.0,
             }));
@@ -766,7 +767,11 @@ mod tests {
         assert!(plan
             .stages
             .iter()
-            .any(|stage| matches!(stage, FogDrawStage::Composite(stage) if stage.kind == FogTextureKind::Static)));
+            .any(|stage| matches!(stage, FogDrawStage::Composite(stage) if stage.kind == FogTextureKind::Dynamic && stage.resolve_sample.is_some())));
+        assert!(plan
+            .stages
+            .iter()
+            .any(|stage| matches!(stage, FogDrawStage::Composite(stage) if stage.kind == FogTextureKind::Static && stage.resolve_sample.is_some())));
 
         let passes = plan.to_render_passes();
         assert_eq!(passes.len(), plan.stages.len());
@@ -778,6 +783,16 @@ mod tests {
                 if name == "fog-copy-from-cpu"
                     && properties.iter().any(|property| property.key == "revealed_tiles")
         ));
+        let dynamic_stage_sample = plan
+            .stages
+            .iter()
+            .find_map(|stage| match stage {
+                FogDrawStage::Composite(stage) if stage.kind == FogTextureKind::Dynamic => {
+                    stage.resolve_sample
+                }
+                _ => None,
+            })
+            .expect("dynamic fog composite stage should carry Draw.fbo UV window");
         let dynamic_composite = passes
             .iter()
             .find(|pass| {
@@ -789,6 +804,7 @@ mod tests {
         let dynamic_sample = dynamic_composite
             .resolve_sample
             .expect("dynamic fog composite should carry Draw.fbo UV window");
+        assert_eq!(dynamic_stage_sample, dynamic_sample);
         assert_eq!(
             dynamic_sample.flip,
             crate::mindustry::graphics::RenderTextureSampleFlip::UvY
@@ -806,9 +822,20 @@ mod tests {
                     && pass.resolve_kind == Some(RenderResolveKind::DrawFboSample)
             })
             .expect("static fog composite pass should resolve with Draw.fbo semantics");
+        let static_stage_sample = plan
+            .stages
+            .iter()
+            .find_map(|stage| match stage {
+                FogDrawStage::Composite(stage) if stage.kind == FogTextureKind::Static => {
+                    stage.resolve_sample
+                }
+                _ => None,
+            })
+            .expect("static fog composite stage should carry half-tile Draw.fbo UV window");
         let static_sample = static_composite
             .resolve_sample
             .expect("static fog composite should carry half-tile Draw.fbo UV window");
+        assert_eq!(static_stage_sample, static_sample);
         assert_eq!(
             static_sample.flip,
             crate::mindustry::graphics::RenderTextureSampleFlip::UvY
@@ -817,6 +844,7 @@ mod tests {
         assert!((static_sample.uv.v - 2.090625).abs() < 0.0001);
         assert!((static_sample.uv.u2 - 1.325).abs() < 0.0001);
         assert!((static_sample.uv.v2 - 0.840625).abs() < 0.0001);
+        assert!((static_sample.uv.v - dynamic_sample.uv.v - 0.0625).abs() < 0.0001);
 
         assert!(state.queued_events.is_empty());
         assert_eq!(state.last_team, Some(2));

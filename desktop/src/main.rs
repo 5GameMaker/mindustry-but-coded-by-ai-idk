@@ -26,7 +26,7 @@ fn desktop_graphics_backend_label() -> &'static str {
 
 #[cfg(feature = "opengl-backend")]
 fn desktop_graphics_backend_label() -> &'static str {
-    "opengl-backend:null-runtime"
+    "opengl-backend:null-runtime-submit"
 }
 
 #[cfg(not(feature = "opengl-backend"))]
@@ -48,9 +48,10 @@ fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
 
 #[cfg(feature = "opengl-backend")]
 fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
-    let mut _opengl_runtime = mindustry_desktop::DesktopGraphicsNullOpenGlBackendRuntime::default();
+    let opengl_runtime = mindustry_desktop::DesktopGraphicsNullOpenGlBackendRuntime::default();
     let mut effect_renderer = mindustry_desktop::HeadlessDesktopEffectRenderer::default();
-    let mut graphics_renderer = mindustry_desktop::HeadlessDesktopGraphicsRenderer::default();
+    let mut graphics_renderer =
+        mindustry_desktop::DesktopOpenGlBackendGraphicsRenderer::new(opengl_runtime);
     let mut frame_loop = mindustry_desktop::DesktopFrameLoopState::default();
 
     launcher.run_with_desktop_frame_loop(

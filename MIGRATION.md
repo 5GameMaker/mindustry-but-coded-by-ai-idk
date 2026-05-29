@@ -288,6 +288,7 @@ git -C "D:/MDT/rust-mindustry" checkout -- "core/src/mindustry/game/rules.rs"
 - `DesktopGraphicsLiveBackendRenderTargetSink` 已记录每个 render pass 的 target `Begin/End` 生命周期，`RenderTarget::Screen` 对应默认 backbuffer，`Texture/Buffer` 对应后续 OpenGL FBO/离屏纹理路径；`RenderPass::resolve_target` 会显式生成 `Resolve` 事件，禁止对所有非 Screen target 自动推导回填。
 - `RenderResolveKind::{Blit, ShaderBlit, DrawRectSample, DrawFboSample}` 已用于区分 Java `effectBuffer.blit(shader)`、`Draw.rect(texture)`、`Draw.fbo(texture)` 等回填核；后续 CacheLayer 映射必须显式选择 kind。
 - `core/ui::Bar` 已出现生产接入口：`DesktopLauncher::graphics_frame_for_render(...)` 会在连接中、已连接或连接错误状态下生成 `RenderPassKind::Ui`，把客户端同步/错误状态条落到真实 render frame；这只是最小客户端状态 UI，不代表完整 UI/HUD 或真实 OpenGL runtime 已完成。
+- `FogRenderer` 的 dynamic/static composite pass 已把 Java `Draw.fbo(...)` 的 UV window 采样语义接到 `RenderPass.resolve_sample`，static fog 保留半 tile y offset；desktop `opengl-backend` 分支也已从“创建后不用的 null runtime + headless renderer”推进为通过 `DesktopOpenGlBackendGraphicsRenderer` 向 OpenGL runtime seam 提交 frame plan 并 present，但 runtime 仍是 null/recording，尚未创建真实窗口、GL context 或 swap buffers。
 - 后续真实 backend 方向预期保持 OpenGL-compatible，倾向 `winit + glow` 组合。
 - 迁移时需要持续对齐原版 Java / Arc 的 GL 渲染语义，避免只做接口替换而丢失实际绘制行为。
 

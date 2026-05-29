@@ -8031,6 +8031,121 @@ impl HeadlessDesktopGraphicsRenderer {
     }
 }
 
+#[cfg(feature = "opengl-backend")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopOpenGlBackendGraphicsRenderer<R> {
+    pub runtime: R,
+    pub frames_rendered: usize,
+    pub last_stats: GraphicsFrameStats,
+    pub last_opengl_backend_plan: DesktopGraphicsOpenGlBackendFramePlan,
+    pub last_opengl_backend_execution_state: DesktopGraphicsOpenGlBackendExecutionState,
+    pub last_resolved_command_executor_state:
+        DesktopGraphicsOpenGlBackendResolvedCommandExecutorState,
+    pub last_driver_state: DesktopGraphicsOpenGlBackendDriverExecutionState,
+    pub last_effect_buffer_surface: Option<DesktopGraphicsEffectBufferSurface>,
+}
+
+#[cfg(feature = "opengl-backend")]
+impl<R> DesktopOpenGlBackendGraphicsRenderer<R> {
+    pub fn new(runtime: R) -> Self {
+        Self {
+            runtime,
+            frames_rendered: 0,
+            last_stats: GraphicsFrameStats::default(),
+            last_opengl_backend_plan: DesktopGraphicsOpenGlBackendFramePlan::default(),
+            last_opengl_backend_execution_state:
+                DesktopGraphicsOpenGlBackendExecutionState::default(),
+            last_resolved_command_executor_state:
+                DesktopGraphicsOpenGlBackendResolvedCommandExecutorState::default(),
+            last_driver_state: DesktopGraphicsOpenGlBackendDriverExecutionState::default(),
+            last_effect_buffer_surface: None,
+        }
+    }
+
+    pub fn runtime(&self) -> &R {
+        &self.runtime
+    }
+
+    pub fn runtime_mut(&mut self) -> &mut R {
+        &mut self.runtime
+    }
+}
+
+#[cfg(feature = "opengl-backend")]
+impl<R> Default for DesktopOpenGlBackendGraphicsRenderer<R>
+where
+    R: Default,
+{
+    fn default() -> Self {
+        Self::new(R::default())
+    }
+}
+
+#[cfg(feature = "opengl-backend")]
+impl<R> DesktopGraphicsRenderer for DesktopOpenGlBackendGraphicsRenderer<R>
+where
+    R: DesktopGraphicsOpenGlBackendRuntime,
+{
+    fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats {
+        self.render_graphics_frame_with_effect_buffer_surface(frame, None)
+    }
+
+    fn render_graphics_frame_for_surface(
+        &mut self,
+        frame: &DesktopGraphicsFrame,
+        effect_buffer_surface: DesktopGraphicsEffectBufferSurface,
+    ) -> GraphicsFrameStats {
+        self.render_graphics_frame_with_effect_buffer_surface(frame, Some(effect_buffer_surface))
+    }
+}
+
+#[cfg(feature = "opengl-backend")]
+impl<R> DesktopOpenGlBackendGraphicsRenderer<R>
+where
+    R: DesktopGraphicsOpenGlBackendRuntime,
+{
+    fn render_graphics_frame_with_effect_buffer_surface(
+        &mut self,
+        frame: &DesktopGraphicsFrame,
+        effect_buffer_surface: Option<DesktopGraphicsEffectBufferSurface>,
+    ) -> GraphicsFrameStats {
+        if let Some(surface) = effect_buffer_surface {
+            self.runtime.resize_surface(surface.size);
+        }
+
+        let stats = frame.stats().clone();
+        let opengl_backend_plan =
+            DesktopGraphicsOpenGlBackendFramePlan::from_frame_with_effect_buffer_surface(
+                frame,
+                effect_buffer_surface,
+            );
+        let mut opengl_backend_step_sink = DesktopGraphicsOpenGlBackendExecutor::default();
+        opengl_backend_plan.drive_framebuffer_attachment_sink(&mut opengl_backend_step_sink);
+        let opengl_backend_execution_state =
+            opengl_backend_plan.drive_step_sink(&mut opengl_backend_step_sink);
+        opengl_backend_step_sink
+            .state
+            .sprite_texture_upload_plans
+            .extend(opengl_backend_plan.texture_upload_plans.clone());
+
+        let mut resolving_executor =
+            DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        let resolved_command_executor_state =
+            opengl_backend_step_sink.drive_resolving_command_executor(&mut resolving_executor);
+        let driver_state = self.runtime.submit_resolving_executor(&resolving_executor);
+        self.runtime.present_frame();
+
+        self.frames_rendered += 1;
+        self.last_stats = stats.clone();
+        self.last_opengl_backend_plan = opengl_backend_plan;
+        self.last_opengl_backend_execution_state = opengl_backend_execution_state;
+        self.last_resolved_command_executor_state = resolved_command_executor_state;
+        self.last_driver_state = driver_state;
+        self.last_effect_buffer_surface = effect_buffer_surface;
+        stats
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DesktopLauncher {
     pub client: ClientLauncher,
@@ -20135,6 +20250,52 @@ mod tests {
                 super::DesktopGraphicsOpenGlBackendDriverCommand::Resolve(_)
             ]
         ));
+    }
+
+    #[cfg(feature = "opengl-backend")]
+    #[test]
+    fn desktop_opengl_backend_graphics_renderer_submits_frame_to_runtime() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut renderer = super::DesktopOpenGlBackendGraphicsRenderer::new(
+            super::DesktopGraphicsNullOpenGlBackendRuntime::default(),
+        );
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let effect_generation = 3;
+
+        let stats = launcher.render_default_graphics_frame_for_surface_with(
+            0,
+            surface,
+            effect_generation,
+            &mut renderer,
+        );
+
+        assert_eq!(renderer.frames_rendered, 1);
+        assert_eq!(renderer.last_stats, stats);
+        assert_eq!(
+            renderer.last_effect_buffer_surface,
+            Some(super::DesktopGraphicsEffectBufferSurface::new(
+                surface,
+                effect_generation
+            ))
+        );
+        assert_eq!(renderer.runtime.state.surface_size, Some(surface));
+        assert_eq!(renderer.runtime.state.resize_events, 1);
+        assert_eq!(renderer.runtime.state.frames_submitted, 1);
+        assert_eq!(renderer.runtime.state.present_events, 1);
+        assert_eq!(
+            renderer.runtime.state.last_driver_state,
+            Some(renderer.last_driver_state)
+        );
+        assert_eq!(
+            renderer
+                .last_resolved_command_executor_state
+                .framebuffer_attachments_emitted,
+            renderer
+                .last_opengl_backend_plan
+                .framebuffer_attachment_plans
+                .len()
+        );
+        assert_eq!(renderer.last_driver_state.framebuffer_attachment_plans, 1);
     }
 
     #[test]
