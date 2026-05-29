@@ -31,6 +31,61 @@ impl Default for GenericCrafterState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GenericCrafterDefaults {
+    pub craft_time: f32,
+    pub warmup_speed: f32,
+    pub dump_extra_liquid: bool,
+    pub ignore_liquid_fullness: bool,
+}
+
+impl Default for GenericCrafterDefaults {
+    fn default() -> Self {
+        Self {
+            craft_time: 80.0,
+            warmup_speed: 0.019,
+            dump_extra_liquid: true,
+            ignore_liquid_fullness: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrillDefaults {
+    pub hardness_drill_multiplier: f32,
+    pub drill_time: f32,
+    pub liquid_boost_intensity: f32,
+    pub warmup_speed: f32,
+}
+
+impl Default for DrillDefaults {
+    fn default() -> Self {
+        Self {
+            hardness_drill_multiplier: 50.0,
+            drill_time: 300.0,
+            liquid_boost_intensity: 1.6,
+            warmup_speed: 0.015,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PumpDefaults {
+    pub pump_amount: f32,
+    pub consume_time: f32,
+    pub warmup_speed: f32,
+}
+
+impl Default for PumpDefaults {
+    fn default() -> Self {
+        Self {
+            pump_amount: 0.2,
+            consume_time: 60.0 * 5.0,
+            warmup_speed: 0.019,
+        }
+    }
+}
+
 pub fn generic_crafter_should_consume(
     output_items: &[ItemOutput],
     item_capacity: i32,
@@ -1401,5 +1456,59 @@ mod tests {
 
         assert_eq!(single_block_producer_recipe(Some(42)), Some(42));
         assert_eq!(single_block_producer_recipe(None), None);
+    }
+
+    #[test]
+    fn production_defaults_match_java_constructors_and_smoke_the_main_chain() {
+        let generic = GenericCrafterDefaults::default();
+        assert_eq!(generic.craft_time, 80.0);
+        assert_eq!(generic.warmup_speed, 0.019);
+        assert!(generic.dump_extra_liquid);
+        assert!(!generic.ignore_liquid_fullness);
+
+        let drill = DrillDefaults::default();
+        assert_eq!(drill.hardness_drill_multiplier, 50.0);
+        assert_eq!(drill.drill_time, 300.0);
+        assert_eq!(drill.liquid_boost_intensity, 1.6);
+        assert_eq!(drill.warmup_speed, 0.015);
+
+        let pump = PumpDefaults::default();
+        assert_eq!(pump.pump_amount, 0.2);
+        assert_eq!(pump.consume_time, 300.0);
+        assert_eq!(pump.warmup_speed, 0.019);
+
+        let mut crafter_state = GenericCrafterState::default();
+        let crafted =
+            generic_crafter_update(&mut crafter_state, 1.0, 1.0, generic.warmup_speed, 1.0);
+        assert!(crafted.crafted);
+        assert_eq!(crafter_state.progress, 0.0);
+        assert_eq!(crafter_state.warmup, generic.warmup_speed);
+
+        let drill_delay = drill_time(drill.drill_time, drill.hardness_drill_multiplier, 1, 1.0);
+        assert_eq!(drill_delay, 350.0);
+
+        let mut drill_state = DrillState::default();
+        let drill_tick = drill_update(
+            &mut drill_state,
+            0,
+            100,
+            1,
+            1.0,
+            0.0,
+            drill.liquid_boost_intensity,
+            drill.warmup_speed,
+            drill_delay,
+            1.0,
+        );
+        assert_eq!(drill_tick.produced, 0);
+        assert_eq!(drill_state.warmup, drill.warmup_speed);
+        assert_eq!(drill_state.last_drill_speed, 0.0);
+
+        assert!(pump_should_consume(Some(1), 9.98, 10.0, true));
+        assert!(!pump_should_consume(Some(1), 9.99, 10.0, true));
+        assert_eq!(
+            pump_amount_to_add(10.0, 0.0, 3.0, pump.pump_amount, 10.0),
+            6.0
+        );
     }
 }
