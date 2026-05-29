@@ -46,12 +46,12 @@ use mindustry_core::mindustry::graphics::{
     RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
     RenderCommand, RenderEngineState, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
     RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
-    RenderTextStyle, RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect,
-    RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCamera,
-    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters,
-    ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
-    TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
-    Viewport as FloorViewport,
+    RenderTextStyle, RenderTextVerticalAlign, RenderTextureSampleFlip, RenderTextureSamplePlan,
+    RenderUvRect, RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan,
+    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask,
+    ShaderParameters, ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport,
+    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord,
+    UniformValue, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -70,6 +70,7 @@ use mindustry_core::mindustry::net::{
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
+use mindustry_core::mindustry::ui::{Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw};
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
     draw_block_dispatch_icons, DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
@@ -8059,6 +8060,7 @@ pub struct DesktopLauncher {
     pub minimap_renderer_state: MinimapRendererState,
     pub menu_renderer_state: MenuRendererState,
     pub load_renderer_state: LoadRendererState,
+    pub ui_status_bar: Bar,
     pub pixelator_state: PixelatorState,
     pub pixelate: bool,
     pub renderer_scale: f32,
@@ -8101,6 +8103,73 @@ pub struct DesktopLauncher {
     last_service_trigger_apply_summary: Option<GameServiceApplySummary>,
     last_applied_client_plan_snapshot_received_count: usize,
     puddle_particle_rand_state: u64,
+}
+
+fn rgba8888_to_render_color(rgba: u32, alpha_scale: f32) -> [f32; 4] {
+    let r = ((rgba >> 24) & 0xff) as f32 / 255.0;
+    let g = ((rgba >> 16) & 0xff) as f32 / 255.0;
+    let b = ((rgba >> 8) & 0xff) as f32 / 255.0;
+    let a = (rgba & 0xff) as f32 / 255.0;
+    [r, g, b, (a * alpha_scale).clamp(0.0, 1.0)]
+}
+
+fn rect_to_render_rect(
+    rect: mindustry_core::mindustry::entities::entity_group::Rect,
+) -> RenderRect {
+    RenderRect::new(rect.x, rect.y, rect.width, rect.height)
+}
+
+fn push_bar_text_command(pass: &mut RenderPass, text: &BarTextDraw, layer: f32) {
+    pass.push(RenderCommand::draw_text_styled(
+        text.text.clone(),
+        RenderPoint::new(text.x, text.y),
+        rgba8888_to_render_color(text.color_rgba, text.alpha),
+        12.0,
+        0.0,
+        RenderTextStyle::new(RenderTextAlign::Center)
+            .with_vertical_align(RenderTextVerticalAlign::Center)
+            .with_integer_position(true)
+            .with_outline(true),
+        layer,
+    ));
+}
+
+fn push_bar_draw_plan_as_ui_commands(pass: &mut RenderPass, plan: &BarDrawPlan, layer: f32) {
+    pass.push(RenderCommand::set_blend(RenderBlendMode::Normal));
+    for command in &plan.commands {
+        match command {
+            BarDrawCommand::Outline(draw) => pass.push(RenderCommand::stroke_rect(
+                rect_to_render_rect(draw.rect),
+                rgba8888_to_render_color(draw.color_rgba, 1.0),
+                1.0,
+                layer,
+            )),
+            BarDrawCommand::Background(draw) => pass.push(RenderCommand::fill_rect(
+                rect_to_render_rect(draw.rect),
+                [
+                    draw.shade,
+                    draw.shade,
+                    draw.shade,
+                    draw.alpha.clamp(0.0, 1.0),
+                ],
+                layer,
+            )),
+            BarDrawCommand::Fill(draw) => {
+                if let Some(clip) = draw.clip_rect {
+                    pass.push(RenderCommand::set_clip(rect_to_render_rect(clip)));
+                }
+                pass.push(RenderCommand::fill_rect(
+                    rect_to_render_rect(draw.draw_rect),
+                    rgba8888_to_render_color(draw.tint_rgba, draw.alpha),
+                    layer,
+                ));
+                if draw.clip_rect.is_some() {
+                    pass.push(RenderCommand::clear_clip());
+                }
+            }
+            BarDrawCommand::Text(draw) => push_bar_text_command(pass, draw, layer),
+        }
+    }
 }
 
 fn visible_block_tiles(
@@ -8602,6 +8671,8 @@ impl DesktopLauncher {
         let block_renderer_state = BlockRendererState::default();
         let content_loader = ContentLoader::create_base_content_or_panic();
         let texture_atlas = default_desktop_texture_atlas(&block_renderer_state, &content_loader);
+        let mut ui_status_bar = Bar::new_clamped("client", 0x66cc_ffff, 0.0);
+        ui_status_bar.outline(0x0000_00ff, 1.0);
         Self {
             client: ClientLauncher::new(AppContext::new("data")),
             net_client: NetClient::with_net(Net::new(Box::new(ArcNetProvider::new()))),
@@ -8630,6 +8701,7 @@ impl DesktopLauncher {
             minimap_renderer_state: MinimapRendererState::new(MinimapWorldSize::new(0, 0)),
             menu_renderer_state: MenuRendererState::new(MenuRendererConfig::new(false, 7)),
             load_renderer_state: LoadRendererState::default(),
+            ui_status_bar,
             pixelator_state: PixelatorState::default(),
             pixelate: false,
             renderer_scale: 1.0,
@@ -9304,6 +9376,78 @@ impl DesktopLauncher {
         Some(pass)
     }
 
+    fn desktop_ui_status_bar_model(&self) -> Option<(String, f32, u32)> {
+        let connect_error = self.connect_error.as_deref();
+        let connected = {
+            let state = self.net_client.state();
+            let state = state.lock().unwrap();
+            state.connected
+        };
+        if !connected && connect_error.is_none() && self.connect_target.is_none() {
+            return None;
+        }
+
+        if let Some(error) = connect_error {
+            return Some((format!("connect error: {error}"), 0.0, 0xff55_55ff));
+        }
+
+        if !connected {
+            return Some(("connecting".to_string(), 0.1, 0xffd3_7fff));
+        }
+
+        let status = self.playable_smoke_status();
+        let checks = [
+            status.client_ready,
+            status.connected,
+            status.world_loaded,
+            status.confirmed,
+            status.game_playing,
+            status.runtime_client,
+            status.world_width > 0 && status.world_height > 0,
+            status.buildings > 0,
+            status.player_on_default_team,
+        ];
+        let ready = checks.iter().filter(|ready| **ready).count();
+        let total = checks.len();
+        let fraction = ready as f32 / total as f32;
+        let label = if status.ready() {
+            "client ready".to_string()
+        } else {
+            format!("client sync {ready}/{total}")
+        };
+        let color = if status.ready() {
+            0x84f4_91ff
+        } else {
+            0xffd3_7fff
+        };
+        Some((label, fraction, color))
+    }
+
+    pub fn desktop_ui_render_pass(&mut self, viewport: RenderViewport) -> Option<RenderPass> {
+        let (label, fraction, color) = self.desktop_ui_status_bar_model()?;
+        self.ui_status_bar.set_name(label);
+        self.ui_status_bar.set_fraction(fraction);
+        self.ui_status_bar.set_color(color);
+        self.ui_status_bar.set_blink_color(0xffff_ffff);
+        self.ui_status_bar.outline(0x0000_00ff, 1.0);
+
+        let width = viewport.width.min(260.0).max(96.0);
+        let layout = BarLayout {
+            x: viewport.x + 12.0,
+            y: viewport.y + viewport.height - 28.0,
+            width,
+            height: 16.0,
+            parent_alpha: 1.0,
+            label_width: width,
+            label_height: 12.0,
+            top_min_width: 1.0,
+        };
+        let plan = self.ui_status_bar.draw_plan(layout)?;
+        let mut pass = RenderPass::new(RenderPassKind::Ui);
+        push_bar_draw_plan_as_ui_commands(&mut pass, &plan, Layer::END);
+        Some(pass)
+    }
+
     pub fn minimap_overlay_plan(
         &mut self,
         camera: MinimapCamera,
@@ -9783,6 +9927,9 @@ impl DesktopLauncher {
             for pass in fog_frame.to_render_passes() {
                 render_frame.push_pass(pass);
             }
+        }
+        if let Some(ui_pass) = self.desktop_ui_render_pass(viewport) {
+            render_frame.push_pass(ui_pass);
         }
         render_frame.sort_passes_like_java_renderer_draw();
         let floor_chunk_batches = self.floor_chunk_draw_batches(camera, viewport);
@@ -13198,6 +13345,53 @@ mod tests {
         assert!(render_frame.passes[background_index + 1..]
             .iter()
             .all(|pass| pass.order >= background.order));
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_includes_connected_client_ui_status_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.connected = true;
+            state.connect_confirm_sent = true;
+        }
+
+        let viewport = RenderViewport::new(0.0, 0.0, 120.0, 80.0);
+        let camera = RenderCamera::new(RenderPoint::new(60.0, 40.0), viewport);
+        let minimap_camera = MinimapCamera::new(60.0, 40.0, 120.0, 80.0);
+        let frame = launcher.graphics_frame_for_render(
+            13,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let ui = render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Ui)
+            .expect("connected client should emit a UI status pass");
+
+        assert_eq!(ui.target, RenderTarget::Screen);
+        assert_eq!(ui.order, RenderPassKind::Ui.default_order());
+        assert!(ui
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::SetBlend { mode } if *mode == RenderBlendMode::Normal)));
+        assert!(ui
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::FillRect { .. })));
+        assert!(ui.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, style, layer, .. }
+                if text.starts_with("client sync")
+                    && style.vertical_align == RenderTextVerticalAlign::Center
+                    && style.outline
+                    && *layer == Layer::END
+        )));
     }
 
     #[test]
