@@ -14833,3 +14833,48 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - liquid turret 的完整 firing / targeting / reload loop 仍需继续接入；
   - continuous liquid turret activation 和 liquid consumption runtime 还需补全；
   - 当前总体迁移约 35.2%，仍未达到完整可玩。
+
+## 12.487 OpenGL resolve sample mesh upload command
+
+- 2026-05-30：把上一轮 resolve sample quad 顶点继续推进到显式 resolve mesh upload command / sink。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolveMeshUploadPlan`、`DesktopGraphicsOpenGlBackendResolvedResolveMeshUpload`、`DesktopGraphicsOpenGlBackendResolveMeshUploadCommand`；
+    - 新增 `DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink` 与 recording driver 通道；
+    - DrawRectSample / DrawFboSample 带 sample 时生成 vertex bytes / index bytes / attribute plan，并通过同一 VAO handle 与后续 draw command 关联；
+    - ShaderBlit 或缺 sample 时不生成 resolve mesh upload。
+- 迁移意义：
+  - Java `Draw.fbo` / `Draw.rect(TextureRegion)` 的采样 geometry/uv 已进入 backend 可提交的 mesh upload 命令；
+  - 真实 native OpenGL 后续可以把该命令直接映射到 `glBufferData` / `glVertexAttribPointer`。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_resolver_allocates_draw_rect_and_fbo_sample_quad_resources --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 `glow/glutin/winit` window/context/swap/present 仍未接入；
+  - resolve mesh upload command 还未由真实 GL driver 执行；
+  - 当前总体迁移约 35.3%，仍未达到完整可玩。
+
+## 12.488 LiquidBridge / phase-conduit sidecar 与 visual warmup 回归
+
+- 2026-05-30：补齐 LiquidBridge 变体的联机 sidecar 回环与 visual runtime warmup 回归。
+- Rust 新增/接入：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `game_runtime_liquid_bridge_sidecar_kind(...)`，统一 LiquidBridge sidecar 判定；
+    - `phase-conduit` 通过现有 LiquidBridge state tail 导出/读回；
+    - 新增 `game_runtime_exports_phase_conduit_liquid_bridge_state_tail_in_network_map_snapshot`；
+    - 新增 `game_runtime_applies_liquid_bridge_warmup_to_block_visual_snapshot`，锁定 `GameRuntimeLiquidBlockState::Bridge.warmup -> block_visual_runtime_snapshot.warmup`。
+- 迁移意义：
+  - `phase-conduit` 不再只依赖 `bridge-conduit` 测试间接覆盖；
+  - 液桥 warmup 已明确进入渲染/客户端可消费的 visual runtime snapshot。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core game_runtime_exports_phase_conduit_liquid_bridge_state_tail_in_network_map_snapshot`
+  - `cargo test -p mindustry-core game_runtime_applies_liquid_bridge_warmup_to_block_visual_snapshot`
+  - `cargo test -p mindustry-core game_runtime_exports_liquid_bridge_state_tail_in_network_map_snapshot`
+  - `git diff --check`
+- 仍未完成：
+  - DirectionLiquidBridge / reinforced bridge conduit 仍应按 Java `DirectionBridge` 独立 runtime 补齐，不能混入 LiquidBridge sidecar；
+  - 液体网络完整 updateTile / flow / bridge 占用关系仍需继续迁移；
+  - 当前总体迁移约 35.4%，仍未达到完整可玩。

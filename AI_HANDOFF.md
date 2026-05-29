@@ -12197,3 +12197,50 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. turret 主链继续推进 firing / targeting / reload；
   2. continuous liquid turret activation / liquid consumption runtime；
   3. liquid bridge/phase-conduit 侧车回环和 warmup visual snapshot。
+
+---
+
+## 393. 最新闭环记录：OpenGL resolve mesh upload command
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **35.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendResolveMeshUploadPlan`；
+    - `DesktopGraphicsOpenGlBackendResolvedResolveMeshUpload`；
+    - `DesktopGraphicsOpenGlBackendResolveMeshUploadCommand`；
+    - `DesktopGraphicsOpenGlBackendResolveMeshUploadCommandSink`；
+    - DrawRectSample / DrawFboSample 带 sample 时生成 vertex/index bytes 与 attribute plan；
+    - driver/state 记录 `resolve_mesh_upload_commands`。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_resolver_allocates_draw_rect_and_fbo_sample_quad_resources --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `git diff --check`
+- 下一步：
+  1. 真实 native OpenGL driver 执行该 resolve mesh upload command；
+  2. 接 `glow/glutin/winit` runtime；
+  3. 保持 ShaderBlit / missing sample fallback 不破坏。
+
+---
+
+## 394. 最新闭环记录：LiquidBridge / phase-conduit sidecar 与 visual warmup
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **35.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `game_runtime_liquid_bridge_sidecar_kind(...)`；
+    - `phase-conduit` 明确覆盖 LiquidBridge state tail 导出/读回；
+    - `GameRuntimeLiquidBlockState::Bridge.warmup` 明确进入 `block_visual_runtime_snapshot.warmup`；
+    - 新增 phase-conduit sidecar 与 liquid bridge warmup visual 两个回归。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core game_runtime_exports_phase_conduit_liquid_bridge_state_tail_in_network_map_snapshot`
+  - `cargo test -p mindustry-core game_runtime_applies_liquid_bridge_warmup_to_block_visual_snapshot`
+  - `cargo test -p mindustry-core game_runtime_exports_liquid_bridge_state_tail_in_network_map_snapshot`
+  - `git diff --check`
+- 下一步：
+  1. DirectionLiquidBridge / reinforced bridge conduit 按 Java `DirectionBridge` 独立 runtime 迁移；
+  2. liquid flow / bridge 占用关系；
+  3. turret：液体炮灭火优先、连续液体炮 activated 保真。
