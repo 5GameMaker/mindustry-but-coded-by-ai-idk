@@ -12079,3 +12079,51 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 继续补 `Renderer.backgroundBuffer` 生产 pass 的 `background_buffer_geometry_flip(...)`；
   3. 准备 `native-opengl-backend` feature：`glow + glutin + glutin-winit + winit`；
   4. 可并行推进 core runtime：liquid junction 路由闭环、liquid turret ammo 闭环，注意 helper 必须接进 `GameRuntime` 主链。
+
+---
+
+## 388. 最新闭环记录：OpenGL resolve sample trace 下沉
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **34.8%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolveSampleTrace`；
+    - `DesktopGraphicsOpenGlBackendResolveCommand.resolve_sample_trace`；
+    - resolver 从 `RenderTextureSamplePlan` 下沉 geometry / uv / flip；
+    - desktop OpenGL shared resolver 测试覆盖 DrawRectSample / DrawFboSample sample trace。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_resolver_allocates_draw_rect_and_fbo_sample_quad_resources --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_resolve_shader_blit_translates_to_fullscreen_quad_draw_commands --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `git diff --check`
+- 下一步：
+  1. 把 `resolve_sample_trace` 变成真实 resolve quad mesh upload / vertex attributes；
+  2. 接 `Renderer.backgroundBuffer` 生产 pass；
+  3. 准备 `native-opengl-backend` feature。
+
+---
+
+## 389. 最新闭环记录：LiquidJunction route 接入 GameRuntime
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **34.9%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/world/blocks/liquid/mod.rs`
+    - `choose_liquid_destination` 覆盖终点阻塞回退和 cycle 有限退出。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `liquid_destination_index(...)` 接入 junction route path / route nodes；
+    - 新增 `building_is_liquid_junction(...)`、`liquid_junction_route_path(...)`、`liquid_junction_route_nodes(...)`；
+    - 新增 `game_runtime_liquid_junction_routes_to_terminal_acceptor`，覆盖多级 junction、终点满时回退、disabled junction 不接收。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core game_runtime_liquid_junction_routes_to_terminal_acceptor`
+  - `cargo test -p mindustry-core game_runtime_payload_unloader_dumps_liquid_through_liquid_junction`
+  - `cargo test -p mindustry-core bridge_junction_and_tiled_frame_helpers_follow_liquid_blocks`
+  - `git diff --check`
+- 下一步：
+  1. liquid runtime：继续把 LiquidRouter / LiquidBridge / Conduit 完整 updateTile 边界接进主链；
+  2. turrets：推进 liquid turret ammo helper 接入 `GameRuntime`；
+  3. 渲染：继续 resolve quad upload 与 backgroundBuffer 生产 pass。

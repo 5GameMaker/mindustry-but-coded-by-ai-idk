@@ -14713,3 +14713,52 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Renderer.backgroundBuffer` 的生产 pass 还未自动填充 `background_buffer_geometry_flip(...)`；
   - 真实 `glow/glutin/winit` window/context/swap/present 尚未接入；
   - 当前总体迁移约 34.7%，仍未达到完整可玩。
+
+## 12.482 OpenGL resolve sample trace 下沉
+
+- 2026-05-30：继续把 `resolve_sample` 从 pass metadata 下沉到 desktop OpenGL resolve command 层的可验证 trace。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolveSampleTrace`；
+    - `DesktopGraphicsOpenGlBackendResolveCommand` 新增 `resolve_sample_trace`；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor::consume_opengl_resolve_event(...)` 把 `RenderTextureSamplePlan` 映射为 geometry / uv / flip trace；
+    - `desktop_graphics_opengl_shared_resolver_allocates_draw_rect_and_fbo_sample_quad_resources` 验证 DrawRectSample / DrawFboSample 携带 sample 时 resolve command 保留采样几何与 UV。
+- 迁移意义：
+  - `DrawRectSample` / `DrawFboSample` 的 Java camera/world UV 与 Y 翻转不再只停在 `RenderPass`；
+  - 后续真实 VBO/IBO/quad upload 可以直接消费 resolve command trace，而不是重新推导。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_plan_preserves_pass_flush_and_resolve_steps --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_resolver_allocates_draw_rect_and_fbo_sample_quad_resources --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_resolve_shader_blit_translates_to_fullscreen_quad_draw_commands --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `git diff --check`
+- 仍未完成：
+  - trace 还需要继续变成真实 resolve quad mesh upload / vertex attribute 数据；
+  - native OpenGL window/context/swap/present 仍未完成；
+  - 当前总体迁移约 34.8%，仍未达到完整可玩。
+
+## 12.483 LiquidJunction 路由接入 GameRuntime 主链
+
+- 2026-05-30：把 `world/blocks/liquid` 中的 junction route helper 接入 `GameRuntime` 液体 dump 主链，避免停留在孤立 helper。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/blocks/liquid/mod.rs`
+    - 扩充 `choose_liquid_destination` 回归，覆盖终点阻塞回退与 cycle 有限退出。
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `liquid_destination_index(...)` 识别 `LiquidJunction` 后构建 route path / route nodes；
+    - 新增 `building_is_liquid_junction(...)`、`liquid_junction_route_path(...)`、`liquid_junction_route_nodes(...)`；
+    - 复用 `choose_liquid_destination(...)` 决定最终 dump 目标；
+    - 新增 `game_runtime_liquid_junction_routes_to_terminal_acceptor`，覆盖多级 junction 到最终容器、容器满时回退到最后 junction、disabled junction 不接收。
+- 迁移意义：
+  - 对齐 Java `LiquidJunction.getLiquidDestination(...)` 的链式穿透/回退/防死循环语义；
+  - payload-unloader 的真实 runtime 液体 dump 已经能经过多级 liquid-junction 到达终端容器。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core game_runtime_liquid_junction_routes_to_terminal_acceptor`
+  - `cargo test -p mindustry-core game_runtime_payload_unloader_dumps_liquid_through_liquid_junction`
+  - `cargo test -p mindustry-core bridge_junction_and_tiled_frame_helpers_follow_liquid_blocks`
+  - `git diff --check`
+- 仍未完成：
+  - LiquidRouter / LiquidBridge / Conduit 的完整 Java updateTile 边界仍需继续迁移；
+  - liquid turret ammo 仍需接入 GameRuntime 主链；
+  - 当前总体迁移约 34.9%，仍未达到完整可玩。
