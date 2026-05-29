@@ -507,6 +507,7 @@ pub enum DesktopGraphicsOpenGlBackendStepKind {
     Command {
         kind: &'static str,
         command: RenderCommand,
+        resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
     },
     EndPass,
     Resolve {
@@ -696,10 +697,27 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
                 kind: DesktopGraphicsOpenGlBackendStepKind::Command {
                     kind: render_command_trace_kind(command),
                     command: command.clone(),
+                    resolved_sprite: opengl_backend_resolved_sprite_for_command(
+                        command,
+                        resolved_sprites,
+                    ),
                 },
             });
         }
     }
+}
+
+fn opengl_backend_resolved_sprite_for_command(
+    command: &RenderCommand,
+    resolved_sprites: &[DesktopGraphicsResolvedSpriteTrace],
+) -> Option<DesktopGraphicsResolvedSpriteTrace> {
+    let RenderCommand::DrawSprite { symbol, .. } = command else {
+        return None;
+    };
+    resolved_sprites
+        .iter()
+        .find(|sprite| sprite.symbol == *symbol)
+        .cloned()
 }
 
 pub trait DesktopGraphicsOpenGlBackendStepSink {
@@ -936,6 +954,7 @@ pub enum DesktopGraphicsOpenGlBackendEvent {
         target: RenderTarget,
         kind: &'static str,
         command: RenderCommand,
+        resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
     },
     EndPass {
         source: DesktopGraphicsOpenGlBackendStepSource,
@@ -988,6 +1007,7 @@ pub enum DesktopGraphicsOpenGlBackendAdapterAction {
     ClearClip,
     DrawSprite {
         symbol: String,
+        resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
         rect: RenderRect,
         tint: [f32; 4],
         rotation: f32,
@@ -1112,9 +1132,13 @@ pub struct DesktopGraphicsClassifyingOpenGlBackendAdapter {
 }
 
 impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
-    fn consume_command(&mut self, command: RenderCommand) {
+    fn consume_command(
+        &mut self,
+        command: RenderCommand,
+        resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
+    ) {
         self.state.command_events += 1;
-        let action = opengl_backend_adapter_action_from_render_command(&command);
+        let action = opengl_backend_adapter_action_from_render_command(&command, resolved_sprite);
         match command {
             RenderCommand::Clear { .. } => {
                 self.state.state_commands += 1;
@@ -1175,6 +1199,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
 
 fn opengl_backend_adapter_action_from_render_command(
     command: &RenderCommand,
+    resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>,
 ) -> DesktopGraphicsOpenGlBackendAdapterAction {
     match command {
         RenderCommand::Clear { color } => {
@@ -1195,6 +1220,7 @@ fn opengl_backend_adapter_action_from_render_command(
             layer,
         } => DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
             symbol: symbol.clone(),
+            resolved_sprite,
             rect: *rect,
             tint: *tint,
             rotation: *rotation,
@@ -1270,8 +1296,12 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
                 self.state.shader_applies += 1;
                 self.state.current_shader = Some(apply.shader);
             }
-            DesktopGraphicsOpenGlBackendEvent::Command { command, .. } => {
-                self.consume_command(command);
+            DesktopGraphicsOpenGlBackendEvent::Command {
+                command,
+                resolved_sprite,
+                ..
+            } => {
+                self.consume_command(command, resolved_sprite);
             }
             DesktopGraphicsOpenGlBackendEvent::EndPass { .. } => self.state.end_passes += 1,
             DesktopGraphicsOpenGlBackendEvent::Resolve { .. } => self.state.resolves += 1,
@@ -1452,11 +1482,18 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                         error_count: apply.errors.len(),
                     });
             }
-            DesktopGraphicsOpenGlBackendStepKind::Command { kind, command } => {
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                kind,
+                command,
+                resolved_sprite,
+            } => {
                 self.record_target_for_pass_step(&target);
                 self.state.commands += 1;
                 self.state.last_command_kind = Some(kind);
-                self.emit_action(opengl_backend_adapter_action_from_render_command(&command));
+                self.emit_action(opengl_backend_adapter_action_from_render_command(
+                    &command,
+                    resolved_sprite.clone(),
+                ));
                 self.state
                     .event_log
                     .push(DesktopGraphicsOpenGlBackendEvent::Command {
@@ -1464,6 +1501,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                         target,
                         kind,
                         command: command.clone(),
+                        resolved_sprite,
                     });
                 match command {
                     RenderCommand::Clear { .. } => {
@@ -8110,7 +8148,7 @@ mod tests {
                 )
             })
             .filter_map(|step| match &step.kind {
-                DesktopGraphicsOpenGlBackendStepKind::Command { kind, command } => {
+                DesktopGraphicsOpenGlBackendStepKind::Command { kind, command, .. } => {
                     Some((*kind, command))
                 }
                 _ => None,
@@ -9030,6 +9068,20 @@ mod tests {
                 ..
             }
         ));
+        match &plan.steps[5].kind {
+            DesktopGraphicsOpenGlBackendStepKind::Command {
+                resolved_sprite: Some(sprite),
+                ..
+            } => {
+                assert_eq!(sprite.symbol, "router");
+                assert!(!sprite.missing);
+                assert_eq!(
+                    sprite.region_source_path.as_deref(),
+                    Some("sprites/router.png")
+                );
+            }
+            other => panic!("expected resolved draw sprite step, got {other:?}"),
+        }
         assert!(matches!(
             plan.steps[6].kind,
             DesktopGraphicsOpenGlBackendStepKind::EndPass
@@ -9097,8 +9149,11 @@ mod tests {
         ));
         assert!(matches!(
             &executor.state.actions[2],
-            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { symbol, .. }
-                if symbol == "router"
+            super::DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
+                symbol,
+                resolved_sprite: Some(sprite),
+                ..
+            } if symbol == "router" && sprite.region_source_path.as_deref() == Some("sprites/router.png")
         ));
         assert_eq!(
             executor.state.last_action.as_ref(),
@@ -9527,6 +9582,7 @@ mod tests {
             DesktopGraphicsOpenGlBackendStepKind::Command {
                 kind: "SetClip",
                 command: RenderCommand::set_clip(outer),
+                resolved_sprite: None,
             },
         ));
         assert_eq!(executor.state.current_clip, Some(outer));
@@ -9539,6 +9595,7 @@ mod tests {
             DesktopGraphicsOpenGlBackendStepKind::Command {
                 kind: "SetClip",
                 command: RenderCommand::set_clip(inner),
+                resolved_sprite: None,
             },
         ));
         assert_eq!(executor.state.current_clip, Some(intersected));
@@ -9552,6 +9609,7 @@ mod tests {
             DesktopGraphicsOpenGlBackendStepKind::Command {
                 kind: "ClearClip",
                 command: RenderCommand::clear_clip(),
+                resolved_sprite: None,
             },
         ));
         assert_eq!(executor.state.current_clip, Some(outer));
@@ -9563,6 +9621,7 @@ mod tests {
             DesktopGraphicsOpenGlBackendStepKind::Command {
                 kind: "ClearClip",
                 command: RenderCommand::clear_clip(),
+                resolved_sprite: None,
             },
         ));
         assert_eq!(executor.state.current_clip, None);
@@ -9599,6 +9658,7 @@ mod tests {
             DesktopGraphicsOpenGlBackendStepKind::Command {
                 kind: "SetBlend",
                 command: RenderCommand::set_blend(RenderBlendMode::Disabled),
+                resolved_sprite: None,
             },
         ));
         assert_eq!(executor.state.current_blend, RenderBlendMode::Disabled);
@@ -9618,6 +9678,7 @@ mod tests {
             DesktopGraphicsOpenGlBackendStepKind::Command {
                 kind: "SetBlend",
                 command: RenderCommand::set_blend(custom),
+                resolved_sprite: None,
             },
         ));
         assert_eq!(executor.state.current_blend, custom);
@@ -9684,6 +9745,7 @@ mod tests {
                     style,
                     Layer::OVERLAY_UI,
                 ),
+                resolved_sprite: None,
             },
         ));
 
@@ -10098,6 +10160,7 @@ mod tests {
                     0.0,
                     Layer::BLOCK,
                 ),
+                resolved_sprite: None,
             },
         ));
 

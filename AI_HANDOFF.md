@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **27.9%**。
+- 当前总体迁移完成度：约 **28.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10538,3 +10538,25 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 后续真实 text backend 需要把 `RenderFontId` 对接字体资源；
   2. 继续扩展 Java `Align` 位掩码/旋转锚点/markup layout 细节；
   3. 渲染主线可回到 `DrawSprite` 的 atlas/resource binding。
+
+---
+
+## 329. 最新闭环记录：DrawSprite atlas payload 接入 OpenGL action
+
+- 本轮总体进度更新：约 **28.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendStepKind::Command` 新增 `resolved_sprite`；
+    - `DesktopGraphicsOpenGlBackendEvent::Command` 新增 `resolved_sprite`；
+    - `DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite` 新增 `resolved_sprite`；
+    - `DesktopGraphicsOpenGlBackendFramePlan::push_commands(...)` 在 DrawSprite command step 上挂接 atlas resolver 结果；
+    - executor 与 classifying adapter 均把 resolved sprite payload 传递到 action；
+    - 回归测试断言 `router` 的 atlas source path 能一路进入 action。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 将 `resolved_sprite` 中的 page/UV/filter/sampler 继续下沉到真实 texture binding；
+  2. 扩展 duplicate symbol 时的 command-index 精确匹配，避免只按 symbol 找第一项；
+  3. 再推进真实 VBO/mesh draw call 边界。

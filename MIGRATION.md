@@ -13236,3 +13236,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java `Align` 位掩码、旋转锚点、font cache layout 仍待继续细化；
   - `DrawSprite` 的 atlas texture binding 与真实 GL draw call 仍待落地；
   - 当前总体迁移约 27.9%，仍未达到完整可玩。
+
+## 12.423 DrawSprite atlas payload 接入 OpenGL action
+
+- 2026-05-29：把 desktop trace 已有的 atlas sprite 解析结果继续接入 OpenGL backend command/event/action 链路。此前 `DrawSprite` action 只有 symbol、rect、tint、rotation、layer，真实 OpenGL backend 仍无法直接知道 atlas page、UV、filter/sampler、source path；现在 action payload 可携带 `DesktopGraphicsResolvedSpriteTrace`。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendStepKind::Command` 新增 `resolved_sprite: Option<DesktopGraphicsResolvedSpriteTrace>`；
+    - `DesktopGraphicsOpenGlBackendEvent::Command` 新增同名字段；
+    - `DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite` 新增 `resolved_sprite`；
+    - 新增 `opengl_backend_resolved_sprite_for_command(...)`；
+    - `DesktopGraphicsOpenGlBackendFramePlan::push_commands(...)` 在构造 command step 时为 `DrawSprite` 绑定 atlas resolver 结果；
+    - `DesktopGraphicsOpenGlBackendExecutor` 与 `DesktopGraphicsClassifyingOpenGlBackendAdapter` 保留该 payload 到 action。
+- 迁移意义：
+  - 真实 OpenGL adapter 后续可从 action 直接读取 atlas page/UV/source path，而不是重新扫描 trace 或只拿 symbol；
+  - 这使 `DrawSprite` 从“抽象符号”推进到“可绑定纹理区域”的执行边界；
+  - 仍保持在 `RenderFramePlan -> Desktop trace -> OpenGL plan -> Executor -> ActionSink` 主链内。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - 目前 resolver 仍按 symbol 查找，duplicate symbol/多 command 场景后续应引入 command-index 精确关联；
+  - `resolved_sprite` 尚未映射到真实 GPU texture id / UV buffer；
+  - `DrawSprite` 的 VBO/mesh 提交与 shader binding 仍待落地；
+  - 当前总体迁移约 28.0%，仍未达到完整可玩。
