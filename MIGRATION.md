@@ -13311,3 +13311,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 尚未生成 DrawSprite 顶点/索引/VBO；
   - shader program binding 与 draw call 仍待落地；
   - 当前总体迁移约 28.2%，仍未达到完整可玩。
+
+## 12.426 DrawSprite quad 顶点输入
+
+- 2026-05-29：继续推进 DrawSprite 到真实 OpenGL draw call 的中间层，将 texture binding 与 `DrawSprite` 的 rect/tint/rotation/layer 组合成 quad/vertex 输入。该闭环仍不调用 GL，只形成 VBO/mesh 所需的数据结构。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteVertex`；
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteQuad`；
+    - `DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(...)` 根据 texture binding 生成 4 个顶点；
+    - `opengl_backend_sprite_quad_positions(...)` 按 rect 与 rotation 计算顶点位置；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `sprite_quads`；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增 `sprite_quads`；
+    - executor 与 classifying adapter 在 `DrawSprite` action 产生 texture binding 时同步产生 quad。
+- 迁移意义：
+  - `DrawSprite` 已从 atlas payload 进一步推进到 VBO/mesh 前一层的结构化顶点输入；
+  - 后续真实 GL backend 可将 `sprite_quads` 写入 vertex buffer，并配合 texture binding 提交 draw call；
+  - 仍保持原版 OpenGL 语义路线，不切换到其他渲染引擎。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - 尚未创建真实 VBO/IBO/VAO 或 mesh batch；
+  - 尚未将 texture binding 转为 GL texture handle；
+  - shader program binding 与 draw call 仍待落地；
+  - 当前总体迁移约 28.3%，仍未达到完整可玩。

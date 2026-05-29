@@ -484,6 +484,90 @@ impl DesktopGraphicsOpenGlBackendTextureBinding {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteVertex {
+    pub position: RenderPoint,
+    pub uv: [f32; 2],
+    pub color: [f32; 4],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteQuad {
+    pub command_index: Option<usize>,
+    pub symbol: String,
+    pub page_source_path: String,
+    pub sampler: DesktopGraphicsTextureSamplerTrace,
+    pub layer: f32,
+    pub rotation: f32,
+    pub vertices: [DesktopGraphicsOpenGlBackendSpriteVertex; 4],
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteQuad {
+    pub fn from_draw_sprite(
+        binding: &DesktopGraphicsOpenGlBackendTextureBinding,
+        rect: RenderRect,
+        tint: [f32; 4],
+        rotation: f32,
+        layer: f32,
+    ) -> Self {
+        let [u, v, u2, v2] = binding.uv;
+        let positions = opengl_backend_sprite_quad_positions(rect, rotation);
+        Self {
+            command_index: binding.command_index,
+            symbol: binding.symbol.clone(),
+            page_source_path: binding.page_source_path.clone(),
+            sampler: binding.sampler,
+            layer,
+            rotation,
+            vertices: [
+                DesktopGraphicsOpenGlBackendSpriteVertex {
+                    position: positions[0],
+                    uv: [u, v],
+                    color: tint,
+                },
+                DesktopGraphicsOpenGlBackendSpriteVertex {
+                    position: positions[1],
+                    uv: [u2, v],
+                    color: tint,
+                },
+                DesktopGraphicsOpenGlBackendSpriteVertex {
+                    position: positions[2],
+                    uv: [u2, v2],
+                    color: tint,
+                },
+                DesktopGraphicsOpenGlBackendSpriteVertex {
+                    position: positions[3],
+                    uv: [u, v2],
+                    color: tint,
+                },
+            ],
+        }
+    }
+}
+
+fn opengl_backend_sprite_quad_positions(rect: RenderRect, rotation: f32) -> [RenderPoint; 4] {
+    let positions = [
+        RenderPoint::new(rect.x, rect.y),
+        RenderPoint::new(rect.right(), rect.y),
+        RenderPoint::new(rect.right(), rect.bottom()),
+        RenderPoint::new(rect.x, rect.bottom()),
+    ];
+    if rotation.abs() <= f32::EPSILON {
+        return positions;
+    }
+    let center = rect.center();
+    let radians = rotation.to_radians();
+    let (sin, cos) = radians.sin_cos();
+    positions.map(|point| {
+        let dx = point.x - center.x;
+        let dy = point.y - center.y;
+        RenderPoint::new(
+            center.x + dx * cos - dy * sin,
+            center.y + dx * sin + dy * cos,
+        )
+    })
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsLiveBackendDrawSpriteTrace {
     pub pass_index: usize,
@@ -1135,6 +1219,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub custom_markers: Vec<String>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
+    pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
     pub missing_sprite_texture_bindings: usize,
 }
 
@@ -1167,6 +1252,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             custom_markers: Vec::new(),
             actions: Vec::new(),
             sprite_texture_bindings: Vec::new(),
+            sprite_quads: Vec::new(),
             missing_sprite_texture_bindings: 0,
         }
     }
@@ -1259,6 +1345,20 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                 if let Some(binding) =
                     DesktopGraphicsOpenGlBackendTextureBinding::from_resolved_sprite(sprite)
                 {
+                    if let DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
+                        rect,
+                        tint,
+                        rotation,
+                        layer,
+                        ..
+                    } = action
+                    {
+                        self.state.sprite_quads.push(
+                            DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+                                &binding, *rect, *tint, *rotation, *layer,
+                            ),
+                        );
+                    }
                     self.state.sprite_texture_bindings.push(binding);
                 } else {
                     self.state.missing_sprite_texture_bindings += 1;
@@ -1411,6 +1511,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub action_count: usize,
     pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
+    pub sprite_quads: Vec<DesktopGraphicsOpenGlBackendSpriteQuad>,
     pub missing_sprite_texture_bindings: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
     pub last_command_kind: Option<&'static str>,
@@ -1444,6 +1545,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             last_action: None,
             action_count: 0,
             sprite_texture_bindings: Vec::new(),
+            sprite_quads: Vec::new(),
             missing_sprite_texture_bindings: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
             last_command_kind: None,
@@ -1524,6 +1626,20 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                 if let Some(binding) =
                     DesktopGraphicsOpenGlBackendTextureBinding::from_resolved_sprite(sprite)
                 {
+                    if let DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
+                        rect,
+                        tint,
+                        rotation,
+                        layer,
+                        ..
+                    } = action
+                    {
+                        self.state.sprite_quads.push(
+                            DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+                                &binding, *rect, *tint, *rotation, *layer,
+                            ),
+                        );
+                    }
                     self.state.sprite_texture_bindings.push(binding);
                 } else {
                     self.state.missing_sprite_texture_bindings += 1;
@@ -9279,6 +9395,39 @@ mod tests {
             executor.state.sprite_texture_bindings[0].uv,
             [0.0, 0.0, 1.0 / 4096.0, 1.0 / 4096.0]
         );
+        assert_eq!(executor.state.sprite_quads.len(), 1);
+        assert_eq!(executor.state.sprite_quads[0].symbol, "router");
+        assert_eq!(
+            executor.state.sprite_quads[0].page_source_path,
+            "sprites.png"
+        );
+        assert_eq!(executor.state.sprite_quads[0].layer, 8.0);
+        assert_eq!(
+            executor.state.sprite_quads[0]
+                .vertices
+                .iter()
+                .map(|vertex| vertex.position)
+                .collect::<Vec<_>>(),
+            vec![
+                RenderPoint::new(8.0, 8.0),
+                RenderPoint::new(24.0, 8.0),
+                RenderPoint::new(24.0, 24.0),
+                RenderPoint::new(8.0, 24.0),
+            ]
+        );
+        assert_eq!(
+            executor.state.sprite_quads[0]
+                .vertices
+                .iter()
+                .map(|vertex| vertex.uv)
+                .collect::<Vec<_>>(),
+            vec![
+                [0.0, 0.0],
+                [1.0 / 4096.0, 0.0],
+                [1.0 / 4096.0, 1.0 / 4096.0],
+                [0.0, 1.0 / 4096.0],
+            ]
+        );
         assert_eq!(
             executor.state.resolve_events,
             vec![super::DesktopGraphicsOpenGlBackendResolveEvent {
@@ -9305,6 +9454,10 @@ mod tests {
         assert_eq!(
             classifying_adapter.state.sprite_texture_bindings,
             executor.state.sprite_texture_bindings
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_quads,
+            executor.state.sprite_quads
         );
         assert_eq!(classifying_adapter.state.actions.len(), 3);
         assert!(matches!(
