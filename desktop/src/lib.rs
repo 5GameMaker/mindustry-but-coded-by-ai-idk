@@ -8858,6 +8858,53 @@ impl DesktopLauncher {
         state.finish()
     }
 
+    pub fn background_render_pass(&self, camera: RenderCamera) -> Option<RenderPass> {
+        if self.game_state.rules.background_texture.is_none()
+            && self.game_state.rules.custom_background_callback.is_none()
+        {
+            return None;
+        }
+
+        let mut pass = RenderPass::new(RenderPassKind::Background)
+            .with_target(RenderTarget::Buffer("background-buffer".into()))
+            .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawRectSample)
+            .with_resolve_sample(RenderTextureSamplePlan::background_buffer_geometry_flip(
+                camera,
+            ));
+        pass.push(RenderCommand::custom(
+            "background-buffer-render",
+            vec![
+                RenderProperty::new(
+                    "texture",
+                    self.game_state
+                        .rules
+                        .background_texture
+                        .as_deref()
+                        .unwrap_or(""),
+                ),
+                RenderProperty::new(
+                    "callback",
+                    self.game_state
+                        .rules
+                        .custom_background_callback
+                        .as_deref()
+                        .unwrap_or(""),
+                ),
+                RenderProperty::new("speed", self.game_state.rules.background_speed.to_string()),
+                RenderProperty::new("scale", self.game_state.rules.background_scl.to_string()),
+                RenderProperty::new(
+                    "offset_x",
+                    self.game_state.rules.background_offset_x.to_string(),
+                ),
+                RenderProperty::new(
+                    "offset_y",
+                    self.game_state.rules.background_offset_y.to_string(),
+                ),
+            ],
+        ));
+        Some(pass)
+    }
+
     pub fn minimap_overlay_plan(
         &mut self,
         camera: MinimapCamera,
@@ -9285,6 +9332,11 @@ impl DesktopLauncher {
         minimap_input: MinimapOverlayInput,
     ) -> DesktopGraphicsFrame {
         let mut render_frame = self.render_frame_plan(frame_index, camera, viewport);
+        let mut background_camera = camera;
+        background_camera.viewport = viewport;
+        if let Some(background_pass) = self.background_render_pass(background_camera) {
+            render_frame.push_pass(background_pass);
+        }
         let accelerator_launching_pass =
             self.accelerator_launching_render_pass(camera, viewport, 8.0);
         if let Some(light_pass) = self.drain_light_renderer_plan().to_render_pass() {
@@ -11117,9 +11169,10 @@ mod tests {
         RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan, RenderPass,
         RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize,
         RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
-        RenderTextureSamplePlan, RenderViewport, ShaderApplyContext, ShaderApplyOperation,
-        ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan,
-        TextureBinding, TileCoord, UniformBinding, UniformValue,
+        RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect, RenderViewport,
+        ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCatalog,
+        ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureBinding, TileCoord, UniformBinding,
+        UniformValue,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -12691,6 +12744,61 @@ mod tests {
             command,
             RenderCommand::Custom { name, .. } if name == "darkness-dirty-tile"
         )));
+    }
+
+    #[test]
+    fn desktop_launcher_graphics_frame_includes_background_buffer_resolve_when_rules_define_background(
+    ) {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(8, 8);
+        launcher.game_state.rules.background_texture = Some("sprites/space.png".into());
+        launcher.game_state.rules.custom_background_callback = Some("planet-background".into());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 80.0, 40.0);
+        let camera = RenderCamera::new(RenderPoint::new(50.0, 30.0), viewport);
+        let minimap_camera = MinimapCamera::new(50.0, 30.0, 80.0, 40.0);
+        let frame = launcher.graphics_frame_for_render(
+            12,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let background = render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Background)
+            .expect("rules background should create a background buffer pass");
+
+        assert_eq!(
+            background.target,
+            RenderTarget::Buffer("background-buffer".into())
+        );
+        assert_eq!(background.resolve_target, Some(RenderTarget::Screen));
+        assert_eq!(
+            background.resolve_kind,
+            Some(RenderResolveKind::DrawRectSample)
+        );
+        let expected_sample = RenderTextureSamplePlan::background_buffer_geometry_flip(camera);
+        assert_eq!(background.resolve_sample, Some(expected_sample));
+        assert_eq!(expected_sample.flip, RenderTextureSampleFlip::GeometryY);
+        assert_eq!(expected_sample.uv, RenderUvRect::full());
+        assert!(background.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::Custom { name, properties }
+                if name == "background-buffer-render"
+                    && properties.iter().any(|property| property.key == "texture" && property.value == "sprites/space.png")
+                    && properties.iter().any(|property| property.key == "callback" && property.value == "planet-background")
+        )));
+        let background_index = render_frame
+            .passes
+            .iter()
+            .position(|pass| pass.kind == RenderPassKind::Background)
+            .unwrap();
+        assert!(render_frame.passes[background_index + 1..]
+            .iter()
+            .all(|pass| pass.order >= background.order));
     }
 
     #[test]
