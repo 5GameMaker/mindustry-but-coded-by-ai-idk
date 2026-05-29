@@ -12327,15 +12327,15 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. primitive mesh：优先把 `FillRect/StrokeRect/DrawLine/DrawPixel` 接入 draw path。
   4. `BindFramebuffer` / target bind 已推进到 native driver 的 `glBindFramebuffer` / viewport；clear 顺序仍需继续下沉。
 
-### 2026-05-30：native OpenGL target framebuffer bind / clear 闭环
+### 2026-05-30：native OpenGL target framebuffer bind / clear / state 闭环
 
-- 当前整体完成度：约 **37.0%**。
+- 当前整体完成度：约 **37.4%**。
 - 这轮需要交接给下一位的重点：
   - draw / resolve 计划已经新增 `BindFramebuffer`；
   - native driver 将负责真实执行 `glBindFramebuffer + viewport` 的有序闭环；
   - 非 screen target 缺失 FBO 时会记录问题并按目标尺寸惰性创建 attachment，不再静默落到默认 backbuffer；
   - clear command 已经下沉到 native OpenGL `glClearColor + glClear`；
+  - `SetViewport / SetBlend / SetScissor / ClearScissor` 也已经进入 native driver 的实际执行路径；
   - 还没完成的部分依次是：
-    1. viewport / scissor / blend 的完整接管；
-    2. primitive mesh / entity / UI 的真实 draw path。
-- 建议下一步继续围绕 render target 链路推进，先把 viewport / scissor / blend 的驱动侧时序打牢，再向 primitive draw 扩展。
+    1. primitive mesh / entity / UI 的真实 draw path。
+- 建议下一步继续围绕 primitive draw 与 UI/entity 的真实渲染路径推进。

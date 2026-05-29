@@ -472,6 +472,63 @@ impl DesktopNativeOpenGlDriver<'_> {
         true
     }
 
+    fn native_blend_factor(factor: mindustry_core::mindustry::graphics::RenderBlendFactor) -> u32 {
+        match factor {
+            mindustry_core::mindustry::graphics::RenderBlendFactor::Zero => glow::ZERO,
+            mindustry_core::mindustry::graphics::RenderBlendFactor::One => glow::ONE,
+            mindustry_core::mindustry::graphics::RenderBlendFactor::SrcColor => glow::SRC_COLOR,
+            mindustry_core::mindustry::graphics::RenderBlendFactor::OneMinusSrcColor => {
+                glow::ONE_MINUS_SRC_COLOR
+            }
+            mindustry_core::mindustry::graphics::RenderBlendFactor::DstColor => glow::DST_COLOR,
+            mindustry_core::mindustry::graphics::RenderBlendFactor::OneMinusDstColor => {
+                glow::ONE_MINUS_DST_COLOR
+            }
+            mindustry_core::mindustry::graphics::RenderBlendFactor::SrcAlpha => glow::SRC_ALPHA,
+            mindustry_core::mindustry::graphics::RenderBlendFactor::OneMinusSrcAlpha => {
+                glow::ONE_MINUS_SRC_ALPHA
+            }
+            mindustry_core::mindustry::graphics::RenderBlendFactor::DstAlpha => glow::DST_ALPHA,
+            mindustry_core::mindustry::graphics::RenderBlendFactor::OneMinusDstAlpha => {
+                glow::ONE_MINUS_DST_ALPHA
+            }
+        }
+    }
+
+    fn consume_native_blend_state(
+        &mut self,
+        state: &mindustry_desktop::DesktopGraphicsOpenGlBackendBlendState,
+    ) {
+        unsafe {
+            if state.enabled {
+                self.gl.enable(glow::BLEND);
+                if let (Some(source), Some(destination)) =
+                    (state.source_factor, state.destination_factor)
+                {
+                    self.gl.blend_func(
+                        Self::native_blend_factor(source),
+                        Self::native_blend_factor(destination),
+                    );
+                }
+            } else {
+                self.gl.disable(glow::BLEND);
+            }
+        }
+    }
+
+    fn native_scissor_rect_for_target(
+        &self,
+        target: Option<&mindustry_core::mindustry::graphics::RenderTarget>,
+        rect: mindustry_core::mindustry::graphics::RenderRect,
+    ) -> (i32, i32, i32, i32) {
+        let (target_width, target_height) = self.viewport_for_render_target(target);
+        let left = rect.x.floor().max(0.0).min(target_width as f32) as i32;
+        let bottom = rect.y.floor().max(0.0).min(target_height as f32) as i32;
+        let right = rect.right().ceil().max(0.0).min(target_width as f32) as i32;
+        let top = rect.bottom().ceil().max(0.0).min(target_height as f32) as i32;
+        (left, bottom, (right - left).max(0), (top - bottom).max(0))
+    }
+
     fn delete_framebuffer_handle(&mut self, framebuffer_handle: u32) {
         if let Some(framebuffer) = self.framebuffers.remove(&framebuffer_handle) {
             unsafe {
@@ -1320,6 +1377,15 @@ impl DesktopNativeOpenGlDriver<'_> {
             } => {
                 self.draw_target_available = self.bind_framebuffer_target(target.as_ref());
             }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::SetViewport { target } => {
+                if !self.draw_target_available {
+                    return;
+                }
+                let (width, height) = self.viewport_for_render_target(target.as_ref());
+                unsafe {
+                    self.gl.viewport(0, 0, width, height);
+                }
+            }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::Clear { color } => {
                 if !self.draw_target_available {
                     return;
@@ -1327,6 +1393,34 @@ impl DesktopNativeOpenGlDriver<'_> {
                 unsafe {
                     self.gl.clear_color(color[0], color[1], color[2], color[3]);
                     self.gl.clear(glow::COLOR_BUFFER_BIT);
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::SetBlend { state } => {
+                if !self.draw_target_available {
+                    return;
+                }
+                self.consume_native_blend_state(state);
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::SetScissor {
+                target,
+                rect,
+            } => {
+                if !self.draw_target_available {
+                    return;
+                }
+                let (x, y, width, height) =
+                    self.native_scissor_rect_for_target(target.as_ref(), *rect);
+                unsafe {
+                    self.gl.enable(glow::SCISSOR_TEST);
+                    self.gl.scissor(x, y, width, height);
+                }
+            }
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::ClearScissor { .. } => {
+                if !self.draw_target_available {
+                    return;
+                }
+                unsafe {
+                    self.gl.disable(glow::SCISSOR_TEST);
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram {

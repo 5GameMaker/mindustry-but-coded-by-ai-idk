@@ -14940,3 +14940,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
   - `cargo test -p mindustry-desktop --features opengl-native-runtime --no-run`
   - `git diff --check`
+
+## 400. 最新闭环记录：native OpenGL viewport / scissor / blend 闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **37.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `RenderCommand::SetBlend / SetClip / ClearClip` 现在会下沉成 `SetViewport / SetBlend / SetScissor / ClearScissor` 的 OpenGL draw command 序列；
+    - state 命令和 target-aware viewport 进入真正的 draw/driver 命令流，不再只停留在记录层。
+  - `desktop/src/main.rs`
+    - native driver 的 `consume_native_draw_command()` 已执行 `gl.viewport`；
+    - `gl.enable/disable(glow::BLEND)` + `gl.blend_func` 已接通；
+    - `gl.enable/disable(glow::SCISSOR_TEST)` + `gl.scissor` 已接通；
+    - pass 开始时会重置 clip 相关状态，避免 offscreen clip 污染后续 target。
+- 仍未完成：
+  - primitive mesh / entity / UI 的真实 draw path 仍需继续推进。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_state_commands_reach_driver_in_target_order --lib --features opengl-backend`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_clear_emits_targeted_draw_commands_and_driver_records_them --lib --features opengl-backend`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime --no-run`
+  - `git diff --check`
