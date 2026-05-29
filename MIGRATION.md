@@ -14523,3 +14523,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - fullscreen quad mesh/VAO 目前仍由调用方提供 handle，尚未进入资源准备器；
   - `DrawRectSample` / `DrawFboSample` 尚未展开；
   - 当前总体迁移约 33.4%，仍未达到完整可玩。
+
+## 12.475 ShaderBlit fullscreen quad 资源句柄准备
+
+- 2026-05-29：在 `ShaderBlit` resolve draw command 翻译层基础上，继续把 fullscreen quad 资源句柄准备接入 shared resolving executor，避免调用方手动传入 shader program / quad VAO handle。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 新增 `resolve_draw_commands`；
+    - 新增 `SHADER_BLIT_PROGRAM_KEY = "shader:resolve:ShaderBlit"`；
+    - 新增 `FULLSCREEN_QUAD_VERTEX_ARRAY_KEY = "mesh:resolve:fullscreen-quad"`；
+    - `consume_opengl_resolve_event(...)` 在记录 `ResolveCommand` 的同时，通过 shared handle cache 分配/复用 shader-blit program handle 与 fullscreen quad VAO handle；
+    - 新增 `drive_resolve_draw_command_sink(...)`；
+    - 新增测试 `desktop_graphics_opengl_shared_resolver_allocates_shader_blit_quad_resources`。
+- 迁移意义：
+  - `ShaderBlit` 的 draw command 序列不再只依赖外部传入 handle，已接入 shared resolver 的统一 handle/cache 体系；
+  - 后续真实 OpenGL backend 可以把 `mesh:resolve:fullscreen-quad` 接到固定 screen quad VBO/IBO/VAO 上传；
+  - 保持 `ResolveCommand` 语义记录与低层 draw command 翻译层分离。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_resolver_allocates_shader_blit_quad_resources --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - fullscreen quad 的实际 VBO/IBO 数据上传尚未接入；
+  - `DrawRectSample` / `DrawFboSample` 尚未展开；
+  - 当前总体迁移约 33.5%，仍未达到完整可玩。

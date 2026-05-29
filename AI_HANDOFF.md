@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **33.4%**。
+- 当前总体迁移完成度：约 **33.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11889,3 +11889,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 为 fullscreen quad 建资源准备/句柄分配闭环；
   2. 再展开 `DrawRectSample` / `DrawFboSample`；
   3. 可并行推进 `loadouts.rs`、`save11.rs`、`version.rs` 低冲突闭环。
+
+---
+
+## 381. 最新闭环记录：ShaderBlit fullscreen quad 资源句柄准备
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **33.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 新增 `resolve_draw_commands`；
+    - 新增 `SHADER_BLIT_PROGRAM_KEY` 与 `FULLSCREEN_QUAD_VERTEX_ARRAY_KEY`；
+    - `consume_opengl_resolve_event(...)` 记录 resolve command 时同步分配/复用 shader blit program handle 与 fullscreen quad VAO handle；
+    - 新增 `drive_resolve_draw_command_sink(...)`；
+    - 新增 `desktop_graphics_opengl_shared_resolver_allocates_shader_blit_quad_resources`。
+- 关键语义：
+  - fullscreen quad 的 program/VAO handle 进入 shared resolver 的 handle cache；
+  - `ResolveCommand` 仍保持逻辑语义，低层 draw commands 作为独立 `resolve_draw_commands` 输出；
+  - 后续真实 backend 应把 `mesh:resolve:fullscreen-quad` 接到固定 screen quad mesh 上传。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_resolver_allocates_shader_blit_quad_resources --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 下一步：
+  1. 为 fullscreen quad 增加实际 VBO/IBO 上传计划；
+  2. 展开 `DrawRectSample` / `DrawFboSample` 的几何/UV；
+  3. 验收并提交 `loadouts.rs` worker 的静态 loadout 回归。
