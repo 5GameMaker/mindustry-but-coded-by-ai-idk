@@ -11965,3 +11965,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 接真实 fullscreen quad VBO/IBO 上传；
   2. 接真实 OpenGL window/context/present；
   3. 并行推进 `save11.rs` 或 `version.rs`。
+
+---
+
+## 384. 最新闭环记录：并行迁移回归与 OpenGL resolve draw 下沉
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **34.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/core/version.rs`：补 Java-like build/revision/default number/steam/custom build 回归。
+  - `core/src/mindustry/io/versions/save11.rs`：锁定 Save11 manifest 完整顺序，尤其 `Patches` 在 `Map` 前。
+  - `core/src/mindustry/game/map_markers.rs`、`core/src/mindustry/io/save.rs`：补 mixed Point/Shape/Text/Quad marker replace/remove + UBJSON roundtrip 回归。
+  - `core/src/mindustry/net/network_io.rs`：valid markers + custom chunks 后的 opaque tail 可保留并写回。
+  - `core/src/mindustry/type/item.rs`、`core/src/mindustry/type/liquid.rs`：补 Java constructor/default field 回归。
+  - `desktop/src/lib.rs`：`ShaderBlit` / `DrawRectSample` / `DrawFboSample` 均进入 source texture sample draw command；`drive_driver(...)` 现在会把 `resolve_draw_commands` 下沉到 driver draw sink。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core version`
+  - `cargo test -p mindustry-core save11`
+  - `cargo test -p mindustry-core map_markers`
+  - `cargo test -p mindustry-core marker_region`
+  - `cargo test -p mindustry-core network_io`
+  - `cargo test -p mindustry-core item`
+  - `cargo test -p mindustry-core liquid`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_runtime_feature_records_driver_submission --lib --features opengl-backend`
+  - `git diff --check`
+- 下一步：
+  1. 渲染优先：给 `DrawRectSample` / `DrawFboSample` 增加 camera/world UV / Y 翻转表达，再接 fullscreen quad VBO/IBO 上传；
+  2. native backend：按 `native-opengl-backend` feature 接 `glow + glutin + glutin-winit + winit`；
+  3. core 可玩性优先批次：生产链、仓储/电力、运输/分发、液体网络、炮台/防御、逻辑块、payload/units。

@@ -14587,3 +14587,47 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - feature on 分支目前仍是 null runtime + headless renderer；
   - 真实窗口、GL context、swap/present 尚未接入；
   - 当前总体迁移约 33.7%，仍未达到完整可玩。
+
+## 12.478 并行迁移回归：Version / Save11 / markers / network tail / OpenGL resolve draw
+
+- 2026-05-29：并行推进一组低冲突 Java v158.1 对照闭环，并把渲染 resolve draw command 从单一 `ShaderBlit` 扩展到 `DrawRectSample` / `DrawFboSample`。
+- Rust 新增/接入：
+  - `core/src/mindustry/core/version.rs`
+    - `build` 缺失时回退为 custom build；
+    - 多段 build 字符串按 Java `split("\\.")` 前两段解析；
+    - 补充非法 `number`、steam modifier、custom build 回归。
+  - `core/src/mindustry/io/versions/save11.rs`
+    - 锁定 `Meta -> Content -> Patches -> Map -> Entities -> Markers -> Custom` manifest 顺序；
+    - 明确 `Patches` 必须位于 `Map` 之前。
+  - `core/src/mindustry/game/map_markers.rs`、`core/src/mindustry/io/save.rs`
+    - 补充 Point / Shape / Text / Quad 混合 marker 的替换、删除、UBJSON roundtrip 顺序回归。
+  - `core/src/mindustry/net/network_io.rs`
+    - world-data tail 在 valid markers + custom chunks 后允许保留 opaque 后缀；
+    - materialize 时把 opaque 后缀拼回，避免联机 world stream 尾部丢字节。
+  - `core/src/mindustry/type/item.rs`、`core/src/mindustry/type/liquid.rs`
+    - 补强 Java constructor/default field 回归。
+  - `desktop/src/lib.rs`
+    - 新增 `source_texture_sample_to_opengl_draw_commands(...)`；
+    - `ShaderBlit` / `DrawRectSample` / `DrawFboSample` 均可生成 source texture fullscreen quad draw commands；
+    - resolver 增加 `shader:resolve:DrawRectSample`、`shader:resolve:DrawFboSample` program key；
+    - `drive_driver(...)` 下沉 `resolve_draw_commands` 到 driver draw sink，runtime 提交能记录 resolve draw 序列。
+- 迁移意义：
+  - save/network marker/custom tail 更接近 Java 联机 world-data 可回放语义；
+  - `Version` / `Save11` / Item / Liquid 默认值继续向 Java 静态行为收敛；
+  - OpenGL resolve 不再只停在 `ShaderBlit`，shadow/darkness/fog 的 texture-sample resolve 已进入低层 draw command 与 driver/runtime 提交通道。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core version`
+  - `cargo test -p mindustry-core save11`
+  - `cargo test -p mindustry-core map_markers`
+  - `cargo test -p mindustry-core marker_region`
+  - `cargo test -p mindustry-core network_io`
+  - `cargo test -p mindustry-core item`
+  - `cargo test -p mindustry-core liquid`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_runtime_feature_records_driver_submission --lib --features opengl-backend`
+  - `git diff --check`
+- 仍未完成：
+  - `DrawRectSample` / `DrawFboSample` 目前仍共享 source texture fullscreen quad 形态，Java camera/world UV 与 Y 翻转细节尚未类型化；
+  - 真实 `glow/glutin/winit` window/context/swap/present 尚未接入；
+  - 当前总体迁移约 34.2%，仍未达到完整可玩。
