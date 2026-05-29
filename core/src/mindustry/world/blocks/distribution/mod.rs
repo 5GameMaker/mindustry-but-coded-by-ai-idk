@@ -1182,6 +1182,53 @@ mod tests {
     }
 
     #[test]
+    fn transport_chain_defaults_and_overflow_gate_legacy_payloads_follow_upstream() {
+        use std::io::Cursor;
+
+        assert_eq!(CONVEYOR_ITEM_SPACE, 0.4);
+        assert_eq!(CONVEYOR_CAPACITY, 3);
+
+        let junction = DuctJunctionState::default();
+        assert_eq!(
+            junction.buffer.capacity(),
+            DuctJunctionState::DEFAULT_CAPACITY
+        );
+        assert_eq!(junction.buffer.capacity(), 6);
+
+        assert!(conveyor_accept_item(0, 0.4, Some(0), 0, false));
+        assert!(!conveyor_accept_item(3, 1.0, Some(0), 0, false));
+
+        assert_eq!(
+            overflow_gate_route(true, false, false, false, 0, 1, true),
+            Some((OverflowRoute::Forward, 0))
+        );
+        assert_eq!(
+            overflow_gate_route(false, false, false, true, 0, 1, true),
+            Some((OverflowRoute::Right, 0))
+        );
+        assert_eq!(
+            overflow_gate_route(false, false, true, true, 2, 1, true),
+            Some((OverflowRoute::Right, 0))
+        );
+        assert_eq!(
+            overflow_gate_route(false, false, true, true, 2, 1, false),
+            Some((OverflowRoute::Right, 2))
+        );
+
+        let mut legacy = DirectionalItemBuffer::new(25);
+        assert!(legacy.accept(1, 7, 42.0));
+        let mut bytes = Vec::new();
+        legacy.write(&mut bytes).unwrap();
+        let mut cursor = Cursor::new(bytes);
+        read_overflow_gate_legacy_payload(&mut cursor, 1).unwrap();
+        assert_eq!(cursor.position(), 4 * (2 + 25 * 8));
+
+        let mut cursor = Cursor::new(1234i32.to_be_bytes().to_vec());
+        read_overflow_gate_legacy_payload(&mut cursor, 3).unwrap();
+        assert_eq!(cursor.position(), 4);
+    }
+
+    #[test]
     fn buffered_bridge_and_stack_conveyor_shells_follow_upstream_state() {
         assert!(buffered_bridge_can_accept(0, 10, 1));
         assert!(!buffered_bridge_can_accept(10, 10, 1));
