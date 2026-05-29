@@ -118,7 +118,9 @@ impl<'a> IntoIterator for &'a MapMarkers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mindustry::game::map_objectives::{PointMarker, ShapeMarker, TextMarker};
+    use crate::mindustry::game::map_objectives::{
+        PointMarker, QuadMarker, ShapeMarker, TextMarker, TextureHolder,
+    };
     use crate::mindustry::game::Vec2;
     use crate::mindustry::logic::LMarkerControl;
 
@@ -207,5 +209,84 @@ mod tests {
         assert_eq!(rebuilt.get(1).unwrap().common().array_index, 0);
         assert_eq!(rebuilt.get(3).unwrap().common().array_index, 1);
         assert_eq!(rebuilt.get(4).unwrap().common().array_index, 2);
+    }
+
+    #[test]
+    fn replace_and_remove_keep_sequential_view_stable_for_mixed_marker_variants() {
+        let mut markers = MapMarkers::new();
+
+        let mut point = PointMarker::default();
+        point.pos = Vec2::new(1.0, 2.0);
+        point.radius = 3.0;
+        point.stroke = 4.0;
+        markers.add(10, ObjectiveMarker::Point(point));
+
+        let mut shape = ShapeMarker::default();
+        shape.pos = Vec2::new(5.0, 6.0);
+        shape.radius = 7.0;
+        shape.rotation = 8.0;
+        shape.stroke = 9.0;
+        shape.fill = true;
+        shape.sides = 5;
+        markers.add(30, ObjectiveMarker::Shape(shape));
+
+        let mut text = TextMarker::default();
+        text.pos = Vec2::new(11.0, 12.0);
+        text.text = "alpha".into();
+        text.font_size = 13.0;
+        text.flags = 2;
+        text.text_align = 3;
+        text.line_align = 4;
+        markers.add(20, ObjectiveMarker::Text(text));
+
+        let mut quad = QuadMarker::default();
+        quad.texture = TextureHolder::Building(17);
+        quad.vertices = (0..24).map(|index| index as f32 + 0.5).collect();
+        quad.map_region = false;
+        markers.add(40, ObjectiveMarker::Quad(quad));
+
+        let mut replacement = ShapeMarker::default();
+        replacement.pos = Vec2::new(15.0, 16.0);
+        replacement.radius = 17.0;
+        replacement.rotation = 18.0;
+        replacement.stroke = 19.0;
+        replacement.start_angle = 20.0;
+        replacement.end_angle = 21.0;
+        replacement.outline = true;
+        replacement.sides = 6;
+        markers.add(30, ObjectiveMarker::Shape(replacement));
+
+        assert_eq!(markers.ids().collect::<Vec<_>>(), vec![10, 30, 20, 40]);
+        assert_eq!(markers.get(30).unwrap().common().array_index, 1);
+        assert_eq!(markers.get(30).unwrap().type_name(), "Shape");
+
+        let removed = markers.remove(20).unwrap();
+        assert_eq!(removed.type_name(), "Text");
+        assert_eq!(markers.ids().collect::<Vec<_>>(), vec![10, 30, 40]);
+        assert_eq!(markers.get(10).unwrap().common().array_index, 0);
+        assert_eq!(markers.get(30).unwrap().common().array_index, 1);
+        assert_eq!(markers.get(40).unwrap().common().array_index, 2);
+
+        let mut replacement_text = TextMarker::default();
+        replacement_text.pos = Vec2::new(22.0, 23.0);
+        replacement_text.text = "beta".into();
+        replacement_text.font_size = 24.0;
+        replacement_text.flags = 7;
+        replacement_text.text_align = 8;
+        replacement_text.line_align = 9;
+        markers.add(25, ObjectiveMarker::Text(replacement_text));
+
+        assert_eq!(markers.ids().collect::<Vec<_>>(), vec![10, 30, 40, 25]);
+        assert_eq!(markers.get(10).unwrap().common().array_index, 0);
+        assert_eq!(markers.get(30).unwrap().common().array_index, 1);
+        assert_eq!(markers.get(40).unwrap().common().array_index, 2);
+        assert_eq!(markers.get(25).unwrap().common().array_index, 3);
+        assert_eq!(
+            markers
+                .iter()
+                .map(ObjectiveMarker::type_name)
+                .collect::<Vec<_>>(),
+            vec!["Point", "Shape", "Quad", "Text"]
+        );
     }
 }

@@ -3200,6 +3200,150 @@ mod tests {
         assert_eq!(decoded, expected);
     }
 
+    #[test]
+    fn marker_region_writer_roundtrips_mixed_marker_variants_after_replace_and_remove() {
+        use crate::mindustry::game::map_objectives::{
+            PointMarker, QuadMarker, ShapeMarker, TextMarker, TextureHolder,
+        };
+
+        let mut markers = MapMarkers::new();
+
+        let mut point = PointMarker::default();
+        point.pos = Vec2::new(12.0, 24.0);
+        point.radius = 3.25;
+        point.stroke = 1.5;
+        point.color = 0x11223344;
+        markers.add(10, ObjectiveMarker::Point(point));
+
+        let mut shape = ShapeMarker::default();
+        shape.pos = Vec2::new(5.0, 6.0);
+        shape.radius = 7.0;
+        shape.rotation = 8.0;
+        shape.stroke = 9.0;
+        shape.start_angle = 10.0;
+        shape.end_angle = 11.0;
+        shape.fill = true;
+        shape.outline = false;
+        shape.sides = 12;
+        shape.color = 0x55667788;
+        markers.add(30, ObjectiveMarker::Shape(shape));
+
+        let mut text = TextMarker::default();
+        text.pos = Vec2::new(2.0, 4.0);
+        text.text = "alpha".into();
+        text.font_size = 1.5;
+        text.flags = 3;
+        text.text_align = 5;
+        text.line_align = 1;
+        markers.add(20, ObjectiveMarker::Text(text));
+
+        let mut quad = QuadMarker::default();
+        quad.texture = TextureHolder::Building(42);
+        quad.vertices = (0..24).map(|index| index as f32 + 0.25).collect();
+        quad.map_region = false;
+        markers.add(40, ObjectiveMarker::Quad(quad));
+
+        let mut replacement_shape = ShapeMarker::default();
+        replacement_shape.pos = Vec2::new(15.0, 16.0);
+        replacement_shape.radius = 17.0;
+        replacement_shape.rotation = 18.0;
+        replacement_shape.stroke = 19.0;
+        replacement_shape.start_angle = 20.0;
+        replacement_shape.end_angle = 21.0;
+        replacement_shape.fill = false;
+        replacement_shape.outline = true;
+        replacement_shape.sides = 6;
+        replacement_shape.color = 0x99aabbcc;
+        markers.add(30, ObjectiveMarker::Shape(replacement_shape));
+
+        assert_eq!(markers.ids().collect::<Vec<_>>(), vec![10, 30, 20, 40]);
+        assert_eq!(markers.get(30).unwrap().common().array_index, 1);
+
+        let removed = markers.remove(20).unwrap();
+        assert_eq!(removed.type_name(), "Text");
+        assert_eq!(markers.ids().collect::<Vec<_>>(), vec![10, 30, 40]);
+        assert_eq!(markers.get(10).unwrap().common().array_index, 0);
+        assert_eq!(markers.get(30).unwrap().common().array_index, 1);
+        assert_eq!(markers.get(40).unwrap().common().array_index, 2);
+
+        let mut replacement_text = TextMarker::default();
+        replacement_text.pos = Vec2::new(22.0, 24.0);
+        replacement_text.text = "beta".into();
+        replacement_text.font_size = 2.5;
+        replacement_text.flags = 7;
+        replacement_text.text_align = 8;
+        replacement_text.line_align = 9;
+        markers.add(25, ObjectiveMarker::Text(replacement_text));
+
+        assert_eq!(markers.ids().collect::<Vec<_>>(), vec![10, 30, 40, 25]);
+        assert_eq!(markers.get(10).unwrap().common().array_index, 0);
+        assert_eq!(markers.get(30).unwrap().common().array_index, 1);
+        assert_eq!(markers.get(40).unwrap().common().array_index, 2);
+        assert_eq!(markers.get(25).unwrap().common().array_index, 3);
+
+        let bytes = marker_region_bytes_from_map_markers(&markers).unwrap();
+        let decoded = parse_marker_region_bytes(&bytes).unwrap();
+        let mut expected_entries = markers
+            .entries()
+            .map(|(id, marker)| (id, marker.clone()))
+            .collect::<Vec<_>>();
+        expected_entries.sort_by_key(|(id, _)| *id);
+        let expected = MapMarkers::rebuild_from_entries(expected_entries);
+
+        assert_eq!(decoded.ids().collect::<Vec<_>>(), vec![10, 25, 30, 40]);
+        assert_eq!(decoded, expected);
+
+        match decoded.get(10).unwrap() {
+            ObjectiveMarker::Point(point) => {
+                assert_eq!(point.pos, Vec2::new(12.0, 24.0));
+                assert!((point.radius - 3.25).abs() < f32::EPSILON);
+                assert!((point.stroke - 1.5).abs() < f32::EPSILON);
+                assert_eq!(point.color, 0x11223344);
+            }
+            other => panic!("expected Point marker, got {other:?}"),
+        }
+
+        match decoded.get(25).unwrap() {
+            ObjectiveMarker::Text(text) => {
+                assert_eq!(text.pos, Vec2::new(22.0, 24.0));
+                assert_eq!(text.text, "beta");
+                assert!((text.font_size - 2.5).abs() < f32::EPSILON);
+                assert_eq!(text.flags, 7);
+                assert_eq!(text.text_align, 8);
+                assert_eq!(text.line_align, 9);
+            }
+            other => panic!("expected Text marker, got {other:?}"),
+        }
+
+        match decoded.get(30).unwrap() {
+            ObjectiveMarker::Shape(shape) => {
+                assert_eq!(shape.pos, Vec2::new(15.0, 16.0));
+                assert!((shape.radius - 17.0).abs() < f32::EPSILON);
+                assert!((shape.rotation - 18.0).abs() < f32::EPSILON);
+                assert!((shape.stroke - 19.0).abs() < f32::EPSILON);
+                assert!((shape.start_angle - 20.0).abs() < f32::EPSILON);
+                assert!((shape.end_angle - 21.0).abs() < f32::EPSILON);
+                assert!(!shape.fill);
+                assert!(shape.outline);
+                assert_eq!(shape.sides, 6);
+                assert_eq!(shape.color, 0x99aabbcc);
+            }
+            other => panic!("expected Shape marker, got {other:?}"),
+        }
+
+        match decoded.get(40).unwrap() {
+            ObjectiveMarker::Quad(quad) => {
+                assert_eq!(quad.texture, TextureHolder::Building(42));
+                assert_eq!(
+                    quad.vertices,
+                    (0..24).map(|index| index as f32 + 0.25).collect::<Vec<_>>()
+                );
+                assert!(!quad.map_region);
+            }
+            other => panic!("expected Quad marker, got {other:?}"),
+        }
+    }
+
     fn ubjson_object(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(b'{');
