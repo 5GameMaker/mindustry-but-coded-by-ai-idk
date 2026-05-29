@@ -14483,3 +14483,20 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `DesktopGraphicsNullOpenGlBackendRuntime` 仍为 recording/null runtime，不创建真实窗口或 GL context；
   - `desktop/src/main.rs` 仍固定 headless 启动，尚未按 `opengl-backend` 分流；
   - 当前总体迁移约 33.2%，仍未达到完整可玩。
+
+## 12.473 NetworkIO Java sentinel/front-matter 回归
+
+- 2026-05-29：并行补充 `NetworkIO` 的 Java 联机协议边缘回归，聚焦服务器公告、玩家同步哨兵、legacy revision 字段门控和最小 world data 前半段。
+- Rust 新增/接入：
+  - `core/src/mindustry/net/network_io.rs`
+    - 新增 `network_server_data_defaults_zero_port_and_invalid_mode`，覆盖非法 gamemode ordinal 回退 `Survival`，以及 port `0` 回退 `DEFAULT_PORT`；
+    - 新增 `network_player_sync_data_none_selected_block_roundtrips_java_sentinel`，覆盖 `selected_block_id = None` 时按 Java `-1` 哨兵编码并可精确回读；
+    - 新增 `network_player_data_revision_one_omits_revisioned_block_fields`，覆盖 `revision = 1` 时不写 revisioned block 字段，读取端回落为 `selected_block_id = None` / `selected_rotation = 0`；
+    - 新增 `network_world_data_bootstrap_roundtrips_java_front_matter`，覆盖 `write_minimal_world_data(...)` 的 zlib 包装、raw front matter 与 bootstrap player bytes。
+- 迁移意义：
+  - 增强 Rust 客户端/服务端与 Java `NetworkIO` 的字节级兼容回归；
+  - 继续保护 Java↔Rust 联机关键路径中的 server discovery、player sync、world payload 基础形状。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core network_ --lib`
+- 当前总体迁移约 33.3%，仍未达到完整可玩。

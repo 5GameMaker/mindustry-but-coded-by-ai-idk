@@ -1358,6 +1358,142 @@ mod tests {
     }
 
     #[test]
+    fn network_player_sync_data_none_selected_block_roundtrips_java_sentinel() {
+        let data = NetworkPlayerSyncData {
+            admin: false,
+            boosting: false,
+            color: 0x00ff_aa55,
+            mouse_x: -1.5,
+            mouse_y: 2.25,
+            name: None,
+            selected_block_id: None,
+            selected_rotation: 0,
+            shooting: false,
+            team: TeamId(3),
+            typing: true,
+            unit: UnitRef::Null,
+            x: 10.0,
+            y: 20.0,
+        };
+
+        let mut bytes = Vec::new();
+        data.write_to(&mut bytes).unwrap();
+        assert_eq!(&bytes[15..17], &(-1i16).to_be_bytes());
+        assert_eq!(
+            NetworkPlayerSyncData::read_exact_from(&bytes).unwrap(),
+            data
+        );
+    }
+
+    #[test]
+    fn network_player_data_revision_one_omits_revisioned_block_fields() {
+        let data = NetworkPlayerData {
+            revision: 1,
+            admin: true,
+            boosting: false,
+            color: 0x0102_0304,
+            last_command_id: Some(11),
+            mouse_x: 4.5,
+            mouse_y: 5.5,
+            name: Some("legacy-player".into()),
+            selected_block_id: Some(9),
+            selected_rotation: 99,
+            shooting: true,
+            team: TeamId(5),
+            typing: false,
+            unit: UnitRef::Unit { id: 321 },
+            x: 12.0,
+            y: 13.0,
+        };
+
+        let mut bytes = Vec::new();
+        data.write_to(&mut bytes).unwrap();
+
+        let mut remaining = bytes.as_slice();
+        let decoded = read_network_player(&mut remaining).unwrap();
+        assert!(remaining.is_empty());
+        assert_eq!(decoded.revision, 1);
+        assert_eq!(decoded.last_command_id, Some(11));
+        assert_eq!(decoded.selected_block_id, None);
+        assert_eq!(decoded.selected_rotation, 0);
+        assert_eq!(decoded.unit, UnitRef::Unit { id: 321 });
+        assert_eq!(
+            decoded,
+            NetworkPlayerData {
+                selected_block_id: None,
+                selected_rotation: 0,
+                ..data
+            }
+        );
+    }
+
+    #[test]
+    fn network_server_data_defaults_zero_port_and_invalid_mode() {
+        let mut bytes = Vec::new();
+        write_string(&mut bytes, "Server", 100);
+        write_string(&mut bytes, "Map", 64);
+        bytes.extend_from_slice(&5i32.to_be_bytes());
+        bytes.extend_from_slice(&12i32.to_be_bytes());
+        bytes.extend_from_slice(&157i32.to_be_bytes());
+        write_string(&mut bytes, "release", 32);
+        bytes.push(255);
+        bytes.extend_from_slice(&16i32.to_be_bytes());
+        write_string(&mut bytes, "desc", 100);
+        write_string(&mut bytes, "", 50);
+        bytes.extend_from_slice(&0i16.to_be_bytes());
+
+        let host = read_server_data(42, "127.0.0.1", &bytes).unwrap();
+        assert_eq!(host.name, "Server");
+        assert_eq!(host.mapname, "Map");
+        assert_eq!(host.players, 5);
+        assert_eq!(host.wave, 12);
+        assert_eq!(host.version, 157);
+        assert_eq!(host.version_type, "release");
+        assert_eq!(host.mode, Gamemode::Survival);
+        assert_eq!(host.player_limit, 16);
+        assert_eq!(host.description, "desc");
+        assert_eq!(host.mode_name, None);
+        assert_eq!(host.port, DEFAULT_PORT as i32);
+        assert_eq!(host.ping, 42);
+    }
+
+    #[test]
+    fn network_world_data_bootstrap_roundtrips_java_front_matter() {
+        let compressed = write_minimal_world_data(17).unwrap();
+        assert!(compressed.len() > 2);
+        assert_eq!(compressed[0] & 0x0f, 8);
+
+        let mut decoder = ZlibDecoder::new(compressed.as_slice());
+        let mut raw = Vec::new();
+        decoder.read_to_end(&mut raw).unwrap();
+
+        let expected =
+            write_world_data_raw(&NetworkWorldData::bootstrap_for_connection(17)).unwrap();
+        assert_eq!(raw, expected);
+
+        let decoded = read_world_data(&compressed).unwrap();
+        assert_eq!(decoded.player_id, 17);
+        assert!(decoded.tail_parse_error.is_some());
+        assert_eq!(
+            decoded.player.as_ref().map(|player| player.revision),
+            Some(2)
+        );
+        let mut expected_player_bytes = Vec::new();
+        NetworkPlayerData::bootstrap()
+            .write_to(&mut expected_player_bytes)
+            .unwrap();
+        assert_eq!(decoded.player_bytes, expected_player_bytes);
+
+        let mut empty_custom_chunks = Vec::new();
+        crate::mindustry::io::write_custom_chunks(
+            &mut empty_custom_chunks,
+            &crate::mindustry::io::CustomChunkSet::default(),
+        )
+        .unwrap();
+        assert!(raw.ends_with(&empty_custom_chunks));
+    }
+
+    #[test]
     fn server_data_roundtrips_java_order() {
         let data = ServerData {
             name: "Server".into(),

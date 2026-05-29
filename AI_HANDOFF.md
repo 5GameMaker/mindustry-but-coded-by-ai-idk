@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **33.2%**。
+- 当前总体迁移完成度：约 **33.3%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11838,3 +11838,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 `ResolveCommand::ShaderBlit` 翻译为 fullscreen quad draw command；
   2. 按 `opengl-backend` feature 给 `main.rs` 增加运行时路由；
   3. 验收并提交 `network_io.rs` worker 的联机协议回归。
+
+---
+
+## 379. 最新闭环记录：NetworkIO Java sentinel/front-matter 回归
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **33.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/net/network_io.rs`
+    - 新增 `network_server_data_defaults_zero_port_and_invalid_mode`；
+    - 新增 `network_player_sync_data_none_selected_block_roundtrips_java_sentinel`；
+    - 新增 `network_player_data_revision_one_omits_revisioned_block_fields`；
+    - 新增 `network_world_data_bootstrap_roundtrips_java_front_matter`。
+- 关键语义：
+  - server discovery 对非法 mode/零端口走 Java 兼容 fallback；
+  - player sync 中 `selected_block_id = None` 使用 Java `-1` sentinel；
+  - revision 1 player data 不读写 revisioned block 字段；
+  - minimal world data 的 zlib/raw front matter/player bytes 形状有回归保护。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core network_ --lib`
+- 下一步：
+  1. 继续 `ResolveCommand::ShaderBlit` 到 fullscreen quad draw command 的翻译层；
+  2. 继续 `opengl-backend` main/runtime 路由；
+  3. 按 Java 文件清单继续挑选低冲突模块并行补齐。
