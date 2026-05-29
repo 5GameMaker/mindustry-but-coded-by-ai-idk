@@ -1786,6 +1786,7 @@ fn block_renderer_tile_snapshot_from_world(
         snapshot.draw_custom_shadow = block.custom_shadow;
         snapshot.emits_light = block.emit_light;
         snapshot.obstructs_light = block.obstructs_light;
+        snapshot.darkness = Some(tile.static_darkness(block) as f32);
     }
 
     snapshot.building = block_renderer_building_snapshot_from_world(
@@ -5835,6 +5836,13 @@ mod tests {
             Some(RenderResolveKind::DrawFboSample)
         );
         assert!(darkness.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::FillRect { rect, color, layer }
+                if *rect == RenderRect::new(8.0, 8.0, 8.0, 8.0)
+                    && *color == [1.0, 1.0, 1.0, 1.0]
+                    && *layer == Layer::DARKNESS
+        )));
+        assert!(!darkness.commands.iter().any(|command| matches!(
             command,
             RenderCommand::Custom { name, .. } if name == "darkness-dirty-tile"
         )));

@@ -201,6 +201,9 @@ pub struct BlockRendererTileSnapshot {
     pub draw_custom_shadow: bool,
     pub emits_light: bool,
     pub obstructs_light: bool,
+    /// 当前世界对该 tile 采样出的 darkness 值；有值时 dirty darkness 可直接生成
+    /// Java `drawDarkness()` 等价的灰度 FBO 写入命令，无值时保留脏 tile 标记交给后端/后续 runtime 回填。
+    pub darkness: Option<f32>,
     pub building: Option<BlockRendererBuildingSnapshot>,
 }
 
@@ -213,6 +216,7 @@ impl BlockRendererTileSnapshot {
             draw_custom_shadow: false,
             emits_light: false,
             obstructs_light: false,
+            darkness: None,
             building: None,
         }
     }
@@ -618,6 +622,10 @@ impl DarknessTilePlan {
             layer: Layer::DARKNESS,
         }
     }
+
+    pub fn color(&self) -> [f32; 4] {
+        [self.opacity, self.opacity, self.opacity, 1.0]
+    }
 }
 
 impl Default for DarknessTilePlan {
@@ -960,7 +968,13 @@ impl BlockRendererState {
         append_building_passes_from_snapshot(&mut plan, self, &snapshot_tiles);
 
         if !self.cache.dark_events.is_empty() {
-            plan.darkness.dirty_tiles = self.cache.dark_events.iter().copied().collect();
+            for coord in self.cache.dark_events.iter().copied() {
+                if let Some(darkness) = snapshot_tiles.get(&coord).and_then(|tile| tile.darkness) {
+                    plan.darkness.push_tile(coord, darkness);
+                } else {
+                    plan.darkness.push_dirty_tile(coord);
+                }
+            }
         }
 
         if self.draw_quadtree_debug {
@@ -1286,40 +1300,51 @@ impl BlockRendererPlan {
     }
 
     pub fn to_darkness_resolve_pass(&self, tile_size_world: f32) -> Option<RenderPass> {
-        if tile_size_world <= 0.0 {
-            return None;
-        }
-
-        let has_darkness_work = self.darkness.effective_fill() == DarknessFill::Black
-            || !self.darkness.tiles.is_empty()
-            || !self.darkness.dirty_tiles.is_empty();
-        if !has_darkness_work {
+        let commands = self.to_darkness_render_commands(tile_size_world);
+        if commands.is_empty() {
             return None;
         }
 
         let mut pass = RenderPass::new(RenderPassKind::Darkness)
             .with_target(RenderTarget::Buffer("block-darkness".into()))
             .with_resolve(RenderTarget::Screen, RenderResolveKind::DrawFboSample);
+        pass.extend(commands);
+        Some(pass)
+    }
+
+    pub fn to_darkness_render_commands(&self, tile_size_world: f32) -> Vec<RenderCommand> {
+        if tile_size_world <= 0.0 {
+            return Vec::new();
+        }
+
+        let has_darkness_work = self.darkness.effective_fill() == DarknessFill::Black
+            || !self.darkness.tiles.is_empty()
+            || !self.darkness.dirty_tiles.is_empty();
+        if !has_darkness_work {
+            return Vec::new();
+        }
+
+        let mut commands = Vec::new();
 
         if self.darkness.effective_fill() == DarknessFill::Black {
-            pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+            commands.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
         }
 
         for tile in &self.darkness.tiles {
-            pass.push(RenderCommand::fill_rect(
+            commands.push(RenderCommand::fill_rect(
                 RenderRect::new(
                     tile.coord.x as f32 * tile_size_world,
                     tile.coord.y as f32 * tile_size_world,
                     tile_size_world,
                     tile_size_world,
                 ),
-                [0.0, 0.0, 0.0, tile.opacity],
+                tile.color(),
                 tile.layer,
             ));
         }
 
         for coord in &self.darkness.dirty_tiles {
-            pass.push(RenderCommand::custom(
+            commands.push(RenderCommand::custom(
                 "darkness-dirty-tile",
                 vec![
                     RenderProperty::new("x", coord.x.to_string()),
@@ -1328,7 +1353,7 @@ impl BlockRendererPlan {
             ));
         }
 
-        Some(pass)
+        commands
     }
 
     pub fn to_block_sprite_ops(&self, tile_size_world: f32) -> Vec<BlockSpriteOp> {
@@ -1921,6 +1946,44 @@ mod tests {
     }
 
     #[test]
+    fn build_plan_turns_sampled_dirty_darkness_into_tile_fill_plan() {
+        let mut state = BlockRendererState::default();
+        state.cache.dark_events.insert(TileCoord::new(2, 3));
+        state.cache.dark_events.insert(TileCoord::new(4, 5));
+
+        let mut sampled = BlockRendererTileSnapshot::new(TileCoord::new(2, 3), "copper-wall");
+        sampled.darkness = Some(1.5);
+        let snapshot = BlockRendererWorldSnapshot::new(vec![sampled]);
+
+        let plan = state.build_plan_from_snapshot(&snapshot);
+
+        assert_eq!(
+            plan.darkness.tiles,
+            vec![DarknessTilePlan::new(TileCoord::new(2, 3), 1.5)]
+        );
+        assert_eq!(plan.darkness.dirty_tiles, vec![TileCoord::new(4, 5)]);
+
+        let commands = plan.to_darkness_render_commands(8.0);
+        assert!(matches!(
+            commands.first(),
+            Some(RenderCommand::FillRect { rect, color, layer })
+                if *rect == RenderRect::new(16.0, 24.0, 8.0, 8.0)
+                    && *color == [0.5, 0.5, 0.5, 1.0]
+                    && *layer == Layer::DARKNESS
+        ));
+        assert!(matches!(
+            commands.get(1),
+            Some(RenderCommand::Custom { name, properties })
+                if name == "darkness-dirty-tile"
+                    && properties
+                        == &vec![
+                            RenderProperty::new("x", "4"),
+                            RenderProperty::new("y", "5"),
+                        ]
+        ));
+    }
+
+    #[test]
     fn darkness_plan_clear_resets_fill_tiles_and_dirty_tiles() {
         let mut plan = DarknessPlan::default();
         plan.fill = DarknessFill::Black;
@@ -2262,6 +2325,7 @@ mod tests {
                 draw_custom_shadow: false,
                 emits_light: true,
                 obstructs_light: true,
+                darkness: None,
                 building: Some(damaged_building),
             },
             BlockRendererTileSnapshot {
@@ -2271,6 +2335,7 @@ mod tests {
                 draw_custom_shadow: false,
                 emits_light: false,
                 obstructs_light: true,
+                darkness: None,
                 building: Some(remembered_building),
             },
             BlockRendererTileSnapshot {
@@ -2280,6 +2345,7 @@ mod tests {
                 draw_custom_shadow: false,
                 emits_light: false,
                 obstructs_light: true,
+                darkness: None,
                 building: Some(hidden_building),
             },
         ]);
@@ -2631,7 +2697,7 @@ mod tests {
             passes[1].commands.get(1),
             Some(RenderCommand::FillRect { rect, color, layer })
                 if *rect == RenderRect::new(8.0, 16.0, 8.0, 8.0)
-                    && *color == [0.0, 0.0, 0.0, 0.5]
+                    && *color == [0.5, 0.5, 0.5, 1.0]
                     && *layer == Layer::DARKNESS
         ));
         assert!(matches!(

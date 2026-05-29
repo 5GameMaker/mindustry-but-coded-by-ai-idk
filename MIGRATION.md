@@ -12406,3 +12406,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `block-shadows` target 仍未绑定真实 FBO/texture；
   - darkness FBO 写入与 dirty tile cache 生命周期还需继续推进；
   - 当前总体迁移约 24.9%，仍未达到完整可玩。
+
+### 12.393 Darkness sampled tile commands 写入 block-darkness target
+
+- 2026-05-29：继续推进 Java `BlockRenderer.drawDarkness()` 的 FBO 写入语义。本轮把 `dark_events` 中可从当前 world snapshot 采样到 darkness 的 tile 从 `Custom("darkness-dirty-tile")` fallback 推进为真实 `FillRect` 命令，写入 `Buffer("block-darkness")`，再由既有 `DrawFboSample` resolve 回屏；无法采样的 dirty tile 仍保留 custom marker，避免伪造 world darkness。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererTileSnapshot` 新增 `darkness: Option<f32>`，表示当前 frame/world snapshot 可提供的 darkness 采样值；
+    - `BlockRendererState::build_plan_from_snapshot(...)` 处理 `cache.dark_events` 时，优先把 sampled darkness 转为 `DarknessTilePlan`；没有 snapshot/darkness 值时才进入 `dirty_tiles` fallback；
+    - `DarknessTilePlan::color()` 使用 Java `Draw.colorl(...)` 风格灰度色 `[luma,luma,luma,1]`，使 darkness 0 能表达为白色清除、darkness 较高表达为更暗灰度；
+    - `BlockRendererPlan::to_darkness_render_commands(tile_size_world)` 抽出 darkness FBO 写入命令，`to_darkness_resolve_pass(...)` 只包装 target/resolve；
+    - 新增 `build_plan_turns_sampled_dirty_darkness_into_tile_fill_plan`，锁定 sampled dirty tile -> `FillRect`，未采样 dirty tile -> `Custom("darkness-dirty-tile")` 的分支。
+  - `desktop/src/lib.rs`
+    - `block_renderer_tile_snapshot_from_world(...)` 通过 `tile.static_darkness(block)` 将当前 tile 的静态 darkness 带入 `BlockRendererTileSnapshot`；
+    - `desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes` 更新为断言可见 dirty darkness 会生成 `FillRect` 写入 `block-darkness`，不再只依赖 custom marker。
+- Java 对照要点：
+  - `drawDarkness()` 对 dirty tile 调用 `world.getDarkness(tile.x,tile.y)`，再 `Draw.colorl(...) + Fill.rect(...)` 写回 darkness FBO；
+  - 本轮先接入可从 Rust 当前 tile snapshot 获得的静态 darkness，尚未覆盖 Java `World.getDarkness(...)` 的 border darkness、sector darkness 与 limit-map-area 动态项；
+  - Java `checkChanges()` 对 `fillsTile` 执行 `tile.data = world.getWallDarkness(tile)` 的副作用仍需接入 runtime/world mutation。
+- 已跑验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core darkness --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `block-darkness` 仍未绑定真实 OpenGL FBO/texture；
+  - `World.getDarkness(...)` 的完整动态 darkness 规则尚未迁移；
+  - `checkChanges()` 的 wall darkness 回写尚未进入真实 runtime；
+  - 当前总体迁移约 25.0%，仍未达到完整可玩。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **24.9%**。
+- 当前总体迁移完成度：约 **25.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9814,3 +9814,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 下一步：
   1. 对 darkness 执行同样处理：把可计算的 darkness tile/fill 写入 `block-darkness` target，并细化 dirty tile cache 生命周期；
   2. 继续准备真实 OpenGL/glow backend 消费 `block-shadows` / `block-darkness` FBO。
+
+---
+
+## 299. 最新闭环记录：Darkness sampled tile 写入 block-darkness target
+
+- 本轮总体进度更新：约 **25.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/block_renderer.rs`
+    - `BlockRendererTileSnapshot` 新增 `darkness: Option<f32>`，用于把当前世界可采样 darkness 从 snapshot 带入渲染计划；
+    - `BlockRendererState::build_plan_from_snapshot(...)` 在处理 `dark_events` 时，若 snapshot 提供 darkness 值，则生成 `DarknessTilePlan`；否则继续保留 `dirty_tiles` fallback；
+    - `DarknessTilePlan::color()` 改为 Java `Draw.colorl(...)` 风格灰度色 `[luma,luma,luma,1]`，不再把 darkness tile 表达成黑色 alpha；
+    - `BlockRendererPlan::to_darkness_render_commands(...)` 抽出 darkness FBO 写入命令，`to_darkness_resolve_pass(...)` 只负责包装 `Buffer("block-darkness") -> Screen + DrawFboSample`；
+    - 新增测试覆盖 sampled dirty darkness 进入 `FillRect` 命令、未采样 dirty tile 仍保留 `Custom("darkness-dirty-tile")` fallback。
+  - `desktop/src/lib.rs`
+    - `block_renderer_tile_snapshot_from_world(...)` 从 `Tile::static_darkness(block)` 采样 darkness；
+    - desktop graphics frame 测试确认可见 dirty darkness 不再只停在 custom marker，而是生成 `FillRect` 写入 `block-darkness` pass。
+- 已验证：
+  - `cargo fmt --check`
+  - `cargo test -p mindustry-core darkness --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_block_shadow_and_darkness_resolve_passes --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 继续补 `World::getDarkness(...)` 中 border/sector/map-limit 等动态 darkness 采样，而不只用 `Tile::static_darkness(...)`；
+  2. 将 `checkChanges()` 的 wall darkness side-effect 接到 runtime/world tile `data` 回写；
+  3. 准备真实 OpenGL/glow backend 消费 `block-darkness` FBO、darkness shader 与 `DrawFboSample` resolve。
