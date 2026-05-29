@@ -13643,6 +13643,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 已跑验证：
   - `cargo test -p mindustry-desktop opengl_backend --lib`
 - 仍未完成：
-  - 尚未真实解析 uniform location，也未执行 `glUniform*`；
+  - sprite draw call sink 已在下一节补齐，尚未真实解析 uniform location，也未执行 `glUniform*`；
   - texture unit binding 尚未连接真实 GL texture cache；
   - 当前总体迁移约 29.6%，仍未达到完整可玩。
+
+## 12.440 Sprite draw call sink 边界
+
+- 2026-05-29：将上一轮形成的 `DesktopGraphicsOpenGlBackendSpriteDrawCallPlan` 暴露为独立 sink 边界。当前仍不执行真实 GL，但真实 adapter 后续可以实现该 sink，按 draw call plan 顺序绑定 shader/texture/VAO 并提交 draw。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteDrawCallSink` trait；
+    - 新增 `DesktopGraphicsNullOpenGlBackendSpriteDrawCallSink`；
+    - 新增 `DesktopGraphicsRecordingOpenGlBackendSpriteDrawCallSink`；
+    - 新增 `DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState`；
+    - `DesktopGraphicsOpenGlBackendExecutorState::drive_sprite_draw_call_sink(...)` 顺序回放 `sprite_draw_call_plans`；
+    - `DesktopGraphicsOpenGlBackendExecutor::drive_sprite_draw_call_sink(...)` 暴露 executor 级入口；
+    - 回归测试验证 sink 输出、emitted count、last draw call 与 executor state 一致。
+- 迁移意义：
+  - `DrawSprite` 链路第一次具备专门的 draw call 消费边界；
+  - 后续真实 OpenGL backend 可以实现该 sink，而不是继续读取测试状态字段；
+  - 继续保持整体链路为 `RenderFramePlan -> OpenGL executor -> draw call sink`，避免形成孤立 demo。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+- 仍未完成：
+  - sink 尚未真实调用 `glUseProgram/glBindTexture/glBindVertexArray/glDrawElements`；
+  - GL object handle 分配和 texture cache 仍待连接；
+  - 当前总体迁移约 29.7%，仍未达到完整可玩。

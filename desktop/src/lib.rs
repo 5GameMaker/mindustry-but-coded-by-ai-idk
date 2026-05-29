@@ -1676,6 +1676,48 @@ impl DesktopGraphicsOpenGlBackendActionSink for DesktopGraphicsRecordingOpenGlBa
     }
 }
 
+pub trait DesktopGraphicsOpenGlBackendSpriteDrawCallSink {
+    fn consume_opengl_sprite_draw_call(
+        &mut self,
+        draw_call: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan,
+    );
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsNullOpenGlBackendSpriteDrawCallSink;
+
+impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
+    for DesktopGraphicsNullOpenGlBackendSpriteDrawCallSink
+{
+    fn consume_opengl_sprite_draw_call(
+        &mut self,
+        _draw_call: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan,
+    ) {
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendSpriteDrawCallSink {
+    pub draw_calls: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
+    for DesktopGraphicsRecordingOpenGlBackendSpriteDrawCallSink
+{
+    fn consume_opengl_sprite_draw_call(
+        &mut self,
+        draw_call: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan,
+    ) {
+        self.draw_calls.push(draw_call);
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
+    pub draw_calls_emitted: usize,
+    pub last_draw_call: Option<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub events_received: usize,
@@ -2133,6 +2175,19 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         }
         self.actions.len()
     }
+
+    pub fn drive_sprite_draw_call_sink<S: DesktopGraphicsOpenGlBackendSpriteDrawCallSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
+        let mut state = DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState::default();
+        for draw_call in &self.sprite_draw_call_plans {
+            sink.consume_opengl_sprite_draw_call(draw_call.clone());
+            state.draw_calls_emitted += 1;
+            state.last_draw_call = Some(draw_call.clone());
+        }
+        state
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -2150,6 +2205,13 @@ impl DesktopGraphicsOpenGlBackendExecutor {
         sink: &mut S,
     ) -> usize {
         self.state.drive_action_sink(sink)
+    }
+
+    pub fn drive_sprite_draw_call_sink<S: DesktopGraphicsOpenGlBackendSpriteDrawCallSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
+        self.state.drive_sprite_draw_call_sink(sink)
     }
 
     fn record_error(&mut self, message: impl Into<String>) {
@@ -10380,6 +10442,21 @@ mod tests {
         let action_count = executor.drive_action_sink(&mut action_sink);
         assert_eq!(action_count, executor.state.actions.len());
         assert_eq!(action_sink.actions, executor.state.actions);
+        let mut draw_call_sink =
+            super::DesktopGraphicsRecordingOpenGlBackendSpriteDrawCallSink::default();
+        let draw_call_sink_state = executor.drive_sprite_draw_call_sink(&mut draw_call_sink);
+        assert_eq!(
+            draw_call_sink_state.draw_calls_emitted,
+            executor.state.sprite_draw_call_plans.len()
+        );
+        assert_eq!(
+            draw_call_sink_state.last_draw_call.as_ref(),
+            executor.state.sprite_draw_call_plans.last()
+        );
+        assert_eq!(
+            draw_call_sink.draw_calls,
+            executor.state.sprite_draw_call_plans
+        );
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);
