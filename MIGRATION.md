@@ -14631,3 +14631,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `DrawRectSample` / `DrawFboSample` 目前仍共享 source texture fullscreen quad 形态，Java camera/world UV 与 Y 翻转细节尚未类型化；
   - 真实 `glow/glutin/winit` window/context/swap/present 尚未接入；
   - 当前总体迁移约 34.2%，仍未达到完整可玩。
+
+## 12.479 可玩性主链默认值回归：production / distribution / power
+
+- 2026-05-29：并行补强三组更接近“能玩”的世界方块主链回归：生产链、运输分发链、电力网络。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/blocks/production/mod.rs`
+    - 新增 `GenericCrafterDefaults` / `DrillDefaults` / `PumpDefaults`；
+    - 锁定 Java constructor 默认值，如 `craft_time=80`、`drill_time=300`、`liquid_boost_intensity=1.6`、`pump_amount=0.2`；
+    - 补充“默认值 -> 一轮运行时更新”的生产链 smoke。
+  - `core/src/mindustry/world/blocks/distribution/mod.rs`
+    - 补充 Conveyor / Junction / OverflowGate 的最小运输链路回归；
+    - 覆盖基础容量、可达性、overflow 分流分支以及 revision 1/3 legacy payload 读取。
+  - `core/src/mindustry/world/blocks/power/mod.rs`
+    - 为 `PowerBlockStatus`、`PowerBattery`、`PowerProducer`、`PowerConsumer`、`PowerGraphNode` 补齐默认值；
+    - 补充“生产者 + 消费者 + 电池”的最小电力网络更新回归。
+- 迁移意义：
+  - 这三组分别对应基础经济、物品移动、供电，是可玩性主循环的底座；
+  - 本轮不是孤立 helper，而是直接保护已有 runtime/model 入口的默认值与最小运行行为。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core world::blocks::production`
+  - `cargo test -p mindustry-core world::blocks::distribution`
+  - `cargo test -p mindustry-core world::blocks::power`
+  - `git diff --check`
+- 仍未完成：
+  - Java 生产/运输/电力的完整视觉、特效、路由 UI 与所有边界分支仍需继续迁移；
+  - Router 完整运行时行为、生产块完整配置表、电力断链/cheat/零容量边界还需继续补强；
+  - 当前总体迁移约 34.5%，仍未达到完整可玩。

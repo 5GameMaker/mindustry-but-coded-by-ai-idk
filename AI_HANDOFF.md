@@ -11995,3 +11995,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 渲染优先：给 `DrawRectSample` / `DrawFboSample` 增加 camera/world UV / Y 翻转表达，再接 fullscreen quad VBO/IBO 上传；
   2. native backend：按 `native-opengl-backend` feature 接 `glow + glutin + glutin-winit + winit`；
   3. core 可玩性优先批次：生产链、仓储/电力、运输/分发、液体网络、炮台/防御、逻辑块、payload/units。
+
+---
+
+## 385. 最新闭环记录：production / distribution / power 可玩性主链回归
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **34.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/world/blocks/production/mod.rs`
+    - `GenericCrafterDefaults` / `DrillDefaults` / `PumpDefaults`；
+    - 新增 `production_defaults_match_java_constructors_and_smoke_the_main_chain`。
+  - `core/src/mindustry/world/blocks/distribution/mod.rs`
+    - 新增 `transport_chain_defaults_and_overflow_gate_legacy_payloads_follow_upstream`；
+    - 覆盖 Conveyor/Junction/OverflowGate 默认值、路由分支与 legacy payload。
+  - `core/src/mindustry/world/blocks/power/mod.rs`
+    - 增加 Power 默认值 impl；
+    - 新增 `power_graph_defaults_and_minimal_network_update_match_java_neutral_state`。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core world::blocks::production`
+  - `cargo test -p mindustry-core world::blocks::distribution`
+  - `cargo test -p mindustry-core world::blocks::power`
+  - `git diff --check`
+- 下一步：
+  1. 等待/使用渲染子代理的 `Draw.fbo/Draw.rect` UV/Y 翻转公式结论；
+  2. 继续补 Router 真实运行时、生产块完整配置表、电力零容量/断链/cheat 边界；
+  3. 开始准备 `native-opengl-backend` 真实窗口/context/present 分支。
