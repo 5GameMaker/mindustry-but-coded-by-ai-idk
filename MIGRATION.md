@@ -14008,3 +14008,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - program/shader handle cache 与 compile/link error log 还未落地；
   - shader attribute/uniform location 的真实查询仍由伪 location cache 代替；
   - 当前总体迁移约 31.0%，仍未达到完整可玩。
+
+## 12.454 Shader lifecycle resolving executor 接入
+
+- 2026-05-29：继续把 shader lifecycle command 从符号命令推进到带 program/shader handle 的 resolved 命令层。该层仍不直接调用真实 GL，但已经能模拟/记录 `glCreateShader`、`glCreateProgram` 等生命周期对象 handle 的分配、替换与删除。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendHandleCache` 新增 `shaders` 表；
+    - handle cache 新增 `replace_program_handle(...)`、`remove_program_handle(...)`、`shader_handle(...)`、`replace_shader_handle(...)`、`remove_shader_handle(...)`；
+    - 新增 `DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand`，为 shader source/compile/attach/link/delete 命令携带 program/shader handle；
+    - 新增 resolved shader lifecycle command sink / recording sink；
+    - 新增 `DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor`，消费 lifecycle command plan 并生成 resolved lifecycle commands；
+    - 新增测试覆盖 `Mesh` shader 首个 lifecycle block 的 handle 分配：vertex shader handle、fragment shader handle、program handle、attach/link/delete 顺序；
+    - 新增测试覆盖同一 executor 中 init 后 reload：`DeleteProgram(Some(old))` 后创建新的 program handle，并保持 stage shader handle 在 `DeleteShader` 后清空。
+- 迁移意义：
+  - shader lifecycle 从“命令顺序描述”推进到“可落到真实 GL object handle 的 resolved 命令边界”；
+  - reload 已具备 program handle 替换语义，后续 real GL executor 可将其映射到真实 `glDeleteProgram` 与重新编译/链接；
+  - shader stage object 在 link 后删除的语义与 Arc/OpenGL 常见生命周期对齐，避免 vertex/fragment shader handle 泄漏。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_lifecycle --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - resolved lifecycle command 仍未调用真实 GL；
+  - shader source 文本读取/预处理与 compile/link error log 仍未接入；
+  - program handle 还没有和 draw/apply command 的真实 `UseProgram` handle 合流；
+  - 当前总体迁移约 31.1%，仍未达到完整可玩。

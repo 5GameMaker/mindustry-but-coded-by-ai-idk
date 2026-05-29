@@ -1390,6 +1390,15 @@ pub enum DesktopGraphicsOpenGlBackendShaderStage {
     Fragment,
 }
 
+impl DesktopGraphicsOpenGlBackendShaderStage {
+    pub const fn key_suffix(self) -> &'static str {
+        match self {
+            Self::Vertex => "vertex",
+            Self::Fragment => "fragment",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendShaderLifecycleCommand {
     DeleteProgram {
@@ -1429,6 +1438,61 @@ pub enum DesktopGraphicsOpenGlBackendShaderLifecycleCommand {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand {
+    DeleteProgram {
+        shader: ShaderId,
+        program_key: String,
+        program_handle: Option<u32>,
+    },
+    CreateShader {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        shader_key: String,
+        shader_handle: u32,
+        previous_shader_handle: Option<u32>,
+        source_path: String,
+    },
+    ShaderSource {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        shader_key: String,
+        shader_handle: u32,
+        source_path: String,
+    },
+    CompileShader {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        shader_key: String,
+        shader_handle: u32,
+    },
+    CreateProgram {
+        shader: ShaderId,
+        program_key: String,
+        program_handle: u32,
+        previous_program_handle: Option<u32>,
+    },
+    AttachShader {
+        shader: ShaderId,
+        program_key: String,
+        program_handle: u32,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        shader_key: String,
+        shader_handle: u32,
+    },
+    LinkProgram {
+        shader: ShaderId,
+        program_key: String,
+        program_handle: u32,
+    },
+    DeleteShader {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        shader_key: String,
+        shader_handle: Option<u32>,
+    },
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan {
     pub commands: Vec<DesktopGraphicsOpenGlBackendShaderLifecycleCommand>,
@@ -1452,6 +1516,29 @@ impl DesktopGraphicsOpenGlBackendShaderLifecycleCommandSink
     fn consume_opengl_shader_lifecycle_command(
         &mut self,
         command: DesktopGraphicsOpenGlBackendShaderLifecycleCommand,
+    ) {
+        self.commands.push(command);
+    }
+}
+
+pub trait DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink {
+    fn consume_opengl_resolved_shader_lifecycle_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand,
+    );
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsRecordingOpenGlBackendResolvedShaderLifecycleCommandSink {
+    pub commands: Vec<DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand>,
+}
+
+impl DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink
+    for DesktopGraphicsRecordingOpenGlBackendResolvedShaderLifecycleCommandSink
+{
+    fn consume_opengl_resolved_shader_lifecycle_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand,
     ) {
         self.commands.push(command);
     }
@@ -1805,6 +1892,17 @@ impl DesktopGraphicsOpenGlBackendShaderProgramBinding {
 
 fn opengl_backend_shader_program_key(shader: ShaderId) -> String {
     DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(shader).program_key
+}
+
+fn opengl_backend_shader_stage_key(
+    shader: ShaderId,
+    stage: DesktopGraphicsOpenGlBackendShaderStage,
+) -> String {
+    format!(
+        "{}:{}",
+        opengl_backend_shader_program_key(shader),
+        stage.key_suffix()
+    )
 }
 
 impl DesktopGraphicsOpenGlBackendShaderLifecycleCommand {
@@ -3106,6 +3204,7 @@ impl DesktopGraphicsOpenGlBackendHandleAllocator {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendHandleCache {
     pub programs: BTreeMap<String, u32>,
+    pub shaders: BTreeMap<String, u32>,
     pub textures: BTreeMap<String, u32>,
     pub vertex_arrays: BTreeMap<String, u32>,
     pub buffers: BTreeMap<String, u32>,
@@ -3122,6 +3221,48 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
             .programs
             .entry(key)
             .or_insert_with(|| allocator.allocate())
+    }
+
+    pub fn replace_program_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> (Option<u32>, u32) {
+        let key = key.into();
+        let program_handle = allocator.allocate();
+        let previous_program_handle = self.programs.insert(key, program_handle);
+        (previous_program_handle, program_handle)
+    }
+
+    pub fn remove_program_handle(&mut self, key: &str) -> Option<u32> {
+        self.programs.remove(key)
+    }
+
+    pub fn shader_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> u32 {
+        let key = key.into();
+        *self
+            .shaders
+            .entry(key)
+            .or_insert_with(|| allocator.allocate())
+    }
+
+    pub fn replace_shader_handle(
+        &mut self,
+        key: impl Into<String>,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> (Option<u32>, u32) {
+        let key = key.into();
+        let shader_handle = allocator.allocate();
+        let previous_shader_handle = self.shaders.insert(key, shader_handle);
+        (previous_shader_handle, shader_handle)
+    }
+
+    pub fn remove_shader_handle(&mut self, key: &str) -> Option<u32> {
+        self.shaders.remove(key)
     }
 
     pub fn texture_handle(
@@ -3222,6 +3363,119 @@ impl DesktopGraphicsOpenGlBackendHandleCache {
                 index_count,
                 index_offset,
             },
+        }
+    }
+
+    pub fn resolve_shader_lifecycle_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendShaderLifecycleCommand,
+        allocator: &mut DesktopGraphicsOpenGlBackendHandleAllocator,
+    ) -> DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand {
+        match command {
+            DesktopGraphicsOpenGlBackendShaderLifecycleCommand::DeleteProgram {
+                shader,
+                program_key,
+            } => {
+                let program_handle = self.remove_program_handle(&program_key);
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::DeleteProgram {
+                    shader,
+                    program_key,
+                    program_handle,
+                }
+            }
+            DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateShader {
+                shader,
+                stage,
+                source_path,
+            } => {
+                let shader_key = opengl_backend_shader_stage_key(shader, stage);
+                let (previous_shader_handle, shader_handle) =
+                    self.replace_shader_handle(shader_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateShader {
+                    shader,
+                    stage,
+                    shader_key,
+                    shader_handle,
+                    previous_shader_handle,
+                    source_path,
+                }
+            }
+            DesktopGraphicsOpenGlBackendShaderLifecycleCommand::ShaderSource {
+                shader,
+                stage,
+                source_path,
+            } => {
+                let shader_key = opengl_backend_shader_stage_key(shader, stage);
+                let shader_handle = self.shader_handle(shader_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::ShaderSource {
+                    shader,
+                    stage,
+                    shader_key,
+                    shader_handle,
+                    source_path,
+                }
+            }
+            DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CompileShader { shader, stage } => {
+                let shader_key = opengl_backend_shader_stage_key(shader, stage);
+                let shader_handle = self.shader_handle(shader_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CompileShader {
+                    shader,
+                    stage,
+                    shader_key,
+                    shader_handle,
+                }
+            }
+            DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateProgram {
+                shader,
+                program_key,
+            } => {
+                let (previous_program_handle, program_handle) =
+                    self.replace_program_handle(program_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateProgram {
+                    shader,
+                    program_key,
+                    program_handle,
+                    previous_program_handle,
+                }
+            }
+            DesktopGraphicsOpenGlBackendShaderLifecycleCommand::AttachShader {
+                shader,
+                program_key,
+                stage,
+            } => {
+                let program_handle = self.program_handle(program_key.clone(), allocator);
+                let shader_key = opengl_backend_shader_stage_key(shader, stage);
+                let shader_handle = self.shader_handle(shader_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::AttachShader {
+                    shader,
+                    program_key,
+                    program_handle,
+                    stage,
+                    shader_key,
+                    shader_handle,
+                }
+            }
+            DesktopGraphicsOpenGlBackendShaderLifecycleCommand::LinkProgram {
+                shader,
+                program_key,
+            } => {
+                let program_handle = self.program_handle(program_key.clone(), allocator);
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::LinkProgram {
+                    shader,
+                    program_key,
+                    program_handle,
+                }
+            }
+            DesktopGraphicsOpenGlBackendShaderLifecycleCommand::DeleteShader { shader, stage } => {
+                let shader_key = opengl_backend_shader_stage_key(shader, stage);
+                let shader_handle = self.remove_shader_handle(&shader_key);
+                DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::DeleteShader {
+                    shader,
+                    stage,
+                    shader_key,
+                    shader_handle,
+                }
+            }
         }
     }
 }
@@ -3387,6 +3641,41 @@ impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
                 .extend(resolved_action.to_opengl_draw_commands());
             self.actions.push(resolved_action);
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor {
+    pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub commands: Vec<DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand>,
+}
+
+impl DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor {
+    pub fn drive_resolved_shader_lifecycle_command_sink<
+        S: DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.commands {
+            sink.consume_opengl_resolved_shader_lifecycle_command(command.clone());
+        }
+        self.commands.len()
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderLifecycleCommandSink
+    for DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor
+{
+    fn consume_opengl_shader_lifecycle_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendShaderLifecycleCommand,
+    ) {
+        let resolved = self
+            .cache
+            .resolve_shader_lifecycle_command(command, &mut self.allocator);
+        self.commands.push(resolved);
     }
 }
 
@@ -14025,6 +14314,163 @@ mod tests {
             .commands
             .iter()
             .any(|command| command.shader() == ShaderId::Shockwave));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_lifecycle_resolving_executor_allocates_stage_and_program_handles(
+    ) {
+        let load_plan = ShaderCatalog::init_plan();
+        let lifecycle_plan =
+            super::DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan::from_load_plan(
+                &load_plan,
+            );
+        let mut executor =
+            super::DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor::default();
+
+        assert_eq!(
+            lifecycle_plan.drive_shader_lifecycle_command_sink(&mut executor),
+            lifecycle_plan.commands.len()
+        );
+        assert_eq!(executor.commands.len(), lifecycle_plan.commands.len());
+        assert_eq!(
+            executor.commands[..12],
+            [
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                    shader_key: "shader:Mesh:vertex".into(),
+                    shader_handle: 1,
+                    previous_shader_handle: None,
+                    source_path: "shaders/planet.vert".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::ShaderSource {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                    shader_key: "shader:Mesh:vertex".into(),
+                    shader_handle: 1,
+                    source_path: "shaders/planet.vert".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CompileShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                    shader_key: "shader:Mesh:vertex".into(),
+                    shader_handle: 1,
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    shader_key: "shader:Mesh:fragment".into(),
+                    shader_handle: 2,
+                    previous_shader_handle: None,
+                    source_path: "shaders/mesh.frag".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::ShaderSource {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    shader_key: "shader:Mesh:fragment".into(),
+                    shader_handle: 2,
+                    source_path: "shaders/mesh.frag".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CompileShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    shader_key: "shader:Mesh:fragment".into(),
+                    shader_handle: 2,
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateProgram {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                    program_handle: 3,
+                    previous_program_handle: None,
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::AttachShader {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                    program_handle: 3,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                    shader_key: "shader:Mesh:vertex".into(),
+                    shader_handle: 1,
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::AttachShader {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                    program_handle: 3,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    shader_key: "shader:Mesh:fragment".into(),
+                    shader_handle: 2,
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::LinkProgram {
+                    shader: ShaderId::Mesh,
+                    program_key: "shader:Mesh".into(),
+                    program_handle: 3,
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::DeleteShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                    shader_key: "shader:Mesh:vertex".into(),
+                    shader_handle: Some(1),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::DeleteShader {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                    shader_key: "shader:Mesh:fragment".into(),
+                    shader_handle: Some(2),
+                },
+            ]
+        );
+        assert_eq!(executor.cache.shaders.len(), 0);
+        assert_eq!(executor.cache.programs.len(), ShaderId::INIT_ORDER.len());
+
+        let mut sink =
+            super::DesktopGraphicsRecordingOpenGlBackendResolvedShaderLifecycleCommandSink::default(
+            );
+        assert_eq!(
+            executor.drive_resolved_shader_lifecycle_command_sink(&mut sink),
+            executor.commands.len()
+        );
+        assert_eq!(sink.commands, executor.commands);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_lifecycle_reload_resolving_replaces_cached_program_handle() {
+        let load_plan = ShaderCatalog::init_plan();
+        let lifecycle_plan =
+            super::DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan::from_load_plan(
+                &load_plan,
+            );
+        let mut executor =
+            super::DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor::default();
+        lifecycle_plan.drive_shader_lifecycle_command_sink(&mut executor);
+        let old_mesh_program = *executor.cache.programs.get("shader:Mesh").unwrap();
+        let before_reload = executor.commands.len();
+
+        let reload_lifecycle_plan =
+            super::DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan::from_reload_plan(
+                &ShaderCatalog::reload_plan(),
+            );
+        reload_lifecycle_plan.drive_shader_lifecycle_command_sink(&mut executor);
+        assert_eq!(
+            executor.commands[before_reload],
+            super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::DeleteProgram {
+                shader: ShaderId::Mesh,
+                program_key: "shader:Mesh".into(),
+                program_handle: Some(old_mesh_program),
+            }
+        );
+
+        let new_mesh_program = *executor.cache.programs.get("shader:Mesh").unwrap();
+        assert_ne!(old_mesh_program, new_mesh_program);
+        assert_eq!(
+            executor.commands[before_reload + 7],
+            super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateProgram {
+                shader: ShaderId::Mesh,
+                program_key: "shader:Mesh".into(),
+                program_handle: new_mesh_program,
+                previous_program_handle: None,
+            }
+        );
+        assert_eq!(executor.cache.shaders.len(), 0);
+        assert_eq!(executor.cache.programs.len(), ShaderId::INIT_ORDER.len());
     }
 
     #[test]
