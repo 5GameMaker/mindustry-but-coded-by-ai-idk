@@ -12189,3 +12189,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - soft sample region 已进入 trace，但仍未做真实 atlas lookup / GPU draw；
   - block particle circle/poly/soft sprite 仍需进入真正 renderer backend；
   - 当前总体迁移约 23.7%，仍未达到完整可玩。
+
+### 12.385 Renderer 顺序覆盖与 block particle draw-call seam
+
+- 2026-05-29：继续沿渲染主链推进。一方面补强 Java `Renderer.draw()` 顺序在 Rust `render_engine` 中的覆盖测试，另一方面把 block particle 从 trace sample 再推进一跳，形成 desktop backend 可消费的 draw-call seam。该 seam 仍不是 GPU 绘制，但已经把 circle/poly/soft sprite 转成 backend 入口可直接消费的数据形态。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - 新增 `java_renderer_stage_and_pass_mapping_is_exhaustive_and_ordered`；
+    - 全量断言 `RendererDrawStage::ordered()`、`RendererDrawStage::label()`、`RendererDrawStage::sort_key()`；
+    - 全量断言 `RenderPassKind::label()`、`default_order()`、`java_renderer_draw_stage()`、`java_renderer_draw_rank()`；
+    - 单独覆盖 `Custom("postprocess")` 的 fallback 行为，避免后续新增 pass 时破坏 Java-like 顺序。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsBlockParticleDrawCallKind::{Circle, Polygon, SoftSprite}`；
+    - 新增 `DesktopGraphicsBlockParticleDrawCall`，携带 `x/y/size/alpha/layer/color/color_t/blend/kind`；
+    - `DesktopGraphicsExecutionTrace.block_particle_draw_calls` 由 `DesktopGraphicsBlockParticleTrace` 转换生成；
+    - 新增 `DesktopGraphicsLiveBackendBlockParticleDrawCallSink` 与 null sink；
+    - `DesktopGraphicsLiveBackendExecutionState` 记录 `block_particle_draw_calls_emitted` 与 `last_block_particle_draw_call`；
+    - `HeadlessDesktopGraphicsRenderer` 的 live backend seam 同时驱动 sprite trace、block particle trace 与 block particle draw-call sink。
+- 已跑验证：
+  - `cargo test -p mindustry-core render_engine --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_ --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+- 仍未完成：
+  - `DesktopGraphicsBlockParticleDrawCall` 还未变成真实 `RenderCommand` 或 OpenGL draw call；
+  - Java `Renderer.draw()` 中的更多细分 stage 还需逐步从折叠 pass 提升成真实 pass；
+  - darkness/cache 下一步优先补 Java 曲线与 dirty tile 传播闭环；
+  - 当前总体迁移约 23.8%，仍未达到完整可玩。

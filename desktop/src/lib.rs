@@ -62,6 +62,9 @@ use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
+use mindustry_core::mindustry::world::draw::{
+    DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
+};
 use mindustry_core::mindustry::world::{BuildingRef, CacheLayer as WorldCacheLayer, Tile};
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
@@ -434,8 +437,77 @@ pub struct DesktopGraphicsBlockParticleTrace {
     pub sample: BlockRendererBlockParticleWorldSample,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum DesktopGraphicsBlockParticleDrawCallKind {
+    Circle,
+    Polygon { sides: usize, rotation: f32 },
+    SoftSprite { region: Option<String> },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsBlockParticleDrawCall {
+    pub plan_index: usize,
+    pub sample_index: usize,
+    pub coord: TileCoord,
+    pub block: String,
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+    pub alpha: f32,
+    pub layer: f32,
+    pub color: [f32; 4],
+    pub color_t: Option<f32>,
+    pub blend_mode: DrawBlockParticleBlendMode,
+    pub kind: DesktopGraphicsBlockParticleDrawCallKind,
+}
+
+impl DesktopGraphicsBlockParticleDrawCall {
+    pub fn from_trace(trace: &DesktopGraphicsBlockParticleTrace) -> Self {
+        let sample = &trace.sample;
+        let kind = match sample.render_kind {
+            DrawBlockParticleRenderKind::Circle => DesktopGraphicsBlockParticleDrawCallKind::Circle,
+            DrawBlockParticleRenderKind::Polygon => {
+                DesktopGraphicsBlockParticleDrawCallKind::Polygon {
+                    sides: sample.sides,
+                    rotation: sample.rotation,
+                }
+            }
+            DrawBlockParticleRenderKind::SoftSprite => {
+                DesktopGraphicsBlockParticleDrawCallKind::SoftSprite {
+                    region: sample.region.map(str::to_string),
+                }
+            }
+        };
+
+        Self {
+            plan_index: trace.plan_index,
+            sample_index: trace.sample_index,
+            coord: trace.coord,
+            block: trace.block.clone(),
+            x: sample.x,
+            y: sample.y,
+            size: sample.size,
+            alpha: sample.alpha,
+            layer: sample.layer,
+            color: [
+                sample.color.r,
+                sample.color.g,
+                sample.color.b,
+                sample.color.a,
+            ],
+            color_t: sample.color_t,
+            blend_mode: sample.blend_mode,
+            kind,
+        }
+    }
+}
+
 pub trait DesktopGraphicsLiveBackendBlockParticleSink {
     fn consume_block_particle_trace(&mut self, trace: DesktopGraphicsBlockParticleTrace);
+}
+
+pub trait DesktopGraphicsLiveBackendBlockParticleDrawCallSink {
+    fn consume_block_particle_draw_call(&mut self, draw_call: DesktopGraphicsBlockParticleDrawCall);
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -447,6 +519,19 @@ impl DesktopGraphicsLiveBackendBlockParticleSink
     fn consume_block_particle_trace(&mut self, _trace: DesktopGraphicsBlockParticleTrace) {}
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DesktopGraphicsNullLiveBackendBlockParticleDrawCallSink;
+
+impl DesktopGraphicsLiveBackendBlockParticleDrawCallSink
+    for DesktopGraphicsNullLiveBackendBlockParticleDrawCallSink
+{
+    fn consume_block_particle_draw_call(
+        &mut self,
+        _draw_call: DesktopGraphicsBlockParticleDrawCall,
+    ) {
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsLiveBackendExecutionState {
     pub render_passes_visited: usize,
@@ -455,6 +540,8 @@ pub struct DesktopGraphicsLiveBackendExecutionState {
     pub last_draw_sprite_trace: Option<DesktopGraphicsLiveBackendDrawSpriteTrace>,
     pub block_particle_traces_emitted: usize,
     pub last_block_particle_trace: Option<DesktopGraphicsBlockParticleTrace>,
+    pub block_particle_draw_calls_emitted: usize,
+    pub last_block_particle_draw_call: Option<DesktopGraphicsBlockParticleDrawCall>,
 }
 
 pub trait DesktopGraphicsLiveBackendDrawSpriteSink {
@@ -474,6 +561,7 @@ pub struct DesktopGraphicsExecutionTrace {
     pub block_particle_plans: usize,
     pub block_particle_world_samples: usize,
     pub block_particle_traces: Vec<DesktopGraphicsBlockParticleTrace>,
+    pub block_particle_draw_calls: Vec<DesktopGraphicsBlockParticleDrawCall>,
     pub execution_steps: Vec<DesktopGraphicsExecutionStepTrace>,
     pub render_passes: Vec<DesktopGraphicsPassExecutionTrace>,
 }
@@ -527,10 +615,12 @@ impl DesktopGraphicsExecutionTrace {
     pub fn drive_live_backend_sinks<
         S: DesktopGraphicsLiveBackendDrawSpriteSink,
         P: DesktopGraphicsLiveBackendBlockParticleSink,
+        D: DesktopGraphicsLiveBackendBlockParticleDrawCallSink,
     >(
         &self,
         draw_sprite_sink: &mut S,
         block_particle_sink: &mut P,
+        block_particle_draw_call_sink: &mut D,
     ) -> DesktopGraphicsLiveBackendExecutionState {
         let mut state = self.drive_draw_sprite_sink(draw_sprite_sink);
 
@@ -538,6 +628,12 @@ impl DesktopGraphicsExecutionTrace {
             block_particle_sink.consume_block_particle_trace(trace.clone());
             state.block_particle_traces_emitted += 1;
             state.last_block_particle_trace = Some(trace.clone());
+        }
+
+        for draw_call in &self.block_particle_draw_calls {
+            block_particle_draw_call_sink.consume_block_particle_draw_call(draw_call.clone());
+            state.block_particle_draw_calls_emitted += 1;
+            state.last_block_particle_draw_call = Some(draw_call.clone());
         }
 
         state
@@ -597,6 +693,10 @@ impl DesktopGraphicsExecutionTrace {
                         .collect()
                 });
         let block_particle_world_samples = block_particle_traces.len();
+        let block_particle_draw_calls = block_particle_traces
+            .iter()
+            .map(DesktopGraphicsBlockParticleDrawCall::from_trace)
+            .collect();
         if block_particle_plans > 0 {
             execution_steps.push(DesktopGraphicsExecutionStepTrace::BlockParticles {
                 plan_count: block_particle_plans,
@@ -672,6 +772,7 @@ impl DesktopGraphicsExecutionTrace {
             block_particle_plans,
             block_particle_world_samples,
             block_particle_traces,
+            block_particle_draw_calls,
             execution_steps,
             render_passes,
         }
@@ -767,6 +868,7 @@ pub struct DesktopGraphicsExecutionSummary {
     pub block_renderer_slots: usize,
     pub block_particle_plans: usize,
     pub block_particle_world_samples: usize,
+    pub block_particle_draw_calls: usize,
     pub floor_renderer_slots: usize,
     pub fog_frame_slots: usize,
     pub overlay_renderer_slots: usize,
@@ -825,6 +927,7 @@ impl DesktopGraphicsExecutionSummary {
         summary.block_renderer_slots = usize::from(frame.bundle.block_renderer.is_some());
         summary.block_particle_plans = trace.block_particle_plans;
         summary.block_particle_world_samples = trace.block_particle_world_samples;
+        summary.block_particle_draw_calls = trace.block_particle_draw_calls.len();
         summary.floor_renderer_slots = usize::from(frame.bundle.floor_renderer.is_some());
         summary.fog_frame_slots = usize::from(frame.bundle.fog_frame.is_some());
         summary.overlay_renderer_slots = usize::from(frame.bundle.overlay_renderer.is_some());
@@ -1045,8 +1148,13 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
         let execution = DesktopGraphicsExecutionSummary::from_trace(frame, &trace);
         let mut live_backend_sink = DesktopGraphicsNullLiveBackendDrawSpriteSink;
         let mut block_particle_sink = DesktopGraphicsNullLiveBackendBlockParticleSink;
-        let live_backend_state =
-            trace.drive_live_backend_sinks(&mut live_backend_sink, &mut block_particle_sink);
+        let mut block_particle_draw_call_sink =
+            DesktopGraphicsNullLiveBackendBlockParticleDrawCallSink;
+        let live_backend_state = trace.drive_live_backend_sinks(
+            &mut live_backend_sink,
+            &mut block_particle_sink,
+            &mut block_particle_draw_call_sink,
+        );
         self.frames_rendered += 1;
         self.last_stats = stats.clone();
         self.last_execution = execution;
@@ -3921,8 +4029,9 @@ mod tests {
         run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopFrameKind,
         DesktopFrameLoopEvent, DesktopFrameLoopExitReason, DesktopFrameLoopState,
         DesktopFramePacing, DesktopFramePayload, DesktopFrameSkipReason,
-        DesktopGraphicsCommandExecutionTrace, DesktopGraphicsExecutionStepTrace,
-        DesktopGraphicsExecutionSummary, DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
+        DesktopGraphicsBlockParticleDrawCallKind, DesktopGraphicsCommandExecutionTrace,
+        DesktopGraphicsExecutionStepTrace, DesktopGraphicsExecutionSummary,
+        DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
         DesktopGraphicsLiveBackendDrawSpriteSink, DesktopGraphicsLiveBackendDrawSpriteTrace,
         DesktopGraphicsRenderer, DesktopGraphicsResolvedSpriteTrace,
         DesktopGraphicsShaderApplyExecutionTrace, DesktopGraphicsTextureSamplerTrace,
@@ -5585,6 +5694,10 @@ mod tests {
             renderer.last_trace.block_particle_world_samples
         );
         assert_eq!(
+            renderer.last_trace.block_particle_draw_calls.len(),
+            renderer.last_trace.block_particle_world_samples
+        );
+        assert_eq!(
             renderer
                 .last_trace
                 .block_particle_traces
@@ -5597,6 +5710,10 @@ mod tests {
             renderer.last_trace.block_particle_world_samples
         );
         assert_eq!(
+            renderer.last_execution.block_particle_draw_calls,
+            renderer.last_trace.block_particle_draw_calls.len()
+        );
+        assert_eq!(
             renderer
                 .last_live_backend_state
                 .block_particle_traces_emitted,
@@ -5605,9 +5722,23 @@ mod tests {
         assert_eq!(
             renderer
                 .last_live_backend_state
+                .block_particle_draw_calls_emitted,
+            renderer.last_trace.block_particle_draw_calls.len()
+        );
+        assert_eq!(
+            renderer
+                .last_live_backend_state
                 .last_block_particle_trace
                 .as_ref()
                 .map(|trace| trace.block.as_str()),
+            Some("atmospheric-concentrator")
+        );
+        assert_eq!(
+            renderer
+                .last_live_backend_state
+                .last_block_particle_draw_call
+                .as_ref()
+                .map(|draw_call| draw_call.block.as_str()),
             Some("atmospheric-concentrator")
         );
         assert!(renderer
@@ -5636,6 +5767,7 @@ mod tests {
         assert_eq!(trace.block_particle_plans, 0);
         assert_eq!(trace.block_particle_world_samples, 0);
         assert!(trace.block_particle_traces.is_empty());
+        assert!(trace.block_particle_draw_calls.is_empty());
         assert!(!trace.execution_steps.iter().any(|step| matches!(
             step,
             DesktopGraphicsExecutionStepTrace::BlockParticles { .. }
@@ -5693,6 +5825,7 @@ mod tests {
         assert_eq!(trace.block_particle_plans, 2);
         assert_eq!(trace.block_particle_world_samples, 2);
         assert_eq!(trace.block_particle_traces.len(), 2);
+        assert_eq!(trace.block_particle_draw_calls.len(), 2);
         assert_eq!(
             trace
                 .block_particle_traces
@@ -5703,6 +5836,16 @@ mod tests {
                 (0, "regular-emitter", None),
                 (1, "soft-emitter", Some("circle-shadow"))
             ]
+        );
+        assert!(matches!(
+            trace.block_particle_draw_calls[0].kind,
+            DesktopGraphicsBlockParticleDrawCallKind::Circle
+        ));
+        assert_eq!(
+            trace.block_particle_draw_calls[1].kind,
+            DesktopGraphicsBlockParticleDrawCallKind::SoftSprite {
+                region: Some("circle-shadow".into())
+            }
         );
         assert!(trace.execution_steps.iter().any(|step| matches!(
             step,

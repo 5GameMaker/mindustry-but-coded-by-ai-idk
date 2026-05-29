@@ -1050,6 +1050,86 @@ mod tests {
     }
 
     #[test]
+    fn java_renderer_stage_and_pass_mapping_is_exhaustive_and_ordered() {
+        let expected_stages = [
+            (RendererDrawStage::Background, "background", 0),
+            (RendererDrawStage::Floor, "floor", 10),
+            (RendererDrawStage::BlockShadows, "block_shadow", 20),
+            (RendererDrawStage::BlockWalls, "block_walls", 30),
+            (RendererDrawStage::BlockBuild, "block_build", 40),
+            (RendererDrawStage::Environment, "env", 50),
+            (RendererDrawStage::Lighting, "light", 60),
+            (RendererDrawStage::Darkness, "darkness", 70),
+            (RendererDrawStage::Overlay, "overlay", 80),
+            (RendererDrawStage::Fog, "fog", 90),
+            (RendererDrawStage::BlockOverdraw, "block_overdraw", 100),
+            (RendererDrawStage::Ui, "ui", 110),
+            (RendererDrawStage::Debug, "debug", 120),
+        ];
+
+        assert_eq!(RendererDrawStage::ordered().len(), expected_stages.len());
+        for ((stage, label, sort_key), expected_stage) in expected_stages
+            .into_iter()
+            .zip(RendererDrawStage::ordered().iter())
+        {
+            assert_eq!(*expected_stage, stage);
+            assert_eq!(stage.label(), label);
+            assert_eq!(stage.sort_key(), sort_key);
+        }
+
+        let pass_cases = [
+            (
+                RenderPassKind::Background,
+                "background",
+                0,
+                RendererDrawStage::Background,
+            ),
+            (RenderPassKind::Floor, "floor", 10, RendererDrawStage::Floor),
+            (
+                RenderPassKind::Block,
+                "block",
+                20,
+                RendererDrawStage::BlockShadows,
+            ),
+            (
+                RenderPassKind::Overlay,
+                "overlay",
+                30,
+                RendererDrawStage::Overlay,
+            ),
+            (
+                RenderPassKind::Minimap,
+                "minimap",
+                40,
+                RendererDrawStage::Debug,
+            ),
+            (
+                RenderPassKind::Lighting,
+                "lighting",
+                50,
+                RendererDrawStage::Lighting,
+            ),
+            (RenderPassKind::Ui, "ui", 60, RendererDrawStage::Ui),
+        ];
+
+        for (kind, label, default_order, stage) in pass_cases {
+            assert_eq!(kind.label(), label);
+            assert_eq!(kind.default_order(), default_order);
+            assert_eq!(kind.java_renderer_draw_stage(), stage);
+            assert_eq!(kind.java_renderer_draw_rank(), stage.sort_key());
+        }
+
+        let custom = RenderPassKind::Custom("postprocess".into());
+        assert_eq!(custom.label(), "postprocess");
+        assert_eq!(custom.default_order(), 1_000);
+        assert_eq!(custom.java_renderer_draw_stage(), RendererDrawStage::Debug);
+        assert_eq!(
+            custom.java_renderer_draw_rank(),
+            RendererDrawStage::Debug.sort_key()
+        );
+    }
+
+    #[test]
     fn command_payloads_round_trip_for_overlay_and_custom_data() {
         let rect = RenderRect::new(2.0, 4.0, 8.0, 16.0);
         let clip = RenderRect::new(0.0, 0.0, 32.0, 32.0);
