@@ -13814,3 +13814,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - dirty/sub-image invalidation 仍需继续与 minimap/darkness/floor cache 等 texture update plan 统一；
   - window/context/present 与真实 GL executor 仍未完成；
   - 当前总体迁移约 30.3%，仍未达到完整可玩。
+
+## 12.447 Minimap runtime texture dirty upload plan 接入
+
+- 2026-05-29：继续把 Java `Texture.draw(Pixmap)` / `Texture.draw(Pixmap, x, y)` / `Pixmaps.drawPixel(...)` 语义下沉到 Rust OpenGL 后端计划层。`MinimapTextureFramePlan` 之前只在 desktop summary 中统计，现在会在 `DesktopGraphicsOpenGlBackendFramePlan::from_frame(...)` 转成 runtime texture upload plan，和 atlas upload 共用 `DesktopGraphicsOpenGlBackendTextureUploadSink` / resolving executor。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsOpenGlBackendTextureResourceIdentity` 增加 `resource_kind`，新增 `from_runtime_texture("minimap")`；
+    - `DesktopGraphicsOpenGlBackendTextureUploadKind` 增加 `DirtyPixels`；
+    - 新增 `DesktopGraphicsOpenGlBackendTexturePixelUpdate`；
+    - texture upload plan / resolved upload 增加 `resource_kind`、`recreate_texture` 与 `dirty_pixels`；
+    - `DesktopGraphicsOpenGlBackendFramePlan` 增加 `texture_upload_plans`，`from_frame(...)` 把 `frame.minimap_texture_frame` 转为 runtime texture full/dirty upload；
+    - `HeadlessDesktopGraphicsRenderer` 使用 `DesktopGraphicsOpenGlBackendFramePlan::from_frame(frame)`，并把 frame-level texture upload plans 汇入 OpenGL executor state；
+    - 新增测试覆盖 minimap full upload、`recreate_texture`、dirty pixel 坐标与 shared texture upload sink handle 解析。
+- 迁移意义：
+  - `MinimapTextureFramePlan.full_upload` 对应 Java `texture.draw(pixmap)` 的整图上传；
+  - `MinimapTextureFramePlan.dirty_pixels` 对应 Java `Pixmaps.drawPixel(texture, ...)` / `glTexSubImage2D` 的 1×1 局部更新；
+  - runtime texture 更新不再停留在 summary 统计，而是进入 `DesktopGraphicsFrame -> OpenGL backend frame plan -> texture upload sink` 主链路。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - 真实 `glTexImage2D/glTexSubImage2D` 执行器尚未接入；
+  - minimap dirty pixels 目前按 1×1 计划表达，后续可合并为矩形 sub-image 批量上传；
+  - texture handle/cache 仍是 recording/resolving 层，真实 GL context/window/present 仍未完成；
+  - 当前总体迁移约 30.4%，仍未达到完整可玩。

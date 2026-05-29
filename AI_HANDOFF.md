@@ -11026,3 +11026,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 upload plan 接到真实 PNG/Pixmap 解码与 `glTexImage2D/glTexSubImage2D` 边界；
   2. 补 minimap/darkness/floor cache 等 dirty texture update 到统一 upload plan；
   3. 继续推进真实 OpenGL executor/window/context/present，保持原版 Arc/LWJGL/OpenGL 语义，不切 wgpu/Bevy。
+
+---
+
+## 353. 最新闭环记录：Minimap runtime texture dirty upload plan 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（当前本地 HEAD 已是 `v158.1`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **30.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - texture identity 增加 `resource_kind`，并新增 runtime texture identity；
+    - upload kind 增加 `DirtyPixels`，新增 texture pixel update 数据结构；
+    - `DesktopGraphicsOpenGlBackendFramePlan::from_frame(...)` 将 `frame.minimap_texture_frame` 转成 runtime texture full/dirty upload plan；
+    - `HeadlessDesktopGraphicsRenderer` 改为使用 frame-level OpenGL backend plan，并把 minimap upload plans 汇入 executor state；
+    - 新增测试覆盖 minimap full upload/recreate 与 dirty pixel 计划。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 texture upload sink 落到真实 `glTexImage2D/glTexSubImage2D` adapter；
+  2. 合并 dirty pixels 为 sub-image batch，减少真实 GL 调用；
+  3. 推进 VBO/IBO dirty upload 与 draw executor，保持 OpenGL/Arc/SpriteBatch 路线。

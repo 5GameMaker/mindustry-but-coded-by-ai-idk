@@ -466,8 +466,15 @@ pub struct DesktopGraphicsOpenGlBackendTextureBinding {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendTextureResourceKind {
+    AtlasPage,
+    RuntimeTexture,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendTextureResourceIdentity {
     pub key: String,
+    pub resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind,
     pub page_type: PageType,
     pub page_source_path: String,
     pub generation: u64,
@@ -479,7 +486,21 @@ impl DesktopGraphicsOpenGlBackendTextureResourceIdentity {
         let page_source_path = page_source_path.into();
         Self {
             key: format!("atlas:{page_type:?}:{page_source_path}"),
+            resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind::AtlasPage,
             page_type,
+            page_source_path,
+            generation: 0,
+            gl_handle: None,
+        }
+    }
+
+    pub fn from_runtime_texture(name: impl Into<String>) -> Self {
+        let name = name.into();
+        let page_source_path = format!("runtime:{name}");
+        Self {
+            key: format!("runtime-texture:{name}"),
+            resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture,
+            page_type: PageType::Ui,
             page_source_path,
             generation: 0,
             gl_handle: None,
@@ -504,6 +525,7 @@ impl DesktopGraphicsOpenGlBackendTextureResourceIdentity {
 pub struct DesktopGraphicsOpenGlBackendTextureResource {
     pub key: String,
     pub identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
+    pub resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind,
     pub page_type: PageType,
     pub page_source_path: String,
     pub page_width: u32,
@@ -520,12 +542,21 @@ pub struct DesktopGraphicsOpenGlBackendTextureResourceTable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopGraphicsOpenGlBackendTextureUploadKind {
     FullPage,
+    DirtyPixels,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendTexturePixelUpdate {
+    pub x: i32,
+    pub y: i32,
+    pub rgba: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendTextureUploadPlan {
     pub texture_key: String,
     pub texture_identity: DesktopGraphicsOpenGlBackendTextureResourceIdentity,
+    pub resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind,
     pub page_type: PageType,
     pub page_source_path: String,
     pub page_width: u32,
@@ -533,6 +564,8 @@ pub struct DesktopGraphicsOpenGlBackendTextureUploadPlan {
     pub sampler: DesktopGraphicsTextureSamplerTrace,
     pub generation: u64,
     pub bind_count: usize,
+    pub recreate_texture: bool,
+    pub dirty_pixels: Vec<DesktopGraphicsOpenGlBackendTexturePixelUpdate>,
     pub kind: DesktopGraphicsOpenGlBackendTextureUploadKind,
 }
 
@@ -540,12 +573,15 @@ pub struct DesktopGraphicsOpenGlBackendTextureUploadPlan {
 pub struct DesktopGraphicsOpenGlBackendResolvedTextureUpload {
     pub texture_key: String,
     pub texture_handle: u32,
+    pub resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind,
     pub page_type: PageType,
     pub page_source_path: String,
     pub page_width: u32,
     pub page_height: u32,
     pub sampler: DesktopGraphicsTextureSamplerTrace,
     pub generation: u64,
+    pub recreate_texture: bool,
+    pub dirty_pixels: Vec<DesktopGraphicsOpenGlBackendTexturePixelUpdate>,
     pub kind: DesktopGraphicsOpenGlBackendTextureUploadKind,
 }
 
@@ -560,6 +596,7 @@ impl DesktopGraphicsOpenGlBackendTextureResource {
         Self {
             key: binding.texture_identity.key.clone(),
             identity: binding.texture_identity.clone(),
+            resource_kind: binding.texture_identity.resource_kind.clone(),
             page_type: binding.page_type,
             page_source_path: binding.page_source_path.clone(),
             page_width: binding.page_width,
@@ -577,6 +614,7 @@ impl DesktopGraphicsOpenGlBackendTextureResource {
         DesktopGraphicsOpenGlBackendTextureUploadPlan {
             texture_key: self.key.clone(),
             texture_identity: self.identity.clone(),
+            resource_kind: self.resource_kind.clone(),
             page_type: self.page_type,
             page_source_path: self.page_source_path.clone(),
             page_width: self.page_width,
@@ -584,6 +622,8 @@ impl DesktopGraphicsOpenGlBackendTextureResource {
             sampler: self.sampler,
             generation: self.identity.generation.saturating_add(1),
             bind_count: self.bind_count,
+            recreate_texture: false,
+            dirty_pixels: Vec::new(),
             kind: DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage,
         }
     }
@@ -607,6 +647,7 @@ impl DesktopGraphicsOpenGlBackendTextureResourceTable {
             .entry(key)
             .or_insert_with(|| DesktopGraphicsOpenGlBackendTextureResource::from_binding(binding));
         resource.identity = binding.texture_identity.clone();
+        resource.resource_kind = binding.texture_identity.resource_kind.clone();
         resource.page_type = binding.page_type;
         resource.page_source_path = binding.page_source_path.clone();
         resource.page_width = binding.page_width;
@@ -1361,12 +1402,21 @@ pub struct DesktopGraphicsOpenGlBackendStep {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsOpenGlBackendFramePlan {
     pub steps: Vec<DesktopGraphicsOpenGlBackendStep>,
+    pub texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
 }
 
 impl DesktopGraphicsOpenGlBackendFramePlan {
     pub fn from_frame(frame: &DesktopGraphicsFrame) -> Self {
         let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
-        trace.to_opengl_backend_plan()
+        let mut plan = trace.to_opengl_backend_plan();
+        if let Some(minimap_texture_frame) = &frame.minimap_texture_frame {
+            plan.texture_upload_plans.extend(
+                opengl_backend_texture_upload_plans_from_minimap_texture_frame(
+                    minimap_texture_frame,
+                ),
+            );
+        }
+        plan
     }
 
     pub fn from_trace(trace: &DesktopGraphicsExecutionTrace) -> Self {
@@ -1390,6 +1440,19 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
         }
 
         plan
+    }
+
+    pub fn drive_texture_upload_sink<S: DesktopGraphicsOpenGlBackendTextureUploadSink>(
+        &self,
+        sink: &mut S,
+    ) -> DesktopGraphicsOpenGlBackendTextureUploadSinkExecutionState {
+        let mut state = DesktopGraphicsOpenGlBackendTextureUploadSinkExecutionState::default();
+        for upload in &self.texture_upload_plans {
+            sink.consume_opengl_texture_upload(upload.clone());
+            state.texture_uploads_emitted += 1;
+            state.last_texture_upload = Some(upload.clone());
+        }
+        state
     }
 
     fn push_synthetic_block_particle_pass(&mut self, commands: &[RenderCommand]) {
@@ -1541,6 +1604,64 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
             });
         }
     }
+}
+
+fn opengl_backend_texture_upload_plans_from_minimap_texture_frame(
+    minimap_texture_frame: &MinimapTextureFramePlan,
+) -> Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan> {
+    let mut plans = Vec::new();
+    let identity =
+        DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_runtime_texture("minimap");
+    let page_width = minimap_texture_frame.texture_size.width.max(0) as u32;
+    let page_height = minimap_texture_frame.texture_size.height.max(0) as u32;
+    let base_plan = |kind, generation, recreate_texture, dirty_pixels| {
+        DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            texture_key: identity.key.clone(),
+            texture_identity: identity.clone(),
+            resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture,
+            page_type: identity.page_type,
+            page_source_path: identity.page_source_path.clone(),
+            page_width,
+            page_height,
+            sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+            generation,
+            bind_count: 0,
+            recreate_texture,
+            dirty_pixels,
+            kind,
+        }
+    };
+
+    if let Some(full_upload) = minimap_texture_frame.full_upload {
+        plans.push(base_plan(
+            DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage,
+            1,
+            minimap_texture_frame.recreate_texture,
+            Vec::new(),
+        ));
+        debug_assert_eq!(page_width, full_upload.width.max(0) as u32);
+        debug_assert_eq!(page_height, full_upload.height.max(0) as u32);
+    }
+
+    if !minimap_texture_frame.dirty_pixels.is_empty() {
+        let dirty_pixels = minimap_texture_frame
+            .dirty_pixels
+            .iter()
+            .map(|pixel| DesktopGraphicsOpenGlBackendTexturePixelUpdate {
+                x: pixel.texture_x,
+                y: pixel.texture_y,
+                rgba: pixel.rgba,
+            })
+            .collect();
+        plans.push(base_plan(
+            DesktopGraphicsOpenGlBackendTextureUploadKind::DirtyPixels,
+            1,
+            false,
+            dirty_pixels,
+        ));
+    }
+
+    plans
 }
 
 fn opengl_backend_resolved_sprite_for_command(
@@ -2199,12 +2320,15 @@ impl DesktopGraphicsOpenGlBackendTextureUploadSink
             .push(DesktopGraphicsOpenGlBackendResolvedTextureUpload {
                 texture_key: upload.texture_key,
                 texture_handle,
+                resource_kind: upload.resource_kind,
                 page_type: upload.page_type,
                 page_source_path: upload.page_source_path,
                 page_width: upload.page_width,
                 page_height: upload.page_height,
                 sampler: upload.sampler,
                 generation: upload.generation,
+                recreate_texture: upload.recreate_texture,
+                dirty_pixels: upload.dirty_pixels,
                 kind: upload.kind,
             });
     }
@@ -4197,11 +4321,15 @@ impl DesktopGraphicsRenderer for HeadlessDesktopGraphicsRenderer {
     fn render_graphics_frame(&mut self, frame: &DesktopGraphicsFrame) -> GraphicsFrameStats {
         let stats = frame.stats().clone();
         let trace = DesktopGraphicsExecutionTrace::from_frame(frame);
-        let opengl_backend_plan = trace.to_opengl_backend_plan();
+        let opengl_backend_plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(frame);
         let execution = DesktopGraphicsExecutionSummary::from_trace(frame, &trace);
         let mut opengl_backend_step_sink = DesktopGraphicsOpenGlBackendExecutor::default();
         let opengl_backend_execution_state =
             opengl_backend_plan.drive_step_sink(&mut opengl_backend_step_sink);
+        opengl_backend_step_sink
+            .state
+            .sprite_texture_upload_plans
+            .extend(opengl_backend_plan.texture_upload_plans.clone());
         let mut live_backend_sink = DesktopGraphicsNullLiveBackendDrawSpriteSink;
         let mut block_particle_sink = DesktopGraphicsNullLiveBackendBlockParticleSink;
         let mut block_particle_draw_call_sink =
@@ -7641,13 +7769,14 @@ mod tests {
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
-        MinimapCamera, MinimapOverlayInput, PageType, ParticleRendererState,
-        RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
-        RenderCommand, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
-        RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
-        RenderTextStyle, RenderTextVerticalAlign, RenderViewport, ShaderApplyContext,
-        ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TileCoord,
-        UniformValue,
+        MinimapCamera, MinimapFullUpdatePlan, MinimapOverlayInput, MinimapTextureFramePlan,
+        MinimapTexturePixelUpdate, MinimapTextureSize, MinimapTilePos, PageType,
+        ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode,
+        RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan, RenderPass,
+        RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize,
+        RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
+        ShaderApplyContext, ShaderApplyPlan, ShaderCatalog, ShaderDispatchFrame, ShaderId,
+        TextureAtlasPlan, TileCoord, UniformValue,
     };
     use mindustry_core::mindustry::io::{
         ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
@@ -10814,6 +10943,90 @@ mod tests {
         assert_eq!(uploaded_resource.identity.gl_handle, Some(1));
         assert_eq!(uploaded_resource.identity.generation, 1);
         assert!(uploaded_table.full_upload_plans().is_empty());
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_frame_plan_carries_minimap_full_upload() {
+        let frame = DesktopGraphicsFrame {
+            bundle: RenderBridge::new().finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: Some(MinimapTextureFramePlan {
+                texture_size: MinimapTextureSize::new(32, 16),
+                recreate_texture: true,
+                full_upload: Some(MinimapFullUpdatePlan {
+                    width: 32,
+                    height: 16,
+                }),
+                dirty_pixels: Vec::new(),
+            }),
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        assert!(plan.steps.is_empty());
+        assert_eq!(plan.texture_upload_plans.len(), 1);
+        let upload = &plan.texture_upload_plans[0];
+        assert_eq!(upload.texture_key, "runtime-texture:minimap");
+        assert_eq!(
+            upload.resource_kind,
+            super::DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture
+        );
+        assert_eq!(upload.page_source_path, "runtime:minimap");
+        assert_eq!(upload.page_width, 32);
+        assert_eq!(upload.page_height, 16);
+        assert!(upload.recreate_texture);
+        assert!(upload.dirty_pixels.is_empty());
+        assert_eq!(
+            upload.kind,
+            super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage
+        );
+
+        let mut upload_executor =
+            super::DesktopGraphicsResolvingOpenGlBackendTextureUploadExecutor::default();
+        let state = plan.drive_texture_upload_sink(&mut upload_executor);
+        assert_eq!(state.texture_uploads_emitted, 1);
+        assert_eq!(upload_executor.uploads[0].texture_handle, 1);
+        assert!(upload_executor.uploads[0].recreate_texture);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_frame_plan_carries_minimap_dirty_pixels() {
+        let frame = DesktopGraphicsFrame {
+            bundle: RenderBridge::new().finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: Some(MinimapTextureFramePlan {
+                texture_size: MinimapTextureSize::new(8, 8),
+                recreate_texture: false,
+                full_upload: None,
+                dirty_pixels: vec![MinimapTexturePixelUpdate {
+                    pos: MinimapTilePos::new(2, 3),
+                    texture_x: 2,
+                    texture_y: 4,
+                    rgba: 0xaabb_ccdd,
+                }],
+            }),
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        assert_eq!(plan.texture_upload_plans.len(), 1);
+        let upload = &plan.texture_upload_plans[0];
+        assert_eq!(upload.texture_key, "runtime-texture:minimap");
+        assert_eq!(upload.page_width, 8);
+        assert_eq!(upload.page_height, 8);
+        assert!(!upload.recreate_texture);
+        assert_eq!(
+            upload.kind,
+            super::DesktopGraphicsOpenGlBackendTextureUploadKind::DirtyPixels
+        );
+        assert_eq!(
+            upload.dirty_pixels,
+            vec![super::DesktopGraphicsOpenGlBackendTexturePixelUpdate {
+                x: 2,
+                y: 4,
+                rgba: 0xaabb_ccdd,
+            }]
+        );
     }
 
     #[test]
