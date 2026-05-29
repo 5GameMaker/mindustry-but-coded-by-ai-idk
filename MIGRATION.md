@@ -12067,3 +12067,22 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 还需扩大到 Java 服务端/客户端互通 smoke；
   - world stream 后的更多 snapshot/materialization 行为仍需逐项对照 Java；
   - 当前总体迁移约 23.1%，仍未达到完整可玩。
+
+### 12.380 Desktop graphics trace 消费 block particle plans
+
+- 2026-05-29：继续把 `BlockRendererPlan.block_particles` 从 bundle 数据推进到 desktop graphics renderer 的可观察消费点。当前仍未做真实 GPU 粒子绘制，但 headless/live backend trace 已能看到 block particle plans，后续真实 backend 可按同一 execution step 接线。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsExecutionStepTrace` 新增 `BlockParticles { plan_count }`；
+    - `DesktopGraphicsExecutionTrace` 新增 `block_particle_plans`；
+    - `DesktopGraphicsExecutionSummary` 新增 `block_particle_plans`；
+    - `DesktopGraphicsExecutionTrace::from_frame(...)` 会从 `frame.bundle.block_renderer.block_particles` 生成 execution step；
+    - `HeadlessDesktopGraphicsRenderer` 的 `last_trace` / `last_execution` 可观察 block particle plan 数。
+- 已跑验证：
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_block_render_plan_collects_content_draw_particles --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - block particle plan 已被 desktop trace/summary 消费，但仍需生成 world-space particle vertices 或真实 backend draw call；
+  - 当前总体迁移约 23.2%，仍未达到完整可玩。

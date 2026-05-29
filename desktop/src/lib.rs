@@ -347,6 +347,9 @@ pub enum DesktopGraphicsExecutionStepTrace {
     ShaderDispatch {
         apply_count: usize,
     },
+    BlockParticles {
+        plan_count: usize,
+    },
     RenderPass {
         kind: RenderPassKind,
         order: i32,
@@ -443,6 +446,7 @@ impl DesktopGraphicsLiveBackendDrawSpriteSink for DesktopGraphicsNullLiveBackend
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopGraphicsExecutionTrace {
     pub shader_dispatch: DesktopGraphicsShaderDispatchExecutionTrace,
+    pub block_particle_plans: usize,
     pub execution_steps: Vec<DesktopGraphicsExecutionStepTrace>,
     pub render_passes: Vec<DesktopGraphicsPassExecutionTrace>,
 }
@@ -518,6 +522,16 @@ impl DesktopGraphicsExecutionTrace {
                 apply_count: shader_dispatch.applies.len(),
             });
         }
+        let block_particle_plans = frame
+            .bundle
+            .block_renderer
+            .as_ref()
+            .map_or(0, |block_renderer| block_renderer.block_particles.len());
+        if block_particle_plans > 0 {
+            execution_steps.push(DesktopGraphicsExecutionStepTrace::BlockParticles {
+                plan_count: block_particle_plans,
+            });
+        }
 
         let render_passes =
             frame
@@ -585,6 +599,7 @@ impl DesktopGraphicsExecutionTrace {
 
         Self {
             shader_dispatch,
+            block_particle_plans,
             execution_steps,
             render_passes,
         }
@@ -678,6 +693,7 @@ pub struct DesktopGraphicsExecutionSummary {
     pub atlas_resolved_sprites: usize,
     pub atlas_missing_sprites: usize,
     pub block_renderer_slots: usize,
+    pub block_particle_plans: usize,
     pub floor_renderer_slots: usize,
     pub fog_frame_slots: usize,
     pub overlay_renderer_slots: usize,
@@ -734,6 +750,7 @@ impl DesktopGraphicsExecutionSummary {
             .map(|apply| apply.error_count)
             .sum();
         summary.block_renderer_slots = usize::from(frame.bundle.block_renderer.is_some());
+        summary.block_particle_plans = trace.block_particle_plans;
         summary.floor_renderer_slots = usize::from(frame.bundle.floor_renderer.is_some());
         summary.fog_frame_slots = usize::from(frame.bundle.fog_frame.is_some());
         summary.overlay_renderer_slots = usize::from(frame.bundle.overlay_renderer.is_some());
@@ -5346,6 +5363,73 @@ mod tests {
         assert_eq!(particle.plan.build_id_seed, tile_pos);
         assert_eq!(particle.plan.warmup, 0.8);
         assert_eq!(particle.plan.time, 33.0);
+    }
+
+    #[test]
+    fn desktop_graphics_trace_reports_block_particle_plans_for_live_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let concentrator = launcher
+            .content_loader
+            .block_by_name("atmospheric-concentrator")
+            .unwrap()
+            .base()
+            .clone();
+
+        let tile_pos = {
+            let world = &mut launcher.game_state.world;
+            world.resize(4, 4);
+            let tile = world.tile_mut(1, 1).unwrap();
+            tile.block = concentrator.id;
+            let tile_pos = tile.pos();
+            tile.build = Some(mindustry_core::mindustry::world::BuildingRef {
+                tile_pos,
+                block: concentrator.id,
+                team: 1,
+                rotation: 0,
+            });
+            tile_pos
+        };
+
+        launcher
+            .runtime
+            .add_building(BuildingComp::new(tile_pos, concentrator, TeamId(1)));
+        launcher.runtime.crafting_runtime_states.insert(
+            tile_pos,
+            mindustry_core::mindustry::core::game_runtime::GameRuntimeCraftingBlockState::GenericCrafter(
+                mindustry_core::mindustry::world::blocks::production::GenericCrafterState {
+                    progress: 0.1,
+                    total_progress: 33.0,
+                    warmup: 0.8,
+                },
+            ),
+        );
+
+        let viewport = RenderViewport::new(8.0, 8.0, 8.0, 8.0);
+        let camera = RenderCamera::new(RenderPoint::new(12.0, 12.0), viewport);
+        let minimap_camera = MinimapCamera::new(12.0, 12.0, 8.0, 8.0);
+        let frame = launcher.graphics_frame_for_render(
+            12,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        assert_eq!(frame.bundle.stats.block_particle_plans, 1);
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        let stats = renderer.render_graphics_frame(&frame);
+
+        assert_eq!(stats.block_particle_plans, 1);
+        assert_eq!(renderer.last_trace.block_particle_plans, 1);
+        assert_eq!(renderer.last_execution.block_particle_plans, 1);
+        assert!(renderer
+            .last_trace
+            .execution_steps
+            .iter()
+            .any(|step| matches!(
+                step,
+                DesktopGraphicsExecutionStepTrace::BlockParticles { plan_count: 1 }
+            )));
     }
 
     #[test]

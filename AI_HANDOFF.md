@@ -9369,3 +9369,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 增加更小的失败定位 smoke，分别断言 connect/world stream/confirm/materialization 阶段；
   2. 准备 Java server ↔ Rust desktop 或 Rust server ↔ Java client 的外部进程 smoke；
   3. 渲染侧继续把 `block_particles` 接到 DesktopGraphicsFrame/renderer 可消费层。
+
+---
+
+## 282. 最新闭环记录：Desktop trace 可观察 block particle plans
+
+- 本轮总体进度更新：约 **23.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsExecutionStepTrace::BlockParticles { plan_count }`；
+    - `DesktopGraphicsExecutionTrace.block_particle_plans`；
+    - `DesktopGraphicsExecutionSummary.block_particle_plans`；
+    - headless/live backend trace 能从 `GraphicsFrameBundle.block_renderer.block_particles` 看到真实 content drawer 粒子计划。
+- 已验证：
+  - `cargo fmt --all --manifest-path "Cargo.toml" -- --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_trace_reports_block_particle_plans_for_live_backend --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_block_render_plan_collects_content_draw_particles --manifest-path "Cargo.toml" -- --test-threads=1`
+  - `git diff --check`
+- 下一步：
+  1. 将 `BlockDrawerParticlePlan` 转成 world-space particle output/vertices；
+  2. 把 block particles 接入真实 effect renderer 或未来 GPU backend draw call；
+  3. 继续推进真实 window/surface/texture upload 后端准备。
