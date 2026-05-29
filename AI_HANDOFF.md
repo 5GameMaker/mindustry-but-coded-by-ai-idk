@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **31.2%**。
+- 当前总体迁移完成度：约 **31.3%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -11198,7 +11198,7 @@ git -C 'D:/MDT/rust-mindustry' push origin main
     - `ShaderCatalog::init_plan()` 可转换为 enabled shader 的 compile/link 命令序列；
     - `ShaderCatalog::reload_plan()` 可转换为 `DeleteProgram -> Recreate` 命令序列；
     - lifecycle command sink / recording sink 已接入；
-    - 测试锁定 `Mesh` 首个 shader 的 `planet.vert + mesh.frag` 顺序、默认跳过 `Shockwave`、reload 先 delete 再 recreate。
+    - 测试锁定 `Mesh` 首个 shader 的 `mesh.vert + planet.frag` 顺序、默认跳过 `Shockwave`、reload 先 delete 再 recreate。
 - 关键语义：
   - compile/link 属于 shader 生命周期，不属于 per-frame/per-apply；
   - `ShaderApply` 只负责 `UseProgram + UploadUniform + ActiveTexture + BindTexture`；
@@ -11251,21 +11251,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 ## 361. 最新闭环记录：Shader source loader 接入
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前本地 HEAD 为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
-- 本轮总体进度更新：约 **31.2%**，仍未达到完整可玩。
+- 本轮总体进度更新：约 **31.3%**，仍未达到完整可玩。
 - 本轮主改动：
+  - `core/src/mindustry/graphics/shaders.rs`
+    - 修正 `Mesh` 为 `mesh.vert + planet.frag`；
+    - 修正 `Clouds` 为 `clouds.vert + planet.frag`；
+    - 上述两项对齐 upstream `LoadShader(frag, vert)` 参数顺序。
   - `desktop/src/lib.rs`
     - 新增 shader source file/program source 结构；
     - 新增 shader source load error；
     - 新增 `DesktopGraphicsOpenGlBackendShaderSourceLoader`；
     - 可从 asset root 加载 `ShaderSource::vertex_path()/fragment_path()` 对应 UTF-8 文本；
     - source 文本会做 CRLF/CR -> LF 的最小规范化；
-    - 测试覆盖读取 `Mesh` 的 vertex/fragment、缺 fragment、空 fragment、空路径错误。
+    - 测试覆盖读取 `Mesh` 的 `mesh.vert/planet.frag`、缺 fragment、空 fragment、空路径错误。
 - 关键语义：
   - 不硬编码参考仓库路径；
   - 不使用废案目录；
   - source loader 作为 `lifecycle/resolved lifecycle -> glShaderSource` 的输入层。
 - 已验证：
   - `cargo fmt`
+  - `cargo test -p mindustry-core init_plan_preserves_upstream_names_and_sources --lib`
   - `cargo test -p mindustry-desktop shader_source_loader --lib`
   - `cargo test -p mindustry-desktop opengl --lib`
   - `cargo check -p mindustry-core -p mindustry-desktop`

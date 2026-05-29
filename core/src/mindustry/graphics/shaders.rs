@@ -443,7 +443,7 @@ impl ShaderId {
 
     pub const fn source(self) -> ShaderSource {
         match self {
-            Self::Mesh => ShaderSource::new("planet.vert", "mesh.frag"),
+            Self::Mesh => ShaderSource::new("mesh.vert", "planet.frag"),
             Self::BlockBuild => ShaderSource::new("default.vert", "blockbuild.frag"),
             Self::Shield => ShaderSource::new("screenspace.vert", "shield.frag"),
             Self::Fog => ShaderSource::new("default.vert", "fog.frag"),
@@ -461,7 +461,7 @@ impl ShaderId {
             Self::Space => ShaderSource::new("screenspace.vert", "space.frag"),
             Self::Caustics => ShaderSource::new("screenspace.vert", "caustics.frag"),
             Self::Planet => ShaderSource::new("planet.vert", "planet.frag"),
-            Self::Clouds => ShaderSource::new("planet.vert", "clouds.frag"),
+            Self::Clouds => ShaderSource::new("clouds.vert", "planet.frag"),
             Self::PlanetGrid => ShaderSource::new("planetgrid.vert", "planetgrid.frag"),
             Self::Atmosphere => ShaderSource::new("atmosphere.vert", "atmosphere.frag"),
             // `LoadShader("planet", "unlit")`: vertex first after expansion.

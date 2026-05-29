@@ -14348,12 +14348,12 @@ mod tests {
                 super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateShader {
                     shader: ShaderId::Mesh,
                     stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
-                    source_path: "shaders/planet.vert".into(),
+                    source_path: "shaders/mesh.vert".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::ShaderSource {
                     shader: ShaderId::Mesh,
                     stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
-                    source_path: "shaders/planet.vert".into(),
+                    source_path: "shaders/mesh.vert".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CompileShader {
                     shader: ShaderId::Mesh,
@@ -14362,12 +14362,12 @@ mod tests {
                 super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateShader {
                     shader: ShaderId::Mesh,
                     stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
-                    source_path: "shaders/mesh.frag".into(),
+                    source_path: "shaders/planet.frag".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::ShaderSource {
                     shader: ShaderId::Mesh,
                     stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
-                    source_path: "shaders/mesh.frag".into(),
+                    source_path: "shaders/planet.frag".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CompileShader {
                     shader: ShaderId::Mesh,
@@ -14439,7 +14439,7 @@ mod tests {
             super::DesktopGraphicsOpenGlBackendShaderLifecycleCommand::CreateShader {
                 shader: ShaderId::Mesh,
                 stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
-                source_path: "shaders/planet.vert".into(),
+                source_path: "shaders/mesh.vert".into(),
             }
         );
         assert!(!lifecycle_plan
@@ -14473,14 +14473,14 @@ mod tests {
                     shader_key: "shader:Mesh:vertex".into(),
                     shader_handle: 1,
                     previous_shader_handle: None,
-                    source_path: "shaders/planet.vert".into(),
+                    source_path: "shaders/mesh.vert".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::ShaderSource {
                     shader: ShaderId::Mesh,
                     stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
                     shader_key: "shader:Mesh:vertex".into(),
                     shader_handle: 1,
-                    source_path: "shaders/planet.vert".into(),
+                    source_path: "shaders/mesh.vert".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CompileShader {
                     shader: ShaderId::Mesh,
@@ -14494,14 +14494,14 @@ mod tests {
                     shader_key: "shader:Mesh:fragment".into(),
                     shader_handle: 2,
                     previous_shader_handle: None,
-                    source_path: "shaders/mesh.frag".into(),
+                    source_path: "shaders/planet.frag".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::ShaderSource {
                     shader: ShaderId::Mesh,
                     stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
                     shader_key: "shader:Mesh:fragment".into(),
                     shader_handle: 2,
-                    source_path: "shaders/mesh.frag".into(),
+                    source_path: "shaders/planet.frag".into(),
                 },
                 super::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CompileShader {
                     shader: ShaderId::Mesh,
@@ -14631,12 +14631,12 @@ mod tests {
         let root = desktop_shader_test_asset_root("success");
         write_shader_source(
             &root,
-            "shaders/planet.vert",
+            "shaders/mesh.vert",
             "attribute vec3 a_position;\r\nvoid main(){}\r\n",
         );
         write_shader_source(
             &root,
-            "shaders/mesh.frag",
+            "shaders/planet.frag",
             "void main(){ gl_FragColor = vec4(1.0); }\r\n",
         );
         let task = ShaderCatalog::init_plan()
@@ -14651,8 +14651,8 @@ mod tests {
         assert_eq!(sources.program_key, "shader:Mesh");
         assert_eq!(sources.vertex.source_path, task.source.vertex_path());
         assert_eq!(sources.fragment.source_path, task.source.fragment_path());
-        assert_eq!(sources.vertex.file_path, root.join("shaders/planet.vert"));
-        assert_eq!(sources.fragment.file_path, root.join("shaders/mesh.frag"));
+        assert_eq!(sources.vertex.file_path, root.join("shaders/mesh.vert"));
+        assert_eq!(sources.fragment.file_path, root.join("shaders/planet.frag"));
         assert_eq!(
             sources.vertex.source_text,
             "attribute vec3 a_position;\nvoid main(){}\n"
@@ -14663,7 +14663,7 @@ mod tests {
     #[test]
     fn desktop_graphics_opengl_shader_source_loader_reports_missing_empty_and_empty_path() {
         let root = desktop_shader_test_asset_root("errors");
-        write_shader_source(&root, "shaders/planet.vert", "void main(){}\n");
+        write_shader_source(&root, "shaders/mesh.vert", "void main(){}\n");
         let task = ShaderCatalog::init_plan()
             .tasks
             .into_iter()
@@ -14678,10 +14678,10 @@ mod tests {
                 stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
                 ref source_path,
                 ..
-            }) if source_path == "shaders/mesh.frag"
+            }) if source_path == "shaders/planet.frag"
         ));
 
-        write_shader_source(&root, "shaders/mesh.frag", "\r\n");
+        write_shader_source(&root, "shaders/planet.frag", "\r\n");
         assert!(matches!(
             loader.load_program_sources(&task),
             Err(super::DesktopGraphicsOpenGlBackendShaderSourceLoadError::EmptySource {
@@ -14689,7 +14689,7 @@ mod tests {
                 stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
                 ref source_path,
                 ..
-            }) if source_path == "shaders/mesh.frag"
+            }) if source_path == "shaders/planet.frag"
         ));
 
         assert!(matches!(
