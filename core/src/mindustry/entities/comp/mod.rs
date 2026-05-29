@@ -68,7 +68,7 @@ pub use draw::DrawComp;
 pub use effect_state::{EffectRenderInput, EffectStateComp};
 pub use elevation_move::{ElevationMoveComp, SolidPred};
 pub use entity::{EntityComp, EntityIoState, EntityLocality};
-pub use fire::{FireComp, FireTile, FireUpdateContext, FireUpdatePlan};
+pub use fire::{FireComp, FireDrawPlan, FireTile, FireUpdateContext, FireUpdatePlan};
 pub use health::HealthComp;
 pub use hitbox::{HitboxComp, HitboxRect};
 pub use items::{ItemStackSlot, ItemsComp};

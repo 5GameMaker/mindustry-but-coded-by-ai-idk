@@ -15344,3 +15344,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - minimap fog shader/texture、`MapObjectives` 多态 marker 仍需继续迁移；
   - entity/world draw、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.3%，仍未达到完整可玩。
+
+## 416. 最新闭环记录：FireComp.draw 渲染计划样板
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.4%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/comp/FireComp.java`
+  - `draw()` 中的 `Core.atlas.find("fire" + i)`、`Draw.color(... warmup / warmupDuration)`、`Draw.z(Layer.effect)`、`Draw.rect(...)`、`Mathf.randomSeedRange(...)`、`Drawf.light(...)`。
+- 本轮主改动：
+  - `core/src/mindustry/entities/comp/fire.rs`
+    - 新增 `FireDrawPlan`，保留 fire frame index、atlas region、sprite 坐标、alpha、layer 与 light primitive；
+    - `FireComp::draw_plan(global_time)` 对齐 Java `FireComp.draw()` 的 `fire{frame}`、`Layer.effect`、warmup alpha、`x/y` 交叉 seed jitter、`Pal.lightFlame` 与 `0.6 * alpha`；
+    - 新增 `FireDrawPlan::render_commands()`，把火焰 sprite 转成 `RenderCommand::DrawSprite`，避免只停留在不可执行 helper；
+    - 新增 `FireDrawPlan::light_primitive()`，为后续 entity/world light aggregation 接入 `LightRendererPlan` 预留主链接口；
+    - 复制最小 `ArcRand`/`murmur_hash3` helper，用于对齐 Java/Arc `Mathf.randomSeedRange(seed, range)`；后续可统一抽到公共 math 模块。
+  - `core/src/mindustry/entities/comp/mod.rs`
+    - 导出 `FireDrawPlan`，方便后续 runtime/entity render aggregation 使用。
+- 迁移意义：
+  - Fire 不再只有 update/sync/remove 逻辑，开始具备 Java `Drawc.draw()` 对应的 sprite + light 可执行渲染表达；
+  - 该闭环仍是 entity 渲染主链路的过渡层，下一步必须把 `FireComp::draw_plan(...)` 接入真实 entity/world render frame，而不是让它长期作为孤立 plan。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo test -p mindustry-core fire_component_draw_plan_matches_java_sprite_and_light_arguments`
+  - `cargo test -p mindustry-core fire_component_draw_plan`
+  - `cargo test -p mindustry-core fire_random_seed_range_matches_arc_seeded_range`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Fire draw plan 仍需从 `FireComp` 集合接入 runtime entity/world render aggregation 与 light pass；
+  - Fire atlas region 尺寸目前使用 `clipSize()/DRAW_SIZE=25` 的过渡表达，后续应接入真实 atlas metadata；
+  - entity/world draw、primitive mesh path、UI pass、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.4%，仍未达到完整可玩。

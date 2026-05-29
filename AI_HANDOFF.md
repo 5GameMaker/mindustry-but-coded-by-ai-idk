@@ -12628,3 +12628,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. minimap fog：把 dynamic/static fog 从 `FillRect` 过渡到 texture/shader 语义；
   2. minimap marker：逐步拆 `MapObjectives` 多态 marker；
   3. entity/world draw：优先 Fire 的 draw plan + render command 样板闭环。
+
+### 2026-05-30：FireComp.draw 渲染计划样板
+
+- 当前整体完成度：约 **40.4%**。
+- 固定路径：
+  - Rust 仓库：`D:\MDT\rust-mindustry`
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - 废案禁用：`D:\MDT\mindustry-rust`
+  - 乱码读取：优先 UTF-8，再尝试其他编码。
+- 已完成：
+  - `core/src/mindustry/entities/comp/fire.rs` 新增 `FireDrawPlan`；
+  - `FireComp::draw_plan(global_time)` 对齐 Java `FireComp.draw()` 的 `fire{frame}`、`Layer.effect`、warmup alpha、交叉 seed jitter、`Pal.lightFlame` 与 light opacity；
+  - `FireDrawPlan::render_commands()` 产出 `RenderCommand::DrawSprite`，不是纯孤立数据结构；
+  - `FireDrawPlan::light_primitive()` 为后续 entity/world light aggregation 接入 `LightRendererPlan` 预留；
+  - `core/src/mindustry/entities/comp/mod.rs` 已导出 `FireDrawPlan`；
+  - 新增测试覆盖 frame clamp、warmup clamp、sprite command、light 参数与 Arc-style `randomSeedRange`。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo test -p mindustry-core fire_component_draw_plan_matches_java_sprite_and_light_arguments`
+  - `cargo test -p mindustry-core fire_component_draw_plan`
+  - `cargo test -p mindustry-core fire_random_seed_range_matches_arc_seeded_range`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 把 `FireComp::draw_plan(...)` 从实体集合接入真实 entity/world render aggregation 与 light pass，避免长期停留在 plan；
+  2. 接入真实 atlas metadata，替换当前 `DRAW_SIZE=25` 的过渡表达；
+  3. 继续推进 Bullet/Weather/Effect/Puddle 的 plan→RenderCommand/RenderPass 桥接，再补 primitive mesh path 与 UI pass。
