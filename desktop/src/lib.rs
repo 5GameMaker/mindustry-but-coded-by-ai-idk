@@ -80,7 +80,7 @@ use mindustry_core::mindustry::world::{
 use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1545,6 +1545,49 @@ impl DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommandSink
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderSourceFile {
+    pub shader: ShaderId,
+    pub stage: DesktopGraphicsOpenGlBackendShaderStage,
+    pub source_path: String,
+    pub file_path: PathBuf,
+    pub source_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderProgramSourceFiles {
+    pub shader: ShaderId,
+    pub program_key: String,
+    pub vertex: DesktopGraphicsOpenGlBackendShaderSourceFile,
+    pub fragment: DesktopGraphicsOpenGlBackendShaderSourceFile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopGraphicsOpenGlBackendShaderSourceLoadError {
+    EmptySourcePath {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+    },
+    ReadSource {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: String,
+        file_path: PathBuf,
+        message: String,
+    },
+    EmptySource {
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: String,
+        file_path: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendShaderSourceLoader {
+    pub asset_root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
     pub batch_index: usize,
     pub shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
@@ -2026,6 +2069,95 @@ impl DesktopGraphicsOpenGlBackendShaderLifecycleCommandPlan {
             sink.consume_opengl_shader_lifecycle_command(command.clone());
         }
         self.commands.len()
+    }
+}
+
+fn opengl_backend_normalize_shader_source(source: &str) -> String {
+    source.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+impl DesktopGraphicsOpenGlBackendShaderSourceLoader {
+    pub fn new(asset_root: impl Into<PathBuf>) -> Self {
+        Self {
+            asset_root: asset_root.into(),
+        }
+    }
+
+    pub fn source_file_path(&self, source_path: &str) -> PathBuf {
+        self.asset_root.join(Path::new(source_path))
+    }
+
+    pub fn load_stage_source(
+        &self,
+        shader: ShaderId,
+        stage: DesktopGraphicsOpenGlBackendShaderStage,
+        source_path: impl Into<String>,
+    ) -> Result<
+        DesktopGraphicsOpenGlBackendShaderSourceFile,
+        DesktopGraphicsOpenGlBackendShaderSourceLoadError,
+    > {
+        let source_path = source_path.into();
+        if source_path.trim().is_empty() {
+            return Err(
+                DesktopGraphicsOpenGlBackendShaderSourceLoadError::EmptySourcePath {
+                    shader,
+                    stage,
+                },
+            );
+        }
+
+        let file_path = self.source_file_path(&source_path);
+        let source_text = std::fs::read_to_string(&file_path).map_err(|error| {
+            DesktopGraphicsOpenGlBackendShaderSourceLoadError::ReadSource {
+                shader,
+                stage,
+                source_path: source_path.clone(),
+                file_path: file_path.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        let source_text = opengl_backend_normalize_shader_source(&source_text);
+        if source_text.trim().is_empty() {
+            return Err(
+                DesktopGraphicsOpenGlBackendShaderSourceLoadError::EmptySource {
+                    shader,
+                    stage,
+                    source_path,
+                    file_path,
+                },
+            );
+        }
+
+        Ok(DesktopGraphicsOpenGlBackendShaderSourceFile {
+            shader,
+            stage,
+            source_path,
+            file_path,
+            source_text,
+        })
+    }
+
+    pub fn load_program_sources(
+        &self,
+        task: &ShaderLoadTask,
+    ) -> Result<
+        DesktopGraphicsOpenGlBackendShaderProgramSourceFiles,
+        DesktopGraphicsOpenGlBackendShaderSourceLoadError,
+    > {
+        Ok(DesktopGraphicsOpenGlBackendShaderProgramSourceFiles {
+            shader: task.shader,
+            program_key: opengl_backend_shader_program_key(task.shader),
+            vertex: self.load_stage_source(
+                task.shader,
+                DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                task.source.vertex_path(),
+            )?,
+            fragment: self.load_stage_source(
+                task.shader,
+                DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                task.source.fragment_path(),
+            )?,
+        })
     }
 }
 
@@ -14471,6 +14603,108 @@ mod tests {
         );
         assert_eq!(executor.cache.shaders.len(), 0);
         assert_eq!(executor.cache.programs.len(), ShaderId::INIT_ORDER.len());
+    }
+
+    fn desktop_shader_test_asset_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "mindustry-shader-source-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("shaders")).unwrap();
+        root
+    }
+
+    fn write_shader_source(root: &std::path::Path, source_path: &str, text: &str) {
+        let path = root.join(source_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_source_loader_reads_vertex_and_fragment_sources() {
+        let root = desktop_shader_test_asset_root("success");
+        write_shader_source(
+            &root,
+            "shaders/planet.vert",
+            "attribute vec3 a_position;\r\nvoid main(){}\r\n",
+        );
+        write_shader_source(
+            &root,
+            "shaders/mesh.frag",
+            "void main(){ gl_FragColor = vec4(1.0); }\r\n",
+        );
+        let task = ShaderCatalog::init_plan()
+            .tasks
+            .into_iter()
+            .find(|task| task.shader == ShaderId::Mesh)
+            .unwrap();
+        let loader = super::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(&root);
+        let sources = loader.load_program_sources(&task).unwrap();
+
+        assert_eq!(sources.shader, ShaderId::Mesh);
+        assert_eq!(sources.program_key, "shader:Mesh");
+        assert_eq!(sources.vertex.source_path, task.source.vertex_path());
+        assert_eq!(sources.fragment.source_path, task.source.fragment_path());
+        assert_eq!(sources.vertex.file_path, root.join("shaders/planet.vert"));
+        assert_eq!(sources.fragment.file_path, root.join("shaders/mesh.frag"));
+        assert_eq!(
+            sources.vertex.source_text,
+            "attribute vec3 a_position;\nvoid main(){}\n"
+        );
+        assert!(sources.fragment.source_text.contains("gl_FragColor"));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shader_source_loader_reports_missing_empty_and_empty_path() {
+        let root = desktop_shader_test_asset_root("errors");
+        write_shader_source(&root, "shaders/planet.vert", "void main(){}\n");
+        let task = ShaderCatalog::init_plan()
+            .tasks
+            .into_iter()
+            .find(|task| task.shader == ShaderId::Mesh)
+            .unwrap();
+        let loader = super::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(&root);
+
+        assert!(matches!(
+            loader.load_program_sources(&task),
+            Err(super::DesktopGraphicsOpenGlBackendShaderSourceLoadError::ReadSource {
+                shader: ShaderId::Mesh,
+                stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                ref source_path,
+                ..
+            }) if source_path == "shaders/mesh.frag"
+        ));
+
+        write_shader_source(&root, "shaders/mesh.frag", "\r\n");
+        assert!(matches!(
+            loader.load_program_sources(&task),
+            Err(super::DesktopGraphicsOpenGlBackendShaderSourceLoadError::EmptySource {
+                shader: ShaderId::Mesh,
+                stage: super::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+                ref source_path,
+                ..
+            }) if source_path == "shaders/mesh.frag"
+        ));
+
+        assert!(matches!(
+            loader.load_stage_source(
+                ShaderId::Mesh,
+                super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                ""
+            ),
+            Err(
+                super::DesktopGraphicsOpenGlBackendShaderSourceLoadError::EmptySourcePath {
+                    shader: ShaderId::Mesh,
+                    stage: super::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                }
+            )
+        ));
     }
 
     #[test]

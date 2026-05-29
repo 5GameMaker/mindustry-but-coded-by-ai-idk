@@ -14037,3 +14037,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shader source 文本读取/预处理与 compile/link error log 仍未接入；
   - program handle 还没有和 draw/apply command 的真实 `UseProgram` handle 合流；
   - 当前总体迁移约 31.1%，仍未达到完整可玩。
+
+## 12.455 Shader source loader 接入
+
+- 2026-05-29：继续把 shader lifecycle command 的 `source_path` 推进到可读取的 shader source 文本输入，为后续真实 `glShaderSource` 与 compile/link error log 做准备。当前不硬编码参考仓库路径，而是通过可配置 asset root 加载 `ShaderSource::vertex_path()` / `fragment_path()` 对应文件。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendShaderSourceFile`，记录 shader、stage、source path、实际文件路径与规范化 source text；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderProgramSourceFiles`，聚合一个 shader program 的 vertex/fragment source；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderSourceLoadError`，区分空 source path、读取失败、空 source；
+    - 新增 `DesktopGraphicsOpenGlBackendShaderSourceLoader`，按 asset root + `shaders/<file>` 读取 UTF-8 shader 文本；
+    - source loader 会把 CRLF/CR 规范化为 LF，作为最小预处理输入层；
+    - 新增测试覆盖成功读取 `Mesh` 的 `shaders/planet.vert` / `shaders/mesh.frag`、缺失 fragment、空 fragment、空路径错误。
+- 迁移意义：
+  - shader lifecycle 现在从 source path 推进到真实 source text 输入，后续 real GL executor 可以把该文本交给 `glShaderSource`；
+  - 继续保持 `ShaderCatalog::init_plan/reload_plan -> lifecycle command -> resolved lifecycle command -> source loader` 主链路；
+  - 不依赖废案目录，也不把上游参考路径硬编码进 runtime。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shader_source_loader --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+  - `cargo fmt --check`
+  - `git diff --check`
+- 仍未完成：
+  - Arc `Shader.prepend` / 平台宏 / GLES precision 等完整预处理语义尚未接入；
+  - source loader 尚未与 resolved lifecycle executor 合并成真实 compile/link 执行器；
+  - compile/link error log 仍未记录；
+  - 当前总体迁移约 31.2%，仍未达到完整可玩。
