@@ -15262,3 +15262,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java minimap 的精确文本布局、ping 双层文本、fog shader/texture、spawn icon/pulse、indicator 颜色插值和 `MapObjectives` 多态 marker 仍需继续迁移；
   - entity/world draw、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.0%，仍未达到完整可玩。
+
+## 413. 最新闭环记录：minimap indicator 偏移与颜色插值语义
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/minimap_renderer.rs`
+    - `MinimapOverlayCommand::Indicator` 新增 world-space `x/y`；
+    - `overlay_plan(...)` 现在按 Java `Lines.square((ix + 0.5f + offset) * tilesize, ...)` 使用 `block_offset_tiles` 修正多格建筑 indicator 中心；
+    - indicator 仍保留 `tile`、`radius`、`color_from/color_to`，为后续更精确 marker/indicator plan 接入留字段。
+  - `desktop/src/lib.rs`
+    - 新增 `minimap_overlay_lerp_color(...)`；
+    - indicator `DrawCircle` 使用 `color_from -> color_to` 按 `time / 70f` 插值，不再把该值误当最终 alpha；
+    - minimap render pass 回归测试覆盖 indicator 偏移后的屏幕坐标和插值颜色。
+- 迁移意义：
+  - 对齐 Java `MinimapRenderer` 中 indicator 的多格建筑 offset 与 orange→scarlet 时间插值；
+  - indicator 继续进入 `RenderPassKind::Minimap` / OpenGL backend 主链路，没有形成新的孤立 helper。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core overlay_plan_emits_full_view_entities_fog_spawns_camera_and_markers`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass --features opengl-native-runtime`
+- 仍未完成：
+  - minimap ping 的 diamond/triangle 几何、spawn icon/pulse、fog shader/texture、`MapObjectives` 多态 marker 仍需继续迁移；
+  - entity/world draw、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.1%，仍未达到完整可玩。

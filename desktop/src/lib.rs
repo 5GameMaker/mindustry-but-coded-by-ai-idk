@@ -165,6 +165,18 @@ fn minimap_overlay_world_len_to_screen(plan: &MinimapOverlayPlan, value: f32) ->
     }
 }
 
+fn minimap_overlay_lerp_color(from: u32, to: u32, progress: f32) -> [f32; 4] {
+    let from = rgba8888_to_render_color(from, 1.0);
+    let to = rgba8888_to_render_color(to, 1.0);
+    let progress = progress.clamp(0.0, 1.0);
+    [
+        from[0] + (to[0] - from[0]) * progress,
+        from[1] + (to[1] - from[1]) * progress,
+        from[2] + (to[2] - from[2]) * progress,
+        from[3] + (to[3] - from[3]) * progress,
+    ]
+}
+
 fn minimap_overlay_world_rect_to_screen(
     plan: &MinimapOverlayPlan,
     screen_rect: RenderRect,
@@ -321,23 +333,22 @@ fn minimap_overlay_render_pass(
                 }
             }
             MinimapOverlayCommand::Indicator {
-                tile,
+                x,
+                y,
                 radius,
                 alpha,
                 color_from,
+                color_to,
                 ..
             } => {
-                let world_x = tile.x as f32 * 8.0 + 4.0;
-                let world_y = tile.y as f32 * 8.0 + 4.0;
-                let Some(center) =
-                    minimap_overlay_world_to_screen(plan, screen_rect, world_x, world_y)
+                let Some(center) = minimap_overlay_world_to_screen(plan, screen_rect, *x, *y)
                 else {
                     continue;
                 };
                 pass.push(RenderCommand::draw_circle(
                     center,
                     minimap_overlay_world_len_to_screen(plan, *radius),
-                    rgba8888_to_render_color(*color_from, *alpha),
+                    minimap_overlay_lerp_color(*color_from, *color_to, *alpha),
                     false,
                     Layer::END,
                 ));
@@ -13123,8 +13134,8 @@ mod tests {
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
-        MinimapCamera, MinimapEntitySnapshot, MinimapFullUpdatePlan, MinimapMarkerSnapshot,
-        MinimapOverlayInput, MinimapPlayerSnapshot, MinimapTextureFramePlan,
+        MinimapCamera, MinimapEntitySnapshot, MinimapFullUpdatePlan, MinimapIndicatorSnapshot,
+        MinimapMarkerSnapshot, MinimapOverlayInput, MinimapPlayerSnapshot, MinimapTextureFramePlan,
         MinimapTexturePixelUpdate, MinimapTextureSize, MinimapTilePos, PageType,
         ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode,
         RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan, RenderPass,
@@ -14952,6 +14963,7 @@ mod tests {
         let mut minimap_input = sample_minimap_overlay_input(true);
         minimap_input.net_active = true;
         minimap_input.show_pings = true;
+        minimap_input.global_time = 15.0;
         minimap_input.units.push(MinimapEntitySnapshot {
             entity_id: 42,
             x: 64.0,
@@ -14980,6 +14992,11 @@ mod tests {
             y: 48.0,
             label: "A".into(),
             minimap: true,
+        });
+        minimap_input.indicators.push(MinimapIndicatorSnapshot {
+            tile: MinimapTilePos::new(2, 3),
+            time: 35.0,
+            block_offset_tiles: 1.0,
         });
 
         let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
@@ -15031,6 +15048,20 @@ mod tests {
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::DrawText { text, .. } if text == "A")));
+        let expected_indicator_color =
+            super::minimap_overlay_lerp_color(0xffa500ff, 0xff2400ff, 0.5);
+        assert!(minimap_pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawCircle {
+                    center,
+                    color,
+                    filled: false,
+                    ..
+                } if *center == RenderPoint::new(28.0, 36.0)
+                    && *color == expected_indicator_color
+            )
+        }));
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         renderer.render_graphics_frame(&frame);

@@ -262,6 +262,8 @@ pub enum MinimapOverlayCommand {
     CameraBounds(MinimapRect),
     Indicator {
         tile: MinimapTilePos,
+        x: f32,
+        y: f32,
         radius: f32,
         alpha: f32,
         color_from: u32,
@@ -648,8 +650,12 @@ impl MinimapRendererState {
         let fin = (input.global_time / 30.0) % 1.0;
         let rad = fin * 5.0 + self.tile_size - 2.0;
         for indicator in input.indicators {
+            let x = (indicator.tile.x as f32 + 0.5 + indicator.block_offset_tiles) * self.tile_size;
+            let y = (indicator.tile.y as f32 + 0.5 + indicator.block_offset_tiles) * self.tile_size;
             commands.push(MinimapOverlayCommand::Indicator {
                 tile: indicator.tile,
+                x,
+                y,
                 radius: rad * inverse_scale.max(1.0),
                 alpha: (indicator.time / 70.0).clamp(0.0, 1.0),
                 color_from: 0xffa500ff,
@@ -1084,7 +1090,7 @@ mod tests {
                 indicators: vec![MinimapIndicatorSnapshot {
                     tile: MinimapTilePos::new(4, 5),
                     time: 35.0,
-                    block_offset_tiles: 0.0,
+                    block_offset_tiles: 1.0,
                 }],
                 markers: vec![MinimapMarkerSnapshot {
                     id: 9,
@@ -1125,10 +1131,20 @@ mod tests {
             .commands
             .iter()
             .any(|cmd| matches!(cmd, MinimapOverlayCommand::CameraBounds(_))));
-        assert!(plan
-            .commands
-            .iter()
-            .any(|cmd| matches!(cmd, MinimapOverlayCommand::Indicator { .. })));
+        assert!(plan.commands.iter().any(|cmd| matches!(
+            cmd,
+            MinimapOverlayCommand::Indicator {
+                tile,
+                x,
+                y,
+                alpha: 0.5,
+                color_from: 0xffa500ff,
+                color_to: 0xff2400ff,
+                ..
+            } if *tile == MinimapTilePos::new(4, 5)
+                && (*x - 44.0).abs() < f32::EPSILON
+                && (*y - 52.0).abs() < f32::EPSILON
+        )));
         assert!(plan
             .commands
             .iter()

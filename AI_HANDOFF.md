@@ -12570,3 +12570,21 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续精确补 Java minimap：真实 fog shader/texture、spawn icon/pulse、ping 双层文字、indicator block offset/color interpolation、MapObjectives 多态 marker；
   2. 按渲染优先级推进 entity/world draw：Unit/Weapon/Bullet/Weather/Fire/Puddle/BlockRenderer 到 `RenderPass`/`RenderCommand` 主链路；
   3. 每个闭环继续更新 `README.md` 百分比、`MIGRATION.md`、本文件，中文提交并推送 `origin main`。
+
+### 2026-05-30：minimap indicator 偏移与颜色插值语义
+
+- 当前整体完成度：约 **40.1%**。
+- 已完成：
+  - `MinimapOverlayCommand::Indicator` 新增 world-space `x/y`，仍保留 tile 与颜色端点；
+  - `MinimapRendererState::overlay_plan(...)` 现在使用 `block_offset_tiles` 计算 `(tile + 0.5 + offset) * tile_size`，对齐 Java 多格建筑 indicator 偏移；
+  - `minimap_overlay_render_pass(...)` 使用 `color_from -> color_to` 插值生成 indicator 颜色，不再把 `time / 70f` 当 alpha；
+  - core/desktop 回归测试覆盖 indicator 坐标偏移与插值颜色。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core overlay_plan_emits_full_view_entities_fog_spawns_camera_and_markers`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass --features opengl-native-runtime`
+- 下一步：
+  1. minimap ping：补 Java diamond + triangle 指示器和 pingText/name 双层布局；
+  2. minimap spawn：补 `Icon.units`、drop zone circle、pulse circle；
+  3. 然后回到 entity/world draw 主线，优先 Unit/Bullet/Weather/Fire/Puddle 的 plan→pass 接入。
