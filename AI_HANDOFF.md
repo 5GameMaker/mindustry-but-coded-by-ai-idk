@@ -9613,3 +9613,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 给 `DesktopGraphicsLiveBackendRenderTargetEventKind` 补 `Blit`/`Resolve` 类事件，明确 Java `effectBuffer`、`shadows`、`dark` 的回填语义；
   2. 开始设计真实 OpenGL/glow backend 前，需要按开发规则确认新增 `winit/glow` 依赖；
   3. 继续 TextureAtlas GPU upload 与 ShaderCatalog compile/bind seam，避免 target 生命周期孤立。
+
+---
+
+## 292. 最新闭环记录：显式 RenderPass resolve_target 与 Resolve 事件
+
+- 本轮总体进度更新：约 **24.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/render_engine.rs`
+    - `RenderPass` 新增 `resolve_target: Option<RenderTarget>`，默认 `None`；
+    - 新增 builder `with_resolve_target(...)`；
+    - 新增/补充测试，锁定“resolve 必须显式声明，不从非 Screen target 自动推导”。
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsPassExecutionTrace` 和 `DesktopGraphicsLiveBackendRenderTargetTrace` 透传 `resolve_target`；
+    - `DesktopGraphicsLiveBackendRenderTargetEventKind` 新增 `Resolve`；
+    - `render_target_traces` 仅在 pass 显式设置 `resolve_target` 时追加 `Resolve` 事件；
+    - `DesktopGraphicsLiveBackendExecutionState` 新增 `resolve_target_events_emitted` 计数；
+    - 新增测试覆盖中间 `Texture("minimap-buffer")` 不自动 resolve、`Buffer("effect-buffer") -> Screen` 显式 resolve。
+  - `README.md` / `MIGRATION.md`
+    - 总体完成度更新到 **24.3%**；
+    - 记录禁止自动 Blit、后续需要补 `ResolveKind` 来区分 Java `effectBuffer.blit(shader)` / `Draw.rect(texture)` / `Draw.fbo(texture)`。
+- Java 对照要点：
+  - `Renderer.effectBuffer` 与 `CacheLayer.ShaderLayer` 使用 `begin -> end -> blit(shader)`；
+  - `BlockRenderer.shadows/dark` 是先写离屏缓冲，再通过 shader/rect/fbo 采样回填；
+  - 所以 Rust 侧把回填建模为 pass 生命周期的显式 `resolve_target`，而不是把 `RenderTarget::Texture/Buffer` 直接等同于“必须 Blit”。
+- 已验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core render_pass_resolve_target -- --nocapture`
+  - `cargo test -p mindustry-desktop render_target -- --nocapture`
+  - `cargo test -p mindustry-desktop`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 增加 `ResolveKind`（例如 `ShaderBlit` / `DrawRectSample` / `DrawFboSample`）以区分 Java 三类回填核；
+  2. 将 CacheLayer 的 `target/blit_target/needs_fbo` 映射到 `RenderPass.resolve_target + ResolveKind`；
+  3. 继续推进 TextureAtlas GPU upload / ShaderCatalog compile-bind，为真实 OpenGL backend 做准备。

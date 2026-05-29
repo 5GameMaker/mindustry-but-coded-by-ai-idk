@@ -373,6 +373,7 @@ pub struct DesktopGraphicsPassExecutionTrace {
     pub kind: RenderPassKind,
     pub order: i32,
     pub target: RenderTarget,
+    pub resolve_target: Option<RenderTarget>,
     pub command_count: usize,
     pub commands: Vec<RenderCommand>,
     pub command_trace: Vec<DesktopGraphicsCommandExecutionTrace>,
@@ -454,6 +455,7 @@ pub struct DesktopGraphicsLiveBackendRenderCommandTrace {
 pub enum DesktopGraphicsLiveBackendRenderTargetEventKind {
     Begin,
     End,
+    Resolve,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -462,6 +464,7 @@ pub struct DesktopGraphicsLiveBackendRenderTargetTrace {
     pub pass_kind: RenderPassKind,
     pub pass_order: i32,
     pub target: RenderTarget,
+    pub resolve_target: Option<RenderTarget>,
     pub event: DesktopGraphicsLiveBackendRenderTargetEventKind,
     pub command_count: usize,
 }
@@ -683,6 +686,7 @@ pub struct DesktopGraphicsLiveBackendExecutionState {
     pub backend_render_commands_emitted: usize,
     pub last_backend_render_command: Option<DesktopGraphicsLiveBackendRenderCommandTrace>,
     pub backend_target_events_emitted: usize,
+    pub resolve_target_events_emitted: usize,
     pub screen_target_events_emitted: usize,
     pub texture_target_events_emitted: usize,
     pub buffer_target_events_emitted: usize,
@@ -817,6 +821,9 @@ impl DesktopGraphicsExecutionTrace {
         for trace in &self.render_target_traces {
             sink.consume_render_target_trace(trace.clone());
             state.backend_target_events_emitted += 1;
+            if trace.event == DesktopGraphicsLiveBackendRenderTargetEventKind::Resolve {
+                state.resolve_target_events_emitted += 1;
+            }
             match &trace.target {
                 RenderTarget::Screen => state.screen_target_events_emitted += 1,
                 RenderTarget::Texture(_) => state.texture_target_events_emitted += 1,
@@ -863,6 +870,7 @@ impl DesktopGraphicsExecutionTrace {
 
         let render_target_state = self.drive_render_target_sink(render_target_sink);
         state.backend_target_events_emitted = render_target_state.backend_target_events_emitted;
+        state.resolve_target_events_emitted = render_target_state.resolve_target_events_emitted;
         state.screen_target_events_emitted = render_target_state.screen_target_events_emitted;
         state.texture_target_events_emitted = render_target_state.texture_target_events_emitted;
         state.buffer_target_events_emitted = render_target_state.buffer_target_events_emitted;
@@ -994,6 +1002,7 @@ impl DesktopGraphicsExecutionTrace {
                                 kind: pass.kind.clone(),
                                 order: pass.order,
                                 target: pass.target.clone(),
+                                resolve_target: pass.resolve_target.clone(),
                                 command_count: pass.commands.len(),
                                 commands: pass.commands.clone(),
                                 command_trace,
@@ -1009,19 +1018,24 @@ impl DesktopGraphicsExecutionTrace {
             .iter()
             .enumerate()
             .flat_map(|(pass_index, pass)| {
-                [
+                let mut events = vec![
                     DesktopGraphicsLiveBackendRenderTargetEventKind::Begin,
                     DesktopGraphicsLiveBackendRenderTargetEventKind::End,
-                ]
-                .into_iter()
-                .map(move |event| DesktopGraphicsLiveBackendRenderTargetTrace {
-                    pass_index,
-                    pass_kind: pass.kind.clone(),
-                    pass_order: pass.order,
-                    target: pass.target.clone(),
-                    event,
-                    command_count: pass.command_count,
-                })
+                ];
+                if pass.resolve_target.is_some() {
+                    events.push(DesktopGraphicsLiveBackendRenderTargetEventKind::Resolve);
+                }
+                events
+                    .into_iter()
+                    .map(move |event| DesktopGraphicsLiveBackendRenderTargetTrace {
+                        pass_index,
+                        pass_kind: pass.kind.clone(),
+                        pass_order: pass.order,
+                        target: pass.target.clone(),
+                        resolve_target: pass.resolve_target.clone(),
+                        event,
+                        command_count: pass.command_count,
+                    })
             })
             .collect();
 
@@ -7113,6 +7127,12 @@ mod tests {
         assert_eq!(
             renderer
                 .last_live_backend_state
+                .resolve_target_events_emitted,
+            0
+        );
+        assert_eq!(
+            renderer
+                .last_live_backend_state
                 .buffer_target_events_emitted,
             2
         );
@@ -7925,6 +7945,97 @@ mod tests {
                     1,
                 ),
             ]
+        );
+        assert_eq!(state.last_backend_target_event.as_ref(), sink.traces.last());
+    }
+
+    #[test]
+    fn desktop_graphics_render_target_sink_resolves_only_explicit_targets() {
+        #[derive(Default)]
+        struct RecordingLiveBackendRenderTargetSink {
+            traces: Vec<DesktopGraphicsLiveBackendRenderTargetTrace>,
+        }
+
+        impl DesktopGraphicsLiveBackendRenderTargetSink for RecordingLiveBackendRenderTargetSink {
+            fn consume_render_target_trace(
+                &mut self,
+                trace: DesktopGraphicsLiveBackendRenderTargetTrace,
+            ) {
+                self.traces.push(trace);
+            }
+        }
+
+        let viewport = RenderViewport::new(0.0, 0.0, 80.0, 80.0);
+        let camera = RenderCamera::new(RenderPoint::new(40.0, 40.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(36, RenderSize::new(80.0, 80.0), camera, viewport);
+
+        let mut unresolved = RenderPass::new(RenderPassKind::Minimap)
+            .with_order(7)
+            .with_target(RenderTarget::Texture("minimap-buffer".into()));
+        unresolved.push(RenderCommand::draw_sprite(
+            "minimap",
+            RenderRect::new(0.0, 0.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            7.0,
+        ));
+        render_frame.push_pass(unresolved);
+
+        let mut resolved = RenderPass::new(RenderPassKind::Lighting)
+            .with_order(8)
+            .with_target(RenderTarget::Buffer("effect-buffer".into()))
+            .with_resolve_target(RenderTarget::Screen);
+        resolved.push(RenderCommand::custom(
+            "shader-blit-placeholder",
+            vec![RenderProperty::new("shader", "shield")],
+        ));
+        render_frame.push_pass(resolved);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/minimap.png"]),
+        };
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        let mut sink = RecordingLiveBackendRenderTargetSink::default();
+        let state = trace.drive_render_target_sink(&mut sink);
+
+        assert_eq!(state.render_passes_visited, 2);
+        assert_eq!(state.backend_target_events_emitted, 5);
+        assert_eq!(state.resolve_target_events_emitted, 1);
+        assert_eq!(
+            sink.traces
+                .iter()
+                .filter(|trace| {
+                    trace.event == DesktopGraphicsLiveBackendRenderTargetEventKind::Resolve
+                })
+                .collect::<Vec<_>>(),
+            vec![&DesktopGraphicsLiveBackendRenderTargetTrace {
+                pass_index: 1,
+                pass_kind: RenderPassKind::Lighting,
+                pass_order: 8,
+                target: RenderTarget::Buffer("effect-buffer".into()),
+                resolve_target: Some(RenderTarget::Screen),
+                event: DesktopGraphicsLiveBackendRenderTargetEventKind::Resolve,
+                command_count: 1,
+            }]
+        );
+        assert_eq!(
+            sink.traces
+                .iter()
+                .filter(|trace| trace.pass_index == 0)
+                .map(|trace| trace.event)
+                .collect::<Vec<_>>(),
+            vec![
+                DesktopGraphicsLiveBackendRenderTargetEventKind::Begin,
+                DesktopGraphicsLiveBackendRenderTargetEventKind::End,
+            ],
+            "non-screen targets must not auto-resolve without explicit resolve_target"
         );
         assert_eq!(state.last_backend_target_event.as_ref(), sink.traces.last());
     }

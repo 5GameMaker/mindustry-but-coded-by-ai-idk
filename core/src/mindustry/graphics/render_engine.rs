@@ -654,6 +654,7 @@ pub struct RenderPass {
     pub kind: RenderPassKind,
     pub order: i32,
     pub target: RenderTarget,
+    pub resolve_target: Option<RenderTarget>,
     pub viewport: Option<RenderViewport>,
     pub camera: Option<RenderCamera>,
     pub commands: Vec<RenderCommand>,
@@ -666,6 +667,7 @@ impl RenderPass {
             kind,
             order,
             target: RenderTarget::default(),
+            resolve_target: None,
             viewport: None,
             camera: None,
             commands: Vec::new(),
@@ -679,6 +681,11 @@ impl RenderPass {
 
     pub fn with_target(mut self, target: RenderTarget) -> Self {
         self.target = target;
+        self
+    }
+
+    pub fn with_resolve_target(mut self, target: RenderTarget) -> Self {
+        self.resolve_target = Some(target);
         self
     }
 
@@ -1145,6 +1152,7 @@ mod tests {
         assert_eq!(pass.kind.label(), "overlay");
         assert_eq!(pass.order, 123);
         assert_eq!(pass.target, RenderTarget::Buffer("overlay".into()));
+        assert_eq!(pass.resolve_target, None);
         assert_eq!(
             pass.effective_viewport(RenderViewport::default()),
             clip.into()
@@ -1217,6 +1225,16 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn render_pass_resolve_target_models_explicit_backend_blit() {
+        let pass = RenderPass::new(RenderPassKind::Lighting)
+            .with_target(RenderTarget::Texture("effect-buffer".into()))
+            .with_resolve_target(RenderTarget::Screen);
+
+        assert_eq!(pass.target, RenderTarget::Texture("effect-buffer".into()));
+        assert_eq!(pass.resolve_target, Some(RenderTarget::Screen));
     }
 
     #[test]
