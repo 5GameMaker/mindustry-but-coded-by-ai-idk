@@ -184,6 +184,7 @@ pub fn landing_pad_ready_to_queue(
 pub struct AcceleratorState {
     pub progress: f32,
     pub launching: bool,
+    pub launch_time: f32,
 }
 
 impl Default for AcceleratorState {
@@ -191,6 +192,7 @@ impl Default for AcceleratorState {
         Self {
             progress: 0.0,
             launching: false,
+            launch_time: 0.0,
         }
     }
 }
@@ -258,6 +260,24 @@ pub fn accelerator_accept_item(
 pub fn accelerator_consume_launch(state: &mut AcceleratorState) {
     state.progress = 0.0;
     state.launching = true;
+    state.launch_time = 0.0;
+}
+
+pub fn accelerator_update_launch_time(
+    state: &mut AcceleratorState,
+    delta: f32,
+    charge_duration: f32,
+) -> f32 {
+    if state.launching {
+        state.launch_time = (state.launch_time + delta.max(0.0)).min(charge_duration.max(0.0));
+    } else {
+        state.launch_time = 0.0;
+    }
+    state.launch_time
+}
+
+pub fn accelerator_launch_charge_ratio(state: &AcceleratorState, charge_duration: f32) -> f32 {
+    clamp01(state.launch_time / charge_duration)
 }
 
 pub fn write_launch_pad_state<W: Write>(write: &mut W, state: &LaunchPadState) -> io::Result<()> {
@@ -312,6 +332,7 @@ pub fn read_accelerator_state<R: Read>(read: &mut R, revision: u8) -> io::Result
         Ok(AcceleratorState {
             progress: read_f32(read)?,
             launching: false,
+            launch_time: 0.0,
         })
     } else {
         Ok(AcceleratorState::default())
@@ -483,6 +504,20 @@ mod tests {
         accelerator_consume_launch(&mut state);
         assert_eq!(state.progress, 0.0);
         assert!(state.launching);
+        assert_eq!(state.launch_time, 0.0);
+        assert_eq!(
+            accelerator_update_launch_time(&mut state, 55.0, DEFAULT_ACCELERATOR_CHARGE_DURATION),
+            55.0
+        );
+        assert_eq!(
+            accelerator_launch_charge_ratio(&state, DEFAULT_ACCELERATOR_CHARGE_DURATION),
+            0.25
+        );
+        state.launching = false;
+        assert_eq!(
+            accelerator_update_launch_time(&mut state, 1.0, DEFAULT_ACCELERATOR_CHARGE_DURATION),
+            0.0
+        );
     }
 
     #[test]
@@ -504,6 +539,7 @@ mod tests {
         let accelerator = AcceleratorState {
             progress: 0.75,
             launching: true,
+            launch_time: 33.0,
         };
         let mut bytes = Vec::new();
         write_accelerator_state(&mut bytes, &accelerator).unwrap();
@@ -511,7 +547,8 @@ mod tests {
             read_accelerator_state(&mut bytes.as_slice(), 1).unwrap(),
             AcceleratorState {
                 progress: 0.75,
-                launching: false
+                launching: false,
+                launch_time: 0.0
             }
         );
     }

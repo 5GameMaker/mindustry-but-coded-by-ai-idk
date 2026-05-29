@@ -10,13 +10,13 @@ use crate::mindustry::{
 
 use super::{
     accelerator_can_launch, accelerator_consume_launch, accelerator_is_core_built,
-    accelerator_maximum_accepted, accelerator_update_progress, landing_pad_accept_item,
-    landing_pad_handle_landing, landing_pad_ready_to_queue, landing_pad_update_arrival,
-    landing_pad_update_cooldown, launch_pad_accept_item, launch_pad_progress,
-    launch_pad_should_consume, read_accelerator_state, read_landing_pad_state,
-    read_launch_pad_state, write_accelerator_state, write_landing_pad_state,
-    write_launch_pad_state, AcceleratorState, LandingPadArrivalStep, LandingPadState,
-    LaunchPadState, LaunchPadStep, DEFAULT_ACCELERATOR_BUILD_DURATION,
+    accelerator_launch_charge_ratio, accelerator_maximum_accepted, accelerator_update_launch_time,
+    accelerator_update_progress, landing_pad_accept_item, landing_pad_handle_landing,
+    landing_pad_ready_to_queue, landing_pad_update_arrival, landing_pad_update_cooldown,
+    launch_pad_accept_item, launch_pad_progress, launch_pad_should_consume, read_accelerator_state,
+    read_landing_pad_state, read_launch_pad_state, write_accelerator_state,
+    write_landing_pad_state, write_launch_pad_state, AcceleratorState, LandingPadArrivalStep,
+    LandingPadState, LaunchPadState, LaunchPadStep, DEFAULT_ACCELERATOR_BUILD_DURATION,
     DEFAULT_ACCELERATOR_CHARGE_DURATION, DEFAULT_ACCELERATOR_LAUNCH_DURATION,
     DEFAULT_LANDING_ARRIVAL_DURATION, DEFAULT_LANDING_COOLDOWN_TIME,
 };
@@ -250,6 +250,14 @@ impl Accelerator {
         accelerator_update_progress(state, delta, efficiency, self.build_duration)
     }
 
+    pub fn update_launch_time(&self, state: &mut AcceleratorState, delta: f32) -> f32 {
+        accelerator_update_launch_time(state, delta, self.charge_duration)
+    }
+
+    pub fn launch_charge_ratio(&self, state: &AcceleratorState) -> f32 {
+        accelerator_launch_charge_ratio(state, self.charge_duration)
+    }
+
     pub fn is_core_built(&self, progress: f32) -> bool {
         accelerator_is_core_built(progress)
     }
@@ -383,6 +391,8 @@ mod tests {
         assert!(!accelerator.is_core_built(accel_state.progress));
         accelerator.consume_launch(&mut accel_state);
         assert!(accel_state.launching);
+        assert_eq!(accelerator.update_launch_time(&mut accel_state, 110.0), 110.0);
+        assert_eq!(accelerator.launch_charge_ratio(&accel_state), 0.5);
 
         let mut bytes = Vec::new();
         launch

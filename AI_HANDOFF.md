@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **26.5%**。
+- 当前总体迁移完成度：约 **26.6%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10209,3 +10209,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 为 `AcceleratorState` 补 Java `launchTime` 等价 runtime 更新链，替代当前 `progress` 作为 charge ratio 的过渡输入；
   2. 继续把 fullIcon candidate 绑定到真实 atlas/backend region handle；
   3. 真实 OpenGL backend 后续需要实现 `mixcol` 与 additive light 的实际 GPU 状态。
+
+---
+
+## 315. 最新闭环记录：Accelerator launchTime runtime 字段接入
+
+- 本轮总体进度更新：约 **26.6%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/world/blocks/campaign/mod.rs`
+    - `AcceleratorState` 新增 `launch_time`；
+    - 新增 `accelerator_update_launch_time(...)` 与 `accelerator_launch_charge_ratio(...)`；
+    - `accelerator_consume_launch(...)` 重置 `launch_time`；
+    - codec 回读保持 `launch_time = 0.0`，避免破坏现有 Java payload 兼容。
+  - `core/src/mindustry/world/blocks/campaign/shells.rs`
+    - `Accelerator` shell 暴露 `update_launch_time(...)` 与 `launch_charge_ratio(...)`。
+  - `desktop/src/lib.rs`
+    - Accelerator launching 分支 charge ratio 改为 `launch_time / charge_duration`；
+    - launching 测试改用 `launch_time = 110.0` 对齐默认 `charge_duration = 220.0`。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core accelerator --lib`
+  - `cargo test -p mindustry-desktop accelerator_launching --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 把 `launch_time` 接进完整 `LaunchAnimator` / renderer land-time 更新链；
+  2. 继续推进真实 OpenGL backend 对 `mixcol`、additive light、fullIcon atlas region 的执行；
+  3. 后续清理 `Accelerator.launching` 相关 custom marker，让它们变成真实 GPU 状态而不是仅 trace/plan seam。

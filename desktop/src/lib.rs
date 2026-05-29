@@ -2160,8 +2160,11 @@ fn accelerator_launch_block_build_region_symbols(
     Some(block_build_region_symbols_from_content_block(launch_block))
 }
 
-fn accelerator_launch_charge_ratio(state: &AcceleratorState) -> f32 {
-    state.progress.clamp(0.0, 1.0)
+fn accelerator_launch_charge_ratio(state: &AcceleratorState, charge_duration: f32) -> f32 {
+    if charge_duration <= 0.0 {
+        return 0.0;
+    }
+    (state.launch_time / charge_duration).clamp(0.0, 1.0)
 }
 
 fn accelerator_launch_overlay_alpha(charge_ratio: f32) -> f32 {
@@ -3290,6 +3293,10 @@ impl DesktopLauncher {
             };
 
             let accelerator_size = content_block.base().size.max(1).min(u8::MAX as i32) as u8;
+            let charge_duration = match content_block {
+                BlockDef::Campaign(campaign) => campaign.charge_duration,
+                _ => 0.0,
+            };
             let launch_size = launch_block.base().size.max(1) as f32 * tile_size_world;
             let building_coord = TileCoord::new(
                 point2_x(runtime_tile_pos) as i32,
@@ -3297,7 +3304,7 @@ impl DesktopLauncher {
             );
             let center = desktop_building_center(building_coord, accelerator_size, tile_size_world);
             let rect = RenderRect::from_center(center, launch_size, launch_size);
-            let charge_ratio = accelerator_launch_charge_ratio(state);
+            let charge_ratio = accelerator_launch_charge_ratio(state, charge_duration);
             let overlay_alpha = accelerator_launch_overlay_alpha(charge_ratio);
             let light_radius = launch_block.base().size.max(1) as f32 * tile_size_world;
 
@@ -6906,6 +6913,7 @@ mod tests {
             GameRuntimeCampaignBlockState::Accelerator(AcceleratorState {
                 progress: 0.6,
                 launching: false,
+                launch_time: 0.0,
             }),
         );
 
@@ -6956,8 +6964,9 @@ mod tests {
         launcher.runtime.campaign_runtime_states.insert(
             tile_pos,
             GameRuntimeCampaignBlockState::Accelerator(AcceleratorState {
-                progress: 0.5,
+                progress: 1.0,
                 launching: true,
+                launch_time: 110.0,
             }),
         );
         let expected_icon = super::block_full_icon_region_symbol(

@@ -21562,6 +21562,7 @@ mod tests {
             GameRuntimeCampaignBlockState::Accelerator(AcceleratorState {
                 progress: 0.6,
                 launching: false,
+                launch_time: 0.0,
             }),
         );
 
@@ -31415,6 +31416,7 @@ mod tests {
         let accelerator = AcceleratorState {
             progress: 0.75,
             launching: true,
+            launch_time: 12.0,
         };
         assert_eq!(
             roundtrip_exported_campaign_state(
@@ -31427,6 +31429,7 @@ mod tests {
             Some(GameRuntimeCampaignBlockState::Accelerator(
                 AcceleratorState {
                     launching: false,
+                    launch_time: 0.0,
                     ..accelerator
                 }
             ))
@@ -40848,6 +40851,7 @@ mod tests {
         let state = AcceleratorState {
             progress: 0.9,
             launching: false,
+            launch_time: 0.0,
         };
         let mut building_bytes = Vec::new();
         building_bytes.push(1);

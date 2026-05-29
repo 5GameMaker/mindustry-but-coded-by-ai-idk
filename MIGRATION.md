@@ -12852,3 +12852,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - fullIcon 仍是 atlas candidate symbol，尚不是真实 GPU `TextureRegion` handle；
   - `mixcol` 仍是 custom marker + overlay tint 近似表达，真实 OpenGL backend 后续需实现 Java `Draw.mixcol` 等价状态；
   - 当前总体迁移约 26.5%，仍未达到完整可玩。
+
+### 12.409 Accelerator launchTime runtime 字段接入
+
+- 2026-05-29：继续收口上一轮 `Accelerator.launching` 视觉的临时输入。本轮把 Java `AcceleratorBuild.launchTime` 的等价字段接入 Rust `AcceleratorState`，并让 desktop launching charge ratio 改为 `launch_time / charge_duration`，不再用 `progress` 近似发射充能。
+- Rust 新增/接入：
+  - `core/src/mindustry/world/blocks/campaign/mod.rs`
+    - `AcceleratorState` 新增 `launch_time`；
+    - `Default` 与 `read_accelerator_state(...)` 将 `launch_time` 置为 `0.0`，保持现有 Java 网络/存档 payload 只持久化 `progress` 的兼容行为；
+    - `accelerator_consume_launch(...)` 会重置 `launch_time`；
+    - 新增 `accelerator_update_launch_time(...)` 与 `accelerator_launch_charge_ratio(...)`；
+    - 测试覆盖 launch time 推进、charge ratio 与 codec 回读重置。
+  - `core/src/mindustry/world/blocks/campaign/shells.rs`
+    - `Accelerator` shell 暴露 `update_launch_time(...)` 与 `launch_charge_ratio(...)`，复用 block 自身 `charge_duration`。
+  - `desktop/src/lib.rs`
+    - launching 分支的 light/mixcol/overlay alpha 改为读取 `AcceleratorState.launch_time / CampaignBlockData.charge_duration`；
+    - desktop launching 测试改用 `launch_time = 110.0` 对齐默认 `charge_duration = 220.0`，验证 ratio 为 `0.5`。
+- Java 对照要点：
+  - Java `updateLaunch()` 写入 `launchTime`，`draw()` 中 `Fill.light`、`Draw.mixcol` 与 overlay alpha 都使用 `launchTime / chargeDuration`；
+  - Rust 当前已有字段与 charge ratio helper，但完整 `LaunchAnimator`/renderer land-time 驱动仍需后续接入。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core accelerator --lib`
+  - `cargo test -p mindustry-desktop accelerator_launching --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - `launch_time` 尚未接入完整 `LaunchAnimator` / renderer land-time 生命周期；
+  - fullIcon/mixcol 仍需真实 atlas region 与 OpenGL backend 状态实现；
+  - 当前总体迁移约 26.6%，仍未达到完整可玩。
