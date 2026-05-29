@@ -2639,8 +2639,13 @@ impl DesktopLauncher {
                 render_frame.push_pass(pass);
             }
         }
-        render_frame.sort_passes_like_java_renderer_draw();
         let floor_renderer = self.floor_render_plan(camera, viewport);
+        if let Some(floor_renderer) = &floor_renderer {
+            for pass in floor_renderer.cache_layer_passes.iter().cloned() {
+                render_frame.push_pass(pass);
+            }
+        }
+        render_frame.sort_passes_like_java_renderer_draw();
         let floor_chunk_batches = self.floor_chunk_draw_batches(camera, viewport);
         let fog_frame = self.fog_frame_plan(camera, viewport);
         let pixelator = self.pixelator_frame_plan(camera, viewport);
@@ -5718,9 +5723,26 @@ mod tests {
             .flat_map(|pass| pass.commands.iter())
             .filter(|command| matches!(command, RenderCommand::DrawSprite { .. }))
             .count();
-        assert_eq!(frame.bundle.stats.render_passes, 1);
+        assert_eq!(frame.bundle.stats.render_passes, 10);
         assert_eq!(frame.bundle.stats.render_commands, 6);
         assert_eq!(sprite_commands, 6);
+        assert_eq!(
+            render_frame
+                .passes
+                .iter()
+                .filter(|pass| pass.target.clone()
+                    == RenderTarget::Buffer("cache-layer:water:effect".into()))
+                .count(),
+            1
+        );
+        assert_eq!(
+            render_frame
+                .passes
+                .iter()
+                .filter(|pass| pass.resolve_kind == Some(RenderResolveKind::ShaderBlit))
+                .count(),
+            7
+        );
         assert!(!frame.floor_chunk_batches.is_empty());
         assert!(frame.minimap_texture_frame.is_some());
         let execution = DesktopGraphicsExecutionSummary::from_frame(&frame);

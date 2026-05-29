@@ -14,6 +14,10 @@
 
 #![allow(dead_code)]
 
+use super::{
+    cache_layer::CacheLayer,
+    render_engine::{RenderEngineState, RenderPass},
+};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -491,6 +495,7 @@ pub struct FloorRenderPlan {
     pub viewport_chunks: ChunkRange,
     pub visible_chunks: Vec<ChunkCoord>,
     pub stage_plans: Vec<FloorStagePlan>,
+    pub cache_layer_passes: Vec<RenderPass>,
     pub cache_dirty_chunks: Vec<ChunkCoord>,
     pub ignore_walls: bool,
     pub full_reload: bool,
@@ -555,6 +560,24 @@ impl FloorRendererState {
         self.cache.clear();
     }
 
+    pub fn cache_layer_passes(&self) -> Vec<RenderPass> {
+        if self.stages.contains(&FloorRenderStage::Cache) {
+            CacheLayer::builtin_entries()
+                .iter()
+                .map(|entry| entry.to_render_pass())
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn push_cache_layer_passes(&self, render_engine: &mut RenderEngineState) -> Vec<usize> {
+        self.cache_layer_passes()
+            .into_iter()
+            .map(|pass| render_engine.push_pass(pass))
+            .collect()
+    }
+
     pub fn build_plan(&self, viewport: Viewport) -> FloorRenderPlan {
         let viewport_tiles = viewport.tile_range(
             self.tile_size_world,
@@ -593,12 +616,14 @@ impl FloorRendererState {
                 },
             })
             .collect();
+        let cache_layer_passes = self.cache_layer_passes();
 
         FloorRenderPlan {
             viewport_tiles,
             viewport_chunks,
             visible_chunks,
             stage_plans,
+            cache_layer_passes,
             cache_dirty_chunks,
             ignore_walls: self.cache.ignore_walls,
             full_reload: self.cache.full_reload,
@@ -653,6 +678,10 @@ fn ceil_div_i32(value: i32, divisor: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::graphics::{
+        RenderCamera, RenderEngineState, RenderPassKind, RenderPoint, RenderResolveKind,
+        RenderSize, RenderTarget, RenderViewport,
+    };
 
     #[test]
     fn viewport_tile_range_clamps_and_uses_exclusive_upper_bounds() {
@@ -827,6 +856,145 @@ mod tests {
                 (FloorRenderStage::Decals, false, false, Vec::new()),
             ]
         );
+        assert_eq!(plan.cache_layer_passes.len(), 9);
+        assert_eq!(
+            plan.cache_layer_passes
+                .iter()
+                .map(|pass| (
+                    pass.kind.clone(),
+                    pass.target.clone(),
+                    pass.resolve_target.clone(),
+                    pass.resolve_kind,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:water:effect".into()),
+                    Some(RenderTarget::Buffer("cache-layer:water:floor".into())),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:mud:effect".into()),
+                    Some(RenderTarget::Buffer("cache-layer:mud:floor".into())),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:tar:effect".into()),
+                    Some(RenderTarget::Buffer("cache-layer:tar:floor".into())),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:slag:effect".into()),
+                    Some(RenderTarget::Buffer("cache-layer:slag:floor".into())),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:arkycite:effect".into()),
+                    Some(RenderTarget::Buffer("cache-layer:arkycite:floor".into())),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:cryofluid:effect".into()),
+                    Some(RenderTarget::Buffer("cache-layer:cryofluid:floor".into())),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:space:effect".into()),
+                    Some(RenderTarget::Buffer("cache-layer:space:floor".into())),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:normal:floor".into()),
+                    None,
+                    None,
+                ),
+                (
+                    RenderPassKind::Floor,
+                    RenderTarget::Buffer("cache-layer:walls:floor".into()),
+                    None,
+                    None,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn floor_renderer_pushes_cache_layer_passes_into_render_engine_state() {
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_engine = RenderEngineState::new(RenderSize::new(64.0, 64.0), camera);
+        let state = FloorRendererState::default();
+
+        let indices = state.push_cache_layer_passes(&mut render_engine);
+        let frame = render_engine.finish();
+
+        assert_eq!(indices, (0..9).collect::<Vec<_>>());
+        assert_eq!(frame.passes.len(), 9);
+        assert_eq!(
+            frame
+                .passes
+                .iter()
+                .map(|pass| (pass.target.clone(), pass.resolve_kind))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    RenderTarget::Buffer("cache-layer:water:effect".into()),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderTarget::Buffer("cache-layer:mud:effect".into()),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderTarget::Buffer("cache-layer:tar:effect".into()),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderTarget::Buffer("cache-layer:slag:effect".into()),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderTarget::Buffer("cache-layer:arkycite:effect".into()),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderTarget::Buffer("cache-layer:cryofluid:effect".into()),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderTarget::Buffer("cache-layer:space:effect".into()),
+                    Some(RenderResolveKind::ShaderBlit),
+                ),
+                (
+                    RenderTarget::Buffer("cache-layer:normal:floor".into()),
+                    None,
+                ),
+                (RenderTarget::Buffer("cache-layer:walls:floor".into()), None,),
+            ]
+        );
+    }
+
+    #[test]
+    fn floor_renderer_omits_cache_layer_passes_when_cache_stage_is_disabled() {
+        let mut state = FloorRendererState::default();
+        state.set_stage_order([
+            FloorRenderStage::Floor,
+            FloorRenderStage::Ore,
+            FloorRenderStage::Shadow,
+            FloorRenderStage::Scorch,
+            FloorRenderStage::Decals,
+        ]);
+        let plan = state.build_plan(Viewport::new(0.0, 0.0, 16.0, 16.0));
+
+        assert!(plan.cache_layer_passes.is_empty());
     }
 
     #[test]

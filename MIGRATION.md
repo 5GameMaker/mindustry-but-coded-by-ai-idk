@@ -12319,3 +12319,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - CacheLayer render pass 还未并入真实 floor renderer frame pass 列表；
   - `RenderTarget::Buffer("cache-layer:*")` 仍是 backend-neutral 名称，未创建真实 FBO/texture；
   - 当前总体迁移约 24.6%，仍未达到完整可玩。
+
+### 12.390 FloorRenderer cache layer pass 并入 desktop render frame 主链
+
+- 2026-05-29：继续消除上一轮 `CacheLayerEntry::to_render_pass()` 只停在 metadata helper 的风险，把 cache layer pass 接到 `FloorRendererState` 和 desktop `RenderFramePlan` 主链。现在世界 graphics frame 会实际携带 9 个内置 cache layer pass，后续真实 OpenGL/glow backend 可从同一个 render frame/target trace 消费这些 FBO/resolve 信息。
+- Rust 新增/接入：
+  - `core/src/mindustry/graphics/floor_renderer.rs`
+    - `FloorRenderPlan` 新增 `cache_layer_passes: Vec<RenderPass>`；
+    - `FloorRendererState::cache_layer_passes()` 按 Java `CacheLayer.all` 内置顺序生成 pass；
+    - `FloorRendererState::push_cache_layer_passes(&mut RenderEngineState)` 可直接把 cache layer pass 推入 `RenderEngineState::push_pass`；
+    - 当 `FloorRenderStage::Cache` 被禁用时不生成 cache layer pass。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::graphics_frame_for_render(...)` 在构建 floor plan 后，将 `floor_renderer.cache_layer_passes` 推入 `RenderFramePlan`，再调用 `sort_passes_like_java_renderer_draw()`；
+    - 现有 world graphics frame 测试更新为确认 1 个 block sprite pass + 9 个 cache layer pass，并确认 7 个 shader layer 带 `RenderResolveKind::ShaderBlit`。
+- Java 对照要点：
+  - 对齐 `Renderer.draw()` 中 floor/cache layer 处于整帧绘制链，而不是孤立统计数据；
+  - shader layer 仍是 `EffectBuffer -> FloorCache + ShaderBlit`，normal/walls 仍是 direct floor target。
+- 已跑验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core floor_renderer --lib`
+  - `cargo test -p mindustry-core cache_layer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo test -p mindustry-desktop render_target --lib`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_records_execution_summary_without_polluting_stats --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - cache layer pass 已进入 render frame，但其中 tile draw command 仍待接入真实 floor/cache tile batching；
+  - backend 仍需把 `RenderTarget::Buffer("cache-layer:*")` 创建为真实 FBO/texture 并执行 shader blit；
+  - 当前总体迁移约 24.7%，仍未达到完整可玩。

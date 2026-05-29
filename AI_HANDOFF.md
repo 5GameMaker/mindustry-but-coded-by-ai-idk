@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **24.6%**。
+- 当前总体迁移完成度：约 **24.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -9734,3 +9734,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 `CacheLayerEntry::to_render_pass()` 并入 floor renderer/cache frame 构建链路，而不是只停在 metadata helper；
   2. 继续补 `BlockRenderer.shadows`/`darkness` 的 `DrawRectSample` / `DrawFboSample` pass；
   3. 真实 OpenGL/glow backend 需要消费这些 `RenderTarget::Buffer("cache-layer:*")` 并创建对应 FBO/texture。
+
+---
+
+## 296. 最新闭环记录：CacheLayer pass 并入 desktop render frame
+
+- 本轮总体进度更新：约 **24.7%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/floor_renderer.rs`
+    - `FloorRenderPlan.cache_layer_passes` 携带 cache layer render passes；
+    - `FloorRendererState::cache_layer_passes()` 按 builtin `CacheLayer` 顺序产出 9 个 pass；
+    - `FloorRendererState::push_cache_layer_passes(...)` 可直接推入 `RenderEngineState`；
+    - 禁用 `FloorRenderStage::Cache` 时不生成 cache layer pass。
+  - `desktop/src/lib.rs`
+    - `graphics_frame_for_render(...)` 将 floor plan 的 cache layer passes 加入 `RenderFramePlan`，再排序；
+    - world graphics frame 测试确认 9 个 cache layer pass 已进入 render frame，且 7 个 shader layer 是 `ShaderBlit`。
+- 已验证：
+  - `cargo fmt -p mindustry-core -p mindustry-desktop`
+  - `cargo test -p mindustry-core floor_renderer --lib`
+  - `cargo test -p mindustry-core cache_layer --lib`
+  - `cargo test -p mindustry-desktop graphics_frame --lib`
+  - `cargo test -p mindustry-desktop render_target --lib`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_records_execution_summary_without_polluting_stats --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 给 cache layer pass 填入真实 floor/cache tile draw commands，不能长期只携带 target/resolve metadata；
+  2. 继续补 `BlockRenderer.shadows` / `darkness` 的 `DrawRectSample` / `DrawFboSample` pass；
+  3. 真实 OpenGL/glow backend 需要消费 render frame 里的 cache-layer target 并创建/绑定 FBO。
