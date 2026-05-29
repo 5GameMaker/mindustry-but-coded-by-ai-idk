@@ -12397,3 +12397,21 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续 bridge `line_primitives` 到 `RenderCommand::DrawLine`；
   2. 继续 bridge `rect_primitives` 到 `FillRect` / `DrawSprite`，注意 textured rect 的 atlas region；
   3. `triangle/square/light/textured-line` 分批接，别再停留在 headless stats。
+
+### 2026-05-30：standard effect line 接入 graphics/OpenGL backend
+
+- 当前整体完成度：约 **38.4%**。
+- 已完成：
+  - `DesktopStandardEffectRenderFrame::to_render_pass()` 同时处理 circle 与非纹理 line；
+  - `StandardEffectLineRenderPrimitive.region == None` 转成 `RenderCommand::DrawLine`；
+  - `desktop_launcher_routes_standard_effect_lines_into_graphics_backend` 覆盖 line primitive 进入 graphics frame 与 OpenGL executor；
+  - 继续复用 `DrawLine` 的 primitive white-texture mesh path。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_lines_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_circles_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 下一步：
+  1. bridge `rect_primitives`，先接 `FilledRect`，再处理 `TexturedRect.region`；
+  2. bridge square/triangle 到 `DrawPolygon`；
+  3. textured-line 必须接 atlas/sprite，不要丢 region 信息。

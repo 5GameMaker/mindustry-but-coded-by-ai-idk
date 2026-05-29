@@ -109,7 +109,7 @@ fn desktop_effect_render_color(color: Option<DecalColor>, alpha: f32) -> [f32; 4
 }
 
 impl DesktopStandardEffectRenderFrame {
-    pub fn to_circle_render_pass(&self) -> Option<RenderPass> {
+    pub fn to_render_pass(&self) -> Option<RenderPass> {
         let mut pass = RenderPass::new(RenderPassKind::Overlay);
         for primitive in &self.circle_primitives {
             if primitive.radius <= f32::EPSILON {
@@ -125,6 +125,27 @@ impl DesktopStandardEffectRenderFrame {
                 primitive.radius,
                 desktop_effect_render_color(primitive.color, primitive.alpha),
                 filled,
+                Layer::EFFECT,
+            ));
+        }
+        for primitive in &self.line_primitives {
+            if primitive.region.is_some()
+                || primitive.length <= f32::EPSILON
+                || primitive.stroke <= f32::EPSILON
+            {
+                continue;
+            }
+            let angle = primitive.angle.to_radians();
+            let from = RenderPoint::new(primitive.start.0, primitive.start.1);
+            let to = RenderPoint::new(
+                primitive.start.0 + angle.cos() * primitive.length,
+                primitive.start.1 + angle.sin() * primitive.length,
+            );
+            pass.push(RenderCommand::draw_line(
+                from,
+                to,
+                primitive.stroke,
+                desktop_effect_render_color(primitive.color, primitive.alpha),
                 Layer::EFFECT,
             ));
         }
@@ -10819,7 +10840,7 @@ impl DesktopLauncher {
                 render_frame.push_pass(pass);
             }
         }
-        if let Some(pass) = self.standard_effect_render_frame().to_circle_render_pass() {
+        if let Some(pass) = self.standard_effect_render_frame().to_render_pass() {
             render_frame.push_pass(pass);
         }
         if let Some(ui_pass) = self.desktop_ui_render_pass(viewport) {
@@ -23279,6 +23300,107 @@ mod tests {
                 .sprite_quads
                 .len()
                 >= 2 * super::DESKTOP_GRAPHICS_OPENGL_CIRCLE_MIN_SEGMENTS
+        );
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_draw_call_plans
+            .iter()
+            .any(|plan| plan.target == Some(RenderTarget::Screen)));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_standard_effect_lines_into_graphics_backend() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .runtime
+            .client_local_effect_events
+            .push(EffectCallPacket2 {
+                effect: EffectCallPacket {
+                    effect_id: standard_effect_id("hitBulletBig").unwrap() as u16,
+                    x: 32.0,
+                    y: 48.0,
+                    rotation: 30.0,
+                    color: type_io::RgbaColor::new(-1),
+                },
+                data: TypeValue::Null,
+            });
+
+        launcher.update();
+        let expected_lines = launcher
+            .standard_effect_render_frame()
+            .line_primitives
+            .iter()
+            .filter(|line| line.region.is_none())
+            .map(|line| {
+                let angle = line.angle.to_radians();
+                (
+                    RenderPoint::new(line.start.0, line.start.1),
+                    RenderPoint::new(
+                        line.start.0 + angle.cos() * line.length,
+                        line.start.1 + angle.sin() * line.length,
+                    ),
+                    line.stroke,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(!expected_lines.is_empty());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            4,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let effect_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, RenderCommand::DrawLine { .. }))
+            })
+            .expect("standard effect lines should be routed into an overlay render pass");
+        let line_commands = effect_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawLine {
+                    from,
+                    to,
+                    stroke,
+                    layer,
+                    ..
+                } => Some((*from, *to, *stroke, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(line_commands.len(), expected_lines.len());
+        assert!(line_commands
+            .iter()
+            .all(|(_, _, _, layer)| (*layer - Layer::EFFECT).abs() < f32::EPSILON));
+        assert_eq!(
+            line_commands
+                .iter()
+                .map(|(from, to, stroke, _)| (*from, *to, *stroke))
+                .collect::<Vec<_>>(),
+            expected_lines
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(
+            renderer
+                .last_opengl_backend_executor_state
+                .sprite_quads
+                .len()
+                >= expected_lines.len()
         );
         assert!(renderer
             .last_opengl_backend_executor_state

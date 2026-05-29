@@ -15035,3 +15035,26 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - line / rect / square / triangle / textured-line / light primitives 还需继续 bridge 到 `RenderPass` / `RenderCommand`；
   - 当前 circle bridge 暂挂在 overlay pass，后续仍需按 Java draw stage/layer 继续细化；
   - 当前总体迁移约 38.2%，仍未达到完整可玩。
+
+## 404. 最新闭环记录：standard effect line 接入 graphics/OpenGL backend
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **38.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopStandardEffectRenderFrame::to_render_pass()` 现在同时 bridge circle 与非纹理 line primitive；
+    - `StandardEffectLineRenderPrimitive { region: None, ... }` 转成 `RenderCommand::DrawLine`；
+    - line command 继续复用已接通的 OpenGL primitive quad / mesh / draw elements 路径；
+    - 新增 `desktop_launcher_routes_standard_effect_lines_into_graphics_backend`，覆盖本地 effect event → line primitive → overlay render pass → OpenGL executor sprite mesh。
+- 迁移意义：
+  - `hitBulletBig` 等标准特效的线段 primitive 不再只停留在 headless stats；
+  - 已有 `DrawLine` native mesh path 开始服务 standard effect renderer。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_lines_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect_circles_into_graphics_backend --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 仍未完成：
+  - textured-line 仍保留 region 数据，尚未解析 atlas / sprite；
+  - rect / square / triangle / light primitives 还需继续 bridge；
+  - 当前总体迁移约 38.4%，仍未达到完整可玩。
