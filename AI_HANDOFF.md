@@ -12150,3 +12150,50 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 `background-buffer` 接入真实 GL framebuffer/texture resize/invalidate；
   2. 继续 resolve quad mesh upload；
   3. 并行推进 liquid turret ammo / LiquidRouter / LiquidBridge runtime 主链。
+
+---
+
+## 391. 最新闭环记录：OpenGL resolve sample quad 生成
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **35.1%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolveQuadVertex` / `DesktopGraphicsOpenGlBackendResolveQuad`；
+    - `DesktopGraphicsOpenGlBackendResolveCommand.resolve_sample_quad`；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor.resolve_sample_quads`；
+    - DrawRectSample / DrawFboSample 带 sample 时生成 quad vertices，并绑定 sample quad VAO key；
+    - ShaderBlit / 无 sample 仍走 fullscreen quad。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_resolver_allocates_draw_rect_and_fbo_sample_quad_resources --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+  - `git diff --check`
+- 下一步：
+  1. 把 resolve sample quad 接到真实 VBO/IBO upload / vertex attrib binding；
+  2. 继续 native `glow/glutin/winit` runtime 壳；
+  3. 保持 null/recording backend smoke 先行。
+
+---
+
+## 392. 最新闭环记录：LiquidTurret ammo runtime 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **35.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `GameRuntimeBlockVisualTurretSnapshot.ammo_fraction`；
+    - liquid turret visual snapshot 从液体模块回填 ammo fraction；
+    - `dump_liquid_target_accepts(...)` 针对 `LiquidTurret` / `ContinuousLiquidTurret` 接入 `liquid_turret_accept_liquid(...)` 并保留 capacity 上限；
+    - 新增 `game_runtime_liquid_turret_acceptance_and_ammo_fraction_match_java`。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core game_runtime_liquid_turret_acceptance_and_ammo_fraction_match_java`
+  - `cargo test -p mindustry-core game_runtime_exports_block_visual_runtime_snapshot_from_existing_state`
+  - `cargo test -p mindustry-core world::blocks::defense::turrets`
+  - `git diff --check`
+- 下一步：
+  1. turret 主链继续推进 firing / targeting / reload；
+  2. continuous liquid turret activation / liquid consumption runtime；
+  3. liquid bridge/phase-conduit 侧车回环和 warmup visual snapshot。

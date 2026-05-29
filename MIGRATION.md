@@ -14786,3 +14786,50 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 背景缓存目前是最小生产 pass，真实 planets/background renderer、跨帧 framebuffer resize/invalidate 还需继续迁移；
   - `background-buffer` 的真实 GL framebuffer/texture 生命周期仍需接 native OpenGL backend；
   - 当前总体迁移约 35.0%，仍未达到完整可玩。
+
+## 12.485 OpenGL resolve sample quad 生成
+
+- 2026-05-30：把 `resolve_sample_trace` 继续推进到可验证的 resolve quad 顶点数据与 sample quad VAO key。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolveQuadVertex` / `DesktopGraphicsOpenGlBackendResolveQuad`；
+    - `DesktopGraphicsOpenGlBackendResolveCommand` 新增 `resolve_sample_quad`；
+    - `DesktopGraphicsResolvingOpenGlBackendCommandExecutor` 记录 `resolve_sample_quads`；
+    - DrawRectSample / DrawFboSample 带 sample 时使用 sample quad vertex array key，ShaderBlit / 无 sample 继续走 fullscreen quad；
+    - shared resolver 测试验证 geometry / uv 被转成 quad vertices。
+- 迁移意义：
+  - Java `Draw.rect(TextureRegion)` / `Draw.fbo` 的 UV 窗口已经从 metadata 下沉到 backend 可消费的四边形顶点数据；
+  - 真实 native OpenGL 后续只需把该 quad 数据接到 VBO/IBO upload 与 vertex attrib pointer。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_resolver_allocates_draw_rect_and_fbo_sample_quad_resources --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+  - `git diff --check`
+- 仍未完成：
+  - 当前是记录/解析层 quad 数据，真实 GL buffer upload 与 draw attrib binding 尚未接入；
+  - native `glow/glutin/winit` runtime 仍未落地；
+  - 当前总体迁移约 35.1%，仍未达到完整可玩。
+
+## 12.486 LiquidTurret 弹药接收与 visual ammo fraction runtime
+
+- 2026-05-30：把 liquid turret ammo helper 接入 `GameRuntime` 液体接收与可视化 snapshot 主链。
+- Rust 新增/接入：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `GameRuntimeBlockVisualTurretSnapshot` 增加 `ammo_fraction`；
+    - `block_visual_runtime_snapshot_for_building(...)` 根据当前液体量/容量回填液体炮台 ammo fraction；
+    - `dump_liquid_target_accepts(...)` 对 `LiquidTurret` / `ContinuousLiquidTurret` 使用 `liquid_turret_accept_liquid(...)`，并保留容量上限判断；
+    - 新增 `game_runtime_liquid_turret_acceptance_and_ammo_fraction_match_java`。
+- 迁移意义：
+  - Java `LiquidTurret.acceptLiquid(...)` 的“只接 ammo 液体、当前弹药未耗尽前不随便切换、容量上限”进入 runtime；
+  - 客户端/渲染侧可从 visual snapshot 获得液体炮台 ammo fraction。
+- 已跑验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core game_runtime_liquid_turret_acceptance_and_ammo_fraction_match_java`
+  - `cargo test -p mindustry-core game_runtime_exports_block_visual_runtime_snapshot_from_existing_state`
+  - `cargo test -p mindustry-core world::blocks::defense::turrets`
+  - `git diff --check`
+- 仍未完成：
+  - liquid turret 的完整 firing / targeting / reload loop 仍需继续接入；
+  - continuous liquid turret activation 和 liquid consumption runtime 还需补全；
+  - 当前总体迁移约 35.2%，仍未达到完整可玩。
