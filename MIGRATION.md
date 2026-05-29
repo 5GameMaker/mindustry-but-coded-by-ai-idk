@@ -13285,3 +13285,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `DesktopGraphicsResolvedSpriteTrace` 仍是 CPU-side trace，尚未转成 GPU texture handle；
   - VBO/mesh 顶点生成、UV buffer、shader binding 仍待落地；
   - 当前总体迁移约 28.1%，仍未达到完整可玩。
+
+## 12.425 OpenGL texture binding 输入
+
+- 2026-05-29：将 `DesktopGraphicsResolvedSpriteTrace` 继续转换为后续真实 OpenGL backend 可消费的 texture binding 输入。该闭环仍不创建真实 GL texture，只把 page、UV、sampler、region size 等 GPU 绑定必需数据挂到 executor/adapter 状态。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendTextureBinding`；
+    - `DesktopGraphicsOpenGlBackendTextureBinding::from_resolved_sprite(...)` 从 resolved sprite 提取 page type、page source path、page size、sampler、UV、region size；
+    - `DesktopGraphicsOpenGlBackendExecutorState` 新增 `sprite_texture_bindings` 与 `missing_sprite_texture_bindings`；
+    - `DesktopGraphicsOpenGlBackendAdapterExecutionState` 新增同名字段；
+    - executor `emit_action(...)` 时从 `DrawSprite` action 提取 texture binding；
+    - classifying adapter 消费 command/action 时同步记录 texture binding；
+    - 回归测试确认 executor 与 adapter 的 texture binding 状态一致。
+- 迁移意义：
+  - `DrawSprite` 已从 symbol/atlas trace 推进到可直接用于 texture binding 的结构化输入；
+  - 真实 GL adapter 后续只需把 page source 映射为 GPU texture handle，并使用 UV/region size 构造 quad；
+  - 保持 atlas/resource binding 接在 OpenGL executor/action 主链内。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 仍未完成：
+  - 尚未创建/缓存真实 GPU texture handle；
+  - 尚未生成 DrawSprite 顶点/索引/VBO；
+  - shader program binding 与 draw call 仍待落地；
+  - 当前总体迁移约 28.2%，仍未达到完整可玩。

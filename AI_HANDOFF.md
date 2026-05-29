@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **28.1%**。
+- 当前总体迁移完成度：约 **28.2%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -10581,3 +10581,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 atlas page/UV/sampler 转成真实 texture binding 输入；
   2. 推进 VBO/mesh draw call 边界；
   3. 保持 resolved sprite payload 不脱离 OpenGL executor/action 主链。
+
+---
+
+## 331. 最新闭环记录：OpenGL texture binding 输入
+
+- 本轮总体进度更新：约 **28.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendTextureBinding`；
+    - 可从 `DesktopGraphicsResolvedSpriteTrace` 生成 page/source/size/sampler/UV/region size；
+    - executor state 与 classifying adapter state 均新增 `sprite_texture_bindings` 和 `missing_sprite_texture_bindings`；
+    - `DrawSprite` action 进入 executor/adapter 时同步记录 texture binding 输入；
+    - 回归测试断言 `router` 的 page path 与 UV 进入 executor 与 adapter 状态。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop opengl_backend --lib`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 将 texture binding 输入映射到真实 GPU texture handle/resource table；
+  2. 继续构造 DrawSprite quad/VBO/mesh 提交边界；
+  3. 后续接入 shader/atlas page lifecycle。

@@ -451,6 +451,40 @@ pub struct DesktopGraphicsResolvedSpriteTrace {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DesktopGraphicsOpenGlBackendTextureBinding {
+    pub command_index: Option<usize>,
+    pub symbol: String,
+    pub page_type: PageType,
+    pub page_source_path: String,
+    pub page_width: u32,
+    pub page_height: u32,
+    pub sampler: DesktopGraphicsTextureSamplerTrace,
+    pub uv: [f32; 4],
+    pub region_width: u32,
+    pub region_height: u32,
+}
+
+impl DesktopGraphicsOpenGlBackendTextureBinding {
+    pub fn from_resolved_sprite(sprite: &DesktopGraphicsResolvedSpriteTrace) -> Option<Self> {
+        if sprite.missing {
+            return None;
+        }
+        Some(Self {
+            command_index: sprite.command_index,
+            symbol: sprite.symbol.clone(),
+            page_type: sprite.page_type?,
+            page_source_path: sprite.page_source_path.clone()?,
+            page_width: sprite.page_width?,
+            page_height: sprite.page_height?,
+            sampler: sprite.sampler,
+            uv: [sprite.u?, sprite.v?, sprite.u2?, sprite.v2?],
+            region_width: sprite.region_width?,
+            region_height: sprite.region_height?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DesktopGraphicsLiveBackendDrawSpriteTrace {
     pub pass_index: usize,
     pub command_index: usize,
@@ -1100,6 +1134,8 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub current_shader: Option<ShaderId>,
     pub custom_markers: Vec<String>,
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
+    pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
+    pub missing_sprite_texture_bindings: usize,
 }
 
 impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
@@ -1130,6 +1166,8 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
             current_shader: None,
             custom_markers: Vec::new(),
             actions: Vec::new(),
+            sprite_texture_bindings: Vec::new(),
+            missing_sprite_texture_bindings: 0,
         }
     }
 }
@@ -1147,6 +1185,7 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
     ) {
         self.state.command_events += 1;
         let action = opengl_backend_adapter_action_from_render_command(&command, resolved_sprite);
+        self.consume_sprite_texture_binding(&command, &action);
         match command {
             RenderCommand::Clear { .. } => {
                 self.state.state_commands += 1;
@@ -1202,6 +1241,34 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
             }
         }
         self.state.actions.push(action);
+    }
+
+    fn consume_sprite_texture_binding(
+        &mut self,
+        command: &RenderCommand,
+        action: &DesktopGraphicsOpenGlBackendAdapterAction,
+    ) {
+        if !matches!(command, RenderCommand::DrawSprite { .. }) {
+            return;
+        }
+        match action {
+            DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
+                resolved_sprite: Some(sprite),
+                ..
+            } => {
+                if let Some(binding) =
+                    DesktopGraphicsOpenGlBackendTextureBinding::from_resolved_sprite(sprite)
+                {
+                    self.state.sprite_texture_bindings.push(binding);
+                } else {
+                    self.state.missing_sprite_texture_bindings += 1;
+                }
+            }
+            DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { .. } => {
+                self.state.missing_sprite_texture_bindings += 1;
+            }
+            _ => {}
+        }
     }
 }
 
@@ -1343,6 +1410,8 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub actions: Vec<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub action_count: usize,
+    pub sprite_texture_bindings: Vec<DesktopGraphicsOpenGlBackendTextureBinding>,
+    pub missing_sprite_texture_bindings: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
     pub last_command_kind: Option<&'static str>,
     pub errors: Vec<String>,
@@ -1374,6 +1443,8 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             actions: Vec::new(),
             last_action: None,
             action_count: 0,
+            sprite_texture_bindings: Vec::new(),
+            missing_sprite_texture_bindings: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
             last_command_kind: None,
             errors: Vec::new(),
@@ -1435,9 +1506,34 @@ impl DesktopGraphicsOpenGlBackendExecutor {
     }
 
     fn emit_action(&mut self, action: DesktopGraphicsOpenGlBackendAdapterAction) {
+        self.record_texture_binding_from_action(&action);
         self.state.last_action = Some(action.clone());
         self.state.action_count += 1;
         self.state.actions.push(action);
+    }
+
+    fn record_texture_binding_from_action(
+        &mut self,
+        action: &DesktopGraphicsOpenGlBackendAdapterAction,
+    ) {
+        match action {
+            DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite {
+                resolved_sprite: Some(sprite),
+                ..
+            } => {
+                if let Some(binding) =
+                    DesktopGraphicsOpenGlBackendTextureBinding::from_resolved_sprite(sprite)
+                {
+                    self.state.sprite_texture_bindings.push(binding);
+                } else {
+                    self.state.missing_sprite_texture_bindings += 1;
+                }
+            }
+            DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { .. } => {
+                self.state.missing_sprite_texture_bindings += 1;
+            }
+            _ => {}
+        }
     }
 }
 
@@ -9170,6 +9266,19 @@ mod tests {
             executor.state.last_action.as_ref(),
             executor.state.actions.last()
         );
+        assert_eq!(executor.state.sprite_texture_bindings.len(), 1);
+        assert_eq!(executor.state.missing_sprite_texture_bindings, 0);
+        assert_eq!(executor.state.sprite_texture_bindings[0].symbol, "router");
+        assert_eq!(
+            executor.state.sprite_texture_bindings[0]
+                .page_source_path
+                .as_str(),
+            "sprites.png"
+        );
+        assert_eq!(
+            executor.state.sprite_texture_bindings[0].uv,
+            [0.0, 0.0, 1.0 / 4096.0, 1.0 / 4096.0]
+        );
         assert_eq!(
             executor.state.resolve_events,
             vec![super::DesktopGraphicsOpenGlBackendResolveEvent {
@@ -9192,6 +9301,10 @@ mod tests {
         assert_eq!(
             classifying_adapter.state.current_blend,
             RenderBlendMode::Additive
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_texture_bindings,
+            executor.state.sprite_texture_bindings
         );
         assert_eq!(classifying_adapter.state.actions.len(), 3);
         assert!(matches!(
