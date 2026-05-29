@@ -40,18 +40,18 @@ use mindustry_core::mindustry::graphics::{
     FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState, FogViewport,
     GraphicsFrameBundle, GraphicsFrameStats, Layer, LightPrimitive, LightRendererPlan,
     LightRendererState, LoadFrameInput, LoadFramePlan, LoadRendererState, MenuFrameInput,
-    MenuFramePlan, MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapOverlayInput,
-    MinimapOverlayPlan, MinimapRect, MinimapRendererState, MinimapTextureFramePlan,
-    MinimapWorldSize, OverlayRendererPlan, OverlayRendererState, PageType, Pal, PixelatorCamera,
-    PixelatorFramePlan, PixelatorInput, PixelatorState, PngRgba8888DecodeError,
-    RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
-    RenderCommand, RenderEngineState, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind,
-    RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget,
-    RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderTextureSampleFlip,
-    RenderTextureSamplePlan, RenderUvRect, RenderViewport, ShaderApplyContext,
-    ShaderApplyOperation, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
-    ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
-    ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
+    MenuFramePlan, MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapFogLayer,
+    MinimapOverlayCommand, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect,
+    MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize, OverlayRendererPlan,
+    OverlayRendererState, PageType, Pal, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
+    PixelatorState, PngRgba8888DecodeError, RenderBackendFlushBoundary, RenderBlendFactor,
+    RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderEngineState, RenderFontId,
+    RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
+    RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle,
+    RenderTextVerticalAlign, RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect,
+    RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCamera,
+    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters,
+    ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
     TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
     Viewport as FloorViewport,
 };
@@ -136,6 +136,232 @@ fn desktop_world_label_background_rect(
     let width = (text.len() as f32 * 10.0 * font_size.max(0.0)).max(1.0) + 8.0;
     let height = desktop_world_label_text_size(font_size) + 6.0;
     RenderRect::from_center(position, width, height)
+}
+
+fn minimap_overlay_world_to_screen(
+    plan: &MinimapOverlayPlan,
+    screen_rect: RenderRect,
+    x: f32,
+    y: f32,
+) -> Option<RenderPoint> {
+    if plan.world_rect.width <= f32::EPSILON
+        || plan.world_rect.height <= f32::EPSILON
+        || screen_rect.width <= f32::EPSILON
+        || screen_rect.height <= f32::EPSILON
+    {
+        return None;
+    }
+    Some(RenderPoint::new(
+        screen_rect.x + ((x - plan.world_rect.x) / plan.world_rect.width) * screen_rect.width,
+        screen_rect.y + ((y - plan.world_rect.y) / plan.world_rect.height) * screen_rect.height,
+    ))
+}
+
+fn minimap_overlay_world_len_to_screen(plan: &MinimapOverlayPlan, value: f32) -> f32 {
+    if plan.scale_factor <= f32::EPSILON {
+        value.max(1.0)
+    } else {
+        (value / plan.scale_factor).max(1.0)
+    }
+}
+
+fn minimap_overlay_world_rect_to_screen(
+    plan: &MinimapOverlayPlan,
+    screen_rect: RenderRect,
+    rect: MinimapRect,
+) -> Option<RenderRect> {
+    let min = minimap_overlay_world_to_screen(plan, screen_rect, rect.x, rect.y)?;
+    let max = minimap_overlay_world_to_screen(
+        plan,
+        screen_rect,
+        rect.x + rect.width,
+        rect.y + rect.height,
+    )?;
+    Some(RenderRect::new(min.x, min.y, max.x - min.x, max.y - min.y))
+}
+
+fn minimap_overlay_render_pass(
+    plan: &MinimapOverlayPlan,
+    screen_rect: RenderRect,
+) -> Option<RenderPass> {
+    if plan.commands.is_empty() {
+        return None;
+    }
+    let mut pass = RenderPass::new(RenderPassKind::Minimap)
+        .with_order(RenderPassKind::Minimap.default_order());
+    for command in &plan.commands {
+        match command {
+            MinimapOverlayCommand::UnitIcon {
+                x,
+                y,
+                rotation,
+                team_color,
+                region,
+                scale,
+                ..
+            } => {
+                let Some(center) = minimap_overlay_world_to_screen(plan, screen_rect, *x, *y)
+                else {
+                    continue;
+                };
+                let size = minimap_overlay_world_len_to_screen(plan, *scale);
+                pass.push(RenderCommand::draw_sprite(
+                    region.clone(),
+                    RenderRect::from_center(center, size, size),
+                    rgba8888_to_render_color(*team_color, 1.0),
+                    *rotation,
+                    Layer::END,
+                ));
+            }
+            MinimapOverlayCommand::PlayerLabel {
+                x,
+                y,
+                text,
+                color,
+                background,
+                ..
+            } => {
+                let Some(position) = minimap_overlay_world_to_screen(plan, screen_rect, *x, *y)
+                else {
+                    continue;
+                };
+                if *background {
+                    pass.push(RenderCommand::fill_rect(
+                        RenderRect::from_center(
+                            position,
+                            (text.len() as f32 * 7.0).max(8.0) + 6.0,
+                            14.0,
+                        ),
+                        [0.0, 0.0, 0.0, 0.45],
+                        Layer::END - 0.02,
+                    ));
+                }
+                pass.push(RenderCommand::draw_text_styled(
+                    text.clone(),
+                    position,
+                    rgba8888_to_render_color(*color, 1.0),
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_outline(true),
+                    Layer::END,
+                ));
+            }
+            MinimapOverlayCommand::Ping {
+                x, y, text, color, ..
+            } => {
+                let Some(position) = minimap_overlay_world_to_screen(plan, screen_rect, *x, *y)
+                else {
+                    continue;
+                };
+                pass.push(RenderCommand::draw_circle(
+                    position,
+                    6.0,
+                    rgba8888_to_render_color(*color, 1.0),
+                    false,
+                    Layer::END,
+                ));
+                if let Some(text) = text {
+                    pass.push(RenderCommand::draw_text_styled(
+                        text.clone(),
+                        RenderPoint::new(position.x, position.y + 10.0),
+                        rgba8888_to_render_color(*color, 1.0),
+                        10.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_outline(true),
+                        Layer::END,
+                    ));
+                }
+            }
+            MinimapOverlayCommand::FogTexture {
+                layer,
+                color,
+                alpha,
+            } => {
+                let layer_offset = match layer {
+                    MinimapFogLayer::Dynamic => 0.0,
+                    MinimapFogLayer::Static => 0.01,
+                };
+                pass.push(RenderCommand::fill_rect(
+                    screen_rect,
+                    rgba8888_to_render_color(*color, *alpha),
+                    Layer::END - 0.5 + layer_offset,
+                ));
+            }
+            MinimapOverlayCommand::Spawn {
+                x,
+                y,
+                radius,
+                pulse,
+                team_color,
+            } => {
+                let Some(center) = minimap_overlay_world_to_screen(plan, screen_rect, *x, *y)
+                else {
+                    continue;
+                };
+                pass.push(RenderCommand::draw_circle(
+                    center,
+                    minimap_overlay_world_len_to_screen(plan, *radius) + pulse * 4.0,
+                    rgba8888_to_render_color(*team_color, 1.0),
+                    false,
+                    Layer::END,
+                ));
+            }
+            MinimapOverlayCommand::CameraBounds(rect) => {
+                if let Some(rect) = minimap_overlay_world_rect_to_screen(plan, screen_rect, *rect) {
+                    pass.push(RenderCommand::stroke_rect(
+                        rect,
+                        [1.0, 1.0, 1.0, 0.85],
+                        1.0,
+                        Layer::END,
+                    ));
+                }
+            }
+            MinimapOverlayCommand::Indicator {
+                tile,
+                radius,
+                alpha,
+                color_from,
+                ..
+            } => {
+                let world_x = tile.x as f32 * 8.0 + 4.0;
+                let world_y = tile.y as f32 * 8.0 + 4.0;
+                let Some(center) =
+                    minimap_overlay_world_to_screen(plan, screen_rect, world_x, world_y)
+                else {
+                    continue;
+                };
+                pass.push(RenderCommand::draw_circle(
+                    center,
+                    minimap_overlay_world_len_to_screen(plan, *radius),
+                    rgba8888_to_render_color(*color_from, *alpha),
+                    false,
+                    Layer::END,
+                ));
+            }
+            MinimapOverlayCommand::Marker { x, y, label, .. } => {
+                let Some(position) = minimap_overlay_world_to_screen(plan, screen_rect, *x, *y)
+                else {
+                    continue;
+                };
+                pass.push(RenderCommand::draw_text_styled(
+                    label.clone(),
+                    position,
+                    [1.0, 1.0, 1.0, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_outline(true),
+                    Layer::END,
+                ));
+            }
+        }
+    }
+    (!pass.commands.is_empty()).then_some(pass)
 }
 
 impl DesktopStandardEffectRenderFrame {
@@ -11107,6 +11333,16 @@ impl DesktopLauncher {
         if let Some(pass) = self.world_label_render_pass() {
             render_frame.push_pass(pass);
         }
+        let minimap_screen_rect = RenderRect::new(
+            minimap_input.screen_x,
+            minimap_input.screen_y,
+            minimap_input.screen_width,
+            minimap_input.screen_height,
+        );
+        let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
+        if let Some(pass) = minimap_overlay_render_pass(&minimap_overlay, minimap_screen_rect) {
+            render_frame.push_pass(pass);
+        }
         if let Some(ui_pass) = self.desktop_ui_render_pass(viewport) {
             render_frame.push_pass(ui_pass);
         }
@@ -11116,7 +11352,6 @@ impl DesktopLauncher {
         let shader_dispatch = self.shader_dispatch_frame_plan(camera, viewport);
         let overlay_renderer = self.drain_overlay_renderer_plan();
         let minimap_texture_frame = self.minimap_texture_frame_plan();
-        let minimap_overlay = self.minimap_overlay_plan(minimap_camera, minimap_input);
 
         let mut bridge = RenderBridge::new();
         bridge
@@ -12888,7 +13123,8 @@ mod tests {
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
-        MinimapCamera, MinimapFullUpdatePlan, MinimapOverlayInput, MinimapTextureFramePlan,
+        MinimapCamera, MinimapEntitySnapshot, MinimapFullUpdatePlan, MinimapMarkerSnapshot,
+        MinimapOverlayInput, MinimapPlayerSnapshot, MinimapTextureFramePlan,
         MinimapTexturePixelUpdate, MinimapTextureSize, MinimapTilePos, PageType,
         ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode,
         RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan, RenderPass,
@@ -14703,6 +14939,111 @@ mod tests {
                 .last_opengl_backend_executor_state
                 .draw_text_commands
                 >= 1
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.texture_atlas =
+            TextureAtlasPlan::from_virtual_source_paths(["sprites/dagger.png"]);
+
+        let mut minimap_input = sample_minimap_overlay_input(true);
+        minimap_input.net_active = true;
+        minimap_input.show_pings = true;
+        minimap_input.units.push(MinimapEntitySnapshot {
+            entity_id: 42,
+            x: 64.0,
+            y: 64.0,
+            rotation: 180.0,
+            team_color: 0x33cc66ff,
+            region: "dagger".into(),
+            draw_minimap: true,
+            hidden_by_fog: false,
+        });
+        minimap_input.players.push(MinimapPlayerSnapshot {
+            player_id: 7,
+            x: 72.0,
+            y: 80.0,
+            name: "pilot".into(),
+            color: 0xffffffff,
+            dead: false,
+            ping_time: 1.0,
+            ping_x: 80.0,
+            ping_y: 88.0,
+            ping_text: Some("go".into()),
+        });
+        minimap_input.markers.push(MinimapMarkerSnapshot {
+            id: 3,
+            x: 96.0,
+            y: 48.0,
+            label: "A".into(),
+            minimap: true,
+        });
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame =
+            launcher.graphics_frame_for_render(16, camera, viewport, minimap_camera, minimap_input);
+
+        let minimap_sidecar = frame
+            .bundle
+            .minimap_overlay
+            .as_ref()
+            .expect("graphics bridge should still carry minimap overlay sidecar state");
+        assert!(
+            !minimap_sidecar.commands.is_empty(),
+            "minimap overlay sidecar should remain observable while commands are lowered"
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let minimap_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Minimap)
+            .expect("minimap overlay commands should be lowered into a Minimap render pass");
+        assert_eq!(minimap_pass.target, RenderTarget::Screen);
+        assert_eq!(minimap_pass.order, RenderPassKind::Minimap.default_order());
+
+        let expected_tint = super::rgba8888_to_render_color(0x33cc66ff, 1.0);
+        assert!(minimap_pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    tint,
+                    rotation,
+                    ..
+                } if symbol == "dagger"
+                    && *tint == expected_tint
+                    && (*rotation - 90.0).abs() < f32::EPSILON
+            )
+        }));
+        assert!(minimap_pass.commands.iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "pilot")
+        ));
+        assert!(minimap_pass.commands.iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "go")
+        ));
+        assert!(minimap_pass
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawText { text, .. } if text == "A")));
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_texture_bindings
+            .iter()
+            .any(|binding| binding.symbol == "dagger"));
+        assert!(
+            renderer
+                .last_opengl_backend_executor_state
+                .draw_text_commands
+                >= 3
         );
     }
 

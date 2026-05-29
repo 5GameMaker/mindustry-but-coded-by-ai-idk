@@ -15235,3 +15235,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - minimap overlay 仍需从 sidecar lower 到 `RenderPassKind::Minimap`；
   - entity world draw、更多 native runtime smoke、联机可玩 smoke 仍未完成；
   - 当前总体迁移约 39.8%，仍未达到完整可玩。
+
+## 412. 最新闭环记录：minimap overlay 接入独立 Minimap render pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.0%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `minimap_overlay_render_pass(...)`，把 `MinimapOverlayPlan` lower 成独立 `RenderPassKind::Minimap`；
+    - `graphics_frame_for_render()` 现在只生成一次 `minimap_overlay_plan(...)`，既保留 `RenderBridge.minimap_overlay` sidecar，也把可执行命令 push 到 render frame；
+    - `UnitIcon` 转成 `DrawSprite` 并保留 Java minimap 的 `team_color` tint 与 `rotation - 90` 语义；
+    - `PlayerLabel` / `Ping` / `Marker` 转成 `DrawText`，`FogTexture` / `Spawn` / `CameraBounds` / `Indicator` 转成对应的 rect/circle/stroke 命令；
+    - 新增 `desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass`，覆盖 unit sprite、player label、ping text、marker label、sidecar 保留、atlas binding 和 headless/OpenGL executor 统计。
+- 迁移意义：
+  - minimap overlay 不再只停留在 bridge sidecar；
+  - minimap 覆盖层进入真实 `RenderFramePlan` / OpenGL backend 主链路，且不污染 standard effect / world label 使用的 `Overlay` pass；
+  - 当前仍是可执行过渡表达，后续继续补 Java `MinimapRenderer.drawEntities/drawSpawns/fog/marker.draw(1)` 的精确视觉语义。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_world_label_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 仍未完成：
+  - Java minimap 的精确文本布局、ping 双层文本、fog shader/texture、spawn icon/pulse、indicator 颜色插值和 `MapObjectives` 多态 marker 仍需继续迁移；
+  - entity/world draw、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.0%，仍未达到完整可玩。

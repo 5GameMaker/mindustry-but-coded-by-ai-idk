@@ -12549,3 +12549,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 补 Java world label autoscale / parent local visibility / 精确 font layout；
   2. minimap overlay：按子代理建议独立接成 `RenderPassKind::Minimap`；
   3. entity world draw：继续把 bullet/unit/player 等渲染从 snapshot/state 收口到 render frame。
+
+### 2026-05-30：minimap overlay 接入独立 Minimap render pass
+
+- 当前整体完成度：约 **40.0%**。
+- 已完成：
+  - `desktop/src/lib.rs` 新增 `minimap_overlay_render_pass(...)`，把 `MinimapOverlayPlan` lower 到 `RenderPassKind::Minimap`；
+  - `graphics_frame_for_render()` 只生成一次 minimap overlay plan，同时保留 `frame.bundle.minimap_overlay` sidecar 与真实 render pass；
+  - `UnitIcon` 进入 `DrawSprite` / atlas / OpenGL sprite path，并保留 team tint 与 `rotation - 90`；
+  - `PlayerLabel`、`Ping`、`Marker` 进入 `DrawText`，fog/spawn/camera/indicator 进入基础 rect/circle/stroke 命令；
+  - 新增 `desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_minimap_overlay_plan_into_minimap_render_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_standard_effect --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_world_label_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop opengl --lib --features opengl-backend`
+- 下一步：
+  1. 继续精确补 Java minimap：真实 fog shader/texture、spawn icon/pulse、ping 双层文字、indicator block offset/color interpolation、MapObjectives 多态 marker；
+  2. 按渲染优先级推进 entity/world draw：Unit/Weapon/Bullet/Weather/Fire/Puddle/BlockRenderer 到 `RenderPass`/`RenderCommand` 主链路；
+  3. 每个闭环继续更新 `README.md` 百分比、`MIGRATION.md`、本文件，中文提交并推送 `origin main`。
