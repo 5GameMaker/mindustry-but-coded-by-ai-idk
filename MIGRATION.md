@@ -14196,3 +14196,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - draw call resolving executor 与 shader command resolving executor 仍各自持有 cache，后续需要合并到同一 real GL backend 状态边界；
   - `EffectBuffer` 已有稳定 runtime texture identity/handle，但仍未接真实 FBO attachment / resolve pipeline；
   - 当前总体迁移约 31.8%，仍未达到完整可玩。
+
+## 12.461 Shader/Draw 共享 resolved command executor 接入
+
+- 2026-05-29：继续把 shader command 与 draw call command 的 handle 解析边界合流。当前新增共享 resolving executor，让 shader resolved command 与 sprite draw resolved action 使用同一 `DesktopGraphicsOpenGlBackendHandleCache` / `HandleAllocator`，避免同一 program/texture 在两条流里各自分配不同 handle。
+- Rust 新增/接入：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendResolvedCommandExecutorState`，记录共享 executor 被驱动时的 shader command / sprite draw call 数量；
+    - 新增 `DesktopGraphicsResolvingOpenGlBackendCommandExecutor`，同时实现 `DesktopGraphicsOpenGlBackendShaderCommandSink` 与 `DesktopGraphicsOpenGlBackendSpriteDrawCallSink`；
+    - `DesktopGraphicsOpenGlBackendExecutorState::drive_resolving_command_executor(...)` 与 `DesktopGraphicsOpenGlBackendExecutor::drive_resolving_command_executor(...)` 将现有 `shader_commands` 与 `sprite_draw_call_plans` 推入同一个共享 executor；
+    - 新增 `desktop_graphics_opengl_shared_command_executor_reuses_shader_and_draw_handles`，锁定 `shader:Space` 与 `sprites/noise.png` 在 shader/draw 两条流中复用相同 program/texture handle。
+- 迁移意义：
+  - shader apply 和 sprite draw 不再只能通过两个独立 resolving executor 观察 OpenGL handle；
+  - 共享 executor 是后续 real GL backend 状态边界的最小雏形：program、texture、VAO 的解析都从同一 cache 分配；
+  - 这一步仍保持现有 plan/executor/sink 架构，未引入真实 GL API，也未破坏 headless 测试。
+- 已跑验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop shared_command --lib`
+  - `cargo test -p mindustry-desktop shader_commands --lib`
+  - `cargo test -p mindustry-desktop opengl --lib`
+- 仍未完成：
+  - texture upload executor / mesh upload executor 仍各自持有独立 cache，后续需要继续纳入同一 real GL backend state；
+  - 共享 executor 当前只按 `shader_commands` 后接 `sprite_draw_call_plans` 的聚合顺序驱动，尚未恢复完整 frame event interleaving；
+  - 真实 `glUseProgram/glUniform*/glActiveTexture/glBindTexture/glDrawElements` 尚未执行；
+  - 当前总体迁移约 31.9%，仍未达到完整可玩。

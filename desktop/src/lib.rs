@@ -3645,6 +3645,12 @@ pub struct DesktopGraphicsOpenGlBackendSpriteDrawCallSinkExecutionState {
     pub last_draw_call: Option<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+    pub shader_commands_emitted: usize,
+    pub sprite_draw_calls_emitted: usize,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsOpenGlBackendSpriteMeshUploadSinkExecutionState {
     pub mesh_uploads_emitted: usize,
@@ -4408,6 +4414,85 @@ impl DesktopGraphicsOpenGlBackendShaderCommandSink
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
+    pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub resolved_shader_commands: Vec<DesktopGraphicsOpenGlBackendResolvedShaderCommand>,
+    pub resolved_draw_actions: Vec<DesktopGraphicsOpenGlBackendResolvedDrawCallAction>,
+    pub draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
+}
+
+impl DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
+    pub fn consume_opengl_shader_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendShaderCommand,
+    ) {
+        let resolved = self
+            .cache
+            .resolve_shader_command(command, &mut self.allocator);
+        self.resolved_shader_commands.push(resolved);
+    }
+
+    pub fn consume_opengl_sprite_draw_call(
+        &mut self,
+        draw_call: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan,
+    ) {
+        let mut recording = DesktopGraphicsRecordingOpenGlBackendDrawCallExecutor::default();
+        recording.consume_opengl_sprite_draw_call(draw_call);
+        for action in recording.actions {
+            let resolved_action = self.cache.resolve_action(action, &mut self.allocator);
+            self.draw_commands
+                .extend(resolved_action.to_opengl_draw_commands());
+            self.resolved_draw_actions.push(resolved_action);
+        }
+    }
+
+    pub fn drive_resolved_shader_command_sink<
+        S: DesktopGraphicsOpenGlBackendResolvedShaderCommandSink,
+    >(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.resolved_shader_commands {
+            sink.consume_opengl_resolved_shader_command(command.clone());
+        }
+        self.resolved_shader_commands.len()
+    }
+
+    pub fn drive_draw_command_sink<S: DesktopGraphicsOpenGlBackendDrawCommandSink>(
+        &self,
+        sink: &mut S,
+    ) -> usize {
+        for command in &self.draw_commands {
+            sink.consume_opengl_draw_command(command.clone());
+        }
+        self.draw_commands.len()
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendShaderCommandSink
+    for DesktopGraphicsResolvingOpenGlBackendCommandExecutor
+{
+    fn consume_opengl_shader_command(
+        &mut self,
+        command: DesktopGraphicsOpenGlBackendShaderCommand,
+    ) {
+        Self::consume_opengl_shader_command(self, command);
+    }
+}
+
+impl DesktopGraphicsOpenGlBackendSpriteDrawCallSink
+    for DesktopGraphicsResolvingOpenGlBackendCommandExecutor
+{
+    fn consume_opengl_sprite_draw_call(
+        &mut self,
+        draw_call: DesktopGraphicsOpenGlBackendSpriteDrawCallPlan,
+    ) {
+        Self::consume_opengl_sprite_draw_call(self, draw_call);
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DesktopGraphicsResolvingOpenGlBackendShaderLifecycleExecutor {
     pub allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
@@ -4977,6 +5062,22 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         self.shader_commands.len()
     }
 
+    pub fn drive_resolving_command_executor(
+        &self,
+        executor: &mut DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
+    ) -> DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+        let mut state = DesktopGraphicsOpenGlBackendResolvedCommandExecutorState::default();
+        for command in &self.shader_commands {
+            executor.consume_opengl_shader_command(command.clone());
+            state.shader_commands_emitted += 1;
+        }
+        for draw_call in &self.sprite_draw_call_plans {
+            executor.consume_opengl_sprite_draw_call(draw_call.clone());
+            state.sprite_draw_calls_emitted += 1;
+        }
+        state
+    }
+
     pub fn drive_sprite_draw_call_sink<S: DesktopGraphicsOpenGlBackendSpriteDrawCallSink>(
         &self,
         sink: &mut S,
@@ -5039,6 +5140,13 @@ impl DesktopGraphicsOpenGlBackendExecutor {
         sink: &mut S,
     ) -> usize {
         self.state.drive_shader_command_sink(sink)
+    }
+
+    pub fn drive_resolving_command_executor(
+        &self,
+        executor: &mut DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
+    ) -> DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+        self.state.drive_resolving_command_executor(executor)
     }
 
     pub fn drive_sprite_draw_call_sink<S: DesktopGraphicsOpenGlBackendSpriteDrawCallSink>(
@@ -15078,6 +15186,120 @@ mod tests {
             resolving_executor.commands.len()
         );
         assert_eq!(resolved_sink.commands, resolving_executor.commands);
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_shared_command_executor_reuses_shader_and_draw_handles() {
+        let shared_texture_identity =
+            super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_shader_texture_binding(
+                &TextureBinding::Asset("sprites/noise.png".into()),
+            );
+        let state = super::DesktopGraphicsOpenGlBackendExecutorState {
+            shader_commands: vec![
+                super::DesktopGraphicsOpenGlBackendShaderCommand::UseProgram {
+                    program_key: "shader:Space".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendShaderCommand::BindTexture {
+                    program_key: "shader:Space".into(),
+                    slot: 1,
+                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    texture: TextureBinding::Asset("sprites/noise.png".into()),
+                },
+            ],
+            sprite_draw_call_plans: vec![super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan {
+                batch_index: 0,
+                shader_program:
+                    super::DesktopGraphicsOpenGlBackendShaderProgramIdentity::from_shader(
+                        ShaderId::Space,
+                    ),
+                texture_identity: shared_texture_identity,
+                vertex_array_key: "sprite-batch:shared:vao".into(),
+                index_count: 6,
+                index_offset: 0,
+                primitive_type:
+                    super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+            }],
+            ..Default::default()
+        };
+        let mut executor = super::DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        let execution_state = state.drive_resolving_command_executor(&mut executor);
+        assert_eq!(
+            execution_state,
+            super::DesktopGraphicsOpenGlBackendResolvedCommandExecutorState {
+                shader_commands_emitted: 2,
+                sprite_draw_calls_emitted: 1,
+            }
+        );
+
+        assert_eq!(executor.cache.programs["shader:Space"], 1);
+        assert_eq!(executor.cache.textures["atlas:Main:sprites/noise.png"], 2);
+        assert_eq!(executor.cache.vertex_arrays["sprite-batch:shared:vao"], 3);
+        assert_eq!(
+            executor.resolved_shader_commands,
+            vec![
+                super::DesktopGraphicsOpenGlBackendResolvedShaderCommand::UseProgram {
+                    program_key: "shader:Space".into(),
+                    program_handle: 1,
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedShaderCommand::BindTexture {
+                    program_key: "shader:Space".into(),
+                    program_handle: 1,
+                    slot: 1,
+                    target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                    texture: TextureBinding::Asset("sprites/noise.png".into()),
+                    texture_key: "atlas:Main:sprites/noise.png".into(),
+                    texture_handle: 2,
+                },
+            ]
+        );
+        assert_eq!(
+            executor.resolved_draw_actions,
+            vec![
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::UseProgram {
+                    program_handle: 1,
+                    program_key: "shader:Space".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindTexture {
+                    texture_handle: 2,
+                    texture_key: "atlas:Main:sprites/noise.png".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::BindVertexArray {
+                    vertex_array_handle: 3,
+                    vertex_array_key: "sprite-batch:shared:vao".into(),
+                },
+                super::DesktopGraphicsOpenGlBackendResolvedDrawCallAction::DrawElements {
+                    primitive_type:
+                        super::DesktopGraphicsOpenGlBackendSpriteDrawCallPlan::TRIANGLES_PRIMITIVE,
+                    index_count: 6,
+                    index_offset: 0,
+                },
+            ]
+        );
+        assert_eq!(
+            executor.draw_commands[0],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::UseProgram { program_handle: 1 }
+        );
+        assert_eq!(
+            executor.draw_commands[2],
+            super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                target: super::DESKTOP_GRAPHICS_OPENGL_TEXTURE_2D,
+                texture_handle: 2,
+            }
+        );
+
+        let mut shader_sink =
+            super::DesktopGraphicsRecordingOpenGlBackendResolvedShaderCommandSink::default();
+        assert_eq!(
+            executor.drive_resolved_shader_command_sink(&mut shader_sink),
+            executor.resolved_shader_commands.len()
+        );
+        assert_eq!(shader_sink.commands, executor.resolved_shader_commands);
+        let mut draw_sink = super::DesktopGraphicsRecordingOpenGlBackendDrawCommandSink::default();
+        assert_eq!(
+            executor.drive_draw_command_sink(&mut draw_sink),
+            executor.draw_commands.len()
+        );
+        assert_eq!(draw_sink.commands, executor.draw_commands);
     }
 
     #[test]
