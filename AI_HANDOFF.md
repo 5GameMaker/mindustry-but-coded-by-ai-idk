@@ -9583,3 +9583,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续沿 `DesktopGraphicsLiveBackendRenderCommandSink` 做真实 OpenGL/glow backend 的最小执行器；
   2. 优先把 `RenderTarget`/FBO、TextureAtlas GPU upload、ShaderCatalog compile/bind 三条线接到同一个 desktop backend，不要继续堆孤立 headless seam；
   3. polygon particle 当前仍是 `Custom("block-particle-polygon")` 占位，真实 backend 需要三角扇/mesh 绘制。
+
+---
+
+## 291. 最新闭环记录：RenderTarget/FBO backend target 生命周期 seam
+
+- 本轮总体进度更新：约 **24.2%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsLiveBackendRenderTargetEventKind::{Begin, End}` 与 `DesktopGraphicsLiveBackendRenderTargetTrace`；
+    - 新增 `DesktopGraphicsLiveBackendRenderTargetSink` 和 null sink；
+    - `DesktopGraphicsExecutionTrace` 新增 `render_target_traces`，按 pass 顺序生成每个 target 的 Begin/End 生命周期；
+    - `DesktopGraphicsLiveBackendExecutionState` 记录 target event 总数、screen/texture/buffer 分类计数和最后一个 target event；
+    - `HeadlessDesktopGraphicsRenderer` 已接入 target sink，后续 OpenGL/glow backend 可把 `RenderTarget::Screen` 映射到默认 backbuffer，把 `Texture/Buffer` 映射到 FBO/离屏纹理。
+  - `README.md`
+    - 总体完成度更新到 **24.2%**。
+  - `MIGRATION.md`
+    - 记录 target sink 是 OpenGL FBO/default framebuffer 接入前的过渡 seam；`Blit`/回填事件仍待补齐。
+- Java 对照要点：
+  - `Renderer.effectBuffer`、`BlockRenderer.shadows/dark`、`CacheLayer.ShaderLayer.begin/end` 都是“离屏写入 -> 采样/回填”的两段式流程；
+  - 当前只锁住 Begin/End 生命周期，下一步需要显式表示 `effectBuffer.blit(...)` / `Draw.fbo(...)` / `Draw.rect(shadows.getTexture(), ...)` 这类 Blit/采样回填。
+- 已验证：
+  - `cargo fmt -p mindustry-desktop`
+  - `cargo test -p mindustry-desktop render_target -- --nocapture`
+  - `cargo test -p mindustry-desktop headless_graphics_renderer_records_execution_summary_without_polluting_stats -- --nocapture`
+  - `cargo test -p mindustry-desktop`
+  - `cargo check -p mindustry-core -p mindustry-desktop`
+- 下一步：
+  1. 给 `DesktopGraphicsLiveBackendRenderTargetEventKind` 补 `Blit`/`Resolve` 类事件，明确 Java `effectBuffer`、`shadows`、`dark` 的回填语义；
+  2. 开始设计真实 OpenGL/glow backend 前，需要按开发规则确认新增 `winit/glow` 依赖；
+  3. 继续 TextureAtlas GPU upload 与 ShaderCatalog compile/bind seam，避免 target 生命周期孤立。
