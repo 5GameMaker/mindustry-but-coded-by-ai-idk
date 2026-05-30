@@ -18903,3 +18903,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Tooltip description、TextSetting/AreaTextSetting、动态 category、Data 页真实 side effects 仍待迁移；
   - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 531. JoinDialog 服务器浏览器前端骨架
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.7%**，仍未达到完整可玩；开始把 Join 路由从单行 target 文本壳推进为 JoinDialog 服务器浏览器前端骨架。
+- Java 对照证据：
+  - `JoinDialog` 持有 `servers/tmpServers/hosts/local/remote/global` 等服务器列表与分区状态；
+  - 顶部按钮包含 `@server.add`、帮助、刷新路径；
+  - `setupRemote()` 里保存服务器条目可点击连接，并带上移/下移/刷新/编辑/删除；
+  - `buildServer()` 渲染名称、版本、描述、玩家数、地图/模式、ping；
+  - `connect(ip, port)` / `safeConnect(...)` 负责最终连接。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction` 新增 `OpenJoinAddServer` 与 `RefreshJoinServers`；
+    - `DesktopLauncher` 新增 `join_add_dialog_open` 与 `join_refresh_requests` 过渡状态；
+    - Join 路由文本摘要从单行 `target` 扩展为 `@servers.local` / `@servers.remote` / saved server / add / refresh；
+    - 新增 Join 几何 helper：`join_route_add_button_rect_for_panel()`、`join_route_refresh_button_rect_for_panel()`、`join_route_server_card_rect_for_panel()`；
+    - 新增 `join_route_shell_action_at_surface_point()`，支持 Add、Refresh、点击 saved server card 触发 `ConnectJoin`；
+    - 新增 `push_join_route_page()`，绘制 `@server.add`、`@refresh`、`@servers.local`、`@servers.remote` 与基于 `connect_target` 的 saved server card；
+    - Join card/主 Connect 继续复用现有 `connect_to_target()` 网络连接主链。
+  - 测试：
+    - 新增 `desktop_launcher_join_route_renders_server_browser_skeleton`，验证 Join 路由列表摘要、按钮/card 命中、refresh/add 状态更新、render frame 文本输出；
+    - 既有 `desktop_launcher_join_route_connect_button_uses_connect_target_helper` 继续验证 Connect 按钮走真实连接 helper；
+    - Settings 回归测试保持通过，避免菜单路由变体影响 Settings。
+- 迁移意义：
+  - Join 不再只是 `target: host:port` 文本和一个 CONNECT 按钮，已经有服务器浏览器的可视骨架与操作入口；
+  - 连接仍接在真实 `DesktopLauncher -> connect_to_target -> NetClient` 主链路上；
+  - 为后续接入保存服务器列表、本地发现、社区服务器、搜索、收藏、编辑、删除与 ping 刷新打基础。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_join --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Join 服务器列表仍是基于 `connect_target` 的过渡骨架，尚未接入真实 saved servers/local discovery/community servers；
+  - add/edit/delete/search/favorite/hidden/ping 分区刷新仍未完整实现；
+  - JoinDialog 还未完全还原 Java 的 ScrollPane 分区折叠、搜索框、服务器详情与重连流程；
+  - 主页面完整 UI 还必须继续推进 Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
+  - 未达到完整可玩，不能宣告目标完成。
