@@ -17680,3 +17680,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - DiscordDialog 仍是 shell 文本布局，不是完整 Java Dialog/card；
   - copy 成功提示 `@copied` 尚未渲染；
   - 真实 OS clipboard backend 尚未实现。
+
+## 491. Native OpenGL desktop 主菜单启动可见化
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.6%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和真实页面。
+- 问题背景：
+  - native OpenGL desktop 客户端能编译并创建窗口，但启动后曾出现未响应/全黑屏；
+  - trace 显示首帧已生成 FillRect/DrawText/DrawSprite draw commands，但 native runtime 未提前建立 Mesh shader program，导致 DrawElements 实际无法输出可见内容；
+  - Java 菜单世界背景的 100x50 tile 展开会生成上万条 render command，debug/native 首帧容易卡住。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - native runtime 默认启用 `MINDUSTRY_DESKTOP_FAST_MENU=1`，先走快速菜单背景，保证前端首屏可见；
+    - 增加 `DesktopNativeOpenGlApp::next_redraw_at`，让 winit/OpenGL native 路径按 `DesktopFramePacing` 节流，避免启动后连续 redraw 打满 UI 线程；
+    - `existing_program(...)` 增加内建 Mesh shader 懒加载兜底，缺失 shader lifecycle 时仍可创建/链接 Mesh program；
+    - `upload_builtin_sprite_uniforms_for_program(...)` 同步上传 `u_surfaceSize` 与 `u_texture=0`。
+  - `desktop/src/lib.rs`
+    - 增加 native fast menu render pass：保留主菜单按钮、版本、chrome 与 route shell，暂时跳过未批处理的 5000 tile 菜单世界背景；
+    - 优化 primitive/text quad 记录：批量追加 quads 后只重建一次 mesh/buffer/draw-call plan，避免长文本占位 glyph 导致 O(n²) 首帧卡顿；
+    - 增加 `MINDUSTRY_DESKTOP_TRACE` 受控 trace，定位 OpenGL frame plan / driver submit / present 路径。
+- 迁移意义：
+  - desktop 客户端从“能启动但黑屏/未响应”推进到“能启动、响应、显示主菜单前端层”；
+  - 当前 fast menu 是过渡路径，后续必须用批处理/缓存方式恢复完整 Java `MenuRenderer` 菜单世界背景，不能作为最终替代；
+  - Mesh shader 懒加载是 native 可见性兜底，后续仍需把 shader lifecycle 正式接入 runtime。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - 启动 `target/debug/mindustry-desktop.exe` 后 Windows 进程 `Responding=True`；
+  - 本地桌面截图确认窗口内可见 `RUST MDT CLIENT`、`mindustry-upstream-v158.1` 与主菜单按钮，不再是全黑屏。
+- 仍未完成：
+  - fast menu 背景还不是完整 Java 菜单世界；
+  - shader lifecycle 仍未正式接入 native runtime，只做了 Mesh 懒加载兜底；
+  - `LoadGame / CustomGame / Editor / Mods / Settings` 仍需从 route shell 接入真实页面；
+  - 未达到完整可玩，不能宣告目标完成。

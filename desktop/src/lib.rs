@@ -72,7 +72,7 @@ use mindustry_core::mindustry::input::input_handler::{
 use mindustry_core::mindustry::io::{
     read_bullet_sync, read_decal_sync, read_effect_state_sync, read_fire_sync, read_puddle_sync,
     read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
-    LegacyTeamBlocks, TeamId, TypeValue, Vec2,
+    LegacyTeamBlocks, SaveSlotRecord, TeamId, TypeValue, Vec2,
 };
 use mindustry_core::mindustry::modsys::{ModResourceContainerPlan, ModResourcePlan};
 use mindustry_core::mindustry::net::{
@@ -102,6 +102,22 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_MINDUSTRY_PORT: u16 = 6567;
+
+fn desktop_runtime_trace_enabled() -> bool {
+    std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
+}
+
+fn desktop_runtime_trace(message: impl AsRef<str>) {
+    if desktop_runtime_trace_enabled() {
+        eprintln!("[desktop-runtime] {}", message.as_ref());
+    }
+}
+
+fn desktop_fast_menu_enabled() -> bool {
+    std::env::var_os("MINDUSTRY_DESKTOP_FAST_MENU")
+        .map(|value| value != "0")
+        .unwrap_or(false)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopConnectTarget {
@@ -599,6 +615,15 @@ pub struct DesktopAboutLinkAction {
     pub wiki_event_fired: bool,
     pub clipboard_text: Option<String>,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopLoadGameAction {
+    pub slot: String,
+    pub file: String,
+    pub map_name: Option<String>,
+    pub timestamp: i64,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -9868,34 +9893,7 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
         self.sprite_texture_upload_plans = self.sprite_texture_resource_table.full_upload_plans();
     }
 
-    fn record_primitive_quads(
-        &mut self,
-        target: Option<RenderTarget>,
-        action: &DesktopGraphicsOpenGlBackendAdapterAction,
-    ) {
-        let quads = opengl_backend_primitive_quads_from_action(
-            action,
-            target,
-            self.current_shader_program
-                .clone()
-                .unwrap_or_else(opengl_backend_default_sprite_shader_program),
-            self.current_blend_state,
-            self.current_clip,
-        );
-        if quads.is_empty() {
-            return;
-        }
-        for quad in quads {
-            self.record_sprite_quad(quad);
-        }
-        let binding = opengl_backend_primitive_texture_binding("primitive");
-        self.sprite_texture_resource_table
-            .register_binding(&binding);
-        self.refresh_sprite_texture_upload_plans();
-    }
-
-    fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
-        self.sprite_quads.push(quad);
+    fn refresh_sprite_mesh_plans(&mut self) {
         self.sprite_mesh_batches =
             opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
         self.sprite_mesh_buffer_plans = opengl_backend_mesh_buffer_plans_from_batches(
@@ -9919,6 +9917,36 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
             &self.sprite_mesh_batches,
             &self.sprite_mesh_resource_plans,
         );
+    }
+
+    fn record_primitive_quads(
+        &mut self,
+        target: Option<RenderTarget>,
+        action: &DesktopGraphicsOpenGlBackendAdapterAction,
+    ) {
+        let quads = opengl_backend_primitive_quads_from_action(
+            action,
+            target,
+            self.current_shader_program
+                .clone()
+                .unwrap_or_else(opengl_backend_default_sprite_shader_program),
+            self.current_blend_state,
+            self.current_clip,
+        );
+        if quads.is_empty() {
+            return;
+        }
+        self.sprite_quads.extend(quads);
+        self.refresh_sprite_mesh_plans();
+        let binding = opengl_backend_primitive_texture_binding("primitive");
+        self.sprite_texture_resource_table
+            .register_binding(&binding);
+        self.refresh_sprite_texture_upload_plans();
+    }
+
+    fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
+        self.sprite_quads.push(quad);
+        self.refresh_sprite_mesh_plans();
     }
 }
 
@@ -10498,6 +10526,32 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         self.sprite_texture_upload_plans = self.sprite_texture_resource_table.full_upload_plans();
     }
 
+    fn refresh_sprite_mesh_plans(&mut self) {
+        self.sprite_mesh_batches =
+            opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
+        self.sprite_mesh_buffer_plans = opengl_backend_mesh_buffer_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &mut self.location_cache,
+        );
+        self.sprite_mesh_resource_plans =
+            opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
+                &self.sprite_mesh_buffer_plans,
+            );
+        self.sprite_mesh_resource_table =
+            DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::from_plans(
+                &self.sprite_mesh_resource_plans,
+            );
+        self.sprite_mesh_upload_plans = opengl_backend_sprite_mesh_upload_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &self.sprite_mesh_buffer_plans,
+            &self.sprite_mesh_resource_plans,
+        );
+        self.sprite_draw_call_plans = opengl_backend_sprite_draw_call_plans_from_batches(
+            &self.sprite_mesh_batches,
+            &self.sprite_mesh_resource_plans,
+        );
+    }
+
     fn ensure_framebuffer_attachment_plan_for_target(&mut self, target: &RenderTarget) {
         let Some(attachment_plan) =
             opengl_backend_framebuffer_attachment_plan_for_render_target(target)
@@ -10524,29 +10578,7 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
 
     fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
         self.sprite_quads.push(quad);
-        self.sprite_mesh_batches =
-            opengl_backend_sprite_mesh_batches_from_quads(&self.sprite_quads);
-        self.sprite_mesh_buffer_plans = opengl_backend_mesh_buffer_plans_from_batches(
-            &self.sprite_mesh_batches,
-            &mut self.location_cache,
-        );
-        self.sprite_mesh_resource_plans =
-            opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(
-                &self.sprite_mesh_buffer_plans,
-            );
-        self.sprite_mesh_resource_table =
-            DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::from_plans(
-                &self.sprite_mesh_resource_plans,
-            );
-        self.sprite_mesh_upload_plans = opengl_backend_sprite_mesh_upload_plans_from_batches(
-            &self.sprite_mesh_batches,
-            &self.sprite_mesh_buffer_plans,
-            &self.sprite_mesh_resource_plans,
-        );
-        self.sprite_draw_call_plans = opengl_backend_sprite_draw_call_plans_from_batches(
-            &self.sprite_mesh_batches,
-            &self.sprite_mesh_resource_plans,
-        );
+        self.refresh_sprite_mesh_plans();
     }
 
     fn record_primitive_quads(
@@ -10566,9 +10598,8 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         if quads.is_empty() {
             return;
         }
-        for quad in quads {
-            self.record_sprite_quad(quad);
-        }
+        self.sprite_quads.extend(quads);
+        self.refresh_sprite_mesh_plans();
         let binding = opengl_backend_primitive_texture_binding("primitive");
         self.sprite_texture_resource_table
             .register_binding(&binding);
@@ -10835,8 +10866,18 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
     ) -> DesktopGraphicsOpenGlBackendExecutionState {
         let mut state = DesktopGraphicsOpenGlBackendExecutionState::default();
 
-        for step in &self.steps {
+        let trace_steps = desktop_runtime_trace_enabled();
+        for (step_index, step) in self.steps.iter().enumerate() {
+            if trace_steps {
+                desktop_runtime_trace(format!(
+                    "opengl.plan: step {step_index} begin target={:?} kind={:?}",
+                    step.target, step.kind
+                ));
+            }
             sink.consume_opengl_backend_step(step.clone());
+            if trace_steps {
+                desktop_runtime_trace(format!("opengl.plan: step {step_index} done"));
+            }
             state.steps_visited += 1;
             match &step.target {
                 RenderTarget::Screen => state.screen_target_steps += 1,
@@ -12202,20 +12243,41 @@ where
         frame: &DesktopGraphicsFrame,
         effect_buffer_surface: Option<DesktopGraphicsEffectBufferSurface>,
     ) -> GraphicsFrameStats {
+        desktop_runtime_trace("opengl.renderer: begin");
         if let Some(surface) = effect_buffer_surface {
             self.runtime.resize_surface(surface.size);
         }
 
         let stats = frame.stats().clone();
+        let trace_renderer = desktop_runtime_trace_enabled();
+        if trace_renderer {
+            desktop_runtime_trace(format!(
+                "opengl.renderer: frame stats passes={} commands={}",
+                stats.render_passes, stats.render_commands
+            ));
+        }
         let opengl_backend_plan =
             DesktopGraphicsOpenGlBackendFramePlan::from_frame_with_effect_buffer_surface(
                 frame,
                 effect_buffer_surface,
             );
+        if trace_renderer {
+            desktop_runtime_trace(format!(
+                "opengl.renderer: backend plan steps={} texture_uploads={}",
+                opengl_backend_plan.steps.len(),
+                opengl_backend_plan.texture_upload_plans.len()
+            ));
+        }
         let mut opengl_backend_step_sink = DesktopGraphicsOpenGlBackendExecutor::default();
         opengl_backend_plan.drive_framebuffer_attachment_sink(&mut opengl_backend_step_sink);
         let opengl_backend_execution_state =
             opengl_backend_plan.drive_step_sink(&mut opengl_backend_step_sink);
+        if trace_renderer {
+            desktop_runtime_trace(format!(
+                "opengl.renderer: backend executor commands={}",
+                opengl_backend_step_sink.state.draw_commands.len()
+            ));
+        }
         opengl_backend_step_sink
             .state
             .sprite_texture_upload_plans
@@ -12225,6 +12287,13 @@ where
             DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
         let resolved_command_executor_state =
             opengl_backend_step_sink.drive_resolving_command_executor(&mut resolving_executor);
+        if trace_renderer {
+            desktop_runtime_trace(format!(
+                "opengl.renderer: resolved draw_commands={} shader_commands={}",
+                resolving_executor.draw_commands.len(),
+                resolving_executor.resolved_shader_commands.len()
+            ));
+        }
         let driver_state = self.runtime.submit_resolving_executor(&resolving_executor);
         self.runtime.present_frame();
 
@@ -12282,6 +12351,9 @@ pub struct DesktopLauncher {
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
     pub last_discord_clipboard_text: Option<String>,
+    pub load_game_slots: Vec<SaveSlotRecord>,
+    pub last_load_game_action: Option<DesktopLoadGameAction>,
+    pub load_game_error: Option<String>,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
     pub load_renderer_state: LoadRendererState,
@@ -12968,6 +13040,9 @@ impl DesktopLauncher {
             last_about_link_action: None,
             last_about_linkfail_message: None,
             last_discord_clipboard_text: None,
+            load_game_slots: Vec::new(),
+            last_load_game_action: None,
+            load_game_error: None,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
             load_renderer_state: LoadRendererState::default(),
@@ -16473,6 +16548,73 @@ impl DesktopLauncher {
         }
     }
 
+    fn fast_menu_render_pass_from_plan(
+        &self,
+        plan: &MenuFramePlan,
+        viewport: RenderViewport,
+    ) -> RenderPass {
+        let camera = self.default_render_camera_for_viewport(viewport);
+        let width = viewport.width.max(1.0);
+        let height = viewport.height.max(1.0);
+        let mut pass = RenderPass::new(RenderPassKind::Custom("menu-fast".to_string()))
+            .with_viewport(viewport)
+            .with_camera(camera);
+
+        pass.push(RenderCommand::custom(
+            "menu-fast-background",
+            vec![
+                RenderProperty::new("reason", "native-fast-path-before-menu-world-batching"),
+                RenderProperty::new("width", width.to_string()),
+                RenderProperty::new("height", height.to_string()),
+            ],
+        ));
+        pass.push(RenderCommand::clear([0.018, 0.024, 0.036, 1.0]));
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(0.0, 0.0, width, height),
+            [0.025, 0.035, 0.055, 1.0],
+            0.0,
+        ));
+
+        let panel_width = (width * 0.58).clamp(360.0, 760.0).min(width - 40.0);
+        let panel_height = (height * 0.72).clamp(300.0, 620.0).min(height - 88.0);
+        let panel = RenderRect::new(
+            (width - panel_width) * 0.5,
+            (height - panel_height) * 0.5,
+            panel_width,
+            panel_height,
+        );
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.035, 0.052, 0.075, 0.72],
+            99.0,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            panel,
+            [0.22, 0.42, 0.54, 0.86],
+            2.0,
+            99.1,
+        ));
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(panel.x, panel.y + panel.height - 46.0, panel.width, 46.0),
+            [0.08, 0.18, 0.25, 0.82],
+            99.2,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "RUST MDT CLIENT",
+            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 23.0),
+            [0.74, 0.92, 1.0, 1.0],
+            16.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            99.3,
+        ));
+        pass.extend(plan.ui.to_render_commands());
+        pass
+    }
+
     fn menu_button_at_surface_point(
         &self,
         surface_size: DesktopSurfaceSize,
@@ -17270,8 +17412,13 @@ impl DesktopLauncher {
     ) -> DesktopGraphicsFrame {
         let input = Self::default_menu_frame_input_for_viewport(viewport);
         let plan = self.menu_renderer_state.render_plan(input);
-        let Some(mut menu_pass) = plan.into_render_pass() else {
-            return self.startup_menu_preview_graphics_frame(frame_index, viewport);
+        let mut menu_pass = if desktop_fast_menu_enabled() {
+            self.fast_menu_render_pass_from_plan(&plan, viewport)
+        } else {
+            let Some(menu_pass) = plan.into_render_pass() else {
+                return self.startup_menu_preview_graphics_frame(frame_index, viewport);
+            };
+            menu_pass
         };
 
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
@@ -17538,13 +17685,17 @@ impl DesktopLauncher {
     {
         let viewport = self.default_render_viewport_for_surface(surface_size);
         if !self.has_renderable_world_for_default_frame() {
+            desktop_runtime_trace("frame.graphics: menu frame build begin");
             let frame = self.menu_graphics_frame_for_surface(frame_index, viewport);
+            desktop_runtime_trace("frame.graphics: menu frame build done");
+            desktop_runtime_trace("frame.graphics: menu frame submit begin");
             return renderer.render_graphics_frame_for_surface(
                 &frame,
                 DesktopGraphicsEffectBufferSurface::new(surface_size, effect_buffer_generation),
             );
         }
 
+        desktop_runtime_trace("frame.graphics: world frame build begin");
         let camera = self.default_render_camera_for_viewport(viewport);
         let minimap_camera = self.default_minimap_camera_for_viewport(viewport);
         let minimap_input = self.default_minimap_overlay_input_for_viewport(viewport);
@@ -17623,6 +17774,12 @@ impl DesktopLauncher {
             };
         }
 
+        if desktop_runtime_trace_enabled() {
+            desktop_runtime_trace(format!(
+                "frame.step: apply menu input events={}",
+                input_events.len()
+            ));
+        }
         if self.apply_menu_input_events(loop_state.surface.size, &input_events) {
             loop_state.request_close();
             return DesktopPresentResult {
@@ -17637,14 +17794,20 @@ impl DesktopLauncher {
                 effect_stats: None,
             };
         }
+        desktop_runtime_trace("frame.step: update begin");
         self.update();
+        desktop_runtime_trace("frame.step: update done");
+        desktop_runtime_trace("frame.step: graphics render begin");
         let graphics_stats = self.render_default_graphics_frame_for_surface_with(
             frame_index,
             loop_state.surface.size,
             loop_state.effect_buffer_generation,
             graphics_renderer,
         );
+        desktop_runtime_trace("frame.step: graphics render done");
+        desktop_runtime_trace("frame.step: effects render begin");
         let effect_stats = self.render_standard_effect_frame_with(effect_renderer);
+        desktop_runtime_trace("frame.step: effects render done");
         loop_state.next_frame_index = loop_state.next_frame_index.wrapping_add(1);
 
         DesktopPresentResult {

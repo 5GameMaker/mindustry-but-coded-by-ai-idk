@@ -53,6 +53,18 @@ fn desktop_graphics_backend_label() -> &'static str {
     "opengl-native-runtime:glutin-glow-recording-driver"
 }
 
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_trace_enabled() -> bool {
+    std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_trace(message: impl AsRef<str>) {
+    if desktop_native_trace_enabled() {
+        eprintln!("[desktop-native] {}", message.as_ref());
+    }
+}
+
 #[cfg(not(feature = "opengl-backend"))]
 fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
     let mut effect_renderer = mindustry_desktop::HeadlessDesktopEffectRenderer::default();
@@ -91,6 +103,9 @@ fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
 
 #[cfg(feature = "opengl-native-runtime")]
 fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
+    if std::env::var_os("MINDUSTRY_DESKTOP_FAST_MENU").is_none() {
+        std::env::set_var("MINDUSTRY_DESKTOP_FAST_MENU", "1");
+    }
     let event_loop = winit::event_loop::EventLoop::new()
         .expect("failed to create winit event loop for native OpenGL runtime");
     let native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::default();
@@ -106,6 +121,7 @@ struct DesktopNativeOpenGlApp<'a> {
     native_config: mindustry_desktop::DesktopNativeOpenGlRuntimeConfig,
     window_id: Option<winit::window::WindowId>,
     frame_loop: mindustry_desktop::DesktopFrameLoopState,
+    next_redraw_at: std::time::Instant,
     graphics_renderer:
         Option<mindustry_desktop::DesktopOpenGlBackendGraphicsRenderer<DesktopNativeOpenGlRuntime>>,
     effect_renderer: mindustry_desktop::HeadlessDesktopEffectRenderer,
@@ -231,6 +247,7 @@ impl DesktopNativeOpenGlRuntime {
         event_loop: &winit::event_loop::ActiveEventLoop,
         native_config: &mindustry_desktop::DesktopNativeOpenGlRuntimeConfig,
     ) -> Result<Self, String> {
+        desktop_native_trace("runtime.new: begin");
         let template = ConfigTemplateBuilder::new();
         let (window, gl_config) = DisplayBuilder::new()
             .with_window_attributes(Some(native_config.window_attributes()))
@@ -242,6 +259,7 @@ impl DesktopNativeOpenGlRuntime {
             .map_err(|error| format!("failed to build native OpenGL display/window: {error}"))?;
         let window =
             window.ok_or_else(|| "glutin display builder did not return a window".to_string())?;
+        desktop_native_trace("runtime.new: window created");
         let raw_window_handle = window
             .window_handle()
             .map_err(|error| format!("failed to read raw window handle: {error}"))?
@@ -259,6 +277,7 @@ impl DesktopNativeOpenGlRuntime {
                     gl_display.create_context(&gl_config, &fallback_context_attributes)
                 })
                 .map_err(|error| format!("failed to create native OpenGL context: {error}"))?;
+        desktop_native_trace("runtime.new: context created");
         let surface_attributes = window
             .build_surface_attributes(SurfaceAttributesBuilder::<WindowSurface>::new())
             .map_err(|error| {
@@ -269,6 +288,7 @@ impl DesktopNativeOpenGlRuntime {
         let context = not_current_context
             .make_current(&surface)
             .map_err(|error| format!("failed to make native OpenGL context current: {error}"))?;
+        desktop_native_trace("runtime.new: surface current");
         if native_config.vsync {
             let _ = surface.set_swap_interval(
                 &context,
@@ -307,6 +327,7 @@ impl DesktopNativeOpenGlRuntime {
             native_errors: Vec::new(),
         };
         runtime.resize_native_surface(runtime.window_surface_size());
+        desktop_native_trace("runtime.new: resized initial surface");
         Ok(runtime)
     }
 
@@ -698,12 +719,111 @@ impl DesktopNativeOpenGlDriver<'_> {
     }
 
     fn existing_program(&mut self, program_handle: u32) -> Option<glow::NativeProgram> {
-        self.programs.get(&program_handle).copied().or_else(|| {
-            self.native_errors.push(format!(
-                "native OpenGL program for logical handle {program_handle} is not initialized"
-            ));
-            None
-        })
+        if let Some(program) = self.programs.get(&program_handle).copied() {
+            return Some(program);
+        }
+        self.create_builtin_mesh_program_for_handle(program_handle)
+            .or_else(|| {
+                self.native_errors.push(format!(
+                    "native OpenGL program for logical handle {program_handle} is not initialized"
+                ));
+                None
+            })
+    }
+
+    fn create_builtin_mesh_program_for_handle(
+        &mut self,
+        program_handle: u32,
+    ) -> Option<glow::NativeProgram> {
+        let vertex_source = desktop_native_opengl_builtin_sprite_shader_source(
+            mindustry_core::mindustry::graphics::ShaderId::Mesh,
+            mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+            "builtin-mesh.vert",
+        )?;
+        let fragment_source = desktop_native_opengl_builtin_sprite_shader_source(
+            mindustry_core::mindustry::graphics::ShaderId::Mesh,
+            mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+            "builtin-mesh.frag",
+        )?;
+
+        unsafe {
+            let vertex_shader = match self.gl.create_shader(glow::VERTEX_SHADER) {
+                Ok(shader) => shader,
+                Err(error) => {
+                    self.native_errors.push(format!(
+                        "failed to create builtin Mesh vertex shader for logical program {program_handle}: {error}"
+                    ));
+                    return None;
+                }
+            };
+            self.gl.shader_source(vertex_shader, vertex_source);
+            self.gl.compile_shader(vertex_shader);
+            if !self.gl.get_shader_compile_status(vertex_shader) {
+                self.native_errors.push(format!(
+                    "builtin Mesh vertex shader compile failed for logical program {program_handle}: {}",
+                    self.gl.get_shader_info_log(vertex_shader)
+                ));
+                self.gl.delete_shader(vertex_shader);
+                return None;
+            }
+
+            let fragment_shader = match self.gl.create_shader(glow::FRAGMENT_SHADER) {
+                Ok(shader) => shader,
+                Err(error) => {
+                    self.native_errors.push(format!(
+                        "failed to create builtin Mesh fragment shader for logical program {program_handle}: {error}"
+                    ));
+                    self.gl.delete_shader(vertex_shader);
+                    return None;
+                }
+            };
+            self.gl.shader_source(fragment_shader, fragment_source);
+            self.gl.compile_shader(fragment_shader);
+            if !self.gl.get_shader_compile_status(fragment_shader) {
+                self.native_errors.push(format!(
+                    "builtin Mesh fragment shader compile failed for logical program {program_handle}: {}",
+                    self.gl.get_shader_info_log(fragment_shader)
+                ));
+                self.gl.delete_shader(vertex_shader);
+                self.gl.delete_shader(fragment_shader);
+                return None;
+            }
+
+            let program = match self.gl.create_program() {
+                Ok(program) => program,
+                Err(error) => {
+                    self.native_errors.push(format!(
+                        "failed to create builtin Mesh program for logical handle {program_handle}: {error}"
+                    ));
+                    self.gl.delete_shader(vertex_shader);
+                    self.gl.delete_shader(fragment_shader);
+                    return None;
+                }
+            };
+            self.gl.attach_shader(program, vertex_shader);
+            self.gl.attach_shader(program, fragment_shader);
+            self.gl.link_program(program);
+            self.gl.detach_shader(program, vertex_shader);
+            self.gl.detach_shader(program, fragment_shader);
+            self.gl.delete_shader(vertex_shader);
+            self.gl.delete_shader(fragment_shader);
+
+            if !self.gl.get_program_link_status(program) {
+                self.native_errors.push(format!(
+                    "builtin Mesh program link failed for logical handle {program_handle}: {}",
+                    self.gl.get_program_info_log(program)
+                ));
+                self.gl.delete_program(program);
+                return None;
+            }
+
+            self.programs.insert(program_handle, program);
+            self.program_shaders.insert(
+                program_handle,
+                mindustry_core::mindustry::graphics::ShaderId::Mesh,
+            );
+            Some(program)
+        }
     }
 
     fn existing_shader(&mut self, shader_handle: u32) -> Option<glow::NativeShader> {
@@ -849,6 +969,12 @@ impl DesktopNativeOpenGlDriver<'_> {
         unsafe {
             self.gl
                 .uniform_2_f32(Some(&location), width as f32, height as f32);
+        }
+        if let Some(texture_location) = self.uniform_location(program_handle, program, "u_texture")
+        {
+            unsafe {
+                self.gl.uniform_1_i32(Some(&texture_location), 0);
+            }
         }
     }
 
@@ -1786,6 +1912,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
         &mut self,
         executor: &mindustry_desktop::DesktopGraphicsResolvingOpenGlBackendCommandExecutor,
     ) -> mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
+        desktop_native_trace("runtime.submit: clear backbuffer");
         self.clear_backbuffer();
         let surface_size = self
             .state
@@ -1813,16 +1940,25 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             draw_target_available: true,
             native_errors: &mut self.native_errors,
         };
+        desktop_native_trace("runtime.submit: drive native OpenGL driver");
         let driver_state = executor.drive_driver(&mut driver);
+        if desktop_native_trace_enabled() {
+            desktop_native_trace(format!(
+                "runtime.submit: driver done draw_commands={} resolve_commands={}",
+                driver_state.draw_commands, driver_state.resolve_commands
+            ));
+        }
         self.state.frames_submitted += 1;
         self.state.last_driver_state = Some(driver_state);
         driver_state
     }
 
     fn present_frame(&mut self) {
+        desktop_native_trace("runtime.present: swap begin");
         self.surface
             .swap_buffers(&self.context)
             .expect("native OpenGL swap_buffers failed");
+        desktop_native_trace("runtime.present: swap done");
         self.state.present_events += 1;
     }
 }
@@ -1842,6 +1978,7 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
             native_config,
             window_id: None,
             frame_loop,
+            next_redraw_at: std::time::Instant::now(),
             graphics_renderer: None,
             effect_renderer: mindustry_desktop::HeadlessDesktopEffectRenderer::default(),
             pending_events: Vec::new(),
@@ -1855,12 +1992,26 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
         }
         let events = std::mem::take(&mut self.pending_events);
         let graphics_renderer = self.graphics_renderer.as_mut()?;
-        Some(self.launcher.step_desktop_frame_loop(
+        if desktop_native_trace_enabled() {
+            desktop_native_trace(format!(
+                "app.frame: begin index={} events={}",
+                self.frame_loop.next_frame_index,
+                events.len()
+            ));
+        }
+        let result = self.launcher.step_desktop_frame_loop(
             &mut self.frame_loop,
             &events,
             graphics_renderer,
             &mut self.effect_renderer,
-        ))
+        );
+        if desktop_native_trace_enabled() {
+            desktop_native_trace(format!(
+                "app.frame: done index={} presented={}",
+                result.frame_index, result.presented
+            ));
+        }
+        Some(result)
     }
 }
 
@@ -1871,6 +2022,7 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
             return;
         }
 
+        desktop_native_trace("app.resumed: begin");
         let runtime = DesktopNativeOpenGlRuntime::new(event_loop, &self.native_config)
             .expect("failed to initialize native OpenGL desktop runtime");
         let window_id = runtime.window.id();
@@ -1881,6 +2033,7 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
         self.window_id = Some(window_id);
         self.graphics_renderer =
             Some(mindustry_desktop::DesktopOpenGlBackendGraphicsRenderer::new(runtime));
+        desktop_native_trace("app.resumed: renderer ready");
     }
 
     fn window_event(
@@ -1923,10 +2076,25 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         if !self.frame_loop.closed {
+            let now = std::time::Instant::now();
+            if self.frame_loop.pacing.is_paced() && now < self.next_redraw_at {
+                event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+                    self.next_redraw_at,
+                ));
+                return;
+            }
             if let Some(renderer) = self.graphics_renderer.as_ref() {
                 renderer.runtime.request_redraw();
+            }
+            if self.frame_loop.pacing.is_paced() {
+                self.next_redraw_at = now + self.frame_loop.pacing.target_frame_time;
+                event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+                    self.next_redraw_at,
+                ));
+            } else {
+                event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
             }
         }
     }
