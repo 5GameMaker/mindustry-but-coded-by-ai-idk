@@ -3302,6 +3302,19 @@ impl DesktopFontAssetSourceTrace {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopFontAssetValidationReport {
+    pub total_count: usize,
+    pub resolved_count: usize,
+    pub missing_source_paths: Vec<String>,
+}
+
+impl DesktopFontAssetValidationReport {
+    pub fn all_resolved(&self) -> bool {
+        self.total_count == self.resolved_count && self.missing_source_paths.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsShaderApplyExecutionTrace {
     pub shader: ShaderId,
     pub operation_count: usize,
@@ -4408,6 +4421,30 @@ fn default_desktop_font_asset_source_traces() -> Vec<DesktopFontAssetSourceTrace
                 .map(|path| path.to_string_lossy().replace('\\', "/")),
         })
         .collect()
+}
+
+fn desktop_validate_font_asset_sources(
+    sources: &[DesktopFontAssetSourceTrace],
+) -> DesktopFontAssetValidationReport {
+    let mut resolved_by_source_path = BTreeMap::new();
+    for source in sources {
+        resolved_by_source_path
+            .entry(source.source_path.clone())
+            .and_modify(|resolved| *resolved |= source.resolved())
+            .or_insert_with(|| source.resolved());
+    }
+
+    DesktopFontAssetValidationReport {
+        total_count: resolved_by_source_path.len(),
+        resolved_count: resolved_by_source_path
+            .values()
+            .filter(|resolved| **resolved)
+            .count(),
+        missing_source_paths: resolved_by_source_path
+            .into_iter()
+            .filter_map(|(source_path, resolved)| (!resolved).then_some(source_path))
+            .collect(),
+    }
 }
 
 impl DesktopGraphicsOpenGlBackendTextureBinding {
@@ -13626,6 +13663,10 @@ impl DesktopLauncher {
             render_time: 0.0,
             puddle_particle_rand_state: DESKTOP_PUDDLE_PARTICLE_RAND_DEFAULT,
         }
+    }
+
+    pub fn font_asset_validation_report(&self) -> DesktopFontAssetValidationReport {
+        desktop_validate_font_asset_sources(&self.font_asset_sources)
     }
 
     pub fn merge_mod_directory_into_texture_atlas(
@@ -34454,6 +34495,12 @@ mod tests {
         assert!(source_paths.contains(&"fonts/monospace.woff"));
         assert!(source_paths.contains(&"fonts/tech.ttf"));
         assert!(source_paths.contains(&"icons/icons.properties"));
+        let report = launcher.font_asset_validation_report();
+        assert!(report.total_count <= launcher.font_asset_sources.len());
+        assert_eq!(
+            report.resolved_count + report.missing_source_paths.len(),
+            report.total_count
+        );
     }
 
     #[test]
@@ -34490,6 +34537,13 @@ mod tests {
             icons.file_path.as_deref(),
             Some(expected_icons_path.as_str())
         );
+
+        let report = super::desktop_validate_font_asset_sources(&sources);
+        assert_eq!(report.resolved_count, 2);
+        assert!(!report.all_resolved());
+        assert!(report
+            .missing_source_paths
+            .contains(&"fonts/icon.ttf".to_string()));
     }
 
     #[test]

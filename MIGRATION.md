@@ -18063,3 +18063,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `icons.properties` 解析结果尚未进入 desktop icon glyph registry；
   - `DrawText` placeholder quads 尚未替换为真实 font texture quads；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 502. Desktop 字体资源验证报告
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.8%**，仍未达到完整可玩；继续推进字体 atlas，确保真实资源发现可被验证。
+- 问题背景：
+  - 501 已让 desktop launcher 持有字体资源 source traces，但后续 glyph atlas 需要知道哪些资源已解析、哪些缺失；
+  - 上游 `Fonts.java` 会依赖多个字体和 `icons.properties`，缺任一资源都可能导致 UI 文字/icon 不完整；
+  - 本轮补资源验证报告，不进入 rasterization，避免把字体文件误塞进 PNG texture upload 语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopFontAssetValidationReport`，包含 `total_count/resolved_count/missing_source_paths`；
+    - 新增 `all_resolved()`，用于后续 renderer/诊断判断字体资源是否齐全；
+    - 新增 `desktop_validate_font_asset_sources(...)`，按唯一 source path 聚合重复字体引用（如 `font.woff` 同时供 default/outline 使用）；
+    - `DesktopLauncher::font_asset_validation_report()` 对外暴露验证结果；
+    - 扩展测试，确认 launcher 报告计数自洽，并在临时 `MINDUSTRY_ASSET_ROOT` 下验证部分资源解析与缺失列表。
+- 迁移意义：
+  - 字体资源 discovery 从“列表”推进为可验证 report，后续真实字体 atlas 可以明确阻塞原因；
+  - 该验证层避免把资源缺失误判成渲染黑屏，有利于后续排查前端显示问题；
+  - 这仍是 rasterization 前置，真正 glyph atlas/draw call 还需要继续迁移。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_font_asset_sources_follow_upstream_fonts_registry --lib`
+  - `cargo test -p mindustry-desktop desktop_font_asset_sources_resolve_from_mindustry_asset_root --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 未生成 `DesktopFontRasterizationPlan/DesktopFontAtlasPlan/DesktopFontGlyphUploadPlan`；
+  - 未把 `icons.properties` 的 icon 名称映射到可渲染 glyph；
+  - `DrawText` 仍走 placeholder；
+  - 未达到完整可玩，不能宣告目标完成。
