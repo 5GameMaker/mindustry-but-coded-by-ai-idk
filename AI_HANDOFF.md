@@ -12888,3 +12888,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. Unit engine trail 不要直接画空 snapshot；先补 runtime trail points，再复用 `core::graphics::Trail` 渲染；
   2. Unit weapons 最小闭环需要先补 mount visual snapshot（至少 rotation/recoil），否则只能静态画武器；
   3. 继续推进 hard shadow / weapons / legs / payload/items，并持续收口统一 entity layer sorting。
+
+### 2026-05-30：Unit weapon outline/body sprite 接入同一单位 Overlay pass
+
+- 当前整体完成度：约 **41.6%**。
+- 已完成：
+  - 默认 atlas 候选已包含 content unit weapon 的 body/outline/cell/heat sprite 路径；
+  - `DesktopLauncher::unit_snapshot_weapon_outline_render_commands(...)` 会把 `top=false` weapon outline 放到 unit outline 后、body 前；
+  - `DesktopLauncher::unit_snapshot_weapon_render_commands(...)` 会把 weapon body sprite 放到 unit body/cell 后；
+  - weapon pose 按 Java `Weapon.draw()` 的最小公式计算：unit rotation、mount/base rotation、weapon x/y 与 recoil offset；
+  - dagger 测试覆盖 `large-weapon-outline` / `large-weapon` 的顺序、中心 `(38, 60)`、旋转 `90` 与 `Layer::GROUND_UNIT`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 继续补 weapon heat/cell/shadow/flipSprite/parts/continuous beam/shoot effects；
+  2. 继续补 unit engine trail runtime points，而不是直接渲染空 snapshot；
+  3. 推进 hard shadow、legs、payload/item，并把 Unit/Fire/Bullet/Puddle 从临时 Overlay 收口到统一 Java layer sorting。

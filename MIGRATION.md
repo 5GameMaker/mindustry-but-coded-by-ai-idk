@@ -15726,3 +15726,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - hard shadow、engine trail runtime points、weapons、legs、payload/item 仍未接入；
   - 当前 unit pass 仍临时复用 Overlay，后续必须继续统一 Java layer sorting / entity world pass；
   - Weather custom lowering、native OpenGL live smoke、Java↔Rust 联机 smoke 仍需继续。
+
+## 428. 最新闭环记录：Unit weapon outline/body sprite 接入同一单位 Overlay pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.6%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/UnitType.java#drawWeaponOutlines(...)`
+  - `core/src/mindustry/type/UnitType.java#drawWeapons(...)`
+  - `core/src/mindustry/type/Weapon.java#drawOutline(...)`
+  - `core/src/mindustry/type/Weapon.java#draw(...)`
+  - `core/src/mindustry/io/TypeIO.java#writeMounts/readMounts(...)`
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 默认 atlas 候选加入所有 content unit weapon 的 `name`、`name-outline`、`name-cell`、`name-heat` sprite 路径；
+    - 新增 weapon region/outline/cell/heat symbol helper，保留后续 content override 接入点；
+    - 新增 `desktop_unit_weapon_pose(...)`，按 Java `rotation = unit.rotation - 90`、`weaponRotation = rotation + (rotate ? mount.rotation : baseRotation)`、`Angles.trnsx/trnsy` 与 recoil 公式计算 weapon center/rotation；
+    - 新增 `unit_snapshot_weapon_outline_render_commands(...)`，将 `top=false` 的 weapon outline 插到 unit outline 后、body 前；
+    - 新增 `unit_snapshot_weapon_render_commands(...)`，将 weapon body sprite 插到 unit body/cell 后；
+    - `unit_snapshot_render_pass()` 顺序扩展为 soft shadow → unit outline → non-top weapon outlines → engine circles → body → cell → weapon bodies/top outlines → shield；
+    - 扩展 dagger 快照测试，覆盖 `large-weapon-outline` 与 `large-weapon` 的 atlas、顺序、位置、旋转、颜色和 layer。
+- 迁移意义：
+  - dagger 这类基础地面单位不再只有 body/cell/shield，静态 weapon sprite 已进入同一 typed unit render aggregation；
+  - Java mount 网络协议只传 `shoot/rotate/aimX/aimY`，Rust `MountWire` 已对齐 Java，本轮不扩协议，先消费现有 runtime mounts 做可见渲染。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - weapon heat/cell region、shadow、flipSprite/xscl、parts、continuous beam、shoot effects 与精确 client-side recoil/heat/reload 动画仍需继续；
+  - top weapon 的更复杂 draw parts 与 layer sorting 仍需继续；
+  - Unit engine trail 仍需先补 runtime trail points；hard shadow、legs、payload/item 仍未接入；
+  - Weather custom lowering、native OpenGL live smoke、Java↔Rust 联机 smoke 仍需继续。

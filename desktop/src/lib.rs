@@ -30,8 +30,8 @@ use mindustry_core::mindustry::entities::{
     StandardEffectCircleRenderPrimitive, StandardEffectDrawKind, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
     StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
-    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, WorldLabelAlign,
-    WorldLabelComp, PLAYER_CLASS_ID,
+    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, WeaponMount,
+    WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::{
@@ -73,7 +73,7 @@ use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
-use mindustry_core::mindustry::r#type::WeatherState;
+use mindustry_core::mindustry::r#type::{Weapon, WeatherState};
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
@@ -189,7 +189,64 @@ fn desktop_unit_body_sprite_virtual_source_paths(content_loader: &ContentLoader)
             "sprites/square-shadow.png".to_string(),
             "sprites/power-cell.png".to_string(),
         ])
+        .chain(desktop_unit_weapon_sprite_virtual_source_paths(
+            content_loader,
+        ))
         .collect()
+}
+
+fn desktop_unit_weapon_sprite_virtual_source_paths(content_loader: &ContentLoader) -> Vec<String> {
+    content_loader
+        .units()
+        .iter()
+        .flat_map(|unit| unit.weapons.iter())
+        .flat_map(|weapon| {
+            [
+                desktop_weapon_region_symbol(weapon),
+                desktop_weapon_outline_symbol(weapon),
+                desktop_weapon_cell_symbol(weapon),
+                desktop_weapon_heat_symbol(weapon),
+            ]
+        })
+        .filter(|symbol| !symbol.is_empty())
+        .map(|symbol| format!("sprites/{symbol}.png"))
+        .collect()
+}
+
+fn desktop_weapon_region_symbol(weapon: &Weapon) -> String {
+    weapon
+        .region
+        .as_ref()
+        .filter(|region| !region.is_empty())
+        .cloned()
+        .unwrap_or_else(|| weapon.name.clone())
+}
+
+fn desktop_weapon_outline_symbol(weapon: &Weapon) -> String {
+    weapon
+        .outline_region
+        .as_ref()
+        .filter(|region| !region.is_empty())
+        .cloned()
+        .unwrap_or_else(|| format!("{}-outline", weapon.name))
+}
+
+fn desktop_weapon_cell_symbol(weapon: &Weapon) -> String {
+    weapon
+        .cell_region
+        .as_ref()
+        .filter(|region| !region.is_empty())
+        .cloned()
+        .unwrap_or_else(|| format!("{}-cell", weapon.name))
+}
+
+fn desktop_weapon_heat_symbol(weapon: &Weapon) -> String {
+    weapon
+        .heat_region
+        .as_ref()
+        .filter(|region| !region.is_empty())
+        .cloned()
+        .unwrap_or_else(|| format!("{}-heat", weapon.name))
 }
 
 fn desktop_unit_body_layer(unit: &UnitComp) -> f32 {
@@ -304,6 +361,29 @@ fn desktop_unit_engine_layer(unit: &UnitComp) -> f32 {
     } else {
         desktop_unit_body_layer(unit)
     }
+}
+
+fn desktop_unit_weapon_layer(unit: &UnitComp, weapon: &Weapon) -> f32 {
+    desktop_unit_body_layer(unit) + weapon.layer_offset
+}
+
+fn desktop_unit_weapon_pose(unit: &UnitComp, mount: &WeaponMount) -> (RenderPoint, f32) {
+    let weapon = &mount.weapon;
+    let unit_rotation = unit.rotation() - 90.0;
+    let weapon_rotation = unit_rotation
+        + if weapon.rotate {
+            mount.rotation
+        } else {
+            weapon.base_rotation
+        };
+    let real_recoil = mount.recoil.max(0.0).powf(weapon.recoil_pow) * weapon.recoil;
+    let (mount_x, mount_y) = desktop_rotate_offset(unit_rotation, weapon.x, weapon.y);
+    let (recoil_x, recoil_y) = desktop_rotate_offset(weapon_rotation, 0.0, -real_recoil);
+
+    (
+        RenderPoint::new(unit.x() + mount_x + recoil_x, unit.y() + mount_y + recoil_y),
+        weapon_rotation,
+    )
 }
 
 fn desktop_puddle_fraction(amount: f32) -> f32 {
@@ -11916,6 +11996,81 @@ impl DesktopLauncher {
         ))
     }
 
+    fn unit_snapshot_weapon_sprite_render_command(
+        &self,
+        unit: &UnitComp,
+        mount: &WeaponMount,
+        symbol: String,
+        tint: [f32; 4],
+    ) -> Option<RenderCommand> {
+        if !unit.is_valid() {
+            return None;
+        }
+
+        let region = self.texture_atlas.lookup(&symbol).ok()?;
+        let width = region.region.width.max(1) as f32;
+        let height = region.region.height.max(1) as f32;
+        let (center, rotation) = desktop_unit_weapon_pose(unit, mount);
+        let rect = RenderRect::from_center(center, width, height);
+
+        Some(RenderCommand::draw_sprite(
+            symbol,
+            rect,
+            tint,
+            rotation,
+            desktop_unit_weapon_layer(unit, &mount.weapon),
+        ))
+    }
+
+    fn unit_snapshot_weapon_outline_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid() {
+            return Vec::new();
+        }
+
+        unit.weapons
+            .mounts
+            .iter()
+            .filter(|mount| !mount.weapon.top)
+            .filter_map(|mount| {
+                self.unit_snapshot_weapon_sprite_render_command(
+                    unit,
+                    mount,
+                    desktop_weapon_outline_symbol(&mount.weapon),
+                    rgba8888_to_render_color(unit.type_info.outline_color_rgba, 1.0),
+                )
+            })
+            .collect()
+    }
+
+    fn unit_snapshot_weapon_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid() {
+            return Vec::new();
+        }
+
+        let mut commands = Vec::new();
+        for mount in &unit.weapons.mounts {
+            if mount.weapon.top {
+                if let Some(command) = self.unit_snapshot_weapon_sprite_render_command(
+                    unit,
+                    mount,
+                    desktop_weapon_outline_symbol(&mount.weapon),
+                    rgba8888_to_render_color(unit.type_info.outline_color_rgba, 1.0),
+                ) {
+                    commands.push(command);
+                }
+            }
+            if let Some(command) = self.unit_snapshot_weapon_sprite_render_command(
+                unit,
+                mount,
+                desktop_weapon_region_symbol(&mount.weapon),
+                [1.0, 1.0, 1.0, 1.0],
+            ) {
+                commands.push(command);
+            }
+        }
+        commands
+    }
+
     fn unit_snapshot_shield_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_shields || unit.shield.shield_alpha <= 0.0 {
             return None;
@@ -12016,6 +12171,8 @@ impl DesktopLauncher {
                 pass.commands.push(command);
             }
             pass.commands
+                .extend(self.unit_snapshot_weapon_outline_render_commands(unit));
+            pass.commands
                 .extend(self.unit_snapshot_engine_render_commands(unit));
             if let Some(command) = self.unit_snapshot_body_render_command(unit) {
                 pass.commands.push(command);
@@ -12023,6 +12180,8 @@ impl DesktopLauncher {
             if let Some(command) = self.unit_snapshot_cell_render_command(unit) {
                 pass.commands.push(command);
             }
+            pass.commands
+                .extend(self.unit_snapshot_weapon_render_commands(unit));
             if let Some(command) = self.unit_snapshot_shield_render_command(unit) {
                 pass.commands.push(command);
             }
@@ -16311,6 +16470,8 @@ mod tests {
         assert!(launcher.texture_atlas.has("dagger"));
         assert!(launcher.texture_atlas.has("dagger-outline"));
         assert!(launcher.texture_atlas.has("dagger-cell"));
+        assert!(launcher.texture_atlas.has("large-weapon"));
+        assert!(launcher.texture_atlas.has("large-weapon-outline"));
         assert!(launcher.texture_atlas.has("particle"));
 
         let mut unit = UnitComp::new(7400, dagger, TeamId(1));
@@ -16356,7 +16517,10 @@ mod tests {
         };
         assert!(index_of_symbol("particle") < index_of_symbol("dagger-outline"));
         assert!(index_of_symbol("dagger-outline") < index_of_symbol("dagger"));
+        assert!(index_of_symbol("dagger-outline") < index_of_symbol("large-weapon-outline"));
+        assert!(index_of_symbol("large-weapon-outline") < index_of_symbol("dagger"));
         assert!(index_of_symbol("dagger") < index_of_symbol("dagger-cell"));
+        assert!(index_of_symbol("dagger-cell") < index_of_symbol("large-weapon"));
         match overlay.commands.iter().find(|command| {
             matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger")
         }) {
@@ -16428,6 +16592,42 @@ mod tests {
                 assert_eq!(*layer, Layer::GROUND_UNIT);
             }
             other => panic!("expected unit cell DrawSprite, got {other:?}"),
+        }
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "large-weapon-outline")
+        }) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(38.0, 60.0));
+                assert_eq!(*tint, super::rgba8888_to_render_color(0x2b2f36ff, 1.0));
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected unit weapon outline DrawSprite, got {other:?}"),
+        }
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "large-weapon")
+        }) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(38.0, 60.0));
+                assert_eq!(rect.width, 1.0);
+                assert_eq!(rect.height, 1.0);
+                assert_eq!(*tint, [1.0, 1.0, 1.0, 1.0]);
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected unit weapon body DrawSprite, got {other:?}"),
         }
         match overlay.commands.iter().find(|command| {
             matches!(command, RenderCommand::DrawCircle { center, layer, .. }
