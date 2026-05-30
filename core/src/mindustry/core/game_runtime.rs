@@ -4440,11 +4440,13 @@ impl GameRuntime {
             .extend((0..unit_payloads).map(|_| PayloadState {
                 kind: PayloadKind::Unit,
                 size: 0.0,
+                key: None,
             }));
         payload.payloads.extend(
             (0..build_payloads + unknown_payloads).map(|_| PayloadState {
                 kind: PayloadKind::Build,
                 size: 0.0,
+                key: None,
             }),
         );
         true

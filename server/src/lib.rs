@@ -56,7 +56,7 @@ use mindustry_core::mindustry::net::{
     TransferInventoryCallPacket, UnitBlockSpawnCallPacket, UnitDespawnCallPacket,
     UnitSpawnCallPacket, UnitTetherBlockSpawnedCallPacket,
 };
-use mindustry_core::mindustry::r#type::UnitType;
+use mindustry_core::mindustry::r#type::{PayloadKey, UnitType};
 use mindustry_core::mindustry::vars::{
     AppContext, RuntimeMode, ITEM_TRANSFER_RANGE, MAX_PLAYER_PREVIEW_PLANS, TILE_SIZE,
 };
@@ -4469,6 +4469,7 @@ impl ServerLauncher {
                 Some(PayloadState {
                     kind: PayloadKind::Build,
                     size,
+                    key: Some(PayloadKey::new(ContentType::Block, *block)),
                 })
             }
             PayloadRef::Unit { .. } => {
@@ -4480,6 +4481,7 @@ impl ServerLauncher {
                 Some(PayloadState {
                     kind: PayloadKind::Unit,
                     size,
+                    key: Some(PayloadKey::new(ContentType::Unit, key.id)),
                 })
             }
         }
@@ -4596,6 +4598,7 @@ impl ServerLauncher {
         payload.add_payload(PayloadState {
             kind: PayloadKind::Build,
             size: removed.block.size as f32 * TILE_SIZE as f32,
+            key: Some(PayloadKey::new(ContentType::Block, removed.block.id)),
         });
         true
     }
@@ -4620,6 +4623,10 @@ impl ServerLauncher {
         let target_payload = PayloadState {
             kind: PayloadKind::Unit,
             size: target.type_info.hit_size,
+            key: Some(PayloadKey::new(
+                ContentType::Unit,
+                target.type_info.base.mappable.base.id,
+            )),
         };
         if !self
             .server_units
@@ -5870,6 +5877,7 @@ mod tests {
         unit.payload.as_mut().unwrap().add_payload(PayloadState {
             kind: PayloadKind::Build,
             size: 2.0,
+            key: None,
         });
         launcher.server_units.insert(7, unit);
 

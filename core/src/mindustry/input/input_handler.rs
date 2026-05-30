@@ -8067,6 +8067,7 @@ mod tests {
         let stored = PayloadState {
             kind: PayloadKind::Build,
             size: 2.0,
+            key: None,
         };
 
         let outcome = request_build_payload(
@@ -8448,6 +8449,7 @@ mod tests {
         unit.payload.as_mut().unwrap().add_payload(PayloadState {
             kind: PayloadKind::Build,
             size: 2.0,
+            key: None,
         });
 
         let outcome = request_drop_payload(
@@ -8482,6 +8484,7 @@ mod tests {
         unit.payload.as_mut().unwrap().add_payload(PayloadState {
             kind: PayloadKind::Build,
             size: 2.0,
+            key: None,
         });
 
         let outcome = request_drop_payload(

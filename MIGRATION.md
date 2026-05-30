@@ -16493,3 +16493,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 迁移意义：Java `drawLegs` 已进入 `runtime client unit snapshot -> UnitType stage contract -> Overlay RenderPass -> DrawSprite textured lines -> backend` 主链；腿部渲染不再是 no-op 或死亡特效专用 helper。
 - 已验证：`cargo fmt --all`、`cargo check -p mindustry-core`、`cargo check -p mindustry-desktop --features opengl-native-runtime`、`cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_leg_sprites_before_soft_shadow_for_legged_snapshot --features opengl-native-runtime`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack --features opengl-native-runtime`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`。
 - 仍未完成：`Payload` / `Parts` / `Abilities` 仍需继续填充；`drawLegs()` 的 `applyColor(unit)` mix color、真实 asset 尺寸/scale 与所有水下/foot shadow 细节仍需继续精细对齐；weather / accelerator custom marker 仍需逐项 lowering 或保留审计 marker。
+
+## 452. 最新闭环记录：UnitType drawPayload 接入客户端单位渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **44.0%**，仍未达到完整可玩。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1524-1525`：单位实现 `Payloadc` 时调用 `drawPayload(...)`；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1633-1642`：`drawPayload` 只取 `payloads().first()`，设置为单位 `x/y/rotation`，在当前 z 下沉 `0.02f` 后调用 `Payload.draw()`。
+- 本轮主改动：
+  - `core/src/mindustry/type/unit_type.rs`：`UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 插入 `UnitDrawStage::Payload`，顺序为 `HardShadow -> Legs -> Payload -> SoftShadow`，并更新 stage contract 测试。
+  - `core/src/mindustry/entities/comp/payload.rs`：`PayloadState` 新增 `key: Option<PayloadKey>`，保留 `kind/size` 作为容量与旧镜像兼容字段；新增 `first_draw_payload()` 明确 Java `payloads().first()` 绘制语义。
+  - `server/src/lib.rs`：服务端从 `PayloadRef::Block/Unit`、整栋建筑 pickup、单位 pickup 写入 `PayloadKey(ContentType::Block/Unit, id)`，让后续客户端/渲染层能逐步从 placeholder 升级到内容身份化 payload。
+  - `desktop/src/lib.rs`：默认 atlas 加入 `payload-unit` / `payload-build` fallback；新增 `unit_snapshot_payload_region_symbol(...)` 与 `unit_snapshot_payload_render_commands(...)`；`UnitDrawStage::Payload` 分支优先按 `PayloadKey` 解析 block/unit full icon，缺身份时才退化为受控 fallback marker。
+  - 同步补全 `game_runtime`、`input_handler` 和测试里的 `PayloadState` 构造。
+- 迁移意义：
+  - `Payload` 不再是客户端单位快照渲染的 no-op，已经进入 `runtime client unit snapshot -> UnitType stage contract -> Overlay RenderPass -> DrawSprite -> backend` 主链；
+  - 当前实现仍是“内容身份/图标级”过渡，不伪装为完整 Java `BuildPayload.draw()` / `UnitPayload.draw()`；完整 draw 仍需后续把 `PayloadKey` 扩展为真实 `BuildPayload` building state 与 `UnitPayload` unit type draw recursion。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-server`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core payload_component_draw_uses_first_payload_like_java --lib`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_payload_sprite_before_soft_shadow_for_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `UnitDrawStage::Parts` / `Abilities` 仍需继续填充；
+  - payload 当前尚未完整复刻 `BuildPayload.drawShadow()/build.payloadDraw()` 与 `UnitPayload.draw()->unit.type.draw(unit)`；
+  - `ClientUnitPayloadMirror` 仍是计数级镜像，后续应升级为有序 `PayloadKey` 列表，避免真实联机中 `first()` 顺序和内容身份丢失；
+  - weather custom command、`DrawText` OpenGL lowering、`LightCommand::Runnable` 等后端长尾仍需继续逐项闭环。

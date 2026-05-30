@@ -52,9 +52,10 @@ pub const UNIT_TYPE_JAVA_DRAW_STAGES: [UnitDrawStage; 15] = [
     UnitDrawStage::Shield,
 ];
 
-pub const UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES: [UnitDrawStage; 12] = [
+pub const UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES: [UnitDrawStage; 13] = [
     UnitDrawStage::HardShadow,
     UnitDrawStage::Legs,
+    UnitDrawStage::Payload,
     UnitDrawStage::SoftShadow,
     UnitDrawStage::Outline,
     UnitDrawStage::WeaponOutlines,
@@ -1367,6 +1368,7 @@ mod tests {
             &[
                 UnitDrawStage::HardShadow,
                 UnitDrawStage::Legs,
+                UnitDrawStage::Payload,
                 UnitDrawStage::SoftShadow,
                 UnitDrawStage::Outline,
                 UnitDrawStage::WeaponOutlines,

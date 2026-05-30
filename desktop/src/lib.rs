@@ -20,7 +20,8 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
 use mindustry_core::mindustry::entities::comp::{
-    BuildingComp, BulletComp, DecalColor, FireComp, PuddleComp, UnitComp, UnitControllerState,
+    BuildingComp, BulletComp, DecalColor, FireComp, PayloadKind, PayloadState, PuddleComp,
+    UnitComp, UnitControllerState,
 };
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect, standard_effect_color_symbol,
@@ -1132,6 +1133,8 @@ fn desktop_unit_body_sprite_virtual_source_paths(content_loader: &ContentLoader)
             "sprites/circle-shadow.png".to_string(),
             "sprites/square-shadow.png".to_string(),
             "sprites/ring-item.png".to_string(),
+            "sprites/payload-unit.png".to_string(),
+            "sprites/payload-build.png".to_string(),
             "sprites/power-cell.png".to_string(),
         ])
         .chain(desktop_unit_weapon_sprite_virtual_source_paths(
@@ -1277,6 +1280,19 @@ fn desktop_textured_line_sprite_command(
 
 const DESKTOP_UNIT_ITEM_BASE_SIZE: f32 = 5.0;
 const DESKTOP_UNIT_ITEM_RING_SYMBOL: &str = "ring-item";
+const DESKTOP_UNIT_PAYLOAD_UNIT_SYMBOL: &str = "payload-unit";
+const DESKTOP_UNIT_PAYLOAD_BUILD_SYMBOL: &str = "payload-build";
+
+fn desktop_unit_payload_symbol(kind: PayloadKind) -> &'static str {
+    match kind {
+        PayloadKind::Unit => DESKTOP_UNIT_PAYLOAD_UNIT_SYMBOL,
+        PayloadKind::Build => DESKTOP_UNIT_PAYLOAD_BUILD_SYMBOL,
+    }
+}
+
+fn desktop_unit_payload_layer(unit: &UnitComp) -> f32 {
+    desktop_unit_soft_shadow_layer(unit) - 0.02
+}
 
 fn desktop_unit_item_center(unit: &UnitComp) -> RenderPoint {
     let offset = if unit.type_info.item_offset_y.is_finite() {
@@ -13479,6 +13495,67 @@ impl DesktopLauncher {
         commands
     }
 
+    fn unit_snapshot_payload_region_symbol(&self, payload: &PayloadState) -> Option<String> {
+        let key = payload.key?;
+        let symbol = match key.content_type {
+            ContentType::Block => self
+                .content_loader
+                .block(key.id)
+                .and_then(block_full_icon_region_symbol),
+            ContentType::Unit => self.content_loader.unit(key.id).and_then(|unit| {
+                unit_full_icon_region_symbol(unit.name(), &self.content_loader)
+                    .or_else(|| Some(unit.name().to_string()))
+            }),
+            _ => None,
+        }?;
+
+        self.texture_atlas.lookup(&symbol).is_ok().then_some(symbol)
+    }
+
+    fn unit_snapshot_payload_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid() {
+            return Vec::new();
+        }
+
+        let Some(payload) = unit
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.first_draw_payload())
+        else {
+            return Vec::new();
+        };
+
+        let resolved_symbol = self.unit_snapshot_payload_region_symbol(payload);
+        let symbol = resolved_symbol
+            .as_deref()
+            .unwrap_or_else(|| desktop_unit_payload_symbol(payload.kind));
+        if self.texture_atlas.lookup(symbol).is_err() {
+            return Vec::new();
+        }
+
+        let fallback_size = (unit.hitbox.hit_size * 0.75).clamp(4.0, 16.0);
+        let size = if payload.size.is_finite() && payload.size > f32::EPSILON {
+            payload.size.max(4.0)
+        } else {
+            fallback_size
+        };
+        let tint = match (resolved_symbol.is_some(), payload.kind) {
+            (true, _) => [1.0, 1.0, 1.0, 1.0],
+            (false, PayloadKind::Unit) => {
+                rgba8888_to_render_color(desktop_team_color_rgba(unit.team_id()), 1.0)
+            }
+            (false, PayloadKind::Build) => desktop_effect_render_color(Some(Pal::ACCENT), 1.0),
+        };
+
+        vec![RenderCommand::draw_sprite(
+            symbol.to_string(),
+            RenderRect::from_center(RenderPoint::new(unit.x(), unit.y()), size, size),
+            tint,
+            unit.rotation(),
+            desktop_unit_payload_layer(unit),
+        )]
+    }
+
     fn unit_snapshot_shield_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_shields || unit.shield.shield_alpha <= 0.0 {
             return None;
@@ -14002,6 +14079,9 @@ impl DesktopLauncher {
                     UnitDrawStage::Legs => pass
                         .commands
                         .extend(self.unit_snapshot_leg_render_commands(unit)),
+                    UnitDrawStage::Payload => pass
+                        .commands
+                        .extend(self.unit_snapshot_payload_render_commands(unit)),
                     UnitDrawStage::SoftShadow => {
                         if let Some(command) = self.unit_snapshot_soft_shadow_render_command(unit) {
                             pass.commands.push(command);
@@ -14042,7 +14122,7 @@ impl DesktopLauncher {
                             pass.commands.push(command);
                         }
                     }
-                    UnitDrawStage::Payload | UnitDrawStage::Parts | UnitDrawStage::Abilities => {}
+                    UnitDrawStage::Parts | UnitDrawStage::Abilities => {}
                 }
             }
         }
@@ -16168,8 +16248,9 @@ mod tests {
     use mindustry_core::mindustry::{
         entities::{
             comp::{
-                BuildingComp, BuildingTetherAction, BuildingTetherRef, BulletComp, PayloadKind,
-                PuddleComp, UnitComp, UnitControllerState, UnitTrailState, WorldLabelComp,
+                BuildingComp, BuildingTetherAction, BuildingTetherRef, BulletComp, PayloadComp,
+                PayloadKind, PayloadState, PuddleComp, UnitComp, UnitControllerState,
+                UnitTrailState, WorldLabelComp,
             },
             entity_class_id, standard_effect_id, LegDestroyData, PlayerComp, PuddleLiquidInfo,
             StandardEffectDrawKind, TextureRegionRef, BULLET_CLASS_ID, DECAL_CLASS_ID,
@@ -19953,6 +20034,106 @@ mod tests {
                 assert_eq!(*layer, Layer::GROUND_UNIT);
             }
             other => panic!("expected carried item amount DrawText, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_emits_unit_payload_sprite_before_soft_shadow_for_snapshot() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+        let router = launcher
+            .content_loader
+            .block_by_name("router")
+            .expect("base content should include router");
+        let router_symbol =
+            super::block_full_icon_region_symbol(router).expect("router should have full icon");
+        assert!(launcher.texture_atlas.has(&router_symbol));
+        assert!(launcher.texture_atlas.has("particle"));
+
+        let mut unit = UnitComp::new(7405, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(90.0);
+        let mut payload = PayloadComp::new(TeamId(1), unit.type_info.payload_capacity);
+        payload.add_payload(PayloadState {
+            kind: PayloadKind::Build,
+            size: 8.0,
+            key: Some(PayloadKey::new(ContentType::Block, router.base().id)),
+        });
+        payload.add_payload(PayloadState {
+            kind: PayloadKind::Unit,
+            size: 10.0,
+            key: None,
+        });
+        unit.payload = Some(payload);
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7405, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            26,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == &router_symbol)
+                    })
+            })
+            .expect("payload stage should emit overlay sprite");
+
+        let payload_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == &router_symbol)
+            })
+            .expect("payload sprite should be present");
+        let soft_shadow_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol, rect, .. }
+                        if symbol == "particle" && rect.center() == RenderPoint::new(40.0, 56.0)
+                )
+            })
+            .expect("soft shadow should still render after payload");
+        assert!(payload_index < soft_shadow_index);
+
+        match &overlay.commands[payload_index] {
+            RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(rect.center(), RenderPoint::new(40.0, 56.0));
+                assert_eq!(rect.width, 8.0);
+                assert_eq!(rect.height, 8.0);
+                assert_eq!(*tint, [1.0, 1.0, 1.0, 1.0]);
+                assert_eq!(*rotation, 90.0);
+                assert!((*layer - (Layer::GROUND_UNIT - 0.03)).abs() < 0.0001);
+            }
+            other => panic!("expected unit payload DrawSprite, got {other:?}"),
         }
     }
 

@@ -1,6 +1,6 @@
 //! Payload component shell mirroring upstream `mindustry.entities.comp.PayloadComp`.
 
-use crate::mindustry::io::TeamId;
+use crate::mindustry::{io::TeamId, r#type::PayloadKey};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PayloadKind {
@@ -12,6 +12,7 @@ pub enum PayloadKind {
 pub struct PayloadState {
     pub kind: PayloadKind,
     pub size: f32,
+    pub key: Option<PayloadKey>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,6 +93,10 @@ impl PayloadComp {
         !self.payloads.is_empty()
     }
 
+    pub fn first_draw_payload(&self) -> Option<&PayloadState> {
+        self.payloads.first()
+    }
+
     pub fn add_payload(&mut self, load: PayloadState) {
         self.payloads.push(load);
     }
@@ -123,6 +128,7 @@ mod tests {
         comp.add_payload(PayloadState {
             kind: PayloadKind::Build,
             size: 4.0,
+            key: None,
         });
 
         assert_eq!(comp.payload_used(), 16.0);
@@ -131,6 +137,7 @@ mod tests {
         assert!(comp.can_pickup_payload(&PayloadState {
             kind: PayloadKind::Unit,
             size: 2.0,
+            key: None,
         }));
     }
 
@@ -150,10 +157,12 @@ mod tests {
         comp.add_payload(PayloadState {
             kind: PayloadKind::Unit,
             size: 2.0,
+            key: None,
         });
         comp.add_payload(PayloadState {
             kind: PayloadKind::Build,
             size: 3.0,
+            key: None,
         });
 
         assert!(comp.has_payload());
@@ -165,5 +174,33 @@ mod tests {
         comp.remove();
         assert_eq!(comp.removed_payloads, 1);
         assert!(!comp.has_payload());
+    }
+
+    #[test]
+    fn payload_component_draw_uses_first_payload_like_java() {
+        let mut comp = PayloadComp::new(TeamId(1), 100.0);
+        comp.add_payload(PayloadState {
+            kind: PayloadKind::Unit,
+            size: 2.0,
+            key: None,
+        });
+        comp.add_payload(PayloadState {
+            kind: PayloadKind::Build,
+            size: 3.0,
+            key: None,
+        });
+
+        let draw_payload = comp
+            .first_draw_payload()
+            .expect("drawPayload should use payloads().first()");
+        assert_eq!(draw_payload.kind, PayloadKind::Unit);
+        assert_eq!(draw_payload.size, 2.0);
+        assert!(comp.drop_last_payload(|payload| payload.kind == PayloadKind::Build));
+        assert_eq!(
+            comp.first_draw_payload()
+                .expect("first payload remains after dropping last")
+                .kind,
+            PayloadKind::Unit
+        );
     }
 }
