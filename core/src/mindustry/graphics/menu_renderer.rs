@@ -234,20 +234,24 @@ fn menu_push_mobile_image_button_background(
 
 fn menu_push_black6_panel(commands: &mut Vec<RenderCommand>, rect: RenderRect, alpha_scale: f32) {
     if let Some(drawable) = upstream_ui_drawable_alias("black6") {
-        commands.push(RenderCommand::draw_sprite(
-            drawable.atlas_symbol,
-            rect,
-            menu_color_with_alpha(drawable.tint.rgba(), alpha_scale),
-            0.0,
-            MENU_DESKTOP_BACKGROUND_LAYER,
-        ));
-    } else {
-        commands.push(RenderCommand::fill_rect(
-            rect,
-            menu_color_with_alpha([0.0, 0.0, 0.0, 0.6], alpha_scale),
-            MENU_DESKTOP_BACKGROUND_LAYER,
-        ));
+        let tint = menu_color_with_alpha(drawable.tint.rgba(), alpha_scale);
+        if drawable.tint != UiDrawableTint::Transparent && tint[3] > 0.0 {
+            commands.push(RenderCommand::draw_sprite(
+                drawable.atlas_symbol,
+                rect,
+                tint,
+                0.0,
+                MENU_DESKTOP_BACKGROUND_LAYER,
+            ));
+            return;
+        }
     }
+
+    commands.push(RenderCommand::fill_rect(
+        rect,
+        menu_color_with_alpha([0.0, 0.0, 0.0, 0.6], alpha_scale),
+        MENU_DESKTOP_BACKGROUND_LAYER,
+    ));
 }
 
 fn menu_union_rect(a: RenderRect, b: RenderRect) -> RenderRect {
@@ -2020,6 +2024,21 @@ mod tests {
                         && (*layer - MENU_DARKNESS_LAYER).abs() < f32::EPSILON
             )
         }));
+
+        let darkness_command = plan
+            .commands
+            .last()
+            .expect("menu frame should end with darkness");
+        let darkness_render_commands =
+            darkness_command.to_render_commands(&plan.world, plan.tile_size);
+        assert_eq!(darkness_render_commands.len(), 1);
+        assert!(matches!(
+            darkness_render_commands[0],
+            RenderCommand::FillRect { rect, color, layer }
+                if rect == RenderRect::new(0.0, 0.0, 1920.0, 1080.0)
+                    && color == [0.0, 0.0, 0.0, MENU_DARKNESS]
+                    && (layer - MENU_DARKNESS_LAYER).abs() < f32::EPSILON
+        ));
     }
 
     #[test]
@@ -2162,24 +2181,52 @@ mod tests {
         });
         let commands = plan.ui.to_render_commands();
 
-        assert!(commands.iter().any(|command| {
-            matches!(
-                command,
-                RenderCommand::DrawSprite { symbol, rect, tint, layer, .. }
-                    if symbol == "whiteui"
-                        && *rect == RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0)
-                        && (tint[3] - UiDrawableTint::Black6.rgba()[3]).abs() < 0.0001
+        fn is_black6_panel_command(
+            command: &RenderCommand,
+            rect: RenderRect,
+            alpha_scale: f32,
+        ) -> bool {
+            match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: sprite_rect,
+                    tint,
+                    layer,
+                    ..
+                } => {
+                    symbol == "whiteui"
+                        && *sprite_rect == rect
+                        && (tint[3] - UiDrawableTint::Black6.rgba()[3] * alpha_scale).abs() < 0.0001
                         && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+                }
+                RenderCommand::FillRect {
+                    rect: fill_rect,
+                    color,
+                    layer,
+                } => {
+                    *fill_rect == rect
+                        && color[0] == 0.0
+                        && color[1] == 0.0
+                        && color[2] == 0.0
+                        && (color[3] - 0.6 * alpha_scale).abs() < 0.0001
+                        && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+                }
+                _ => false,
+            }
+        }
+
+        assert!(commands.iter().any(|command| {
+            is_black6_panel_command(
+                command,
+                RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+                1.0,
             )
         }));
         assert!(commands.iter().any(|command| {
-            matches!(
+            is_black6_panel_command(
                 command,
-                RenderCommand::DrawSprite { symbol, rect, tint, layer, .. }
-                    if symbol == "whiteui"
-                        && *rect == RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0)
-                        && (tint[3] - UiDrawableTint::Black6.rgba()[3] * plan.ui.submenu_alpha).abs() < 0.0001
-                        && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+                RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+                plan.ui.submenu_alpha,
             )
         }));
     }

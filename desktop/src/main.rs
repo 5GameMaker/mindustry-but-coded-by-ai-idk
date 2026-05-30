@@ -181,21 +181,20 @@ fn desktop_native_opengl_builtin_sprite_shader_source(
     match stage {
         mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Vertex => Some(
             r#"#version 150
-in vec2 a_position;
-in vec4 a_color;
-in vec2 a_texCoord0;
-in vec4 a_mix_color;
+layout(location = 0) in vec4 a_position;
+layout(location = 1) in vec4 a_color;
+layout(location = 2) in vec2 a_texCoord0;
+layout(location = 3) in vec4 a_mix_color;
 
-uniform vec2 u_surfaceSize;
+uniform mat4 u_projTrans;
+uniform vec2 u_viewportInverse;
 
 out vec4 v_color;
 out vec2 v_texCoords;
 out vec4 v_mix_color;
 
 void main(){
-    vec2 safeSize = max(u_surfaceSize, vec2(1.0, 1.0));
-    vec2 clip = vec2(a_position.x / safeSize.x * 2.0 - 1.0, a_position.y / safeSize.y * 2.0 - 1.0);
-    gl_Position = vec4(clip, 0.0, 1.0);
+    gl_Position = u_projTrans * a_position;
     v_color = a_color;
     v_texCoords = a_texCoord0;
     v_mix_color = a_mix_color;
@@ -219,6 +218,30 @@ void main(){
 "#,
         ),
     }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_pixel_projection_matrix(width: i32, height: i32) -> [f32; 16] {
+    let width = width.max(1) as f32;
+    let height = height.max(1) as f32;
+    [
+        2.0 / width,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.0 / height,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        -1.0,
+        -1.0,
+        0.0,
+        1.0,
+    ]
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -960,12 +983,13 @@ impl DesktopNativeOpenGlDriver<'_> {
         }
 
         let (width, height) = self.viewport_for_render_target(self.bound_render_target.as_ref());
-        let Some(location) = self.uniform_location(program_handle, program, "u_surfaceSize") else {
+        let Some(location) = self.uniform_location(program_handle, program, "u_projTrans") else {
             return;
         };
+        let projection = desktop_native_opengl_pixel_projection_matrix(width, height);
         unsafe {
             self.gl
-                .uniform_2_f32(Some(&location), width as f32, height as f32);
+                .uniform_matrix_4_f32_slice(Some(&location), false, &projection);
         }
         if let Some(texture_location) = self.uniform_location(program_handle, program, "u_texture")
         {
@@ -2170,7 +2194,7 @@ mod tests {
     }
 
     #[test]
-    fn native_opengl_builtin_sprite_shader_maps_pixels_and_samples_texture() {
+    fn native_opengl_builtin_sprite_shader_uses_default_projection_and_samples_texture() {
         let vertex = desktop_native_opengl_builtin_sprite_shader_source(
             mindustry_core::mindustry::graphics::ShaderId::Mesh,
             mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
@@ -2184,9 +2208,11 @@ mod tests {
         )
         .expect("native sprite fragment shader should override Mesh");
 
-        assert!(vertex.contains("uniform vec2 u_surfaceSize"));
-        assert!(vertex.contains("in vec4 a_mix_color"));
-        assert!(vertex.contains("gl_Position = vec4(clip, 0.0, 1.0)"));
+        assert!(vertex.contains("layout(location = 0) in vec4 a_position"));
+        assert!(vertex.contains("layout(location = 3) in vec4 a_mix_color"));
+        assert!(vertex.contains("uniform mat4 u_projTrans"));
+        assert!(vertex.contains("uniform vec2 u_viewportInverse"));
+        assert!(vertex.contains("gl_Position = u_projTrans * a_position"));
         assert!(fragment.contains("uniform sampler2D u_texture"));
         assert!(fragment.contains("texture(u_texture, v_texCoords)"));
         assert!(fragment.contains("v_mix_color"));
@@ -2197,6 +2223,18 @@ mod tests {
                 "screenspace.vert",
             ),
             None
+        );
+    }
+
+    #[test]
+    fn native_opengl_pixel_projection_matrix_maps_surface_pixels_to_clip_space() {
+        assert_eq!(
+            desktop_native_opengl_pixel_projection_matrix(100, 50),
+            [0.02, 0.0, 0.0, 0.0, 0.0, 0.04, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0,]
+        );
+        assert_eq!(
+            desktop_native_opengl_pixel_projection_matrix(0, -1),
+            [2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0,]
         );
     }
 }

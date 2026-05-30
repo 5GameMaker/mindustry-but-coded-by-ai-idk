@@ -19068,3 +19068,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - desktop/mobile 按钮文字已通过最小上游 bundle 表解析，但仍未接完整 `bundle.properties` 文件解析、多语言 bundle 与运行时语言切换；
   - chrome 按钮已减少自绘 fill/stroke，但仍未完整迁移 Scene2D 的 hover/down/tooltip/visible 条件和 becontrol update color；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 535. OpenGL 2D UI 投影矩阵与主菜单面板可见性修复
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **56.4%**，仍未达到完整可玩；继续优先前端/UI，目标是让原版菜单和弹窗在 native OpenGL 路径下可靠可见，而不是黑屏或按钮悬空。
+- Java/Arc 对照证据：
+  - 原版 2D batch shader 使用 `u_projTrans` 正交投影把 UI 像素坐标变换到 clip space；
+  - `MenuFragment.buildDesktop()` 的主菜单列和 submenu 列依赖 `Styles.black6` 背景；
+  - 菜单世界后需要 fullscreen 黑色暗化层。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - native OpenGL 内建 sprite shader 改为 `default.vert` 风格，固定 `layout(location=0..3)` 对应 position/color/texCoord/mixColor；
+    - 新增 `desktop_native_opengl_pixel_projection_matrix()`，把当前 framebuffer/target viewport 像素坐标映射到 clip space；
+    - 使用 `u_projTrans` 上传正交投影矩阵，并继续上传 `u_texture=0`，降低主菜单/弹窗 `FillRect` 与 `DrawSprite` 黑屏风险。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `black6` drawable 透明、缺失或 alpha 为 0 时回退到黑色 `FillRect`，避免桌面主菜单列/submenu 列悬空；
+    - 补充 `DrawDarkness` 输出 fullscreen `FillRect` 的验证；
+    - 放宽 black6 面板测试，使其同时覆盖真实 drawable 与 fallback fill 两条路径。
+- 已验证：
+  - `cargo test -p mindustry-core menu_renderer --lib`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 本轮是 shader/投影/面板可见性修复，尚未做真实窗口截图级 smoke；
+  - 默认 sprite shader 仍通过 native `Mesh` program override 承接，后续应继续拆成显式 2D sprite shader id，避免与 3D/planet mesh 语义混用；
+  - 主菜单仍需继续补齐 Scene2D 可见性门控、becheck update pulse、customButtons 完整对象模型、logo/version 精确几何和弹窗 UI 卡片化；
+  - 未达到完整可玩，不能宣告目标完成。
