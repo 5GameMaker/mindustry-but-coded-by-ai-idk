@@ -17085,3 +17085,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - route shell 还不是 Java 等价完整 dialog，只是确保动作分发和可见页面状态进入主渲染链；
   - `CAMPAIGN/JOIN/LOAD/CUSTOM/EDITOR/SETTINGS/MODS/SCHEMATICS/ABOUT` 的真实 dialog 内容、列表、网络连接和存档流程仍需逐类迁移；
   - 真实 font atlas、按钮图标、fade 动画、点击音效、键盘/触控输入仍需继续补齐。
+
+## 471. Campaign route shell 接入内容目录起始 sector
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.4%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链。
+- Java 对照：
+  - `MenuFragment.java` 的 `CAMPAIGN` action 指向 `checkPlay(ui.planet::show)`；
+  - `PlanetDialog.java` 打开后会围绕 planet/start sector/last sector 构建可选战役入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::active_menu_route_shell_lines(...)` 为不同 route 生成可见 shell 内容；
+    - `Campaign` route 不再只显示通用占位，而是从真实 `ContentLoader` 内容目录读取 `groundZero` 起始 sector 与 `serpulo` planet 信息；
+    - route shell 在正式 menu pass 中显示 `planet: serpulo`、`sector: groundZero #15`、difficulty 等内容目录信息；
+    - 新增 `desktop_launcher_campaign_menu_route_shell_uses_content_start_sector`，锁定菜单点击 `CAMPAIGN` 后进入 `PlanetDialog` shell 并消费内容目录。
+- 迁移意义：
+  - `PLAY -> CAMPAIGN` 已从单纯 action route 前进一步接到 Rust 内容注册表，不再是完全空白页面；
+  - 该 shell 仍在 `DesktopLauncher -> RenderPass` 主链中渲染，为后续替换成真正 `PlanetDialog` 的 planet/sector 选择 UI 提供入口；
+  - 没有把 helper 当最终可玩闭环，真实 `control.playSector(...)` / sector 存档加载 / 世界生成仍待迁移。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_quit_menu_action_requests_close --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Campaign shell 尚不能选择 sector 或进入游戏；
+  - 下一步需要实现 `PlanetDialog` 的 sector list/selection state，并逐步接 `GameState.sector`、rules、map generator/save load；
+  - `JOIN` route 仍需接入连接输入/服务器列表和 `NetClient` 错误反馈。

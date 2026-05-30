@@ -15862,6 +15862,50 @@ impl DesktopLauncher {
         close_requested
     }
 
+    fn active_menu_route_shell_lines(&self, route: DesktopMenuRoute) -> Vec<String> {
+        match route {
+            DesktopMenuRoute::Campaign => {
+                let Some(start) = self.content_loader.sector_by_name("groundZero") else {
+                    return vec!["campaign start sector: missing".into()];
+                };
+                let planet_name = start.planet_name.as_deref().unwrap_or("serpulo");
+                let planet_label = self
+                    .content_loader
+                    .catalog()
+                    .planet_by_name(planet_name)
+                    .map(|planet| planet.localized_name().to_string())
+                    .unwrap_or_else(|| planet_name.to_string());
+                vec![
+                    format!("planet: {planet_label}"),
+                    format!(
+                        "sector: {} #{}",
+                        start.name,
+                        start.sector_id.unwrap_or(start.original_position)
+                    ),
+                    format!("difficulty: {:.1}", start.difficulty),
+                ]
+            }
+            DesktopMenuRoute::Join => {
+                if let Some(target) = self.connect_target.as_ref() {
+                    vec![format!("target: {}:{}", target.host, target.port)]
+                } else {
+                    vec!["target: not selected".into()]
+                }
+            }
+            DesktopMenuRoute::LoadGame => vec!["save slots: pending LoadDialog port".into()],
+            DesktopMenuRoute::CustomGame => vec!["maps: pending CustomGameDialog port".into()],
+            DesktopMenuRoute::Schematics => vec!["library: pending SchematicsDialog port".into()],
+            DesktopMenuRoute::Database => {
+                vec!["content browser: pending DatabaseDialog port".into()]
+            }
+            DesktopMenuRoute::TechTree => vec!["research tree: pending TechTreeDialog port".into()],
+            DesktopMenuRoute::About => vec!["about dialog: pending AboutDialog port".into()],
+            DesktopMenuRoute::Editor => vec!["maps: pending EditorMapsDialog port".into()],
+            DesktopMenuRoute::Mods => vec!["mods: pending ModsDialog port".into()],
+            DesktopMenuRoute::Settings => vec!["settings: pending SettingsMenuDialog port".into()],
+        }
+    }
+
     fn push_active_menu_route_shell(&self, pass: &mut RenderPass, viewport: RenderViewport) {
         let Some(route) = self.active_menu_route else {
             return;
@@ -15909,17 +15953,22 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.02,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            "dialog shell routed from MenuFragment",
-            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + 42.0),
-            [0.56, 0.64, 0.72, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.02,
-        ));
+        for (index, line) in self.active_menu_route_shell_lines(route).iter().enumerate() {
+            pass.push(RenderCommand::draw_text_styled(
+                line.clone(),
+                RenderPoint::new(
+                    panel.x + panel.width * 0.5,
+                    panel.y + panel.height - 118.0 - index as f32 * 20.0,
+                ),
+                [0.56, 0.64, 0.72, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.02,
+            ));
+        }
     }
 
     fn menu_graphics_frame_for_surface(
@@ -31755,6 +31804,69 @@ mod tests {
                 )
             });
         assert!(route_text_present);
+    }
+
+    #[test]
+    fn desktop_launcher_campaign_menu_route_shell_uses_content_start_sector() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let campaign_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Campaign)
+            .expect("play submenu should include CAMPAIGN")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: campaign_center.x,
+                    y: campaign_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Campaign)
+        );
+        assert_eq!(
+            launcher.last_menu_dispatch,
+            Some(super::DesktopMenuActionDispatch {
+                role: MenuButtonRole::Campaign,
+                submenu_changed: false,
+                route: Some(super::DesktopMenuRoute::Campaign),
+                close_requested: false,
+            })
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"upstream: PlanetDialog"));
+        assert!(texts.contains(&"planet: serpulo"));
+        assert!(texts.contains(&"sector: groundZero #15"));
     }
 
     #[test]
