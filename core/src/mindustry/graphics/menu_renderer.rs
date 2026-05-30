@@ -6,7 +6,7 @@
 /// are expected to translate `MenuRenderCommand` into GPU/cache calls.
 use super::{
     RenderCamera, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
-    RenderViewport,
+    RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
@@ -151,6 +151,99 @@ pub struct FlyerPlan {
     pub y: f32,
     pub rotation: f32,
     pub unit_name: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuButtonRole {
+    Play,
+    Campaign,
+    Join,
+    CustomGame,
+    LoadGame,
+    Database,
+    Schematics,
+    TechTree,
+    About,
+    Editor,
+    Mods,
+    Settings,
+    Quit,
+}
+
+impl MenuButtonRole {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Play => "PLAY",
+            Self::Campaign => "CAMPAIGN",
+            Self::Join => "JOIN",
+            Self::CustomGame => "CUSTOM GAME",
+            Self::LoadGame => "LOAD GAME",
+            Self::Database => "DATABASE",
+            Self::Schematics => "SCHEMATICS",
+            Self::TechTree => "TECH TREE",
+            Self::About => "ABOUT",
+            Self::Editor => "EDITOR",
+            Self::Mods => "MODS",
+            Self::Settings => "SETTINGS",
+            Self::Quit => "QUIT",
+        }
+    }
+
+    pub const fn is_submenu(self) -> bool {
+        matches!(
+            self,
+            Self::Campaign
+                | Self::Join
+                | Self::CustomGame
+                | Self::LoadGame
+                | Self::Schematics
+                | Self::TechTree
+                | Self::About
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuButtonPlan {
+    pub role: MenuButtonRole,
+    pub rect: RenderRect,
+    pub selected: bool,
+    pub submenu: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuUiPlan {
+    pub mobile: bool,
+    pub buttons: Vec<MenuButtonPlan>,
+}
+
+impl MenuUiPlan {
+    pub fn to_render_commands(&self) -> Vec<RenderCommand> {
+        let mut commands = Vec::with_capacity(self.buttons.len() * 2);
+        for button in &self.buttons {
+            let fill = if button.selected {
+                [0.19, 0.38, 0.50, 0.92]
+            } else if button.submenu {
+                [0.10, 0.16, 0.22, 0.86]
+            } else {
+                [0.07, 0.11, 0.16, 0.88]
+            };
+            commands.push(RenderCommand::fill_rect(button.rect, fill, 101.0));
+            commands.push(RenderCommand::draw_text_styled(
+                button.role.label(),
+                button.rect.center(),
+                [0.88, 0.96, 1.0, 1.0],
+                if self.mobile { 7.0 } else { 8.0 },
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                101.1,
+            ));
+        }
+        commands
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -306,6 +399,7 @@ pub struct MenuFramePlan {
     pub tile_size: f32,
     pub world: MenuWorldPlan,
     pub commands: Vec<MenuRenderCommand>,
+    pub ui: MenuUiPlan,
 }
 
 impl MenuFramePlan {
@@ -329,6 +423,7 @@ impl MenuFramePlan {
         for command in &self.commands {
             pass.extend(command.to_render_commands(&self.world, self.tile_size));
         }
+        pass.extend(self.ui.to_render_commands());
         Some(pass)
     }
 
@@ -342,6 +437,7 @@ impl MenuFramePlan {
             tile_size,
             world,
             commands,
+            ui,
         } = self;
 
         if commands.is_empty() {
@@ -359,6 +455,7 @@ impl MenuFramePlan {
         for command in commands {
             pass.extend(command.into_render_commands(&world, tile_size));
         }
+        pass.extend(ui.to_render_commands());
         Some(pass)
     }
 }
@@ -433,6 +530,7 @@ impl MenuRendererState {
             tile_size: self.config.tile_size,
             world: self.world.clone(),
             commands,
+            ui: menu_ui_plan(input, self.config.mobile),
         }
     }
 
@@ -778,6 +876,133 @@ fn flyer_draw_size(unit_name: &str) -> f32 {
     }
 }
 
+fn menu_button_plan(role: MenuButtonRole, rect: RenderRect, selected: bool) -> MenuButtonPlan {
+    MenuButtonPlan {
+        role,
+        rect,
+        selected,
+        submenu: role.is_submenu(),
+    }
+}
+
+fn menu_desktop_ui_plan(input: MenuFrameInput) -> MenuUiPlan {
+    let margin = input.scl4.max(1.0) * 6.0;
+    let button_width = 188.0;
+    let button_height = 32.0;
+    let gap = 8.0;
+    let main_roles = [
+        MenuButtonRole::Play,
+        MenuButtonRole::Database,
+        MenuButtonRole::Editor,
+        MenuButtonRole::Mods,
+        MenuButtonRole::Settings,
+        MenuButtonRole::Quit,
+    ];
+    let submenu_roles = [
+        MenuButtonRole::Campaign,
+        MenuButtonRole::Join,
+        MenuButtonRole::CustomGame,
+        MenuButtonRole::LoadGame,
+    ];
+    let total_height =
+        main_roles.len() as f32 * button_height + main_roles.len().saturating_sub(1) as f32 * gap;
+    let start_y = ((input.graphics_height - total_height) * 0.5).max(margin);
+    let left_x = margin;
+    let submenu_x = left_x + button_width + margin * 0.75;
+
+    let mut buttons = Vec::with_capacity(main_roles.len() + submenu_roles.len());
+    for (index, role) in main_roles.into_iter().enumerate() {
+        buttons.push(menu_button_plan(
+            role,
+            RenderRect::new(
+                left_x,
+                start_y + index as f32 * (button_height + gap),
+                button_width,
+                button_height,
+            ),
+            role == MenuButtonRole::Play,
+        ));
+    }
+    for (index, role) in submenu_roles.into_iter().enumerate() {
+        buttons.push(menu_button_plan(
+            role,
+            RenderRect::new(
+                submenu_x,
+                start_y + index as f32 * (button_height + gap),
+                button_width,
+                button_height,
+            ),
+            false,
+        ));
+    }
+
+    MenuUiPlan {
+        mobile: false,
+        buttons,
+    }
+}
+
+fn menu_mobile_ui_plan(input: MenuFrameInput) -> MenuUiPlan {
+    let roles = [
+        MenuButtonRole::Play,
+        MenuButtonRole::Campaign,
+        MenuButtonRole::Join,
+        MenuButtonRole::CustomGame,
+        MenuButtonRole::LoadGame,
+        MenuButtonRole::Database,
+        MenuButtonRole::Schematics,
+        MenuButtonRole::TechTree,
+        MenuButtonRole::About,
+        MenuButtonRole::Editor,
+        MenuButtonRole::Mods,
+        MenuButtonRole::Settings,
+        MenuButtonRole::Quit,
+    ];
+    let margin = input.scl4.max(1.0) * 3.0;
+    let gap = 6.0;
+    let columns = if input.graphics_width > input.graphics_height {
+        3
+    } else {
+        2
+    };
+    let button_width = ((input.graphics_width - margin * 2.0 - gap * (columns as f32 - 1.0))
+        / columns as f32)
+        .max(72.0);
+    let button_height = 28.0;
+    let rows = (roles.len() + columns - 1) / columns;
+    let total_height = rows as f32 * button_height + rows.saturating_sub(1) as f32 * gap;
+    let start_y = ((input.graphics_height - total_height) * 0.5).max(margin);
+
+    let mut buttons = Vec::with_capacity(roles.len());
+    for (index, role) in roles.into_iter().enumerate() {
+        let column = index % columns;
+        let row = index / columns;
+        buttons.push(menu_button_plan(
+            role,
+            RenderRect::new(
+                margin + column as f32 * (button_width + gap),
+                start_y + row as f32 * (button_height + gap),
+                button_width,
+                button_height,
+            ),
+            role == MenuButtonRole::Play,
+        ));
+    }
+
+    MenuUiPlan {
+        mobile: true,
+        buttons,
+    }
+}
+
+fn menu_ui_plan(input: MenuFrameInput, mobile: bool) -> MenuUiPlan {
+    if mobile {
+        menu_mobile_ui_plan(input)
+    } else {
+        menu_desktop_ui_plan(input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,6 +1067,27 @@ mod tests {
             }
         ));
         assert_eq!(plan.commands.len(), 6);
+        assert_eq!(
+            plan.ui
+                .buttons
+                .iter()
+                .map(|button| button.role)
+                .collect::<Vec<_>>(),
+            vec![
+                MenuButtonRole::Play,
+                MenuButtonRole::Database,
+                MenuButtonRole::Editor,
+                MenuButtonRole::Mods,
+                MenuButtonRole::Settings,
+                MenuButtonRole::Quit,
+                MenuButtonRole::Campaign,
+                MenuButtonRole::Join,
+                MenuButtonRole::CustomGame,
+                MenuButtonRole::LoadGame,
+            ]
+        );
+        assert!(plan.ui.buttons[0].selected);
+        assert!(plan.ui.buttons[6].submenu);
     }
 
     #[test]
@@ -897,8 +1143,27 @@ mod tests {
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::FillRect { .. })));
+        assert!(borrowed.commands.iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "PLAY")
+        ));
+        assert!(borrowed.commands.iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "CAMPAIGN")
+        ));
 
-        match borrowed.commands.last().unwrap() {
+        let darkness = borrowed
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(
+                    command,
+                    RenderCommand::FillRect { color, layer, .. }
+                        if *color == [0.0, 0.0, 0.0, MENU_DARKNESS]
+                            && (*layer - 100.0).abs() < f32::EPSILON
+                )
+            })
+            .expect("menu darkness should still be emitted before UI overlay");
+
+        match darkness {
             RenderCommand::FillRect { rect, color, layer } => {
                 assert_eq!(*rect, RenderRect::new(0.0, 0.0, 1920.0, 1080.0));
                 assert_eq!(*color, [0.0, 0.0, 0.0, MENU_DARKNESS]);
@@ -906,5 +1171,43 @@ mod tests {
             }
             other => panic!("unexpected darkness command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn menu_ui_plan_preserves_mobile_flat_button_order() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(true, 9));
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 720.0,
+            graphics_height: 1280.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        });
+
+        assert!(plan.ui.mobile);
+        assert_eq!(
+            plan.ui
+                .buttons
+                .iter()
+                .map(|button| button.role)
+                .collect::<Vec<_>>(),
+            vec![
+                MenuButtonRole::Play,
+                MenuButtonRole::Campaign,
+                MenuButtonRole::Join,
+                MenuButtonRole::CustomGame,
+                MenuButtonRole::LoadGame,
+                MenuButtonRole::Database,
+                MenuButtonRole::Schematics,
+                MenuButtonRole::TechTree,
+                MenuButtonRole::About,
+                MenuButtonRole::Editor,
+                MenuButtonRole::Mods,
+                MenuButtonRole::Settings,
+                MenuButtonRole::Quit,
+            ]
+        );
+        assert!(plan.ui.to_render_commands().iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "TECH TREE")
+        ));
     }
 }

@@ -16953,3 +16953,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 需要继续审计 native viewport/uniform/FBO 状态与真实菜单 Scene UI；
   - 字体仍是 placeholder glyph，真实 font atlas 尚未完成。
+
+## 467. MenuFramePlan 接入 Java 风格菜单按钮树
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.0%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\ui\fragments\MenuFragment.java`：desktop 菜单主按钮与 submenu 结构；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\core\UI.java` / `Renderer.java`：菜单 UI 叠在菜单世界背景之上。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuButtonRole`、`MenuButtonPlan`、`MenuUiPlan`；
+    - `MenuRendererState::render_plan(...)` 生成正式 UI plan，并保留原有 menu world/flyer/darkness；
+    - desktop layout 生成左侧主按钮列：`PLAY / DATABASE / EDITOR / MODS / SETTINGS / QUIT`；
+    - 默认 Play submenu 生成：`CAMPAIGN / JOIN / CUSTOM GAME / LOAD GAME`；
+    - mobile layout 生成扁平按钮序列，并包含数据库子入口；
+    - `MenuFramePlan::to_render_pass()` 与 `into_render_pass()` 将 UI plan 降低为 `FillRect + DrawText`，进入正式 `RenderPassKind::Custom("menu")`。
+  - `desktop/src/lib.rs`
+    - no-world 默认 surface/frame loop 测试断言正式 menu pass 里存在 `PLAY` / `CAMPAIGN` 文本，防止退回只靠 startup preview。
+- 迁移意义：
+  - 菜单 UI 从 `startup-menu-preview` 兜底页推进到正式 `MenuRendererState -> MenuFramePlan -> RenderPass -> desktop renderer` 主链；
+  - 菜单背景世界、flyer、darkness 和 UI 按钮层现在在同一个 menu pass 中汇合；
+  - 这不是静态 preview mock，而是后续接输入命中、submenu 状态与 action dispatch 的数据模型入口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_preserves_draw_text_style --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 还没有菜单输入 hit-test、submenu 展开/收起状态、fade 动画和真实 action dispatch；
+  - `Workshop` 条件、custom buttons、完整 mobile/desktop Scene layout 仍需继续迁移；
+  - 字体仍是 placeholder glyph，真实 font atlas 仍需预烘焙资产或新增字体栅格化依赖。

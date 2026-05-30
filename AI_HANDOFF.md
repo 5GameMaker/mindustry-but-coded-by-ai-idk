@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **47.9%**。
+- 当前总体迁移完成度：约 **48.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -14089,3 +14089,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
 - 仍未完成：
   1. 这只是 native 可见性防护，不代表完整 Scene UI；
   2. 后续仍需真实字体 atlas、菜单交互与更完整的 OpenGL 状态审计。
+
+### 2026-05-30：正式 MenuFramePlan 接入菜单按钮树
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **48.0%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuButtonRole` / `MenuButtonPlan` / `MenuUiPlan`；
+    - desktop 菜单生成 Java-like 主按钮顺序：`PLAY / DATABASE / EDITOR / MODS / SETTINGS / QUIT`；
+    - 默认展开 `PLAY` 子菜单：`CAMPAIGN / JOIN / CUSTOM GAME / LOAD GAME`；
+    - mobile 菜单生成扁平按钮顺序，包含 `SCHEMATICS / TECH TREE / ABOUT` 等数据库相关入口；
+    - `MenuFramePlan::to_render_pass()/into_render_pass()` 在正式 `menu` pass 中追加按钮 `FillRect + DrawText`，不再只依赖 `startup-menu-preview`。
+  - `desktop/src/lib.rs`
+    - no-world 菜单测试增加正式 `menu` pass 里的 `PLAY/CAMPAIGN` DrawText 断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_preserves_draw_text_style --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. 按钮目前是渲染模型，还没有输入命中、submenu 状态切换、fade 动画和真实 action dispatch；
+  2. 尚未完整迁移 Java `MenuFragment` 的 custom buttons、workshop 条件、mobile/desktop 全布局细节；
+  3. 字体仍是 placeholder glyph，真实 font atlas 待后续处理。

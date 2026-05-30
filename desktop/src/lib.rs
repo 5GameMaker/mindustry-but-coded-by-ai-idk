@@ -31269,6 +31269,12 @@ mod tests {
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::FillRect { .. })));
+        assert!(menu_pass.commands.iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "PLAY")
+        ));
+        assert!(menu_pass.commands.iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "CAMPAIGN")
+        ));
         assert!(
             preview_pass
                 .commands
@@ -31350,6 +31356,12 @@ mod tests {
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::FillRect { .. })));
+        assert!(graphics_renderer.last_trace.render_passes[1]
+            .commands
+            .iter()
+            .any(
+                |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "PLAY")
+            ));
         assert!(
             graphics_renderer
                 .last_opengl_backend_executor_state
