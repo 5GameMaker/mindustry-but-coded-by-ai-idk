@@ -16340,3 +16340,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `LightCommand::Region` / `LightCommand::Runnable` 仍是 custom marker；
   - textured effect regions、shader/blend 细节、完整 `Fx.java` 迁移仍需继续；
   - 单位主渲染编排、parts、legs、payload/item、hard shadow 仍需继续。
+
+## 447. 最新闭环记录：UnitType.draw 阶段契约接入客户端单位渲染顺序
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.5%**，仍未达到完整可玩。
+- Java 对照：
+  - `UnitType.draw(...)` 是单位渲染总入口，必须保持 shadow/legs/payload/outline/weapons/items/parts/abilities 等阶段顺序；
+  - Rust desktop 之前已能绘制一部分 snapshot unit 命令，但顺序硬编码在 `unit_snapshot_render_pass()` 内，不利于继续接 parts/legs/payload/shadow。
+- 本轮主改动：
+  - `core/src/mindustry/type/unit_type.rs`
+    - 新增 `UnitDrawStage`；
+    - 新增 `UNIT_TYPE_JAVA_DRAW_STAGES`，固定完整 Java 风格单位渲染阶段顺序；
+    - 新增 `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES`，固定当前客户端 snapshot 已实现阶段；
+    - 新增 `UnitType::java_draw_stages()` 与 `UnitType::client_snapshot_draw_stages()`；
+    - 新增 `unit_type_draw_stage_contract_preserves_java_and_snapshot_order`。
+  - `core/src/mindustry/type/mod.rs`
+    - re-export `UnitDrawStage` 与两个阶段常量。
+  - `desktop/src/lib.rs`
+    - `unit_snapshot_render_pass()` 改为遍历 `unit.type_info.client_snapshot_draw_stages()` 并按 stage 分派现有 soft shadow/outline/weapon outline/trail/engine/body/cell/weapons/shield 命令；
+    - 未实现的 hard shadow/legs/payload/items/parts/abilities 明确留在 stage match 中，后续可逐项填充而不再重排主循环。
+- 迁移意义：
+  - 单位渲染从“desktop 内局部硬编码顺序”推进到“core UnitType 暴露 Java draw 阶段契约、desktop 消费该契约”的整体化路径；
+  - 后续推进 weapon/unit parts、legs、payload/item、hard shadow 时，有统一 stage 入口，避免继续堆成互不相连的 helper。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `UnitDrawStage::HardShadow` / `Legs` / `Payload` / `Items` / `Parts` / `Abilities` 仍是显式 no-op；
+  - 仍需把 Java `drawLegs()`、`drawPayload()`、`drawItems()`、weapon/unit parts、hard shadow 真正接入对应 stage；
+  - full `UnitType.draw()` 与 floor shadow、payload hiding、abilities layer 等细节仍需继续。

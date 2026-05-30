@@ -13472,3 +13472,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续迁移更多 `Drawf.laser(...)` 调用点；
   2. 或先落 `UnitType.draw()` 编排契约，给 parts/legs/payload/shadow 提供统一接入口；
   3. `LightCommand::Region` / `Runnable` 后续需要从 custom marker 走向真实 backend 表达。
+
+### 2026-05-30：UnitType.draw 阶段契约接入客户端单位渲染顺序
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **43.5%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/type/unit_type.rs`
+    - 新增 `UnitDrawStage`；
+    - 新增 `UNIT_TYPE_JAVA_DRAW_STAGES`；
+    - 新增 `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES`；
+    - 新增 `UnitType::java_draw_stages()`；
+    - 新增 `UnitType::client_snapshot_draw_stages()`；
+    - 新增测试 `unit_type_draw_stage_contract_preserves_java_and_snapshot_order`。
+  - `core/src/mindustry/type/mod.rs`
+    - re-export draw stage 相关类型/常量。
+  - `desktop/src/lib.rs`
+    - `unit_snapshot_render_pass()` 现在消费 `UnitType::client_snapshot_draw_stages()`，不再局部硬编码所有已实现 stage。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 按 stage 补 `HardShadow` 或 `Parts` 是最直接的后续闭环；
+  2. `Legs` 与 `Payload/Items` 需要对照 Java `drawLegs()` / `drawPayload()` / `drawItems()`；
+  3. 继续保证新增单位渲染能力都通过这个 stage contract 进入 `unit_snapshot_render_pass()`。

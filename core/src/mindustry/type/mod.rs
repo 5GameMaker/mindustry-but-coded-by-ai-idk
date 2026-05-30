@@ -37,7 +37,10 @@ pub use publishable::Publishable;
 pub use sector::{Sector, SectorPlanetDefaults, SectorPreset, SectorRuntimeState};
 pub use status_effect::StatusEffect;
 pub use team_entry::TeamEntry;
-pub use unit_type::{UnitEngine, UnitType};
+pub use unit_type::{
+    UnitDrawStage, UnitEngine, UnitType, UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES,
+    UNIT_TYPE_JAVA_DRAW_STAGES,
+};
 pub use weapon::Weapon;
 pub use weather::{
     MagneticStorm, ParticleDrawParticlesPlan, ParticleDrawPlan, ParticleNoiseLayerPlan,

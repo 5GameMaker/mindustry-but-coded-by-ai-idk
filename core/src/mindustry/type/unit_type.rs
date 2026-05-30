@@ -15,6 +15,55 @@ pub const LAYER_GROUND_UNIT: f32 = 60.0;
 pub const LAYER_FLYING_UNIT_LOW: f32 = 90.0;
 pub const LAYER_FLYING_UNIT: f32 = 115.0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitDrawStage {
+    HardShadow,
+    Legs,
+    Payload,
+    SoftShadow,
+    Outline,
+    WeaponOutlines,
+    Trail,
+    Engines,
+    Body,
+    Cell,
+    Weapons,
+    Items,
+    Parts,
+    Abilities,
+    Shield,
+}
+
+pub const UNIT_TYPE_JAVA_DRAW_STAGES: [UnitDrawStage; 15] = [
+    UnitDrawStage::HardShadow,
+    UnitDrawStage::Legs,
+    UnitDrawStage::Payload,
+    UnitDrawStage::SoftShadow,
+    UnitDrawStage::Outline,
+    UnitDrawStage::WeaponOutlines,
+    UnitDrawStage::Trail,
+    UnitDrawStage::Engines,
+    UnitDrawStage::Body,
+    UnitDrawStage::Cell,
+    UnitDrawStage::Weapons,
+    UnitDrawStage::Items,
+    UnitDrawStage::Parts,
+    UnitDrawStage::Abilities,
+    UnitDrawStage::Shield,
+];
+
+pub const UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES: [UnitDrawStage; 9] = [
+    UnitDrawStage::SoftShadow,
+    UnitDrawStage::Outline,
+    UnitDrawStage::WeaponOutlines,
+    UnitDrawStage::Trail,
+    UnitDrawStage::Engines,
+    UnitDrawStage::Body,
+    UnitDrawStage::Cell,
+    UnitDrawStage::Weapons,
+    UnitDrawStage::Shield,
+];
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitType {
     pub base: UnlockableContentBase,
@@ -777,6 +826,14 @@ impl UnitType {
         }
     }
 
+    pub fn java_draw_stages(&self) -> &'static [UnitDrawStage] {
+        &UNIT_TYPE_JAVA_DRAW_STAGES
+    }
+
+    pub fn client_snapshot_draw_stages(&self) -> &'static [UnitDrawStage] {
+        &UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES
+    }
+
     pub fn sense(&self, sensor: LAccess, payload_capable: bool, logic_id: i32) -> f64 {
         match sensor {
             LAccess::Health | LAccess::MaxHealth => self.health as f64,
@@ -1262,6 +1319,45 @@ mod tests {
         assert_eq!(planned[2].reload, 10.0);
         assert_eq!(planned[2].recoil_time, 10.0);
         assert_eq!(planned[2].other_side, -1);
+    }
+
+    #[test]
+    fn unit_type_draw_stage_contract_preserves_java_and_snapshot_order() {
+        let unit = UnitType::new(0, "render-contract");
+        assert_eq!(
+            unit.java_draw_stages(),
+            &[
+                UnitDrawStage::HardShadow,
+                UnitDrawStage::Legs,
+                UnitDrawStage::Payload,
+                UnitDrawStage::SoftShadow,
+                UnitDrawStage::Outline,
+                UnitDrawStage::WeaponOutlines,
+                UnitDrawStage::Trail,
+                UnitDrawStage::Engines,
+                UnitDrawStage::Body,
+                UnitDrawStage::Cell,
+                UnitDrawStage::Weapons,
+                UnitDrawStage::Items,
+                UnitDrawStage::Parts,
+                UnitDrawStage::Abilities,
+                UnitDrawStage::Shield,
+            ]
+        );
+        assert_eq!(
+            unit.client_snapshot_draw_stages(),
+            &[
+                UnitDrawStage::SoftShadow,
+                UnitDrawStage::Outline,
+                UnitDrawStage::WeaponOutlines,
+                UnitDrawStage::Trail,
+                UnitDrawStage::Engines,
+                UnitDrawStage::Body,
+                UnitDrawStage::Cell,
+                UnitDrawStage::Weapons,
+                UnitDrawStage::Shield,
+            ]
+        );
     }
 
     #[test]

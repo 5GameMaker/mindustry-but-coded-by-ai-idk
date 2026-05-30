@@ -73,7 +73,7 @@ use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
-use mindustry_core::mindustry::r#type::{Weapon, WeatherState};
+use mindustry_core::mindustry::r#type::{UnitDrawStage, Weapon, WeatherState};
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
@@ -13335,28 +13335,53 @@ impl DesktopLauncher {
             if self.runtime.client_hidden_entity_ids.contains(entity_id) {
                 continue;
             }
-            if let Some(command) = self.unit_snapshot_soft_shadow_render_command(unit) {
-                pass.commands.push(command);
-            }
-            if let Some(command) = self.unit_snapshot_outline_render_command(unit) {
-                pass.commands.push(command);
-            }
-            pass.commands
-                .extend(self.unit_snapshot_weapon_outline_render_commands(unit));
-            pass.commands
-                .extend(self.unit_snapshot_trail_render_commands(unit));
-            pass.commands
-                .extend(self.unit_snapshot_engine_render_commands(unit));
-            if let Some(command) = self.unit_snapshot_body_render_command(unit) {
-                pass.commands.push(command);
-            }
-            if let Some(command) = self.unit_snapshot_cell_render_command(unit) {
-                pass.commands.push(command);
-            }
-            pass.commands
-                .extend(self.unit_snapshot_weapon_render_commands(unit));
-            if let Some(command) = self.unit_snapshot_shield_render_command(unit) {
-                pass.commands.push(command);
+
+            for stage in unit.type_info.client_snapshot_draw_stages() {
+                match stage {
+                    UnitDrawStage::SoftShadow => {
+                        if let Some(command) = self.unit_snapshot_soft_shadow_render_command(unit) {
+                            pass.commands.push(command);
+                        }
+                    }
+                    UnitDrawStage::Outline => {
+                        if let Some(command) = self.unit_snapshot_outline_render_command(unit) {
+                            pass.commands.push(command);
+                        }
+                    }
+                    UnitDrawStage::WeaponOutlines => pass
+                        .commands
+                        .extend(self.unit_snapshot_weapon_outline_render_commands(unit)),
+                    UnitDrawStage::Trail => pass
+                        .commands
+                        .extend(self.unit_snapshot_trail_render_commands(unit)),
+                    UnitDrawStage::Engines => pass
+                        .commands
+                        .extend(self.unit_snapshot_engine_render_commands(unit)),
+                    UnitDrawStage::Body => {
+                        if let Some(command) = self.unit_snapshot_body_render_command(unit) {
+                            pass.commands.push(command);
+                        }
+                    }
+                    UnitDrawStage::Cell => {
+                        if let Some(command) = self.unit_snapshot_cell_render_command(unit) {
+                            pass.commands.push(command);
+                        }
+                    }
+                    UnitDrawStage::Weapons => pass
+                        .commands
+                        .extend(self.unit_snapshot_weapon_render_commands(unit)),
+                    UnitDrawStage::Shield => {
+                        if let Some(command) = self.unit_snapshot_shield_render_command(unit) {
+                            pass.commands.push(command);
+                        }
+                    }
+                    UnitDrawStage::HardShadow
+                    | UnitDrawStage::Legs
+                    | UnitDrawStage::Payload
+                    | UnitDrawStage::Items
+                    | UnitDrawStage::Parts
+                    | UnitDrawStage::Abilities => {}
+                }
             }
         }
 
