@@ -124,6 +124,12 @@ pub enum DesktopMenuRoute {
     Settings,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopAboutRoutePage {
+    Links,
+    Credits,
+}
+
 impl DesktopMenuRoute {
     pub const fn from_menu_button(role: MenuButtonRole) -> Option<Self> {
         match role {
@@ -179,12 +185,322 @@ impl DesktopMenuRoute {
     }
 }
 
+const ABOUT_CREDITS_TEXT: &str = "Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]";
 const ABOUT_CREDITS_LINE: &str = "credits: Created by Anuken - anukendev@gmail.com";
-const ABOUT_LINKS_LINE: &str = "links: discord, github, wiki, bug";
-const ABOUT_DISCORD_LINE: &str = "discord: Join the Mindustry Discord!";
-const ABOUT_GITHUB_LINE: &str = "github: Game source code";
-const ABOUT_CONTRIBUTORS_LINE: &str = "contributors: redloong9527, Prosta4okua, Felix Corvus";
+pub const ABOUT_DISCORD_LINE: &str = "discord: The official Mindustry Discord chatroom";
+pub const ABOUT_GITHUB_LINE: &str = "github: Game source code";
 const MENU_PLAY_GUARD_MESSAGE: &str = "@mod.noerrorplay";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AboutLinkEntry {
+    pub name: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+    pub url: &'static str,
+    pub icon: &'static str,
+    pub color_hex: &'static str,
+}
+
+const ABOUT_BANNED_LINK_NAMES: &[&str] = &["google-play", "itch.io", "dev-builds", "f-droid"];
+
+const ABOUT_LINKS: &[AboutLinkEntry] = &[
+    AboutLinkEntry {
+        name: "discord",
+        title: "Discord",
+        description: "The official Mindustry Discord chatroom",
+        url: "https://discord.gg/mindustry",
+        icon: "discord",
+        color_hex: "7289da",
+    },
+    AboutLinkEntry {
+        name: "changelog",
+        title: "Changelog",
+        description: "List of update changes",
+        url: "https://github.com/Anuken/Mindustry/releases",
+        icon: "list",
+        color_hex: "accent",
+    },
+    AboutLinkEntry {
+        name: "trello",
+        title: "Trello",
+        description: "Official Trello board for planned features",
+        url: "https://trello.com/b/aE2tcUwF",
+        icon: "trello",
+        color_hex: "026aa7",
+    },
+    AboutLinkEntry {
+        name: "wiki",
+        title: "Wiki",
+        description: "Official Mindustry wiki",
+        url: "https://mindustrygame.github.io/wiki/",
+        icon: "book",
+        color_hex: "0f142f",
+    },
+    AboutLinkEntry {
+        name: "suggestions",
+        title: "Suggestions",
+        description: "Suggest new features",
+        url: "https://github.com/Anuken/Mindustry-Suggestions/issues/new/choose/",
+        icon: "add",
+        color_hex: "ebebeb",
+    },
+    AboutLinkEntry {
+        name: "reddit",
+        title: "Reddit",
+        description: "The Mindustry subreddit",
+        url: "https://www.reddit.com/r/Mindustry/",
+        icon: "redditAlien",
+        color_hex: "ee593b",
+    },
+    AboutLinkEntry {
+        name: "itch.io",
+        title: "Itch.io",
+        description: "itch.io page with PC downloads",
+        url: "https://anuke.itch.io/mindustry",
+        icon: "itchio",
+        color_hex: "fa5c5c",
+    },
+    AboutLinkEntry {
+        name: "google-play",
+        title: "Google play",
+        description: "Google Play store listing",
+        url: "https://play.google.com/store/apps/details?id=io.anuke.mindustry",
+        icon: "googleplay",
+        color_hex: "689f38",
+    },
+    AboutLinkEntry {
+        name: "f-droid",
+        title: "F droid",
+        description: "F-Droid listing",
+        url: "https://f-droid.org/packages/io.anuke.mindustry/",
+        icon: "android",
+        color_hex: "026aa7",
+    },
+    AboutLinkEntry {
+        name: "github",
+        title: "Github",
+        description: "Game source code",
+        url: "https://github.com/Anuken/Mindustry/",
+        icon: "github",
+        color_hex: "24292e",
+    },
+    AboutLinkEntry {
+        name: "dev-builds",
+        title: "Dev builds",
+        description: "Unstable development builds",
+        url: "https://github.com/Anuken/MindustryBuilds",
+        icon: "githubSquare",
+        color_hex: "fafbfc",
+    },
+    AboutLinkEntry {
+        name: "bug",
+        title: "Bug",
+        description: "Found one? Report it here",
+        url: "https://github.com/Anuken/Mindustry/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml",
+        icon: "wrench",
+        color_hex: "cbd97f",
+    },
+];
+
+const ABOUT_CONTRIBUTORS: &[&str] = &[
+    "redloong9527",
+    "Prosta4okua",
+    "Felix Corvus",
+    "Vanguard",
+    "Timmeey86",
+    "Epowerj",
+    "Baltazár Radics",
+    "Dexapnow",
+    "Somka",
+    "Milinai",
+    "키에르",
+    "skybldev",
+    "Leone25",
+    "Gureumi",
+    "VizardAlpha",
+    "LQ",
+    "Commodore64x",
+    "iczero",
+    "Krzysztof Skrzętnicki",
+    "Baramos666",
+    "theshadowknight",
+    "elmenda452",
+    "Predator127",
+    "Sonnicon",
+    "CinExPL",
+    "toushangyouxiang",
+    "xgamezs",
+    "William So",
+    "beito",
+    "BeefEX",
+    "Lorex",
+    "老滑稽/酪桦姬",
+    "Spico The Spirit Guy",
+    "RTOmega",
+    "TunacanGamer",
+    "kemalinanc13",
+    "Zachary",
+    "Fenr1r",
+    "Jaiun Lee",
+    "Gab_351",
+    "Carter Gale",
+    "Jan Polák",
+    "JustYanns",
+    "BasedUser",
+    "Rex Aliis",
+    "BLucky-gh",
+    "DinoWattz",
+    "Jae",
+    "angelickite",
+    "ScriptHosT12",
+    "Senventise",
+    "SkeptiC",
+    "Deyvid67",
+    "Damlon",
+    "DaGamerFiles",
+    "Trigg",
+    "Uriel",
+    "VXF",
+    "Valen. H",
+    "Valentin Sonin",
+    "Clarence \"Sparr\" Risher",
+    "bei2",
+    "AceEllysium",
+    "Cedric L'homme",
+    "Michał “Neoqueto”",
+    "indielm",
+    "Ameb",
+    "player20033",
+    "Ignacy",
+    "J-VdS",
+    "Kevin Vilyan - Kenny",
+    "Franciszek Zaranowicz",
+    "Andreas Heiskanen",
+    "Doyoung Gwak",
+    "MMG",
+    "Math2128",
+    "Michael Plotke",
+    "Niko",
+    "Paul T",
+    "Dominik",
+    "Arkanic",
+    "Potion",
+    "Markus G",
+    "itskatt",
+    "Agent-Laevain",
+    "AzariasB",
+    "amrsoll",
+    "ねらひかだ",
+    "Draco",
+    "Quezler",
+    "killall -q",
+    "Alicila",
+    "Daniel Dusek",
+    "DeltaNedas",
+    "GioIacca9",
+    "SnakkiZXZ",
+    "sk7725",
+    "Slotterleet",
+    "ThePlayerA",
+    "YellOw139",
+    "NgLamVN",
+    "JINODK",
+    "PetrGasparik",
+    "LeoDog896",
+    "Summet",
+    "MEEP of Faith",
+    "jalastram (freesound.org)",
+    "newlocknew (freesound.org)",
+    "dsmolenaers (freesound.org)",
+    "Headphaze (freesound.org)",
+    "Michel Baradari (opengameart.org)",
+    "Michael Klier (opengameart.org)",
+    "Lee Barkovich  (opengameart.org)",
+    "Neoqueto (Darktech LDR Font)",
+    "Nikolass",
+    "VolasYouKnow",
+    "Quick-Korx",
+    "Angel-24",
+    "Catchears",
+    "younggam",
+    "simba-fs",
+    "RedRadiation",
+    "Marko Zajc",
+    "PCX-LK (CPX MC)",
+    "Phinner",
+    "BTA_Susideur",
+    "nilq",
+    "AsgerHB",
+    "AzCraft",
+    "foo",
+    "Skat",
+    "WilloIzCitron",
+    "SAMBUYYA",
+    "genNAowl",
+    "JniTrRny",
+    "TranquillyUnpleasant",
+    "Darkness6030",
+    "hortiSquash",
+    "King-BR",
+    "citrusMarmelade",
+    "Evolveye",
+    "Jerzy Paciorkiewicz",
+    "YozoZChomutova",
+    "Qendolin",
+    "Goobrr",
+    "xem8k5小恶魔",
+    "BlueWolf",
+    "[Error_27]",
+    "code-explorer786",
+    "Alex25820",
+    "Nullotte",
+    "SMOLKEYS",
+    "1stvaliduser(SUS)",
+    "GlennFolker",
+    "BlackDeluxeCat",
+    "zenonet",
+    "AyuKo-o",
+    "JojoFR1",
+    "Xasmedy",
+    "xStaBUx",
+    "WayZer",
+    "SITUVNgcd",
+    "Gabriel \"red\" Fondato",
+    "CoCo Snow",
+    "summoner",
+    "OpalSoPL",
+    "apollovy",
+    "BalaM314",
+    "Redstonneur1256",
+    "ApsZoldat",
+    "Mythril",
+    "hexagon-recursion",
+    "JasonP01",
+    "BlueTheCube",
+    "sasha0552",
+    "1ue999",
+    "6-BennyLi-9",
+    "SeuEarth",
+    "The4codeblocks",
+    "cardillan",
+    "Justacommonegg",
+    "IchMagSchokolade",
+    "MonoChronos",
+    "RushieWashie",
+    "ITY",
+    "Iniquit",
+    "DSFdsfWxp",
+    "Someone's Shadow",
+    "buj",
+    "Agzam4",
+    "ItsKirby69",
+    "TheCuber",
+    "萌新-hhgs",
+    "Jovinull",
+    "Alon",
+    "硫缺铅/PyratiteNoLead",
+    "Space",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopMenuActionDispatch {
@@ -251,6 +567,8 @@ impl CampaignPlanetDialogState {
 pub enum DesktopMenuRouteShellAction {
     LaunchCampaign,
     ConnectJoin,
+    ShowAboutCredits,
+    ShowAboutLinks,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11942,6 +12260,8 @@ pub struct DesktopLauncher {
     pub last_menu_platform_action: Option<DesktopMenuPlatformAction>,
     pub last_menu_guard_message: Option<String>,
     pub menu_mobile_terminal_open: bool,
+    pub about_route_page: DesktopAboutRoutePage,
+    pub about_filter_banned_links: bool,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
     pub load_renderer_state: LoadRendererState,
@@ -12623,6 +12943,8 @@ impl DesktopLauncher {
             last_menu_platform_action: None,
             last_menu_guard_message: None,
             menu_mobile_terminal_open: false,
+            about_route_page: DesktopAboutRoutePage::Links,
+            about_filter_banned_links: false,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
             load_renderer_state: LoadRendererState::default(),
@@ -16188,6 +16510,13 @@ impl DesktopLauncher {
     }
 
     fn apply_menu_back_key(&mut self) -> bool {
+        if self.active_menu_route == Some(DesktopMenuRoute::About)
+            && self.about_route_page == DesktopAboutRoutePage::Credits
+        {
+            self.about_route_page = DesktopAboutRoutePage::Links;
+            self.last_menu_route_shell_action = None;
+            return true;
+        }
         if let Some(route) = self.active_menu_route.take() {
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = None;
@@ -16241,6 +16570,8 @@ impl DesktopLauncher {
                     &self.content_loader,
                     &self.game_state,
                 ));
+            } else if route == DesktopMenuRoute::About {
+                self.about_route_page = DesktopAboutRoutePage::Links;
             }
         }
         let close_requested = role == MenuButtonRole::Quit;
@@ -16278,6 +16609,7 @@ impl DesktopLauncher {
             }
             DesktopMenuChromeAction::InfoOpenAbout => {
                 self.active_menu_route = Some(DesktopMenuRoute::About);
+                self.about_route_page = DesktopAboutRoutePage::Links;
                 self.last_menu_route_shell_action = None;
                 self.last_menu_chrome_action = Some(DesktopMenuChromeAction::InfoOpenAbout);
             }
@@ -16303,7 +16635,10 @@ impl DesktopLauncher {
         viewport: RenderViewport,
         route: DesktopMenuRoute,
     ) -> Option<RenderRect> {
-        if !matches!(route, DesktopMenuRoute::Campaign | DesktopMenuRoute::Join) {
+        if !matches!(
+            route,
+            DesktopMenuRoute::Campaign | DesktopMenuRoute::Join | DesktopMenuRoute::About
+        ) {
             return None;
         }
         let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
@@ -16315,10 +16650,17 @@ impl DesktopLauncher {
         ))
     }
 
-    fn active_menu_route_shell_primary_label(route: DesktopMenuRoute) -> Option<&'static str> {
+    fn active_menu_route_shell_primary_label(
+        &self,
+        route: DesktopMenuRoute,
+    ) -> Option<&'static str> {
         match route {
             DesktopMenuRoute::Campaign => Some("LAUNCH"),
             DesktopMenuRoute::Join => Some("CONNECT"),
+            DesktopMenuRoute::About => Some(match self.about_route_page {
+                DesktopAboutRoutePage::Links => "CREDITS",
+                DesktopAboutRoutePage::Credits => "LINKS",
+            }),
             _ => None,
         }
     }
@@ -16336,6 +16678,10 @@ impl DesktopLauncher {
             .then_some(match route {
                 DesktopMenuRoute::Campaign => DesktopMenuRouteShellAction::LaunchCampaign,
                 DesktopMenuRoute::Join => DesktopMenuRouteShellAction::ConnectJoin,
+                DesktopMenuRoute::About => match self.about_route_page {
+                    DesktopAboutRoutePage::Links => DesktopMenuRouteShellAction::ShowAboutCredits,
+                    DesktopAboutRoutePage::Credits => DesktopMenuRouteShellAction::ShowAboutLinks,
+                },
                 _ => return None,
             })
     }
@@ -16373,6 +16719,12 @@ impl DesktopLauncher {
                 };
                 let _ = self.connect_to_target(target);
             }
+            DesktopMenuRouteShellAction::ShowAboutCredits => {
+                self.about_route_page = DesktopAboutRoutePage::Credits;
+            }
+            DesktopMenuRouteShellAction::ShowAboutLinks => {
+                self.about_route_page = DesktopAboutRoutePage::Links;
+            }
         }
     }
 
@@ -16396,6 +16748,49 @@ impl DesktopLauncher {
         sector.save_exists = true;
         sector.info.has_core = true;
         Some(sector)
+    }
+
+    fn visible_about_links(&self) -> Vec<&'static AboutLinkEntry> {
+        ABOUT_LINKS
+            .iter()
+            .filter(|link| {
+                !self.about_filter_banned_links || !ABOUT_BANNED_LINK_NAMES.contains(&link.name)
+            })
+            .collect()
+    }
+
+    fn about_links_line(&self) -> String {
+        let names = self
+            .visible_about_links()
+            .into_iter()
+            .map(|link| link.name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("links: {names}")
+    }
+
+    fn about_route_link_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            ABOUT_CREDITS_LINE.into(),
+            self.about_links_line(),
+            "button: credits".into(),
+        ];
+        for link in self.visible_about_links() {
+            lines.push(format!("{}: {}", link.name, link.description));
+            lines.push(format!("url: {}", link.url));
+        }
+        lines
+    }
+
+    fn about_route_credit_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            format!("credits.text: {ABOUT_CREDITS_TEXT}"),
+            format!("contributors: {} entries", ABOUT_CONTRIBUTORS.len()),
+        ];
+        for chunk in ABOUT_CONTRIBUTORS.chunks(3) {
+            lines.push(chunk.join(" | "));
+        }
+        lines
     }
 
     fn apply_menu_input_events(
@@ -16510,13 +16905,10 @@ impl DesktopLauncher {
                 vec!["content browser: pending DatabaseDialog port".into()]
             }
             DesktopMenuRoute::TechTree => vec!["research tree: pending TechTreeDialog port".into()],
-            DesktopMenuRoute::About => vec![
-                ABOUT_CREDITS_LINE.into(),
-                ABOUT_LINKS_LINE.into(),
-                ABOUT_DISCORD_LINE.into(),
-                ABOUT_GITHUB_LINE.into(),
-                ABOUT_CONTRIBUTORS_LINE.into(),
-            ],
+            DesktopMenuRoute::About => match self.about_route_page {
+                DesktopAboutRoutePage::Links => self.about_route_link_lines(),
+                DesktopAboutRoutePage::Credits => self.about_route_credit_lines(),
+            },
             DesktopMenuRoute::Editor => vec!["maps: pending EditorMapsDialog port".into()],
             DesktopMenuRoute::Mods => vec!["mods: pending ModsDialog port".into()],
             DesktopMenuRoute::Settings => vec!["settings: pending SettingsMenuDialog port".into()],
@@ -16582,7 +16974,9 @@ impl DesktopLauncher {
         if let Some(primary_rect) =
             Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)
         {
-            let label = Self::active_menu_route_shell_primary_label(route).unwrap_or("OPEN");
+            let label = self
+                .active_menu_route_shell_primary_label(route)
+                .unwrap_or("OPEN");
             pass.push(RenderCommand::fill_rect(
                 primary_rect,
                 [0.18, 0.35, 0.58, 0.92],
@@ -17954,6 +18348,8 @@ impl DesktopLauncher {
         self.last_menu_platform_action = None;
         self.last_menu_guard_message = None;
         self.menu_mobile_terminal_open = false;
+        self.about_route_page = DesktopAboutRoutePage::Links;
+        self.about_filter_banned_links = false;
         self.campaign_planet_dialog = None;
         self.last_campaign_launch_report = None;
         self.load_renderer_state = LoadRendererState::default();
@@ -32897,13 +33293,63 @@ mod tests {
 
         assert!(texts.contains(&"upstream: AboutDialog"));
         assert!(texts.contains(&super::ABOUT_CREDITS_LINE));
-        assert!(texts.contains(&super::ABOUT_LINKS_LINE));
+        let links_line = launcher.about_links_line();
+        assert!(texts.contains(&links_line.as_str()));
         assert!(texts.contains(&super::ABOUT_DISCORD_LINE));
         assert!(texts.contains(&super::ABOUT_GITHUB_LINE));
-        assert!(texts.contains(&super::ABOUT_CONTRIBUTORS_LINE));
+        assert!(texts.contains(&"wiki: Official Mindustry wiki"));
+        assert!(texts.contains(&"url: https://github.com/Anuken/Mindustry/"));
         assert!(!texts
             .iter()
             .any(|text| text.contains("pending AboutDialog port")));
+
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::ShowAboutCredits);
+        assert_eq!(
+            launcher.about_route_page,
+            super::DesktopAboutRoutePage::Credits
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let credit_texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(credit_texts
+            .contains(&"credits.text: Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]"));
+        assert!(credit_texts.contains(&"contributors: 197 entries"));
+        assert!(credit_texts
+            .iter()
+            .any(|text| text.contains("redloong9527 | Prosta4okua | Felix Corvus")));
+        assert!(credit_texts.iter().any(|text| text.contains("Space")));
+    }
+
+    #[test]
+    fn desktop_launcher_about_menu_route_filters_banned_links_for_ios_or_steam_mode() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.about_filter_banned_links = true;
+        launcher.dispatch_menu_action(MenuButtonRole::About);
+
+        let lines = launcher.about_route_link_lines();
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("discord: The official Mindustry Discord chatroom"));
+        assert!(joined.contains("github: Game source code"));
+        for banned in ["google-play", "itch.io", "dev-builds", "f-droid"] {
+            assert!(
+                !joined.contains(banned),
+                "filtered About links should omit {banned}"
+            );
+        }
     }
 
     #[test]

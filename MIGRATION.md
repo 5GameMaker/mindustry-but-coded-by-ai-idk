@@ -17508,3 +17508,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前还没有完整 Java `Mods` 系统，`has_content_errors()` 先承接 `ErrorContent` 和已迁移内容的 `ContentBase.error`；
   - `@mod.noerrorplay` 仍是直接 message key，后续需接完整 bundle/i18n 与 Java 风格错误对话框；
   - `CustomGame / LoadGame / Editor` 的真实 dialog 内容仍是 route shell/pending，需要继续迁移。
+
+## 485. AboutDialog 链接列表、credits 子页与 contributors 数据接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.0%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/AboutDialog.java`
+    - `Links.getLinks()` 逐项渲染 link card；
+    - `ios || steam` 时过滤 `google-play / itch.io / dev-builds / f-droid`；
+    - `buttons.button("@credits", this::showCredits)` 打开 credits 子页；
+    - credits 子页显示 `@credits.text` 与 `contributors` 文件内容，3 列排布。
+  - `core/src/mindustry/ui/Links.java`
+    - 完整链接项：`discord / changelog / trello / wiki / suggestions / reddit / itch.io / google-play / f-droid / github / dev-builds / bug`。
+  - `core/assets/contributors`
+    - 当前 v158.1 基线共 197 行 contributor。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `AboutLinkEntry`、完整 `ABOUT_LINKS` 数据表、`ABOUT_BANNED_LINK_NAMES` 和完整 `ABOUT_CONTRIBUTORS` 快照；
+    - 新增 `DesktopAboutRoutePage::{Links, Credits}` 与 `about_route_page` 状态；
+    - About route 默认显示完整链接列表、URL 与描述；
+    - `about_filter_banned_links` 参数化 Java 的 `ios || steam` 过滤条件；
+    - About route 的 primary action 在 `CREDITS` / `LINKS` 间切换，进入 credits 子页后按 3 列 chunk 渲染 contributors；
+    - Back/Escape 在 credits 子页优先返回 links 页，保持 Java 子 dialog 的回退语义雏形。
+- 迁移意义：
+  - About 不再只是最小摘要，而是接入完整 upstream link 数据、credits 文案和完整 contributors 列表；
+  - 仍走 `DesktopLauncher -> active_menu_route -> RenderPass` 主链，未创建孤立 UI 模块；
+  - 后续只需在同一入口继续接 `openURI / linkfail / clipboard / wiki event` 平台行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_hit_test_and_actions_share_layout --lib`
+- 仍未完成：
+  - 链接点击行为尚未接平台 `open_uri`、失败 `@linkfail` 与剪贴板回填；
+  - credits/contributors 目前是 route shell 文本渲染，尚未实现真实 ScrollPane/card 布局；
+  - banned 过滤条件已参数化，尚未从真实 iOS/Steam 平台状态注入。
