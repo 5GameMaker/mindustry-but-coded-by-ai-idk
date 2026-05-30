@@ -16313,3 +16313,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 primitive 仍走 quad 化 sprite mesh，不是独立 GL_LINES / TRIANGLE_FAN 管线；
   - 还应继续给标准 effect primitives 补同类端到端测试；
   - 单位主渲染编排、parts、legs、payload/item、hard shadow 仍需继续。
+
+## 446. 最新闭环记录：Standard effect primitive 到 OpenGL DrawElements 端到端验证
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.4%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_standard_effect_primitives_flow_into_opengl_draw_elements`；
+    - 以 `hitBulletColor` standard effect 为端到端样本，覆盖 cached circle/line/light primitives；
+    - 通过 `graphics_frame_for_render(...)` 证明 standard effect overlay/light pass 进入 `RenderFramePlan`；
+    - 通过 `HeadlessDesktopGraphicsRenderer` 验证 `primitive:DrawCircle` / `primitive:DrawLine` 进入 OpenGL sprite quad/mesh；
+    - 通过 `DesktopOpenGlBackendGraphicsRenderer<DesktopGraphicsNullOpenGlBackendRuntime>` 验证最终 driver 记录 `DrawElements`。
+- 迁移意义：
+  - 与上一轮 bullet primitive 端到端测试形成配对，标准 effect primitives 也被锁定到真实 OpenGL backend；
+  - 后续继续迁移 `Fx.java` 时，可以直接用该测试风格防止 effect primitive 退回“只缓存不绘制”的状态；
+  - 继续保持整体化路径：runtime local effect event → effect entity/materialize → standard effect frame → render pass → OpenGL backend。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_standard_effect_primitives_flow_into_opengl_draw_elements --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `LightCommand::Region` / `LightCommand::Runnable` 仍是 custom marker；
+  - textured effect regions、shader/blend 细节、完整 `Fx.java` 迁移仍需继续；
+  - 单位主渲染编排、parts、legs、payload/item、hard shadow 仍需继续。
