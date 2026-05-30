@@ -16,8 +16,9 @@ use mindustry_core::mindustry::core::net_client::{
     ClientUnitItemMirror, ClientUnitPayloadMirror,
 };
 use mindustry_core::mindustry::core::{
-    content_loader::ContentLoader, ClientConnectConfig, GameRuntime, GameRuntimeMapLoadReport,
-    GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
+    content_loader::ContentLoader, ClientConnectConfig, DefaultPlatform, GameRuntime,
+    GameRuntimeMapLoadReport, GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
+    Platform,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
 use mindustry_core::mindustry::entities::comp::{
@@ -139,6 +140,7 @@ impl DesktopMenuRoute {
             MenuButtonRole::Settings => Some(Self::Settings),
             MenuButtonRole::Play
             | MenuButtonRole::Database
+            | MenuButtonRole::Workshop
             | MenuButtonRole::Custom(_)
             | MenuButtonRole::Quit => None,
         }
@@ -250,6 +252,11 @@ pub enum DesktopMenuChromeAction {
     MobileTerminalToggle,
     InfoOpenAbout,
     Becheck,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopMenuPlatformAction {
+    OpenWorkshop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -11925,6 +11932,7 @@ pub struct DesktopLauncher {
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
     pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
     pub last_menu_chrome_action: Option<DesktopMenuChromeAction>,
+    pub last_menu_platform_action: Option<DesktopMenuPlatformAction>,
     pub menu_mobile_terminal_open: bool,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
@@ -12604,6 +12612,7 @@ impl DesktopLauncher {
             last_menu_dispatch: None,
             last_menu_route_shell_action: None,
             last_menu_chrome_action: None,
+            last_menu_platform_action: None,
             menu_mobile_terminal_open: false,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
@@ -16164,6 +16173,18 @@ impl DesktopLauncher {
 
     fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
         let submenu_changed = self.menu_renderer_state.select_desktop_root(role);
+        if role == MenuButtonRole::Workshop {
+            self.dispatch_menu_platform_action(DesktopMenuPlatformAction::OpenWorkshop);
+            self.active_menu_route = None;
+            let dispatch = DesktopMenuActionDispatch {
+                role,
+                submenu_changed,
+                route: None,
+                close_requested: false,
+            };
+            self.last_menu_dispatch = Some(dispatch);
+            return dispatch;
+        }
         let route = if submenu_changed {
             self.active_menu_route = None;
             None
@@ -16191,6 +16212,16 @@ impl DesktopLauncher {
         };
         self.last_menu_dispatch = Some(dispatch);
         dispatch
+    }
+
+    fn dispatch_menu_platform_action(&mut self, action: DesktopMenuPlatformAction) {
+        match action {
+            DesktopMenuPlatformAction::OpenWorkshop => {
+                let mut platform = DefaultPlatform;
+                platform.open_workshop();
+                self.last_menu_platform_action = Some(DesktopMenuPlatformAction::OpenWorkshop);
+            }
+        }
     }
 
     fn dispatch_menu_chrome_action(&mut self, action: DesktopMenuChromeAction) {
@@ -17830,6 +17861,7 @@ impl DesktopLauncher {
         self.last_menu_dispatch = None;
         self.last_menu_route_shell_action = None;
         self.last_menu_chrome_action = None;
+        self.last_menu_platform_action = None;
         self.menu_mobile_terminal_open = false;
         self.campaign_planet_dialog = None;
         self.last_campaign_launch_report = None;
@@ -32346,6 +32378,56 @@ mod tests {
             .buttons
             .iter()
             .all(|button| button.role != MenuButtonRole::TechTree));
+    }
+
+    #[test]
+    fn desktop_launcher_dispatches_workshop_button_to_platform_without_route_shell() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state = super::MenuRendererState::new(
+            super::MenuRendererConfig::new(false, 7).with_desktop_workshop_enabled(true),
+        );
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let workshop_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Workshop)
+            .expect("steam/workshop menu should include WORKSHOP")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: workshop_center.x,
+                    y: workshop_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Workshop));
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(
+            launcher.last_menu_platform_action,
+            Some(super::DesktopMenuPlatformAction::OpenWorkshop)
+        );
+        assert_eq!(
+            launcher.last_menu_dispatch,
+            Some(super::DesktopMenuActionDispatch {
+                role: MenuButtonRole::Workshop,
+                submenu_changed: false,
+                route: None,
+                close_requested: false,
+            })
+        );
     }
 
     #[test]

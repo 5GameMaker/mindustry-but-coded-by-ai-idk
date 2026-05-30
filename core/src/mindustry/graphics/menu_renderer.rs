@@ -109,6 +109,7 @@ pub struct MenuRendererConfig {
     pub mobile: bool,
     pub seed: u64,
     pub tile_size: f32,
+    pub desktop_workshop_enabled: bool,
 }
 
 impl MenuRendererConfig {
@@ -117,7 +118,13 @@ impl MenuRendererConfig {
             mobile,
             seed,
             tile_size: MENU_TILE_SIZE,
+            desktop_workshop_enabled: false,
         }
+    }
+
+    pub const fn with_desktop_workshop_enabled(mut self, enabled: bool) -> Self {
+        self.desktop_workshop_enabled = enabled;
+        self
     }
 
     pub const fn width(&self) -> usize {
@@ -166,6 +173,7 @@ pub enum MenuButtonRole {
     TechTree,
     About,
     Editor,
+    Workshop,
     Mods,
     Settings,
     Custom(u16),
@@ -186,6 +194,7 @@ impl MenuButtonRole {
             Self::TechTree => "TECH TREE",
             Self::About => "ABOUT",
             Self::Editor => "EDITOR",
+            Self::Workshop => "WORKSHOP",
             Self::Mods => "MODS",
             Self::Settings => "SETTINGS",
             Self::Custom(_) => "CUSTOM",
@@ -210,7 +219,13 @@ impl MenuButtonRole {
     pub const fn is_desktop_root(self) -> bool {
         matches!(
             self,
-            Self::Play | Self::Database | Self::Editor | Self::Mods | Self::Settings | Self::Quit
+            Self::Play
+                | Self::Database
+                | Self::Editor
+                | Self::Workshop
+                | Self::Mods
+                | Self::Settings
+                | Self::Quit
         )
     }
 
@@ -581,6 +596,7 @@ impl MenuRendererState {
                 input,
                 self.config.mobile,
                 self.selected_root,
+                self.config.desktop_workshop_enabled,
                 &self.custom_buttons,
             ),
         }
@@ -634,6 +650,7 @@ impl MenuRendererState {
             input,
             self.config.mobile,
             self.selected_root,
+            self.config.desktop_workshop_enabled,
             &self.custom_buttons,
         )
     }
@@ -1000,18 +1017,22 @@ fn menu_mobile_button_plan(
 fn menu_desktop_ui_plan(
     input: MenuFrameInput,
     selected_root: MenuButtonRole,
+    desktop_workshop_enabled: bool,
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
     let button_width = 230.0;
     let button_height = 70.0;
     let gap = 0.0;
-    let main_roles = [
+    let mut main_roles = vec![
         MenuButtonRole::Play,
         MenuButtonRole::Database,
         MenuButtonRole::Editor,
         MenuButtonRole::Mods,
         MenuButtonRole::Settings,
     ];
+    if desktop_workshop_enabled {
+        main_roles.insert(3, MenuButtonRole::Workshop);
+    }
     let play_submenu_roles = [
         MenuButtonRole::Campaign,
         MenuButtonRole::Join,
@@ -1028,7 +1049,8 @@ fn menu_desktop_ui_plan(
         MenuButtonRole::Database => &database_submenu_roles,
         _ => &[],
     };
-    let main_button_count = main_roles.len() + custom_buttons.len() + 1;
+    let main_role_count = main_roles.len();
+    let main_button_count = main_role_count + custom_buttons.len() + 1;
     let total_height =
         main_button_count as f32 * button_height + main_button_count.saturating_sub(1) as f32 * gap;
     let start_y = ((input.graphics_height - total_height) * 0.5).max(0.0);
@@ -1041,7 +1063,7 @@ fn menu_desktop_ui_plan(
     let submenu_start_y = start_y + selected_root_index as f32 * (button_height + gap);
 
     let mut buttons = Vec::with_capacity(main_button_count + submenu_roles.len());
-    for (index, role) in main_roles.into_iter().enumerate() {
+    for (index, role) in main_roles.iter().copied().enumerate() {
         buttons.push(menu_button_plan(
             role,
             RenderRect::new(
@@ -1054,7 +1076,7 @@ fn menu_desktop_ui_plan(
         ));
     }
     for (custom_index, custom) in custom_buttons.iter().enumerate() {
-        let index = main_roles.len() + custom_index;
+        let index = main_role_count + custom_index;
         buttons.push(menu_custom_button_plan(
             custom_index,
             custom,
@@ -1066,7 +1088,7 @@ fn menu_desktop_ui_plan(
             ),
         ));
     }
-    let quit_index = main_roles.len() + custom_buttons.len();
+    let quit_index = main_role_count + custom_buttons.len();
     buttons.push(menu_button_plan(
         MenuButtonRole::Quit,
         RenderRect::new(
@@ -1204,12 +1226,18 @@ fn menu_ui_plan(
     input: MenuFrameInput,
     mobile: bool,
     selected_root: MenuButtonRole,
+    desktop_workshop_enabled: bool,
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
     if mobile {
         menu_mobile_ui_plan(input, custom_buttons)
     } else {
-        menu_desktop_ui_plan(input, selected_root, custom_buttons)
+        menu_desktop_ui_plan(
+            input,
+            selected_root,
+            desktop_workshop_enabled,
+            custom_buttons,
+        )
     }
 }
 
@@ -1600,6 +1628,65 @@ mod tests {
             state.hit_test_ui(input, join_center.x, join_center.y),
             Some(MenuButtonRole::Join)
         );
+    }
+
+    #[test]
+    fn menu_button_role_workshop_is_desktop_root_without_submenu() {
+        assert_eq!(MenuButtonRole::Workshop.label(), "WORKSHOP");
+        assert!(MenuButtonRole::Workshop.is_desktop_root());
+        assert!(!MenuButtonRole::Workshop.has_desktop_submenu());
+        assert!(!MenuButtonRole::Workshop.is_submenu());
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_inserts_workshop_before_mods_when_enabled_like_java() {
+        let mut state = MenuRendererState::new(
+            MenuRendererConfig::new(false, 11).with_desktop_workshop_enabled(true),
+        );
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        });
+
+        let roles = plan
+            .ui
+            .buttons
+            .iter()
+            .map(|button| button.role)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            roles,
+            vec![
+                MenuButtonRole::Play,
+                MenuButtonRole::Database,
+                MenuButtonRole::Editor,
+                MenuButtonRole::Workshop,
+                MenuButtonRole::Mods,
+                MenuButtonRole::Settings,
+                MenuButtonRole::Quit,
+                MenuButtonRole::Campaign,
+                MenuButtonRole::Join,
+                MenuButtonRole::CustomGame,
+                MenuButtonRole::LoadGame,
+            ]
+        );
+
+        let workshop = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Workshop)
+            .expect("steam/workshop desktop menu should expose workshop button");
+        let mods = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Mods)
+            .expect("desktop menu should still expose mods after workshop");
+        assert_eq!(workshop.label, "WORKSHOP");
+        assert!(workshop.rect.y < mods.rect.y);
     }
 
     #[test]

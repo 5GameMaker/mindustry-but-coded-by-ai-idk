@@ -17406,3 +17406,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `becheck` 仍只是动作记录，尚未接真实 update check / loadfrag / info 反馈；
   - `terminal` 只保留 toggle 状态，尚未接真实 consolefrag；
   - `About` route 仍是 shell，尚未读取 upstream `AboutDialog/Links/contributors/bundle` 的真实内容。
+
+## 482. MenuFragment desktop workshop 条件按钮接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.7%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:209-224`
+    - desktop `desktopButtons` 在 `@editor` 后按 `steam ? new MenuButton("@workshop", Icon.steam, platform::openWorkshop) : null` 条件插入 workshop；
+    - workshop 是 desktop-only 平台动作按钮，不是 submenu，也不是 route dialog。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuRendererConfig` 新增默认关闭的 `desktop_workshop_enabled`；
+    - 新增 `with_desktop_workshop_enabled(...)` 构造器，测试/平台层可显式开启；
+    - `MenuButtonRole::Workshop` 新增为 `WORKSHOP`，是 desktop root、无 submenu；
+    - `menu_desktop_ui_plan(...)` 在开启时把 Workshop 插入 `Editor` 与 `Mods` 之间，默认关闭时保持既有布局和几何测试不变。
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRoute::from_menu_button(...)` 显式将 Workshop 视为非 route；
+    - 新增 `DesktopMenuPlatformAction::OpenWorkshop` 与 `last_menu_platform_action`；
+    - `dispatch_menu_action(...)` 对 Workshop 走平台动作分支，调用当前 no-op `DefaultPlatform.open_workshop()` 并记录动作，不打开 route shell、不请求关闭。
+- 迁移意义：
+  - Java desktop-only workshop 条件按钮从缺口推进到可见、可点击、可测试的平台动作入口；
+  - 默认非 steam/workshop 布局保持不变，避免污染普通桌面菜单主链。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `git diff --check`
+  - `cargo test -p mindustry-core workshop --lib`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_matches_upstream_main_and_submenu_geometry --lib`
+  - `cargo test -p mindustry-desktop workshop --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_ --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前 desktop 仍使用 `DefaultPlatform.open_workshop()` no-op 作为过渡，尚未接真实 Steam/平台 workshop 打开逻辑；
+  - workshop 开关尚未从真实平台/启动参数注入，只能通过 `MenuRendererConfig` 显式开启；
+  - submenu fade、`checkPlay()` mod error guard、真实 dialogs 和真字体 atlas 仍待继续。
