@@ -16286,3 +16286,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - PowerNode、BeamNode、TractorBeamTurret、BeamDrill、RepairBeamWeapon、unit mining laser 等还未统一迁入该 textured laser helper；
   - PointLaser 的 `Damage.collidePoint`、beamEffect、trail endpoint effect 仍需接 runtime/effect 链；
   - weapon/unit parts、hard shadow、legs、payload/item 仍需继续。
+
+## 445. 最新闭环记录：Bullet primitive 到 OpenGL DrawElements 端到端验证
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.3%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_launcher_bullet_snapshot_primitives_flow_into_opengl_draw_elements`；
+    - 以 `toxopid_shrapnel` snapshot 为端到端样本，先断言 bullet overlay 产出 `DrawTriangle`、lighting pass 产出 `DrawLine`；
+    - 通过 `HeadlessDesktopGraphicsRenderer` 验证 `primitive:DrawTriangle` / `primitive:DrawLine` 进入 OpenGL sprite quad/mesh 计划；
+    - 通过 `DesktopOpenGlBackendGraphicsRenderer<DesktopGraphicsNullOpenGlBackendRuntime>` 验证最终 driver 记录 `DrawElements`。
+- 迁移意义：
+  - 明确证明 bullet/effect primitive 不是只停在 frame seam，而是已经能进入现有 OpenGL sprite mesh/backend 执行链；
+  - 后续继续补具体渲染算法时，可以把“是否能进入 native OpenGL 执行”作为固定回归门槛；
+  - 该闭环不改变渲染语义，只加端到端验证，降低后续重构 primitive/texture laser 时打断真实 backend 的风险。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_bullet_snapshot_primitives_flow_into_opengl_draw_elements --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `LightCommand::Region` / `LightCommand::Runnable` 仍是 custom marker，不是几何 primitive；
+  - 当前 primitive 仍走 quad 化 sprite mesh，不是独立 GL_LINES / TRIANGLE_FAN 管线；
+  - 还应继续给标准 effect primitives 补同类端到端测试；
+  - 单位主渲染编排、parts、legs、payload/item、hard shadow 仍需继续。

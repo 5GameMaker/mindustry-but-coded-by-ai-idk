@@ -17848,6 +17848,91 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "opengl-backend")]
+    #[test]
+    fn desktop_launcher_bullet_snapshot_primitives_flow_into_opengl_draw_elements() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_content = launcher
+            .content_loader
+            .bullet_by_name("toxopid_shrapnel")
+            .expect("base content should include toxopid shrapnel bullet");
+
+        let mut bullet = BulletComp::new(
+            bullet_content.id(),
+            TeamId(1),
+            type_io::EntityRef::null(),
+            32.0,
+            48.0,
+        );
+        bullet.lifetime = 10.0;
+        bullet.time = 5.0;
+        bullet.rotation = 0.0;
+        bullet.fdata = 45.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7206, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            31,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        assert!(render_frame.passes.iter().any(|pass| {
+            pass.kind == RenderPassKind::Overlay
+                && pass
+                    .commands
+                    .iter()
+                    .any(|command| matches!(command, RenderCommand::DrawTriangle { .. }))
+        }));
+        assert!(render_frame.passes.iter().any(|pass| {
+            pass.kind == RenderPassKind::Lighting
+                && pass
+                    .commands
+                    .iter()
+                    .any(|command| matches!(command, RenderCommand::DrawLine { .. }))
+        }));
+
+        let mut headless = HeadlessDesktopGraphicsRenderer::default();
+        headless.render_graphics_frame(&frame);
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "primitive:DrawTriangle"));
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "primitive:DrawLine"));
+
+        let mut renderer = super::DesktopOpenGlBackendGraphicsRenderer::new(
+            super::DesktopGraphicsNullOpenGlBackendRuntime::default(),
+        );
+        renderer.render_graphics_frame(&frame);
+        assert!(
+            renderer
+                .last_resolved_command_executor_state
+                .sprite_draw_calls_emitted
+                > 0
+        );
+        assert!(renderer.last_driver_state.draw_commands > 0);
+        assert!(renderer.runtime.driver.commands.iter().any(|command| {
+            matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                    super::DesktopGraphicsOpenGlBackendDrawCommand::DrawElements { .. }
+                )
+            )
+        }));
+    }
+
     #[test]
     fn desktop_launcher_routes_sap_snapshot_textured_laser_and_light_pass() {
         let mut launcher = DesktopLauncher::new(Vec::new());

@@ -13422,3 +13422,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 将 PowerNode/BeamNode/TractorBeamTurret/BeamDrill/RepairBeamWeapon/unit mining laser 逐步迁入 `Drawf::laser(...)` helper；
   2. 给 effect/bullet primitive → OpenGL draw elements 补端到端测试；
   3. 建立单位主渲染编排入口，避免 parts/legs/payload/shadow 继续散落。
+
+### 2026-05-30：Bullet primitive 到 OpenGL DrawElements 端到端验证
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **43.3%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增测试 `desktop_launcher_bullet_snapshot_primitives_flow_into_opengl_draw_elements`；
+    - `toxopid_shrapnel` bullet snapshot 产出的 `DrawTriangle` 与 lighting `DrawLine` 会进入 `primitive:DrawTriangle` / `primitive:DrawLine` sprite quad；
+    - `DesktopOpenGlBackendGraphicsRenderer<DesktopGraphicsNullOpenGlBackendRuntime>` 最终 driver 能记录 `DrawElements`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_bullet_snapshot_primitives_flow_into_opengl_draw_elements --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 给 standard effect primitive 补同类 OpenGL DrawElements 端到端测试；
+  2. 继续把更多 Java textured laser 调用迁入 `Drawf::laser(...)`；
+  3. 建立 `UnitType.draw()` 等价渲染编排契约后推进 parts/legs/payload/shadow。
