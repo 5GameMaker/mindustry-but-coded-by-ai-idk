@@ -233,24 +233,79 @@ impl UpstreamUiIconGlyph {
 
 pub const UPSTREAM_UI_ICON_GLYPHS: &[UpstreamUiIconGlyph] = &[
     UpstreamUiIconGlyph {
-        java_name: "discord",
-        css_name: "discord_",
-        codepoint: 0xe80d,
+        java_name: "fileTextFill",
+        css_name: "file-text-fill",
+        codepoint: 0xf15c,
     },
     UpstreamUiIconGlyph {
-        java_name: "list",
-        css_name: "list",
-        codepoint: 0xe811,
+        java_name: "file",
+        css_name: "file",
+        codepoint: 0xf15b,
     },
     UpstreamUiIconGlyph {
-        java_name: "trello",
-        css_name: "trello",
-        codepoint: 0xf181,
+        java_name: "fileText",
+        css_name: "file-text",
+        codepoint: 0xf0f6,
     },
     UpstreamUiIconGlyph {
-        java_name: "book",
-        css_name: "book",
-        codepoint: 0xe85b,
+        java_name: "left",
+        css_name: "left",
+        codepoint: 0xe802,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "right",
+        css_name: "right",
+        codepoint: 0xe803,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "up",
+        css_name: "up",
+        codepoint: 0xe804,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "down",
+        css_name: "down",
+        codepoint: 0xe805,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "home",
+        css_name: "home",
+        codepoint: 0xe807,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "ok",
+        css_name: "ok",
+        codepoint: 0xe800,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "image",
+        css_name: "image",
+        codepoint: 0xe808,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "star",
+        css_name: "star",
+        codepoint: 0xe809,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "resize",
+        css_name: "resize",
+        codepoint: 0xe80b,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "wrench",
+        css_name: "wrench",
+        codepoint: 0xe80f,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "githubSquare",
+        css_name: "github-square",
+        codepoint: 0xf300,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "fileImage",
+        css_name: "file-image",
+        codepoint: 0xf1c5,
     },
     UpstreamUiIconGlyph {
         java_name: "add",
@@ -258,14 +313,184 @@ pub const UPSTREAM_UI_ICON_GLYPHS: &[UpstreamUiIconGlyph] = &[
         codepoint: 0xe813,
     },
     UpstreamUiIconGlyph {
+        java_name: "edit",
+        css_name: "edit",
+        codepoint: 0xe816,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "chartBar",
+        css_name: "chart-bar",
+        codepoint: 0xe819,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "planeOutline",
+        css_name: "plane-outline",
+        codepoint: 0xe81a,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "filter",
+        css_name: "filter",
+        codepoint: 0xf0b0,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "folder",
+        css_name: "folder",
+        codepoint: 0xe81d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "steam",
+        css_name: "steam",
+        codepoint: 0xe822,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "downOpen",
+        css_name: "down-open",
+        codepoint: 0xe824,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "leftOpen",
+        css_name: "left-open",
+        codepoint: 0xe825,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "upOpen",
+        css_name: "up-open",
+        codepoint: 0xe826,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "map",
+        css_name: "map",
+        codepoint: 0xe827,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "rotate",
+        css_name: "rotate",
+        codepoint: 0xe823,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "play",
+        css_name: "play",
+        codepoint: 0xe829,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "pause",
+        css_name: "pause",
+        codepoint: 0xe806,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "list",
+        css_name: "list",
+        codepoint: 0xe811,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "cancel",
+        css_name: "cancel",
+        codepoint: 0xe815,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "move",
+        css_name: "move",
+        codepoint: 0xe818,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "terminal",
+        css_name: "terminal",
+        codepoint: 0xf120,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "undo",
+        css_name: "undo",
+        codepoint: 0xe835,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "redo",
+        css_name: "redo",
+        codepoint: 0xe836,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "info",
+        css_name: "info",
+        codepoint: 0xf129,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "infoCircle",
+        css_name: "info-circle",
+        codepoint: 0xe837,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "rightOpenOut",
+        css_name: "right-open-out",
+        codepoint: 0xe839,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "rightOpen",
+        css_name: "right-open",
+        codepoint: 0xe83a,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "waves",
+        css_name: "waves",
+        codepoint: 0xe83b,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "filters",
+        css_name: "filters",
+        codepoint: 0xe83e,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "layers",
+        css_name: "layers",
+        codepoint: 0xe83f,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "eraser",
+        css_name: "eraser",
+        codepoint: 0xf12d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "bookOpen",
+        css_name: "book-open",
+        codepoint: 0xe801,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "grid",
+        css_name: "grid",
+        codepoint: 0xf029,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "flipX",
+        css_name: "flip-x",
+        codepoint: 0xe812,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "flipY",
+        css_name: "flip-y",
+        codepoint: 0xe842,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "diagonal",
+        css_name: "diagonal",
+        codepoint: 0xe844,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "discord",
+        css_name: "discord_",
+        codepoint: 0xe80d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "box",
+        css_name: "box",
+        codepoint: 0xe81e,
+    },
+    UpstreamUiIconGlyph {
         java_name: "redditAlien",
         css_name: "reddit-alien",
         codepoint: 0xf281,
     },
     UpstreamUiIconGlyph {
-        java_name: "itchio",
-        css_name: "itchio",
-        codepoint: 0xe82a,
+        java_name: "github",
+        css_name: "github_",
+        codepoint: 0xf308,
     },
     UpstreamUiIconGlyph {
         java_name: "googleplay",
@@ -278,19 +503,29 @@ pub const UPSTREAM_UI_ICON_GLYPHS: &[UpstreamUiIconGlyph] = &[
         codepoint: 0xe845,
     },
     UpstreamUiIconGlyph {
-        java_name: "github",
-        css_name: "github_",
-        codepoint: 0xf308,
+        java_name: "trello",
+        css_name: "trello",
+        codepoint: 0xf181,
     },
     UpstreamUiIconGlyph {
-        java_name: "githubSquare",
-        css_name: "github-square",
-        codepoint: 0xf300,
+        java_name: "logic",
+        css_name: "logic",
+        codepoint: 0xe80e,
     },
     UpstreamUiIconGlyph {
-        java_name: "wrench",
-        css_name: "wrench",
-        codepoint: 0xe80f,
+        java_name: "distribution",
+        css_name: "distribution",
+        codepoint: 0xe814,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "hammer",
+        css_name: "hammer",
+        codepoint: 0xe817,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "save",
+        css_name: "save",
+        codepoint: 0xe81b,
     },
     UpstreamUiIconGlyph {
         java_name: "link",
@@ -298,39 +533,34 @@ pub const UPSTREAM_UI_ICON_GLYPHS: &[UpstreamUiIconGlyph] = &[
         codepoint: 0xe81c,
     },
     UpstreamUiIconGlyph {
-        java_name: "terminal",
-        css_name: "terminal",
-        codepoint: 0xf120,
+        java_name: "itchio",
+        css_name: "itchio",
+        codepoint: 0xe82a,
     },
     UpstreamUiIconGlyph {
-        java_name: "info",
-        css_name: "info",
-        codepoint: 0xf129,
+        java_name: "line",
+        css_name: "line",
+        codepoint: 0xe82b,
     },
     UpstreamUiIconGlyph {
-        java_name: "refresh",
-        css_name: "refresh",
-        codepoint: 0xe86a,
+        java_name: "admin",
+        css_name: "admin",
+        codepoint: 0xe82c,
     },
     UpstreamUiIconGlyph {
-        java_name: "play",
-        css_name: "play",
-        codepoint: 0xe829,
+        java_name: "spray1",
+        css_name: "spray-1",
+        codepoint: 0xe82d,
     },
     UpstreamUiIconGlyph {
-        java_name: "download",
-        css_name: "download",
-        codepoint: 0xe879,
+        java_name: "crafting",
+        css_name: "crafting",
+        codepoint: 0xe830,
     },
     UpstreamUiIconGlyph {
-        java_name: "settings",
-        css_name: "settings",
-        codepoint: 0xe87c,
-    },
-    UpstreamUiIconGlyph {
-        java_name: "menu",
-        css_name: "menu",
-        codepoint: 0xe88c,
+        java_name: "fill",
+        css_name: "fill",
+        codepoint: 0xe84c,
     },
     UpstreamUiIconGlyph {
         java_name: "paste",
@@ -338,14 +568,214 @@ pub const UPSTREAM_UI_ICON_GLYPHS: &[UpstreamUiIconGlyph] = &[
         codepoint: 0xe852,
     },
     UpstreamUiIconGlyph {
-        java_name: "terrain",
-        css_name: "terrain",
-        codepoint: 0xe864,
+        java_name: "effect",
+        css_name: "effect",
+        codepoint: 0xe853,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "book",
+        css_name: "book",
+        codepoint: 0xe85b,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "liquid",
+        css_name: "liquid",
+        codepoint: 0xe85c,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "host",
+        css_name: "host",
+        codepoint: 0xe85d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "production",
+        css_name: "production",
+        codepoint: 0xe85e,
     },
     UpstreamUiIconGlyph {
         java_name: "exit",
         css_name: "exit",
         codepoint: 0xe85f,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "modePvp",
+        css_name: "mode-pvp",
+        codepoint: 0xe861,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "modeAttack",
+        css_name: "mode-attack",
+        codepoint: 0xe865,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "refresh1",
+        css_name: "refresh-1",
+        codepoint: 0xe867,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "none",
+        css_name: "none",
+        codepoint: 0xe868,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "pencil",
+        css_name: "pencil_",
+        codepoint: 0xe869,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "refresh",
+        css_name: "refresh",
+        codepoint: 0xe86a,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "modeSurvival",
+        css_name: "mode-survival",
+        codepoint: 0xe86b,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "commandRally",
+        css_name: "command-rally",
+        codepoint: 0xe86c,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "units",
+        css_name: "units",
+        codepoint: 0xe86d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "commandAttack",
+        css_name: "command-attack",
+        codepoint: 0xe86e,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "trash",
+        css_name: "trash",
+        codepoint: 0xe86f,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "chat",
+        css_name: "chat",
+        codepoint: 0xe870,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "turret",
+        css_name: "turret",
+        codepoint: 0xe871,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "players",
+        css_name: "players",
+        codepoint: 0xe872,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "editor",
+        css_name: "editor",
+        codepoint: 0xe873,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "copy",
+        css_name: "copy",
+        codepoint: 0xe874,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "tree",
+        css_name: "tree",
+        codepoint: 0xe875,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "lockOpen",
+        css_name: "lock-open",
+        codepoint: 0xe876,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "pick",
+        css_name: "pick",
+        codepoint: 0xe877,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "export",
+        css_name: "export",
+        codepoint: 0xe878,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "download",
+        css_name: "download",
+        codepoint: 0xe879,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "upload",
+        css_name: "upload",
+        codepoint: 0xe87b,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "settings",
+        css_name: "settings",
+        codepoint: 0xe87c,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "spray",
+        css_name: "spray",
+        codepoint: 0xe87d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "zoom",
+        css_name: "zoom",
+        codepoint: 0xe88a,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "powerOld",
+        css_name: "power_old",
+        codepoint: 0xe88b,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "power",
+        css_name: "power_",
+        codepoint: 0xe810,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "menu",
+        css_name: "menu",
+        codepoint: 0xe88c,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "lock",
+        css_name: "lock",
+        codepoint: 0xe88d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "eye",
+        css_name: "eye",
+        codepoint: 0xe88e,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "eyeOff",
+        css_name: "eye-off",
+        codepoint: 0xe88f,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "warning",
+        css_name: "warning",
+        codepoint: 0x26a0,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "terrain",
+        css_name: "terrain",
+        codepoint: 0xe864,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "defense",
+        css_name: "defense",
+        codepoint: 0xe84d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "planet",
+        css_name: "planet",
+        codepoint: 0xe833,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "arrowNote",
+        css_name: "arrow-note",
+        codepoint: 0xe834,
     },
 ];
 
@@ -529,34 +959,68 @@ mod tests {
     }
 
     #[test]
-    fn upstream_ui_icon_glyph_registry_covers_menu_and_about_icons() {
+    fn upstream_ui_icon_glyph_registry_covers_all_config_glyphs_and_aliases() {
+        assert_eq!(UPSTREAM_UI_ICON_GLYPHS.len(), 109);
+
         for (name, expected) in [
-            ("discord", 0xe80d),
-            ("list", 0xe811),
-            ("trello", 0xf181),
-            ("book", 0xe85b),
-            ("add", 0xe813),
-            ("redditAlien", 0xf281),
-            ("itchio", 0xe82a),
-            ("googleplay", 0xe83d),
-            ("android", 0xe845),
-            ("github", 0xf308),
-            ("githubSquare", 0xf300),
-            ("wrench", 0xe80f),
-            ("link", 0xe81c),
-            ("terminal", 0xf120),
-            ("info", 0xf129),
-            ("refresh", 0xe86a),
+            ("cancel", 0xe815),
+            ("downOpen", 0xe824),
+            ("ok", 0xe800),
+            ("left", 0xe802),
+            ("upOpen", 0xe826),
+            ("trash", 0xe86f),
+            ("zoom", 0xe88a),
+            ("copy", 0xe874),
+            ("pencil", 0xe869),
+            ("edit", 0xe816),
+            ("upload", 0xe87b),
+            ("save", 0xe81b),
+            ("warning", 0x26a0),
+            ("export", 0xe878),
+            ("units", 0xe86d),
+            ("filter", 0xf0b0),
+            ("lock", 0xe88d),
+            ("file", 0xf15b),
+            ("pause", 0xe806),
         ] {
             let glyph = upstream_ui_icon_glyph(name).expect("icon glyph should be registered");
             assert_eq!(glyph.codepoint, expected);
             assert_eq!(upstream_ui_icon_glyph_char(name), char::from_u32(expected));
+            assert_eq!(
+                upstream_ui_icon_glyph_string(name),
+                char::from_u32(expected).map(|ch| ch.to_string())
+            );
         }
+
+        for (name, expected) in [
+            ("down-open", 0xe824),
+            ("up-open", 0xe826),
+            ("left-open", 0xe825),
+            ("right-open-out", 0xe839),
+            ("file-text", 0xf0f6),
+            ("file-image", 0xf1c5),
+            ("file-text-fill", 0xf15c),
+            ("pencil_", 0xe869),
+            ("power_", 0xe810),
+            ("power_old", 0xe88b),
+            ("discord_", 0xe80d),
+            ("github_", 0xf308),
+            ("reddit-alien", 0xf281),
+        ] {
+            let glyph = upstream_ui_icon_glyph(name).expect("css icon glyph should be registered");
+            assert_eq!(glyph.codepoint, expected);
+        }
+
         assert_eq!(
             upstream_ui_icon_glyph("reddit-alien").map(|glyph| glyph.java_name),
             Some("redditAlien")
         );
+        assert_eq!(
+            upstream_ui_icon_glyph("down-open").map(|glyph| glyph.java_name),
+            Some("downOpen")
+        );
         assert_eq!(upstream_ui_icon_glyph_char("missing-icon"), None);
+        assert_eq!(upstream_ui_icon_glyph_string("missing-icon"), None);
     }
 
     #[test]
