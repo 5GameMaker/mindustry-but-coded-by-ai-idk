@@ -119,6 +119,7 @@ pub enum DesktopMenuRoute {
     Database,
     TechTree,
     About,
+    Discord,
     Editor,
     Mods,
     Settings,
@@ -162,6 +163,7 @@ impl DesktopMenuRoute {
             Self::Database => "DATABASE",
             Self::TechTree => "TECH TREE",
             Self::About => "ABOUT",
+            Self::Discord => "DISCORD",
             Self::Editor => "EDITOR",
             Self::Mods => "MODS",
             Self::Settings => "SETTINGS",
@@ -178,6 +180,7 @@ impl DesktopMenuRoute {
             Self::Database => "DatabaseDialog",
             Self::TechTree => "TechTreeDialog",
             Self::About => "AboutDialog",
+            Self::Discord => "DiscordDialog",
             Self::Editor => "EditorMapsDialog",
             Self::Mods => "ModsDialog",
             Self::Settings => "SettingsMenuDialog",
@@ -569,6 +572,7 @@ pub enum DesktopMenuRouteShellAction {
     ConnectJoin,
     ShowAboutCredits,
     ShowAboutLinks,
+    OpenDiscordLink,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16615,6 +16619,8 @@ impl DesktopLauncher {
     fn dispatch_menu_chrome_action(&mut self, action: DesktopMenuChromeAction) {
         match action {
             DesktopMenuChromeAction::Discord => {
+                self.active_menu_route = Some(DesktopMenuRoute::Discord);
+                self.last_menu_route_shell_action = None;
                 self.last_menu_chrome_action = Some(DesktopMenuChromeAction::Discord);
             }
             DesktopMenuChromeAction::MobileTerminalToggle => {
@@ -16651,7 +16657,10 @@ impl DesktopLauncher {
     ) -> Option<RenderRect> {
         if !matches!(
             route,
-            DesktopMenuRoute::Campaign | DesktopMenuRoute::Join | DesktopMenuRoute::About
+            DesktopMenuRoute::Campaign
+                | DesktopMenuRoute::Join
+                | DesktopMenuRoute::About
+                | DesktopMenuRoute::Discord
         ) {
             return None;
         }
@@ -16675,6 +16684,7 @@ impl DesktopLauncher {
                 DesktopAboutRoutePage::Links => "CREDITS",
                 DesktopAboutRoutePage::Credits => "LINKS",
             }),
+            DesktopMenuRoute::Discord => Some("OPEN"),
             _ => None,
         }
     }
@@ -16696,6 +16706,7 @@ impl DesktopLauncher {
                     DesktopAboutRoutePage::Links => DesktopMenuRouteShellAction::ShowAboutCredits,
                     DesktopAboutRoutePage::Credits => DesktopMenuRouteShellAction::ShowAboutLinks,
                 },
+                DesktopMenuRoute::Discord => DesktopMenuRouteShellAction::OpenDiscordLink,
                 _ => return None,
             })
     }
@@ -16763,6 +16774,9 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ShowAboutLinks => {
                 self.about_route_page = DesktopAboutRoutePage::Links;
+            }
+            DesktopMenuRouteShellAction::OpenDiscordLink => {
+                self.dispatch_about_link_action("discord");
             }
         }
     }
@@ -16993,6 +17007,12 @@ impl DesktopLauncher {
                 DesktopAboutRoutePage::Links => self.about_route_link_lines(),
                 DesktopAboutRoutePage::Credits => self.about_route_credit_lines(),
             },
+            DesktopMenuRoute::Discord => vec![
+                "discord: Join the Mindustry Discord!".into(),
+                "url: https://discord.gg/mindustry".into(),
+                "button: openlink".into(),
+                "copylink: pending clipboard button".into(),
+            ],
             DesktopMenuRoute::Editor => vec!["maps: pending EditorMapsDialog port".into()],
             DesktopMenuRoute::Mods => vec!["mods: pending ModsDialog port".into()],
             DesktopMenuRoute::Settings => vec!["settings: pending SettingsMenuDialog port".into()],
@@ -33605,7 +33625,56 @@ mod tests {
             launcher.last_menu_chrome_action,
             Some(super::DesktopMenuChromeAction::Discord)
         );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Discord)
+        );
         assert_eq!(launcher.last_menu_action, None);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"upstream: DiscordDialog"));
+        assert!(texts.contains(&"discord: Join the Mindustry Discord!"));
+        assert!(texts.contains(&"url: https://discord.gg/mindustry"));
+
+        let open_center = DesktopLauncher::active_menu_route_shell_primary_rect_for_viewport(
+            viewport,
+            super::DesktopMenuRoute::Discord,
+        )
+        .expect("Discord route should expose an open button")
+        .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: open_center.x,
+                    y: open_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        let action = launcher
+            .last_about_link_action
+            .as_ref()
+            .expect("Discord OPEN should dispatch link action");
+        assert_eq!(action.name, "discord");
+        assert_eq!(action.url, "https://discord.gg/mindustry");
+        assert_eq!(action.error_message.as_deref(), Some("@linkfail"));
 
         let becheck_center = chrome
             .becheck_rect

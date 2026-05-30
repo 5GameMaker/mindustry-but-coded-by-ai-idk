@@ -17598,3 +17598,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - About 链接仍不是完整 Java card 布局，只是文本行命中；
   - 长列表仍未做滚动与裁剪；
   - 真实 OS/browser 打开链接的 desktop backend 尚未实现。
+
+## 488. DiscordDialog chrome route shell 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.3%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:63-65`
+    - desktop/mobile chrome 的 discord banner 调用 `ui.discord::show`；
+  - `core/src/mindustry/ui/dialogs/DiscordDialog.java`
+    - dialog 展示 `@discord`；
+    - 提供 `@copylink` 与 `@openlink`；
+    - `openlink` 使用 `Core.app.openURI(discordURL)`，失败时 `@linkfail` 并复制 URL。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRoute` 新增 `Discord`，`upstream_dialog()` 对应 `DiscordDialog`；
+    - 点击 chrome `discord` 不再只是记录动作，而是打开 Discord route shell；
+    - Discord route shell 显示 upstream dialog 名、discord 文案和 `https://discord.gg/mindustry`；
+    - Discord route primary button 为 `OPEN`，触发 `OpenDiscordLink` 并复用 About link 的 `open_uri/linkfail/clipboard` 主链。
+- 迁移意义：
+  - Java `ui.discord::show` 从“动作记录占位”推进到可见、可点击、可测试的 route shell；
+  - Discord 打开链接行为复用统一平台接口，避免后续分叉。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions --lib`
+- 仍未完成：
+  - DiscordDialog 的 `copylink` 独立按钮尚未接入；
+  - Discord route 仍是 shell 文本布局，不是完整 Java Dialog/card；
+  - 真实 OS/browser 打开链接的 desktop backend 尚未实现。
