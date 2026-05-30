@@ -1731,7 +1731,11 @@ fn real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_strea
         .get(&1006)
         .expect("real mixed entity snapshot should materialize typed fire runtime");
     assert_eq!(fire.lifetime, 150.0);
-    assert_eq!(fire.time, 45.0);
+    assert!(
+        (46.0..=47.0).contains(&fire.time),
+        "real client update loop should tick synced fire once or twice before the smoke observes it, got {}",
+        fire.time
+    );
     assert_eq!(fire.x, 16.0);
     assert_eq!(fire.y, 24.0);
     assert_eq!(fire.tile.unwrap().x, 2);

@@ -18044,8 +18044,8 @@ mod tests {
             .flat_map(|pass| pass.commands.iter())
             .filter(|command| matches!(command, RenderCommand::DrawSprite { .. }))
             .count();
-        assert_eq!(frame.bundle.stats.render_passes, 10);
-        assert_eq!(frame.bundle.stats.render_commands, 6);
+        assert_eq!(frame.bundle.stats.render_passes, 11);
+        assert_eq!(frame.bundle.stats.render_commands, 7);
         assert_eq!(sprite_commands, 6);
         assert_eq!(
             render_frame
@@ -35514,7 +35514,7 @@ mod tests {
             .get(&9901)
             .expect("mixed fallback should materialize fire record");
         assert_eq!(fire.lifetime, 120.0);
-        assert_eq!(fire.time, 30.0);
+        assert_eq!(fire.time, 31.0);
         assert_eq!(fire.x, 16.0);
         assert_eq!(fire.y, 24.0);
         assert_eq!(fire.tile.unwrap().x, 2);

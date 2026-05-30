@@ -16617,3 +16617,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 本轮 splash sprite 先使用 atlas region 尺寸/8px fallback，尚未校验所有真实 splash 资源尺寸；
   - dry splash line 已按 Java 角度/长度公式生成，但仍未接 renderer.weatherAlpha / showweather 开关；
   - `Abilities`、完整 `Payload.draw()`、`RegionPart` / `Weapon.parts`、`DrawText` glyph/quad/OpenGL 仍是渲染长尾缺口。
+
+## 456. 总体迁移进度审查与 README 百分比校准
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考 tag 为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮审查结论：README 当前总体完成度从 **44.3%** 校准为 **46.8%**，仍未达到完整可玩；该百分比是综合估值，不按 Rust 行数硬折算。
+- 审查口径：
+  - 源码覆盖：Java 参考 `.java` 共 817 个，Rust `.rs` 共 406 个，文件数覆盖约 **49.7%**；
+  - core 覆盖：Java `core/src/mindustry` 共 774 个，Rust `core/src/mindustry` 共 389 个，core 文件覆盖约 **50.3%**；
+  - 主链路扣分：world/ui/maps/editor、真实可玩客户端、完整 Java↔Rust 联机 smoke、渲染长尾和 payload/ability 长尾尚未收口；
+  - 未完成标记扣分：Rust 源码仍有 `DeferredNoOp` 1 处、`placeholder` 71 处、`RenderCommand::Custom` 39 处；文档仍有大量 `仍未完成` / `尚未` / `未接入` / `缺口` 记录。
+- 主要模块缺口：
+  - `world`：Java 258 文件，对应 Rust 69 文件，是最大结构性缺口；
+  - `ui`：Java 71 文件，对应 Rust 8 文件，仍远未完整；
+  - `maps` / `editor`：仍明显不足；
+  - 渲染：weather rain-over / splashes 已接入真实 command/OpenGL primitive，但 `weather-particles`、`weather-particle-noise`、`DrawText` glyph/quad/OpenGL、`Abilities` 与完整 `Payload.draw()` 仍需继续；
+  - 联机/可玩：已有大量协议、snapshot、runtime mirror 与 playable smoke，但还不能宣称完整可玩或完整 Java↔Rust 互通。
+- 审查中修正的测试期望：
+  - `desktop_launcher_graphics_frame_feeds_block_renderer_plan_when_world_and_camera_exist`：weather/environment pass 下沉后 render pass/command 计数从 `10/6` 更新为 `11/7`；
+  - `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`：`launcher.update()` 会 tick client fire snapshot，`fire.time` 从输入 `30.0` 推进到 `31.0`。
+  - `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`：真实 server→desktop smoke 的网络循环会在观测前 tick synced fire 1~2 次，断言从固定 `45.0` 改为 `46.0..=47.0`，raw sync bytes 校验仍保留。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check --workspace --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_feeds_block_renderer_plan_when_world_and_camera_exist --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet --features opengl-native-runtime`
+  - `cargo test -p mindustry-tests real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream`
+  - `cargo test --workspace --features opengl-native-runtime`
+- 下一步：
+  - 继续优先推进渲染引擎主链，建议从 `weather-particles` / `weather-particle-noise` 或 `DrawText -> glyph quad -> OpenGL` 窄链路切入；
+  - 同步并行推进单位 `Abilities`、完整 payload draw 和 world/ui/maps/editor 大缺口，避免只堆 helper 而不接整体 runtime。

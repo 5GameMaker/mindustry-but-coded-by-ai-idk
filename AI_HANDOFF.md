@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **44.1%**。
+- 当前总体迁移完成度：约 **46.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -13764,3 +13764,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 复核 README 当前 `44.3%` 是否过高/过低；
   3. 若需要调整 README 百分比，单独提交并推送“校准迁移进度百分比”；
   4. 审查后再继续 weather particles / Abilities / DrawText。
+
+### 2026-05-30：总体迁移进度审查与 README 百分比校准
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前 HEAD/tag 为 `v158.1 / 05b2ecd`）
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 审查结论：
+  - README 当前总体完成度已从 **44.3%** 校准为 **46.8%**；
+  - 该值按“源码覆盖 + 已接入主链路 + 可构建/测试 + 未完成大块扣分”的综合口径维护，不按 Rust 行数机械折算；
+  - 仍未达到完整可玩状态，不能宣称 goal 完成。
+- 关键审查数字：
+  - Java 参考 `.java`：817 个；Rust `.rs`：406 个；文件数覆盖约 **49.7%**；
+  - `core/src/mindustry`：Java 774 个；Rust 389 个；core 文件覆盖约 **50.3%**；
+  - Rust 源码仍有 `DeferredNoOp` 1 处、`placeholder` 71 处、`RenderCommand::Custom` 39 处；
+  - 文档仍记录大量未完成标记：`仍未完成` 600 处、`尚未` 316 处、`未接入` 153 处、`缺口` 39 处。
+- 主要扣分项：
+  1. `world` 仍是最大缺口：Java 258 文件，对应 Rust 69 文件；
+  2. `ui` 很薄：Java 71 文件，对应 Rust 8 文件；
+  3. `maps` / `editor` 仍明显不足；
+  4. 渲染仍有 `Abilities`、完整 `Payload.draw()`、`DrawText` glyph/quad/OpenGL、weather particle/noise 等长尾；
+  5. 完整 Java↔Rust 联机 smoke、真实可游玩客户端闭环尚未完成。
+- 验证状态：
+  - `cargo fmt --all --check` 通过；
+  - `cargo check --workspace --features opengl-native-runtime` 通过，仅有既有 warning；
+  - 审查时发现 desktop 两个测试期望过期，已同步修正：
+    - `desktop_launcher_graphics_frame_feeds_block_renderer_plan_when_world_and_camera_exist`：weather/environment pass 下沉后 render pass/command 计数从 `10/6` 变为 `11/7`；
+    - `desktop_launcher_fallback_splits_mixed_player_and_unit_entity_snapshot_packet`：`launcher.update()` 会 tick client fire snapshot，fire time 由 `30.0` 变为 `31.0`。
+  - 完整 workspace 测试又暴露 `real_server_desktop_entity_sync_snapshot_updates_net_client_after_world_stream` 对 fire time 的精确值断言过窄；已改为断言真实客户端 update loop 会在 smoke 观测前 tick 1~2 次（`46.0..=47.0`），同时保留 raw sync bytes 校验。
+  - `cargo test --workspace --features opengl-native-runtime` 已通过。
+- 下一步：
+  1. 继续优先渲染引擎主链：weather particles/noise 或 `DrawText -> glyph quad -> OpenGL`；
+  2. 并行推进单位 `Abilities` 与完整 payload draw；
+  3. 每个闭环完成后继续只在 README 更新百分比，不写详细代码进度。
