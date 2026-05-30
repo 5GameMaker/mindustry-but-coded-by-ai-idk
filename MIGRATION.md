@@ -17440,3 +17440,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 desktop 仍使用 `DefaultPlatform.open_workshop()` no-op 作为过渡，尚未接真实 Steam/平台 workshop 打开逻辑；
   - workshop 开关尚未从真实平台/启动参数注入，只能通过 `MenuRendererConfig` 显式开启；
   - submenu fade、`checkPlay()` mod error guard、真实 dialogs 和真字体 atlas 仍待继续。
+
+## 483. About route shell 接入 upstream 最小真实内容
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.8%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/AboutDialog.java`
+    - AboutDialog 读取 `contributors`，遍历 `Links.getLinks()`，并通过 credits 子页显示 `credits.text` 与 contributors；
+  - `core/src/mindustry/ui/Links.java`
+    - upstream link entries 包括 `discord/github/wiki/bug` 等；
+  - `core/assets/bundles/bundle.properties`
+    - `credits.text = Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]`；
+    - `discord = Join the Mindustry Discord!`；
+    - `link.github.description = Game source code`；
+  - `core/assets/contributors`
+    - 前几项包括 `redloong9527 / Prosta4okua / Felix Corvus`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 About upstream snapshot 常量：credits、links、discord/github 描述、contributors 摘要；
+    - `DesktopMenuRoute::About` 不再返回 `about dialog: pending AboutDialog port`；
+    - About route 继续通过 `active_menu_route_shell_lines(...) -> push_active_menu_route_shell(...) -> menu_graphics_frame_for_surface(...) -> RenderPass` 输出，不新增孤立页面；
+    - 新增 `desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors`，从 mobile `info` chrome 打开 About route 并验证 render frame 中包含 upstream 内容、且不再包含 pending 文案。
+- 迁移意义：
+  - About route 从单行 pending shell 推进到使用 upstream AboutDialog/Links/contributors/bundle 数据的最小真实页面内容；
+  - 该闭环仍接在现有菜单 route/render pass 主链上，为后续完整 link list、credits 子页、openURI 行为和滚动布局打基础。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_hit_test_and_actions_share_layout --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_ --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - About 仍未实现完整 ScrollPane/link 卡片布局、全部 Links.getLinks() 条目、bannedItems 过滤、credits 子页、openURI/linkfail/clipboard 行为；
+  - contributors 当前只接入最小摘要，尚未完整读取/渲染整个 contributors 文件；
+  - 真字体 atlas 尚未接入，About 内容仍走当前 DrawText placeholder glyph 路径。

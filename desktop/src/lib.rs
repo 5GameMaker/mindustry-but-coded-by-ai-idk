@@ -179,6 +179,12 @@ impl DesktopMenuRoute {
     }
 }
 
+const ABOUT_CREDITS_LINE: &str = "credits: Created by Anuken - anukendev@gmail.com";
+const ABOUT_LINKS_LINE: &str = "links: discord, github, wiki, bug";
+const ABOUT_DISCORD_LINE: &str = "discord: Join the Mindustry Discord!";
+const ABOUT_GITHUB_LINE: &str = "github: Game source code";
+const ABOUT_CONTRIBUTORS_LINE: &str = "contributors: redloong9527, Prosta4okua, Felix Corvus";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopMenuActionDispatch {
     pub role: MenuButtonRole,
@@ -16463,7 +16469,13 @@ impl DesktopLauncher {
                 vec!["content browser: pending DatabaseDialog port".into()]
             }
             DesktopMenuRoute::TechTree => vec!["research tree: pending TechTreeDialog port".into()],
-            DesktopMenuRoute::About => vec!["about dialog: pending AboutDialog port".into()],
+            DesktopMenuRoute::About => vec![
+                ABOUT_CREDITS_LINE.into(),
+                ABOUT_LINKS_LINE.into(),
+                ABOUT_DISCORD_LINE.into(),
+                ABOUT_GITHUB_LINE.into(),
+                ABOUT_CONTRIBUTORS_LINE.into(),
+            ],
             DesktopMenuRoute::Editor => vec!["maps: pending EditorMapsDialog port".into()],
             DesktopMenuRoute::Mods => vec!["mods: pending ModsDialog port".into()],
             DesktopMenuRoute::Settings => vec!["settings: pending SettingsMenuDialog port".into()],
@@ -32757,6 +32769,62 @@ mod tests {
             launcher.last_menu_chrome_action,
             Some(super::DesktopMenuChromeAction::MobileTerminalToggle)
         );
+    }
+
+    #[test]
+    fn desktop_launcher_about_menu_route_renders_upstream_credits_links_and_contributors() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(540, 960);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
+
+        let info_center = chrome
+            .info_rect
+            .expect("mobile chrome layout should include info")
+            .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: info_center.x,
+                    y: info_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::About)
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&"upstream: AboutDialog"));
+        assert!(texts.contains(&super::ABOUT_CREDITS_LINE));
+        assert!(texts.contains(&super::ABOUT_LINKS_LINE));
+        assert!(texts.contains(&super::ABOUT_DISCORD_LINE));
+        assert!(texts.contains(&super::ABOUT_GITHUB_LINE));
+        assert!(texts.contains(&super::ABOUT_CONTRIBUTORS_LINE));
+        assert!(!texts
+            .iter()
+            .any(|text| text.contains("pending AboutDialog port")));
     }
 
     #[test]
