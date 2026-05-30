@@ -79,8 +79,8 @@ use mindustry_core::mindustry::net::{
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::r#type::{
-    ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, SplashDrawPlan, UnitDrawStage,
-    Weapon, WeatherState, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
+    ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, Sector, SectorPreset,
+    SplashDrawPlan, UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
 };
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
@@ -180,6 +180,59 @@ pub struct DesktopMenuActionDispatch {
     pub submenu_changed: bool,
     pub route: Option<DesktopMenuRoute>,
     pub close_requested: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CampaignPlanetDialogMode {
+    Look,
+    Select,
+    PlanetLaunch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CampaignPlanetDialogState {
+    pub planet_name: String,
+    pub mode: CampaignPlanetDialogMode,
+    pub selected_sector_id: Option<i32>,
+    pub hovered_sector_id: Option<i32>,
+    pub launch_sector_id: Option<i32>,
+    pub new_preset_sector_ids: Vec<i32>,
+}
+
+impl CampaignPlanetDialogState {
+    pub fn look(content_loader: &ContentLoader, game_state: &GameState) -> Self {
+        let planet_name = game_state
+            .get_planet_name()
+            .unwrap_or("serpulo")
+            .to_string();
+        let selected_sector_id = content_loader
+            .sector_by_name("groundZero")
+            .filter(|sector| sector.planet_name.as_deref() == Some(planet_name.as_str()))
+            .or_else(|| {
+                content_loader.sectors().iter().find(|sector| {
+                    sector.planet_name.as_deref() == Some(planet_name.as_str())
+                        && sector.always_unlocked
+                })
+            })
+            .and_then(|sector| sector.sector_id);
+        let new_preset_sector_ids = content_loader
+            .sectors()
+            .iter()
+            .filter(|sector| {
+                sector.planet_name.as_deref() == Some(planet_name.as_str())
+                    && sector.always_unlocked
+            })
+            .filter_map(|sector| sector.sector_id)
+            .collect();
+        Self {
+            planet_name,
+            mode: CampaignPlanetDialogMode::Look,
+            selected_sector_id,
+            hovered_sector_id: None,
+            launch_sector_id: game_state.get_sector().map(|sector| sector.id),
+            new_preset_sector_ids,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11759,6 +11812,7 @@ pub struct DesktopLauncher {
     pub active_menu_route: Option<DesktopMenuRoute>,
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
     pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
+    pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
     pub load_renderer_state: LoadRendererState,
     pub ui_status_bar: Bar,
@@ -12434,6 +12488,7 @@ impl DesktopLauncher {
             active_menu_route: None,
             last_menu_dispatch: None,
             last_menu_route_shell_action: None,
+            campaign_planet_dialog: None,
             last_campaign_launch_report: None,
             load_renderer_state: LoadRendererState::default(),
             ui_status_bar,
@@ -15820,7 +15875,10 @@ impl DesktopLauncher {
     }
 
     fn apply_menu_back_key(&mut self) -> bool {
-        if self.active_menu_route.take().is_some() {
+        if let Some(route) = self.active_menu_route.take() {
+            if route == DesktopMenuRoute::Campaign {
+                self.campaign_planet_dialog = None;
+            }
             self.last_menu_dispatch = None;
             self.last_menu_route_shell_action = None;
             return true;
@@ -15842,6 +15900,12 @@ impl DesktopLauncher {
         };
         if let Some(route) = route {
             self.active_menu_route = Some(route);
+            if route == DesktopMenuRoute::Campaign {
+                self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
+                    &self.content_loader,
+                    &self.game_state,
+                ));
+            }
         }
         let close_requested = role == MenuButtonRole::Quit;
         if close_requested {
@@ -15910,12 +15974,17 @@ impl DesktopLauncher {
     }
 
     fn launch_campaign_smoke_world_from_menu(&mut self) -> GameRuntimePlayableSmokeReport {
+        let selected_sector = self.campaign_selected_sector_from_dialog();
         let report = self.runtime.seed_playable_smoke_world(&self.content_loader);
+        if let Some(sector) = selected_sector {
+            self.runtime.state.set_sector(Some(sector));
+        }
         self.runtime
             .set_network_context(GameRuntimeNetworkContext::offline());
         self.game_state = self.runtime.state.clone();
         self.player.team = TeamId(self.game_state.rules.default_team as u8);
         self.active_menu_route = None;
+        self.campaign_planet_dialog = None;
         self.last_campaign_launch_report = Some(report);
         report
     }
@@ -15934,6 +16003,28 @@ impl DesktopLauncher {
                 let _ = self.connect_to_target(target);
             }
         }
+    }
+
+    fn campaign_sector_preset_by_id(
+        &self,
+        planet_name: &str,
+        sector_id: i32,
+    ) -> Option<&SectorPreset> {
+        self.content_loader.sectors().iter().find(|sector| {
+            sector.planet_name.as_deref() == Some(planet_name)
+                && sector.sector_id == Some(sector_id)
+        })
+    }
+
+    fn campaign_selected_sector_from_dialog(&self) -> Option<Sector> {
+        let dialog = self.campaign_planet_dialog.as_ref()?;
+        let selected = dialog.selected_sector_id?;
+        let preset = self.campaign_sector_preset_by_id(&dialog.planet_name, selected)?;
+        let mut sector = Sector::new(selected);
+        sector.preset = Some(preset.clone());
+        sector.save_exists = true;
+        sector.info.has_core = true;
+        Some(sector)
     }
 
     fn apply_menu_input_events(
@@ -15991,10 +16082,24 @@ impl DesktopLauncher {
     fn active_menu_route_shell_lines(&self, route: DesktopMenuRoute) -> Vec<String> {
         match route {
             DesktopMenuRoute::Campaign => {
-                let Some(start) = self.content_loader.sector_by_name("groundZero") else {
+                let dialog = self
+                    .campaign_planet_dialog
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        CampaignPlanetDialogState::look(&self.content_loader, &self.game_state)
+                    });
+                let selected = dialog
+                    .selected_sector_id
+                    .and_then(|id| self.campaign_sector_preset_by_id(&dialog.planet_name, id))
+                    .or_else(|| self.content_loader.sector_by_name("groundZero"));
+                let Some(selected) = selected else {
                     return vec!["campaign start sector: missing".into()];
                 };
-                let planet_name = start.planet_name.as_deref().unwrap_or("serpulo");
+                let planet_name = selected
+                    .planet_name
+                    .as_deref()
+                    .unwrap_or(dialog.planet_name.as_str());
                 let planet_label = self
                     .content_loader
                     .catalog()
@@ -16004,11 +16109,12 @@ impl DesktopLauncher {
                 vec![
                     format!("planet: {planet_label}"),
                     format!(
-                        "sector: {} #{}",
-                        start.name,
-                        start.sector_id.unwrap_or(start.original_position)
+                        "selected: {} #{}",
+                        selected.name,
+                        selected.sector_id.unwrap_or(selected.original_position)
                     ),
-                    format!("difficulty: {:.1}", start.difficulty),
+                    format!("mode: {:?}", dialog.mode),
+                    format!("new presets: {}", dialog.new_preset_sector_ids.len()),
                 ]
             }
             DesktopMenuRoute::Join => {
@@ -17421,6 +17527,7 @@ impl DesktopLauncher {
         self.active_menu_route = None;
         self.last_menu_dispatch = None;
         self.last_menu_route_shell_action = None;
+        self.campaign_planet_dialog = None;
         self.last_campaign_launch_report = None;
         self.load_renderer_state = LoadRendererState::default();
         self.pixelator_state = PixelatorState::default();
@@ -32011,6 +32118,7 @@ mod tests {
             }],
         );
         assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(launcher.campaign_planet_dialog, None);
 
         let database_center = launcher
             .menu_renderer_state
@@ -32087,6 +32195,17 @@ mod tests {
             Some(super::DesktopMenuRoute::Campaign)
         );
         assert_eq!(
+            launcher.campaign_planet_dialog,
+            Some(super::CampaignPlanetDialogState {
+                planet_name: "serpulo".into(),
+                mode: super::CampaignPlanetDialogMode::Look,
+                selected_sector_id: Some(15),
+                hovered_sector_id: None,
+                launch_sector_id: None,
+                new_preset_sector_ids: vec![15],
+            })
+        );
+        assert_eq!(
             launcher.last_menu_dispatch,
             Some(super::DesktopMenuActionDispatch {
                 role: MenuButtonRole::Campaign,
@@ -32112,7 +32231,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.contains(&"upstream: PlanetDialog"));
         assert!(texts.contains(&"planet: serpulo"));
-        assert!(texts.contains(&"sector: groundZero #15"));
+        assert!(texts.contains(&"selected: groundZero #15"));
+        assert!(texts.contains(&"mode: Look"));
     }
 
     #[test]
@@ -32167,6 +32287,7 @@ mod tests {
         );
 
         assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(launcher.campaign_planet_dialog, None);
         assert_eq!(
             launcher.last_menu_route_shell_action,
             Some(super::DesktopMenuRouteShellAction::LaunchCampaign)
@@ -32179,6 +32300,15 @@ mod tests {
         assert_eq!(report.world_height, 16);
         assert_eq!(report.buildings, 1);
         assert!(launcher.game_state.is_playing());
+        assert!(launcher.game_state.is_campaign());
+        assert_eq!(
+            launcher
+                .game_state
+                .get_sector()
+                .and_then(|sector| sector.preset.as_ref())
+                .map(|preset| preset.name.as_str()),
+            Some("groundZero")
+        );
         assert!(launcher.runtime.state.is_playing());
         assert_eq!(launcher.runtime.state.world.width(), 16);
         assert_eq!(launcher.runtime.state.world.height(), 16);

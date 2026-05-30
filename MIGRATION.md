@@ -17198,3 +17198,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - native winit keyboard event 尚未完整映射到 `DesktopInputTickEvent::Key`；
   - dialog stack/settings back/mobile back 还只是同一语义的后续接入点；
   - hover/selected 样式、点击音效和 fade 动画仍需迁移。
+
+## 475. Campaign PlanetDialog 会话状态接入 route shell
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.8%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链。
+- 子代理只读对照结论：
+  - Java `PlanetDialog` 的核心 UI 状态是 `selected / hovered / launchSector / newPresets`；
+  - Rust 不应把这些选择态塞进 `GameState`，应作为 desktop 侧 PlanetDialog 会话状态，最终再把确认后的 sector 写入 `GameState.rules.sector / state.sector`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CampaignPlanetDialogMode` 与 `CampaignPlanetDialogState`；
+    - 点击 `CAMPAIGN` route 时初始化 `campaign_planet_dialog`，默认 planet 为 `serpulo`，selected sector 为 `groundZero #15`，new preset 列表来自真实 `ContentLoader`；
+    - Campaign route shell 不再直接硬编码 `groundZero` 文案，而是读取 `campaign_planet_dialog`；
+    - `LAUNCH` 现在会把 selected sector 转成带 `SectorPreset` 的 `Sector`，写入 `runtime.state.set_sector(...)`，再同步到 `DesktopLauncher.game_state`；
+    - Back/Esc 关闭 Campaign route 时会清理会话状态，避免 stale dialog。
+- 迁移意义：
+  - `CAMPAIGN` 从“route shell + smoke launch”推进到具备 Java `PlanetDialog` 风格的最小会话状态；
+  - `PLAY -> CAMPAIGN -> LAUNCH` 现在不仅进入 smoke world，也会在 `GameState` 中保留 campaign sector 镜像；
+  - 这仍不是完整 PlanetDialog，但为后续 sector list、hover/select、locked/canPlay、newPresets 轮播和真实 `playSelected()` 迁移打下主链状态入口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_back_key_closes_route_shell_then_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 尚未实现 PlanetDialog 的 planet grid / sector list / hover hit-test / locked state / launch candidate；
+  - `LAUNCH` 仍使用 smoke world，真实 sector save/generator/loadout 还需继续；
+  - `new_preset_sector_ids` 目前只是会话字段与 shell 数据源，尚未实现 Java 自动轮播和 shown 持久化。

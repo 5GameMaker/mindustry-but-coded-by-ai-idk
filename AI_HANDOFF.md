@@ -14302,3 +14302,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. winit keyboard event 到 `DesktopInputTickEvent::Key` 的 native 映射仍待补；
   2. Java Scene/Dialog stack 的完整 back 语义还未迁移；
   3. fade 动画、音效、hover/selected 样式仍待继续。
+
+### 2026-05-30：Campaign PlanetDialog 会话状态接入 route shell
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **48.8%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `CampaignPlanetDialogMode` / `CampaignPlanetDialogState`；
+    - `CAMPAIGN` route 初始化 `campaign_planet_dialog`；
+    - shell 内容改为读取 dialog state：`planet / selected / mode / new presets`；
+    - `LAUNCH` 会把 selected `groundZero #15` 转成 `Sector`，调用 `runtime.state.set_sector(...)` 后同步到 `game_state`；
+    - Back/Esc 关闭 Campaign route 时清理会话状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_back_key_closes_route_shell_then_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. PlanetDialog 还没有真实 sector grid/hover/select/locked/canPlay；
+  2. 真实 sector save/generator/loadout 仍未替换 smoke world；
+  3. `newPresets` 自动轮播和 `SectorInfo.shown` 持久化还未接。
