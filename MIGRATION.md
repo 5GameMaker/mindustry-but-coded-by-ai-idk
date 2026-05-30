@@ -17543,3 +17543,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 链接点击行为尚未接平台 `open_uri`、失败 `@linkfail` 与剪贴板回填；
   - credits/contributors 目前是 route shell 文本渲染，尚未实现真实 ScrollPane/card 布局；
   - banned 过滤条件已参数化，尚未从真实 iOS/Steam 平台状态注入。
+
+## 486. AboutDialog link openURI / linkfail / clipboard 行为接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.1%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/AboutDialog.java:67-73`
+    - link button 点击时，`wiki` 额外触发 `Trigger.openWiki`；
+    - 调用 `Core.app.openURI(link.link)`；
+    - 打开失败时显示 `@linkfail`，并 `Core.app.setClipboardText(link.link)`。
+- 本轮主改动：
+  - `core/src/mindustry/core/platform.rs`
+    - `Platform` trait 新增 `open_uri(&str) -> bool` 与 `set_clipboard_text(&str)`；
+    - `DefaultPlatform` 保持 Java default/no-op 语义，`open_uri` 默认返回 `false`。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopAboutLinkAction`；
+    - 新增 `last_about_link_action` 与 `last_about_linkfail_message`；
+    - `dispatch_about_link_action_with_platform(...)` 对接 About link 数据、wiki 特殊事件标记、平台 `open_uri`、失败 `@linkfail` 与 clipboard 回填；
+    - `about_filter_banned_links` 下被过滤的 link 不会被派发。
+- 迁移意义：
+  - Java AboutDialog 的 link 点击副作用已经进入 Rust 平台边界和 DesktopLauncher 状态主链；
+  - 后续真实 UI card hit-test 可以直接调用现有 dispatch 方法，不需要重新设计平台接口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core default_platform_hooks_match_java_noop_and_provider_defaults --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_link_action --lib`
+- 仍未完成：
+  - 真实 OS/browser 打开链接的 desktop backend 尚未实现；
+  - About link card 的鼠标命中区域尚未接到 route shell 输入系统；
+  - `@linkfail` 仍是 message key 状态，尚未接完整错误弹窗/i18n 渲染。

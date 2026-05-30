@@ -584,6 +584,16 @@ pub enum DesktopMenuPlatformAction {
     OpenWorkshop,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopAboutLinkAction {
+    pub name: String,
+    pub url: String,
+    pub opened: bool,
+    pub wiki_event_fired: bool,
+    pub clipboard_text: Option<String>,
+    pub error_message: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DesktopMenuChromeLayout {
     is_mobile: bool,
@@ -12262,6 +12272,8 @@ pub struct DesktopLauncher {
     pub menu_mobile_terminal_open: bool,
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
+    pub last_about_link_action: Option<DesktopAboutLinkAction>,
+    pub last_about_linkfail_message: Option<String>,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
     pub load_renderer_state: LoadRendererState,
@@ -12945,6 +12957,8 @@ impl DesktopLauncher {
             menu_mobile_terminal_open: false,
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
+            last_about_link_action: None,
+            last_about_linkfail_message: None,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
             load_renderer_state: LoadRendererState::default(),
@@ -16759,6 +16773,44 @@ impl DesktopLauncher {
             .collect()
     }
 
+    fn about_link_by_name(&self, name: &str) -> Option<&'static AboutLinkEntry> {
+        self.visible_about_links()
+            .into_iter()
+            .find(|link| link.name == name)
+    }
+
+    pub fn dispatch_about_link_action_with_platform<P: Platform>(
+        &mut self,
+        name: &str,
+        platform: &mut P,
+    ) -> Option<DesktopAboutLinkAction> {
+        let link = self.about_link_by_name(name)?;
+        let wiki_event_fired = link.name == "wiki";
+        let opened = platform.open_uri(link.url);
+        let (clipboard_text, error_message) = if opened {
+            (None, None)
+        } else {
+            platform.set_clipboard_text(link.url);
+            (Some(link.url.to_string()), Some("@linkfail".to_string()))
+        };
+        let action = DesktopAboutLinkAction {
+            name: link.name.to_string(),
+            url: link.url.to_string(),
+            opened,
+            wiki_event_fired,
+            clipboard_text,
+            error_message,
+        };
+        self.last_about_linkfail_message = action.error_message.clone();
+        self.last_about_link_action = Some(action.clone());
+        Some(action)
+    }
+
+    pub fn dispatch_about_link_action(&mut self, name: &str) -> Option<DesktopAboutLinkAction> {
+        let mut platform = DefaultPlatform;
+        self.dispatch_about_link_action_with_platform(name, &mut platform)
+    }
+
     fn about_links_line(&self) -> String {
         let names = self
             .visible_about_links()
@@ -18350,6 +18402,8 @@ impl DesktopLauncher {
         self.menu_mobile_terminal_open = false;
         self.about_route_page = DesktopAboutRoutePage::Links;
         self.about_filter_banned_links = false;
+        self.last_about_link_action = None;
+        self.last_about_linkfail_message = None;
         self.campaign_planet_dialog = None;
         self.last_campaign_launch_report = None;
         self.load_renderer_state = LoadRendererState::default();
@@ -19015,7 +19069,7 @@ mod tests {
         ClientUnitItemMirror, ClientUnitPayloadMirror,
     };
     use mindustry_core::mindustry::core::{
-        GameRuntime, GameRuntimeNetworkContext, GameStateState, WorldLoadEventKind,
+        GameRuntime, GameRuntimeNetworkContext, GameStateState, Platform, WorldLoadEventKind,
     };
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::ctype::{Content, ContentId};
@@ -19085,6 +19139,24 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
+
+    #[derive(Debug, Default)]
+    struct RecordingPlatform {
+        open_result: bool,
+        opened_uris: Vec<String>,
+        clipboard_texts: Vec<String>,
+    }
+
+    impl Platform for RecordingPlatform {
+        fn open_uri(&mut self, uri: &str) -> bool {
+            self.opened_uris.push(uri.to_string());
+            self.open_result
+        }
+
+        fn set_clipboard_text(&mut self, text: &str) {
+            self.clipboard_texts.push(text.to_string());
+        }
+    }
 
     fn free_local_port() -> u16 {
         for _ in 0..32 {
@@ -33350,6 +33422,70 @@ mod tests {
                 "filtered About links should omit {banned}"
             );
         }
+    }
+
+    #[test]
+    fn desktop_launcher_about_link_action_opens_uri_and_fires_wiki_event() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut platform = RecordingPlatform {
+            open_result: true,
+            ..Default::default()
+        };
+
+        let action = launcher
+            .dispatch_about_link_action_with_platform("wiki", &mut platform)
+            .expect("wiki link should exist");
+
+        assert_eq!(
+            platform.opened_uris,
+            vec!["https://mindustrygame.github.io/wiki/"]
+        );
+        assert!(platform.clipboard_texts.is_empty());
+        assert_eq!(action.name, "wiki");
+        assert!(action.opened);
+        assert!(action.wiki_event_fired);
+        assert_eq!(action.clipboard_text, None);
+        assert_eq!(action.error_message, None);
+        assert_eq!(launcher.last_about_link_action, Some(action));
+        assert_eq!(launcher.last_about_linkfail_message, None);
+    }
+
+    #[test]
+    fn desktop_launcher_about_link_action_copies_url_and_records_linkfail_when_open_uri_fails() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut platform = RecordingPlatform::default();
+
+        let action = launcher
+            .dispatch_about_link_action_with_platform("bug", &mut platform)
+            .expect("bug link should exist");
+
+        assert_eq!(
+            platform.opened_uris,
+            vec!["https://github.com/Anuken/Mindustry/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml"]
+        );
+        assert_eq!(
+            platform.clipboard_texts,
+            vec!["https://github.com/Anuken/Mindustry/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml"]
+        );
+        assert_eq!(action.name, "bug");
+        assert!(!action.opened);
+        assert!(!action.wiki_event_fired);
+        assert_eq!(action.clipboard_text.as_deref(), Some(action.url.as_str()));
+        assert_eq!(action.error_message.as_deref(), Some("@linkfail"));
+        assert_eq!(launcher.last_about_link_action, Some(action));
+        assert_eq!(
+            launcher.last_about_linkfail_message.as_deref(),
+            Some("@linkfail")
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_about_link_action_respects_banned_link_filter() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.about_filter_banned_links = true;
+
+        assert_eq!(launcher.dispatch_about_link_action("google-play"), None);
+        assert_eq!(launcher.last_about_link_action, None);
     }
 
     #[test]

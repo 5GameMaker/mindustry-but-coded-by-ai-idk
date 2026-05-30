@@ -75,6 +75,12 @@ pub trait Platform {
 
     fn open_workshop(&mut self) {}
 
+    fn open_uri(&mut self, _uri: &str) -> bool {
+        false
+    }
+
+    fn set_clipboard_text(&mut self, _text: &str) {}
+
     fn get_net(&self) -> NetProviderKind {
         NetProviderKind::ArcNet
     }
@@ -265,6 +271,8 @@ mod tests {
         platform.view_listing("map");
         platform.view_listing_id("123");
         platform.open_workshop();
+        assert!(!platform.open_uri("https://example.invalid"));
+        platform.set_clipboard_text("https://example.invalid");
         platform.update_rpc();
         platform.share_file("map.msav");
         platform.hide();
