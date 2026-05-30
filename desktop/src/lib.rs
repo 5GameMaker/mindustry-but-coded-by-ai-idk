@@ -15812,6 +15812,26 @@ impl DesktopLauncher {
         )
     }
 
+    fn is_menu_back_key(key_code: &str) -> bool {
+        matches!(
+            key_code,
+            "Escape" | "Esc" | "Back" | "AndroidBack" | "BrowserBack"
+        )
+    }
+
+    fn apply_menu_back_key(&mut self) -> bool {
+        if self.active_menu_route.take().is_some() {
+            self.last_menu_dispatch = None;
+            self.last_menu_route_shell_action = None;
+            return true;
+        }
+        if self.menu_renderer_state.selected_root != MenuButtonRole::Play {
+            self.menu_renderer_state.selected_root = MenuButtonRole::Play;
+            return true;
+        }
+        false
+    }
+
     fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
         let submenu_changed = self.menu_renderer_state.select_desktop_root(role);
         let route = if submenu_changed {
@@ -15928,6 +15948,11 @@ impl DesktopLauncher {
         let mut close_requested = false;
         for input in input_events {
             match input {
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed && Self::is_menu_back_key(key_code) =>
+                {
+                    self.apply_menu_back_key();
+                }
                 DesktopInputTickEvent::CursorMoved { x, y } => {
                     let point = RenderPoint::new(*x, *y);
                     self.last_menu_cursor = Some(point);
@@ -31942,6 +31967,89 @@ mod tests {
                 )
             });
         assert!(route_text_present);
+    }
+
+    #[test]
+    fn desktop_launcher_menu_back_key_closes_route_shell_then_submenu() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let campaign_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Campaign)
+            .expect("play submenu should include CAMPAIGN")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: campaign_center.x,
+                    y: campaign_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Campaign)
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Escape".into(),
+                pressed: true,
+            }],
+        );
+        assert_eq!(launcher.active_menu_route, None);
+
+        let database_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Database)
+            .expect("menu ui should include DATABASE root")
+            .rect
+            .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: database_center.x,
+                    y: database_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.menu_renderer_state.selected_root,
+            MenuButtonRole::Database
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Back".into(),
+                pressed: true,
+            }],
+        );
+        assert_eq!(
+            launcher.menu_renderer_state.selected_root,
+            MenuButtonRole::Play
+        );
     }
 
     #[test]

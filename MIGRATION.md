@@ -17172,3 +17172,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Join route 还没有真实文本输入框、服务器列表、版本检查、安全连接提示与 load fragment；
   - 当前 `CONNECT` 只能提交已有 `connect_target`（例如 CLI 或后续 UI 输入写入的 target）；
   - 后续需要把 Java `JoinDialog` 的服务器列表、ping、错误归一和版本兼容检查继续迁移。
+
+## 474. 菜单返回键关闭 route shell / submenu
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.7%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `is_menu_back_key(...)`，接受 `Escape / Esc / Back / AndroidBack / BrowserBack`；
+    - 新增 `apply_menu_back_key(...)`；
+    - no-world 菜单收到返回键时，优先关闭当前 `active_menu_route` shell；
+    - 若没有 route shell 且当前 desktop submenu root 不是 `PLAY`，返回键会恢复到默认 `PLAY` submenu；
+    - 新增 `desktop_launcher_menu_back_key_closes_route_shell_then_submenu`。
+- 迁移意义：
+  - 菜单不再只能靠鼠标点主按钮切换，也开始具备 Java/移动端常见的 back/escape 前端返回语义；
+  - 该逻辑作用在 `DesktopLauncher` 的真实菜单输入路径，不是独立测试 helper；
+  - 后续可继续把 winit keyboard event、settings back、dialog stack 与 mobile touch back 接进同一语义。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_back_key_closes_route_shell_then_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - native winit keyboard event 尚未完整映射到 `DesktopInputTickEvent::Key`；
+  - dialog stack/settings back/mobile back 还只是同一语义的后续接入点；
+  - hover/selected 样式、点击音效和 fade 动画仍需迁移。

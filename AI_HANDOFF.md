@@ -14278,3 +14278,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. JoinDialog 还没有真实输入框和服务器列表；
   2. `CONNECT` 现在只提交已有 `connect_target`；
   3. 版本检查、load fragment、错误归一与 ping 列表还需继续迁移。
+
+### 2026-05-30：菜单返回键关闭 route shell / submenu
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **48.7%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `apply_menu_input_events(...)` 开始处理 `DesktopInputTickEvent::Key` 的返回键；
+    - `Escape / Esc / Back / AndroidBack / BrowserBack` 优先关闭 `active_menu_route`；
+    - 无 route 时返回键把 desktop submenu root 恢复到 `PLAY`；
+    - 新增 `desktop_launcher_menu_back_key_closes_route_shell_then_submenu`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_back_key_closes_route_shell_then_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. winit keyboard event 到 `DesktopInputTickEvent::Key` 的 native 映射仍待补；
+  2. Java Scene/Dialog stack 的完整 back 语义还未迁移；
+  3. fade 动画、音效、hover/selected 样式仍待继续。
