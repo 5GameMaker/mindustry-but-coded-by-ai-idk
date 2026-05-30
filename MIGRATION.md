@@ -18800,3 +18800,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 主壳左侧菜单、`prefs.margin(14f)`、reset/back 按钮尺寸、tooltip description、TextSetting/AreaTextSetting 和动态 category 仍待迁移；
   - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 528. SettingsMenuDialog checkbox 左对齐控件布局
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.4%**，仍未达到完整可玩；继续把 Settings checkbox 从“右侧状态 icon + on/off 文本”向 Java `CheckBox(title).left().padTop(3f)` 靠近。
+- Java 对照证据：
+  - `SettingsMenuDialog.java` 的 `CheckSetting.add()` 使用 `CheckBox box = new CheckBox(title)`；
+  - `box.left()`；
+  - `addDesc(table.add(box).left().padTop(3f).get())`；
+  - 原版没有额外右侧 `on/off` 文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 checkbox 布局常量：box 尺寸、左 padding、label gap、hit 最大宽度与 `padTop(3f)` 对齐偏移；
+    - 新增 `settings_pref_widget_check_box_rect()`、`settings_pref_widget_check_label_point()`、`settings_pref_widget_check_hit_rect()`；
+    - checkbox icon 改为绘制在行左侧，title 紧跟 icon 右侧；
+    - 移除过渡期右侧 `on/off` 状态文本，减少和 Java 原版的视觉差异；
+    - checkbox hit-test 改为 Settings 行左侧控件区域，避免整行任意位置都切换设置。
+  - 测试：
+    - 更新 `desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets`，确认不再输出 `off` 文本；
+    - 新增 `desktop_launcher_settings_checkbox_layout_uses_upstream_left_check_box`，验证 checkbox box 左对齐、label 位于 box 右侧、hit 区域宽度与 render 命令位置一致；
+    - 现有点击/hover/pressed 测试继续覆盖 `ToggleSetting("game", "communityservers")` 不回退。
+- 迁移意义：
+  - Settings checkbox 从“状态徽章式行控件”进一步接近 Java Scene2D `CheckBox(title)`；
+  - 布局 helper 让渲染与命中共享同一几何，继续降低 UI 精修时的错位风险；
+  - 仍接在真实 Settings 渲染与输入主链路上，不是独立 demo。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Settings 主壳左侧菜单、`prefs.margin(14f)`、reset/back 按钮尺寸、tooltip description、TextSetting/AreaTextSetting、动态 category 和 Data 页真实 side effects 仍待迁移；
+  - checkbox/slider 还未完全拥有 Java Scene2D 的 actor/focus/tooltip 语义，只是在当前 renderer 主链路上继续逼近；
+  - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
+  - 未达到完整可玩，不能宣告目标完成。

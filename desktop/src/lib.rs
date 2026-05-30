@@ -117,6 +117,11 @@ const MENU_VISUAL_PRESSED_HOLD_FRAMES: u8 = 6;
 const SETTINGS_SLIDER_STACK_MAX_WIDTH: f32 = 460.0;
 const SETTINGS_SLIDER_CONTENT_MARGIN_HORIZONTAL: f32 = 33.0;
 const SETTINGS_SLIDER_CONTENT_MARGIN_VERTICAL: f32 = 3.0;
+const SETTINGS_CHECK_BOX_SIZE: f32 = 30.0;
+const SETTINGS_CHECK_BOX_PAD_LEFT: f32 = 8.0;
+const SETTINGS_CHECK_BOX_LABEL_GAP: f32 = 8.0;
+const SETTINGS_CHECK_BOX_HIT_MAX_WIDTH: f32 = 460.0;
+const SETTINGS_CHECK_BOX_PAD_TOP: f32 = 3.0;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -19144,6 +19149,33 @@ impl DesktopLauncher {
         RenderRect::new(stack.x, row.y + row.height * 0.5 - 6.0, stack.width, 12.0)
     }
 
+    fn settings_pref_widget_check_box_rect(row: RenderRect) -> RenderRect {
+        let center_y = row.y + row.height * 0.5 - SETTINGS_CHECK_BOX_PAD_TOP * 0.5;
+        RenderRect::new(
+            row.x + SETTINGS_CHECK_BOX_PAD_LEFT,
+            center_y - SETTINGS_CHECK_BOX_SIZE * 0.5,
+            SETTINGS_CHECK_BOX_SIZE,
+            SETTINGS_CHECK_BOX_SIZE,
+        )
+    }
+
+    fn settings_pref_widget_check_label_point(row: RenderRect) -> RenderPoint {
+        let check = Self::settings_pref_widget_check_box_rect(row);
+        RenderPoint::new(
+            check.right() + SETTINGS_CHECK_BOX_LABEL_GAP,
+            row.y + row.height * 0.5 - SETTINGS_CHECK_BOX_PAD_TOP * 0.5,
+        )
+    }
+
+    fn settings_pref_widget_check_hit_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(
+            row.x,
+            row.y,
+            row.width.min(SETTINGS_CHECK_BOX_HIT_MAX_WIDTH),
+            row.height,
+        )
+    }
+
     fn settings_slider_value_from_track_x(
         range: DesktopSettingsPrefRange,
         track: RenderRect,
@@ -19259,16 +19291,11 @@ impl DesktopLauncher {
             match spec.kind {
                 DesktopSettingsPrefKind::Check => {
                     let checked = self.setting_bool_effective_value(spec);
-                    let control_size = 30.0;
-                    let control = RenderRect::new(
-                        row.x + row.width - control_size - 14.0,
-                        row.y + (row.height - control_size) * 0.5,
-                        control_size,
-                        control_size,
-                    );
+                    let control = Self::settings_pref_widget_check_box_rect(row);
+                    let label_point = Self::settings_pref_widget_check_label_point(row);
                     pass.push(RenderCommand::draw_text_styled(
                         Self::settings_pref_label(spec.key),
-                        RenderPoint::new(row.x + 16.0, row.y + row.height * 0.5),
+                        label_point,
                         [0.82, 0.9, 0.96, 1.0],
                         12.0,
                         0.0,
@@ -19283,17 +19310,6 @@ impl DesktopLauncher {
                         [1.0, 1.0, 1.0, 1.0],
                         0.0,
                         Layer::END_PIXELED + 0.032,
-                    ));
-                    pass.push(RenderCommand::draw_text_styled(
-                        if checked { "on" } else { "off" },
-                        RenderPoint::new(control.x - 12.0, row.y + row.height * 0.5),
-                        [0.72, 0.84, 0.9, 1.0],
-                        11.0,
-                        0.0,
-                        RenderTextStyle::new(RenderTextAlign::End)
-                            .with_vertical_align(RenderTextVerticalAlign::Center)
-                            .with_integer_position(true),
-                        Layer::END_PIXELED + 0.033,
                     ));
                 }
                 DesktopSettingsPrefKind::Slider => {
@@ -19402,6 +19418,10 @@ impl DesktopLauncher {
             }
             match spec.kind {
                 DesktopSettingsPrefKind::Check => {
+                    let hit = Self::settings_pref_widget_check_hit_rect(row);
+                    if !hit.contains_point(point) {
+                        continue;
+                    }
                     return Some(DesktopSettingsAction::ToggleSetting(spec.table, spec.key));
                 }
                 DesktopSettingsPrefKind::Slider => {
@@ -38777,7 +38797,7 @@ mod tests {
         assert!(texts.contains(&"@setting.communityservers.name"));
         assert!(texts.contains(&"@setting.playerlimit.name"));
         assert!(texts.contains(&"value: 60"));
-        assert!(texts.contains(&"off"));
+        assert!(!texts.contains(&"off"));
 
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Graphics;
         let graphics_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
@@ -38890,6 +38910,81 @@ mod tests {
             .expect("saveinterval value should be rendered inside the slider overlay content");
         assert!((save_label_position.x - content.x).abs() < 0.01);
         assert!((save_value_position.x - content.right()).abs() < 0.01);
+    }
+
+    #[test]
+    fn desktop_launcher_settings_checkbox_layout_uses_upstream_left_check_box() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let clip = DesktopLauncher::settings_pref_widget_clip_rect_for_panel(panel);
+        let specs = DesktopLauncher::settings_pref_widget_specs("game");
+        let community_index = specs
+            .iter()
+            .position(|spec| spec.key == "communityservers")
+            .expect("game settings should include communityservers");
+        let community_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip_with_scroll(
+            clip,
+            community_index,
+            0.0,
+        );
+        let check = DesktopLauncher::settings_pref_widget_check_box_rect(community_row);
+        let label_point = DesktopLauncher::settings_pref_widget_check_label_point(community_row);
+        let hit = DesktopLauncher::settings_pref_widget_check_hit_rect(community_row);
+
+        assert!((check.x - (community_row.x + super::SETTINGS_CHECK_BOX_PAD_LEFT)).abs() < 0.01);
+        assert!(
+            (label_point.x - (check.right() + super::SETTINGS_CHECK_BOX_LABEL_GAP)).abs() < 0.01
+        );
+        assert_eq!(hit.x, community_row.x);
+        assert!(
+            (hit.width
+                - community_row
+                    .width
+                    .min(super::SETTINGS_CHECK_BOX_HIT_MAX_WIDTH))
+            .abs()
+                < 0.01
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("settings frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let check_on_rects = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } if symbol == "check-on" => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(check_on_rects.contains(&check));
+        let community_label_position = commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::DrawText { text, position, .. }
+                    if text == "@setting.communityservers.name" =>
+                {
+                    Some(*position)
+                }
+                _ => None,
+            })
+            .expect("communityservers label should be rendered next to the left check box");
+        assert!((community_label_position.x - label_point.x).abs() < 0.01);
+        assert!((community_label_position.y - label_point.y).abs() < 0.01);
     }
 
     #[test]
