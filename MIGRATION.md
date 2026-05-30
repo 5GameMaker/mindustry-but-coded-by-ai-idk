@@ -18980,3 +18980,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - LoadGame ScrollPane/网格布局/宽度自适应和空状态导入按钮仍待迁移；
   - 主页面完整 UI 还必须继续推进 About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 533. OpenGL UI pass shader 隔离与 DatabaseDialog 内容浏览骨架
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **55.0%**，仍未达到完整可玩；继续优先前端/UI 可见性和原版弹窗还原。
+- Java 对照证据：
+  - `DatabaseDialog` 顶部有 `@players.search` 搜索栏、`@all`/星球 tab、分类标题 `@database-category.*`、内容 icon 网格和无结果 `@none.found`；
+  - 原版 2D UI/primitive 绘制不应被前一 pass 的特效 shader 污染，否则会导致菜单或弹窗出现黑屏/不可见。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - OpenGL backend 的 executor/classifying adapter 在每个 `BeginPass` 时清空 `current_shader/current_shader_program`，保证上一 pass 的 `BlockBuild/Water/...` shader 不会泄漏到后续 UI pass；
+    - 保留同一 pass 内 `Custom blockbuild-shader -> DrawSprite` 的 Java 等价语义，避免破坏 blockbuild 自定义 shader；
+    - `Database` route 不再返回 `pending DatabaseDialog port`，改为真实 `database_route_lines()`；
+    - `Database` route panel 改为更大的内容浏览面板；
+    - 新增 `push_database_route_page()`：绘制 `@players.search` 搜索条、`@all` 和星球 tab、分类标题/分隔线、基于 `ContentLoader` 的内容 cell 网格与 `@none.found`；
+    - `push_active_menu_route_shell()` 已接入 Database 专用页面渲染，不再只走通用文本行。
+  - 测试：
+    - 新增 `desktop_graphics_opengl_backend_resets_shader_between_passes_for_ui_primitives`，验证 blockbuild pass 的 router sprite 仍走 `BlockBuild`，后续 UI `FillRect` 回到默认 2D sprite shader；
+    - 扩展 `desktop_launcher_menu_sub_action_routes_to_database_dialog_shell`，验证 Database route 不再是 pending，并输出 `@players.search`、`@all`、`content total` 和 `@database-category.*`。
+- 迁移意义：
+  - 继续降低 UI 黑屏/不可见风险，避免前一渲染 pass 的 shader 污染菜单和弹窗；
+  - DatabaseDialog 从纯占位推进为接入 `ContentLoader` 的内容浏览 UI 骨架，已经能用实际内容注册表驱动分类和内容格子；
+  - 仍保持“已迁移模块必须接入真实 runtime/content/render 主链路”的目标，不新增孤立 helper。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_resets_shader_between_passes_for_ui_primitives --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+- 仍未完成：
+  - DatabaseDialog 还没有真实搜索输入过滤、星球 tab 切换、点击内容打开 `ContentInfoDialog`、锁定/禁用/patch 图标 overlay；
+  - Database 的 icon 仍是内容 cell 骨架，真实 `UnlockableContent.uiIcon`/字体/tooltip 链路仍待补齐；
+  - 主页面完整 UI 还必须继续推进 CustomGame/Schematics/TechTree/Editor/Mods 等仍 pending 的路由；
+  - 未达到完整可玩，不能宣告目标完成。

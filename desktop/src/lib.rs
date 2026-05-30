@@ -138,6 +138,12 @@ const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const LOAD_SLOT_CARD_HEIGHT: f32 = 82.0;
 const LOAD_SLOT_CARD_GAP: f32 = 8.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
+const DATABASE_SEARCH_BAR_HEIGHT: f32 = 34.0;
+const DATABASE_TAB_SIZE: f32 = 36.0;
+const DATABASE_CONTENT_CELL_SIZE: f32 = 32.0;
+const DATABASE_CONTENT_CELL_GAP: f32 = 7.0;
+const DATABASE_VISIBLE_CATEGORIES: usize = 4;
+const DATABASE_VISIBLE_ITEMS_PER_CATEGORY: usize = 8;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -12027,7 +12033,11 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
     fn consume_opengl_backend_event(&mut self, event: DesktopGraphicsOpenGlBackendEvent) {
         self.state.events_received += 1;
         match event {
-            DesktopGraphicsOpenGlBackendEvent::BeginPass { .. } => self.state.begin_passes += 1,
+            DesktopGraphicsOpenGlBackendEvent::BeginPass { .. } => {
+                self.state.begin_passes += 1;
+                self.state.current_shader = None;
+                self.state.current_shader_program = None;
+            }
             DesktopGraphicsOpenGlBackendEvent::FlushBoundary { .. } => {
                 self.state.flush_boundaries += 1;
             }
@@ -12585,6 +12595,8 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                 self.state.current_target = Some(target.clone());
                 self.state.current_clip = None;
                 self.state.clip_stack = DesktopGraphicsOpenGlBackendClipStackState::default();
+                self.state.current_shader = None;
+                self.state.current_shader_program = None;
                 self.state.begin_passes += 1;
                 self.state
                     .event_log
@@ -18961,6 +18973,74 @@ impl DesktopLauncher {
         lines
     }
 
+    fn database_route_content_types(&self) -> Vec<ContentType> {
+        ContentType::ALL
+            .iter()
+            .copied()
+            .filter(|content_type| {
+                !matches!(
+                    content_type,
+                    ContentType::MechUnused
+                        | ContentType::Bullet
+                        | ContentType::EffectUnused
+                        | ContentType::LoadoutUnused
+                        | ContentType::TypeidUnused
+                        | ContentType::Error
+                        | ContentType::AmmoUnused
+                        | ContentType::Team
+                        | ContentType::UnitCommand
+                        | ContentType::UnitStance
+                )
+            })
+            .filter(|content_type| {
+                self.content_loader
+                    .get_by(*content_type)
+                    .iter()
+                    .any(|record| record.name().is_some())
+            })
+            .collect()
+    }
+
+    fn database_category_label(content_type: ContentType) -> String {
+        format!("@database-category.{}", content_type.wire_name())
+    }
+
+    fn database_route_lines(&self) -> Vec<String> {
+        let content_types = self.database_route_content_types();
+        let total = content_types
+            .iter()
+            .map(|content_type| self.content_loader.get_by(*content_type).len())
+            .sum::<usize>();
+        let mut lines = vec![
+            "search: @players.search".into(),
+            "tab: @all".into(),
+            format!("content total: {total}"),
+        ];
+
+        for content_type in content_types.iter().take(DATABASE_VISIBLE_CATEGORIES) {
+            let sample = self
+                .content_loader
+                .get_by(*content_type)
+                .iter()
+                .filter_map(|record| record.name())
+                .take(4)
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!(
+                "category: {} count {} sample {}",
+                Self::database_category_label(*content_type),
+                self.content_loader.get_by(*content_type).len(),
+                sample
+            ));
+        }
+
+        if content_types.is_empty() {
+            lines.push("@none.found".into());
+        }
+
+        lines
+    }
+
     fn settings_storage_key(table: &str, key: &str) -> String {
         format!("{table}.{key}")
     }
@@ -20133,6 +20213,16 @@ impl DesktopLauncher {
                 panel_height,
             );
         }
+        if route == DesktopMenuRoute::Database {
+            let panel_width = (viewport.width * 0.68).clamp(380.0, 760.0);
+            let panel_height = (viewport.height - 130.0).clamp(330.0, 620.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
         Self::active_menu_route_shell_panel_for_viewport(viewport)
     }
 
@@ -20269,6 +20359,50 @@ impl DesktopLauncher {
             return Some(DesktopMenuRouteShellAction::ConnectJoin);
         }
         None
+    }
+
+    fn database_search_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + panel.height - 128.0,
+            panel.width - 56.0,
+            DATABASE_SEARCH_BAR_HEIGHT,
+        )
+    }
+
+    fn database_tab_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let search = Self::database_search_rect_for_panel(panel);
+        RenderRect::new(
+            panel.x + 28.0 + index as f32 * (DATABASE_TAB_SIZE + 6.0),
+            search.y - DATABASE_TAB_SIZE - 10.0,
+            DATABASE_TAB_SIZE,
+            DATABASE_TAB_SIZE,
+        )
+    }
+
+    fn database_category_header_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let first_y = Self::database_tab_rect_for_panel(panel, 0).y - 38.0;
+        let row_height = DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP + 46.0;
+        RenderRect::new(
+            panel.x + 28.0,
+            first_y - index as f32 * row_height,
+            panel.width - 56.0,
+            22.0,
+        )
+    }
+
+    fn database_content_cell_rect_for_panel(
+        panel: RenderRect,
+        category_index: usize,
+        item_index: usize,
+    ) -> RenderRect {
+        let header = Self::database_category_header_rect_for_panel(panel, category_index);
+        RenderRect::new(
+            header.x + item_index as f32 * (DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP),
+            header.y - DATABASE_CONTENT_CELL_SIZE - 9.0,
+            DATABASE_CONTENT_CELL_SIZE,
+            DATABASE_CONTENT_CELL_SIZE,
+        )
     }
 
     fn active_menu_route_shell_action_at_surface_point(
@@ -20524,6 +20658,180 @@ impl DesktopLauncher {
     pub fn copy_discord_link(&mut self) -> String {
         let mut platform = DefaultPlatform;
         self.copy_discord_link_with_platform(&mut platform)
+    }
+
+    fn push_database_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let search = Self::database_search_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            search,
+            [1.0, 1.0, 1.0, 0.92],
+            0.0,
+            Layer::END_PIXELED + 0.025,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 22.0, search.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.03,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@players.search",
+            RenderPoint::new(search.x + 44.0, search.center().y),
+            [0.60, 0.70, 0.78, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.03,
+        ));
+
+        let all_tab = Self::database_tab_rect_for_panel(panel, 0);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("flatTogglet", false, true),
+            all_tab,
+            [1.0, 1.0, 1.0, 0.95],
+            0.0,
+            Layer::END_PIXELED + 0.031,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@all",
+            all_tab.center(),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.033,
+        ));
+
+        for (index, planet) in self
+            .content_loader
+            .get_by(ContentType::Planet)
+            .iter()
+            .filter_map(|record| record.name())
+            .take(4)
+            .enumerate()
+        {
+            let tab = Self::database_tab_rect_for_panel(panel, index + 1);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("flatTogglet", false, false),
+                tab,
+                [1.0, 1.0, 1.0, 0.82],
+                0.0,
+                Layer::END_PIXELED + 0.031 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                planet,
+                tab.center(),
+                [0.76, 0.86, 0.94, 1.0],
+                8.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
+            ));
+        }
+
+        let categories = self.database_route_content_types();
+        if categories.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@none.found",
+                RenderPoint::new(panel.x + panel.width * 0.5, all_tab.y - 50.0),
+                [0.70, 0.78, 0.84, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.034,
+            ));
+            return;
+        }
+
+        let visible_columns = ((panel.width - 56.0 + DATABASE_CONTENT_CELL_GAP)
+            / (DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP))
+            .floor()
+            .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
+            as usize;
+        for (category_index, content_type) in categories
+            .iter()
+            .take(DATABASE_VISIBLE_CATEGORIES)
+            .copied()
+            .enumerate()
+        {
+            let header = Self::database_category_header_rect_for_panel(panel, category_index);
+            if header.y < panel.y + 42.0 {
+                break;
+            }
+            let records = self
+                .content_loader
+                .get_by(content_type)
+                .iter()
+                .filter_map(|record| record.name())
+                .take(visible_columns)
+                .collect::<Vec<_>>();
+            let label = Self::database_category_label(content_type);
+            pass.push(RenderCommand::draw_text_styled(
+                format!(
+                    "{} | {}",
+                    label,
+                    self.content_loader.get_by(content_type).len()
+                ),
+                RenderPoint::new(header.x, header.center().y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.034 + category_index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::fill_rect(
+                RenderRect::new(header.x, header.y - 4.0, header.width, 3.0),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
+                Layer::END_PIXELED + 0.0345 + category_index as f32 * 0.001,
+            ));
+            for (item_index, name) in records.iter().enumerate() {
+                let cell =
+                    Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
+                pass.push(RenderCommand::draw_sprite(
+                    "whiteui",
+                    cell,
+                    [0.12, 0.16, 0.20, 0.96],
+                    0.0,
+                    Layer::END_PIXELED + 0.035 + category_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::stroke_rect(
+                    cell,
+                    [0.34, 0.48, 0.58, 0.82],
+                    1.0,
+                    Layer::END_PIXELED + 0.036 + category_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    *name,
+                    RenderPoint::new(cell.center().x, cell.y - 7.0),
+                    [0.66, 0.76, 0.84, 1.0],
+                    7.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.037 + category_index as f32 * 0.001,
+                ));
+            }
+        }
     }
 
     fn push_join_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -21206,9 +21514,7 @@ impl DesktopLauncher {
             DesktopMenuRoute::LoadGame => self.load_game_slot_lines(),
             DesktopMenuRoute::CustomGame => vec!["maps: pending CustomGameDialog port".into()],
             DesktopMenuRoute::Schematics => vec!["library: pending SchematicsDialog port".into()],
-            DesktopMenuRoute::Database => {
-                vec!["content browser: pending DatabaseDialog port".into()]
-            }
+            DesktopMenuRoute::Database => self.database_route_lines(),
             DesktopMenuRoute::TechTree => vec!["research tree: pending TechTreeDialog port".into()],
             DesktopMenuRoute::About => match self.about_route_page {
                 DesktopAboutRoutePage::Links => self.about_route_link_lines(),
@@ -21262,6 +21568,8 @@ impl DesktopLauncher {
             self.push_join_route_page(pass, panel);
         } else if route == DesktopMenuRoute::LoadGame {
             self.push_load_game_route_page(pass, panel);
+        } else if route == DesktopMenuRoute::Database {
+            self.push_database_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Settings
             && self.settings_dialog_state.page == DesktopSettingsPage::Main
         {
@@ -33511,6 +33819,76 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_resets_shader_between_passes_for_ui_primitives() {
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(44, RenderSize::new(96.0, 96.0), camera, viewport);
+
+        let mut blockbuild_pass = RenderPass::new(RenderPassKind::BlockBuild)
+            .with_order(RenderPassKind::BlockBuild.default_order());
+        blockbuild_pass.push(RenderCommand::custom(
+            "blockbuild-shader",
+            vec![
+                RenderProperty::new("shader", "blockbuild"),
+                RenderProperty::new("region", "router"),
+                RenderProperty::new("u_progress", "0.25"),
+            ],
+        ));
+        blockbuild_pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(8.0, 8.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::BLOCK_BUILDING,
+        ));
+        render_frame.push_pass(blockbuild_pass);
+
+        let mut ui_pass = RenderPass::new(RenderPassKind::Ui)
+            .with_order(RenderPassKind::Ui.default_order())
+            .with_target(RenderTarget::Screen);
+        ui_pass.push(RenderCommand::fill_rect(
+            RenderRect::new(12.0, 12.0, 42.0, 18.0),
+            [0.2, 0.4, 0.8, 1.0],
+            Layer::OVERLAY_UI,
+        ));
+        render_frame.push_pass(ui_pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        plan.drive_step_sink(&mut executor);
+
+        let router_quad = executor
+            .state
+            .sprite_quads
+            .iter()
+            .find(|quad| quad.symbol == "router")
+            .expect("blockbuild pass should still render router with its custom shader");
+        assert_eq!(router_quad.shader_program.shader, ShaderId::BlockBuild);
+
+        let ui_quad = executor
+            .state
+            .sprite_quads
+            .iter()
+            .find(|quad| quad.symbol == "primitive:FillRect")
+            .expect("ui pass should render primitive fill rect");
+        assert_eq!(
+            ui_quad.shader_program,
+            super::opengl_backend_default_sprite_shader_program()
+        );
+    }
+
+    #[test]
     fn desktop_graphics_opengl_shader_commands_preserve_texture_units_without_implicit_sampler_upload(
     ) {
         let mut apply = ShaderApplyPlan::new(ShaderId::Space);
@@ -37945,6 +38323,32 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(route_shell_symbols.contains(&"window-empty.9"));
         assert!(route_shell_symbols.contains(&"whiteui"));
+
+        let route_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Database);
+        assert!(!route_lines
+            .iter()
+            .any(|line| line.contains("pending DatabaseDialog port")));
+        assert!(route_lines.contains(&"search: @players.search".to_string()));
+        assert!(route_lines.contains(&"tab: @all".to_string()));
+        assert!(route_lines
+            .iter()
+            .any(|line| line.starts_with("content total: ")));
+        assert!(route_lines
+            .iter()
+            .any(|line| line.starts_with("category: @database-category.")));
+
+        let route_texts = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(route_texts.contains(&"@players.search"));
+        assert!(route_texts.contains(&"@all"));
+        assert!(route_texts
+            .iter()
+            .any(|text| text.starts_with("@database-category.")));
     }
 
     #[test]
