@@ -173,6 +173,18 @@ pub struct DesktopSettingsPrefGroup {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopSettingsControlId {
+    pub table: &'static str,
+    pub key: &'static str,
+}
+
+impl DesktopSettingsControlId {
+    pub const fn new(table: &'static str, key: &'static str) -> Self {
+        Self { table, key }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopSettingsPrefKind {
     Check,
     Slider,
@@ -14245,6 +14257,8 @@ pub struct DesktopLauncher {
     pub about_filter_banned_links: bool,
     pub settings_dialog_state: DesktopSettingsDialogState,
     pub last_settings_action: Option<DesktopSettingsAction>,
+    pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
+    pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
     pub settings_overrides: BTreeMap<String, String>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
@@ -14945,6 +14959,8 @@ impl DesktopLauncher {
             about_filter_banned_links: false,
             settings_dialog_state: DesktopSettingsDialogState::default(),
             last_settings_action: None,
+            last_settings_hovered_control: None,
+            last_settings_pressed_control: None,
             settings_overrides: BTreeMap::new(),
             last_about_link_action: None,
             last_about_linkfail_message: None,
@@ -18760,6 +18776,8 @@ impl DesktopLauncher {
             } else if route == DesktopMenuRoute::Settings {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
                 self.last_settings_action = None;
+                self.last_settings_hovered_control = None;
+                self.last_settings_pressed_control = None;
             }
         }
         let close_requested = role == MenuButtonRole::Quit;
@@ -18945,13 +18963,14 @@ impl DesktopLauncher {
             .unwrap_or_else(|| java_drawable.to_string())
     }
 
-    fn settings_check_box_symbol(checked: bool) -> String {
+    fn settings_check_box_symbol(checked: bool, hovered: bool, pressed: bool) -> String {
         let style = upstream_check_box_style_skin("defaultCheck")
             .expect("defaultCheck should be present in upstream style registry");
-        let drawable = if checked {
-            style.checkbox_on
-        } else {
-            style.checkbox_off
+        let drawable = match (checked, hovered || pressed) {
+            (true, true) => style.checkbox_on_over,
+            (true, false) => style.checkbox_on,
+            (false, true) => style.checkbox_over,
+            (false, false) => style.checkbox_off,
         };
         Self::settings_drawable_symbol(drawable)
     }
@@ -18962,10 +18981,17 @@ impl DesktopLauncher {
         Self::settings_drawable_symbol(style.background)
     }
 
-    fn settings_slider_knob_symbol() -> String {
+    fn settings_slider_knob_symbol(hovered: bool, pressed: bool) -> String {
         let style = upstream_slider_style_skin("defaultSlider")
             .expect("defaultSlider should be present in upstream style registry");
-        Self::settings_drawable_symbol(style.knob)
+        let drawable = if pressed {
+            style.knob_down
+        } else if hovered {
+            style.knob_over
+        } else {
+            style.knob
+        };
+        Self::settings_drawable_symbol(drawable)
     }
 
     fn settings_scroll_track_symbol() -> String {
@@ -19106,7 +19132,6 @@ impl DesktopLauncher {
         let table = self.settings_dialog_state.page.key();
         let pane_symbol = Self::settings_drawable_symbol("pane");
         let track_symbol = Self::settings_slider_track_symbol();
-        let knob_symbol = Self::settings_slider_knob_symbol();
         let scroll_track_symbol = Self::settings_scroll_track_symbol();
         let scroll_knob_symbol = Self::settings_scroll_knob_symbol();
         let specs = Self::settings_pref_widget_specs(table);
@@ -19114,11 +19139,20 @@ impl DesktopLauncher {
 
         pass.push(RenderCommand::set_clip(clip));
         for (index, spec) in specs.iter().copied().enumerate() {
+            let control_id = DesktopSettingsControlId::new(spec.table, spec.key);
+            let hovered = self.last_settings_hovered_control == Some(control_id);
+            let pressed = self.last_settings_pressed_control == Some(control_id);
             let row = Self::settings_pref_widget_row_rect_for_clip(clip, index);
             pass.push(RenderCommand::draw_sprite(
                 pane_symbol.clone(),
                 row,
-                [1.0, 1.0, 1.0, 0.82],
+                if pressed {
+                    [0.88, 0.94, 1.0, 0.95]
+                } else if hovered {
+                    [1.0, 1.0, 1.0, 0.92]
+                } else {
+                    [1.0, 1.0, 1.0, 0.82]
+                },
                 0.0,
                 Layer::END_PIXELED + 0.025,
             ));
@@ -19151,7 +19185,7 @@ impl DesktopLauncher {
                         control_size,
                     );
                     pass.push(RenderCommand::draw_sprite(
-                        Self::settings_check_box_symbol(checked),
+                        Self::settings_check_box_symbol(checked, hovered, pressed),
                         control,
                         [1.0, 1.0, 1.0, 1.0],
                         0.0,
@@ -19199,7 +19233,7 @@ impl DesktopLauncher {
                         Layer::END_PIXELED + 0.032,
                     ));
                     pass.push(RenderCommand::draw_sprite(
-                        knob_symbol.clone(),
+                        Self::settings_slider_knob_symbol(hovered, pressed),
                         knob,
                         [1.0, 1.0, 1.0, 1.0],
                         0.0,
@@ -19269,6 +19303,35 @@ impl DesktopLauncher {
             };
         }
         None
+    }
+
+    fn settings_control_id_from_action(
+        action: DesktopSettingsAction,
+    ) -> Option<DesktopSettingsControlId> {
+        match action {
+            DesktopSettingsAction::ToggleSetting(table, key)
+            | DesktopSettingsAction::SetSliderValue(table, key, _) => {
+                Some(DesktopSettingsControlId::new(table, key))
+            }
+            _ => None,
+        }
+    }
+
+    fn settings_control_id_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopSettingsControlId> {
+        if self.active_menu_route != Some(DesktopMenuRoute::Settings) {
+            return None;
+        }
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
+        let point = RenderPoint::new(x, y);
+        self.settings_route_control_action_at_point(panel, point)
+            .and_then(Self::settings_control_id_from_action)
     }
 
     fn settings_route_lines(&self) -> Vec<String> {
@@ -19644,6 +19707,8 @@ impl DesktopLauncher {
         match action {
             DesktopSettingsAction::OpenPage(page) => {
                 self.settings_dialog_state.page = page;
+                self.last_settings_hovered_control = None;
+                self.last_settings_pressed_control = None;
             }
             DesktopSettingsAction::BackToMain => {
                 if self.settings_dialog_state.page == DesktopSettingsPage::Main {
@@ -19651,6 +19716,8 @@ impl DesktopLauncher {
                 } else {
                     self.settings_dialog_state.page = DesktopSettingsPage::Main;
                 }
+                self.last_settings_hovered_control = None;
+                self.last_settings_pressed_control = None;
             }
             DesktopSettingsAction::ResetCurrentPage => {
                 self.reset_current_settings_page_overrides();
@@ -20092,6 +20159,8 @@ impl DesktopLauncher {
                     self.last_menu_cursor = Some(point);
                     self.last_menu_hovered_button =
                         self.menu_button_at_surface_point(surface_size, point.x, point.y);
+                    self.last_settings_hovered_control =
+                        self.settings_control_id_at_surface_point(surface_size, point.x, point.y);
                 }
                 DesktopInputTickEvent::MouseButton { button, pressed }
                     if !*pressed && Self::is_primary_menu_mouse_button(button) =>
@@ -20101,6 +20170,7 @@ impl DesktopLauncher {
                         self.last_menu_visual_pressed_frames = MENU_VISUAL_PRESSED_HOLD_FRAMES;
                     }
                     self.last_menu_pressed_button = None;
+                    self.last_settings_pressed_control = None;
                 }
                 DesktopInputTickEvent::MouseButton { button, pressed }
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
@@ -20108,6 +20178,7 @@ impl DesktopLauncher {
                     if let Some(cursor) = self.last_menu_cursor {
                         self.last_menu_pressed_button =
                             self.menu_button_at_surface_point(surface_size, cursor.x, cursor.y);
+                        self.last_settings_pressed_control = self.last_settings_hovered_control;
                         self.last_menu_visual_pressed_button = None;
                         self.last_menu_visual_pressed_frames = 0;
                         if let Some(slot_index) =
@@ -21784,6 +21855,8 @@ impl DesktopLauncher {
         self.about_filter_banned_links = false;
         self.settings_dialog_state = DesktopSettingsDialogState::default();
         self.last_settings_action = None;
+        self.last_settings_hovered_control = None;
+        self.last_settings_pressed_control = None;
         self.last_about_link_action = None;
         self.last_about_linkfail_message = None;
         self.last_discord_clipboard_text = None;
@@ -38461,6 +38534,36 @@ mod tests {
             .expect("game settings should include communityservers");
         let community_center =
             DesktopLauncher::settings_pref_widget_row_rect_for_clip(clip, community_index).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: community_center.x,
+                y: community_center.y,
+            }],
+        );
+        assert_eq!(
+            launcher.last_settings_hovered_control,
+            Some(super::DesktopSettingsControlId::new(
+                "game",
+                "communityservers"
+            ))
+        );
+        let hover_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let hover_sprites = hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("hover settings frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, .. } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(hover_sprites.contains(&"check-on-over"));
+
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -38473,16 +38576,10 @@ mod tests {
         );
         launcher.apply_menu_input_events(
             surface,
-            &[
-                DesktopInputTickEvent::CursorMoved {
-                    x: community_center.x,
-                    y: community_center.y,
-                },
-                DesktopInputTickEvent::MouseButton {
-                    button: "primary".into(),
-                    pressed: true,
-                },
-            ],
+            &[DesktopInputTickEvent::MouseButton {
+                button: "primary".into(),
+                pressed: true,
+            }],
         );
         assert_eq!(
             launcher.last_settings_action,
@@ -38529,6 +38626,10 @@ mod tests {
             ],
         );
         assert_eq!(
+            launcher.last_settings_pressed_control,
+            Some(super::DesktopSettingsControlId::new("game", "saveinterval"))
+        );
+        assert_eq!(
             launcher.last_settings_action,
             Some(super::DesktopSettingsAction::SetSliderValue(
                 "game",
@@ -38542,6 +38643,30 @@ mod tests {
                 .as_deref(),
             Some("600")
         );
+        let pressed_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let pressed_sprites = pressed_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("pressed settings frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, .. } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(pressed_sprites.contains(&"slider-knob-down"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::MouseButton {
+                button: "primary".into(),
+                pressed: false,
+            }],
+        );
+        assert_eq!(launcher.last_settings_pressed_control, None);
     }
 
     #[test]

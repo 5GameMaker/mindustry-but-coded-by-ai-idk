@@ -18661,3 +18661,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - settings override 尚未持久化到文件，也未接入真实图形/音频/runtime side effects；
   - ScrollPane 还没有 scroll position，条件项过滤仍是元数据阶段；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 523. SettingsMenuDialog checkbox/slider hover pressed 视觉状态
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.9%**，仍未达到完整可玩；继续补齐 SettingsTable 控件的 Scene2D 式 hover/pressed 视觉反馈。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSettingsControlId`，`DesktopLauncher` 记录 `last_settings_hovered_control` / `last_settings_pressed_control`；
+    - `apply_menu_input_events()` 在鼠标移动、按下、释放时同步 Settings 控件 hover/pressed 状态；
+    - checkbox 渲染按状态切换到上游 `checkOnOver/checkOver` 对应 atlas symbol（如 `check-on-over`）；
+    - slider knob 按状态切换到上游 `sliderKnobOver/sliderKnobDown`，按下时输出 `slider-knob-down`；
+    - 行背景在 hover/pressed 时提升 tint，避免静态列表无反馈。
+  - 测试：
+    - 扩展 `desktop_launcher_settings_controls_write_overrides_from_hit_tests`，验证 hover `communityservers` 时输出 `check-on-over`，按下 `saveinterval` 滑条后输出 `slider-knob-down`，释放后清空 pressed 状态。
+- 迁移意义：
+  - Settings checkbox/slider 已具备 hover/pressed 状态链路，更接近 Java Scene2D 控件反馈；
+  - 状态接入真实桌面输入与渲染帧，不是一次性截图或独立 helper；
+  - 后续可以继续补 disabled、dragging、滚轮和真实 tooltip。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - slider 还没有拖动连续更新，只有点击轨道写入；
+  - checkbox/slider disabled 条件与 tooltip description 尚未渲染；
+  - settings 持久化与真实 runtime side effects 尚未接入；
+  - 未达到完整可玩，不能宣告目标完成。
