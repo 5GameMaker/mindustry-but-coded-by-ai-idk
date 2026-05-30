@@ -16217,3 +16217,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - block turret ammo 中的匿名 rail line/end effect 若没有标准 effect id，仍需专用 visual plan 或 effect 注册；
   - desktop snapshot marker 可在后续 Rail runtime effect 稳定后降级/删除；
   - weapon/unit parts、Unit trail tick、textured laser、hard shadow、legs、payload/item 仍需继续。
+
+## 443. 最新闭环记录：Unit trail tick 接入客户端 runtime/desktop update
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.1%**，仍未达到完整可玩。
+- Java 对照：
+  - `UnitComp.update()` 会在单位更新时推进 trail 采样；
+  - `UnitType.draw()` 只消费已推进的 trail 几何，避免把采样逻辑停留在渲染 helper。
+- 本轮主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntime::tick_client_unit_snapshot_trails(delta)`，遍历 `client_unit_snapshot_entities` 并调用 `UnitComp::update_trail(delta)`；
+    - 新增 `game_runtime_ticks_client_unit_snapshot_trails_for_render`，覆盖 runtime 自动 attach trail、移动后生成 segment plan。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::update()` 在 move-effect ability 后、fire snapshot tick 前推进客户端 unit trail；
+    - 新增 `desktop_launcher_update_ticks_client_unit_snapshot_trails`，覆盖 desktop update 能持续喂给已接入的 trail render path。
+- 迁移意义：
+  - Unit trail 从“核心 helper 可生成采样点”和“desktop 可消费手动 trail”推进到真实客户端 update 链路；
+  - 当前路径保持整体化：`client_unit_snapshot_entities` → `GameRuntime` tick → `UnitComp.trail` → desktop unit render aggregation → `RenderCommand`；
+  - 没有引入独立 trail 演示模块，后续 remove/death 的 `Fx.trailFade` 可以继续沿 runtime effect 队列接入。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core game_runtime_ticks_client_unit_snapshot_trails_for_render --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_update_ticks_client_unit_snapshot_trails --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Unit remove/death 仍未产出 Java `Fx.trailFade` 等价 effect；
+  - trail 宽度动态脉动仍未完全复刻 `UnitType.drawTrail()` 中的 `absin(Time.time, 2f, engineSize/4f)`；
+  - trail 当前仍以 line primitive 近似，后续应升级到 quad/mesh/polygon；
+  - textured laser、weapon/unit parts、hard shadow、legs、payload/item 仍需继续。

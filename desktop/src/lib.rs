@@ -11611,6 +11611,7 @@ impl DesktopLauncher {
         self.sync_remote_preview_plan_packets(now_millis);
         self.rebuild_other_player_preview_overlays_at(now_millis, 1.0, None);
         self.runtime.tick_client_move_effect_abilities(1.0, false);
+        self.runtime.tick_client_unit_snapshot_trails(1.0);
         self.runtime
             .tick_client_fire_snapshot_entities(1.0, false, 0.0);
         self.tick_accelerator_launch_animations_for_render(1.0);
@@ -19131,6 +19132,53 @@ mod tests {
             }
             other => panic!("expected unit trail DrawLine, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn desktop_launcher_update_ticks_client_unit_snapshot_trails() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut unit_type = UnitType::new(9905, "desktop-trail-test");
+        unit_type.trail_length = 4;
+        unit_type.engine_offset = 4.0;
+        unit_type.engine_size = 2.0;
+        unit_type.use_engine_elevation = true;
+
+        let mut unit = UnitComp::new(7505, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(32.0, 32.0);
+        unit.set_rotation(0.0);
+        unit.elevation = 1.0;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7505, unit);
+
+        launcher.update();
+        {
+            let unit = launcher
+                .runtime
+                .client_unit_snapshot_entities
+                .get_mut(&7505)
+                .unwrap();
+            unit.set_pos(40.0, 32.0);
+        }
+        launcher.update();
+
+        let unit = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&7505)
+            .unwrap();
+        let segments = unit
+            .trail
+            .as_ref()
+            .expect("desktop update should tick unit trail")
+            .segment_plans();
+        assert_eq!(segments.len(), 2);
+        assert!((segments[0].start.x - 28.0).abs() < 0.0001);
+        assert!((segments[0].start.y - 32.0).abs() < 0.0001);
+        assert!((segments[0].end.x - 36.0).abs() < 0.0001);
+        assert!((segments[0].end.y - 32.0).abs() < 0.0001);
     }
 
     #[test]

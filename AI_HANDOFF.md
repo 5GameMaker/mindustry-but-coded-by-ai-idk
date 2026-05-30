@@ -13350,3 +13350,35 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 匿名 line/end effect 若无 standard id，需要 effect 注册或专用 visual plan；
   3. textured `Drawf.laser` 可先用现有 `DrawSprite` 组合 body/caps，不必立即新增命令；
   4. Unit trail tick 与 weapon/unit parts 继续推进。
+
+### 2026-05-30：Unit trail tick 接入客户端 runtime/desktop update
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **43.1%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `GameRuntime::tick_client_unit_snapshot_trails(delta)`；
+    - 新增测试 `game_runtime_ticks_client_unit_snapshot_trails_for_render`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::update()` 调用 `runtime.tick_client_unit_snapshot_trails(1.0)`；
+    - 新增测试 `desktop_launcher_update_ticks_client_unit_snapshot_trails`。
+- Java 对照：
+  - `UnitComp.update()` 推进 trail 采样；
+  - `UnitType.draw()` 消费 trail，gating 已在前一闭环迁入 `UnitComp::update_trail(delta)`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core game_runtime_ticks_client_unit_snapshot_trails_for_render --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_update_ticks_client_unit_snapshot_trails --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 继续渲染优先：textured `Drawf.laser` / laser body/end cap atlas region；
+  2. 推进 OpenGL backend 对 effect/bullet primitive frame 的真实消费；
+  3. Unit remove/death 补 `Fx.trailFade`；
+  4. weapon/unit parts、hard shadow、legs、payload/item 继续接入整体 unit render pass。

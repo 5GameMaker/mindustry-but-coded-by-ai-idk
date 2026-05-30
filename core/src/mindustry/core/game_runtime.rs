@@ -3970,6 +3970,16 @@ impl GameRuntime {
         ticked
     }
 
+    pub fn tick_client_unit_snapshot_trails(&mut self, delta: f32) -> usize {
+        let mut ticked = 0;
+        for unit in self.client_unit_snapshot_entities.values_mut() {
+            if unit.update_trail(delta).is_some() {
+                ticked += 1;
+            }
+        }
+        ticked
+    }
+
     fn effect_color_from_symbol(name: &str) -> type_io::RgbaColor {
         if name.is_empty() || name == "none" {
             return type_io::RgbaColor::new(-1);
@@ -23399,6 +23409,48 @@ mod tests {
         assert_eq!(fire.animation, 1.0 / FireComp::TICKS_PER_FRAME);
         assert_eq!(fire.time, 1.0);
         assert!(!fire.removed);
+    }
+
+    #[test]
+    fn game_runtime_ticks_client_unit_snapshot_trails_for_render() {
+        let mut unit_type = UnitType::new(990, "trail-flare");
+        unit_type.trail_length = 4;
+        unit_type.engine_offset = 8.0;
+        unit_type.engine_size = 2.0;
+        unit_type.trail_scl = 1.0;
+        unit_type.use_engine_elevation = true;
+
+        let mut unit = UnitComp::new(990, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 40.0);
+        unit.set_rotation(0.0);
+        unit.elevation = 1.0;
+
+        let mut runtime = GameRuntime::default();
+        runtime.client_unit_snapshot_entities.insert(990, unit);
+
+        assert_eq!(runtime.tick_client_unit_snapshot_trails(1.0), 1);
+        {
+            let unit = runtime.client_unit_snapshot_entities.get(&990).unwrap();
+            let trail = unit
+                .trail
+                .as_ref()
+                .expect("runtime tick should attach trail");
+            assert_eq!(trail.trail.size(), 1);
+            assert!((trail.trail.points()[0].x - 32.0).abs() < 0.0001);
+            assert!((trail.trail.points()[0].y - 40.0).abs() < 0.0001);
+        }
+
+        let unit = runtime.client_unit_snapshot_entities.get_mut(&990).unwrap();
+        unit.set_pos(50.0, 40.0);
+        unit.set_rotation(0.0);
+
+        assert_eq!(runtime.tick_client_unit_snapshot_trails(1.0), 1);
+        let unit = runtime.client_unit_snapshot_entities.get(&990).unwrap();
+        let segments = unit.trail.as_ref().unwrap().segment_plans();
+        assert_eq!(segments.len(), 2);
+        assert!((segments[0].start.x - 32.0).abs() < 0.0001);
+        assert!((segments[0].end.x - 42.0).abs() < 0.0001);
     }
 
     #[test]
