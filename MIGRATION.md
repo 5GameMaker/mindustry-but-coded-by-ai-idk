@@ -18834,3 +18834,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - checkbox/slider 还未完全拥有 Java Scene2D 的 actor/focus/tooltip 语义，只是在当前 renderer 主链路上继续逼近；
   - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 529. SettingsMenuDialog Main 页原版菜单按钮
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.5%**，仍未达到完整可玩；继续把 Settings Main 页从文本摘要行推进为接近 Java `rebuildMenu()` 的按钮列表。
+- Java 对照证据：
+  - `SettingsMenuDialog.java` 中 `menu = new Table(Tex.button)`；
+  - `rebuildMenu()` 使用 `TextButtonStyle style = Styles.flatt`；
+  - `menu.defaults().size(300f, 60f)`；
+  - 每项 `menu.button(..., Icon.*, style, iconMed, ...).marginLeft(8f).row()`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 接入 `upstream_text_button_style_skin("flatt")`，按 `up/over/down` drawable 映射 Settings 主菜单按钮背景；
+    - 新增 Settings Main 菜单按钮常量：`300x60`、`marginLeft(8f)`、icon 尺寸与 label gap；
+    - 新增 `settings_main_menu_button_rect_for_panel()` 与 `settings_main_menu_entry_index_at_point()`，让 Main 页按钮渲染和命中共用同一几何；
+    - 新增 `push_settings_main_menu_buttons()`，绘制 `@settings.game / graphics / sound / language / controls / data` 六个按钮及对应上游 icon glyph；
+    - `settings_route_shell_action_at_surface_point()` 优先使用 Main 页按钮命中，保留旧文本摘要 action 作为过渡兼容；
+    - `push_active_menu_route_shell()` 在 Settings Main 页不再渲染文本摘要行，改为渲染原版风格按钮列表。
+  - 测试：
+    - 新增 `desktop_launcher_settings_main_page_renders_upstream_menu_buttons`，验证按钮尺寸、位置、命中 action、渲染 label/icon，以及 Main 页不再输出 `settings page: main` 文本行；
+    - 更新 Settings 路由测试，使用新的 Main 页按钮 rect 触发 Game/Language/Data。
+- 迁移意义：
+  - Settings Main 页从“可读文本壳”推进为可见、可点、尺寸接近 Java 的原版按钮菜单；
+  - Main 页入口与后续子页 SettingsTable 控件继续接入同一 DesktopLauncher 渲染/输入主链；
+  - 为后续迁移 `LanguageDialog`、`ControlsDialog`、Data 子对话框和动态 settings category 留出更接近 Java 的入口结构。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Settings Main 页仍未完整承载 Java `Table(Tex.button)` 背景层、mod 动态 category、移动端 keyboard 条件过滤；
+  - `prefs.margin(14f)`、reset/back 按钮尺寸、tooltip description、TextSetting/AreaTextSetting、Data 页真实 side effects 仍待迁移；
+  - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
+  - 未达到完整可玩，不能宣告目标完成。

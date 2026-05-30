@@ -93,9 +93,9 @@ use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
     parse_upstream_icon_properties, upstream_check_box_style_skin, upstream_font_assets,
     upstream_font_source_paths, upstream_scroll_pane_style_skin, upstream_slider_style_skin,
-    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan,
-    BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole,
-    UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
+    upstream_text_button_style_skin, upstream_ui_drawable_alias, upstream_ui_icon_glyph_string,
+    Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw, UpstreamContentIcon,
+    UpstreamFontRole, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -122,6 +122,11 @@ const SETTINGS_CHECK_BOX_PAD_LEFT: f32 = 8.0;
 const SETTINGS_CHECK_BOX_LABEL_GAP: f32 = 8.0;
 const SETTINGS_CHECK_BOX_HIT_MAX_WIDTH: f32 = 460.0;
 const SETTINGS_CHECK_BOX_PAD_TOP: f32 = 3.0;
+const SETTINGS_MENU_BUTTON_WIDTH: f32 = 300.0;
+const SETTINGS_MENU_BUTTON_HEIGHT: f32 = 60.0;
+const SETTINGS_MENU_BUTTON_MARGIN_LEFT: f32 = 8.0;
+const SETTINGS_MENU_BUTTON_ICON_SIZE: f32 = 24.0;
+const SETTINGS_MENU_BUTTON_LABEL_GAP: f32 = 18.0;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -19003,6 +19008,20 @@ impl DesktopLauncher {
             .unwrap_or_else(|| java_drawable.to_string())
     }
 
+    fn settings_text_button_symbol(style_name: &str, hovered: bool, pressed: bool) -> String {
+        let style = upstream_text_button_style_skin(style_name)
+            .unwrap_or_else(|| panic!("{style_name} should be present in upstream style registry"));
+        let drawable = if pressed {
+            style.down.or(style.over).or(style.up)
+        } else if hovered {
+            style.over.or(style.up)
+        } else {
+            style.up
+        }
+        .unwrap_or("button");
+        Self::settings_drawable_symbol(drawable)
+    }
+
     fn settings_check_box_symbol(checked: bool, hovered: bool, pressed: bool) -> String {
         let style = upstream_check_box_style_skin("defaultCheck")
             .expect("defaultCheck should be present in upstream style registry");
@@ -19241,6 +19260,70 @@ impl DesktopLauncher {
             0.0,
             Layer::END_PIXELED + 0.032,
         ));
+    }
+
+    fn push_settings_main_menu_buttons(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let hovered_index = self
+            .last_menu_cursor
+            .and_then(|point| Self::settings_main_menu_entry_index_at_point(panel, point));
+        for (index, entry) in SETTINGS_MENU_ENTRIES.iter().enumerate() {
+            let rect = Self::settings_main_menu_button_rect_for_panel(panel, index);
+            let hovered = hovered_index == Some(index);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("flatt", hovered, false),
+                rect,
+                if hovered {
+                    [1.0, 1.0, 1.0, 0.92]
+                } else {
+                    [0.70, 0.78, 0.86, 0.84]
+                },
+                0.0,
+                Layer::END_PIXELED + 0.025 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                rect,
+                if hovered {
+                    [0.62, 0.82, 1.0, 0.92]
+                } else {
+                    [0.28, 0.38, 0.46, 0.78]
+                },
+                1.0,
+                Layer::END_PIXELED + 0.026 + index as f32 * 0.0001,
+            ));
+            let icon_center = RenderPoint::new(
+                rect.x + SETTINGS_MENU_BUTTON_MARGIN_LEFT + SETTINGS_MENU_BUTTON_ICON_SIZE * 0.5,
+                rect.center().y,
+            );
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label(entry.icon, entry.icon),
+                icon_center,
+                [0.86, 0.92, 0.98, 1.0],
+                17.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.032 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                entry.label,
+                RenderPoint::new(
+                    icon_center.x
+                        + SETTINGS_MENU_BUTTON_ICON_SIZE * 0.5
+                        + SETTINGS_MENU_BUTTON_LABEL_GAP,
+                    rect.center().y,
+                ),
+                [0.92, 0.96, 1.0, 1.0],
+                14.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
+            ));
+        }
     }
 
     fn push_settings_route_controls(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -19694,6 +19777,30 @@ impl DesktopLauncher {
         RenderRect::new(panel.x + 22.0, center_y - 9.0, panel.width - 44.0, 18.0)
     }
 
+    fn settings_main_menu_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let x = panel.x + 36.0 + SETTINGS_MENU_BUTTON_MARGIN_LEFT;
+        let top = panel.y + panel.height - 124.0 - index as f32 * SETTINGS_MENU_BUTTON_HEIGHT;
+        RenderRect::new(
+            x,
+            top - SETTINGS_MENU_BUTTON_HEIGHT,
+            SETTINGS_MENU_BUTTON_WIDTH,
+            SETTINGS_MENU_BUTTON_HEIGHT,
+        )
+    }
+
+    fn settings_main_menu_entry_index_at_point(
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<usize> {
+        SETTINGS_MENU_ENTRIES
+            .iter()
+            .enumerate()
+            .find(|(index, _)| {
+                Self::settings_main_menu_button_rect_for_panel(panel, *index).contains_point(point)
+            })
+            .map(|(index, _)| index)
+    }
+
     fn settings_action_for_main_entry(index: usize) -> Option<DesktopSettingsAction> {
         match index {
             0 => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Game)),
@@ -19754,6 +19861,12 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
         let point = RenderPoint::new(x, y);
+        if self.settings_dialog_state.page == DesktopSettingsPage::Main {
+            if let Some(index) = Self::settings_main_menu_entry_index_at_point(panel, point) {
+                return Self::settings_action_for_main_entry(index)
+                    .map(DesktopMenuRouteShellAction::Settings);
+            }
+        }
         if let Some(action) = self.settings_route_control_action_at_point(panel, point) {
             return Some(DesktopMenuRouteShellAction::Settings(action));
         }
@@ -20649,6 +20762,10 @@ impl DesktopLauncher {
         ));
         if route == DesktopMenuRoute::About {
             self.push_about_route_page(pass, panel);
+        } else if route == DesktopMenuRoute::Settings
+            && self.settings_dialog_state.page == DesktopSettingsPage::Main
+        {
+            self.push_settings_main_menu_buttons(pass, panel);
         } else {
             for (index, line) in self.active_menu_route_shell_lines(route).iter().enumerate() {
                 pass.push(RenderCommand::draw_text_styled(
@@ -38553,7 +38670,7 @@ mod tests {
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Main;
         let surface = DesktopSurfaceSize::new(1280, 720);
         let game_center =
-            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, 3).center();
+            DesktopLauncher::settings_main_menu_button_rect_for_panel(settings_panel, 0).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -38660,7 +38777,7 @@ mod tests {
         );
 
         let language_center =
-            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, 6).center();
+            DesktopLauncher::settings_main_menu_button_rect_for_panel(settings_panel, 3).center();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -38684,7 +38801,7 @@ mod tests {
         );
 
         let data_center =
-            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, 8).center();
+            DesktopLauncher::settings_main_menu_button_rect_for_panel(settings_panel, 5).center();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -38751,6 +38868,77 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.contains(&"upstream: SettingsMenuDialog"));
         assert!(texts.contains(&"settings page: data"));
+    }
+
+    #[test]
+    fn desktop_launcher_settings_main_page_renders_upstream_menu_buttons() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let game_button = DesktopLauncher::settings_main_menu_button_rect_for_panel(panel, 0);
+        assert_eq!(game_button.width, super::SETTINGS_MENU_BUTTON_WIDTH);
+        assert_eq!(game_button.height, super::SETTINGS_MENU_BUTTON_HEIGHT);
+        assert!(
+            (game_button.x - (panel.x + 36.0 + super::SETTINGS_MENU_BUTTON_MARGIN_LEFT)).abs()
+                < 0.01
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                game_button.center().x,
+                game_button.center().y,
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::OpenPage(super::DesktopSettingsPage::Game)
+            ))
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: game_button.center().x,
+                y: game_button.center().y,
+            }],
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("settings main frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let button_rects = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } if symbol == "whiteui" => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(button_rects.contains(&game_button));
+        let labels = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for entry in super::SETTINGS_MENU_ENTRIES {
+            assert!(labels.contains(&entry.label));
+            assert!(labels
+                .contains(&super::desktop_ui_icon_glyph_or_label(entry.icon, entry.icon).as_str()));
+        }
+        assert!(!labels.contains(&"settings page: main"));
     }
 
     #[test]
