@@ -17017,3 +17017,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `last_menu_action` 尚未分发到真实菜单页面/网络连接/退出流程；
   - winit 鼠标坐标与 render 坐标系仍需在真实窗口输入中统一；
   - hover 样式、submenu 展开状态、点击音效、返回键和移动端触控仍需继续补齐。
+
+## 469. 菜单子菜单状态切换
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.2%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链。
+- Java 对照：
+  - `MenuFragment.java` 的 desktop 主菜单以 `PLAY` 为默认展开根，`DATABASE` 触发数据库子入口；
+  - 当前 Rust 先迁移稳定状态切换与按钮树，不把 action dispatch 假装成已完成页面。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuRendererState` 新增 `selected_root: MenuButtonRole`，默认值为 `MenuButtonRole::Play`；
+    - `MenuButtonRole::has_desktop_submenu()` 标记目前有 desktop submenu 的根按钮；
+    - `MenuRendererState::select_desktop_root(role)` 在 desktop 模式下切换 `PLAY` / `DATABASE` 子菜单，`QUIT` 等无 submenu 的按钮不会误改当前根；
+    - desktop 菜单根据 `selected_root` 在 `CAMPAIGN/JOIN/CUSTOM GAME/LOAD GAME` 与 `SCHEMATICS/TECH TREE/ABOUT` 两组 submenu 之间切换；
+    - 新增 `menu_renderer_state_switches_desktop_submenu_roots` 锁定状态切换与按钮树变化。
+  - `desktop/src/lib.rs`
+    - no-world 默认菜单点击主按钮时调用 `menu_renderer_state.select_desktop_root(role)`；
+    - `last_menu_action` 继续记录点击 role，后续可接真实 action dispatch；
+    - 新增 `desktop_launcher_menu_primary_action_switches_database_submenu`，覆盖点击 `DATABASE` 后渲染计划切到数据库子菜单。
+- 迁移意义：
+  - 菜单 UI 从“可命中按钮”推进到“可维护 Java-like desktop submenu 状态”；
+  - 状态仍在 `MenuRendererState -> MenuFramePlan -> DesktopLauncher` 主链中传递，不是独立 mock；
+  - 为后续 `CAMPAIGN/JOIN/SETTINGS/QUIT` 等真实页面/动作分发提供稳定入口。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `git diff --check`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_primary_action_switches_database_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_records_no_world_menu_hover_and_primary_action --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `last_menu_action` 尚未 dispatch 到 campaign/join/settings/editor/database 页面或 quit 流程；
+  - submenu 还缺 hover/selected 的更细视觉反馈、点击音效、返回键/Esc 与移动端触控对齐；
+  - 字体仍是 placeholder glyph，真实 font atlas 与 Java Scene 样式仍需继续接入。

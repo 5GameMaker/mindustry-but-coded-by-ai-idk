@@ -201,6 +201,17 @@ impl MenuButtonRole {
                 | Self::About
         )
     }
+
+    pub const fn is_desktop_root(self) -> bool {
+        matches!(
+            self,
+            Self::Play | Self::Database | Self::Editor | Self::Mods | Self::Settings | Self::Quit
+        )
+    }
+
+    pub const fn has_desktop_submenu(self) -> bool {
+        matches!(self, Self::Play | Self::Database)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -481,6 +492,7 @@ pub struct MenuRendererState {
     pub flyer_rotation: f32,
     pub flyer_count: usize,
     pub flyer_type: &'static str,
+    pub selected_root: MenuButtonRole,
 }
 
 impl MenuRendererState {
@@ -493,6 +505,7 @@ impl MenuRendererState {
             flyer_rotation: 45.0,
             flyer_count: flyer_count_for_seed(config.seed),
             flyer_type: flyer_type_for_seed(config.seed),
+            selected_root: MenuButtonRole::Play,
         }
     }
 
@@ -543,7 +556,7 @@ impl MenuRendererState {
             tile_size: self.config.tile_size,
             world: self.world.clone(),
             commands,
-            ui: menu_ui_plan(input, self.config.mobile),
+            ui: menu_ui_plan(input, self.config.mobile, self.selected_root),
         }
     }
 
@@ -591,11 +604,19 @@ impl MenuRendererState {
     }
 
     pub fn ui_plan(&self, input: MenuFrameInput) -> MenuUiPlan {
-        menu_ui_plan(input, self.config.mobile)
+        menu_ui_plan(input, self.config.mobile, self.selected_root)
     }
 
     pub fn hit_test_ui(&self, input: MenuFrameInput, x: f32, y: f32) -> Option<MenuButtonRole> {
         self.ui_plan(input).hit_test(x, y)
+    }
+
+    pub fn select_desktop_root(&mut self, role: MenuButtonRole) -> bool {
+        if self.config.mobile || !role.has_desktop_submenu() {
+            return false;
+        }
+        self.selected_root = role;
+        true
     }
 }
 
@@ -906,7 +927,7 @@ fn menu_button_plan(role: MenuButtonRole, rect: RenderRect, selected: bool) -> M
     }
 }
 
-fn menu_desktop_ui_plan(input: MenuFrameInput) -> MenuUiPlan {
+fn menu_desktop_ui_plan(input: MenuFrameInput, selected_root: MenuButtonRole) -> MenuUiPlan {
     let margin = input.scl4.max(1.0) * 6.0;
     let button_width = 188.0;
     let button_height = 32.0;
@@ -919,12 +940,21 @@ fn menu_desktop_ui_plan(input: MenuFrameInput) -> MenuUiPlan {
         MenuButtonRole::Settings,
         MenuButtonRole::Quit,
     ];
-    let submenu_roles = [
+    let play_submenu_roles = [
         MenuButtonRole::Campaign,
         MenuButtonRole::Join,
         MenuButtonRole::CustomGame,
         MenuButtonRole::LoadGame,
     ];
+    let database_submenu_roles = [
+        MenuButtonRole::Schematics,
+        MenuButtonRole::TechTree,
+        MenuButtonRole::About,
+    ];
+    let submenu_roles: &[MenuButtonRole] = match selected_root {
+        MenuButtonRole::Database => &database_submenu_roles,
+        _ => &play_submenu_roles,
+    };
     let total_height =
         main_roles.len() as f32 * button_height + main_roles.len().saturating_sub(1) as f32 * gap;
     let start_y = ((input.graphics_height - total_height) * 0.5).max(margin);
@@ -941,10 +971,10 @@ fn menu_desktop_ui_plan(input: MenuFrameInput) -> MenuUiPlan {
                 button_width,
                 button_height,
             ),
-            role == MenuButtonRole::Play,
+            role == selected_root,
         ));
     }
-    for (index, role) in submenu_roles.into_iter().enumerate() {
+    for (index, role) in submenu_roles.iter().copied().enumerate() {
         buttons.push(menu_button_plan(
             role,
             RenderRect::new(
@@ -1016,11 +1046,11 @@ fn menu_mobile_ui_plan(input: MenuFrameInput) -> MenuUiPlan {
     }
 }
 
-fn menu_ui_plan(input: MenuFrameInput, mobile: bool) -> MenuUiPlan {
+fn menu_ui_plan(input: MenuFrameInput, mobile: bool, selected_root: MenuButtonRole) -> MenuUiPlan {
     if mobile {
         menu_mobile_ui_plan(input)
     } else {
-        menu_desktop_ui_plan(input)
+        menu_desktop_ui_plan(input, selected_root)
     }
 }
 
@@ -1203,6 +1233,43 @@ mod tests {
             }
             other => panic!("unexpected darkness command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn menu_renderer_state_switches_desktop_submenu_roots() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        assert!(state.select_desktop_root(MenuButtonRole::Database));
+
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        });
+
+        assert_eq!(state.selected_root, MenuButtonRole::Database);
+        assert!(plan
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Database && button.selected));
+        assert!(plan
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Schematics));
+        assert!(plan
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::TechTree));
+        assert!(plan
+            .ui
+            .buttons
+            .iter()
+            .all(|button| button.role != MenuButtonRole::Campaign));
+        assert!(!state.select_desktop_root(MenuButtonRole::Quit));
+        assert_eq!(state.selected_root, MenuButtonRole::Database);
     }
 
     #[test]

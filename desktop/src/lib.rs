@@ -15742,8 +15742,12 @@ impl DesktopLauncher {
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
                 {
                     if let Some(cursor) = self.last_menu_cursor {
-                        self.last_menu_action =
+                        let action =
                             self.menu_button_at_surface_point(surface_size, cursor.x, cursor.y);
+                        if let Some(role) = action {
+                            self.menu_renderer_state.select_desktop_root(role);
+                        }
+                        self.last_menu_action = action;
                     }
                 }
                 _ => {}
@@ -31422,6 +31426,51 @@ mod tests {
             Some(MenuButtonRole::Play)
         );
         assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Play));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_primary_action_switches_database_submenu() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let ui = launcher.menu_renderer_state.ui_plan(input);
+        let database_center = ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Database)
+            .expect("menu ui should include DATABASE")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: database_center.x,
+                    y: database_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "Left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Database));
+        assert_eq!(
+            launcher.menu_renderer_state.selected_root,
+            MenuButtonRole::Database
+        );
+        let updated = launcher.menu_renderer_state.ui_plan(input);
+        assert!(updated
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Schematics));
+        assert!(updated
+            .buttons
+            .iter()
+            .all(|button| button.role != MenuButtonRole::Campaign));
     }
 
     #[test]

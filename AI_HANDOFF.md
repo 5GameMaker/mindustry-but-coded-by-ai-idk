@@ -14147,3 +14147,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `last_menu_action` 目前只是 action role 记录，尚未 dispatch 到 campaign/join/settings 等真实页面或网络流程；
   2. winit cursor y 坐标仍按当前 render 坐标直接传递，后续真实窗口输入需统一坐标系；
   3. submenu 状态切换、hover 样式、点击音效、返回/退出逻辑仍需继续迁移。
+
+### 2026-05-30：菜单子菜单状态切换
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **48.2%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuRendererState` 新增 `selected_root`，默认 `PLAY`；
+    - `select_desktop_root(...)` 支持 desktop `PLAY` / `DATABASE` 子菜单根切换；
+    - desktop submenu 会在 `CAMPAIGN/JOIN/CUSTOM GAME/LOAD GAME` 和 `SCHEMATICS/TECH TREE/ABOUT` 两组按钮之间切换；
+    - 新增 `menu_renderer_state_switches_desktop_submenu_roots`。
+  - `desktop/src/lib.rs`
+    - no-world 菜单点击主按钮后会先尝试切换 submenu root，再记录 `last_menu_action`；
+    - 新增 `desktop_launcher_menu_primary_action_switches_database_submenu`。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `git diff --check`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_primary_action_switches_database_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_records_no_world_menu_hover_and_primary_action --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. `last_menu_action` 仍未真正打开 campaign/join/settings/editor/database 页面，也未执行 quit；
+  2. 菜单视觉反馈、音效、返回键/Esc、移动端触控还需继续迁移；
+  3. 真实 font atlas 与 Java Scene UI 样式仍未完成。
