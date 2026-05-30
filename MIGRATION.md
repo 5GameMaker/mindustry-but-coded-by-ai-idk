@@ -15544,3 +15544,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 unit pass 仍临时复用 Overlay，后续必须接入更精确 Java layer sorting / entity world pass；
   - Weather custom lowering、更多 native OpenGL smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.9%，仍未达到完整可玩。
+
+## 422. 最新闭环记录：Unit soft shadow 接入同一单位 Overlay pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.0%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/UnitType.java#draw(...)`
+  - `core/src/mindustry/type/UnitType.java#drawSoftShadow(...)`
+  - `core/src/mindustry/type/UnitType.java#load()` 中 `particle` / `circle-shadow` / `square-shadow` 的 soft shadow region 选择。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Unit atlas helper 继续加入 `{unit}-outline`、`{unit}-cell`、`particle`、`circle-shadow`、`square-shadow`、`power-cell` 等后续单位渲染资源候选；
+    - 新增 `desktop_unit_soft_shadow_sprite(...)`，按 `square_shape`、`hit_size <= 10`、默认圆形阴影选择 soft shadow sprite；
+    - 新增 `desktop_unit_soft_shadow_layer(...)`，按 Java `min(z - 0.01, Layer.bullet - 1)` 的最小语义放到 body 前；
+    - 新增 `unit_snapshot_soft_shadow_render_command(...)`，输出黑色 alpha 0.4 的 soft shadow `DrawSprite`；
+    - `unit_snapshot_render_pass()` 先 push soft shadow，再 push body，保持 Unit 渲染仍在同一条 pass 内扩展；
+    - 扩展 `desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot` 覆盖 dagger 的 `particle` soft shadow。
+- 迁移意义：
+  - Unit 渲染从“只有 body sprite”推进到 Java `UnitType.draw()` 的 body 前基础层次；
+  - soft shadow 没有做成独立模块，而是直接接入 unit snapshot render aggregation，后续 cell/outline/weapon/leg 可沿同一路径继续叠加。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - hard shadow (`drawShadow`)、outline、cell/team color、weapons、legs、payload/item、engine trail、unit light/shield 仍未接入；
+  - 当前 soft shadow region 的 `Core.settings.linear` 分支暂按 hit_size/square_shape 最小可复现路径处理；
+  - Unit/Fire/Bullet/Puddle 仍需统一 Java layer sorting；Weather custom lowering 与 native OpenGL smoke 仍需继续。

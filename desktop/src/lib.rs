@@ -176,7 +176,19 @@ fn desktop_unit_body_sprite_virtual_source_paths(content_loader: &ContentLoader)
     content_loader
         .units()
         .iter()
-        .map(|unit| format!("sprites/{}.png", unit.name()))
+        .flat_map(|unit| {
+            [
+                format!("sprites/{}.png", unit.name()),
+                format!("sprites/{}-outline.png", unit.name()),
+                format!("sprites/{}-cell.png", unit.name()),
+            ]
+        })
+        .chain([
+            "sprites/particle.png".to_string(),
+            "sprites/circle-shadow.png".to_string(),
+            "sprites/square-shadow.png".to_string(),
+            "sprites/power-cell.png".to_string(),
+        ])
         .collect()
 }
 
@@ -194,6 +206,20 @@ fn desktop_unit_body_layer(unit: &UnitComp) -> f32 {
     } else {
         Layer::FLYING_UNIT
     }
+}
+
+fn desktop_unit_soft_shadow_sprite(unit: &UnitComp) -> &'static str {
+    if unit.type_info.square_shape {
+        "square-shadow"
+    } else if unit.type_info.hit_size <= 10.0 {
+        "particle"
+    } else {
+        "circle-shadow"
+    }
+}
+
+fn desktop_unit_soft_shadow_layer(unit: &UnitComp) -> f32 {
+    (desktop_unit_body_layer(unit) - 0.01).min(Layer::BULLET - 1.0)
 }
 
 fn desktop_puddle_fraction(amount: f32) -> f32 {
@@ -11729,7 +11755,7 @@ impl DesktopLauncher {
         (!pass.commands.is_empty()).then_some(pass)
     }
 
-    fn unit_snapshot_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
+    fn unit_snapshot_body_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_body {
             return None;
         }
@@ -11749,6 +11775,27 @@ impl DesktopLauncher {
         ))
     }
 
+    fn unit_snapshot_soft_shadow_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
+        if !unit.is_valid() || !unit.type_info.draw_soft_shadow {
+            return None;
+        }
+
+        let symbol = desktop_unit_soft_shadow_sprite(unit).to_string();
+        let region = self.texture_atlas.lookup(&symbol).ok()?;
+        let size = region.region.width.max(region.region.height).max(1) as f32
+            * unit.type_info.soft_shadow_scl
+            * 1.6;
+        let rect = RenderRect::from_center(RenderPoint::new(unit.x(), unit.y()), size, size);
+
+        Some(RenderCommand::draw_sprite(
+            symbol,
+            rect,
+            [0.0, 0.0, 0.0, 0.4],
+            unit.rotation() - 90.0,
+            desktop_unit_soft_shadow_layer(unit),
+        ))
+    }
+
     fn unit_snapshot_render_pass(&self) -> Option<RenderPass> {
         let mut pass = RenderPass::new(RenderPassKind::Overlay)
             .with_order(RenderPassKind::Overlay.default_order());
@@ -11757,7 +11804,10 @@ impl DesktopLauncher {
             if self.runtime.client_hidden_entity_ids.contains(entity_id) {
                 continue;
             }
-            if let Some(command) = self.unit_snapshot_render_command(unit) {
+            if let Some(command) = self.unit_snapshot_soft_shadow_render_command(unit) {
+                pass.commands.push(command);
+            }
+            if let Some(command) = self.unit_snapshot_body_render_command(unit) {
                 pass.commands.push(command);
             }
         }
@@ -16002,6 +16052,7 @@ mod tests {
             .expect("base content should include dagger")
             .clone();
         assert!(launcher.texture_atlas.has("dagger"));
+        assert!(launcher.texture_atlas.has("particle"));
 
         let mut unit = UnitComp::new(7400, dagger, TeamId(1));
         unit.add();
@@ -16052,6 +16103,25 @@ mod tests {
                 assert_eq!(*layer, Layer::GROUND_UNIT);
             }
             other => panic!("expected unit body DrawSprite, got {other:?}"),
+        }
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "particle")
+        }) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(40.0, 56.0));
+                assert!((rect.width - 1.6).abs() < 0.0001);
+                assert!((rect.height - 1.6).abs() < 0.0001);
+                assert_eq!(*tint, [0.0, 0.0, 0.0, 0.4]);
+                assert_eq!(*rotation, 90.0);
+                assert!((*layer - (Layer::GROUND_UNIT - 0.01)).abs() < 0.0001);
+            }
+            other => panic!("expected unit soft shadow DrawSprite, got {other:?}"),
         }
     }
 
