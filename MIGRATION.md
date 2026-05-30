@@ -18634,3 +18634,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - checkbox/slider 行还未按 Java `padTop(3/4)`、`stack(slider, content)`、`460f` 宽度上限完全精确复刻；
   - Reset/Back 仍需拆成页内/对话框级真实按钮，并接入原版尺寸与底部布局；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 522. SettingsMenuDialog checkbox/slider 行交互写入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.8%**，仍未达到完整可玩；继续把 SettingsTable 可视行从“只绘制”推进为可点击并写入桌面 settings override 的交互链路。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopSettingsAction` 新增 `ToggleSetting(table, key)` 与 `SetSliderValue(table, key, value)`；
+    - 新增 `settings_route_control_action_at_point()`，在 Settings `Game/Graphics/Sound` 页对完整设置项行做 hit-test；
+    - checkbox 行点击会分发 `ToggleSetting`，并在 `dispatch_settings_action()` 中按当前有效值取反写入 `settings_overrides`；
+    - slider 行点击会按 `DesktopSettingsPrefRange { min, max, step }` 和 track x 坐标计算 step 对齐后的值，分发并写入 `settings_overrides`；
+    - 控件裁剪区下移，避免与现有 Reset/Back 摘要行热区重叠，保持过渡期 route line action 可用。
+  - 测试：
+    - 新增 `desktop_launcher_settings_controls_write_overrides_from_hit_tests`，验证点击 `communityservers` 行会写入 `false`，点击 `saveinterval` 滑条最右侧会写入 `600`。
+- 迁移意义：
+  - Settings 的 check/slider 已进入真实输入分发与状态写入主链，不再只是 render-only；
+  - 这一步仍复用 `DesktopLauncher.apply_menu_input_events()` 与 `DesktopMenuRouteShellAction::Settings`，没有绕开真实桌面输入链；
+  - 后续可继续把内存 override 接到持久化 settings，并补 hover/pressed/拖拽/滚轮。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - checkbox/slider 还没有 hover/pressed/disabled 视觉状态、拖动连续更新和鼠标滚轮；
+  - settings override 尚未持久化到文件，也未接入真实图形/音频/runtime side effects；
+  - ScrollPane 还没有 scroll position，条件项过滤仍是元数据阶段；
+  - 未达到完整可玩，不能宣告目标完成。

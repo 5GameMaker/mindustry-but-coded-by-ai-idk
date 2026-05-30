@@ -334,6 +334,8 @@ pub enum DesktopSettingsAction {
     OpenControlsDialog,
     BackToMain,
     ResetCurrentPage,
+    ToggleSetting(&'static str, &'static str),
+    SetSliderValue(&'static str, &'static str, i32),
     ClearAllData,
     ClearPlanetData,
     ClearSaves,
@@ -19018,10 +19020,10 @@ impl DesktopLauncher {
     }
 
     fn settings_pref_widget_clip_rect_for_panel(panel: RenderRect) -> RenderRect {
-        let height = (panel.height - 300.0).clamp(160.0, 300.0);
+        let height = (panel.height - 360.0).clamp(140.0, 240.0);
         RenderRect::new(
             panel.x + 36.0,
-            panel.y + 56.0,
+            panel.y + 44.0,
             (panel.width - 84.0).max(160.0),
             height,
         )
@@ -19032,6 +19034,31 @@ impl DesktopLauncher {
         let row_height = 42.0;
         let top = clip.y + clip.height - row_height - index as f32 * 50.0;
         RenderRect::new(clip.x, top, row_width, row_height)
+    }
+
+    fn settings_pref_widget_slider_track_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(
+            row.x + row.width - 218.0,
+            row.y + row.height * 0.5 - 6.0,
+            152.0,
+            12.0,
+        )
+    }
+
+    fn settings_slider_value_from_track_x(
+        range: DesktopSettingsPrefRange,
+        track: RenderRect,
+        x: f32,
+    ) -> i32 {
+        let t = ((x - track.x) / track.width).clamp(0.0, 1.0);
+        let raw = range.min as f32 + (range.max - range.min) as f32 * t;
+        let stepped = if range.step > 1 {
+            let steps = ((raw - range.min as f32) / range.step as f32).round() as i32;
+            range.min + steps * range.step
+        } else {
+            raw.round() as i32
+        };
+        stepped.clamp(range.min, range.max)
     }
 
     fn push_settings_scrollbar(
@@ -19150,12 +19177,7 @@ impl DesktopLauncher {
                         .setting_slider_effective_value(spec)
                         .unwrap_or(range.min)
                         .clamp(range.min, range.max);
-                    let track = RenderRect::new(
-                        row.x + row.width - 218.0,
-                        row.y + row.height * 0.5 - 6.0,
-                        152.0,
-                        12.0,
-                    );
+                    let track = Self::settings_pref_widget_slider_track_rect(row);
                     let t = if range.max > range.min {
                         (value - range.min) as f32 / (range.max - range.min) as f32
                     } else {
@@ -19205,6 +19227,48 @@ impl DesktopLauncher {
             scroll_track_symbol,
             scroll_knob_symbol,
         );
+    }
+
+    fn settings_route_control_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopSettingsAction> {
+        let (DesktopSettingsPage::Game
+        | DesktopSettingsPage::Graphics
+        | DesktopSettingsPage::Sound) = self.settings_dialog_state.page
+        else {
+            return None;
+        };
+        let table = self.settings_dialog_state.page.key();
+        let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        if !clip.contains_point(point) {
+            return None;
+        }
+        for (index, spec) in Self::settings_pref_widget_specs(table)
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let row = Self::settings_pref_widget_row_rect_for_clip(clip, index);
+            if !row.contains_point(point) {
+                continue;
+            }
+            return match spec.kind {
+                DesktopSettingsPrefKind::Check => {
+                    Some(DesktopSettingsAction::ToggleSetting(spec.table, spec.key))
+                }
+                DesktopSettingsPrefKind::Slider => {
+                    let range = spec.range_step?;
+                    let track = Self::settings_pref_widget_slider_track_rect(row);
+                    let value = Self::settings_slider_value_from_track_x(range, track, point.x);
+                    Some(DesktopSettingsAction::SetSliderValue(
+                        spec.table, spec.key, value,
+                    ))
+                }
+            };
+        }
+        None
     }
 
     fn settings_route_lines(&self) -> Vec<String> {
@@ -19332,6 +19396,9 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
         let point = RenderPoint::new(x, y);
+        if let Some(action) = self.settings_route_control_action_at_point(panel, point) {
+            return Some(DesktopMenuRouteShellAction::Settings(action));
+        }
         self.settings_route_lines()
             .iter()
             .enumerate()
@@ -19587,6 +19654,25 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::ResetCurrentPage => {
                 self.reset_current_settings_page_overrides();
+            }
+            DesktopSettingsAction::ToggleSetting(table, key) => {
+                if let Some(spec) = settings_pref_spec(table, key) {
+                    if spec.kind == DesktopSettingsPrefKind::Check {
+                        let checked = self.setting_bool_effective_value(spec);
+                        self.set_setting_override(table, key, (!checked).to_string());
+                    }
+                }
+            }
+            DesktopSettingsAction::SetSliderValue(table, key, value) => {
+                if let Some(spec) = settings_pref_spec(table, key) {
+                    if spec.kind == DesktopSettingsPrefKind::Slider {
+                        let value = spec
+                            .range_step
+                            .map(|range| value.clamp(range.min, range.max))
+                            .unwrap_or(value);
+                        self.set_setting_override(table, key, value.to_string());
+                    }
+                }
             }
             DesktopSettingsAction::OpenLanguageDialog
             | DesktopSettingsAction::OpenControlsDialog
@@ -38352,6 +38438,110 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(sound_texts.contains(&"@setting.musicvol.name"));
         assert!(sound_texts.contains(&"value: 100"));
+    }
+
+    #[test]
+    fn desktop_launcher_settings_controls_write_overrides_from_hit_tests() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let clip = DesktopLauncher::settings_pref_widget_clip_rect_for_panel(panel);
+        let specs = DesktopLauncher::settings_pref_widget_specs("game");
+
+        let community_index = specs
+            .iter()
+            .position(|spec| spec.key == "communityservers")
+            .expect("game settings should include communityservers");
+        let community_center =
+            DesktopLauncher::settings_pref_widget_row_rect_for_clip(clip, community_index).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                community_center.x,
+                community_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::ToggleSetting("game", "communityservers")
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: community_center.x,
+                    y: community_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::ToggleSetting(
+                "game",
+                "communityservers"
+            ))
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("game", "communityservers")
+                .as_deref(),
+            Some("false")
+        );
+
+        let save_index = specs
+            .iter()
+            .position(|spec| spec.key == "saveinterval")
+            .expect("game settings should include saveinterval");
+        let save_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip(clip, save_index);
+        let save_track = DesktopLauncher::settings_pref_widget_slider_track_rect(save_row);
+        let save_point = RenderPoint::new(save_track.x + save_track.width, save_track.center().y);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                save_point.x,
+                save_point.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::SetSliderValue("game", "saveinterval", 600)
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: save_point.x,
+                    y: save_point.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::SetSliderValue(
+                "game",
+                "saveinterval",
+                600
+            ))
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("game", "saveinterval")
+                .as_deref(),
+            Some("600")
+        );
     }
 
     #[test]
