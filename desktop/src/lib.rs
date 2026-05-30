@@ -64,7 +64,7 @@ use mindustry_core::mindustry::graphics::{
     ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
     ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
     TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
-    Viewport as FloorViewport,
+    Viewport as FloorViewport, MENU_DARKNESS, MENU_DARKNESS_LAYER,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -18669,6 +18669,12 @@ impl DesktopLauncher {
         plan: &MenuFramePlan,
         viewport: RenderViewport,
     ) -> RenderPass {
+        if let Some(mut pass) = plan.to_render_pass() {
+            pass.kind = RenderPassKind::Custom("menu-fast".to_string());
+            pass.order = pass.kind.default_order();
+            return pass;
+        }
+
         let camera = self.default_render_camera_for_viewport(viewport);
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
@@ -18689,43 +18695,6 @@ impl DesktopLauncher {
             RenderRect::new(0.0, 0.0, width, height),
             [0.025, 0.035, 0.055, 1.0],
             0.0,
-        ));
-
-        let panel_width = (width * 0.58).clamp(360.0, 760.0).min(width - 40.0);
-        let panel_height = (height * 0.72).clamp(300.0, 620.0).min(height - 88.0);
-        let panel = RenderRect::new(
-            (width - panel_width) * 0.5,
-            (height - panel_height) * 0.5,
-            panel_width,
-            panel_height,
-        );
-        pass.push(RenderCommand::fill_rect(
-            panel,
-            [0.035, 0.052, 0.075, 0.72],
-            99.0,
-        ));
-        pass.push(RenderCommand::stroke_rect(
-            panel,
-            [0.22, 0.42, 0.54, 0.86],
-            2.0,
-            99.1,
-        ));
-        pass.push(RenderCommand::fill_rect(
-            RenderRect::new(panel.x, panel.y + panel.height - 46.0, panel.width, 46.0),
-            [0.08, 0.18, 0.25, 0.82],
-            99.2,
-        ));
-        pass.push(RenderCommand::draw_text_styled(
-            "RUST MDT CLIENT",
-            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 23.0),
-            [0.74, 0.92, 1.0, 1.0],
-            16.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
-            99.3,
         ));
         pass.extend(plan.ui.to_render_commands());
         pass
@@ -42274,6 +42243,38 @@ mod tests {
                 panic!("menu frame must not use load payload");
             }
         }
+    }
+
+    #[test]
+    fn desktop_launcher_fast_menu_path_reuses_real_menu_plan_without_placeholder_panel() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let viewport = RenderViewport::new(0.0, 0.0, 640.0, 360.0);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let plan = launcher.menu_renderer_state.render_plan(input);
+        let pass = launcher.fast_menu_render_pass_from_plan(&plan, viewport);
+
+        assert_eq!(pass.kind, RenderPassKind::Custom("menu-fast".to_string()));
+        assert!(pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "PLAY"
+            )
+        }));
+        assert!(pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::FillRect { rect, color, layer }
+                    if *rect == RenderRect::new(0.0, 0.0, 640.0, 360.0)
+                        && *color == [0.0, 0.0, 0.0, super::MENU_DARKNESS]
+                        && (*layer - super::MENU_DARKNESS_LAYER).abs() < f32::EPSILON
+            )
+        }));
+        assert!(!pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "RUST MDT CLIENT"
+            )
+        }));
     }
 
     #[test]

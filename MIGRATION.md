@@ -19016,7 +19016,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 ## 534. MenuFragment 主菜单壳层继续对齐
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
-- 本轮总体进度更新：约 **55.2%**，仍未达到完整可玩；继续优先前端/UI，目标是减少黑屏/占位感并按 Java `MenuFragment` 还原主菜单外观。
+- 本轮总体进度更新：约 **55.3%**，仍未达到完整可玩；继续优先前端/UI，目标是减少黑屏/占位感并按 Java `MenuFragment` 还原主菜单外观。
 - Java 对照证据：
   - `MenuFragment.buildDesktop()` 的主菜单和 submenu 都是 `Styles.black6` 竖向 table；
   - `MenuFragment.buildMobile()` 使用 `MobileButton extends ImageButton`，背景来自默认 ImageButton skin，而不是 desktop `flatToggleMenut`；
@@ -19034,13 +19034,18 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
     - mobile gutter 从填充色改为原版 `pane-right.9`、`pane-left.9`、`pane-top.9` sprite；
     - logo 在 portrait viewport 下按原版下移 30px；
     - version/baseline 文本 alpha 调整为半透明白。
+    - `fast_menu_render_pass_from_plan()` 不再绘制 `RUST MDT CLIENT` 占位面板，优先复用真实 `MenuFramePlan::to_render_pass()` 输出，fast path 下也走同一套菜单世界/UI 命令。
+  - `core/src/mindustry/graphics/mod.rs`
+    - 导出 `MENU_DARKNESS_LAYER`，供 desktop fast-path 回归测试锁定 fullscreen 暗化层。
 - 已验证：
   - `cargo fmt --all`
   - `cargo test -p mindustry-core menu_ --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_fast_menu_path_reuses_real_menu_plan_without_placeholder_panel --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_mobile_terminal_info_and_gutter_chrome --lib`
   - `cargo test -p mindustry-desktop menu_chrome --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
 - 仍未完成：
-  - `fast_menu_render_pass_from_plan()` 和 `startup_menu_preview_render_pass()` 仍有明显非原版占位壳，后续应优先移除或改成真实 MenuRenderer 输出；
+  - `startup_menu_preview_render_pass()` 仍有明显非原版占位壳，后续应优先移除或仅作为不可达的错误兜底；
   - logo/version 仍使用 `UPSTREAM_BASELINE`，还未完全接 `Version.combined()` 与 build=-1 橙色分支；
   - desktop/mobile 按钮文字仍是当前 Rust 硬编码英文大写，后续必须接入 bundle/localization；
   - chrome 按钮仍有自绘 fill/stroke 近似，未完全等同 Java Scene2D skin；
