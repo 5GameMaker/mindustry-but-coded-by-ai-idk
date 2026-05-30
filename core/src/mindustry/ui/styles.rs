@@ -128,6 +128,55 @@ impl UiTextButtonStyleSkin {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiImageButtonStyleSkin {
+    pub java_name: &'static str,
+    pub up: Option<&'static str>,
+    pub down: Option<&'static str>,
+    pub over: Option<&'static str>,
+    pub checked: Option<&'static str>,
+    pub disabled: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiScrollPaneStyleSkin {
+    pub java_name: &'static str,
+    pub v_scroll: Option<&'static str>,
+    pub v_scroll_knob: Option<&'static str>,
+    pub h_scroll: Option<&'static str>,
+    pub h_scroll_knob: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiSliderStyleSkin {
+    pub java_name: &'static str,
+    pub background: &'static str,
+    pub knob: &'static str,
+    pub knob_over: &'static str,
+    pub knob_down: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiCheckBoxStyleSkin {
+    pub java_name: &'static str,
+    pub checkbox_on: &'static str,
+    pub checkbox_off: &'static str,
+    pub checkbox_on_over: &'static str,
+    pub checkbox_over: &'static str,
+    pub checkbox_on_disabled: &'static str,
+    pub checkbox_off_disabled: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiTextFieldStyleSkin {
+    pub java_name: &'static str,
+    pub background: &'static str,
+    pub disabled_background: Option<&'static str>,
+    pub invalid_background: Option<&'static str>,
+    pub selection: &'static str,
+    pub cursor: &'static str,
+}
+
 pub const UPSTREAM_UI_SKIN_SPRITES: &[UiSkinSprite] = &[
     UiSkinSprite::new("whiteui", "sprites/ui/whiteui.png", UiSkinGroup::Utility),
     UiSkinSprite::new("clear", "sprites/ui/clear.png", UiSkinGroup::Utility),
@@ -551,6 +600,102 @@ pub const UPSTREAM_UI_DRAWABLE_ALIASES: &[UiDrawableAlias] = &[
         UiDrawableTint::None,
     ),
     UiDrawableAlias::new(
+        "buttonSelect",
+        "button-select.9",
+        "sprites/ui/button-select.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "scroll",
+        "scroll.9",
+        "sprites/ui/scroll.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "scrollHorizontal",
+        "scroll-horizontal.9",
+        "sprites/ui/scroll-horizontal.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "scrollKnobVerticalBlack",
+        "scroll-knob-vertical-black",
+        "sprites/ui/scroll-knob-vertical-black.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "scrollKnobHorizontalBlack",
+        "scroll-knob-horizontal-black",
+        "sprites/ui/scroll-knob-horizontal-black.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "scrollKnobVerticalThin",
+        "scroll-knob-vertical-thin",
+        "sprites/ui/scroll-knob-vertical-thin.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "sliderBack",
+        "slider-back.9",
+        "sprites/ui/slider-back.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "sliderKnob",
+        "slider-knob",
+        "sprites/ui/slider-knob.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "sliderKnobOver",
+        "slider-knob-over",
+        "sprites/ui/slider-knob-over.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "sliderKnobDown",
+        "slider-knob-down",
+        "sprites/ui/slider-knob-down.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "checkOn",
+        "check-on",
+        "sprites/ui/check-on.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "checkOff",
+        "check-off",
+        "sprites/ui/check-off.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "checkOnOver",
+        "check-on-over",
+        "sprites/ui/check-on-over.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "checkOver",
+        "check-over",
+        "sprites/ui/check-over.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "checkOnDisabled",
+        "check-on-disabled",
+        "sprites/ui/check-on-disabled.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "checkDisabled",
+        "check-disabled",
+        "sprites/ui/check-disabled.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
         "underline",
         "underline.9",
         "sprites/ui/underline.9.png",
@@ -569,9 +714,27 @@ pub const UPSTREAM_UI_DRAWABLE_ALIASES: &[UiDrawableAlias] = &[
         UiDrawableTint::None,
     ),
     UiDrawableAlias::new(
+        "underlineOver",
+        "underline-over.9",
+        "sprites/ui/underline-over.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
         "underlineRed",
         "underline-red.9",
         "sprites/ui/underline-red.9.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "selection",
+        "selection",
+        "sprites/ui/selection.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "cursor",
+        "cursor",
+        "sprites/ui/cursor.png",
         UiDrawableTint::None,
     ),
 ];
@@ -612,6 +775,133 @@ pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
         .disabled("black"),
 ];
 
+pub const UPSTREAM_IMAGE_BUTTON_STYLE_SKINS: &[UiImageButtonStyleSkin] = &[
+    UiImageButtonStyleSkin {
+        java_name: "defaulti",
+        up: Some("button"),
+        down: Some("buttonDown"),
+        over: Some("buttonOver"),
+        checked: None,
+        disabled: Some("buttonDisabled"),
+    },
+    UiImageButtonStyleSkin {
+        java_name: "selecti",
+        up: Some("none"),
+        down: None,
+        over: None,
+        checked: Some("buttonSelect"),
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "squarei",
+        up: Some("pane"),
+        down: Some("whiteui"),
+        over: Some("flatDown"),
+        checked: None,
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "squareTogglei",
+        up: Some("black"),
+        down: Some("flatDown"),
+        over: Some("flatOver"),
+        checked: Some("flatDown"),
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "clearNoneTogglei",
+        up: Some("none"),
+        down: Some("flatDown"),
+        over: Some("flatOver"),
+        checked: Some("flatDown"),
+        disabled: None,
+    },
+];
+
+pub const UPSTREAM_SCROLL_PANE_STYLE_SKINS: &[UiScrollPaneStyleSkin] = &[
+    UiScrollPaneStyleSkin {
+        java_name: "defaultPane",
+        v_scroll: Some("scroll"),
+        v_scroll_knob: Some("scrollKnobVerticalBlack"),
+        h_scroll: None,
+        h_scroll_knob: None,
+    },
+    UiScrollPaneStyleSkin {
+        java_name: "horizontalPane",
+        v_scroll: Some("scroll"),
+        v_scroll_knob: Some("scrollKnobVerticalBlack"),
+        h_scroll: Some("scrollHorizontal"),
+        h_scroll_knob: Some("scrollKnobHorizontalBlack"),
+    },
+    UiScrollPaneStyleSkin {
+        java_name: "smallPane",
+        v_scroll: Some("clear"),
+        v_scroll_knob: Some("scrollKnobVerticalThin"),
+        h_scroll: None,
+        h_scroll_knob: None,
+    },
+    UiScrollPaneStyleSkin {
+        java_name: "noBarPane",
+        v_scroll: None,
+        v_scroll_knob: None,
+        h_scroll: None,
+        h_scroll_knob: None,
+    },
+];
+
+pub const UPSTREAM_SLIDER_STYLE_SKINS: &[UiSliderStyleSkin] = &[UiSliderStyleSkin {
+    java_name: "defaultSlider",
+    background: "sliderBack",
+    knob: "sliderKnob",
+    knob_over: "sliderKnobOver",
+    knob_down: "sliderKnobDown",
+}];
+
+pub const UPSTREAM_CHECK_BOX_STYLE_SKINS: &[UiCheckBoxStyleSkin] = &[UiCheckBoxStyleSkin {
+    java_name: "defaultCheck",
+    checkbox_on: "checkOn",
+    checkbox_off: "checkOff",
+    checkbox_on_over: "checkOnOver",
+    checkbox_over: "checkOver",
+    checkbox_on_disabled: "checkOnDisabled",
+    checkbox_off_disabled: "checkDisabled",
+}];
+
+pub const UPSTREAM_TEXT_FIELD_STYLE_SKINS: &[UiTextFieldStyleSkin] = &[
+    UiTextFieldStyleSkin {
+        java_name: "defaultField",
+        background: "underline",
+        disabled_background: Some("underlineDisabled"),
+        invalid_background: Some("underlineRed"),
+        selection: "selection",
+        cursor: "cursor",
+    },
+    UiTextFieldStyleSkin {
+        java_name: "nodeField",
+        background: "underlineWhite",
+        disabled_background: Some("underlineDisabled"),
+        invalid_background: Some("underlineRed"),
+        selection: "selection",
+        cursor: "cursor",
+    },
+    UiTextFieldStyleSkin {
+        java_name: "areaField",
+        background: "underline",
+        disabled_background: None,
+        invalid_background: None,
+        selection: "selection",
+        cursor: "cursor",
+    },
+    UiTextFieldStyleSkin {
+        java_name: "nodeArea",
+        background: "underlineWhite",
+        disabled_background: None,
+        invalid_background: None,
+        selection: "selection",
+        cursor: "cursor",
+    },
+];
+
 pub fn upstream_ui_skin_sprites() -> &'static [UiSkinSprite] {
     UPSTREAM_UI_SKIN_SPRITES
 }
@@ -636,6 +926,38 @@ pub fn upstream_ui_drawable_alias(java_name: &str) -> Option<&'static UiDrawable
 
 pub fn upstream_text_button_style_skin(java_name: &str) -> Option<&'static UiTextButtonStyleSkin> {
     UPSTREAM_TEXT_BUTTON_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
+}
+
+pub fn upstream_image_button_style_skin(
+    java_name: &str,
+) -> Option<&'static UiImageButtonStyleSkin> {
+    UPSTREAM_IMAGE_BUTTON_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
+}
+
+pub fn upstream_scroll_pane_style_skin(java_name: &str) -> Option<&'static UiScrollPaneStyleSkin> {
+    UPSTREAM_SCROLL_PANE_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
+}
+
+pub fn upstream_slider_style_skin(java_name: &str) -> Option<&'static UiSliderStyleSkin> {
+    UPSTREAM_SLIDER_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
+}
+
+pub fn upstream_check_box_style_skin(java_name: &str) -> Option<&'static UiCheckBoxStyleSkin> {
+    UPSTREAM_CHECK_BOX_STYLE_SKINS
+        .iter()
+        .find(|style| style.java_name == java_name)
+}
+
+pub fn upstream_text_field_style_skin(java_name: &str) -> Option<&'static UiTextFieldStyleSkin> {
+    UPSTREAM_TEXT_FIELD_STYLE_SKINS
         .iter()
         .find(|style| style.java_name == java_name)
 }
@@ -695,6 +1017,48 @@ mod tests {
         assert_eq!(menu.checked, Some("flatDown"));
         assert_eq!(menu.over, Some("flatOver"));
         assert_eq!(menu.disabled, Some("black"));
+    }
+
+    #[test]
+    fn upstream_widget_style_skins_match_java_scroll_slider_check_and_field_names() {
+        let horizontal = upstream_scroll_pane_style_skin("horizontalPane").unwrap();
+        assert_eq!(horizontal.v_scroll, Some("scroll"));
+        assert_eq!(horizontal.v_scroll_knob, Some("scrollKnobVerticalBlack"));
+        assert_eq!(horizontal.h_scroll, Some("scrollHorizontal"));
+        assert_eq!(horizontal.h_scroll_knob, Some("scrollKnobHorizontalBlack"));
+
+        let slider = upstream_slider_style_skin("defaultSlider").unwrap();
+        assert_eq!(slider.background, "sliderBack");
+        assert_eq!(slider.knob, "sliderKnob");
+        assert_eq!(slider.knob_over, "sliderKnobOver");
+        assert_eq!(slider.knob_down, "sliderKnobDown");
+
+        let check = upstream_check_box_style_skin("defaultCheck").unwrap();
+        assert_eq!(check.checkbox_on, "checkOn");
+        assert_eq!(check.checkbox_off, "checkOff");
+        assert_eq!(check.checkbox_on_disabled, "checkOnDisabled");
+        assert_eq!(check.checkbox_off_disabled, "checkDisabled");
+
+        let field = upstream_text_field_style_skin("defaultField").unwrap();
+        assert_eq!(field.background, "underline");
+        assert_eq!(field.disabled_background, Some("underlineDisabled"));
+        assert_eq!(field.invalid_background, Some("underlineRed"));
+        assert_eq!(field.selection, "selection");
+        assert_eq!(field.cursor, "cursor");
+    }
+
+    #[test]
+    fn upstream_image_button_style_skins_match_java_image_button_names() {
+        let defaulti = upstream_image_button_style_skin("defaulti").unwrap();
+        assert_eq!(defaulti.up, Some("button"));
+        assert_eq!(defaulti.down, Some("buttonDown"));
+        assert_eq!(defaulti.over, Some("buttonOver"));
+        assert_eq!(defaulti.disabled, Some("buttonDisabled"));
+
+        let square = upstream_image_button_style_skin("squarei").unwrap();
+        assert_eq!(square.up, Some("pane"));
+        assert_eq!(square.down, Some("whiteui"));
+        assert_eq!(square.over, Some("flatDown"));
     }
 
     #[test]

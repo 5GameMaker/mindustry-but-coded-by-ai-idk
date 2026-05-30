@@ -17968,3 +17968,68 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 字体/icon glyph atlas 未接入，`DrawText` 仍是占位；
   - route shell 内容还需要逐步替换为真实 About/Load/Settings/Mods/Database/TechTree 等页面；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 499. Styles widget 状态皮肤表补齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.5%**，仍未达到完整可玩；继续推进完整 UI 还原，不能只停在资源 atlas 层。
+- 问题背景：
+  - 498 已把 UI skin sprite/source path 纳入 core registry 和 desktop atlas，但 Java `Styles.java` 还包含各 widget style 的状态字段；
+  - 若不把这些状态表落到 Rust，后续 ScrollPane/Slider/CheckBox/TextField/ImageButton 迁移时仍会各自硬编码，模块会再次分裂；
+  - 本轮继续补齐 core 侧 style 数据契约，为真实 Scene2D widget 行为迁移做准备。
+- 本轮主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - 新增 `UiImageButtonStyleSkin`、`UiScrollPaneStyleSkin`、`UiSliderStyleSkin`、`UiCheckBoxStyleSkin`、`UiTextFieldStyleSkin`；
+    - 新增 `UPSTREAM_IMAGE_BUTTON_STYLE_SKINS`，覆盖 `defaulti/selecti/squarei/squareTogglei/clearNoneTogglei`；
+    - 新增 `UPSTREAM_SCROLL_PANE_STYLE_SKINS`，覆盖 `defaultPane/horizontalPane/smallPane/noBarPane`；
+    - 新增 `UPSTREAM_SLIDER_STYLE_SKINS`、`UPSTREAM_CHECK_BOX_STYLE_SKINS`、`UPSTREAM_TEXT_FIELD_STYLE_SKINS`；
+    - 扩充 `UPSTREAM_UI_DRAWABLE_ALIASES`，补 `buttonSelect/scroll*/slider*/check*/underlineOver/selection/cursor` 等 Java Tex 名到 atlas symbol/source 的映射；
+    - 新增查询函数和测试，固定 scroll/slider/check/textfield/imagebutton 的 Java 字段名。
+  - `core/src/mindustry/ui/mod.rs`
+    - 导出新增 widget style 类型、常量和查询函数，供后续真实控件实现共享。
+- 迁移意义：
+  - `Styles.java` 的常用 widget 状态表开始在 Rust core 侧成形，后续控件迁移能消费统一契约；
+  - 资源表、别名表、状态表在同一模块收口，减少 UI 模块孤立化风险；
+  - 这一步仍是控件运行时前置，不是最终可交互 ScrollPane/Slider/CheckBox/TextField。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core styles --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 真实 `Button/ScrollPane/Slider/CheckBox/TextField` 布局与输入事件处理尚未实现；
+  - `Fonts.java` 的真实字体和 icon glyph atlas 尚未接入；
+  - route shell 仍需替换为真实 Dialog/Page 内容；
+  - 未达到完整可玩，不能宣告目标完成。
+
+## 500. Fonts 字体与内容图标资源契约
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.6%**，仍未达到完整可玩；继续推进真实字体/icon atlas，目标是逐步替换 desktop `DrawText` placeholder。
+- 问题背景：
+  - Java `Fonts.java` 使用 `font.woff`、`font_jp.woff`、`icon.ttf`、`logic.ttf`、`monospace.woff`、`tech.ttf`，并通过 `icons/icons.properties` 给内容图标注册 glyph；
+  - Rust desktop 当前文字仍是 placeholder glyph quads，UI 即使有原版皮肤也无法达到原版视觉；
+  - 本轮先把字体资源、角色、RenderFontId 映射和 icon properties 解析落到 core，作为后续 FreeType/icon atlas 渲染的前置契约。
+- 本轮主改动：
+  - `core/src/mindustry/ui/fonts.rs`
+    - 新增 `UpstreamFontRole`、`UpstreamFontAsset`、`UpstreamContentIcon`；
+    - 固定上游字体资源路径：`fonts/font.woff`、`fonts/font_jp.woff`、`fonts/icon.ttf`、`fonts/logic.ttf`、`fonts/monospace.woff`、`fonts/tech.ttf`、`icons/icons.properties`；
+    - 记录 `Fonts.def/outline/icon/iconLarge/tech/logic/monospace` 和日文字体 override 的 Java 名称、字号、incremental/scaled/border/shadow/characters 等关键参数；
+    - 将 `Default/Outline/Logic` 映射到现有 `RenderFontId`，icon/tech/monospace 暂保留为后续 renderer 扩展点；
+    - 新增 `parse_upstream_icon_properties(...)`，按 Java `icons.properties` 的 `unicode=name|atlasSymbol` 结构解析内容图标；
+    - 新增测试覆盖字体资源、icon 字体、monospace/tech/font_jp 路径和解析错误。
+  - `core/src/mindustry/ui/mod.rs`
+    - 导出 fonts 模块的资源表、查询函数和 parser，供 renderer/atlas 后续统一消费。
+- 迁移意义：
+  - 字体与 icon glyph 的上游资源契约已进入 Rust core，不再需要 renderer 侧重新猜 `Fonts.java`；
+  - 为后续真实文本、Icon.discord、内容 emoji、逻辑字体和 tech 字体渲染打通前置数据层；
+  - 这一步仍未替换 OpenGL text rasterization，但已经把资源名、参数和解析行为固定下来。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core styles --lib`
+  - `cargo test -p mindustry-core fonts --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `desktop/src/lib.rs` 中的 placeholder glyph mesh 尚未替换成真实字体 atlas；
+  - `Icon` 字体 glyph、内容图标 emoji、markup/wrap/outline/shadow 等渲染细节尚未完成；
+  - 原版 Settings/Mods/Database/TechTree 等页面仍需接真实 widget；
+  - 未达到完整可玩，不能宣告目标完成。
