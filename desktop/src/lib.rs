@@ -111,6 +111,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_MINDUSTRY_PORT: u16 = 6567;
+const MENU_VISUAL_PRESSED_HOLD_FRAMES: u8 = 6;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -13412,6 +13413,8 @@ pub struct DesktopLauncher {
     pub last_menu_cursor: Option<RenderPoint>,
     pub last_menu_hovered_button: Option<MenuButtonRole>,
     pub last_menu_pressed_button: Option<MenuButtonRole>,
+    pub last_menu_visual_pressed_button: Option<MenuButtonRole>,
+    pub last_menu_visual_pressed_frames: u8,
     pub last_menu_action: Option<MenuButtonRole>,
     pub active_menu_route: Option<DesktopMenuRoute>,
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
@@ -14107,6 +14110,8 @@ impl DesktopLauncher {
             last_menu_cursor: None,
             last_menu_hovered_button: None,
             last_menu_pressed_button: None,
+            last_menu_visual_pressed_button: None,
+            last_menu_visual_pressed_frames: 0,
             last_menu_action: None,
             active_menu_route: None,
             last_menu_dispatch: None,
@@ -15238,12 +15243,31 @@ impl DesktopLauncher {
         ])
     }
 
+    fn active_menu_pressed_button_for_visuals(&self) -> Option<MenuButtonRole> {
+        self.last_menu_pressed_button.or_else(|| {
+            (self.last_menu_visual_pressed_frames > 0)
+                .then_some(self.last_menu_visual_pressed_button)
+                .flatten()
+        })
+    }
+
+    fn apply_menu_visual_pressed_frame_decay(&mut self) {
+        if self.last_menu_pressed_button.is_some() || self.last_menu_visual_pressed_frames == 0 {
+            return;
+        }
+        self.last_menu_visual_pressed_frames -= 1;
+        if self.last_menu_visual_pressed_frames == 0 {
+            self.last_menu_visual_pressed_button = None;
+        }
+    }
+
     pub fn menu_frame_for_render(&mut self, input: MenuFrameInput) -> DesktopFrame {
         let mut plan = self.menu_renderer_state.render_plan(input);
         plan.ui = plan
             .ui
             .with_hovered_role(self.last_menu_hovered_button)
-            .with_pressed_role(self.last_menu_pressed_button);
+            .with_pressed_role(self.active_menu_pressed_button_for_visuals());
+        self.apply_menu_visual_pressed_frame_decay();
         DesktopFrame {
             kind: DesktopFrameKind::Menu,
             payload: DesktopFramePayload::Menu(plan),
@@ -18648,6 +18672,10 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::MouseButton { button, pressed }
                     if !*pressed && Self::is_primary_menu_mouse_button(button) =>
                 {
+                    if let Some(role) = self.last_menu_pressed_button {
+                        self.last_menu_visual_pressed_button = Some(role);
+                        self.last_menu_visual_pressed_frames = MENU_VISUAL_PRESSED_HOLD_FRAMES;
+                    }
                     self.last_menu_pressed_button = None;
                 }
                 DesktopInputTickEvent::MouseButton { button, pressed }
@@ -18656,6 +18684,8 @@ impl DesktopLauncher {
                     if let Some(cursor) = self.last_menu_cursor {
                         self.last_menu_pressed_button =
                             self.menu_button_at_surface_point(surface_size, cursor.x, cursor.y);
+                        self.last_menu_visual_pressed_button = None;
+                        self.last_menu_visual_pressed_frames = 0;
                         if let Some(slot_index) =
                             self.load_game_slot_at_surface_point(surface_size, cursor.x, cursor.y)
                         {
@@ -18993,7 +19023,8 @@ impl DesktopLauncher {
         plan.ui = plan
             .ui
             .with_hovered_role(self.last_menu_hovered_button)
-            .with_pressed_role(self.last_menu_pressed_button);
+            .with_pressed_role(self.active_menu_pressed_button_for_visuals());
+        self.apply_menu_visual_pressed_frame_decay();
         let mut menu_pass = if desktop_fast_menu_enabled() {
             self.fast_menu_render_pass_from_plan(&plan, viewport)
         } else {
@@ -20312,6 +20343,8 @@ impl DesktopLauncher {
         self.last_menu_cursor = None;
         self.last_menu_hovered_button = None;
         self.last_menu_pressed_button = None;
+        self.last_menu_visual_pressed_button = None;
+        self.last_menu_visual_pressed_frames = 0;
         self.last_menu_action = None;
         self.active_menu_route = None;
         self.last_menu_dispatch = None;
@@ -20978,6 +21011,7 @@ mod tests {
         HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
         DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_HEIGHT, DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_WIDTH,
         DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY, DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME,
+        MENU_VISUAL_PRESSED_HOLD_FRAMES,
     };
     use mindustry_core::mindustry::content::{blocks::BlockDef, bullets::BulletContent};
     use mindustry_core::mindustry::core::game_runtime::{
@@ -35150,6 +35184,61 @@ mod tests {
             }],
         );
         assert_eq!(launcher.last_menu_pressed_button, None);
+        assert_eq!(
+            launcher.last_menu_visual_pressed_button,
+            Some(MenuButtonRole::Settings)
+        );
+        assert_eq!(
+            launcher.last_menu_visual_pressed_frames,
+            MENU_VISUAL_PRESSED_HOLD_FRAMES
+        );
+
+        let release_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let release_commands = release_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(release_commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "flat-down-base.9" && *rect == settings_rect
+            )
+        }));
+        assert_eq!(launcher.last_menu_pressed_button, None);
+        assert_eq!(
+            launcher.last_menu_visual_pressed_button,
+            Some(MenuButtonRole::Settings)
+        );
+
+        for frame_index in 2..=(MENU_VISUAL_PRESSED_HOLD_FRAMES as u64) {
+            launcher.menu_graphics_frame_for_surface(frame_index, viewport);
+        }
+        assert_eq!(launcher.last_menu_visual_pressed_button, None);
+        assert_eq!(launcher.last_menu_visual_pressed_frames, 0);
+
+        let expired_frame = launcher.menu_graphics_frame_for_surface(99, viewport);
+        let expired_commands = expired_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(!expired_commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "flat-down-base.9" && *rect == settings_rect
+            )
+        }));
     }
 
     #[test]

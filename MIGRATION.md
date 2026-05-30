@@ -18445,3 +18445,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实字体 atlas / `DrawText` 仍是 placeholder，尚未替换为真正 glyph quad 渲染；
   - 其它上游 `Iconc.*` 的大范围文本图标未完全替换；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 515. MenuFragment visualPressed 短暂按压保留
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.1%**，仍未达到完整可玩；继续按原版 UI 语义补齐主菜单按钮释放后的短暂按压视觉，避免 mouse up 后立刻闪回导致按下反馈不像 Scene2D 按钮。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MENU_VISUAL_PRESSED_HOLD_FRAMES`，以 60 FPS 下约 0.1 秒的窗口模拟 `visualPressed` 的短暂视觉保留；
+    - `DesktopLauncher` 新增 `last_menu_visual_pressed_button` / `last_menu_visual_pressed_frames`；
+    - primary mouse up 时把刚释放的 `last_menu_pressed_button` 转入 visual pressed 缓存，再清空真实 pressed；
+    - `menu_frame_for_render()` 与 `menu_graphics_frame_for_surface()` 在渲染前统一使用真实 pressed 或 visual pressed 的有效按压角色，并在帧末衰减缓存；
+    - reset 时同步清空 visual pressed 状态。
+  - 测试：
+    - 扩展 `desktop_launcher_menu_frame_applies_pressed_button_down_drawable_and_release_clears`，覆盖 `pressed:false` 后第一帧仍输出 `flat-down-base.9`，保留窗口结束后恢复非 down 状态。
+- 迁移意义：
+  - 主菜单按钮状态链路从 `up / over / down / checked` 进一步补到释放后的 `visualPressed` 反馈；
+  - 视觉保留接入真实 desktop 输入与菜单渲染帧，不是独立 helper；
+  - 后续继续补拖出取消/拖回恢复、disabled、keyboard focus、tooltip，以及更完整 Settings/LoadDialog UI。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_frame_applies_pressed_button_down_drawable_and_release_clears --lib`
+- 仍未完成：
+  - 按住拖出/拖回的 pressed 取消/恢复还未补齐；
+  - disabled/keyboard focus/tooltip 仍未迁移；
+  - SettingsMenuDialog、LoadDialog 仍未达到原版完整 UI；
+  - 未达到完整可玩，不能宣告目标完成。
