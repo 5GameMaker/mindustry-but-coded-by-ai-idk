@@ -16525,3 +16525,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - payload 当前尚未完整复刻 `BuildPayload.drawShadow()/build.payloadDraw()` 与 `UnitPayload.draw()->unit.type.draw(unit)`；
   - `ClientUnitPayloadMirror` 仍是计数级镜像，后续应升级为有序 `PayloadKey` 列表，避免真实联机中 `first()` 顺序和内容身份丢失；
   - weather custom command、`DrawText` OpenGL lowering、`LightCommand::Runnable` 等后端长尾仍需继续逐项闭环。
+
+## 453. 最新闭环记录：UnitType Shape/Flare Parts 接入客户端单位渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **44.1%**，仍未达到完整可玩。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1561-1578`：`UnitType.draw()` 在 `drawItems(unit)` 之后遍历 `parts` 并调用 `part.draw(...)`；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\entities\part\ShapePart.java` / `FlarePart.java`：当前 Rust 已有 typed plan，可作为最小 Parts 渲染闭环；
+  - `shootOnDeathWeapon` 不是普通 DrawPart，本轮明确保留为行为桥缺口，不伪装成 parts 视觉。
+- 本轮主改动：
+  - `core/src/mindustry/entities/part.rs`：新增 `UnitDrawPartKind`、`unit_draw_part_kind_from_tag(...)`、`unit_draw_part_tag_is_behavior_only(...)`，只把当前内容中真实可绘制的 `ShapePart` / `FlarePart` tag 分发到 typed plan，`shootOnDeathWeapon` 显式保持 behavior-only。
+  - `core/src/mindustry/entities/mod.rs`：导出上述 parts tag 分发入口。
+  - `core/src/mindustry/type/unit_type.rs`：`UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 插入 `UnitDrawStage::Parts`，顺序为 `Weapons -> Items -> Parts -> Shield`。
+  - `desktop/src/lib.rs`：新增 snapshot parts 参数、ShapePart/FlarePart 可见过渡 spec、part color lowering 与 `unit_snapshot_parts_render_commands(...)`；`UnitDrawStage::Parts` 分支输出真实 `DrawCircle` / `DrawTriangle`，进入 Overlay pass 与 backend primitive 主链。
+- 迁移意义：
+  - `UnitType.parts` 中当前真实存在的 `ShapePart` / `FlarePart` 不再停留在字符串 tag，已经接入 `runtime client unit snapshot -> UnitType stage contract -> Overlay RenderPass -> primitive RenderCommand -> OpenGL primitive`；
+  - 本轮只覆盖当前内容中真实出现且已有 typed plan 的最小子集，避免把 `shootOnDeathWeapon` 错误实现为视觉 part，也避免提前展开空的 `Weapon.parts`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_draw_part_string_tags_resolve_current_unit_type_subset --lib`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_shape_and_flare_parts_after_items_before_shield --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `Parts` 仍是 Shape/Flare 的可见过渡 spec，尚未从 Java 内容完整解析真实参数；
+  - `RegionPart`、`Weapon.parts` 的 under/over、recoilIndex、heat/light/children 仍未接入；
+  - `shootOnDeathWeapon` 需要走武器/死亡行为链，不属于本轮 parts 渲染；
+  - `Abilities` 仍是单位渲染主链缺口；weather custom command 与 `DrawText` OpenGL lowering 仍需继续推进。

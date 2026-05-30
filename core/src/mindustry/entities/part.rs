@@ -439,6 +439,24 @@ pub enum ShapePartKind {
     Polygon { sides: i32 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitDrawPartKind {
+    Shape,
+    Flare,
+}
+
+pub fn unit_draw_part_kind_from_tag(tag: &str) -> Option<UnitDrawPartKind> {
+    match tag.trim() {
+        "ShapePart" => Some(UnitDrawPartKind::Shape),
+        "FlarePart" => Some(UnitDrawPartKind::Flare),
+        _ => None,
+    }
+}
+
+pub fn unit_draw_part_tag_is_behavior_only(tag: &str) -> bool {
+    matches!(tag.trim(), "shootOnDeathWeapon")
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapePartDrawItem {
     pub x: f32,
@@ -1389,10 +1407,26 @@ fn rotate_offset(angle: f32, x: f32, y: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DrawPartConfig, EffectSpawnerPart, EffectSpawnerRectPlan, FlarePart, HaloPart,
-        HaloShapeKind, HoverPart, PartMove, PartParams, PartProgress, RegionDrawKind, RegionPart,
-        RegionTexture, ShapePart, ShapePartKind,
+        unit_draw_part_kind_from_tag, unit_draw_part_tag_is_behavior_only, DrawPartConfig,
+        EffectSpawnerPart, EffectSpawnerRectPlan, FlarePart, HaloPart, HaloShapeKind, HoverPart,
+        PartMove, PartParams, PartProgress, RegionDrawKind, RegionPart, RegionTexture, ShapePart,
+        ShapePartKind, UnitDrawPartKind,
     };
+
+    #[test]
+    fn unit_draw_part_string_tags_resolve_current_unit_type_subset() {
+        assert_eq!(
+            unit_draw_part_kind_from_tag("ShapePart"),
+            Some(UnitDrawPartKind::Shape)
+        );
+        assert_eq!(
+            unit_draw_part_kind_from_tag("FlarePart"),
+            Some(UnitDrawPartKind::Flare)
+        );
+        assert_eq!(unit_draw_part_kind_from_tag("shootOnDeathWeapon"), None);
+        assert!(unit_draw_part_tag_is_behavior_only("shootOnDeathWeapon"));
+        assert!(!unit_draw_part_tag_is_behavior_only("ShapePart"));
+    }
 
     #[test]
     fn part_params_set_and_recoil_match_java_mutators() {

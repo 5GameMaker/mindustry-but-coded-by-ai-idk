@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **44.0%**。
+- 当前总体迁移完成度：约 **44.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -13667,3 +13667,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `ClientUnitPayloadMirror` 仍只有 count/seen，应升级为有序 `PayloadKey` 列表；
   3. 单位渲染剩余主缺口是 `Parts` / `Abilities`；
   4. 子代理结论建议后续还要推进 weather custom command lowering 与 `DrawText` OpenGL 真实绘制。
+
+### 2026-05-30：UnitType Shape/Flare Parts 接入客户端单位渲染链
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **44.1%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/entities/part.rs`
+    - 新增 `UnitDrawPartKind`；
+    - 新增 `unit_draw_part_kind_from_tag(...)`；
+    - 新增 `unit_draw_part_tag_is_behavior_only(...)`；
+    - 当前只把 `ShapePart` / `FlarePart` 视为可绘制 DrawPart，`shootOnDeathWeapon` 明确保留为 behavior-only。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 parts tag 分发入口。
+  - `core/src/mindustry/type/unit_type.rs`
+    - `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 插入 `UnitDrawStage::Parts`；
+    - snapshot 顺序现在包含 `Weapons -> Items -> Parts -> Shield`。
+  - `desktop/src/lib.rs`
+    - 新增 snapshot parts 参数构造、ShapePart/FlarePart 过渡 spec、part color lowering；
+    - 新增 `unit_snapshot_parts_render_commands(...)`；
+    - `UnitDrawStage::Parts` 输出真实 `DrawCircle` / `DrawTriangle` 命令；
+    - 新增 `desktop_launcher_emits_unit_shape_and_flare_parts_after_items_before_shield`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_draw_part_string_tags_resolve_current_unit_type_subset --lib`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_shape_and_flare_parts_after_items_before_shield --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. `Parts` 后续要从 Java 内容完整解析真实参数，尤其是 `RegionPart`、`Weapon.parts` under/over、recoilIndex、heat/light/children；
+  2. `shootOnDeathWeapon` 要走武器/死亡行为链，不要误当普通 DrawPart；
+  3. 单位渲染剩余主要缺口是 `Abilities`；
+  4. 渲染后端建议继续做 `weather-rain-over` lowering 或 `DrawText` glyph/quad/OpenGL 链路。

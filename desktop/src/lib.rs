@@ -26,13 +26,14 @@ use mindustry_core::mindustry::entities::comp::{
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect, standard_effect_color_symbol,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
-    standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
-    PlayerUnitSwitchContext, PuddleLiquidInfo, ShieldArcAbility,
+    standard_effect_render_lifetime, unit_draw_part_kind_from_tag, EffectRenderInput,
+    EntityClassKind, FlarePart, PartParams, PartProgress, PlayerComp, PlayerUnitSwitchContext,
+    PuddleLiquidInfo, ShapePart, ShapePartKind, ShieldArcAbility,
     StandardEffectCircleRenderPrimitive, StandardEffectDrawKind, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
     StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, TextureRegionRef,
-    WeaponMount, WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
+    UnitDrawPartKind, WeaponMount, WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
@@ -1292,6 +1293,53 @@ fn desktop_unit_payload_symbol(kind: PayloadKind) -> &'static str {
 
 fn desktop_unit_payload_layer(unit: &UnitComp) -> f32 {
     desktop_unit_soft_shadow_layer(unit) - 0.02
+}
+
+fn desktop_unit_part_params(unit: &UnitComp) -> PartParams {
+    PartParams {
+        warmup: 1.0,
+        reload: 1.0,
+        smooth_reload: 1.0,
+        heat: 0.0,
+        recoil: 0.0,
+        life: 1.0,
+        charge: 0.0,
+        x: unit.x(),
+        y: unit.y(),
+        rotation: unit.rotation(),
+        side_override: -1,
+        side_multiplier: 1,
+    }
+}
+
+fn desktop_unit_shape_part_for_snapshot(unit: &UnitComp) -> ShapePart {
+    ShapePart {
+        circle: true,
+        hollow: true,
+        radius: (unit.hitbox.hit_size * 0.65).max(3.0),
+        stroke: 1.5,
+        color: "accent".into(),
+        progress: PartProgress::Constant(1.0),
+        layer: desktop_unit_body_layer(unit) + 0.01,
+        ..ShapePart::default()
+    }
+}
+
+fn desktop_unit_flare_part_for_snapshot(unit: &UnitComp) -> FlarePart {
+    FlarePart {
+        radius: (unit.hitbox.hit_size * 1.2).max(8.0),
+        stroke: 3.0,
+        progress: PartProgress::Constant(1.0),
+        layer: desktop_unit_body_layer(unit) + 0.02,
+        ..FlarePart::default()
+    }
+}
+
+fn desktop_part_render_color(name: &str) -> [f32; 4] {
+    desktop_effect_render_color(
+        Some(desktop_resolve_color_symbol(name).unwrap_or(DecalColor::WHITE)),
+        1.0,
+    )
 }
 
 fn desktop_unit_item_center(unit: &UnitComp) -> RenderPoint {
@@ -13556,6 +13604,67 @@ impl DesktopLauncher {
         )]
     }
 
+    fn unit_snapshot_parts_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid() || unit.type_info.parts.is_empty() {
+            return Vec::new();
+        }
+
+        let params = desktop_unit_part_params(unit);
+        let mut commands = Vec::new();
+        for tag in &unit.type_info.parts {
+            match unit_draw_part_kind_from_tag(tag) {
+                Some(UnitDrawPartKind::Shape) => {
+                    let part = desktop_unit_shape_part_for_snapshot(unit);
+                    let plan = part.draw_plan(&params, self.render_time);
+                    let layer = plan.layer.unwrap_or_else(|| desktop_unit_body_layer(unit))
+                        + plan.layer_offset;
+                    for shape in plan.shapes {
+                        let center = RenderPoint::new(shape.x, shape.y);
+                        let color = desktop_part_render_color(&shape.color);
+                        match shape.kind {
+                            ShapePartKind::Circle => {
+                                commands.push(RenderCommand::draw_circle(
+                                    center,
+                                    shape.radius,
+                                    color,
+                                    !shape.hollow,
+                                    layer,
+                                ));
+                            }
+                            ShapePartKind::Polygon { sides } => {
+                                commands.push(RenderCommand::draw_polygon(
+                                    center,
+                                    shape.radius,
+                                    sides.max(3) as usize,
+                                    shape.rotation,
+                                    color,
+                                    !shape.hollow,
+                                    layer,
+                                ));
+                            }
+                        }
+                    }
+                }
+                Some(UnitDrawPartKind::Flare) => {
+                    let part = desktop_unit_flare_part_for_snapshot(unit);
+                    let plan = part.draw_plan(&params, self.render_time);
+                    for triangle in plan.triangles {
+                        commands.push(RenderCommand::draw_triangle(
+                            RenderPoint::new(plan.x, plan.y),
+                            triangle.width,
+                            triangle.length,
+                            triangle.rotation,
+                            desktop_part_render_color(&triangle.color),
+                            plan.layer,
+                        ));
+                    }
+                }
+                None => {}
+            }
+        }
+        commands
+    }
+
     fn unit_snapshot_shield_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_shields || unit.shield.shield_alpha <= 0.0 {
             return None;
@@ -14117,12 +14226,15 @@ impl DesktopLauncher {
                     UnitDrawStage::Items => pass
                         .commands
                         .extend(self.unit_snapshot_item_render_commands(unit)),
+                    UnitDrawStage::Parts => pass
+                        .commands
+                        .extend(self.unit_snapshot_parts_render_commands(unit)),
                     UnitDrawStage::Shield => {
                         if let Some(command) = self.unit_snapshot_shield_render_command(unit) {
                             pass.commands.push(command);
                         }
                     }
-                    UnitDrawStage::Parts | UnitDrawStage::Abilities => {}
+                    UnitDrawStage::Abilities => {}
                 }
             }
         }
@@ -20135,6 +20247,118 @@ mod tests {
             }
             other => panic!("expected unit payload DrawSprite, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn desktop_launcher_emits_unit_shape_and_flare_parts_after_items_before_shield() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+        dagger.parts = vec![
+            "ShapePart".into(),
+            "FlarePart".into(),
+            "shootOnDeathWeapon".into(),
+        ];
+
+        let mut unit = UnitComp::new(7406, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(90.0);
+        unit.set_controller(UnitControllerState::Player {
+            player_id: launcher.player.id,
+        });
+        unit.items.stack.item = Some("copper".into());
+        unit.items.stack.amount = 1;
+        unit.items.item_time = 1.0;
+        unit.shield.shield_alpha = 0.5;
+        let hit_size = unit.hitbox.hit_size;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7406, unit);
+
+        launcher.render_time = 0.0;
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            27,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, RenderCommand::DrawTriangle { .. }))
+            })
+            .expect("unit parts should emit overlay geometry");
+
+        let item_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "item-copper-full")
+            })
+            .expect("item stage should run before parts");
+        let shape_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawCircle { center, radius, filled, layer, .. }
+                        if *center == RenderPoint::new(40.0, 56.0)
+                            && (*radius - hit_size * 0.65).abs() < 0.0001
+                            && !*filled
+                            && (*layer - (Layer::GROUND_UNIT + 0.01)).abs() < 0.0001
+                )
+            })
+            .expect("ShapePart tag should emit a draw circle");
+        let flare_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawTriangle { center, length, layer, .. }
+                        if *center == RenderPoint::new(40.0, 56.0)
+                            && (*length - hit_size * 1.2).abs() < 0.0001
+                            && (*layer - (Layer::GROUND_UNIT + 0.02)).abs() < 0.0001
+                )
+            })
+            .expect("FlarePart tag should emit triangles");
+        let shield_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawCircle { center, radius, layer, .. }
+                        if *center == RenderPoint::new(40.0, 56.0)
+                            && (*radius - hit_size * 1.3).abs() < 0.0001
+                            && (*layer - Layer::GROUND_UNIT).abs() < 0.0001
+                )
+            })
+            .expect("shield should render after parts");
+
+        assert!(item_index < shape_index);
+        assert!(shape_index < flare_index);
+        assert!(flare_index < shield_index);
+        assert!(!overlay.commands.iter().any(|command| {
+            matches!(command, RenderCommand::Custom { name, .. } if name == "shootOnDeathWeapon")
+        }));
     }
 
     #[test]
