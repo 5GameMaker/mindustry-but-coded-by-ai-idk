@@ -8,6 +8,32 @@ pub mod mobile_button;
 pub mod styles;
 pub mod warning_bar;
 
+pub const UPSTREAM_BUNDLE_PROPERTIES_SOURCE_PATH: &str = "core/assets/bundles/bundle.properties";
+
+pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
+    ("play", "Play"),
+    ("campaign", "Campaign"),
+    ("joingame", "Join Game"),
+    ("customgame", "Custom Game"),
+    ("loadgame", "Load Game"),
+    ("database.button", "Database"),
+    ("database", "Database"),
+    ("schematics", "Schematics"),
+    ("techtree", "Tech Tree"),
+    ("about.button", "About"),
+    ("editor", "Editor"),
+    ("workshop", "Workshop"),
+    ("mods", "Mods"),
+    ("settings", "Settings"),
+    ("quit", "Quit"),
+];
+
+pub fn upstream_bundle_en_value(key: &str) -> Option<&'static str> {
+    UPSTREAM_MENU_BUNDLE_ENTRIES
+        .iter()
+        .find_map(|(candidate, value)| (*candidate == key).then_some(*value))
+}
+
 pub use bar::{
     Bar, BarBackgroundDraw, BarDrawCommand, BarDrawPlan, BarFillDraw, BarFrameState, BarLayout,
     BarOutlineDraw, BarTextDraw,
@@ -42,3 +68,31 @@ pub use warning_bar::{
     LineSegment, Quad, WarningBar, WarningBarDrawCommand, WarningBarDrawPlan, WarningBarLayout,
     WarningBarLineDraw, WarningBarStripeDraw,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upstream_menu_bundle_entries_cover_menu_fragment_buttons() {
+        assert_eq!(
+            UPSTREAM_BUNDLE_PROPERTIES_SOURCE_PATH,
+            "core/assets/bundles/bundle.properties"
+        );
+        for (key, expected) in [
+            ("play", "Play"),
+            ("campaign", "Campaign"),
+            ("joingame", "Join Game"),
+            ("customgame", "Custom Game"),
+            ("loadgame", "Load Game"),
+            ("database.button", "Database"),
+            ("database", "Database"),
+            ("about.button", "About"),
+            ("settings", "Settings"),
+            ("quit", "Quit"),
+        ] {
+            assert_eq!(upstream_bundle_en_value(key), Some(expected));
+        }
+        assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
+    }
+}

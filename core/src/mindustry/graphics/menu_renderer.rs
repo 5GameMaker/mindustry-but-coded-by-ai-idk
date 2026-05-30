@@ -9,8 +9,8 @@ use super::{
     RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
 use crate::mindustry::ui::{
-    upstream_image_button_style_skin, upstream_text_button_style_skin, upstream_ui_drawable_alias,
-    upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
+    upstream_bundle_en_value, upstream_image_button_style_skin, upstream_text_button_style_skin,
+    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
@@ -506,16 +506,39 @@ pub enum MenuButtonRole {
 }
 
 impl MenuButtonRole {
-    pub const fn label(self) -> &'static str {
+    pub const fn bundle_key(self) -> Option<&'static str> {
+        match self {
+            Self::Play => Some("play"),
+            Self::Campaign => Some("campaign"),
+            Self::Join => Some("joingame"),
+            Self::CustomGame => Some("customgame"),
+            Self::LoadGame => Some("loadgame"),
+            Self::Database => Some("database.button"),
+            Self::Schematics => Some("schematics"),
+            Self::ContentDatabase => Some("database"),
+            Self::TechTree => Some("techtree"),
+            Self::About => Some("about.button"),
+            Self::Editor => Some("editor"),
+            Self::Workshop => Some("workshop"),
+            Self::Mods => Some("mods"),
+            Self::Settings => Some("settings"),
+            Self::Custom(_) => None,
+            Self::Quit => Some("quit"),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        if let Some(label) = self.bundle_key().and_then(upstream_bundle_en_value) {
+            return label;
+        }
         match self {
             Self::Play => "Play",
             Self::Campaign => "Campaign",
             Self::Join => "Join Game",
             Self::CustomGame => "Custom Game",
             Self::LoadGame => "Load Game",
-            Self::Database => "Database",
+            Self::Database | Self::ContentDatabase => "Database",
             Self::Schematics => "Schematics",
-            Self::ContentDatabase => "Database",
             Self::TechTree => "Tech Tree",
             Self::About => "About",
             Self::Editor => "Editor",
@@ -2537,6 +2560,21 @@ mod tests {
         assert_eq!(MenuButtonRole::Workshop.icon_name(false), Some("steam"));
         assert_eq!(MenuButtonRole::Quit.icon_name(true), Some("exit"));
         assert_eq!(MenuButtonRole::Custom(0).icon_name(false), None);
+        assert_eq!(MenuButtonRole::Play.bundle_key(), Some("play"));
+        assert_eq!(MenuButtonRole::Join.bundle_key(), Some("joingame"));
+        assert_eq!(
+            MenuButtonRole::Database.bundle_key(),
+            Some("database.button")
+        );
+        assert_eq!(
+            MenuButtonRole::ContentDatabase.bundle_key(),
+            Some("database")
+        );
+        assert_eq!(MenuButtonRole::About.bundle_key(), Some("about.button"));
+        assert_eq!(MenuButtonRole::Custom(0).bundle_key(), None);
+        assert_eq!(MenuButtonRole::Join.label(), "Join Game");
+        assert_eq!(MenuButtonRole::CustomGame.label(), "Custom Game");
+        assert_eq!(MenuButtonRole::Settings.label(), "Settings");
 
         for icon in [
             "play",
