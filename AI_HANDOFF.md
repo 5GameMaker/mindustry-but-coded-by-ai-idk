@@ -12867,3 +12867,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 接 Unit engine trail / hard shadow / weapons / legs / payload/items，继续挂在同一 unit aggregation；
   2. 给 engine circles 补 Java `Mathf.absin(Time.time, 2f, radius / 4f)` 半径脉动；
   3. 并行推进 native OpenGL `Clear`/viewport/scissor/blend 状态链与统一 entity layer sorting，避免 Overlay 过渡层长期化。
+
+### 2026-05-30：Unit engine circles 接入 Java absin 半径脉动
+
+- 当前整体完成度：约 **41.5%**。
+- 已完成：
+  - `DesktopLauncher` 新增内部 `render_time`，`update()` 在非暂停状态下推进；
+  - 新增 `desktop_absin(...)`，按 `abs(sin(time / scl)) * mag` 表达 Java/Arc `Mathf.absin(time, scl, mag)` 最小语义；
+  - `unit_snapshot_engine_render_commands(...)` 已将 engine 半径从静态 `radius * scale` 改为 `(radius + absin(render_time, 2, radius / 4)) * scale`；
+  - dagger 快照测试新增 `render_time = PI` 断言，默认 engine 外圈半径从 `2.5` 脉动到 `3.125`；
+  - native OpenGL `Clear`/viewport/blend/scissor 链路经只读复核已真实接到 `main.rs` 的 glow 调用；剩余缺口是 live window smoke。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_engine_circles_for_elevated_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. Unit engine trail 不要直接画空 snapshot；先补 runtime trail points，再复用 `core::graphics::Trail` 渲染；
+  2. Unit weapons 最小闭环需要先补 mount visual snapshot（至少 rotation/recoil），否则只能静态画武器；
+  3. 继续推进 hard shadow / weapons / legs / payload/items，并持续收口统一 entity layer sorting。

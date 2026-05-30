@@ -9803,6 +9803,7 @@ pub struct DesktopLauncher {
     last_client_snapshot_apply_report: Option<GameRuntimeClientSnapshotApplyReport>,
     last_service_trigger_apply_summary: Option<GameServiceApplySummary>,
     last_applied_client_plan_snapshot_received_count: usize,
+    render_time: f32,
     puddle_particle_rand_state: u64,
 }
 
@@ -10110,6 +10111,13 @@ fn desktop_interp_pow4_in(value: f32) -> f32 {
 
 fn desktop_lerp(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * progress.clamp(0.0, 1.0)
+}
+
+fn desktop_absin(time: f32, scl: f32, mag: f32) -> f32 {
+    if !time.is_finite() || scl.abs() <= f32::EPSILON || !mag.is_finite() {
+        return 0.0;
+    }
+    (time / scl).sin().abs() * mag
 }
 
 fn accelerator_launch_zoom_scale(
@@ -10457,6 +10465,7 @@ impl DesktopLauncher {
             last_client_snapshot_apply_report: None,
             last_service_trigger_apply_summary: None,
             last_applied_client_plan_snapshot_received_count: 0,
+            render_time: 0.0,
             puddle_particle_rand_state: DESKTOP_PUDDLE_PARTICLE_RAND_DEFAULT,
         }
     }
@@ -10635,6 +10644,9 @@ impl DesktopLauncher {
     }
 
     pub fn update(&mut self) {
+        if !self.game_state.is_paused() {
+            self.render_time = (self.render_time + 1.0).max(0.0);
+        }
         self.client.update();
         self.net_client.update();
         self.sync_loaded_world_data();
@@ -11946,7 +11958,7 @@ impl DesktopLauncher {
         for (x, y, radius, engine_rotation) in desktop_unit_engine_entries(unit) {
             let (ex, ey) = desktop_rotate_offset(rot, x, y);
             let center = RenderPoint::new(unit.x() + ex, unit.y() + ey);
-            let rad = radius * scale;
+            let rad = (radius + desktop_absin(self.render_time, 2.0, radius / 4.0)) * scale;
             commands.push(RenderCommand::draw_circle(
                 center,
                 rad,
@@ -16548,6 +16560,36 @@ mod tests {
         );
         assert!(engine_circles[1].3);
         assert_eq!(engine_circles[1].4, Layer::FLYING_UNIT);
+
+        launcher.render_time = std::f32::consts::PI;
+        let pulsed_frame = launcher.graphics_frame_for_render(
+            23,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+        let pulsed_render_frame = pulsed_frame.bundle.render_frame.as_ref().unwrap();
+        let pulsed_overlay = pulsed_render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger")
+                    })
+            })
+            .expect("pulsed unit snapshot should emit overlay pass");
+        let pulsed_engine_radius = pulsed_overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle { radius, .. } => Some(*radius),
+                _ => None,
+            })
+            .next()
+            .expect("pulsed unit engine should still emit outer circle");
+        assert!((pulsed_engine_radius - 3.125).abs() < 0.0001);
     }
 
     #[test]

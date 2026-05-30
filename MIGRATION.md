@@ -15695,3 +15695,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - hard shadow、engine trail、weapons、legs、payload/item 仍未接入；
   - 当前 unit pass 仍临时复用 Overlay，后续必须继续统一 Java layer sorting / entity world pass，避免 Unit 子分支长期散落；
   - Weather custom lowering、native OpenGL state/clear smoke、Java↔Rust 联机 smoke 仍需继续。
+
+## 427. 最新闭环记录：Unit engine circles 接入 Java absin 半径脉动
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.5%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/UnitType.java$UnitEngine#draw(...)`
+  - `float rad = (radius + Mathf.absin(Time.time, 2f, radius / 4f)) * scale;`
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_absin(...)`，按 Arc/Mindustry `Mathf.absin(time, scl, mag)` 的最小语义输出 `abs(sin(time / scl)) * mag`；
+    - `DesktopLauncher` 新增内部 `render_time`，`update()` 在非暂停状态下推进，用于 world/entity 渲染脉动；
+    - `unit_snapshot_engine_render_commands(...)` 的外圈与内圈半径改为 `(radius + absin(render_time, 2, radius / 4)) * scale`，补齐 Java engine circle 的动态呼吸；
+    - 扩展 `desktop_launcher_emits_unit_engine_circles_for_elevated_snapshot`，覆盖 `render_time = PI` 时 dagger 默认 engine 半径从 `2.5` 脉动到 `3.125`。
+- 迁移意义：
+  - Unit engine circles 不再只是静态近似，已继续贴近 Java `UnitEngine.draw()` 的时间驱动视觉；
+  - 脉动仍挂在同一 `client_unit_snapshot_entities` → `unit_snapshot_render_pass()` 聚合中，没有引入孤立模块。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_engine_circles_for_elevated_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 已并行确认：
+  - 当前 OpenGL `Clear` / `SetViewport` / `SetBlend` / `SetScissor` / `ClearScissor` 在 `opengl-native-runtime` feature 分支已从 `desktop/src/lib.rs` command 流真实落到 `desktop/src/main.rs` 的 `gl.clear_color/gl.clear/gl.viewport/gl.blend_func/gl.scissor`；后续缺的是真窗口 live GL smoke，而不是命令链路本身。
+  - Unit engine trail 仍缺 runtime trail points：当前 `UnitTrailState` 只有 `width/length`，不能直接渲染；下一步应先补 unit runtime trail 点生成，再让 renderer 消费。
+- 仍未完成：
+  - hard shadow、engine trail runtime points、weapons、legs、payload/item 仍未接入；
+  - 当前 unit pass 仍临时复用 Overlay，后续必须继续统一 Java layer sorting / entity world pass；
+  - Weather custom lowering、native OpenGL live smoke、Java↔Rust 联机 smoke 仍需继续。
