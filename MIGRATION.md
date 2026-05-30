@@ -17254,3 +17254,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 还需要继续收口完整菜单/UI 叠层、字体 atlas、真实 world load / `PlanetDialog` 主链等；
   - 当前修复只把菜单最短可见链路与默认 framebuffer 状态链路拉稳，不代表已达到完整可玩。
+
+## 477. MenuFragment desktop 主栏/子菜单几何对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.1%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:196-241`
+    - `buildDesktop()` 主栏 `width = 230f`；
+    - `t.defaults().width(width).height(70f)`；
+    - 左侧 spacer 为 `Core.graphics.getWidth()/10f`；
+    - submenu 宽度同主栏，并通过当前 root button 的 top-left 位置做垂直偏移。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `menu_desktop_ui_plan(...)` 的主栏/子菜单按钮尺寸改为 Java 对齐的 `230x70`；
+    - 主栏 x 坐标改为 `graphics_width / 10`；
+    - 子菜单 x 坐标改为主栏右侧紧邻；
+    - 子菜单 y 坐标按当前 selected root 的行号偏移，`DATABASE -> SCHEMATICS` 现在与 `DATABASE` 主按钮顶边对齐；
+    - 非 submenu root 不再隐式显示 `PLAY` 子菜单。
+- 迁移意义：
+  - 菜单 UI 从“可点击占位按钮列”继续推进到 Java `MenuFragment.buildDesktop()` 的真实几何语义；
+  - 该改动仍走 `MenuRendererState -> MenuFramePlan -> RenderPass -> DesktopLauncher` 主链，不是孤立 mock。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu_ui_plan_desktop_matches_upstream_main_and_submenu_geometry --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_primary_action_switches_database_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_while_menu_state_has_world_size --features opengl-native-runtime`
+  - `cargo check -p mindustry-core`
+- 备注：
+  - 并行运行多条 cargo 命令时曾触发一次本机内存不足/CLR 加载失败；已改为 `CARGO_BUILD_JOBS=1` 顺序重跑并通过；
+  - 仍未迁移 `customButtons`、fadeIn/fadeOut 动作、logo/version/discord/info/terminal/becheck chrome，以及移动端 Java 精确顺序与尺寸。

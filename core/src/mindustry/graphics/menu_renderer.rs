@@ -931,10 +931,9 @@ fn menu_button_plan(role: MenuButtonRole, rect: RenderRect, selected: bool) -> M
 }
 
 fn menu_desktop_ui_plan(input: MenuFrameInput, selected_root: MenuButtonRole) -> MenuUiPlan {
-    let margin = input.scl4.max(1.0) * 6.0;
-    let button_width = 188.0;
-    let button_height = 32.0;
-    let gap = 8.0;
+    let button_width = 230.0;
+    let button_height = 70.0;
+    let gap = 0.0;
     let main_roles = [
         MenuButtonRole::Play,
         MenuButtonRole::Database,
@@ -955,14 +954,20 @@ fn menu_desktop_ui_plan(input: MenuFrameInput, selected_root: MenuButtonRole) ->
         MenuButtonRole::About,
     ];
     let submenu_roles: &[MenuButtonRole] = match selected_root {
+        MenuButtonRole::Play => &play_submenu_roles,
         MenuButtonRole::Database => &database_submenu_roles,
-        _ => &play_submenu_roles,
+        _ => &[],
     };
     let total_height =
         main_roles.len() as f32 * button_height + main_roles.len().saturating_sub(1) as f32 * gap;
-    let start_y = ((input.graphics_height - total_height) * 0.5).max(margin);
-    let left_x = margin;
-    let submenu_x = left_x + button_width + margin * 0.75;
+    let start_y = ((input.graphics_height - total_height) * 0.5).max(0.0);
+    let left_x = (input.graphics_width / 10.0).max(0.0);
+    let submenu_x = left_x + button_width;
+    let selected_root_index = main_roles
+        .iter()
+        .position(|role| *role == selected_root)
+        .unwrap_or(0);
+    let submenu_start_y = start_y + selected_root_index as f32 * (button_height + gap);
 
     let mut buttons = Vec::with_capacity(main_roles.len() + submenu_roles.len());
     for (index, role) in main_roles.into_iter().enumerate() {
@@ -982,7 +987,7 @@ fn menu_desktop_ui_plan(input: MenuFrameInput, selected_root: MenuButtonRole) ->
             role,
             RenderRect::new(
                 submenu_x,
-                start_y + index as f32 * (button_height + gap),
+                submenu_start_y + index as f32 * (button_height + gap),
                 button_width,
                 button_height,
             ),
@@ -1273,6 +1278,51 @@ mod tests {
             .all(|button| button.role != MenuButtonRole::Campaign));
         assert!(!state.select_desktop_root(MenuButtonRole::Quit));
         assert_eq!(state.selected_root, MenuButtonRole::Database);
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_matches_upstream_main_and_submenu_geometry() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        assert!(state.select_desktop_root(MenuButtonRole::Database));
+
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        });
+
+        let play = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Play)
+            .expect("desktop menu should include PLAY");
+        let database = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Database)
+            .expect("desktop menu should include DATABASE root");
+        let schematics = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Schematics)
+            .expect("database submenu should include SCHEMATICS");
+
+        assert_eq!(play.rect, RenderRect::new(128.0, 150.0, 230.0, 70.0));
+        assert_eq!(database.rect, RenderRect::new(128.0, 220.0, 230.0, 70.0));
+        assert_eq!(schematics.rect, RenderRect::new(358.0, 220.0, 230.0, 70.0));
+        assert!(database.selected);
+        assert_eq!(
+            plan.ui
+                .buttons
+                .iter()
+                .filter(|button| button.submenu)
+                .count(),
+            3
+        );
     }
 
     #[test]
