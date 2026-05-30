@@ -17340,3 +17340,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `discord / terminal / info / becheck` chrome 尚未迁移；
   - `customButtons` 动态插入、desktop workshop 条件项和 submenu fade 仍待继续；
   - 真字体 atlas 尚未接入，version 文本当前仍走现有 DrawText placeholder/fallback 路径。
+
+## 480. MenuFragment chrome/customButtons 继续接入菜单主链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.5%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:33-131`
+    - `build()` 除 logo/version 外还挂载 `discord`、mobile gutter、mobile `terminal/info`、desktop `becheck`；
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:134-194`
+    - mobile customButtons 横屏按奇/偶分别插入第一/第二行，竖屏从 `mods` 后按 Java row 规则插入；
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:196-241`
+    - desktop customButtons 位于 built-in desktop buttons 之后、`quit` 之前。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_menu_logo_and_version_chrome(...)` 扩展为完整菜单 chrome 叠层：desktop 绘制 `discord/becheck`，mobile 绘制左右/底部 gutter 以及 `terminal/info/discord`；
+    - 新增 `push_menu_chrome_button(...)`，统一将 chrome 入口降为当前 menu pass 内的 `fill_rect/stroke_rect/draw_text_styled` 命令；
+    - `DesktopMenuRoute::from_menu_button(...)` 显式把 `MenuButtonRole::Custom(_)` 作为非 route root/action 处理，避免后续动态按钮破坏穷尽匹配。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuButtonRole::Custom(u16)` 与 `MenuCustomButton`；
+    - `MenuButtonPlan` 增加 `label`，built-in/custom 文本都通过 `MenuUiPlan::to_render_commands()` 进入真实 `DrawText` 主链；
+    - `MenuRendererState::add_custom_button(...)` / `clear_custom_buttons(...)` 作为 Java `addButton(...)` 的第一阶段数据入口；
+    - desktop 布局按 Java 顺序把 customButtons 插入 `Settings` 与 `Quit` 之间；
+    - mobile 横屏按 Java 奇/偶 customButtons 插入两行，竖屏按 `mods -> custom0 -> row -> custom1/custom2... -> quit` 规则插入。
+- 迁移意义：
+  - Java `MenuFragment.build()` 的顶层 chrome 从“只有 logo/version”继续推进到可见的 desktop/mobile chrome；
+  - `customButtons` 不再只是迁移记录里的缺口，而是进入 `MenuRendererState -> MenuUiPlan -> RenderPass -> DesktopLauncher` 主链；后续只需继续把 runnable/submenu/workshop 行为接到 dispatch/runtime。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan_ --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_ --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `discord/terminal/info/becheck` 当前已可见但尚未接入真实点击动作、consolefrag/discord/about/update check 状态；
+  - `customButtons` 当前完成了数据与布局可见闭环，尚未迁移 Java 的 runnable/submenu 回调派发；
+  - desktop `workshop` 条件项、submenu fade、`checkPlay()` mod error guard、真实 route dialogs 和真字体 atlas 仍待继续。

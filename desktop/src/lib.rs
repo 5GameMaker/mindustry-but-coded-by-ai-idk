@@ -137,7 +137,10 @@ impl DesktopMenuRoute {
             MenuButtonRole::Editor => Some(Self::Editor),
             MenuButtonRole::Mods => Some(Self::Mods),
             MenuButtonRole::Settings => Some(Self::Settings),
-            MenuButtonRole::Play | MenuButtonRole::Database | MenuButtonRole::Quit => None,
+            MenuButtonRole::Play
+            | MenuButtonRole::Database
+            | MenuButtonRole::Custom(_)
+            | MenuButtonRole::Quit => None,
         }
     }
 
@@ -15823,6 +15826,102 @@ impl DesktopLauncher {
     fn push_menu_logo_and_version_chrome(pass: &mut RenderPass, viewport: RenderViewport) {
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
+        let is_mobile = width <= 720.0 || height > width * 1.2;
+        let right_margin = 10.0;
+        let bottom_margin = 9.0;
+
+        if is_mobile {
+            let gutter_layer = Layer::END_PIXELED + 0.04;
+            let gutter_left = RenderRect::new(viewport.x, viewport.y, 14.0, height);
+            let gutter_right = RenderRect::new(viewport.x + width - 14.0, viewport.y, 14.0, height);
+            let gutter_bottom = RenderRect::new(
+                viewport.x + 14.0,
+                viewport.y + height - 12.0,
+                (width - 28.0).max(1.0),
+                12.0,
+            );
+            pass.push(RenderCommand::fill_rect(
+                gutter_left,
+                [0.05, 0.07, 0.10, 0.58],
+                gutter_layer,
+            ));
+            pass.push(RenderCommand::fill_rect(
+                gutter_right,
+                [0.05, 0.07, 0.10, 0.58],
+                gutter_layer,
+            ));
+            pass.push(RenderCommand::fill_rect(
+                gutter_bottom,
+                [0.04, 0.06, 0.09, 0.46],
+                gutter_layer,
+            ));
+        }
+
+        let discord_rect = RenderRect::new(
+            viewport.x + width - right_margin - 84.0,
+            viewport.y + height - bottom_margin - 45.0,
+            84.0,
+            45.0,
+        );
+        Self::push_menu_chrome_button(
+            pass,
+            discord_rect,
+            "discord",
+            [0.16, 0.27, 0.52, 0.94],
+            [0.58, 0.74, 1.0, 0.98],
+            14.0,
+            [0.95, 0.98, 1.0, 1.0],
+        );
+
+        if is_mobile {
+            let terminal_rect = RenderRect::new(
+                viewport.x + 6.0,
+                viewport.y + height - bottom_margin - 60.0,
+                60.0,
+                60.0,
+            );
+            let info_rect = RenderRect::new(
+                terminal_rect.x + terminal_rect.width + 8.0,
+                viewport.y + height - bottom_margin - 45.0,
+                84.0,
+                45.0,
+            );
+            Self::push_menu_chrome_button(
+                pass,
+                terminal_rect,
+                "terminal",
+                [0.12, 0.18, 0.22, 0.92],
+                [0.46, 0.64, 0.74, 0.96],
+                12.0,
+                [0.92, 0.98, 1.0, 1.0],
+            );
+            Self::push_menu_chrome_button(
+                pass,
+                info_rect,
+                "info",
+                [0.11, 0.20, 0.31, 0.92],
+                [0.52, 0.72, 0.88, 0.96],
+                13.0,
+                [0.95, 0.98, 1.0, 1.0],
+            );
+        } else {
+            let becheck_rect = RenderRect::new(
+                viewport.x + width - right_margin - 200.0,
+                discord_rect.y - 8.0 - 60.0,
+                200.0,
+                60.0,
+            );
+            Self::push_menu_chrome_button(
+                pass,
+                becheck_rect,
+                "becheck",
+                [0.14, 0.18, 0.27, 0.92],
+                [0.58, 0.72, 0.90, 0.98],
+                14.0,
+                [0.96, 0.99, 1.0, 1.0],
+            );
+        }
+
         let logo_width = 768.0_f32.min((width - 20.0).max(1.0));
         let logo_height = (logo_width / 4.0).max(1.0);
         let logo_x = viewport.x + ((width - logo_width) * 0.5).floor();
@@ -15846,6 +15945,40 @@ impl DesktopLauncher {
                 .with_integer_position(true)
                 .with_outline(true),
             Layer::END_PIXELED + 0.09,
+        ));
+    }
+
+    fn push_menu_chrome_button(
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        label: &str,
+        fill: [f32; 4],
+        stroke: [f32; 4],
+        label_size: f32,
+        label_color: [f32; 4],
+    ) {
+        pass.push(RenderCommand::fill_rect(
+            rect,
+            fill,
+            Layer::END_PIXELED + 0.05,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            rect,
+            stroke,
+            1.0,
+            Layer::END_PIXELED + 0.06,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            label,
+            rect.center(),
+            label_color,
+            label_size,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.07,
         ));
     }
 
@@ -32211,6 +32344,114 @@ mod tests {
                     if text == UPSTREAM_BASELINE
                         && (*layer - (Layer::END_PIXELED + 0.09)).abs() < f32::EPSILON
             )
+        }));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+
+        let discord_rect = RenderRect::new(1186.0, 666.0, 84.0, 45.0);
+        let becheck_rect = RenderRect::new(1070.0, 598.0, 200.0, 60.0);
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::FillRect { rect, .. } if *rect == discord_rect
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "discord"
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::FillRect { rect, .. } if *rect == becheck_rect
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "becheck"
+            )
+        }));
+        assert!(!commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "terminal"
+            )
+        }));
+        assert!(!commands.iter().any(|command| {
+            matches!(command, RenderCommand::FillRect { rect, .. } if rect.width == 14.0 && rect.height == 720.0)
+        }));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_renders_mobile_terminal_info_and_gutter_chrome() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 540.0, 960.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+
+        let left_gutter = RenderRect::new(0.0, 0.0, 14.0, 960.0);
+        let right_gutter = RenderRect::new(526.0, 0.0, 14.0, 960.0);
+        let bottom_gutter = RenderRect::new(14.0, 948.0, 512.0, 12.0);
+        let terminal_rect = RenderRect::new(6.0, 891.0, 60.0, 60.0);
+        let info_rect = RenderRect::new(74.0, 906.0, 84.0, 45.0);
+        let discord_rect = RenderRect::new(446.0, 906.0, 84.0, 45.0);
+
+        for rect in [
+            left_gutter,
+            right_gutter,
+            bottom_gutter,
+            terminal_rect,
+            info_rect,
+            discord_rect,
+        ] {
+            assert!(commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::FillRect { rect: candidate, .. } if *candidate == rect
+                )
+            }));
+        }
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "terminal"
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(command, RenderCommand::DrawText { text, .. } if text == "info")
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(command, RenderCommand::DrawText { text, .. } if text == "discord")
+        }));
+        assert!(!commands.iter().any(|command| {
+            matches!(command, RenderCommand::DrawText { text, .. } if text == "becheck")
         }));
     }
 
