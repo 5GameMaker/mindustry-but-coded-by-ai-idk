@@ -12067,6 +12067,26 @@ impl DesktopLauncher {
             ) {
                 commands.push(command);
             }
+            if let Some(command) = self.unit_snapshot_weapon_sprite_render_command(
+                unit,
+                mount,
+                desktop_weapon_cell_symbol(&mount.weapon),
+                desktop_unit_cell_color(unit),
+            ) {
+                commands.push(command);
+            }
+            if mount.heat > 0.0 {
+                if let Some(command) = self.unit_snapshot_weapon_sprite_render_command(
+                    unit,
+                    mount,
+                    desktop_weapon_heat_symbol(&mount.weapon),
+                    rgba8888_to_render_color(mount.weapon.heat_color_rgba, mount.heat),
+                ) {
+                    commands.push(RenderCommand::set_blend(RenderBlendMode::Additive));
+                    commands.push(command);
+                    commands.push(RenderCommand::set_blend(RenderBlendMode::Normal));
+                }
+            }
         }
         commands
     }
@@ -16472,6 +16492,8 @@ mod tests {
         assert!(launcher.texture_atlas.has("dagger-cell"));
         assert!(launcher.texture_atlas.has("large-weapon"));
         assert!(launcher.texture_atlas.has("large-weapon-outline"));
+        assert!(launcher.texture_atlas.has("large-weapon-cell"));
+        assert!(launcher.texture_atlas.has("large-weapon-heat"));
         assert!(launcher.texture_atlas.has("particle"));
 
         let mut unit = UnitComp::new(7400, dagger, TeamId(1));
@@ -16479,6 +16501,7 @@ mod tests {
         unit.set_pos(40.0, 56.0);
         unit.set_rotation(180.0);
         unit.shield.shield_alpha = 0.5;
+        unit.weapons.mounts[0].heat = 0.5;
         launcher
             .runtime
             .client_unit_snapshot_entities
@@ -16521,6 +16544,8 @@ mod tests {
         assert!(index_of_symbol("large-weapon-outline") < index_of_symbol("dagger"));
         assert!(index_of_symbol("dagger") < index_of_symbol("dagger-cell"));
         assert!(index_of_symbol("dagger-cell") < index_of_symbol("large-weapon"));
+        assert!(index_of_symbol("large-weapon") < index_of_symbol("large-weapon-cell"));
+        assert!(index_of_symbol("large-weapon-cell") < index_of_symbol("large-weapon-heat"));
         match overlay.commands.iter().find(|command| {
             matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger")
         }) {
@@ -16628,6 +16653,51 @@ mod tests {
                 assert_eq!(*layer, Layer::GROUND_UNIT);
             }
             other => panic!("expected unit weapon body DrawSprite, got {other:?}"),
+        }
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "large-weapon-cell")
+        }) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(38.0, 60.0));
+                assert_eq!(*tint, super::rgba8888_to_render_color(0xffd37fff, 1.0));
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected unit weapon cell DrawSprite, got {other:?}"),
+        }
+        let heat_index = index_of_symbol("large-weapon-heat");
+        assert!(matches!(
+            overlay.commands.get(heat_index.saturating_sub(1)),
+            Some(RenderCommand::SetBlend {
+                mode: RenderBlendMode::Additive
+            })
+        ));
+        assert!(matches!(
+            overlay.commands.get(heat_index + 1),
+            Some(RenderCommand::SetBlend {
+                mode: RenderBlendMode::Normal
+            })
+        ));
+        match overlay.commands.get(heat_index) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(38.0, 60.0));
+                assert_eq!(*tint, super::rgba8888_to_render_color(0xffa3f2ff, 0.5));
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected unit weapon heat DrawSprite, got {other:?}"),
         }
         match overlay.commands.iter().find(|command| {
             matches!(command, RenderCommand::DrawCircle { center, layer, .. }

@@ -15760,3 +15760,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - top weapon 的更复杂 draw parts 与 layer sorting 仍需继续；
   - Unit engine trail 仍需先补 runtime trail points；hard shadow、legs、payload/item 仍未接入；
   - Weather custom lowering、native OpenGL live smoke、Java↔Rust 联机 smoke 仍需继续。
+
+## 429. 最新闭环记录：Unit weapon cell/heat sprite 与 additive blend 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.7%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/Weapon.java#draw(...)`
+  - `if(cellRegion.found()) { Draw.color(unit.type.cellColor(unit)); Draw.rect(cellRegion, ...); }`
+  - `if(heatRegion.found() && mount.heat > 0) { Draw.blend(Blending.additive); Draw.rect(heatRegion, ...); Draw.blend(); }`
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `unit_snapshot_weapon_render_commands(...)` 在 weapon body 后继续尝试输出 weapon cell sprite；
+    - 当 `mount.heat > 0` 时输出 `SetBlend(Additive)` → weapon heat `DrawSprite` → `SetBlend(Normal)`；
+    - weapon cell 使用 `desktop_unit_cell_color(unit)`，weapon heat 使用 `weapon.heat_color_rgba` 与 `mount.heat` alpha；
+    - dagger 快照测试覆盖 `large-weapon-cell`、`large-weapon-heat`、additive/normal blend 边界、颜色、位置、旋转与 layer。
+- 迁移意义：
+  - Java `Weapon.draw()` 的 body/cell/heat 三段基础 sprite 绘制已进入同一 Unit pass；
+  - heat 不再只是 mount runtime 中的不可见状态，而是能进入 `RenderCommand` / OpenGL backend 的 blend-aware 命令流。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - weapon shadow、flipSprite/xscl、parts、continuous beam、shoot effects 与更精确 client-side recoil/reload/heat 动画仍需继续；
+  - Unit engine trail 仍需先补 runtime trail points；hard shadow、legs、payload/item 仍未接入；
+  - 当前 unit pass 仍临时复用 Overlay，后续必须统一 Java layer sorting / entity world pass。

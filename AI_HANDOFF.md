@@ -12908,3 +12908,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续补 weapon heat/cell/shadow/flipSprite/parts/continuous beam/shoot effects；
   2. 继续补 unit engine trail runtime points，而不是直接渲染空 snapshot；
   3. 推进 hard shadow、legs、payload/item，并把 Unit/Fire/Bullet/Puddle 从临时 Overlay 收口到统一 Java layer sorting。
+
+### 2026-05-30：Unit weapon cell/heat sprite 与 additive blend 接入
+
+- 当前整体完成度：约 **41.7%**。
+- 已完成：
+  - weapon body 后新增 weapon cell sprite，颜色复用 `desktop_unit_cell_color(unit)`；
+  - `mount.heat > 0` 时新增 `SetBlend(Additive)` → heat sprite → `SetBlend(Normal)`；
+  - heat tint 使用 `weapon.heat_color_rgba` 与 `mount.heat` alpha；
+  - dagger 测试覆盖 `large-weapon-cell` / `large-weapon-heat` 的顺序、颜色、中心 `(38, 60)`、旋转 `90` 与 blend 边界。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 补 weapon shadow、flipSprite/xscl、parts、continuous beam、shoot effects；
+  2. 补 unit engine trail runtime points；
+  3. 继续统一 Unit/Fire/Bullet/Puddle 的 Java layer sorting。
