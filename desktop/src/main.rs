@@ -126,6 +126,7 @@ struct DesktopNativeOpenGlRuntime {
     vertex_arrays: std::collections::BTreeMap<u32, glow::NativeVertexArray>,
     shaders: std::collections::BTreeMap<u32, glow::NativeShader>,
     programs: std::collections::BTreeMap<u32, glow::NativeProgram>,
+    program_shaders: std::collections::BTreeMap<u32, mindustry_core::mindustry::graphics::ShaderId>,
     shader_sources: std::collections::BTreeMap<u32, String>,
     uniform_locations: std::collections::BTreeMap<(u32, String), glow::NativeUniformLocation>,
     framebuffer_handle_cache: mindustry_desktop::DesktopGraphicsOpenGlBackendHandleCache,
@@ -152,6 +153,59 @@ fn desktop_native_opengl_shader_asset_root() -> std::path::PathBuf {
         return reference_assets;
     }
     std::path::PathBuf::from("core/assets")
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_builtin_sprite_shader_source(
+    shader: mindustry_core::mindustry::graphics::ShaderId,
+    stage: mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage,
+    _source_path: &str,
+) -> Option<&'static str> {
+    if shader != mindustry_core::mindustry::graphics::ShaderId::Mesh {
+        return None;
+    }
+
+    match stage {
+        mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Vertex => Some(
+            r#"#version 150
+in vec2 a_position;
+in vec4 a_color;
+in vec2 a_texCoord0;
+in vec4 a_mix_color;
+
+uniform vec2 u_surfaceSize;
+
+out vec4 v_color;
+out vec2 v_texCoords;
+out vec4 v_mix_color;
+
+void main(){
+    vec2 safeSize = max(u_surfaceSize, vec2(1.0, 1.0));
+    vec2 clip = vec2(a_position.x / safeSize.x * 2.0 - 1.0, a_position.y / safeSize.y * 2.0 - 1.0);
+    gl_Position = vec4(clip, 0.0, 1.0);
+    v_color = a_color;
+    v_texCoords = a_texCoord0;
+    v_mix_color = a_mix_color;
+}
+"#,
+        ),
+        mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Fragment => Some(
+            r#"#version 150
+in vec4 v_color;
+in vec2 v_texCoords;
+in vec4 v_mix_color;
+
+uniform sampler2D u_texture;
+
+out vec4 fragColor;
+
+void main(){
+    vec4 sampled = texture(u_texture, v_texCoords);
+    fragColor = v_color * mix(sampled, vec4(v_mix_color.rgb, sampled.a), v_mix_color.a);
+}
+"#,
+        ),
+    }
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -223,6 +277,7 @@ impl DesktopNativeOpenGlRuntime {
             vertex_arrays: std::collections::BTreeMap::new(),
             shaders: std::collections::BTreeMap::new(),
             programs: std::collections::BTreeMap::new(),
+            program_shaders: std::collections::BTreeMap::new(),
             shader_sources: std::collections::BTreeMap::new(),
             uniform_locations: std::collections::BTreeMap::new(),
             framebuffer_handle_cache:
@@ -291,6 +346,8 @@ struct DesktopNativeOpenGlDriver<'a> {
     vertex_arrays: &'a mut std::collections::BTreeMap<u32, glow::NativeVertexArray>,
     shaders: &'a mut std::collections::BTreeMap<u32, glow::NativeShader>,
     programs: &'a mut std::collections::BTreeMap<u32, glow::NativeProgram>,
+    program_shaders:
+        &'a mut std::collections::BTreeMap<u32, mindustry_core::mindustry::graphics::ShaderId>,
     shader_sources: &'a mut std::collections::BTreeMap<u32, String>,
     uniform_locations:
         &'a mut std::collections::BTreeMap<(u32, String), glow::NativeUniformLocation>,
@@ -301,6 +358,7 @@ struct DesktopNativeOpenGlDriver<'a> {
     shader_asset_root: &'a std::path::Path,
     current_program: &'a mut Option<u32>,
     current_vertex_array: &'a mut Option<u32>,
+    bound_render_target: Option<mindustry_core::mindustry::graphics::RenderTarget>,
     draw_target_available: bool,
     native_errors: &'a mut Vec<String>,
 }
@@ -602,6 +660,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                 self.gl.delete_program(program);
             }
         }
+        self.program_shaders.remove(&program_handle);
         self.uniform_locations
             .retain(|(handle, _), _| *handle != program_handle);
     }
@@ -649,6 +708,12 @@ impl DesktopNativeOpenGlDriver<'_> {
         stage: mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage,
         source_path: &str,
     ) -> Option<String> {
+        if let Some(source) =
+            desktop_native_opengl_builtin_sprite_shader_source(shader, stage, source_path)
+        {
+            return Some(source.to_string());
+        }
+
         let loader = mindustry_desktop::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(
             self.shader_asset_root,
         );
@@ -702,6 +767,36 @@ impl DesktopNativeOpenGlDriver<'_> {
                 ));
                 None
             }
+        }
+    }
+
+    fn upload_builtin_sprite_uniforms_for_program(
+        &mut self,
+        program_handle: u32,
+        program: glow::NativeProgram,
+    ) {
+        if self.program_shaders.get(&program_handle).copied()
+            != Some(mindustry_core::mindustry::graphics::ShaderId::Mesh)
+        {
+            return;
+        }
+
+        let (width, height) = self.viewport_for_render_target(self.bound_render_target.as_ref());
+        let Some(location) = self.uniform_location(program_handle, program, "u_surfaceSize") else {
+            return;
+        };
+        unsafe {
+            self.gl
+                .uniform_2_f32(Some(&location), width as f32, height as f32);
+        }
+    }
+
+    fn upload_builtin_sprite_uniforms_for_current_program(&mut self) {
+        let Some(program_handle) = *self.current_program else {
+            return;
+        };
+        if let Some(program) = self.existing_program(program_handle) {
+            self.upload_builtin_sprite_uniforms_for_program(program_handle, program);
         }
     }
 
@@ -983,6 +1078,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::CreateProgram {
+                shader,
                 program_handle,
                 previous_program_handle,
                 ..
@@ -991,6 +1087,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                     self.delete_program_handle(*previous_program_handle);
                 }
                 self.create_program_for_handle(*program_handle);
+                self.program_shaders.insert(*program_handle, *shader);
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderLifecycleCommand::AttachShader {
                 program_handle,
@@ -1047,6 +1144,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                         self.gl.use_program(Some(program));
                     }
                     *self.current_program = Some(*program_handle);
+                    self.upload_builtin_sprite_uniforms_for_program(*program_handle, program);
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendResolvedShaderCommand::UploadUniform {
@@ -1375,7 +1473,11 @@ impl DesktopNativeOpenGlDriver<'_> {
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::BindFramebuffer {
                 target,
             } => {
+                self.bound_render_target = target.clone();
                 self.draw_target_available = self.bind_framebuffer_target(target.as_ref());
+                if self.draw_target_available {
+                    self.upload_builtin_sprite_uniforms_for_current_program();
+                }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::SetViewport { target } => {
                 if !self.draw_target_available {
@@ -1385,6 +1487,8 @@ impl DesktopNativeOpenGlDriver<'_> {
                 unsafe {
                     self.gl.viewport(0, 0, width, height);
                 }
+                self.bound_render_target = target.clone();
+                self.upload_builtin_sprite_uniforms_for_current_program();
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::Clear { color } => {
                 if !self.draw_target_available {
@@ -1434,6 +1538,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                         self.gl.use_program(Some(program));
                     }
                     *self.current_program = Some(*program_handle);
+                    self.upload_builtin_sprite_uniforms_for_program(*program_handle, program);
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendDrawCommand::ActiveTexture {
@@ -1634,6 +1739,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             vertex_arrays: &mut self.vertex_arrays,
             shaders: &mut self.shaders,
             programs: &mut self.programs,
+            program_shaders: &mut self.program_shaders,
             shader_sources: &mut self.shader_sources,
             uniform_locations: &mut self.uniform_locations,
             framebuffer_handle_cache: &mut self.framebuffer_handle_cache,
@@ -1642,6 +1748,7 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             shader_asset_root: &self.shader_asset_root,
             current_program: &mut self.current_program,
             current_vertex_array: &mut self.current_vertex_array,
+            bound_render_target: None,
             draw_target_available: true,
             native_errors: &mut self.native_errors,
         };
@@ -1788,5 +1895,36 @@ mod tests {
         assert!(app.window_id.is_none());
         assert!(app.graphics_renderer.is_none());
         assert!(app.pending_events.is_empty());
+    }
+
+    #[test]
+    fn native_opengl_builtin_sprite_shader_maps_pixels_and_samples_texture() {
+        let vertex = desktop_native_opengl_builtin_sprite_shader_source(
+            mindustry_core::mindustry::graphics::ShaderId::Mesh,
+            mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+            "mesh.vert",
+        )
+        .expect("native sprite vertex shader should override Mesh");
+        let fragment = desktop_native_opengl_builtin_sprite_shader_source(
+            mindustry_core::mindustry::graphics::ShaderId::Mesh,
+            mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Fragment,
+            "planet.frag",
+        )
+        .expect("native sprite fragment shader should override Mesh");
+
+        assert!(vertex.contains("uniform vec2 u_surfaceSize"));
+        assert!(vertex.contains("in vec4 a_mix_color"));
+        assert!(vertex.contains("gl_Position = vec4(clip, 0.0, 1.0)"));
+        assert!(fragment.contains("uniform sampler2D u_texture"));
+        assert!(fragment.contains("texture(u_texture, v_texCoords)"));
+        assert!(fragment.contains("v_mix_color"));
+        assert_eq!(
+            desktop_native_opengl_builtin_sprite_shader_source(
+                mindustry_core::mindustry::graphics::ShaderId::Water,
+                mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Vertex,
+                "screenspace.vert",
+            ),
+            None
+        );
     }
 }

@@ -16715,3 +16715,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 下一步：
   - 继续优先推进渲染引擎主链，建议切入 `DrawText -> glyph quad -> OpenGL` 或 `UnitDrawStage::Abilities -> ForceFieldAbility polygon shield`；
   - 后续需要把临时 startup preview 替换/融合到真实 menu/UI runtime，而不是长期保留为孤立模块。
+
+## 459. 原生 OpenGL 精灵着色链路修复
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.1%**，仍未达到完整可玩；本轮只收束前端可见性/黑屏相关的 native OpenGL sprite 基础链路，后端暂缓。
+- 问题根因：
+  - native 默认 sprite draw 当前复用 `ShaderId::Mesh`，而原资源映射到 `mesh.vert + planet.frag`，不是 2D sprite shader；
+  - native 侧此前没有给 sprite shader 上传 surface/target 尺寸，普通 `DrawSprite` / `FillRect` 可能排队但不可见；
+  - sprite mesh 的 packed color attribute 此前仍按 `FLOAT` 指针描述，真实 OpenGL 读取颜色/UV 时容易错位。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 为 native runtime/driver 记录 `program_handle -> ShaderId`；
+    - 在 native 侧为 `ShaderId::Mesh` 临时注入内置 2D sprite shader：按 `u_surfaceSize` 把像素坐标映射到 clip space，并采样 `u_texture` / `v_mix_color`；
+    - 在 `UseProgram`、`BindFramebuffer`、`SetViewport` 后同步上传 `u_surfaceSize`，避免切换 render target 后 sprite 坐标仍沿用旧尺寸；
+    - `DeleteProgram` 时同步清理 program shader 映射。
+  - `desktop/src/lib.rs`
+    - sprite mesh upload 对 packed color attribute 改用 `DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE + normalized=true`，非 packed 属性继续使用 `FLOAT`。
+- 补充测试：
+  - `native_opengl_builtin_sprite_shader_maps_pixels_and_samples_texture`
+  - `desktop_graphics_opengl_shared_command_executor_reuses_upload_mesh_and_draw_handles` 增补 `a_color` / `a_mix_color` 的 `UNSIGNED_BYTE + normalized=true` 断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop native_opengl_builtin_sprite_shader_maps_pixels_and_samples_texture --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_command_executor_reuses_upload_mesh_and_draw_handles --features opengl-native-runtime`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime -- --test-threads=1`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前是 native 侧临时把 `ShaderId::Mesh` 覆盖为 2D sprite shader；后续更理想做法是新增专用 sprite shader id/asset，并让真正 3D mesh/planet 渲染独立恢复；
+  - 真实菜单、字体 glyph、完整 atlas/filter/repeat 与 Scene/UI 仍需继续前端优先推进。

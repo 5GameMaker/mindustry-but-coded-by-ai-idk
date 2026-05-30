@@ -13869,3 +13869,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 不要把 startup preview 当作最终 UI；后续要把真实 menu/Scene/UI 接入 native render；
   2. 优先推进渲染主线：`DrawText -> glyph quad -> OpenGL` 或 `UnitDrawStage::Abilities -> ForceFieldAbility polygon shield`；
   3. 同时继续补 world/ui/maps/editor 和完整可玩/联机 smoke，不能让模块孤立存在。
+
+### 2026-05-30：native OpenGL sprite shader / packed color 修复
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **47.1%**。
+- 当前用户最新优先级：
+  - 先优先完成前端/客户端，后端可以先等等。
+- 本轮实际闭环：
+  - `desktop/src/main.rs`
+    - native runtime/driver 新增 `program_handle -> ShaderId` 映射；
+    - `ShaderId::Mesh` 在 native 侧临时加载内置 2D sprite shader，不再读 `mesh.vert + planet.frag`；
+    - shader 通过 `u_surfaceSize` 把像素坐标映射到 clip space，并采样 `u_texture` / `v_mix_color`；
+    - `UseProgram`、`BindFramebuffer`、`SetViewport` 后上传 `u_surfaceSize`，避免 target/viewport 切换导致 sprite 仍不可见；
+    - `DeleteProgram` 清理 program shader 映射。
+  - `desktop/src/lib.rs`
+    - sprite mesh 的 `a_color` / `a_mix_color` packed attribute 改为 `UNSIGNED_BYTE + normalized=true`，防止真实 OpenGL 把颜色字节按 float 属性读取。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop native_opengl_builtin_sprite_shader_maps_pixels_and_samples_texture --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_shared_command_executor_reuses_upload_mesh_and_draw_handles --features opengl-native-runtime`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime -- --test-threads=1`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 下一步：
+  1. 优先把真实 `MenuFramePlan -> DesktopGraphicsFrame -> native OpenGL` 接上，startup preview 只能做 fallback；
+  2. 同步推进 `DrawText -> ASCII/bitmap placeholder glyph quad -> sprite mesh/OpenGL`；
+  3. 后续将临时 `ShaderId::Mesh` 覆盖迁移为专用 sprite shader，避免阻碍未来 3D mesh/planet 渲染。

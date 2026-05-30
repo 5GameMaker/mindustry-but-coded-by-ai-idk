@@ -4429,7 +4429,11 @@ impl DesktopGraphicsOpenGlBackendResolvedSpriteMeshUpload {
                 DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::VertexAttributePointer {
                     attribute_location,
                     components: attribute.components,
-                    gl_type: DESKTOP_GRAPHICS_OPENGL_FLOAT,
+                    gl_type: if attribute.packed_color {
+                        DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE
+                    } else {
+                        DESKTOP_GRAPHICS_OPENGL_FLOAT
+                    },
                     normalized: attribute.packed_color,
                     stride_bytes: self.vertex_stride_bytes,
                     offset_bytes: attribute.offset_bytes,
@@ -24504,6 +24508,30 @@ mod tests {
                     super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
                 offset_bytes:
                     super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_POSITION_OFFSET_BYTES,
+            }
+        ));
+        assert!(mesh_upload_executor.commands.contains(
+            &super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::VertexAttributePointer {
+                attribute_location: 1,
+                components: 4,
+                gl_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                normalized: true,
+                stride_bytes:
+                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
+                offset_bytes:
+                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_COLOR_OFFSET_BYTES,
+            }
+        ));
+        assert!(mesh_upload_executor.commands.contains(
+            &super::DesktopGraphicsOpenGlBackendSpriteMeshUploadCommand::VertexAttributePointer {
+                attribute_location: 3,
+                components: 4,
+                gl_type: super::DESKTOP_GRAPHICS_OPENGL_UNSIGNED_BYTE,
+                normalized: true,
+                stride_bytes:
+                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_VERTEX_STRIDE_BYTES,
+                offset_bytes:
+                    super::DesktopGraphicsOpenGlBackendMeshBufferPlan::SPRITE_MIX_COLOR_OFFSET_BYTES,
             }
         ));
         let mut draw_call_executor =
