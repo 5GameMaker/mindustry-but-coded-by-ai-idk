@@ -18942,3 +18942,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - JoinDialog 还未完全还原 Java 的 ScrollPane 分区折叠、搜索框、服务器详情与重连流程；
   - 主页面完整 UI 还必须继续推进 Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 532. LoadDialog 存档卡片前端骨架
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.8%**，仍未达到完整可玩；继续把 LoadGame 路由从通用文本摘要推进为接近 Java `LoadDialog` 的存档卡片前端骨架。
+- Java 对照证据：
+  - `LoadDialog` 使用顶部搜索条 `@save.search` 与模式过滤按钮；
+  - `rebuild()` 按时间戳排序 `SaveSlot`，每个槽位是 `TextButton("", Styles.grayt)`；
+  - 槽位卡片左侧显示 preview/border image，右侧显示地图名、mode/wave、autosave、playtime/date；
+  - 点击整张卡片走 `modifyButton()` / `runLoadSave(slot)`；
+  - 右上角还有 autosave/delete/rename/export 等操作按钮。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 LoadGame 卡片常量：slot card 高度、gap、search bar 高度；
+    - `load_game_slot_line_rect_for_viewport()` 改为返回 LoadGame slot card rect，保持既有点击测试可复用；
+    - 新增 `load_game_search_rect_for_panel()` 与 `load_game_slot_card_rect_for_panel()`；
+    - 新增 `push_load_game_route_page()`，绘制 `@save.search` 搜索条、`grayt` 风格存档卡片、preview placeholder、地图标题、slot/wave、saved timestamp；
+    - `push_active_menu_route_shell()` 为 `DesktopMenuRoute::LoadGame` 接入专用页面渲染，不再只走通用文本行。
+  - 测试：
+    - 扩展 `desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click`，继续验证 `.msav` 读取、时间排序、点击记录 `DesktopLoadGameAction`；
+    - 新增 render 断言，确认 LoadGame frame 输出 `@save.search`、`[accent]New Map`、`slot 2 | @save.wave 9`、`saved 200` 与卡片 rect；
+    - Join/Settings 回归测试保持通过，避免 route-specific 页面改动影响其他主菜单入口。
+- 迁移意义：
+  - LoadGame 不再只是几行文本列表，已经具备 Java LoadDialog 的“搜索条 + 存档卡片 + 点击卡片加载”前端骨架；
+  - 数据仍复用现有 `.msav` 元数据读取与 `dispatch_load_game_slot_action()` 主链；
+  - 为后续补 preview texture、autosave/delete/rename/export、模式过滤和真实 `slot.load()` 等价流程打基础。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_join --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - LoadDialog 还没有真实搜索输入、模式过滤 chip、previewTexture、autosave/delete/rename/export 按钮；
+  - 点击卡片目前仍只记录 `DesktopLoadGameAction`，尚未接入完整 Java `runLoadSave()` 等价加载流程；
+  - LoadGame ScrollPane/网格布局/宽度自适应和空状态导入按钮仍待迁移；
+  - 主页面完整 UI 还必须继续推进 About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
+  - 未达到完整可玩，不能宣告目标完成。

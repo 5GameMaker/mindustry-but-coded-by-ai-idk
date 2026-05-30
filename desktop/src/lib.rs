@@ -135,6 +135,9 @@ const JOIN_SERVER_CARD_HEIGHT: f32 = 76.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
+const LOAD_SLOT_CARD_HEIGHT: f32 = 82.0;
+const LOAD_SLOT_CARD_GAP: f32 = 8.0;
+const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -20032,10 +20035,30 @@ impl DesktopLauncher {
         viewport: RenderViewport,
         slot_index: usize,
     ) -> RenderRect {
-        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
-        let line_index = 1 + slot_index;
-        let center_y = panel.y + panel.height - 118.0 - line_index as f32 * 20.0;
-        RenderRect::new(panel.x + 22.0, center_y - 9.0, panel.width - 44.0, 18.0)
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::LoadGame);
+        Self::load_game_slot_card_rect_for_panel(panel, slot_index)
+    }
+
+    fn load_game_search_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + panel.height - 128.0,
+            panel.width - 56.0,
+            LOAD_SEARCH_BAR_HEIGHT,
+        )
+    }
+
+    fn load_game_slot_card_rect_for_panel(panel: RenderRect, slot_index: usize) -> RenderRect {
+        let search = Self::load_game_search_rect_for_panel(panel);
+        let top =
+            search.y - 16.0 - slot_index as f32 * (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP);
+        RenderRect::new(
+            panel.x + 28.0,
+            top - LOAD_SLOT_CARD_HEIGHT,
+            panel.width - 56.0,
+            LOAD_SLOT_CARD_HEIGHT,
+        )
     }
 
     fn load_game_slot_at_surface_point(
@@ -20611,6 +20634,137 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_load_game_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let search = Self::load_game_search_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            search,
+            [1.0, 1.0, 1.0, 0.92],
+            0.0,
+            Layer::END_PIXELED + 0.025,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 22.0, search.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.03,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@save.search",
+            RenderPoint::new(search.x + 44.0, search.center().y),
+            [0.60, 0.70, 0.78, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.03,
+        ));
+
+        if let Some(error) = self.load_game_error.as_ref() {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("save slots: error | {error}"),
+                RenderPoint::new(panel.x + panel.width * 0.5, search.y - 42.0),
+                [0.92, 0.62, 0.58, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.03,
+            ));
+            return;
+        }
+
+        if self.load_game_slots.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@save.none",
+                RenderPoint::new(panel.x + panel.width * 0.5, search.y - 42.0),
+                [0.70, 0.78, 0.84, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.03,
+            ));
+            return;
+        }
+
+        for (index, slot) in self.load_game_slots.iter().take(4).enumerate() {
+            let rect = Self::load_game_slot_card_rect_for_panel(panel, index);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("grayt", false, false),
+                rect,
+                [1.0, 1.0, 1.0, 0.92],
+                0.0,
+                Layer::END_PIXELED + 0.03 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                rect,
+                [0.34, 0.48, 0.58, 0.86],
+                1.0,
+                Layer::END_PIXELED + 0.031 + index as f32 * 0.0001,
+            ));
+            let preview = RenderRect::new(rect.x + 10.0, rect.y + 10.0, 62.0, rect.height - 20.0);
+            pass.push(RenderCommand::draw_sprite(
+                "whiteui",
+                preview,
+                [0.12, 0.16, 0.20, 0.94],
+                0.0,
+                Layer::END_PIXELED + 0.032 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                preview,
+                [0.52, 0.62, 0.70, 0.78],
+                1.0,
+                Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
+            ));
+            let title = Self::load_game_slot_title(slot);
+            let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
+            pass.push(RenderCommand::draw_text_styled(
+                format!("[accent]{title}"),
+                RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 20.0),
+                [0.90, 0.96, 1.0, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!("slot {} | @save.wave {wave}", slot.index()),
+                RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 42.0),
+                [0.66, 0.76, 0.84, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!("saved {}", slot.timestamp()),
+                RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 60.0),
+                [0.54, 0.64, 0.72, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+            ));
+        }
+    }
+
     fn about_links_line(&self) -> String {
         let names = self
             .visible_about_links()
@@ -21106,6 +21260,8 @@ impl DesktopLauncher {
             self.push_about_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Join {
             self.push_join_route_page(pass, panel);
+        } else if route == DesktopMenuRoute::LoadGame {
+            self.push_load_game_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Settings
             && self.settings_dialog_state.page == DesktopSettingsPage::Main
         {
@@ -38943,6 +39099,46 @@ mod tests {
         assert_eq!(action.map_name.as_deref(), Some("New Map"));
         assert_eq!(action.timestamp, 200);
         assert_eq!(action.status, "selected-for-load");
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("load game frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@save.search"));
+        assert!(texts.contains(&"[accent]New Map"));
+        assert!(texts.contains(&"slot 2 | @save.wave 9"));
+        assert!(texts.contains(&"saved 200"));
+        assert!(!texts.iter().any(|text| text.starts_with("#0 New Map")));
+        let slot_card = DesktopLauncher::load_game_slot_card_rect_for_panel(
+            DesktopLauncher::active_menu_route_shell_panel_for_route(
+                viewport,
+                super::DesktopMenuRoute::LoadGame,
+            ),
+            0,
+        );
+        let card_rects = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } if symbol == "whiteui" => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(card_rects.contains(&slot_card));
 
         std::fs::remove_dir_all(root).ok();
     }
