@@ -13090,6 +13090,11 @@ fn default_desktop_texture_atlas(
 ) -> TextureAtlasPlan<bool> {
     TextureAtlasPlan::from_virtual_source_paths(
         std::iter::once("sprites/logo.png".to_string())
+            .chain(
+                ["discord-banner", "info-banner"]
+                    .into_iter()
+                    .map(|name| format!("sprites/ui/{name}.png")),
+            )
             .chain(content_icon_candidate_virtual_source_paths(content_loader))
             .into_iter()
             .chain(
@@ -16628,9 +16633,11 @@ impl DesktopLauncher {
             }
         }
 
-        Self::push_menu_chrome_button(
+        Self::push_menu_chrome_sprite_button(
             pass,
             chrome.discord_rect,
+            "discord-banner",
+            Some("discord"),
             "discord",
             [0.16, 0.27, 0.52, 0.94],
             [0.58, 0.74, 1.0, 0.98],
@@ -16654,9 +16661,11 @@ impl DesktopLauncher {
                 12.0,
                 [0.92, 0.98, 1.0, 1.0],
             );
-            Self::push_menu_chrome_button(
+            Self::push_menu_chrome_sprite_button(
                 pass,
                 info_rect,
+                "info-banner",
+                None,
                 "info",
                 [0.11, 0.20, 0.31, 0.92],
                 [0.52, 0.72, 0.88, 0.96],
@@ -16710,6 +16719,48 @@ impl DesktopLauncher {
         label_size: f32,
         label_color: [f32; 4],
     ) {
+        Self::push_menu_chrome_button_background(pass, rect, fill, stroke);
+        Self::push_menu_chrome_button_label(pass, rect, label, label_size, label_color);
+    }
+
+    fn push_menu_chrome_sprite_button(
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        sprite_symbol: &str,
+        sprite_label: Option<&str>,
+        fallback_label: &str,
+        fill: [f32; 4],
+        stroke: [f32; 4],
+        label_size: f32,
+        label_color: [f32; 4],
+    ) {
+        Self::push_menu_chrome_button_background(pass, rect, fill, stroke);
+        pass.push(RenderCommand::draw_sprite(
+            sprite_symbol,
+            rect,
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::END_PIXELED + 0.065,
+        ));
+        if let Some(label) = sprite_label {
+            Self::push_menu_chrome_button_label(pass, rect, label, label_size, label_color);
+        } else if sprite_symbol.is_empty() {
+            Self::push_menu_chrome_button_label(
+                pass,
+                rect,
+                fallback_label,
+                label_size,
+                label_color,
+            );
+        }
+    }
+
+    fn push_menu_chrome_button_background(
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        fill: [f32; 4],
+        stroke: [f32; 4],
+    ) {
         pass.push(RenderCommand::fill_rect(
             rect,
             fill,
@@ -16721,6 +16772,15 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.06,
         ));
+    }
+
+    fn push_menu_chrome_button_label(
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        label: &str,
+        label_size: f32,
+        label_color: [f32; 4],
+    ) {
         pass.push(RenderCommand::draw_text_styled(
             label,
             rect.center(),
@@ -33928,6 +33988,8 @@ mod tests {
     fn desktop_launcher_menu_renders_logo_and_version_overlay() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         assert!(launcher.texture_atlas.lookup("logo").is_ok());
+        assert!(launcher.texture_atlas.lookup("discord-banner").is_ok());
+        assert!(launcher.texture_atlas.lookup("info-banner").is_ok());
 
         let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
@@ -33992,6 +34054,13 @@ mod tests {
             matches!(
                 command,
                 RenderCommand::FillRect { rect, .. } if *rect == discord_rect
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "discord-banner" && *rect == discord_rect
             )
         }));
         assert!(commands.iter().any(|command| {
@@ -34068,7 +34137,18 @@ mod tests {
             )
         }));
         assert!(commands.iter().any(|command| {
-            matches!(command, RenderCommand::DrawText { text, .. } if text == "info")
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "info-banner" && *rect == info_rect
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "discord-banner" && *rect == discord_rect
+            )
         }));
         assert!(commands.iter().any(|command| {
             matches!(command, RenderCommand::DrawText { text, .. } if text == "discord")

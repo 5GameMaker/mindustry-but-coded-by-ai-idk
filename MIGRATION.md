@@ -17789,3 +17789,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `DrawText` 仍是 5x7 placeholder quads，必须接真实 `font.woff`/`logic.ttf`/icon glyph atlas；
   - `Settings / Mods / CustomGame / Editor / Database / TechTree` 仍缺通用 `Table/ScrollPane/Slider/CheckBox/TextField/skin` widget 层；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 494. 主菜单 chrome banner 贴图接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.0%**，仍未达到完整可玩；继续优先推进原版 UI 贴图、九宫格、字体和 Dialog/widget 层。
+- 问题背景：
+  - Java `MenuFragment` 的右下角 Discord 按钮使用 `Tex.discordBanner`，移动端 info 使用 `Tex.infoBanner`；
+  - Rust 之前只绘制色块、描边和文本，虽然 hit-test/route 已接通，但视觉上仍不像原版；
+  - 493 已经接通 raw PNG 直载后，本轮可以把这两个 banner 放入默认 atlas 并由菜单 chrome 真实消费。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 默认 desktop atlas 增加 `sprites/ui/discord-banner.png` 与 `sprites/ui/info-banner.png`；
+    - 新增 `push_menu_chrome_sprite_button(...)`，在保留 native fallback 底色/描边的同时绘制真实 banner sprite；
+    - 桌面 Discord chrome 改为绘制 `discord-banner`，暂时保留 `discord` 文本作为 Icon.font 尚未迁移前的可见替代；
+    - 移动端 info chrome 改为绘制 `info-banner`，不再依赖临时 `info` 文本；
+    - 回归测试断言默认 atlas 包含两个 banner，并确认 desktop/mobile 菜单帧里输出对应 `DrawSprite`。
+- 迁移意义：
+  - 主菜单右下角 chrome 从纯色按钮推进到消费原版 raw UI banner；
+  - 这证明 493 的 raw sprite 直载不只是底层能力，已经接到真实菜单 UI 元素；
+  - 后续应继续把 `button*.9.png`、`pane*.9.png`、`window-empty.9.png` 和字体/icon atlas 接入，而不是继续扩展色块 fallback。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_mobile_terminal_info_and_gutter_chrome --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Discord 图标本体仍未由 Java `Icon.discord` 字体 glyph 渲染，暂以文本替代；
+  - 菜单主按钮仍未使用原版 `Styles.flatToggleMenut` 的真实 drawable/九宫格；
+  - Dialog 背景、scroll/table/slider/check/textfield 和字体 atlas 仍未完成；
+  - 未达到完整可玩，不能宣告目标完成。
