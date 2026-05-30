@@ -18523,3 +18523,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `SettingsTable` 的 `checkPref/sliderPref/textPref` 真实控件和 settings 存取还未实现；
   - Language/Controls 子对话框仍是后续工作；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 518. SettingsMenuDialog 页签与 Data 动作分发接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.4%**，仍未达到完整可玩；继续把 SettingsMenuDialog 从“结构化文本壳”推进到可点击的页签/Data action 状态链路。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopSettingsAction` 新增 `OpenLanguageDialog` / `OpenControlsDialog`，明确 Language/Controls 是外部对话框动作而不是普通 settings page；
+    - `DesktopMenuRouteShellAction` 新增 `Settings(DesktopSettingsAction)`，Settings 动作进入现有 route shell 分发主链路；
+    - `SETTINGS_DATA_ACTIONS` 绑定真实 `DesktopSettingsAction`，保持与 Java `dataDialog` 按钮顺序一致；
+    - 新增 Settings line hit-test：主分类行可分发 Game/Graphics/Sound/Data 页切换，Language/Controls 记录外部对话框动作；
+    - Game/Graphics/Sound 页的 `button: reset-to-defaults` 分发 `ResetCurrentPage`；
+    - 子页 `button: back` 对齐 Java：非 Main 页返回 Main；Main 页 Back 后续可关闭 route；
+    - Data 页动作可分发 `ExportData`、`ClearResearch` 等具体 action。
+  - 测试：
+    - 扩展 `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell`，覆盖：
+      - 点击 Game 行切到 `DesktopSettingsPage::Game`；
+      - Reset 只记录 `ResetCurrentPage` 且不切页；
+      - Back 返回 Main；
+      - Language 点击不切页，只记录 `OpenLanguageDialog`；
+      - Data 点击切到 Data；
+      - Data 页 `@data.export` 记录 `ExportData`。
+- 迁移意义：
+  - Settings 已从静态 route shell 进一步接入输入命中与动作分发；
+  - 后续可以在同一状态机上继续接真实 `SettingsTable` 控件、settings 默认值/清除、确认弹窗和文件导入导出；
+  - 仍保持主菜单 route/input/render 主链路，不是独立 UI demo。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+- 仍未完成：
+  - Reset 目前只记录 action，尚未真正删除当前页 settings keys；
+  - Data 动作目前只记录 action，尚未执行清存档/导入导出/崩溃日志导出；
+  - 真实 `SettingsTable` 控件、滑条/复选框、Language/Controls 子对话框仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。

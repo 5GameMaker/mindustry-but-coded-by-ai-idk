@@ -174,6 +174,7 @@ pub struct DesktopSettingsPrefGroup {
 pub struct DesktopSettingsDataAction {
     pub label: &'static str,
     pub icon: &'static str,
+    pub action: DesktopSettingsAction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,6 +216,8 @@ impl Default for DesktopSettingsDialogState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopSettingsAction {
     OpenPage(DesktopSettingsPage),
+    OpenLanguageDialog,
+    OpenControlsDialog,
     BackToMain,
     ResetCurrentPage,
     ClearAllData,
@@ -450,38 +453,47 @@ const SETTINGS_DATA_ACTIONS: &[DesktopSettingsDataAction] = &[
     DesktopSettingsDataAction {
         label: "@settings.cleardata",
         icon: "trash",
+        action: DesktopSettingsAction::ClearAllData,
     },
     DesktopSettingsDataAction {
         label: "@settings.clearplanetdata",
         icon: "trash",
+        action: DesktopSettingsAction::ClearPlanetData,
     },
     DesktopSettingsDataAction {
         label: "@settings.clearsaves",
         icon: "trash",
+        action: DesktopSettingsAction::ClearSaves,
     },
     DesktopSettingsDataAction {
         label: "@settings.clearresearch",
         icon: "trash",
+        action: DesktopSettingsAction::ClearResearch,
     },
     DesktopSettingsDataAction {
         label: "@settings.clearcampaignsaves",
         icon: "trash",
+        action: DesktopSettingsAction::ClearCampaignSaves,
     },
     DesktopSettingsDataAction {
         label: "@data.export",
         icon: "upload",
+        action: DesktopSettingsAction::ExportData,
     },
     DesktopSettingsDataAction {
         label: "@data.import",
         icon: "download",
+        action: DesktopSettingsAction::ImportData,
     },
     DesktopSettingsDataAction {
         label: "@data.openfolder",
         icon: "folder",
+        action: DesktopSettingsAction::OpenDataFolder,
     },
     DesktopSettingsDataAction {
         label: "@crash.export",
         icon: "upload",
+        action: DesktopSettingsAction::ExportCrashLogs,
     },
 ];
 
@@ -853,6 +865,7 @@ pub enum DesktopMenuRouteShellAction {
     ShowAboutLinks,
     OpenDiscordLink,
     CopyDiscordLink,
+    Settings(DesktopSettingsAction),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18339,6 +18352,83 @@ impl DesktopLauncher {
         lines
     }
 
+    fn settings_route_line_rect_for_panel(panel: RenderRect, line_index: usize) -> RenderRect {
+        let center_y = panel.y + panel.height - 118.0 - line_index as f32 * 20.0;
+        RenderRect::new(panel.x + 22.0, center_y - 9.0, panel.width - 44.0, 18.0)
+    }
+
+    fn settings_action_for_main_entry(index: usize) -> Option<DesktopSettingsAction> {
+        match index {
+            0 => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Game)),
+            1 => Some(DesktopSettingsAction::OpenPage(
+                DesktopSettingsPage::Graphics,
+            )),
+            2 => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Sound)),
+            3 => Some(DesktopSettingsAction::OpenLanguageDialog),
+            4 => Some(DesktopSettingsAction::OpenControlsDialog),
+            5 => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Data)),
+            _ => None,
+        }
+    }
+
+    fn settings_route_action_for_line(&self, line_index: usize) -> Option<DesktopSettingsAction> {
+        match self.settings_dialog_state.page {
+            DesktopSettingsPage::Main => line_index
+                .checked_sub(3)
+                .and_then(Self::settings_action_for_main_entry),
+            DesktopSettingsPage::Data => {
+                if let Some(action_index) = line_index.checked_sub(3) {
+                    if let Some(action) = SETTINGS_DATA_ACTIONS.get(action_index) {
+                        return Some(action.action);
+                    }
+                    if action_index == SETTINGS_DATA_ACTIONS.len() {
+                        return Some(DesktopSettingsAction::BackToMain);
+                    }
+                }
+                None
+            }
+            DesktopSettingsPage::Game
+            | DesktopSettingsPage::Graphics
+            | DesktopSettingsPage::Sound => {
+                let table = self.settings_dialog_state.page.key();
+                let group = Self::settings_pref_group(table)?;
+                let chunk_count = group.entries.chunks(6).take(3).count();
+                let reset_line = 3 + chunk_count;
+                let back_line = reset_line + 1;
+                if line_index == reset_line {
+                    Some(DesktopSettingsAction::ResetCurrentPage)
+                } else if line_index == back_line {
+                    Some(DesktopSettingsAction::BackToMain)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn settings_route_shell_action_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        if self.active_menu_route != Some(DesktopMenuRoute::Settings) {
+            return None;
+        }
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
+        let point = RenderPoint::new(x, y);
+        self.settings_route_lines()
+            .iter()
+            .enumerate()
+            .find(|(line_index, _)| {
+                Self::settings_route_line_rect_for_panel(panel, *line_index).contains_point(point)
+            })
+            .and_then(|(line_index, _)| self.settings_route_action_for_line(line_index))
+            .map(DesktopMenuRouteShellAction::Settings)
+    }
+
     fn load_game_slot_line_rect_for_viewport(
         viewport: RenderViewport,
         slot_index: usize,
@@ -18504,6 +18594,13 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let route = self.active_menu_route?;
         let viewport = self.default_render_viewport_for_surface(surface_size);
+        if route == DesktopMenuRoute::Settings {
+            if let Some(action) =
+                self.settings_route_shell_action_at_surface_point(surface_size, x, y)
+            {
+                return Some(action);
+            }
+        }
         if let Some(rect) = Self::discord_route_shell_copy_rect_for_viewport(viewport, route) {
             if rect.contains_point(RenderPoint::new(x, y)) {
                 return Some(DesktopMenuRouteShellAction::CopyDiscordLink);
@@ -18563,6 +18660,34 @@ impl DesktopLauncher {
         report
     }
 
+    fn dispatch_settings_action(&mut self, action: DesktopSettingsAction) {
+        match action {
+            DesktopSettingsAction::OpenPage(page) => {
+                self.settings_dialog_state.page = page;
+            }
+            DesktopSettingsAction::BackToMain => {
+                if self.settings_dialog_state.page == DesktopSettingsPage::Main {
+                    self.active_menu_route = None;
+                } else {
+                    self.settings_dialog_state.page = DesktopSettingsPage::Main;
+                }
+            }
+            DesktopSettingsAction::OpenLanguageDialog
+            | DesktopSettingsAction::OpenControlsDialog
+            | DesktopSettingsAction::ResetCurrentPage
+            | DesktopSettingsAction::ClearAllData
+            | DesktopSettingsAction::ClearPlanetData
+            | DesktopSettingsAction::ClearSaves
+            | DesktopSettingsAction::ClearResearch
+            | DesktopSettingsAction::ClearCampaignSaves
+            | DesktopSettingsAction::ExportData
+            | DesktopSettingsAction::ImportData
+            | DesktopSettingsAction::OpenDataFolder
+            | DesktopSettingsAction::ExportCrashLogs => {}
+        }
+        self.last_settings_action = Some(action);
+    }
+
     fn dispatch_menu_route_shell_action(&mut self, action: DesktopMenuRouteShellAction) {
         self.last_menu_route_shell_action = Some(action);
         match action {
@@ -18591,6 +18716,9 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::CopyDiscordLink => {
                 self.copy_discord_link();
+            }
+            DesktopMenuRouteShellAction::Settings(action) => {
+                self.dispatch_settings_action(action);
             }
         }
     }
@@ -37012,6 +37140,180 @@ mod tests {
         let default_panel = DesktopLauncher::active_menu_route_shell_panel_for_viewport(viewport);
         assert!(settings_panel.width > default_panel.width);
         assert!(settings_panel.height > default_panel.height);
+
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Main;
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let game_center =
+            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, 3).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                game_center.x,
+                game_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::OpenPage(super::DesktopSettingsPage::Game)
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: game_center.x,
+                    y: game_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Game
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::OpenPage(
+                super::DesktopSettingsPage::Game
+            ))
+        );
+
+        let reset_index = launcher
+            .settings_route_lines()
+            .iter()
+            .position(|line| line == "button: reset-to-defaults")
+            .expect("Game settings page should expose reset");
+        let reset_center =
+            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, reset_index)
+                .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: reset_center.x,
+                    y: reset_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::ResetCurrentPage)
+        );
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Game
+        );
+
+        let back_index = launcher
+            .settings_route_lines()
+            .iter()
+            .position(|line| line == "button: back")
+            .expect("Game settings page should expose back");
+        let back_center =
+            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, back_index)
+                .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: back_center.x,
+                    y: back_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Main
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::BackToMain)
+        );
+
+        let language_center =
+            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, 6).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: language_center.x,
+                    y: language_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Main
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::OpenLanguageDialog)
+        );
+
+        let data_center =
+            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, 8).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: data_center.x,
+                    y: data_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Data
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::OpenPage(
+                super::DesktopSettingsPage::Data
+            ))
+        );
+
+        let export_index = launcher
+            .settings_route_lines()
+            .iter()
+            .position(|line| line.contains("data action: @data.export"))
+            .expect("Data page should expose export");
+        let export_center =
+            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, export_index)
+                .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: export_center.x,
+                    y: export_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::ExportData)
+        );
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
         let texts = frame
