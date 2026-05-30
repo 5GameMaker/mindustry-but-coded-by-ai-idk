@@ -13506,3 +13506,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 按 stage 补 `HardShadow` 或 `Parts` 是最直接的后续闭环；
   2. `Legs` 与 `Payload/Items` 需要对照 Java `drawLegs()` / `drawPayload()` / `drawItems()`；
   3. 继续保证新增单位渲染能力都通过这个 stage contract 进入 `unit_snapshot_render_pass()`。
+
+### 2026-05-30：UnitType hard shadow 接入客户端单位渲染
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **43.6%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/type/unit_type.rs`
+    - `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 新增 `HardShadow`，并更新 draw stage contract 测试。
+  - `core/src/mindustry/type/mod.rs`
+    - re-export `UNIT_SHADOW_TX` / `UNIT_SHADOW_TY`。
+  - `desktop/src/lib.rs`
+    - 新增 hard shadow center/layer/alpha 计算；
+    - hard shadow command 进入 `unit_snapshot_render_pass()` 的 `UnitDrawStage::HardShadow` 分支；
+    - `DesktopLauncher::update()` 调用 `tick_client_unit_snapshot_hard_shadow_alpha_for_render(1.0)`；
+    - floor `can_shadow` 与 Java `approachDelta(..., 0.11f)` 风格 alpha 逼近已接入。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_hard_shadow_before_soft_shadow_for_flying_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_ticks_unit_hard_shadow_alpha_from_floor_can_shadow --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 继续补 `UnitDrawStage::Legs`，参考 `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1827-1900`；
+  2. 或先补 `Payload` / `Items` / `Parts`，但必须接入 `unit_snapshot_render_pass()` 的 stage 分支，不能留下孤立 helper；
+  3. 并行推进 `LightCommand::Region` / `Runnable` 从 custom marker 到真实 backend lowering。

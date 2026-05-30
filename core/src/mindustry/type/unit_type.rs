@@ -52,7 +52,8 @@ pub const UNIT_TYPE_JAVA_DRAW_STAGES: [UnitDrawStage; 15] = [
     UnitDrawStage::Shield,
 ];
 
-pub const UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES: [UnitDrawStage; 9] = [
+pub const UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES: [UnitDrawStage; 10] = [
+    UnitDrawStage::HardShadow,
     UnitDrawStage::SoftShadow,
     UnitDrawStage::Outline,
     UnitDrawStage::WeaponOutlines,
@@ -1347,6 +1348,7 @@ mod tests {
         assert_eq!(
             unit.client_snapshot_draw_stages(),
             &[
+                UnitDrawStage::HardShadow,
                 UnitDrawStage::SoftShadow,
                 UnitDrawStage::Outline,
                 UnitDrawStage::WeaponOutlines,

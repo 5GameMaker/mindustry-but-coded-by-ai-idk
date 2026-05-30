@@ -73,7 +73,9 @@ use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
-use mindustry_core::mindustry::r#type::{UnitDrawStage, Weapon, WeatherState};
+use mindustry_core::mindustry::r#type::{
+    UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
+};
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
@@ -1196,6 +1198,38 @@ fn desktop_unit_soft_shadow_sprite(unit: &UnitComp) -> &'static str {
 
 fn desktop_unit_soft_shadow_layer(unit: &UnitComp) -> f32 {
     (desktop_unit_body_layer(unit) - 0.01).min(Layer::BULLET - 1.0)
+}
+
+fn desktop_unit_hard_shadow_layer(unit: &UnitComp) -> f32 {
+    (desktop_unit_body_layer(unit) - 1.0).min(Layer::DARKNESS)
+}
+
+fn desktop_approach_delta(value: f32, target: f32, amount: f32) -> f32 {
+    let amount = if amount.is_finite() {
+        amount.max(0.0)
+    } else {
+        0.0
+    };
+    if value < target {
+        (value + amount).min(target)
+    } else {
+        (value - amount).max(target)
+    }
+}
+
+fn desktop_unit_hard_shadow_center(unit: &UnitComp) -> Option<RenderPoint> {
+    if !unit.is_valid() || (!unit.is_flying() && unit.type_info.shadow_elevation <= 0.0) {
+        return None;
+    }
+
+    let elevation = unit.elevation.clamp(unit.type_info.shadow_elevation, 1.0)
+        * unit.type_info.shadow_elevation_scl
+        * (1.0 - unit.drown_time).clamp(0.0, 1.0);
+
+    Some(RenderPoint::new(
+        unit.x() + UNIT_SHADOW_TX * elevation,
+        unit.y() + UNIT_SHADOW_TY * elevation,
+    ))
 }
 
 fn desktop_team_color_rgba(team: TeamId) -> u32 {
@@ -11692,6 +11726,7 @@ impl DesktopLauncher {
         self.sync_remote_preview_plan_packets(now_millis);
         self.rebuild_other_player_preview_overlays_at(now_millis, 1.0, None);
         self.runtime.tick_client_move_effect_abilities(1.0, false);
+        self.tick_client_unit_snapshot_hard_shadow_alpha_for_render(1.0);
         self.runtime.tick_client_unit_snapshot_trails(1.0);
         self.runtime
             .tick_client_fire_snapshot_entities(1.0, false, 0.0);
@@ -13306,6 +13341,97 @@ impl DesktopLauncher {
             .collect()
     }
 
+    fn unit_snapshot_shadow_floor_can_shadow(&self, center: RenderPoint) -> bool {
+        let floor_id = self.game_state.world.floor_world_id(center.x, center.y);
+        self.content_loader
+            .block(floor_id)
+            .and_then(BlockDef::as_floor)
+            .map(|floor| floor.can_shadow)
+            .unwrap_or(true)
+    }
+
+    fn unit_snapshot_hard_shadow_alpha(&self, unit: &UnitComp, center: RenderPoint) -> f32 {
+        let dest = if self.unit_snapshot_shadow_floor_can_shadow(center) {
+            1.0
+        } else {
+            0.0
+        };
+        if unit.shadow_alpha >= 0.0 {
+            unit.shadow_alpha
+        } else {
+            dest
+        }
+        .clamp(0.0, 1.0)
+    }
+
+    pub fn tick_client_unit_snapshot_hard_shadow_alpha_for_render(&mut self, delta: f32) -> usize {
+        let step = 0.11
+            * if delta.is_finite() {
+                delta.max(0.0)
+            } else {
+                0.0
+            };
+        let targets = self
+            .runtime
+            .client_unit_snapshot_entities
+            .iter()
+            .filter_map(|(entity_id, unit)| {
+                let center = desktop_unit_hard_shadow_center(unit)?;
+                let target = if self.unit_snapshot_shadow_floor_can_shadow(center) {
+                    1.0
+                } else {
+                    0.0
+                };
+                Some((*entity_id, target))
+            })
+            .collect::<Vec<_>>();
+
+        let mut updated = 0;
+        for (entity_id, target) in targets {
+            let Some(unit) = self
+                .runtime
+                .client_unit_snapshot_entities
+                .get_mut(&entity_id)
+            else {
+                continue;
+            };
+            let previous = unit.shadow_alpha;
+            let next = if !previous.is_finite() || previous < 0.0 {
+                target
+            } else {
+                desktop_approach_delta(previous.clamp(0.0, 1.0), target, step)
+            };
+            if !previous.is_finite() || (previous - next).abs() > f32::EPSILON {
+                unit.shadow_alpha = next;
+                updated += 1;
+            }
+        }
+
+        updated
+    }
+
+    fn unit_snapshot_hard_shadow_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
+        let center = desktop_unit_hard_shadow_center(unit)?;
+        let symbol = unit.type_info.name().to_string();
+        let region = self.texture_atlas.lookup(&symbol).ok()?;
+        let width = region.region.width.max(1) as f32;
+        let height = region.region.height.max(1) as f32;
+        let shadow_alpha = self.unit_snapshot_hard_shadow_alpha(unit, center);
+        if shadow_alpha <= f32::EPSILON {
+            return None;
+        }
+
+        let rect = RenderRect::from_center(center, width, height);
+
+        Some(RenderCommand::draw_sprite(
+            symbol,
+            rect,
+            desktop_effect_render_color(Some(Pal::SHADOW), shadow_alpha),
+            unit.rotation() - 90.0,
+            desktop_unit_hard_shadow_layer(unit),
+        ))
+    }
+
     fn unit_snapshot_soft_shadow_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_soft_shadow {
             return None;
@@ -13338,6 +13464,11 @@ impl DesktopLauncher {
 
             for stage in unit.type_info.client_snapshot_draw_stages() {
                 match stage {
+                    UnitDrawStage::HardShadow => {
+                        if let Some(command) = self.unit_snapshot_hard_shadow_render_command(unit) {
+                            pass.commands.push(command);
+                        }
+                    }
                     UnitDrawStage::SoftShadow => {
                         if let Some(command) = self.unit_snapshot_soft_shadow_render_command(unit) {
                             pass.commands.push(command);
@@ -13375,8 +13506,7 @@ impl DesktopLauncher {
                             pass.commands.push(command);
                         }
                     }
-                    UnitDrawStage::HardShadow
-                    | UnitDrawStage::Legs
+                    UnitDrawStage::Legs
                     | UnitDrawStage::Payload
                     | UnitDrawStage::Items
                     | UnitDrawStage::Parts
@@ -19136,6 +19266,192 @@ mod tests {
             }
             other => panic!("expected unit light DrawCircle, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn desktop_launcher_emits_unit_hard_shadow_before_soft_shadow_for_flying_snapshot() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+        assert!(launcher.texture_atlas.has("dagger"));
+        assert!(launcher.texture_atlas.has("dagger-outline"));
+        assert!(launcher.texture_atlas.has("particle"));
+
+        let mut unit = UnitComp::new(7402, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(180.0);
+        unit.elevation = 1.0;
+        unit.shadow_alpha = 1.0;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7402, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            22,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, rect, .. }
+                        if symbol == "dagger"
+                            && rect.center() == RenderPoint::new(
+                                40.0 + super::UNIT_SHADOW_TX,
+                                56.0 + super::UNIT_SHADOW_TY,
+                            ))
+                    })
+            })
+            .expect("flying unit snapshot should emit a hard shadow overlay command");
+
+        let expected_hard_shadow_center =
+            RenderPoint::new(40.0 + super::UNIT_SHADOW_TX, 56.0 + super::UNIT_SHADOW_TY);
+        let expected_hard_shadow_tint = super::desktop_effect_render_color(Some(Pal::SHADOW), 1.0);
+        let hard_shadow_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, rect, tint, .. }
+                    if symbol == "dagger"
+                        && rect.center() == expected_hard_shadow_center
+                        && *tint == expected_hard_shadow_tint)
+            })
+            .expect("unit hard shadow should use body shadow region at Java offset");
+        let soft_shadow_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, rect, tint, .. }
+                    if symbol == "particle"
+                        && rect.center() == RenderPoint::new(40.0, 56.0)
+                        && *tint == [0.0, 0.0, 0.0, 0.4])
+            })
+            .expect("unit soft shadow should still render after hard shadow");
+        let outline_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger-outline")
+            })
+            .expect("unit outline should render after soft shadow");
+
+        assert!(
+            hard_shadow_index < soft_shadow_index,
+            "UnitType.draw should draw hard shadow before soft shadow"
+        );
+        assert!(
+            soft_shadow_index < outline_index,
+            "UnitType.draw should draw soft shadow before outline"
+        );
+
+        match &overlay.commands[hard_shadow_index] {
+            RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(rect.center(), expected_hard_shadow_center);
+                assert_eq!(rect.width, 1.0);
+                assert_eq!(rect.height, 1.0);
+                assert_eq!(*tint, expected_hard_shadow_tint);
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::DARKNESS);
+            }
+            other => panic!("expected unit hard shadow DrawSprite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_ticks_unit_hard_shadow_alpha_from_floor_can_shadow() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+        let space_id = launcher
+            .content_loader
+            .block_by_name("space")
+            .expect("base content should include space floor")
+            .base()
+            .id;
+        let stone_id = launcher
+            .content_loader
+            .block_by_name("stone")
+            .expect("base content should include stone floor")
+            .base()
+            .id;
+        assert!(
+            !launcher
+                .content_loader
+                .block(space_id)
+                .and_then(BlockDef::as_floor)
+                .expect("space should be a floor")
+                .can_shadow
+        );
+        assert!(
+            launcher
+                .content_loader
+                .block(stone_id)
+                .and_then(BlockDef::as_floor)
+                .expect("stone should be a floor")
+                .can_shadow
+        );
+
+        launcher.game_state.world.resize(8, 8);
+        launcher.game_state.world.tile_mut(4, 5).unwrap().floor = space_id;
+
+        let mut unit = UnitComp::new(7403, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.elevation = 1.0;
+        unit.shadow_alpha = 0.5;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7403, unit);
+
+        assert_eq!(
+            launcher.tick_client_unit_snapshot_hard_shadow_alpha_for_render(1.0),
+            1
+        );
+        let faded_alpha = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&7403)
+            .unwrap()
+            .shadow_alpha;
+        assert!((faded_alpha - 0.39).abs() < 0.0001);
+
+        launcher.game_state.world.tile_mut(4, 5).unwrap().floor = stone_id;
+        assert_eq!(
+            launcher.tick_client_unit_snapshot_hard_shadow_alpha_for_render(1.0),
+            1
+        );
+        let restored_alpha = launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .get(&7403)
+            .unwrap()
+            .shadow_alpha;
+        assert!((restored_alpha - 0.5).abs() < 0.0001);
     }
 
     #[test]

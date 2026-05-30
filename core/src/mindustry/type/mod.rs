@@ -38,8 +38,8 @@ pub use sector::{Sector, SectorPlanetDefaults, SectorPreset, SectorRuntimeState}
 pub use status_effect::StatusEffect;
 pub use team_entry::TeamEntry;
 pub use unit_type::{
-    UnitDrawStage, UnitEngine, UnitType, UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES,
-    UNIT_TYPE_JAVA_DRAW_STAGES,
+    UnitDrawStage, UnitEngine, UnitType, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
+    UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES, UNIT_TYPE_JAVA_DRAW_STAGES,
 };
 pub use weapon::Weapon;
 pub use weather::{

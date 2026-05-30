@@ -16376,3 +16376,52 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `UnitDrawStage::HardShadow` / `Legs` / `Payload` / `Items` / `Parts` / `Abilities` 仍是显式 no-op；
   - 仍需把 Java `drawLegs()`、`drawPayload()`、`drawItems()`、weapon/unit parts、hard shadow 真正接入对应 stage；
   - full `UnitType.draw()` 与 floor shadow、payload hiding、abilities layer 等细节仍需继续。
+
+## 448. 最新闭环记录：UnitType hard shadow 接入客户端单位渲染
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.6%**，仍未达到完整可玩。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1495-1498`
+    - `!isPayload && (unit.isFlying() || shadowElevation > 0)` 时先绘制 hard shadow；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1653-1664`
+    - `e = clamp(unit.elevation, shadowElevation, 1f) * shadowElevationScl * (1f - unit.drownTime)`；
+    - `x = unit.x + shadowTX * e`，`y = unit.y + shadowTY * e`；
+    - `floor.canShadow` 决定目标 alpha，`shadowAlpha` 按 `approachDelta(..., 0.11f)` 逼近；
+    - 使用 `Pal.shadow` 与 `rotation - 90` 绘制 `shadowRegion`。
+- 本轮主改动：
+  - `core/src/mindustry/type/unit_type.rs`
+    - `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 新增 `UnitDrawStage::HardShadow`，客户端单位 snapshot 的 stage 顺序现在从 hard shadow 开始；
+    - `unit_type_draw_stage_contract_preserves_java_and_snapshot_order` 覆盖 Java stage 与当前 snapshot stage 顺序。
+  - `core/src/mindustry/type/mod.rs`
+    - re-export `UNIT_SHADOW_TX` / `UNIT_SHADOW_TY`，desktop 渲染侧不再重复硬编码偏移。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_unit_hard_shadow_center(...)`、`desktop_unit_hard_shadow_layer(...)` 与 `desktop_approach_delta(...)`；
+    - 新增 `unit_snapshot_hard_shadow_render_command(...)`，按 Java `shadowTX/shadowTY`、`shadowElevationScl`、`drownTime`、`rotation - 90` 生成 body shadow sprite；
+    - 新增 `unit_snapshot_shadow_floor_can_shadow(...)` 与 `unit_snapshot_hard_shadow_alpha(...)`，将 floor `can_shadow` 纳入 hard shadow alpha 语义；
+    - 新增 `tick_client_unit_snapshot_hard_shadow_alpha_for_render(...)` 并在 `DesktopLauncher::update()` 中调用，使客户端 snapshot 单位的 `shadow_alpha` 按 Java `approachDelta(0.11)` 语义逼近目标值；
+    - `unit_snapshot_render_pass()` 在 `UnitDrawStage::HardShadow` 分支推入 hard shadow command，不再把该 stage 当 no-op。
+  - 测试：
+    - `desktop_launcher_emits_unit_hard_shadow_before_soft_shadow_for_flying_snapshot`
+      - 验证 hard shadow 使用 body region、`Pal::SHADOW`、`UNIT_SHADOW_TX/TY` 偏移、`Layer::DARKNESS`，并位于 soft shadow / outline 之前；
+    - `desktop_launcher_ticks_unit_hard_shadow_alpha_from_floor_can_shadow`
+      - 验证 `space.can_shadow = false` 时 alpha 以 `0.11` 步长衰减，切回 `stone.can_shadow = true` 后按同样步长恢复。
+- 迁移意义：
+  - 单位渲染 stage contract 已开始从“只有顺序”推进到“真实 Java draw stage 命令”，hard shadow 现在进入 `runtime client unit snapshot → unit render stage → RenderPassKind::Overlay → backend` 主链；
+  - hard shadow 的几何、图层、颜色、地面可投影 alpha 语义已接入，不再只是 TODO marker；
+  - 后续 `Legs` / `Payload` / `Items` / `Parts` / `Abilities` 可按同一 stage 分支继续填充，避免形成孤立 helper。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_hard_shadow_before_soft_shadow_for_flying_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_ticks_unit_hard_shadow_alpha_from_floor_can_shadow --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `UnitDrawStage::Legs` / `Payload` / `Items` / `Parts` / `Abilities` 仍是显式 no-op；
+  - hard shadow 当前仍基于 snapshot unit 自身状态与本地 floor lookup，后续若同步协议扩展 `shadowAlpha` 或更完整 floor 语义，需要继续对齐 Java 客户端行为；
+  - `LightCommand::Region` / `Runnable`、weather/accelerator custom marker 等渲染后端 lowering 仍需继续。
