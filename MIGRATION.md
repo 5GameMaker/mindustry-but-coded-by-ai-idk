@@ -18384,3 +18384,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - submenu 动画仍未使用完整 `Interp.fade` 曲线；
   - `MenuFragment` 仍未完全拆成 core UI fragment 结构；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 513. MenuFragment pressed/down 样式接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.9%**，仍未达到完整可玩；继续对照 Arc Scene2D `Button` 的视觉优先级，把主菜单按钮的 `pressed -> down` 状态接入真实 desktop 输入与渲染帧。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuButtonPlan` 新增 `pressed` 字段；
+    - `flat_toggle_menu_state()` 调整为 `pressed -> Down` 优先于 `selected/hovered/up`；
+    - `MenuUiPlan::with_pressed_role()` 统一给按钮写入 pressed 状态；
+    - 新增测试验证 pressed 按钮发出 `flat-down-base.9`，并且 pressed 优先于 hovered。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `last_menu_pressed_button`，初始化与 reset 时清空；
+    - `menu_frame_for_render()` 与 `menu_graphics_frame_for_surface()` 把 pressed 状态写入 `MenuUiPlan`；
+    - `apply_menu_input_events()` 在 primary mouse down 时记录命中的菜单按钮，在 primary mouse up 时清空；
+    - 新增测试覆盖 `CursorMoved -> MouseButton pressed:true -> render frame down drawable -> pressed:false 清空` 的真实主链路。
+- 迁移意义：
+  - 主菜单按钮状态已具备 `up / over / down / checked` 四态基础，`Styles.flatToggleMenut` 的关键视觉状态进入可测试渲染链路；
+  - pressed 状态来自 desktop 输入事件，不是独立 core 片段；
+  - 后续可继续补 `ClickListener.isVisualPressed()` 的短暂视觉保留、拖出取消、disabled/focus。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu_renderer --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 释放后的短暂 `visualPressed` 保留尚未实现；
+  - 按住拖出/拖回的 pressed 取消/恢复还未补齐；
+  - disabled/keyboard focus/tooltip 仍未迁移；
+  - 未达到完整可玩，不能宣告目标完成。

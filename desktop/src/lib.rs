@@ -13407,6 +13407,7 @@ pub struct DesktopLauncher {
     pub menu_renderer_state: MenuRendererState,
     pub last_menu_cursor: Option<RenderPoint>,
     pub last_menu_hovered_button: Option<MenuButtonRole>,
+    pub last_menu_pressed_button: Option<MenuButtonRole>,
     pub last_menu_action: Option<MenuButtonRole>,
     pub active_menu_route: Option<DesktopMenuRoute>,
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
@@ -14101,6 +14102,7 @@ impl DesktopLauncher {
             menu_renderer_state: MenuRendererState::new(MenuRendererConfig::new(false, 7)),
             last_menu_cursor: None,
             last_menu_hovered_button: None,
+            last_menu_pressed_button: None,
             last_menu_action: None,
             active_menu_route: None,
             last_menu_dispatch: None,
@@ -15234,7 +15236,10 @@ impl DesktopLauncher {
 
     pub fn menu_frame_for_render(&mut self, input: MenuFrameInput) -> DesktopFrame {
         let mut plan = self.menu_renderer_state.render_plan(input);
-        plan.ui = plan.ui.with_hovered_role(self.last_menu_hovered_button);
+        plan.ui = plan
+            .ui
+            .with_hovered_role(self.last_menu_hovered_button)
+            .with_pressed_role(self.last_menu_pressed_button);
         DesktopFrame {
             kind: DesktopFrameKind::Menu,
             payload: DesktopFramePayload::Menu(plan),
@@ -18631,9 +18636,16 @@ impl DesktopLauncher {
                         self.menu_button_at_surface_point(surface_size, point.x, point.y);
                 }
                 DesktopInputTickEvent::MouseButton { button, pressed }
+                    if !*pressed && Self::is_primary_menu_mouse_button(button) =>
+                {
+                    self.last_menu_pressed_button = None;
+                }
+                DesktopInputTickEvent::MouseButton { button, pressed }
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
                 {
                     if let Some(cursor) = self.last_menu_cursor {
+                        self.last_menu_pressed_button =
+                            self.menu_button_at_surface_point(surface_size, cursor.x, cursor.y);
                         if let Some(slot_index) =
                             self.load_game_slot_at_surface_point(surface_size, cursor.x, cursor.y)
                         {
@@ -18968,7 +18980,10 @@ impl DesktopLauncher {
     ) -> DesktopGraphicsFrame {
         let input = Self::default_menu_frame_input_for_viewport(viewport);
         let mut plan = self.menu_renderer_state.render_plan(input);
-        plan.ui = plan.ui.with_hovered_role(self.last_menu_hovered_button);
+        plan.ui = plan
+            .ui
+            .with_hovered_role(self.last_menu_hovered_button)
+            .with_pressed_role(self.last_menu_pressed_button);
         let mut menu_pass = if desktop_fast_menu_enabled() {
             self.fast_menu_render_pass_from_plan(&plan, viewport)
         } else {
@@ -20286,6 +20301,7 @@ impl DesktopLauncher {
         self.menu_renderer_state = MenuRendererState::new(MenuRendererConfig::new(false, 7));
         self.last_menu_cursor = None;
         self.last_menu_hovered_button = None;
+        self.last_menu_pressed_button = None;
         self.last_menu_action = None;
         self.active_menu_route = None;
         self.last_menu_dispatch = None;
@@ -35062,6 +35078,68 @@ mod tests {
                     if symbol == "whiteui" && *rect == mods_rect
             )
         }));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_frame_applies_pressed_button_down_drawable_and_release_clears() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let settings_rect = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Settings)
+            .expect("menu ui should include SETTINGS")
+            .rect;
+        let settings_center = settings_rect.center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: settings_center.x,
+                    y: settings_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_menu_pressed_button,
+            Some(MenuButtonRole::Settings)
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "flat-down-base.9" && *rect == settings_rect
+            )
+        }));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::MouseButton {
+                button: "primary".into(),
+                pressed: false,
+            }],
+        );
+        assert_eq!(launcher.last_menu_pressed_button, None);
     }
 
     #[test]

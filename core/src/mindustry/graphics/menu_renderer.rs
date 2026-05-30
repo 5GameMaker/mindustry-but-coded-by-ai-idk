@@ -447,12 +447,15 @@ pub struct MenuButtonPlan {
     pub rect: RenderRect,
     pub selected: bool,
     pub hovered: bool,
+    pub pressed: bool,
     pub submenu: bool,
 }
 
 impl MenuButtonPlan {
     pub const fn flat_toggle_menu_state(&self) -> MenuFlatToggleMenuState {
-        if self.selected {
+        if self.pressed {
+            MenuFlatToggleMenuState::Down
+        } else if self.selected {
             MenuFlatToggleMenuState::Checked
         } else if self.hovered {
             MenuFlatToggleMenuState::Over
@@ -473,6 +476,13 @@ impl MenuUiPlan {
     pub fn with_hovered_role(mut self, hovered_role: Option<MenuButtonRole>) -> Self {
         for button in &mut self.buttons {
             button.hovered = hovered_role == Some(button.role);
+        }
+        self
+    }
+
+    pub fn with_pressed_role(mut self, pressed_role: Option<MenuButtonRole>) -> Self {
+        for button in &mut self.buttons {
+            button.pressed = pressed_role == Some(button.role);
         }
         self
     }
@@ -1320,6 +1330,7 @@ fn menu_button_plan(role: MenuButtonRole, rect: RenderRect, selected: bool) -> M
         rect,
         selected,
         hovered: false,
+        pressed: false,
         submenu: role.is_submenu(),
     }
 }
@@ -1335,6 +1346,7 @@ fn menu_custom_button_plan(
         rect,
         selected: false,
         hovered: false,
+        pressed: false,
         submenu: false,
     }
 }
@@ -1350,6 +1362,7 @@ fn menu_mobile_button_plan(
         rect,
         selected,
         hovered: false,
+        pressed: false,
         submenu: false,
     }
 }
@@ -2121,6 +2134,7 @@ mod tests {
                 rect,
                 selected: true,
                 hovered: false,
+                pressed: false,
                 submenu: false,
             }],
         };
@@ -2159,6 +2173,7 @@ mod tests {
                 rect,
                 selected: false,
                 hovered: false,
+                pressed: false,
                 submenu: false,
             }],
         }
@@ -2180,6 +2195,41 @@ mod tests {
                 } if symbol == "whiteui"
                     && *sprite_rect == rect
                     && (tint[3] - UiDrawableTint::FlatOver.rgba()[3]).abs() < 0.0001
+            )
+        }));
+    }
+
+    #[test]
+    fn menu_ui_plan_pressed_buttons_emit_java_flat_down_drawable() {
+        let rect = RenderRect::new(10.0, 20.0, 230.0, 70.0);
+        let plan = MenuUiPlan {
+            mobile: false,
+            submenu_alpha: 1.0,
+            buttons: vec![MenuButtonPlan {
+                role: MenuButtonRole::Settings,
+                label: "SETTINGS".to_string(),
+                rect,
+                selected: false,
+                hovered: true,
+                pressed: false,
+                submenu: false,
+            }],
+        }
+        .with_pressed_role(Some(MenuButtonRole::Settings));
+
+        assert_eq!(
+            plan.buttons[0].flat_toggle_menu_state(),
+            MenuFlatToggleMenuState::Down
+        );
+        let commands = plan.to_render_commands();
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: sprite_rect,
+                    ..
+                } if symbol == "flat-down-base.9" && *sprite_rect == rect
             )
         }));
     }
