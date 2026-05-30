@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **41.0%**。
+- 当前总体迁移完成度：约 **41.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -12785,3 +12785,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续在同一 unit pass 内补 outline 与 cell/team color，优先选低冲突 sprite 分支；
   2. 再推进 weapon/leg/engine/payload/item；
   3. 同时保持后续统一 entity layer sorting 的目标，不要让这些子分支成为孤立模块。
+
+### 2026-05-30：Unit outline 与 cell/team color 接入同一单位 pass
+
+- 当前整体完成度：约 **41.1%**。
+- 已完成：
+  - `unit_snapshot_render_pass()` 顺序已扩展为 soft shadow → outline → body → cell；
+  - `{unit}-outline` 以 `UnitType.outline_color_rgba` 输出；
+  - `{unit}-cell` 以 health fraction 插值到 team color 输出，缺失时保留 `power-cell` fallback；
+  - 补了 `desktop_team_color_rgba(...)` 的固定队伍色和 placeholder 队伍色；
+  - dagger 快照测试覆盖 outline/cell 的资源、颜色、顺序、位置、旋转和 layer。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 接 unit light/shield 或 engine circles，继续使用同一 unit aggregation；
+  2. 再推进 weapons/legs/payload/items；
+  3. 继续收口统一 entity layer sorting，避免 Overlay 临时层长期化。

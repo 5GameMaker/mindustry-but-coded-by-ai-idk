@@ -15574,3 +15574,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - hard shadow (`drawShadow`)、outline、cell/team color、weapons、legs、payload/item、engine trail、unit light/shield 仍未接入；
   - 当前 soft shadow region 的 `Core.settings.linear` 分支暂按 hit_size/square_shape 最小可复现路径处理；
   - Unit/Fire/Bullet/Puddle 仍需统一 Java layer sorting；Weather custom lowering 与 native OpenGL smoke 仍需继续。
+
+## 423. 最新闭环记录：Unit outline 与 cell/team color 接入同一单位 pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.1%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/UnitType.java#draw(...)`
+  - `core/src/mindustry/type/UnitType.java#drawOutline(...)`
+  - `core/src/mindustry/type/UnitType.java#drawCell(...)`
+  - `core/src/mindustry/type/UnitType.java#cellColor(...)`
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_team_color_rgba(...)` 与稳定 placeholder team color，避免 unit cell 渲染只停在无色 sprite；
+    - 新增 `desktop_unit_cell_color(...)`，按 health fraction 将黑色向 team color 插值，保留后续接 Java `absin(Time.time)` 的扩展点；
+    - 新增 `unit_snapshot_outline_render_command(...)`，将 `{unit}-outline` 按 `outline_color_rgba` 输出为 body 前 `DrawSprite`；
+    - 新增 `unit_snapshot_cell_render_command(...)`，将 `{unit}-cell` 或 `power-cell` fallback 输出为 body 后 `DrawSprite`；
+    - `unit_snapshot_render_pass()` 顺序变为 soft shadow → outline → body → cell；
+    - 扩展 dagger snapshot 测试，覆盖 outline/cell 资源、颜色、顺序、位置、旋转与 layer。
+- 迁移意义：
+  - Unit 渲染继续沿同一个 pass 聚合，不再只有 body/soft shadow；
+  - `UnitType.draw()` 中最基础的静态单位层次（soft shadow / outline / body / cell）已形成可执行 RenderCommand 闭环。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Java `cellColor` 的低血量闪烁 `absin(Time.time)` 尚未接入；
+  - hard shadow、weapons、legs、payload/item、engine trail、unit light/shield 仍未接入；
+  - Unit/Fire/Bullet/Puddle 仍需统一 Java layer sorting；Weather custom lowering 与 native OpenGL smoke 仍需继续。

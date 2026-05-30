@@ -222,6 +222,43 @@ fn desktop_unit_soft_shadow_layer(unit: &UnitComp) -> f32 {
     (desktop_unit_body_layer(unit) - 0.01).min(Layer::BULLET - 1.0)
 }
 
+fn desktop_team_color_rgba(team: TeamId) -> u32 {
+    match team.0 {
+        0 => 0x4d4e58ff,
+        1 => 0xffd37fff,
+        2 => 0xf25555ff,
+        3 => 0xa27ce5ff,
+        4 => 0x54d67dff,
+        5 => 0x6c87fdff,
+        6 => 0xe05438ff,
+        other => {
+            let hash = desktop_splitmix32(other as u32 + 0x9e37_79b9);
+            let r = 0x60 + ((hash >> 16) & 0x7f);
+            let g = 0x60 + ((hash >> 8) & 0x7f);
+            let b = 0x60 + (hash & 0x7f);
+            (r << 24) | (g << 16) | (b << 8) | 0xff
+        }
+    }
+}
+
+fn desktop_splitmix32(mut value: u32) -> u32 {
+    value = value.wrapping_add(0x9e37_79b9);
+    value = (value ^ (value >> 16)).wrapping_mul(0x85eb_ca6b);
+    value = (value ^ (value >> 13)).wrapping_mul(0xc2b2_ae35);
+    value ^ (value >> 16)
+}
+
+fn desktop_unit_cell_color(unit: &UnitComp) -> [f32; 4] {
+    let team = rgba8888_to_render_color(desktop_team_color_rgba(unit.team.team), 1.0);
+    let healthf = unit.health.healthf().clamp(0.0, 1.0);
+    [
+        desktop_lerp(0.0, team[0], healthf),
+        desktop_lerp(0.0, team[1], healthf),
+        desktop_lerp(0.0, team[2], healthf),
+        desktop_lerp(1.0, team[3], healthf),
+    ]
+}
+
 fn desktop_puddle_fraction(amount: f32) -> f32 {
     (amount / (PuddleComp::MAX_LIQUID / 1.5)).clamp(0.0, 1.0)
 }
@@ -11775,6 +11812,51 @@ impl DesktopLauncher {
         ))
     }
 
+    fn unit_snapshot_outline_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
+        if !unit.is_valid() || !unit.type_info.draw_body {
+            return None;
+        }
+
+        let symbol = format!("{}-outline", unit.type_info.name());
+        let region = self.texture_atlas.lookup(&symbol).ok()?;
+        let width = region.region.width.max(1) as f32;
+        let height = region.region.height.max(1) as f32;
+        let rect = RenderRect::from_center(RenderPoint::new(unit.x(), unit.y()), width, height);
+
+        Some(RenderCommand::draw_sprite(
+            symbol,
+            rect,
+            rgba8888_to_render_color(unit.type_info.outline_color_rgba, 1.0),
+            unit.rotation() - 90.0,
+            desktop_unit_body_layer(unit),
+        ))
+    }
+
+    fn unit_snapshot_cell_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
+        if !unit.is_valid() || !unit.type_info.draw_cell {
+            return None;
+        }
+
+        let preferred = format!("{}-cell", unit.type_info.name());
+        let symbol = if self.texture_atlas.lookup(&preferred).is_ok() {
+            preferred
+        } else {
+            "power-cell".to_string()
+        };
+        let region = self.texture_atlas.lookup(&symbol).ok()?;
+        let width = region.region.width.max(1) as f32;
+        let height = region.region.height.max(1) as f32;
+        let rect = RenderRect::from_center(RenderPoint::new(unit.x(), unit.y()), width, height);
+
+        Some(RenderCommand::draw_sprite(
+            symbol,
+            rect,
+            desktop_unit_cell_color(unit),
+            unit.rotation() - 90.0,
+            desktop_unit_body_layer(unit),
+        ))
+    }
+
     fn unit_snapshot_soft_shadow_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_soft_shadow {
             return None;
@@ -11807,7 +11889,13 @@ impl DesktopLauncher {
             if let Some(command) = self.unit_snapshot_soft_shadow_render_command(unit) {
                 pass.commands.push(command);
             }
+            if let Some(command) = self.unit_snapshot_outline_render_command(unit) {
+                pass.commands.push(command);
+            }
             if let Some(command) = self.unit_snapshot_body_render_command(unit) {
+                pass.commands.push(command);
+            }
+            if let Some(command) = self.unit_snapshot_cell_render_command(unit) {
                 pass.commands.push(command);
             }
         }
@@ -16052,6 +16140,8 @@ mod tests {
             .expect("base content should include dagger")
             .clone();
         assert!(launcher.texture_atlas.has("dagger"));
+        assert!(launcher.texture_atlas.has("dagger-outline"));
+        assert!(launcher.texture_atlas.has("dagger-cell"));
         assert!(launcher.texture_atlas.has("particle"));
 
         let mut unit = UnitComp::new(7400, dagger, TeamId(1));
@@ -16085,6 +16175,18 @@ mod tests {
                     })
             })
             .expect("unit snapshot should emit a body sprite overlay pass");
+        let index_of_symbol = |symbol_name: &str| {
+            overlay
+                .commands
+                .iter()
+                .position(|command| {
+                    matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == symbol_name)
+                })
+                .expect("expected unit render command symbol")
+        };
+        assert!(index_of_symbol("particle") < index_of_symbol("dagger-outline"));
+        assert!(index_of_symbol("dagger-outline") < index_of_symbol("dagger"));
+        assert!(index_of_symbol("dagger") < index_of_symbol("dagger-cell"));
         match overlay.commands.iter().find(|command| {
             matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger")
         }) {
@@ -16122,6 +16224,40 @@ mod tests {
                 assert!((*layer - (Layer::GROUND_UNIT - 0.01)).abs() < 0.0001);
             }
             other => panic!("expected unit soft shadow DrawSprite, got {other:?}"),
+        }
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger-outline")
+        }) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(40.0, 56.0));
+                assert_eq!(*tint, super::rgba8888_to_render_color(0x2b2f36ff, 1.0));
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected unit outline DrawSprite, got {other:?}"),
+        }
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger-cell")
+        }) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(40.0, 56.0));
+                assert_eq!(*tint, super::rgba8888_to_render_color(0xffd37fff, 1.0));
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected unit cell DrawSprite, got {other:?}"),
         }
     }
 
