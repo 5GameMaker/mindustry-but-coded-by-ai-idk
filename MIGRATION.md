@@ -18220,3 +18220,53 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - hover/animation/fadeInMenu/fadeOutMenu/currentMenu 行为仍需继续补齐；
   - 真实字体 glyph atlas 仍未替换 placeholder；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 507. Dialog shell 常用 Styles tint 消费面补齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.3%**，仍未达到完整可玩；继续把 `Styles.java` 的 tint/drawable 语义从数据层推进到 Dialog shell 消费层。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - `DialogDrawableRef::atlas_symbol()` 支持 `black8/black6/black5/black3/none/grayPanel/grayPanelDark/flatOver/accentDrawable/windowEmpty`；
+    - 新增/扩展 `DialogDrawableRef::ui_tint()`，复用 `UiDrawableTint::rgba()` 的上游 tint 语义；
+    - `default_tint()` 改为覆盖 `black/black9/black8/black6/black5/black3/none/flatOver/accentDrawable/grayPanel/grayPanelDark`；
+    - 增加表驱动测试，验证 atlas symbol、ui tint、default tint 与 `Styles.load()` 等价别名一致。
+- 迁移意义：
+  - Dialog shell 不再只识别 `black/black9/whiteui`，后续 tooltip/loading/settings/mods 等页面可复用同一 tint 消费层；
+  - `BaseDialog` 仍保持现有 window shell 行为，同时为真实 Dialog/Page 迁移减少硬编码。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core dialogs --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 各具体 Dialog 仍大量停留在 route shell 或文本占位；
+  - Scene2D widget 的事件、layout、scroll/field 行为还需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
+## 508. 字体 glyph atlas 上传通道前置接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.4%**，仍未达到完整可玩；继续推进 `Fonts.java` 的 `glyph atlas -> texture upload` 链路，在不引入外部 rasterizer 的前提下先打通 generated RGBA 上传入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME` 规范为 `font-glyph-atlas`，并新增 runtime texture key、placeholder atlas 尺寸；
+    - `DesktopFontGlyphUploadPlan` 新增 texture key/source path/width/height/generation 字段；
+    - 新增 `generated_rgba8888_pixel_source()`，在 upload ready 时生成可直接加载的 RGBA placeholder glyph atlas pixel source；
+    - 新增 `to_opengl_texture_upload_plan()`，把 ready 的 font glyph upload plan 转为现有 `DesktopGraphicsOpenGlBackendTextureUploadPlan`；
+    - `DesktopGraphicsOpenGlBackendTextureUploadPixelSource` 新增 `GeneratedRgba8888` 变体，支持无需落盘的生成像素；
+    - RuntimeTexture 路径新增 `font-glyph-atlas` placeholder pixel fallback，保留当前 `DrawText` placeholder 防黑屏；
+    - 新增测试验证 ready atlas plan 会生成 runtime texture upload，并能加载 generated/placeholder RGBA 像素。
+- 迁移意义：
+  - 字体 atlas 不再只是 metadata plan，已经具备进入 OpenGL texture upload pipeline 的最小形状；
+  - 当前仍不替换 `DrawText`，所以字体上传失败不会导致 UI 黑屏；
+  - 后续一旦允许/实现真实 rasterizer，只需把 placeholder pixels 替换为真实 glyph atlas pixels，并把 frame 层携带该 upload plan。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready --lib`
+  - `cargo test -p mindustry-core dialogs --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 未引入真实字体 rasterizer，未生成真实 glyph bitmap；
+  - `DesktopGraphicsFrame` 尚未携带 `font_glyph_upload_plan`，OpenGL frame plan 还未自动追加该 upload；
+  - `DrawText` 仍未消费 glyph atlas；
+  - 未达到完整可玩，不能宣告目标完成。

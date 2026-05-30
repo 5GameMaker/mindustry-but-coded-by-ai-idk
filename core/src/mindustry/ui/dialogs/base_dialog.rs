@@ -11,6 +11,7 @@ use crate::mindustry::graphics::{
     Layer, Pal, RenderCommand, RenderPoint, RenderRect, RenderTextAlign, RenderTextStyle,
     RenderTextVerticalAlign,
 };
+use crate::mindustry::ui::UiDrawableTint;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogDrawableRef {
@@ -30,29 +31,58 @@ impl DialogDrawableRef {
 
     /// Atlas symbol used by the render backend.
     ///
-    /// Java exposes `Tex.windowEmpty` from `window-empty.9.png`, while `black`,
-    /// `black9` and `whiteui` are all `whiteui` texture drawables with different
-    /// tints in `Styles.load()`.
+    /// Java exposes `Tex.windowEmpty` from `window-empty.9.png`, while the
+    /// `Styles.load()` drawable aliases like `black8`, `black6`, `black5`,
+    /// `black3`, `none`, `grayPanel`, `grayPanelDark`, `flatOver`, and
+    /// `accentDrawable` are all `whiteui` texture drawables with different
+    /// tints.
     pub fn atlas_symbol(self) -> &'static str {
         let Self::Named(name) = self;
-        if name == "window-empty" || name == "window-empty.9" {
+        if name == "window-empty" || name == "window-empty.9" || name == "windowEmpty" {
             "window-empty.9"
-        } else if name == "black" || name == "black9" || name == "whiteui" {
+        } else if matches!(
+            name,
+            "black"
+                | "black9"
+                | "black8"
+                | "black6"
+                | "black5"
+                | "black3"
+                | "none"
+                | "grayPanel"
+                | "grayPanelDark"
+                | "flatOver"
+                | "accentDrawable"
+                | "whiteui"
+        ) {
             "whiteui"
         } else {
             name
         }
     }
 
-    pub fn default_tint(self) -> [f32; 4] {
+    pub fn ui_tint(self) -> Option<UiDrawableTint> {
         let Self::Named(name) = self;
-        if name == "black" {
-            [0.0, 0.0, 0.0, 1.0]
-        } else if name == "black9" {
-            [0.0, 0.0, 0.0, 0.9]
-        } else {
-            [1.0, 1.0, 1.0, 1.0]
+        match name {
+            "black" => Some(UiDrawableTint::Black),
+            "black9" => Some(UiDrawableTint::Black9),
+            "black8" => Some(UiDrawableTint::Black8),
+            "black6" => Some(UiDrawableTint::Black6),
+            "black5" => Some(UiDrawableTint::Black5),
+            "black3" => Some(UiDrawableTint::Black3),
+            "none" => Some(UiDrawableTint::Transparent),
+            "flatOver" => Some(UiDrawableTint::FlatOver),
+            "accentDrawable" => Some(UiDrawableTint::Accent),
+            "grayPanel" => Some(UiDrawableTint::DarkestGray),
+            "grayPanelDark" => Some(UiDrawableTint::DarkestestGray),
+            _ => None,
         }
+    }
+
+    pub fn default_tint(self) -> [f32; 4] {
+        self.ui_tint()
+            .map(UiDrawableTint::rgba)
+            .unwrap_or([1.0, 1.0, 1.0, 1.0])
     }
 }
 
@@ -482,6 +512,10 @@ mod tests {
             "window-empty.9"
         );
         assert_eq!(
+            DialogDrawableRef::named("windowEmpty").atlas_symbol(),
+            "window-empty.9"
+        );
+        assert_eq!(
             DialogDrawableRef::named("window-empty.9").atlas_symbol(),
             "window-empty.9"
         );
@@ -495,6 +529,74 @@ mod tests {
             DialogDrawableRef::named("black9").default_tint(),
             [0.0, 0.0, 0.0, 0.9]
         );
+    }
+
+    #[test]
+    fn dialog_drawable_refs_cover_common_styles_load_aliases() {
+        let cases = [
+            (
+                "black8",
+                "whiteui",
+                Some(UiDrawableTint::Black8),
+                [0.0, 0.0, 0.0, 0.8],
+            ),
+            (
+                "black6",
+                "whiteui",
+                Some(UiDrawableTint::Black6),
+                [0.0, 0.0, 0.0, 0.6],
+            ),
+            (
+                "black5",
+                "whiteui",
+                Some(UiDrawableTint::Black5),
+                [0.0, 0.0, 0.0, 0.5],
+            ),
+            (
+                "black3",
+                "whiteui",
+                Some(UiDrawableTint::Black3),
+                [0.0, 0.0, 0.0, 0.3],
+            ),
+            (
+                "none",
+                "whiteui",
+                Some(UiDrawableTint::Transparent),
+                [1.0, 1.0, 1.0, 0.0],
+            ),
+            (
+                "grayPanel",
+                "whiteui",
+                Some(UiDrawableTint::DarkestGray),
+                [0.12, 0.13, 0.16, 1.0],
+            ),
+            (
+                "grayPanelDark",
+                "whiteui",
+                Some(UiDrawableTint::DarkestestGray),
+                [0.08, 0.09, 0.11, 1.0],
+            ),
+            (
+                "flatOver",
+                "whiteui",
+                Some(UiDrawableTint::FlatOver),
+                [1.0, 1.0, 1.0, 0.18],
+            ),
+            (
+                "accentDrawable",
+                "whiteui",
+                Some(UiDrawableTint::Accent),
+                [0.48, 0.74, 0.86, 1.0],
+            ),
+        ];
+
+        for (name, atlas, tint, rgba) in cases {
+            let drawable = DialogDrawableRef::named(name);
+
+            assert_eq!(drawable.atlas_symbol(), atlas, "{name}");
+            assert_eq!(drawable.ui_tint(), tint, "{name}");
+            assert_eq!(drawable.default_tint(), rgba, "{name}");
+        }
     }
 
     #[test]

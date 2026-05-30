@@ -3419,7 +3419,10 @@ impl DesktopContentIconGlyphRegistry {
     }
 }
 
-pub const DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME: &str = "runtime:font-glyph-atlas";
+pub const DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME: &str = "font-glyph-atlas";
+pub const DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY: &str = "runtime-texture:font-glyph-atlas";
+pub const DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_WIDTH: u32 = 2;
+pub const DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_HEIGHT: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopFontRasterizationAssetPlan {
@@ -3527,8 +3530,16 @@ impl DesktopFontAtlasPlan {
     }
 
     pub fn upload_plan(&self) -> DesktopFontGlyphUploadPlan {
+        let identity = DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_runtime_texture(
+            self.texture_name.clone(),
+        );
         DesktopFontGlyphUploadPlan {
             texture_name: self.texture_name.clone(),
+            texture_key: identity.key,
+            page_source_path: identity.page_source_path,
+            texture_width: DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_WIDTH,
+            texture_height: DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_HEIGHT,
+            generation: 1,
             expected_glyph_count: self.planned_glyph_count,
             requires_texture_upload: self.ready_for_real_upload(),
             fallback_placeholder_enabled: self.placeholder_fallback_required,
@@ -3539,9 +3550,61 @@ impl DesktopFontAtlasPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopFontGlyphUploadPlan {
     pub texture_name: String,
+    pub texture_key: String,
+    pub page_source_path: String,
+    pub texture_width: u32,
+    pub texture_height: u32,
+    pub generation: u64,
     pub expected_glyph_count: usize,
     pub requires_texture_upload: bool,
     pub fallback_placeholder_enabled: bool,
+}
+
+impl DesktopFontGlyphUploadPlan {
+    pub fn generated_rgba8888_pixel_source(
+        &self,
+    ) -> Option<DesktopGraphicsOpenGlBackendTextureUploadPixelSource> {
+        if !self.requires_texture_upload {
+            return None;
+        }
+        Some(
+            DesktopGraphicsOpenGlBackendTextureUploadPixelSource::GeneratedRgba8888 {
+                source_tag: self.page_source_path.clone(),
+                width: self.texture_width.max(1),
+                height: self.texture_height.max(1),
+                pixels: opengl_backend_font_glyph_atlas_placeholder_pixels(
+                    self.texture_width.max(1),
+                    self.texture_height.max(1),
+                ),
+            },
+        )
+    }
+
+    pub fn to_opengl_texture_upload_plan(
+        &self,
+    ) -> Option<DesktopGraphicsOpenGlBackendTextureUploadPlan> {
+        if !self.requires_texture_upload {
+            return None;
+        }
+        let identity = DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_runtime_texture(
+            self.texture_name.clone(),
+        );
+        Some(DesktopGraphicsOpenGlBackendTextureUploadPlan {
+            texture_key: identity.key.clone(),
+            texture_identity: identity.clone(),
+            resource_kind: DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture,
+            page_type: identity.page_type,
+            page_source_path: identity.page_source_path.clone(),
+            page_width: self.texture_width.max(1),
+            page_height: self.texture_height.max(1),
+            sampler: DesktopGraphicsTextureSamplerTrace::Linear,
+            generation: self.generation,
+            bind_count: 0,
+            recreate_texture: true,
+            dirty_pixels: Vec::new(),
+            kind: DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3948,6 +4011,12 @@ pub enum DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
         width: u32,
         height: u32,
     },
+    GeneratedRgba8888 {
+        source_tag: String,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
     RuntimeTexture {
         texture_key: String,
         page_source_path: String,
@@ -3989,6 +4058,31 @@ impl DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
         DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError,
     > {
         match self {
+            Self::GeneratedRgba8888 {
+                source_tag,
+                width,
+                height,
+                pixels,
+            } => {
+                let expected_len = width.saturating_mul(*height).saturating_mul(4) as usize;
+                if pixels.len() != expected_len {
+                    let actual_pixels = (pixels.len() / 4).min(u32::MAX as usize) as u32;
+                    return Err(
+                        DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::SizeMismatch {
+                            source_path: source_tag.clone(),
+                            expected_width: *width,
+                            expected_height: *height,
+                            actual_width: (*width).max(1),
+                            actual_height: actual_pixels / (*width).max(1),
+                        },
+                    );
+                }
+                Ok(DesktopGraphicsOpenGlBackendTextureUploadPixelBytes {
+                    width: *width,
+                    height: *height,
+                    pixels: pixels.clone(),
+                })
+            }
             Self::AtlasPage {
                 page_source_path,
                 width,
@@ -4031,6 +4125,21 @@ impl DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
                     width: *width,
                     height: *height,
                     pixels: vec![255, 255, 255, 255],
+                })
+            }
+            Self::RuntimeTexture {
+                texture_key,
+                width,
+                height,
+                ..
+            } if texture_key == DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY
+                && *width > 0
+                && *height > 0 =>
+            {
+                Ok(DesktopGraphicsOpenGlBackendTextureUploadPixelBytes {
+                    width: *width,
+                    height: *height,
+                    pixels: opengl_backend_font_glyph_atlas_placeholder_pixels(*width, *height),
                 })
             }
             Self::RuntimeTexture { texture_key, .. } => Err(
@@ -4125,6 +4234,29 @@ fn opengl_backend_rgba8888_upload_bytes(rgba: u32) -> [u8; 4] {
         ((rgba >> 8) & 0xff) as u8,
         (rgba & 0xff) as u8,
     ]
+}
+
+fn opengl_backend_font_glyph_atlas_placeholder_pixels(width: u32, height: u32) -> Vec<u8> {
+    let pixel_count = width.saturating_mul(height) as usize;
+    let mut pixels = vec![0; pixel_count.saturating_mul(4)];
+    if pixel_count == 0 {
+        return pixels;
+    }
+
+    for y in 0..height {
+        for x in 0..width {
+            if x == y || x + y + 1 == width.max(height) {
+                let index = (y.saturating_mul(width).saturating_add(x) as usize) * 4;
+                if index + 3 < pixels.len() {
+                    pixels[index] = 255;
+                    pixels[index + 1] = 255;
+                    pixels[index + 2] = 255;
+                    pixels[index + 3] = 255;
+                }
+            }
+        }
+    }
+    pixels
 }
 
 impl DesktopGraphicsOpenGlBackendResolvedTextureUpload {
@@ -20502,7 +20634,8 @@ mod tests {
         DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceConfig, DesktopSurfaceSize,
         HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
         HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
-        DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME,
+        DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_HEIGHT, DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_WIDTH,
+        DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY, DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME,
     };
     use mindustry_core::mindustry::content::{blocks::BlockDef, bullets::BulletContent};
     use mindustry_core::mindustry::core::game_runtime::{
@@ -35048,6 +35181,91 @@ mod tests {
         );
         assert!(!upload_plan.requires_texture_upload);
         assert!(upload_plan.fallback_placeholder_enabled);
+        assert!(upload_plan.to_opengl_texture_upload_plan().is_none());
+    }
+
+    #[test]
+    fn desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready() {
+        let atlas_plan = super::DesktopFontAtlasPlan {
+            texture_name: DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME.to_string(),
+            font_asset_count: 2,
+            resolved_font_asset_count: 2,
+            content_icon_glyph_count: 1,
+            planned_glyph_count: 8,
+            unresolved_font_source_paths: Vec::new(),
+            missing_icon_atlas_symbols: Vec::new(),
+            content_icon_load_error: None,
+            placeholder_fallback_required: true,
+        };
+
+        assert!(atlas_plan.ready_for_real_upload());
+        let upload_plan = atlas_plan.upload_plan();
+        assert!(upload_plan.requires_texture_upload);
+        assert_eq!(
+            upload_plan.texture_key,
+            DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY
+        );
+        assert_eq!(
+            upload_plan.texture_width,
+            DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_WIDTH
+        );
+        assert_eq!(
+            upload_plan.texture_height,
+            DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_HEIGHT
+        );
+
+        let texture_upload = upload_plan
+            .to_opengl_texture_upload_plan()
+            .expect("ready font upload plan should emit an OpenGL texture upload plan");
+        assert_eq!(
+            texture_upload.resource_kind,
+            super::DesktopGraphicsOpenGlBackendTextureResourceKind::RuntimeTexture
+        );
+        assert_eq!(
+            texture_upload.texture_key,
+            DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY
+        );
+        assert_eq!(
+            texture_upload.kind,
+            super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage
+        );
+        assert!(texture_upload.recreate_texture);
+
+        let generated_source = upload_plan
+            .generated_rgba8888_pixel_source()
+            .expect("ready font upload plan should expose generated RGBA pixels");
+        let generated_pixels = generated_source
+            .load_rgba8888_pixels()
+            .expect("generated font glyph atlas pixels should load directly");
+        assert_eq!(
+            generated_pixels.pixels.len(),
+            (generated_pixels.width * generated_pixels.height * 4) as usize
+        );
+        assert!(generated_pixels
+            .pixels
+            .chunks_exact(4)
+            .any(|rgba| rgba == [255, 255, 255, 255]));
+
+        let pixel_source =
+            super::DesktopGraphicsOpenGlBackendTextureUploadPixelSource::RuntimeTexture {
+                texture_key: texture_upload.texture_key.clone(),
+                page_source_path: texture_upload.page_source_path.clone(),
+                width: texture_upload.page_width,
+                height: texture_upload.page_height,
+            };
+        let pixels = pixel_source
+            .load_rgba8888_pixels()
+            .expect("font glyph atlas runtime texture should provide placeholder pixels");
+        assert_eq!(pixels.width, DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_WIDTH);
+        assert_eq!(pixels.height, DESKTOP_FONT_GLYPH_ATLAS_PLACEHOLDER_HEIGHT);
+        assert_eq!(
+            pixels.pixels.len(),
+            (pixels.width * pixels.height * 4) as usize
+        );
+        assert!(pixels
+            .pixels
+            .chunks_exact(4)
+            .any(|rgba| rgba == [255, 255, 255, 255]));
     }
 
     #[test]
