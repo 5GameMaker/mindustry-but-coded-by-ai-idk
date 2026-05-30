@@ -273,6 +273,39 @@ fn desktop_unit_shield_color(unit: &UnitComp) -> [f32; 4] {
     color
 }
 
+fn desktop_rotate_offset(rotation: f32, x: f32, y: f32) -> (f32, f32) {
+    let radians = rotation.to_radians();
+    let (sin, cos) = radians.sin_cos();
+    (x * cos - y * sin, x * sin + y * cos)
+}
+
+fn desktop_unit_engine_entries(unit: &UnitComp) -> Vec<(f32, f32, f32, f32)> {
+    if !unit.type_info.engines.is_empty() {
+        unit.type_info
+            .engines
+            .iter()
+            .map(|engine| (engine.x, engine.y, engine.radius, engine.rotation))
+            .collect()
+    } else if unit.type_info.engine_size > 0.0 {
+        vec![(
+            0.0,
+            -unit.type_info.engine_offset,
+            unit.type_info.engine_size,
+            -90.0,
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
+fn desktop_unit_engine_layer(unit: &UnitComp) -> f32 {
+    if unit.type_info.engine_layer > 0.0 {
+        unit.type_info.engine_layer
+    } else {
+        desktop_unit_body_layer(unit)
+    }
+}
+
 fn desktop_puddle_fraction(amount: f32) -> f32 {
     (amount / (PuddleComp::MAX_LIQUID / 1.5)).clamp(0.0, 1.0)
 }
@@ -11885,6 +11918,56 @@ impl DesktopLauncher {
         ))
     }
 
+    fn unit_snapshot_engine_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid() {
+            return Vec::new();
+        }
+
+        let scale = if unit.type_info.use_engine_elevation {
+            unit.elevation
+        } else {
+            1.0
+        };
+        if scale <= 0.0001 {
+            return Vec::new();
+        }
+
+        let rot = unit.rotation() - 90.0;
+        let outer_color = rgba8888_to_render_color(
+            unit.type_info
+                .engine_color_rgba
+                .unwrap_or_else(|| desktop_team_color_rgba(unit.team.team)),
+            1.0,
+        );
+        let inner_color = rgba8888_to_render_color(unit.type_info.engine_color_inner_rgba, 1.0);
+        let layer = desktop_unit_engine_layer(unit);
+        let mut commands = Vec::new();
+
+        for (x, y, radius, engine_rotation) in desktop_unit_engine_entries(unit) {
+            let (ex, ey) = desktop_rotate_offset(rot, x, y);
+            let center = RenderPoint::new(unit.x() + ex, unit.y() + ey);
+            let rad = radius * scale;
+            commands.push(RenderCommand::draw_circle(
+                center,
+                rad,
+                outer_color,
+                true,
+                layer,
+            ));
+
+            let (ix, iy) = desktop_rotate_offset(rot + engine_rotation, rad / 4.0, 0.0);
+            commands.push(RenderCommand::draw_circle(
+                RenderPoint::new(center.x - ix, center.y - iy),
+                rad / 2.0,
+                inner_color,
+                true,
+                layer,
+            ));
+        }
+
+        commands
+    }
+
     fn unit_snapshot_soft_shadow_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_soft_shadow {
             return None;
@@ -11920,6 +12003,8 @@ impl DesktopLauncher {
             if let Some(command) = self.unit_snapshot_outline_render_command(unit) {
                 pass.commands.push(command);
             }
+            pass.commands
+                .extend(self.unit_snapshot_engine_render_commands(unit));
             if let Some(command) = self.unit_snapshot_body_render_command(unit) {
                 pass.commands.push(command);
             }
@@ -16385,6 +16470,84 @@ mod tests {
             }
             other => panic!("expected unit light DrawCircle, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn desktop_launcher_emits_unit_engine_circles_for_elevated_snapshot() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+
+        let mut unit = UnitComp::new(7401, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(80.0, 96.0);
+        unit.set_rotation(90.0);
+        unit.elevation = 1.0;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7401, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 160.0, 160.0);
+        let camera = RenderCamera::new(RenderPoint::new(80.0, 80.0), viewport);
+        let minimap_camera = MinimapCamera::new(80.0, 80.0, 160.0, 160.0);
+        let frame = launcher.graphics_frame_for_render(
+            22,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger")
+                    })
+            })
+            .expect("unit snapshot should emit overlay pass");
+
+        let engine_circles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    color,
+                    filled,
+                    layer,
+                    ..
+                } => Some((*center, *radius, *color, *filled, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(engine_circles.len(), 2);
+        assert_eq!(engine_circles[0].0, RenderPoint::new(80.0, 91.0));
+        assert!((engine_circles[0].1 - 2.5).abs() < 0.0001);
+        assert_eq!(
+            engine_circles[0].2,
+            super::rgba8888_to_render_color(0xffd37fff, 1.0)
+        );
+        assert!(engine_circles[0].3);
+        assert_eq!(engine_circles[0].4, Layer::FLYING_UNIT);
+
+        assert!((engine_circles[1].0.x - 80.0).abs() < 0.0001);
+        assert!((engine_circles[1].0.y - 91.625).abs() < 0.0001);
+        assert!((engine_circles[1].1 - 1.25).abs() < 0.0001);
+        assert_eq!(
+            engine_circles[1].2,
+            super::rgba8888_to_render_color(0xffffffff, 1.0)
+        );
+        assert!(engine_circles[1].3);
+        assert_eq!(engine_circles[1].4, Layer::FLYING_UNIT);
     }
 
     #[test]

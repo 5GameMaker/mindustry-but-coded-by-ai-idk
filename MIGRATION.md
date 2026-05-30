@@ -15661,3 +15661,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - hard shadow、weapons、legs、payload/item、engine circles/trail 仍未接入；
   - shield 当前以 filled circle 近似 Java `Fill.light(...)`，后续需要更精确的 radial/vertex light 表达；
   - Unit/Fire/Bullet/Puddle 仍需统一 Java layer sorting；Weather custom lowering 与 native OpenGL smoke 仍需继续。
+
+## 426. 最新闭环记录：Unit engine circles 接入同一单位 Overlay pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.4%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/UnitType.java#draw(...)`
+  - `core/src/mindustry/type/UnitType.java#drawEngines(...)`
+  - `core/src/mindustry/type/UnitType.java$UnitEngine#draw(...)`
+  - `core/src/mindustry/type/UnitType.java#init()` 中 `engineSize > 0` 时默认 `UnitEngine(0, -engineOffset, engineSize, -90)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_rotate_offset(...)`，用于按 Java `Tmp.v1.set(x, y).rotate(rot)` 的最小语义旋转引擎偏移；
+    - 新增 `desktop_unit_engine_entries(...)`，优先使用 typed `UnitType.engines`，缺失时按 `engine_size/engine_offset` 构造默认引擎；
+    - 新增 `desktop_unit_engine_layer(...)`，按 `engine_layer > 0` 覆盖，否则落回当前 unit body layer；
+    - 新增 `unit_snapshot_engine_render_commands(...)`，在 `use_engine_elevation` 规则下输出外圈与内圈 `DrawCircle`；
+    - `unit_snapshot_render_pass()` 顺序扩展为 soft shadow → outline → engine circles → body → cell → shield，继续保持同一 Unit pass aggregation；
+    - 新增 `desktop_launcher_emits_unit_engine_circles_for_elevated_snapshot`，覆盖 elevated unit 的外/内引擎圆、颜色、半径、位置与 layer。
+- 迁移意义：
+  - Unit 渲染从 body/outline/cell/shield/light 继续推进到 Java `UnitType.draw()` 中位于 body 前的 engine circles 分支；
+  - engine circles 没有做成孤立 helper，而是直接挂到已有 `client_unit_snapshot_entities` → `RenderFramePlan` 的同一单位渲染聚合中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_engine_circles_for_elevated_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Java `Mathf.absin(Time.time, 2f, radius / 4f)` 的 engine 半径脉动尚未接入，目前先用静态 `radius * scale`；
+  - hard shadow、engine trail、weapons、legs、payload/item 仍未接入；
+  - 当前 unit pass 仍临时复用 Overlay，后续必须继续统一 Java layer sorting / entity world pass，避免 Unit 子分支长期散落；
+  - Weather custom lowering、native OpenGL state/clear smoke、Java↔Rust 联机 smoke 仍需继续。

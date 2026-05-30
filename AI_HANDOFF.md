@@ -12844,3 +12844,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 接 Unit engine circles/trail 或 weapons；
   2. 继续把 shield 从 filled circle 近似推进到 Java `Fill.light(...)` 级别的径向表达；
   3. 继续统一 entity layer sorting。
+
+### 2026-05-30：Unit engine circles 接入同一单位 Overlay pass
+
+- 当前整体完成度：约 **41.4%**。
+- 已完成：
+  - `DesktopLauncher::unit_snapshot_engine_render_commands(...)` 会把可见 typed unit snapshot 的引擎配置转成外圈/内圈 `DrawCircle`；
+  - 引擎配置优先来自 `UnitType.engines`，缺失时按 Java `engineSize > 0` 默认路径使用 `(0, -engineOffset, engineSize, -90)`；
+  - `use_engine_elevation` 为真时使用 `unit.elevation` 缩放，为假时固定使用 `1.0`；
+  - 外圈颜色优先使用 `engine_color_rgba`，否则使用 team color；内圈使用 `engine_color_inner_rgba`；
+  - `unit_snapshot_render_pass()` 顺序已扩展为 soft shadow → outline → engine circles → body → cell → shield，仍保持同一 Unit pass 聚合；
+  - 新增 dagger 快照测试覆盖 engine circles 的数量、半径、颜色、位置、顺序和 layer。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_engine_circles_for_elevated_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 接 Unit engine trail / hard shadow / weapons / legs / payload/items，继续挂在同一 unit aggregation；
+  2. 给 engine circles 补 Java `Mathf.absin(Time.time, 2f, radius / 4f)` 半径脉动；
+  3. 并行推进 native OpenGL `Clear`/viewport/scissor/blend 状态链与统一 entity layer sorting，避免 Overlay 过渡层长期化。
