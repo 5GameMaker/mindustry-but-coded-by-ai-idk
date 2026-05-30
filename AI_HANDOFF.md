@@ -13196,3 +13196,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. remove/death 路径补 trail fade effect 快照；
   3. Bullet 渲染继续优先 ContinuousFlame，其次 PointLaser；Rail 视觉优先走 effect 系统；
   4. weapon/unit parts 仍需结构化 `parts` 与 `sideMultiplier`，不能把 beam/parts 做成孤立模块。
+
+### 2026-05-30：ContinuousFlame 火焰束与光照接入客户端 bullet 渲染链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.6%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/content/blocks.rs`
+    - `continuous_flame_bullet(...)` 补 `light_opacity = 0.7`、`osc_scl = 1.2`、`osc_mag = 0.02`。
+  - `desktop/src/lib.rs`
+    - 新增 ContinuousFlame colors/slope/sin/real_length helper；
+    - 新增 `continuous_flame_bullet_snapshot_render_commands(...)`，输出多层火焰中心线、`Drawf::flame(...)` outline line primitives、outer/inner flare triangles；
+    - 新增 `continuous_flame_bullet_snapshot_light_commands(...)`，输出 Java `Drawf.light(...)` 对应 lighting line；
+    - `bullet_snapshot_render_pass()` / `bullet_snapshot_light_render_pass()` 已接入 `BulletKind::ContinuousFlame`；
+    - 新增测试 `desktop_launcher_routes_continuous_flame_snapshot_primitives_and_light_pass`。
+- Java 对照：
+  - `ContinuousFlameBulletType.draw(Bullet b)`：`b.fin(Interp.slope)` → `Damage.findLength` → 多层 `Drawf.flame` → flare triangles → `Drawf.light`；
+  - `drawLight()` 为空，light 在 draw 主体内触发。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_continuous_flame_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. Bullet 渲染主链继续补 PointLaser：需要 aimX/aimY endpoint、beam body/end cap、light；
+  2. Rail 视觉优先接 effect/init plan，不建议当普通 bullet body；
+  3. ContinuousFlame 后续应把 line-outline 近似升级成 polygon/triangle fan/mesh；
+  4. Unit trail runtime update/remove fade 与 weapon/unit parts 仍是下一批重点。

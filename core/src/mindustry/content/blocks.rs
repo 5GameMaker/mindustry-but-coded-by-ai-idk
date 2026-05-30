@@ -6946,10 +6946,13 @@ fn continuous_flame_bullet(damage: f32) -> BulletSpec {
     bullet.draw_size = 420.0;
     bullet.hit_color = "e189f5".into();
     bullet.light_color = "e189f5".into();
+    bullet.light_opacity = 0.7;
     bullet.laser_absorb = false;
     bullet.ammo_multiplier = 1.0;
     bullet.pierce_armor = true;
     bullet.width = 3.7;
+    bullet.osc_scl = 1.2;
+    bullet.osc_mag = 0.02;
     bullet.colors = vec![
         "eb7abe88".into(),
         "e189f5b2".into(),

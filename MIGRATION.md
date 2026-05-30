@@ -16063,3 +16063,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Unit remove/death 仍未产出 Java `Fx.trailFade` 等价效果；
   - trail 当前用 `DrawLine` 近似，后续应向 `Trail.quad_plans()`/mesh 过渡以更接近 Java 轨迹带宽形状；
   - ContinuousFlame、PointLaser、Rail、weapon/unit parts、hard shadow、legs、payload/item 仍需继续。
+
+## 438. 最新闭环记录：ContinuousFlame 火焰束与光照接入客户端 bullet 渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.6%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/bullet/ContinuousFlameBulletType.java#draw(Bullet b)`
+  - `mult = b.fin(Interp.slope)`，`realLength = Damage.findLength(b, length * mult, laserAbsorb, pierceCap)`；
+  - 每层颜色调用 `Drawf.flame(...)`，之后绘制 flare 三角与 `Drawf.light(...)`；
+  - `drawLight()` 为空，光照由 `draw()` 主体内发出。
+- 本轮主改动：
+  - `core/src/mindustry/content/blocks.rs`
+    - `continuous_flame_bullet(...)` 补齐 Java 默认 `light_opacity = 0.7`、`osc_scl = 1.2`、`osc_mag = 0.02`。
+  - `desktop/src/lib.rs`
+    - 新增 `continuous_flame_bullet_colors(...)`、`desktop_slope_interp(...)`、`desktop_sin(...)`、`continuous_flame_bullet_real_length(...)` 等 helper；
+    - 新增 `continuous_flame_bullet_snapshot_render_commands(...)`，把 `BulletKind::ContinuousFlame` 转为多层中心线 + `Drawf::flame(...)` outline line primitives + outer/inner flare triangles；
+    - 新增 `continuous_flame_bullet_snapshot_light_commands(...)`，将 Java `Drawf.light(...)` 映射为 `LightRendererPlan` line light；
+    - `bullet_snapshot_render_pass()` 与 `bullet_snapshot_light_render_pass()` 增加 `BulletKind::ContinuousFlame` 分支；
+    - 新增 `desktop_launcher_routes_continuous_flame_snapshot_primitives_and_light_pass`，覆盖火焰主体长度/宽度/颜色 pulse、flare 顺序与 lighting line。
+- 迁移意义：
+  - ContinuousFlame 不再在客户端 bullet snapshot 中静默不可见；
+  - 该闭环复用 `core::graphics::Drawf::flame(...)` 作为几何来源，继续接入 `client_bullet_snapshot_entities` → content `BulletSpec` → desktop overlay/light pass → `RenderFramePlan` 主链；
+  - Sublimate/连续液体火焰类武器已有最小可见渲染基础。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_continuous_flame_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - ContinuousFlame 当前仍用 line outline/centerline 近似 Java 填充火焰体，后续应新增任意 polygon/triangle fan/mesh command 以精确填充；
+  - `Damage.findLength(...)` 仍主要依赖 `BulletComp.fdata` 或 `length * mult` 近似，未完整接入 world collision 截断；
+  - ContinuousFlame 的 flare_inner_scl/flareInnerLenScl/flareLayer 等字段仍是 desktop 默认常量，后续应进入 `BulletSpec` schema；
+  - PointLaser、Rail effect、weapon/unit parts、Unit trail runtime update、hard shadow、legs、payload/item 仍需继续。

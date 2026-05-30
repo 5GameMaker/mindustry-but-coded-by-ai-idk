@@ -39,7 +39,7 @@ use mindustry_core::mindustry::graphics::{
     BlockRendererBuildingVisualRuntimeLiquidSnapshot,
     BlockRendererBuildingVisualRuntimePowerSnapshot, BlockRendererBuildingVisualRuntimeSnapshot,
     BlockRendererBuildingVisualRuntimeTurretSnapshot, BlockRendererPlan, BlockRendererState,
-    BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer,
+    BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer, Drawf,
     Env as GraphicsEnv, EnvRendererContext, EnvRendererPlan, EnvRendererRegistry, FloorRenderPlan,
     FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState, FogViewport,
     GraphicsFrameBundle, GraphicsFrameStats, Layer, LightCommand, LightPrimitive,
@@ -599,6 +599,222 @@ fn continuous_laser_bullet_snapshot_light_commands(
             radius: 40.0,
             color,
             opacity: spec.light_opacity,
+        },
+    }]
+}
+
+fn continuous_flame_bullet_colors(spec: &BulletSpec) -> Vec<String> {
+    if !spec.colors.is_empty() {
+        spec.colors.clone()
+    } else {
+        vec![
+            "eb7abe88".into(),
+            "e189f5b2".into(),
+            "907ef7cc".into(),
+            "91a4ff".into(),
+            "white".into(),
+        ]
+    }
+}
+
+fn desktop_slope_interp(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    if value < 0.5 {
+        value * 2.0
+    } else {
+        (1.0 - value) * 2.0
+    }
+}
+
+fn desktop_sin(time: f32, scl: f32, mag: f32) -> f32 {
+    if !time.is_finite() || scl.abs() <= f32::EPSILON || !mag.is_finite() {
+        return 0.0;
+    }
+    (time / scl).sin() * mag
+}
+
+fn desktop_scale_render_color(mut color: [f32; 4], scale: f32) -> [f32; 4] {
+    for channel in &mut color {
+        *channel = (*channel * scale).clamp(0.0, 1.0);
+    }
+    color
+}
+
+fn continuous_flame_bullet_real_length(bullet: &BulletComp, spec: &BulletSpec, mult: f32) -> f32 {
+    let faded_length = spec.length.max(0.0) * mult.max(0.0);
+    if bullet.fdata > f32::EPSILON {
+        bullet.fdata.min(faded_length)
+    } else {
+        faded_length
+    }
+}
+
+fn continuous_flame_bullet_snapshot_render_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    layer: f32,
+    render_time: f32,
+) -> Vec<RenderCommand> {
+    if bullet.removed || spec.kind != BulletKind::ContinuousFlame {
+        return Vec::new();
+    }
+
+    let (fin, _) = desktop_bullet_fin_fout(bullet);
+    let mult = desktop_slope_interp(fin);
+    let real_length = continuous_flame_bullet_real_length(bullet, spec, mult);
+    let width = if spec.width > f32::EPSILON {
+        spec.width
+    } else {
+        3.7
+    };
+    if mult <= f32::EPSILON || real_length <= f32::EPSILON || width <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let rotation = bullet.rotation();
+    let osc_scl = if spec.osc_scl > f32::EPSILON {
+        spec.osc_scl
+    } else {
+        1.2
+    };
+    let osc_mag = if spec.osc_mag.abs() > f32::EPSILON {
+        spec.osc_mag
+    } else {
+        0.02
+    };
+    let sin = desktop_sin(render_time, osc_scl, osc_mag);
+    let pulse = 0.9 * (1.0 + desktop_absin(render_time, 1.0, 0.1));
+    let divisions = 25;
+    let length_width_pans = [
+        (1.12_f32, 1.3_f32, 0.32_f32),
+        (1.0, 1.0, 0.3),
+        (0.8, 0.9, 0.2),
+        (0.5, 0.8, 0.15),
+        (0.25, 0.7, 0.1),
+    ];
+
+    let colors = continuous_flame_bullet_colors(spec);
+    let mut commands = Vec::new();
+    for (index, color_name) in colors.iter().enumerate() {
+        let (length_scl, width_scl, pan) = length_width_pans
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| *length_width_pans.last().unwrap());
+        let flame_length = real_length * length_scl * (1.0 - sin);
+        let flame_width = width * width_scl * mult * (1.0 + sin);
+        if flame_length <= f32::EPSILON || flame_width <= f32::EPSILON {
+            continue;
+        }
+
+        let color = desktop_scale_render_color(
+            desktop_bullet_render_color(color_name, Pal::LIGHT_FLAME),
+            pulse,
+        );
+        let (_, flame_end) = desktop_line_angle_points(origin, rotation, flame_length);
+        commands.push(RenderCommand::draw_line(
+            origin,
+            flame_end,
+            (flame_width * 2.0).max(0.5),
+            color,
+            layer,
+        ));
+
+        let flame = Drawf::flame(
+            origin.x,
+            origin.y,
+            divisions,
+            rotation,
+            flame_length,
+            flame_width,
+            pan,
+        );
+        let stroke = (flame_width * 0.45).max(0.35);
+        for points in flame.points.windows(2) {
+            let from = RenderPoint::new(points[0].0, points[0].1);
+            let to = RenderPoint::new(points[1].0, points[1].1);
+            commands.push(RenderCommand::draw_line(from, to, stroke, color, layer));
+        }
+        if let (Some(first), Some(last)) = (flame.points.first(), flame.points.last()) {
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(last.0, last.1),
+                RenderPoint::new(first.0, first.1),
+                stroke,
+                color,
+                layer,
+            ));
+        }
+    }
+
+    let flare_color = desktop_bullet_render_color(&spec.flare_color, Pal::LIGHT_FLAME);
+    let flare_angle = render_time * 1.2;
+    let flare_length = 40.0 * (mult + sin).max(0.0);
+    if flare_length > f32::EPSILON {
+        for i in 0..4 {
+            commands.push(RenderCommand::draw_triangle(
+                origin,
+                3.0,
+                flare_length,
+                i as f32 * 90.0 + 45.0 + flare_angle,
+                flare_color,
+                layer - 0.0001,
+            ));
+        }
+        for i in 0..4 {
+            commands.push(RenderCommand::draw_triangle(
+                origin,
+                1.5,
+                flare_length * 0.5,
+                i as f32 * 90.0 + 45.0 + flare_angle,
+                desktop_bullet_render_color("white", DecalColor::WHITE),
+                layer - 0.0001,
+            ));
+        }
+    }
+
+    commands
+}
+
+fn continuous_flame_bullet_snapshot_light_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+) -> Vec<LightCommand> {
+    if bullet.removed || spec.kind != BulletKind::ContinuousFlame {
+        return Vec::new();
+    }
+
+    let (fin, _) = desktop_bullet_fin_fout(bullet);
+    let mult = desktop_slope_interp(fin);
+    let real_length = continuous_flame_bullet_real_length(bullet, spec, mult);
+    if real_length <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let (_, light_end) = desktop_line_angle_points(origin, bullet.rotation(), real_length * 1.1);
+    let light_color_name = if spec.light_color.is_empty() {
+        &spec.hit_color
+    } else {
+        &spec.light_color
+    };
+    let color = desktop_resolve_color_symbol(light_color_name).unwrap_or(Pal::LIGHT_FLAME);
+    let opacity = if spec.light_opacity > f32::EPSILON {
+        spec.light_opacity
+    } else {
+        0.7
+    };
+
+    vec![LightCommand::Line {
+        x: origin.x,
+        y: origin.y,
+        x2: light_end.x,
+        y2: light_end.y,
+        stroke: 40.0,
+        tint: LightPrimitive {
+            center: (origin.x, origin.y),
+            radius: 40.0,
+            color,
+            opacity,
         },
     }]
 }
@@ -12493,6 +12709,15 @@ impl DesktopLauncher {
                             self.render_time,
                         ));
                 }
+                BulletKind::ContinuousFlame => {
+                    pass.commands
+                        .extend(continuous_flame_bullet_snapshot_render_commands(
+                            bullet,
+                            &content.spec,
+                            desktop_bullet_layer(&content.spec),
+                            self.render_time,
+                        ));
+                }
                 _ => pass
                     .commands
                     .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec)),
@@ -12543,6 +12768,12 @@ impl DesktopLauncher {
                 }
                 BulletKind::ContinuousLaser => {
                     commands.extend(continuous_laser_bullet_snapshot_light_commands(
+                        bullet,
+                        &content.spec,
+                    ));
+                }
+                BulletKind::ContinuousFlame => {
+                    commands.extend(continuous_flame_bullet_snapshot_light_commands(
                         bullet,
                         &content.spec,
                     ));
@@ -14984,7 +15215,7 @@ mod tests {
         HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
         HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
     };
-    use mindustry_core::mindustry::content::blocks::BlockDef;
+    use mindustry_core::mindustry::content::{blocks::BlockDef, bullets::BulletContent};
     use mindustry_core::mindustry::core::game_runtime::{
         GameRuntimeCampaignBlockState, GameRuntimeClientCameraShakeEvent,
         GameRuntimeDistributionBlockState, GameRuntimePayloadBlockState,
@@ -17664,6 +17895,162 @@ mod tests {
                 assert_eq!(*layer, LIGHT_RENDER_LAYER);
             }
             other => panic!("expected continuous laser lighting DrawLine, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_routes_continuous_flame_snapshot_primitives_and_light_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_id: ContentId = 9902;
+        let mut spec = super::BulletSpec::new(super::BulletKind::ContinuousFlame, 0.0, 60.0);
+        spec.length = 130.0;
+        spec.lifetime = 16.0;
+        spec.width = 3.7;
+        spec.light_color = "e189f5".into();
+        spec.light_opacity = 0.7;
+        spec.flare_color = "e189f5".into();
+        spec.osc_scl = 1.2;
+        spec.osc_mag = 0.02;
+        spec.colors = vec![
+            "eb7abe88".into(),
+            "e189f5b2".into(),
+            "907ef7cc".into(),
+            "91a4ff".into(),
+            "white".into(),
+        ];
+        launcher
+            .content_loader
+            .catalog_mut()
+            .bullets
+            .push(BulletContent::new(bullet_id, "test_continuous_flame", spec));
+
+        let mut bullet =
+            BulletComp::new(bullet_id, TeamId(1), type_io::EntityRef::null(), 32.0, 48.0);
+        bullet.lifetime = 16.0;
+        bullet.time = 8.0;
+        bullet.rotation = 0.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7109, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 256.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(128.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(128.0, 64.0, 256.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            28,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && (to.x - 177.6).abs() < 0.001
+                                && (to.y - 48.0).abs() < 0.001)
+                    })
+            })
+            .expect("continuous flame snapshot should emit overlay flame commands");
+
+        let center_lines = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawLine {
+                    from,
+                    to,
+                    stroke,
+                    color,
+                    layer,
+                } if *from == RenderPoint::new(32.0, 48.0)
+                    && (*layer - Layer::BULLET).abs() < 0.0001 =>
+                {
+                    Some((*to, *stroke, *color))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(center_lines.len(), 5);
+        assert!((center_lines[0].0.x - 177.6).abs() < 0.001);
+        assert_eq!(center_lines[0].0.y, 48.0);
+        assert!((center_lines[0].1 - 9.62).abs() < 0.001);
+        assert_eq!(
+            center_lines[0].2,
+            super::desktop_scale_render_color(
+                super::desktop_bullet_render_color("eb7abe88", Pal::LIGHT_FLAME),
+                0.9
+            )
+        );
+
+        let flare_triangles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawTriangle {
+                    center,
+                    width,
+                    length,
+                    rotation,
+                    layer,
+                    ..
+                } if *center == RenderPoint::new(32.0, 48.0)
+                    && (*layer - (Layer::BULLET - 0.0001)).abs() < 0.0001 =>
+                {
+                    Some((*width, *length, *rotation))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(flare_triangles.len(), 8);
+        assert_eq!(flare_triangles[0], (3.0, 40.0, 45.0));
+        assert_eq!(flare_triangles[4], (1.5, 20.0, 45.0));
+
+        let lighting = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(175.0, 48.0))
+                    })
+            })
+            .expect("continuous flame snapshot should emit Java Drawf.light equivalent");
+        match lighting
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(32.0, 48.0)
+                        && *to == RenderPoint::new(175.0, 48.0))
+            })
+            .expect("continuous flame lighting line should be present")
+        {
+            RenderCommand::DrawLine {
+                stroke,
+                color,
+                layer,
+                ..
+            } => {
+                assert_eq!(*stroke, 40.0);
+                assert_eq!(
+                    *color,
+                    super::desktop_effect_render_color(
+                        super::desktop_resolve_color_symbol("e189f5"),
+                        0.7
+                    )
+                );
+                assert_eq!(*layer, LIGHT_RENDER_LAYER);
+            }
+            other => panic!("expected continuous flame lighting DrawLine, got {other:?}"),
         }
     }
 
