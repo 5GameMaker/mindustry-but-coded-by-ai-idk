@@ -18768,3 +18768,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Tooltip description、TextSetting/AreaTextSetting、动态 category、Data 页真实 side effects 仍待迁移；
   - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 527. SettingsMenuDialog slider stack 布局与 overlay margin
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.3%**，仍未达到完整可玩；继续把 Settings slider 从“右侧短滑条 + 独立文本”向 Java `table.stack(slider, content)` 的原版布局靠近。
+- Java 对照证据：
+  - `SettingsMenuDialog.java` 的 `SliderSetting.add()` 使用 `Slider(min, max, step, false)`；
+  - `content.margin(3f, 33f, 3f, 33f)`；
+  - `table.stack(slider, content).width(Math.min(Core.graphics.getWidth() / 1.2f, 460f)).left().padTop(4f)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_SLIDER_STACK_MAX_WIDTH = 460.0` 与 overlay margin 常量 `33.0/3.0`；
+    - 新增 `settings_pref_widget_slider_stack_rect()` 与 `settings_pref_widget_slider_content_rect()`；
+    - `settings_pref_widget_slider_track_rect()` 改为使用左对齐、最大 460 宽的 slider stack，而不是旧的右侧 152 宽短 track；
+    - slider 的 title/value 文字改为绘制在 stack overlay content 内，模拟 Java `stack(slider, content)`；
+    - slider hit-test 改为只在 stack 区域内响应，避免整行任意位置都触发滑条写入。
+  - 测试：
+    - 新增 `desktop_launcher_settings_slider_layout_uses_upstream_stack_margins`，验证 460 宽上限、33/3 margin、track 与 stack 对齐，以及 `@setting.saveinterval.name` / `value: 60` 的 overlay 位置；
+    - 更新滚轮命中测试，使 `playerlimit` 点击使用 slider track 左端断言 min 值，适配更接近原版的左对齐 stack。
+- 迁移意义：
+  - Settings slider 的视觉与命中从“过渡期行控件”进一步靠近 Java 原版 Scene2D `Slider + Table overlay`；
+  - 输入、渲染、拖拽和测试继续共用同一套几何，减少后续精修 UI 时出现渲染/命中错位；
+  - 仍接在真实桌面菜单渲染与输入主链路上，不是独立演示。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - checkbox 仍需继续从“行 + icon + on/off”改得更接近 Java `CheckBox(title).left().padTop(3f)`；
+  - Settings 主壳左侧菜单、`prefs.margin(14f)`、reset/back 按钮尺寸、tooltip description、TextSetting/AreaTextSetting 和动态 category 仍待迁移；
+  - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
+  - 未达到完整可玩，不能宣告目标完成。

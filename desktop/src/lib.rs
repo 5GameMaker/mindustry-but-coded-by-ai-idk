@@ -114,6 +114,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_MINDUSTRY_PORT: u16 = 6567;
 const MENU_VISUAL_PRESSED_HOLD_FRAMES: u8 = 6;
+const SETTINGS_SLIDER_STACK_MAX_WIDTH: f32 = 460.0;
+const SETTINGS_SLIDER_CONTENT_MARGIN_HORIZONTAL: f32 = 33.0;
+const SETTINGS_SLIDER_CONTENT_MARGIN_VERTICAL: f32 = 3.0;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -19118,13 +19121,27 @@ impl DesktopLauncher {
             .clamp(0, max) as f32
     }
 
-    fn settings_pref_widget_slider_track_rect(row: RenderRect) -> RenderRect {
+    fn settings_pref_widget_slider_stack_rect(row: RenderRect) -> RenderRect {
         RenderRect::new(
-            row.x + row.width - 218.0,
-            row.y + row.height * 0.5 - 6.0,
-            152.0,
-            12.0,
+            row.x,
+            row.y,
+            row.width.min(SETTINGS_SLIDER_STACK_MAX_WIDTH),
+            row.height,
         )
+    }
+
+    fn settings_pref_widget_slider_content_rect(stack: RenderRect) -> RenderRect {
+        RenderRect::new(
+            stack.x + SETTINGS_SLIDER_CONTENT_MARGIN_HORIZONTAL,
+            stack.y + SETTINGS_SLIDER_CONTENT_MARGIN_VERTICAL,
+            (stack.width - SETTINGS_SLIDER_CONTENT_MARGIN_HORIZONTAL * 2.0).max(0.0),
+            (stack.height - SETTINGS_SLIDER_CONTENT_MARGIN_VERTICAL * 2.0).max(0.0),
+        )
+    }
+
+    fn settings_pref_widget_slider_track_rect(row: RenderRect) -> RenderRect {
+        let stack = Self::settings_pref_widget_slider_stack_rect(row);
+        RenderRect::new(stack.x, row.y + row.height * 0.5 - 6.0, stack.width, 12.0)
     }
 
     fn settings_slider_value_from_track_x(
@@ -19239,18 +19256,6 @@ impl DesktopLauncher {
                 1.0,
                 Layer::END_PIXELED + 0.026,
             ));
-            pass.push(RenderCommand::draw_text_styled(
-                Self::settings_pref_label(spec.key),
-                RenderPoint::new(row.x + 16.0, row.y + row.height * 0.5),
-                [0.82, 0.9, 0.96, 1.0],
-                12.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.03,
-            ));
-
             match spec.kind {
                 DesktopSettingsPrefKind::Check => {
                     let checked = self.setting_bool_effective_value(spec);
@@ -19261,6 +19266,17 @@ impl DesktopLauncher {
                         control_size,
                         control_size,
                     );
+                    pass.push(RenderCommand::draw_text_styled(
+                        Self::settings_pref_label(spec.key),
+                        RenderPoint::new(row.x + 16.0, row.y + row.height * 0.5),
+                        [0.82, 0.9, 0.96, 1.0],
+                        12.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.03,
+                    ));
                     pass.push(RenderCommand::draw_sprite(
                         Self::settings_check_box_symbol(checked, hovered, pressed),
                         control,
@@ -19295,6 +19311,8 @@ impl DesktopLauncher {
                         0.0
                     }
                     .clamp(0.0, 1.0);
+                    let stack = Self::settings_pref_widget_slider_stack_rect(row);
+                    let content = Self::settings_pref_widget_slider_content_rect(stack);
                     let knob_size = 24.0;
                     let knob = RenderRect::new(
                         track.x + t * track.width - knob_size * 0.5,
@@ -19317,15 +19335,26 @@ impl DesktopLauncher {
                         Layer::END_PIXELED + 0.033,
                     ));
                     pass.push(RenderCommand::draw_text_styled(
+                        Self::settings_pref_label(spec.key),
+                        RenderPoint::new(content.x, row.y + row.height * 0.5),
+                        [0.82, 0.9, 0.96, 1.0],
+                        12.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.034,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
                         format!("value: {value}"),
-                        RenderPoint::new(row.x + row.width - 18.0, row.y + row.height * 0.5),
+                        RenderPoint::new(content.right(), row.y + row.height * 0.5),
                         [0.72, 0.84, 0.9, 1.0],
                         11.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::End)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true),
-                        Layer::END_PIXELED + 0.034,
+                        Layer::END_PIXELED + 0.035,
                     ));
                 }
             }
@@ -19371,17 +19400,21 @@ impl DesktopLauncher {
             if !row.contains_point(point) {
                 continue;
             }
-            return match spec.kind {
+            match spec.kind {
                 DesktopSettingsPrefKind::Check => {
-                    Some(DesktopSettingsAction::ToggleSetting(spec.table, spec.key))
+                    return Some(DesktopSettingsAction::ToggleSetting(spec.table, spec.key));
                 }
                 DesktopSettingsPrefKind::Slider => {
+                    let stack = Self::settings_pref_widget_slider_stack_rect(row);
+                    if !stack.contains_point(point) {
+                        continue;
+                    }
                     let range = spec.range_step?;
                     let track = Self::settings_pref_widget_slider_track_rect(row);
                     let value = Self::settings_slider_value_from_track_x(range, track, point.x);
-                    Some(DesktopSettingsAction::SetSliderValue(
+                    return Some(DesktopSettingsAction::SetSliderValue(
                         spec.table, spec.key, value,
-                    ))
+                    ));
                 }
             };
         }
@@ -38784,6 +38817,82 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_settings_slider_layout_uses_upstream_stack_margins() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let clip = DesktopLauncher::settings_pref_widget_clip_rect_for_panel(panel);
+        let specs = DesktopLauncher::settings_pref_widget_specs("game");
+        let save_index = specs
+            .iter()
+            .position(|spec| spec.key == "saveinterval")
+            .expect("game settings should include saveinterval");
+        let save_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip_with_scroll(
+            clip, save_index, 0.0,
+        );
+        let stack = DesktopLauncher::settings_pref_widget_slider_stack_rect(save_row);
+        let content = DesktopLauncher::settings_pref_widget_slider_content_rect(stack);
+        let track = DesktopLauncher::settings_pref_widget_slider_track_rect(save_row);
+
+        assert_eq!(stack.x, save_row.x);
+        assert!((stack.width - super::SETTINGS_SLIDER_STACK_MAX_WIDTH).abs() < 0.01);
+        assert!(
+            (content.x - (stack.x + super::SETTINGS_SLIDER_CONTENT_MARGIN_HORIZONTAL)).abs() < 0.01
+        );
+        assert!(
+            (content.width
+                - (stack.width - super::SETTINGS_SLIDER_CONTENT_MARGIN_HORIZONTAL * 2.0))
+                .abs()
+                < 0.01
+        );
+        assert!(
+            (content.y - (stack.y + super::SETTINGS_SLIDER_CONTENT_MARGIN_VERTICAL)).abs() < 0.01
+        );
+        assert_eq!(track.x, stack.x);
+        assert_eq!(track.width, stack.width);
+        assert!((track.center().y - save_row.center().y).abs() < 0.01);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("settings frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let save_label_position = commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::DrawText { text, position, .. }
+                    if text == "@setting.saveinterval.name" =>
+                {
+                    Some(*position)
+                }
+                _ => None,
+            })
+            .expect("saveinterval label should be rendered inside the slider overlay content");
+        let save_value_position = commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::DrawText { text, position, .. } if text == "value: 60" => {
+                    Some(*position)
+                }
+                _ => None,
+            })
+            .expect("saveinterval value should be rendered inside the slider overlay content");
+        assert!((save_label_position.x - content.x).abs() < 0.01);
+        assert!((save_value_position.x - content.right()).abs() < 0.01);
+    }
+
+    #[test]
     fn desktop_launcher_settings_controls_write_overrides_from_hit_tests() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.dispatch_menu_action(MenuButtonRole::Settings);
@@ -39080,11 +39189,15 @@ mod tests {
             clip.contains_point(playerlimit_row.center()),
             "scroll offset should bring later settings rows into the clipped table"
         );
+        let playerlimit_track =
+            DesktopLauncher::settings_pref_widget_slider_track_rect(playerlimit_row);
+        let playerlimit_min_point =
+            RenderPoint::new(playerlimit_track.x, playerlimit_track.center().y);
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
-                playerlimit_row.center().x,
-                playerlimit_row.center().y
+                playerlimit_min_point.x,
+                playerlimit_min_point.y
             ),
             Some(super::DesktopMenuRouteShellAction::Settings(
                 super::DesktopSettingsAction::SetSliderValue("game", "playerlimit", 2)
