@@ -271,6 +271,125 @@ fn laser_bullet_snapshot_light_commands(
     }]
 }
 
+fn desktop_lerp_decal_color(from: DecalColor, to: DecalColor, progress: f32) -> DecalColor {
+    DecalColor {
+        r: desktop_lerp(from.r, to.r, progress),
+        g: desktop_lerp(from.g, to.g, progress),
+        b: desktop_lerp(from.b, to.b, progress),
+        a: desktop_lerp(from.a, to.a, progress),
+    }
+}
+
+fn desktop_shrapnel_bullet_render_color(spec: &BulletSpec, fin: f32) -> [f32; 4] {
+    let from = desktop_resolve_color_symbol(&spec.from_color).unwrap_or(DecalColor::WHITE);
+    let to = desktop_resolve_color_symbol(&spec.to_color).unwrap_or(Pal::LANCER_LASER);
+    desktop_effect_render_color(Some(desktop_lerp_decal_color(from, to, fin)), 1.0)
+}
+
+fn shrapnel_bullet_snapshot_render_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    layer: f32,
+) -> Vec<RenderCommand> {
+    if bullet.removed || spec.kind != BulletKind::Shrapnel {
+        return Vec::new();
+    }
+
+    let (fin, fout) = desktop_bullet_fin_fout(bullet);
+    if fout <= f32::EPSILON || spec.width <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let real_length = bullet.fdata.max(0.0);
+    let rotation = bullet.rotation();
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let color = desktop_shrapnel_bullet_render_color(spec, fin);
+    let mut commands = Vec::new();
+
+    let serration_count = if spec.length.abs() <= f32::EPSILON {
+        0
+    } else {
+        (spec.serrations as f32 * real_length / spec.length).max(0.0) as i32
+    };
+    let serration_alpha = (fout - spec.serration_fade_offset).clamp(0.0, 1.0);
+    for i in 0..serration_count {
+        let distance = i as f32 * spec.serration_spacing;
+        let (offset_x, offset_y) = desktop_rotate_offset(rotation, distance, 0.0);
+        let center = RenderPoint::new(origin.x + offset_x, origin.y + offset_y);
+        let length =
+            serration_alpha * (spec.serration_space_offset - i as f32 * spec.serration_len_scl);
+        commands.push(RenderCommand::draw_triangle(
+            center,
+            spec.serration_width,
+            length,
+            rotation + 90.0,
+            color,
+            layer,
+        ));
+        commands.push(RenderCommand::draw_triangle(
+            center,
+            spec.serration_width,
+            length,
+            rotation - 90.0,
+            color,
+            layer,
+        ));
+    }
+
+    commands.push(RenderCommand::draw_triangle(
+        origin,
+        spec.width * fout,
+        real_length + 4.0,
+        rotation,
+        color,
+        layer,
+    ));
+    commands.push(RenderCommand::draw_triangle(
+        origin,
+        spec.width * fout,
+        10.0,
+        rotation + 180.0,
+        color,
+        layer,
+    ));
+
+    commands
+}
+
+fn shrapnel_bullet_snapshot_light_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+) -> Vec<LightCommand> {
+    if bullet.removed || spec.kind != BulletKind::Shrapnel {
+        return Vec::new();
+    }
+
+    let (_, fout) = desktop_bullet_fin_fout(bullet);
+    let stroke = spec.width * 2.5 * fout;
+    let real_length = bullet.fdata.max(0.0);
+    if stroke <= f32::EPSILON || real_length <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let (_, light_end) = desktop_line_angle_points(origin, bullet.rotation(), real_length);
+    let color = desktop_resolve_color_symbol(&spec.to_color).unwrap_or(Pal::LANCER_LASER);
+
+    vec![LightCommand::Line {
+        x: origin.x,
+        y: origin.y,
+        x2: light_end.x,
+        y2: light_end.y,
+        stroke,
+        tint: LightPrimitive {
+            center: (origin.x, origin.y),
+            radius: stroke,
+            color,
+            opacity: spec.light_opacity,
+        },
+    }]
+}
+
 fn laser_bolt_bullet_snapshot_render_commands(
     bullet: &BulletComp,
     spec: &BulletSpec,
@@ -12134,6 +12253,14 @@ impl DesktopLauncher {
                     &content.spec,
                     desktop_bullet_layer(&content.spec),
                 )),
+                BulletKind::Shrapnel => {
+                    pass.commands
+                        .extend(shrapnel_bullet_snapshot_render_commands(
+                            bullet,
+                            &content.spec,
+                            desktop_bullet_layer(&content.spec),
+                        ))
+                }
                 _ => pass
                     .commands
                     .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec)),
@@ -12151,8 +12278,17 @@ impl DesktopLauncher {
             let Some(content) = self.content_loader.bullet_by_id(bullet.bullet_type_id) else {
                 continue;
             };
-            if content.spec.kind == BulletKind::Laser {
-                commands.extend(laser_bullet_snapshot_light_commands(bullet, &content.spec));
+            match content.spec.kind {
+                BulletKind::Laser => {
+                    commands.extend(laser_bullet_snapshot_light_commands(bullet, &content.spec));
+                }
+                BulletKind::Shrapnel => {
+                    commands.extend(shrapnel_bullet_snapshot_light_commands(
+                        bullet,
+                        &content.spec,
+                    ));
+                }
+                _ => {}
             }
         }
 
@@ -16831,6 +16967,128 @@ mod tests {
                 assert_eq!(*layer, LIGHT_RENDER_LAYER);
             }
             other => panic!("expected laser lighting DrawLine, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_content = launcher
+            .content_loader
+            .bullet_by_name("toxopid_shrapnel")
+            .expect("base content should include toxopid shrapnel bullet");
+        assert_eq!(bullet_content.spec.kind, super::BulletKind::Shrapnel);
+        let bullet_id = bullet_content.id();
+        let bullet_spec = bullet_content.spec.clone();
+
+        let mut bullet =
+            BulletComp::new(bullet_id, TeamId(1), type_io::EntityRef::null(), 32.0, 48.0);
+        bullet.lifetime = 10.0;
+        bullet.time = 5.0;
+        bullet.rotation = 0.0;
+        bullet.fdata = 45.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7106, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            25,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawTriangle { center, length, .. }
+                            if *center == RenderPoint::new(32.0, 48.0)
+                                && *length == 49.0)
+                    })
+            })
+            .expect("shrapnel bullet snapshot should emit overlay triangle commands");
+
+        let triangles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawTriangle {
+                    center,
+                    width,
+                    length,
+                    rotation,
+                    color,
+                    layer,
+                } => Some((*center, *width, *length, *rotation, *color, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        let expected_color = super::desktop_shrapnel_bullet_render_color(&bullet_spec, 0.5);
+        assert_eq!(triangles.len(), 12);
+        assert_eq!(triangles[0].0, RenderPoint::new(32.0, 48.0));
+        assert_eq!(triangles[0].1, 6.0);
+        assert_eq!(triangles[0].2, 30.0);
+        assert_eq!(triangles[0].3, 90.0);
+        assert_eq!(triangles[0].4, expected_color);
+        assert_eq!(triangles[0].5, Layer::BULLET);
+        assert_eq!(triangles[1].3, -90.0);
+
+        assert_eq!(triangles[10].0, RenderPoint::new(32.0, 48.0));
+        assert_eq!(triangles[10].1, 12.5);
+        assert_eq!(triangles[10].2, 49.0);
+        assert_eq!(triangles[10].3, 0.0);
+        assert_eq!(triangles[11].1, 12.5);
+        assert_eq!(triangles[11].2, 10.0);
+        assert_eq!(triangles[11].3, 180.0);
+
+        let lighting = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(77.0, 48.0))
+                    })
+            })
+            .expect("shrapnel bullet snapshot should emit Java Drawf.light equivalent");
+        match lighting
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(32.0, 48.0)
+                        && *to == RenderPoint::new(77.0, 48.0))
+            })
+            .expect("shrapnel lighting line should be present")
+        {
+            RenderCommand::DrawLine {
+                stroke,
+                color,
+                layer,
+                ..
+            } => {
+                assert_eq!(*stroke, 31.25);
+                assert_eq!(
+                    *color,
+                    super::desktop_effect_render_color(
+                        super::desktop_resolve_color_symbol("sapBulletBack"),
+                        0.6
+                    )
+                );
+                assert_eq!(*layer, LIGHT_RENDER_LAYER);
+            }
+            other => panic!("expected shrapnel lighting DrawLine, got {other:?}"),
         }
     }
 

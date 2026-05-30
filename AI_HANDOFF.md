@@ -13063,3 +13063,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. 继续 Unit trail：先补 `UnitTrailState` 的真实点列/`Trail` runtime；
   4. 继续 Weapon parts：结构化 part seam 与 `sideMultiplier`；
   5. 继续把 Unit/Bullet/Effect 从临时 Overlay 收口到统一 Java layer sorting。
+
+### 2026-05-30：ShrapnelBullet triangle 与 light pass 接入客户端 bullet 渲染链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.2%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 shrapnel 颜色插值 helper，按 Java `Draw.color(fromColor, toColor, fin)` 输出 tint；
+    - 新增 `shrapnel_bullet_snapshot_render_commands(...)`，输出 serration/body/tail `DrawTriangle`；
+    - 新增 `shrapnel_bullet_snapshot_light_commands(...)`，输出 Java `Drawf.light(...)` 对应的 lighting line；
+    - `bullet_snapshot_render_pass()` / `bullet_snapshot_light_render_pass()` 已接入 `BulletKind::Shrapnel`；
+    - 新增测试 `desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass`，覆盖 `toxopid_shrapnel`。
+- Java 对照：
+  - `ShrapnelBulletType.draw(Bullet b)`：按 `b.fdata` 算真实长度，serration 数量 `(int)(serrations * realLength / length)`，再画 body/tail triangles 和 light。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 继续 bullet 渲染：Sap 最适合作为下一个小闭环；ContinuousLaser 结构已有但要单独处理 fade/currentLength/ellipse/light；
+  2. 继续补 bullet init side-effects：Laser/Shrapnel 的 collideLaser、lightning/effect timing；
+  3. Unit trail 仍需先补 runtime trail points；
+  4. Weapon parts 仍需先结构化 `parts` 和 `sideMultiplier`，不要把 continuous beam 当普通 sprite。

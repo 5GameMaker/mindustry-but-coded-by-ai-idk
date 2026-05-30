@@ -15916,3 +15916,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Sap / Shrapnel / ContinuousLaser 的客户端 bullet render pass 仍未接入；
   - Bullet trail、更完整 bullet light、Java layer sorting / world entity pass、Java↔Rust 联机 smoke 仍需继续；
   - Unit engine trail、weapon parts/continuous beam/hard shadow/legs/payload/item 仍未完成。
+
+## 434. 最新闭环记录：ShrapnelBullet triangle 与 light pass 接入客户端 bullet 渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.2%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/bullet/ShrapnelBulletType.java#draw(Bullet b)`
+  - `realLength = b.fdata`
+  - `Draw.color(fromColor, toColor, b.fin())`
+  - serration 数量为 `(int)(serrations * realLength / length)`，每段左右各一枚 `Drawf.tri`
+  - 主体 `Drawf.tri(b.x, b.y, width * b.fout(), realLength + 4f, rot)`，尾部 `Drawf.tri(..., 10f, rot + 180f)`
+  - 末尾 `Drawf.light(..., width * 2.5f * b.fout(), toColor, lightOpacity)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_lerp_decal_color(...)` 和 `desktop_shrapnel_bullet_render_color(...)`，按 Java `Draw.color(fromColor, toColor, fin)` 生成 shrapnel tint；
+    - 新增 `shrapnel_bullet_snapshot_render_commands(...)`，将 `BulletKind::Shrapnel` 映射为 serration/body/tail `DrawTriangle`；
+    - 新增 `shrapnel_bullet_snapshot_light_commands(...)`，将 Java `Drawf.light(...)` 映射进现有 `LightRendererPlan` / `RenderPassKind::Lighting`；
+    - `bullet_snapshot_render_pass()` 与 `bullet_snapshot_light_render_pass()` 增加 `BulletKind::Shrapnel` 分支；
+    - 新增 `desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass`，覆盖 `toxopid_shrapnel` 的 triangle 数量、serration 几何、body/tail 几何、颜色插值与 lighting line。
+- 迁移意义：
+  - Shrapnel bullet 不再在客户端 snapshot 中静默不可见，已进入与 Laser/LaserBolt 相同的 bullet render 主链；
+  - 该闭环复用现有 `RenderCommand::DrawTriangle` / `LightRendererPlan`，没有新增孤立 bullet renderer；
+  - `from_color/to_color` 的插值路径可继续服务后续更多 beam/fragment 类 bullet。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Sap / ContinuousLaser 的客户端 bullet render pass 仍未接入；
+  - Shrapnel 的 collideLaser init side-effects、hit/effect timing、trail/impact 细节仍需继续；
+  - Bullet 渲染仍临时复用 Overlay，后续需要统一 Java layer sorting / world entity pass；
+  - Unit engine trail、weapon parts/continuous beam/hard shadow/legs/payload/item 仍未完成。
