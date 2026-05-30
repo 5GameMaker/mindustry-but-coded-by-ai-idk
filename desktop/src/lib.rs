@@ -12327,7 +12327,8 @@ fn default_desktop_texture_atlas(
     content_loader: &ContentLoader,
 ) -> TextureAtlasPlan<bool> {
     TextureAtlasPlan::from_virtual_source_paths(
-        content_icon_candidate_virtual_source_paths(content_loader)
+        std::iter::once("sprites/logo.png".to_string())
+            .chain(content_icon_candidate_virtual_source_paths(content_loader))
             .into_iter()
             .chain(
                 block_renderer_state
@@ -15819,6 +15820,35 @@ impl DesktopLauncher {
         pass
     }
 
+    fn push_menu_logo_and_version_chrome(pass: &mut RenderPass, viewport: RenderViewport) {
+        let width = viewport.width.max(1.0);
+        let height = viewport.height.max(1.0);
+        let logo_width = 768.0_f32.min((width - 20.0).max(1.0));
+        let logo_height = (logo_width / 4.0).max(1.0);
+        let logo_x = viewport.x + ((width - logo_width) * 0.5).floor();
+        let logo_y = viewport.y + (height - 6.0 - logo_height).max(0.0).floor();
+
+        pass.push(RenderCommand::draw_sprite(
+            "logo",
+            RenderRect::new(logo_x, logo_y, logo_width, logo_height),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::END_PIXELED + 0.08,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            UPSTREAM_BASELINE,
+            RenderPoint::new(viewport.x + width * 0.5, (logo_y - 8.0).max(viewport.y)),
+            [1.0, 1.0, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.09,
+        ));
+    }
+
     fn startup_menu_preview_graphics_frame(
         &self,
         frame_index: u64,
@@ -16240,6 +16270,7 @@ impl DesktopLauncher {
 
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
         self.push_active_menu_route_shell(&mut menu_pass, frame_viewport);
+        Self::push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
         let camera = menu_pass
             .camera
             .unwrap_or_else(|| self.default_render_camera_for_viewport(frame_viewport));
@@ -18236,6 +18267,7 @@ mod tests {
         UnitEnvDeathCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
         UnitTetherBlockSpawnedCallPacket,
     };
+    use mindustry_core::mindustry::UPSTREAM_BASELINE;
     use mindustry_core::mindustry::{
         entities::{
             comp::{
@@ -32134,6 +32166,52 @@ mod tests {
                 )
             });
         assert!(route_text_present);
+    }
+
+    #[test]
+    fn desktop_launcher_menu_renders_logo_and_version_overlay() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        assert!(launcher.texture_atlas.lookup("logo").is_ok());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+
+        let logo = commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    layer,
+                    ..
+                } if symbol == "logo" => Some((*rect, *layer)),
+                _ => None,
+            })
+            .expect("menu chrome should draw the logo sprite");
+        assert_eq!(
+            logo,
+            (
+                RenderRect::new(256.0, 522.0, 768.0, 192.0),
+                Layer::END_PIXELED + 0.08
+            )
+        );
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, layer, .. }
+                    if text == UPSTREAM_BASELINE
+                        && (*layer - (Layer::END_PIXELED + 0.09)).abs() < f32::EPSILON
+            )
+        }));
     }
 
     #[test]

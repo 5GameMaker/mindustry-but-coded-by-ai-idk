@@ -17314,3 +17314,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `customButtons` 的 mobile 奇/偶插入规则尚未迁移；
   - mobile 独立 `info/about` 与 `terminal` chrome 尚未迁移；
   - fadeIn/fadeOut、logo/version/discord/becheck 等完整 `MenuFragment.build()` chrome 仍待继续接入。
+
+## 479. MenuFragment logo/version chrome 接入菜单主帧
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.3%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:94-131`
+    - `logo` 使用 `Core.atlas.find("logo")`；
+    - 顶部居中绘制 logo，并在 logo 下方绘制 `versionText`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `default_desktop_texture_atlas(...)` 追加 `sprites/logo.png`，让真实上游 logo 进入现有 atlas/resource 主链；
+    - 新增 `push_menu_logo_and_version_chrome(...)`，在 `menu_graphics_frame_for_surface(...)` 的 menu pass 上追加 logo sprite 与 `UPSTREAM_BASELINE` 文本；
+    - 新增回归测试 `desktop_launcher_menu_renders_logo_and_version_overlay`，同时验证 logo atlas lookup 和菜单 render frame 中的 sprite/text command。
+- 迁移意义：
+  - `MenuFragment.build()` 中的 logo/version chrome 不再停留在启动预览 mock，而是进入正式菜单 `RenderFramePlan`；
+  - logo 走现有 `TextureAtlasPlan -> RenderCommand::DrawSprite -> OpenGL sprite batching` 主链，不另起孤立渲染路径。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `discord / terminal / info / becheck` chrome 尚未迁移；
+  - `customButtons` 动态插入、desktop workshop 条件项和 submenu fade 仍待继续；
+  - 真字体 atlas 尚未接入，version 文本当前仍走现有 DrawText placeholder/fallback 路径。
