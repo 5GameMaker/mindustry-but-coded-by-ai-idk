@@ -15879,3 +15879,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Laser / Sap / Shrapnel / ContinuousLaser 的完整 bullet draw plan 仍未接入客户端 bullet render pass；
   - LaserBolt 仍未补 trail/light 的完整 Java 视觉；
   - Bullet 渲染仍临时复用 Overlay，后续需要统一 Java layer sorting / world entity pass。
+
+## 433. 最新闭环记录：LaserBullet layered primitive 与 light pass 接入客户端 bullet 渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.1%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/bullet/LaserBulletType.java#draw(Bullet b)`
+  - `realLength = b.fdata`
+  - `baseLen = realLength * Mathf.curve(b.fin(), 0f, 0.2f)`
+  - 每层颜色绘制 `Lines.lineAngle`、末端 `Drawf.tri`、起点 `Fill.circle`、左右 side `Drawf.tri`
+  - 末尾 `Drawf.light(..., width * 1.4f * b.fout(), colors[0], 0.6f)`；`drawLight()` 本身为空。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_resolve_color_symbol(...)` 支持 `name@alpha` 形式，使 `heal@0.4`、`lancerLaser@0.4` 等 Java/Content 颜色语义可被 desktop 渲染解析；
+    - 新增 `desktop_line_angle_points(...)`，表达 Java `Lines.lineAngle(x, y, rotation, length, false)` 的起点到终点射线；
+    - 新增 `laser_bullet_snapshot_render_commands(...)`，将 `BulletKind::Laser` 从 `client_bullet_snapshot_entities` 映射为每层 `DrawLine + DrawTriangle + DrawCircle + side DrawTriangle`；
+    - 新增 `laser_bullet_snapshot_light_commands(...)` 与 `bullet_snapshot_light_render_pass()`，把 Java `Drawf.light(...)` 映射进现有 `LightRendererPlan` / `RenderPassKind::Lighting`，而不是塞进孤立 renderer；
+    - `bullet_snapshot_render_pass()` 对 `BulletKind::Laser` 走专用 primitive 分支，保留 Basic/LaserBolt 等既有路径；
+    - 整帧构建时新增 bullet lighting pass，与 fire/puddle/unit/effect light pass 共用主链；
+    - 新增 `desktop_launcher_routes_laser_snapshot_primitives_and_light_pass`，覆盖 `quasar_beam` 的 overlay line/circle/triangle 数量、端点、stroke、side triangle、颜色 alpha 与 lighting line。
+- 迁移意义：
+  - `LaserBulletType.draw()` 不再缺席客户端 bullet snapshot 渲染；Laser 系 bullet 已进入 `RenderCommand` / OpenGL primitive 主链；
+  - 继续坚持整体化路径：`client_bullet_snapshot_entities` → content `BulletSpec` → `bullet_snapshot_render_pass()` / `bullet_snapshot_light_render_pass()` → `RenderFramePlan`，没有引入独立演示模块；
+  - `@alpha` 颜色解析同时为后续 Sap/Shrapnel/ContinuousLaser/Effect 颜色复用打基础。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_basic_bullet_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_bolt_snapshot_lines_into_overlay_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Laser 的 lightning init side-effects、hit/effect timing 与完整 collideLaser runtime 仍需继续对齐；
+  - Sap / Shrapnel / ContinuousLaser 的客户端 bullet render pass 仍未接入；
+  - Bullet trail、更完整 bullet light、Java layer sorting / world entity pass、Java↔Rust 联机 smoke 仍需继续；
+  - Unit engine trail、weapon parts/continuous beam/hard shadow/legs/payload/item 仍未完成。

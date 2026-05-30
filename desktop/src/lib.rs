@@ -42,10 +42,10 @@ use mindustry_core::mindustry::graphics::{
     BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer,
     Env as GraphicsEnv, EnvRendererContext, EnvRendererPlan, EnvRendererRegistry, FloorRenderPlan,
     FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState, FogViewport,
-    GraphicsFrameBundle, GraphicsFrameStats, Layer, LightPrimitive, LightRendererPlan,
-    LightRendererState, LoadFrameInput, LoadFramePlan, LoadRendererState, MenuFrameInput,
-    MenuFramePlan, MenuRendererConfig, MenuRendererState, MinimapCamera, MinimapFogLayer,
-    MinimapOverlayCommand, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect,
+    GraphicsFrameBundle, GraphicsFrameStats, Layer, LightCommand, LightPrimitive,
+    LightRendererPlan, LightRendererState, LoadFrameInput, LoadFramePlan, LoadRendererState,
+    MenuFrameInput, MenuFramePlan, MenuRendererConfig, MenuRendererState, MinimapCamera,
+    MinimapFogLayer, MinimapOverlayCommand, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect,
     MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize, OverlayRendererPlan,
     OverlayRendererState, PageType, Pal, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
     PixelatorState, PngRgba8888DecodeError, RenderBackendFlushBoundary, RenderBlendFactor,
@@ -119,6 +119,15 @@ fn desktop_resolve_color_symbol(name: &str) -> Option<DecalColor> {
     if name.is_empty() {
         return None;
     }
+
+    if let Some((base, alpha)) = name.rsplit_once('@') {
+        if let Ok(alpha) = alpha.parse::<f32>() {
+            let mut color = desktop_resolve_color_symbol(base)?;
+            color.a *= alpha.clamp(0.0, 1.0);
+            return Some(color);
+        }
+    }
+
     standard_effect_color_symbol(name)
         .or_else(|| Pal::by_name(name))
         .or_else(|| standard_effect_color_symbol(&format!("Pal.{name}")))
@@ -128,6 +137,138 @@ fn desktop_resolve_color_symbol(name: &str) -> Option<DecalColor> {
 fn desktop_bullet_render_color(name: &str, fallback: DecalColor) -> [f32; 4] {
     let color = desktop_resolve_color_symbol(name).unwrap_or(fallback);
     desktop_effect_render_color(Some(color), 1.0)
+}
+
+fn desktop_curve(value: f32, from: f32, to: f32) -> f32 {
+    if (to - from).abs() <= f32::EPSILON {
+        return if value >= to { 1.0 } else { 0.0 };
+    }
+    ((value - from) / (to - from)).clamp(0.0, 1.0)
+}
+
+fn desktop_bullet_fin_fout(bullet: &BulletComp) -> (f32, f32) {
+    let fin = if bullet.lifetime > f32::EPSILON {
+        (bullet.time / bullet.lifetime).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (fin, 1.0 - fin)
+}
+
+fn desktop_laser_bullet_colors(spec: &BulletSpec) -> Vec<String> {
+    if !spec.colors.is_empty() {
+        spec.colors.clone()
+    } else if !spec.front_color.is_empty() {
+        vec![spec.front_color.clone()]
+    } else {
+        vec![
+            "lancerLaser@0.4".into(),
+            "lancerLaser".into(),
+            "white".into(),
+        ]
+    }
+}
+
+fn laser_bullet_base_length(bullet: &BulletComp) -> (f32, f32, f32) {
+    let (fin, fout) = desktop_bullet_fin_fout(bullet);
+    let base_length = bullet.fdata.max(0.0) * desktop_curve(fin, 0.0, 0.2);
+    (base_length, fin, fout)
+}
+
+fn laser_bullet_snapshot_render_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    layer: f32,
+) -> Vec<RenderCommand> {
+    if bullet.removed || spec.kind != BulletKind::Laser {
+        return Vec::new();
+    }
+
+    let (base_length, _, fout) = laser_bullet_base_length(bullet);
+    if base_length <= f32::EPSILON || fout <= f32::EPSILON || spec.width <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let end = desktop_line_angle_points(origin, bullet.rotation(), base_length).1;
+    let mut cwidth = spec.width;
+    let mut compound = 1.0;
+    let mut commands = Vec::new();
+
+    for color_name in desktop_laser_bullet_colors(spec) {
+        cwidth *= 0.5;
+        let stroke = cwidth * fout;
+        let color = desktop_bullet_render_color(&color_name, Pal::LANCER_LASER);
+
+        commands.push(RenderCommand::draw_line(origin, end, stroke, color, layer));
+        commands.push(RenderCommand::draw_triangle(
+            end,
+            stroke,
+            cwidth * 2.0 + spec.width / 2.0,
+            bullet.rotation(),
+            color,
+            layer,
+        ));
+        commands.push(RenderCommand::draw_circle(
+            origin,
+            cwidth * fout,
+            color,
+            true,
+            layer,
+        ));
+
+        for sign in [-1.0_f32, 1.0] {
+            commands.push(RenderCommand::draw_triangle(
+                origin,
+                spec.side_width * fout * cwidth,
+                spec.side_length * compound,
+                bullet.rotation() + spec.side_angle * sign,
+                color,
+                layer,
+            ));
+        }
+
+        compound *= 0.5;
+    }
+
+    commands
+}
+
+fn laser_bullet_snapshot_light_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+) -> Vec<LightCommand> {
+    if bullet.removed || spec.kind != BulletKind::Laser {
+        return Vec::new();
+    }
+
+    let (base_length, _, fout) = laser_bullet_base_length(bullet);
+    let stroke = spec.width * 1.4 * fout;
+    if base_length <= f32::EPSILON || stroke <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let (_, light_end) = desktop_line_angle_points(origin, bullet.rotation(), base_length * 1.1);
+    let color_name = desktop_laser_bullet_colors(spec)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "lancerLaser@0.4".into());
+    let color = desktop_resolve_color_symbol(&color_name).unwrap_or(Pal::LANCER_LASER);
+
+    vec![LightCommand::Line {
+        x: origin.x,
+        y: origin.y,
+        x2: light_end.x,
+        y2: light_end.y,
+        stroke,
+        tint: LightPrimitive {
+            center: (origin.x, origin.y),
+            radius: stroke,
+            color,
+            opacity: 0.6,
+        },
+    }]
 }
 
 fn laser_bolt_bullet_snapshot_render_commands(
@@ -370,6 +511,15 @@ fn desktop_rotate_offset(rotation: f32, x: f32, y: f32) -> (f32, f32) {
     let radians = rotation.to_radians();
     let (sin, cos) = radians.sin_cos();
     (x * cos - y * sin, x * sin + y * cos)
+}
+
+fn desktop_line_angle_points(
+    origin: RenderPoint,
+    rotation: f32,
+    length: f32,
+) -> (RenderPoint, RenderPoint) {
+    let (x, y) = desktop_rotate_offset(rotation, length, 0.0);
+    (origin, RenderPoint::new(origin.x + x, origin.y + y))
 }
 
 fn desktop_line_angle_center_points(
@@ -11978,10 +12128,39 @@ impl DesktopLauncher {
             let Some(content) = self.content_loader.bullet_by_id(bullet.bullet_type_id) else {
                 continue;
             };
-            pass.commands
-                .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec));
+            match content.spec.kind {
+                BulletKind::Laser => pass.commands.extend(laser_bullet_snapshot_render_commands(
+                    bullet,
+                    &content.spec,
+                    desktop_bullet_layer(&content.spec),
+                )),
+                _ => pass
+                    .commands
+                    .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec)),
+            }
         }
         (!pass.commands.is_empty()).then_some(pass)
+    }
+
+    fn bullet_snapshot_light_render_pass(&self) -> Option<RenderPass> {
+        let mut commands = Vec::new();
+        for (entity_id, bullet) in &self.runtime.client_bullet_snapshot_entities {
+            if bullet.removed || self.runtime.client_hidden_entity_ids.contains(entity_id) {
+                continue;
+            }
+            let Some(content) = self.content_loader.bullet_by_id(bullet.bullet_type_id) else {
+                continue;
+            };
+            if content.spec.kind == BulletKind::Laser {
+                commands.extend(laser_bullet_snapshot_light_commands(bullet, &content.spec));
+            }
+        }
+
+        LightRendererPlan {
+            circle_lights: Vec::new(),
+            commands,
+        }
+        .to_render_pass()
     }
 
     fn unit_snapshot_body_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
@@ -12515,6 +12694,9 @@ impl DesktopLauncher {
             render_frame.push_pass(light_pass);
         }
         if let Some(light_pass) = self.unit_snapshot_light_render_pass() {
+            render_frame.push_pass(light_pass);
+        }
+        if let Some(light_pass) = self.bullet_snapshot_light_render_pass() {
             render_frame.push_pass(light_pass);
         }
         let block_renderer = self.block_render_plan(camera, viewport);
@@ -14368,6 +14550,7 @@ mod tests {
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::ctype::{Content, ContentId};
     use mindustry_core::mindustry::entities::comp::{DecalColor, FireComp};
+    use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
@@ -16486,6 +16669,168 @@ mod tests {
                 assert_eq!(*layer, Layer::BULLET);
             }
             other => panic!("expected LaserBolt front DrawLine, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_routes_laser_snapshot_primitives_and_light_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_content = launcher
+            .content_loader
+            .bullet_by_name("quasar_beam")
+            .expect("base content should include quasar laser bullet");
+        assert_eq!(bullet_content.spec.kind, super::BulletKind::Laser);
+
+        let mut bullet = BulletComp::new(
+            bullet_content.id(),
+            TeamId(1),
+            type_io::EntityRef::null(),
+            32.0,
+            48.0,
+        );
+        bullet.lifetime = 16.0;
+        bullet.time = 8.0;
+        bullet.rotation = 0.0;
+        bullet.fdata = 80.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7105, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 160.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(80.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(80.0, 64.0, 160.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            24,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(112.0, 48.0))
+                    })
+            })
+            .expect("laser bullet snapshot should emit overlay primitive commands");
+
+        let lines = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawLine {
+                    from,
+                    to,
+                    stroke,
+                    color,
+                    layer,
+                } => Some((*from, *to, *stroke, *color, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let circles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    color,
+                    filled,
+                    layer,
+                } => Some((*center, *radius, *color, *filled, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let triangles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawTriangle {
+                    center,
+                    width,
+                    length,
+                    rotation,
+                    color,
+                    layer,
+                } => Some((*center, *width, *length, *rotation, *color, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(circles.len(), 3);
+        assert_eq!(triangles.len(), 9);
+        assert_eq!(lines[0].0, RenderPoint::new(32.0, 48.0));
+        assert_eq!(lines[0].1, RenderPoint::new(112.0, 48.0));
+        assert_eq!(lines[0].2, 3.75);
+        assert_eq!(
+            lines[0].3,
+            super::desktop_bullet_render_color("heal@0.4", Pal::LANCER_LASER)
+        );
+        assert_eq!(lines[0].4, Layer::BULLET);
+
+        assert_eq!(triangles[0].0, RenderPoint::new(112.0, 48.0));
+        assert_eq!(triangles[0].1, 3.75);
+        assert_eq!(triangles[0].2, 22.5);
+        assert_eq!(triangles[0].3, 0.0);
+        assert_eq!(triangles[1].0, RenderPoint::new(32.0, 48.0));
+        assert_eq!(triangles[1].1, 3.75);
+        assert_eq!(triangles[1].2, 70.0);
+        assert_eq!(triangles[1].3, -45.0);
+        assert_eq!(triangles[2].3, 45.0);
+
+        assert_eq!(circles[0].0, RenderPoint::new(32.0, 48.0));
+        assert_eq!(circles[0].1, 3.75);
+        assert!(circles[0].3);
+        assert_eq!(circles[0].4, Layer::BULLET);
+
+        let lighting = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(120.0, 48.0))
+                    })
+            })
+            .expect("laser bullet snapshot should emit Java Drawf.light equivalent");
+        match lighting
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(32.0, 48.0)
+                        && *to == RenderPoint::new(120.0, 48.0))
+            })
+            .expect("laser lighting line should be present")
+        {
+            RenderCommand::DrawLine {
+                stroke,
+                color,
+                layer,
+                ..
+            } => {
+                assert_eq!(*stroke, 10.5);
+                assert_eq!(
+                    *color,
+                    super::desktop_effect_render_color(
+                        super::desktop_resolve_color_symbol("heal@0.4"),
+                        0.6
+                    )
+                );
+                assert_eq!(*layer, LIGHT_RENDER_LAYER);
+            }
+            other => panic!("expected laser lighting DrawLine, got {other:?}"),
         }
     }
 

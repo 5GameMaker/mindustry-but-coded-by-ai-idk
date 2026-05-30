@@ -13025,3 +13025,41 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 继续 Unit trail：先补 `UnitTrailState` 的真实点列/`Trail` runtime；
   3. 继续 Weapon parts：结构化 part seam 与 `sideMultiplier`；
   4. 将 Unit/Bullet/Effect 从临时 Overlay 逐步收口到统一 Java layer sorting。
+
+### 2026-05-30：LaserBullet layered primitive 与 light pass 接入客户端 bullet 渲染链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.1%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `desktop_resolve_color_symbol(...)` 已支持 `name@alpha`，例如 `heal@0.4` / `lancerLaser@0.4`；
+    - 新增 `desktop_line_angle_points(...)`，用于 Java `Lines.lineAngle` 的起点射线；
+    - 新增 `laser_bullet_snapshot_render_commands(...)`，将 `BulletKind::Laser` 渲染为每层 `DrawLine`、末端 `DrawTriangle`、起点 `DrawCircle`、左右 side `DrawTriangle`；
+    - 新增 `laser_bullet_snapshot_light_commands(...)` 和 `DesktopLauncher::bullet_snapshot_light_render_pass()`，把 Java `Drawf.light(...)` 接入 `RenderPassKind::Lighting`；
+    - `bullet_snapshot_render_pass()` 已对 `BulletKind::Laser` 做专用分支，仍沿 `client_bullet_snapshot_entities` 主链；
+    - 新增测试 `desktop_launcher_routes_laser_snapshot_primitives_and_light_pass`。
+- Java 对照：
+  - `LaserBulletType.draw(Bullet b)`：`b.fdata` → `Mathf.curve(fin, 0, 0.2)` → 分层 line/tri/circle/side tri → `Drawf.light(...)`；
+  - `drawLight()` 为空，所以不要额外重复画第二套 light。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_basic_bullet_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_bolt_snapshot_lines_into_overlay_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 子代理结论：
+  - Sap：core plan 已有主要几何，但 `SapDrawPlan` 缺 Java `color` tint，desktop 还未接；
+  - Shrapnel：core plan 已比较完整，可直接映射 triangles + light；
+  - ContinuousLaser / weapon parts / unit trail 仍是后续风险点：continuous beam 不要当普通 sprite，weapon parts 先结构化并接 `sideMultiplier`，unit trail 先补 runtime points。
+- 下一步：
+  1. 继续 bullet 渲染：优先 `ShrapnelBulletType`，其次 Sap，ContinuousLaser 最后单独做；
+  2. Laser 后续还需补 lightning init side-effects、hit/effect timing、collideLaser runtime 精确对齐；
+  3. 继续 Unit trail：先补 `UnitTrailState` 的真实点列/`Trail` runtime；
+  4. 继续 Weapon parts：结构化 part seam 与 `sideMultiplier`；
+  5. 继续把 Unit/Bullet/Effect 从临时 Overlay 收口到统一 Java layer sorting。
