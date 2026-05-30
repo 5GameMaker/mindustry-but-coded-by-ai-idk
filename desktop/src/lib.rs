@@ -3282,6 +3282,7 @@ pub struct DesktopGraphicsFrame {
     pub bundle: GraphicsFrameBundle,
     pub floor_chunk_batches: Vec<FloorChunkDrawBatch>,
     pub minimap_texture_frame: Option<MinimapTextureFramePlan>,
+    pub font_glyph_upload_plan: Option<DesktopFontGlyphUploadPlan>,
     pub texture_atlas: TextureAtlasPlan<bool>,
 }
 
@@ -7837,6 +7838,11 @@ impl DesktopGraphicsOpenGlBackendFramePlan {
                     minimap_texture_frame,
                 ),
             );
+        }
+        if let Some(font_upload_plan) = &frame.font_glyph_upload_plan {
+            if let Some(upload) = font_upload_plan.to_opengl_texture_upload_plan() {
+                plan.texture_upload_plans.push(upload);
+            }
         }
         plan
     }
@@ -17647,6 +17653,7 @@ impl DesktopLauncher {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: Some(self.font_glyph_upload_plan()),
             texture_atlas: self.texture_atlas.clone(),
         }
     }
@@ -18686,6 +18693,7 @@ impl DesktopLauncher {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: Some(self.font_glyph_upload_plan()),
             texture_atlas: self.texture_atlas.clone(),
         }
     }
@@ -18840,6 +18848,7 @@ impl DesktopLauncher {
             bundle: bridge.finish(),
             floor_chunk_batches,
             minimap_texture_frame,
+            font_glyph_upload_plan: Some(self.font_glyph_upload_plan()),
             texture_atlas: self.texture_atlas.clone(),
         }
     }
@@ -27102,6 +27111,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::new(),
         };
 
@@ -27180,6 +27190,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::new(),
         };
 
@@ -27309,6 +27320,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::new(),
         };
 
@@ -27413,6 +27425,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::new(),
         };
 
@@ -27905,6 +27918,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -27994,6 +28008,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/logo.png"]),
         };
 
@@ -28052,6 +28067,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_source_paths([source_path.clone()]),
         };
 
@@ -28412,6 +28428,7 @@ mod tests {
                 }),
                 dirty_pixels: Vec::new(),
             }),
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::new(),
         };
 
@@ -28458,6 +28475,7 @@ mod tests {
                     rgba: 0xaabb_ccdd,
                 }],
             }),
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::new(),
         };
 
@@ -28480,6 +28498,40 @@ mod tests {
                 rgba: 0xaabb_ccdd,
             }]
         );
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_frame_plan_carries_font_glyph_texture_upload() {
+        let font_upload_plan = super::DesktopFontAtlasPlan {
+            texture_name: DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME.to_string(),
+            font_asset_count: 1,
+            resolved_font_asset_count: 1,
+            content_icon_glyph_count: 0,
+            planned_glyph_count: 3,
+            unresolved_font_source_paths: Vec::new(),
+            missing_icon_atlas_symbols: Vec::new(),
+            content_icon_load_error: None,
+            placeholder_fallback_required: true,
+        }
+        .upload_plan();
+        let frame = DesktopGraphicsFrame {
+            bundle: RenderBridge::new().finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            font_glyph_upload_plan: Some(font_upload_plan),
+            texture_atlas: TextureAtlasPlan::new(),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        assert_eq!(plan.texture_upload_plans.len(), 1);
+        let upload = &plan.texture_upload_plans[0];
+        assert_eq!(upload.texture_key, DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_KEY);
+        assert_eq!(upload.page_source_path, "runtime:font-glyph-atlas");
+        assert_eq!(
+            upload.kind,
+            super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage
+        );
+        assert!(upload.recreate_texture);
     }
 
     #[test]
@@ -28512,6 +28564,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -29212,6 +29265,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -29380,6 +29434,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -30483,6 +30538,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -31945,6 +32001,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -32378,6 +32435,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -33354,6 +33412,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: atlas.clone(),
         };
 
@@ -33617,6 +33676,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: atlas,
         };
 
@@ -33673,6 +33733,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -36572,6 +36633,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
                 "sprites/ui-sprite.png",
                 "sprites/block-sprite.png",
@@ -36673,6 +36735,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
                 "sprites/alpha.png",
                 "sprites/beta.png",
@@ -36806,6 +36869,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
                 "sprites/alpha.png",
                 "sprites/beta.png",
@@ -36974,6 +37038,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/ui-button.png"]),
         };
 
@@ -37100,6 +37165,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
         };
 
@@ -37230,6 +37296,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/minimap.png"]),
         };
 
@@ -37296,6 +37363,7 @@ mod tests {
             bundle: bridge.finish(),
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
             texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/immutable.png"]),
         };
         let original_frame = frame.clone();

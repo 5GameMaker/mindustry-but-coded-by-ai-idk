@@ -18270,3 +18270,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `DesktopGraphicsFrame` 尚未携带 `font_glyph_upload_plan`，OpenGL frame plan 还未自动追加该 upload；
   - `DrawText` 仍未消费 glyph atlas；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 509. DesktopGraphicsFrame 携带字体 glyph upload plan
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.5%**，仍未达到完整可玩；继续把 508 的字体 glyph upload plan 接进真实 graphics frame / OpenGL frame plan 汇总链。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopGraphicsFrame` 新增 `font_glyph_upload_plan: Option<DesktopFontGlyphUploadPlan>`；
+    - `startup_menu_preview_graphics_frame()`、`menu_graphics_frame_for_surface()`、`graphics_frame_for_render()` 均携带 `self.font_glyph_upload_plan()`，让菜单/游戏帧都能附带字体上传计划；
+    - `DesktopGraphicsOpenGlBackendFramePlan::from_frame_with_effect_buffer_surface()` 追加读取 `frame.font_glyph_upload_plan`，在 ready 时转成 `texture_upload_plans`；
+    - 所有测试构造的 `DesktopGraphicsFrame` 显式标记 `font_glyph_upload_plan: None`，避免测试隐式依赖；
+    - 新增测试 `desktop_graphics_opengl_backend_frame_plan_carries_font_glyph_texture_upload`，验证 frame 中的 ready font upload plan 会进入 OpenGL texture upload 列表。
+- 迁移意义：
+  - 字体 atlas 上传链路从独立 plan 前进到 frame/backend 汇总层；
+  - 后续真实 glyph atlas pixels 生成后，会自然通过现有 `texture_upload_plans` 进入 OpenGL 上传 executor；
+  - `DrawText` placeholder 仍保留，未 ready 时不会发上传计划，避免黑屏。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_frame_plan_carries_font_glyph_texture_upload --lib`
+  - `cargo test -p mindustry-desktop desktop_font_glyph_upload_plan_emits_runtime_texture_upload_when_ready --lib`
+  - `cargo test -p mindustry-core dialogs --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 真实 rasterizer / glyph metrics / UV packing 尚未实现；
+  - OpenGL DrawText 尚未改为 glyph quads；
+  - 字体 upload 仍是 ready 条件下的 placeholder generated pixels；
+  - 未达到完整可玩，不能宣告目标完成。
