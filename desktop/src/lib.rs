@@ -146,6 +146,8 @@ const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
 const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
 const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 44.0;
+const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
+const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
 const SCHEMATICS_IMPORT_BUTTON_WIDTH: f32 = 210.0;
 const SCHEMATICS_IMPORT_BUTTON_HEIGHT: f32 = 54.0;
 const SCHEMATICS_SEARCH_BAR_HEIGHT: f32 = 34.0;
@@ -1523,10 +1525,16 @@ impl CampaignPlanetDialogState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopMenuRouteShellAction {
+    CloseRoute,
     LaunchCampaign,
     ConnectJoin,
     OpenJoinAddServer,
     RefreshJoinServers,
+    OpenMapListFilters,
+    NewEditorMap,
+    ImportEditorMap,
+    OpenSchematicImport,
+    OpenSchematicTags,
     ShowAboutCredits,
     ShowAboutLinks,
     OpenDiscordLink,
@@ -14331,6 +14339,11 @@ pub struct DesktopLauncher {
     pub menu_mobile_terminal_open: bool,
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
+    pub map_list_filter_dialog_open: bool,
+    pub editor_new_map_dialog_open: bool,
+    pub editor_import_map_dialog_open: bool,
+    pub schematic_import_dialog_open: bool,
+    pub schematic_tags_dialog_open: bool,
     pub settings_dialog_state: DesktopSettingsDialogState,
     pub last_settings_action: Option<DesktopSettingsAction>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
@@ -15037,6 +15050,11 @@ impl DesktopLauncher {
             menu_mobile_terminal_open: false,
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
+            map_list_filter_dialog_open: false,
+            editor_new_map_dialog_open: false,
+            editor_import_map_dialog_open: false,
+            schematic_import_dialog_open: false,
+            schematic_tags_dialog_open: false,
             settings_dialog_state: DesktopSettingsDialogState::default(),
             last_settings_action: None,
             last_settings_hovered_control: None,
@@ -20170,6 +20188,15 @@ impl DesktopLauncher {
         rect.contains_point(point).then_some(0)
     }
 
+    fn route_back_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + 18.0,
+            ROUTE_BACK_BUTTON_WIDTH.min((panel.width - 56.0).max(1.0)),
+            ROUTE_BACK_BUTTON_HEIGHT,
+        )
+    }
+
     fn map_list_action_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         RenderRect::new(
             panel.x + 28.0 + index as f32 * (MAP_LIST_ACTION_BUTTON_WIDTH + 10.0),
@@ -20208,11 +20235,12 @@ impl DesktopLauncher {
 
     fn map_list_pane_rect_for_panel(panel: RenderRect, route: DesktopMenuRoute) -> RenderRect {
         let search = Self::map_list_search_rect_for_panel(panel, route);
+        let bottom = Self::route_back_button_rect_for_panel(panel).bottom() + 18.0;
         RenderRect::new(
             panel.x + 28.0,
-            panel.y + 38.0,
+            bottom,
             panel.width - 56.0,
-            (search.y - panel.y - 52.0).max(90.0),
+            (search.y - bottom - 14.0).max(90.0),
         )
     }
 
@@ -20266,11 +20294,12 @@ impl DesktopLauncher {
 
     fn schematics_grid_rect_for_panel(panel: RenderRect) -> RenderRect {
         let tags = Self::schematics_tags_row_rect_for_panel(panel);
+        let bottom = Self::route_back_button_rect_for_panel(panel).bottom() + 18.0;
         RenderRect::new(
             panel.x + 28.0,
-            panel.y + 38.0,
+            bottom,
             panel.width - 56.0,
-            (tags.y - panel.y - 52.0).max(90.0),
+            (tags.y - bottom - 14.0).max(90.0),
         )
     }
 
@@ -20293,6 +20322,59 @@ impl DesktopLauncher {
             .is_some()
         {
             return Some(DesktopMenuRouteShellAction::ConnectJoin);
+        }
+        None
+    }
+
+    fn map_list_route_shell_action_at_surface_point(
+        &self,
+        viewport: RenderViewport,
+        route: DesktopMenuRoute,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        if !matches!(
+            route,
+            DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
+        ) {
+            return None;
+        }
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
+        let point = RenderPoint::new(x, y);
+        if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseRoute);
+        }
+        if Self::map_list_filter_button_rect_for_panel(panel, route).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::OpenMapListFilters);
+        }
+        if route == DesktopMenuRoute::Editor {
+            if Self::map_list_action_button_rect_for_panel(panel, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::NewEditorMap);
+            }
+            if Self::map_list_action_button_rect_for_panel(panel, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ImportEditorMap);
+            }
+        }
+        None
+    }
+
+    fn schematics_route_shell_action_at_surface_point(
+        &self,
+        viewport: RenderViewport,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Schematics);
+        let point = RenderPoint::new(x, y);
+        if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseRoute);
+        }
+        if Self::schematics_import_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::OpenSchematicImport);
+        }
+        if Self::schematics_tag_edit_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::OpenSchematicTags);
         }
         None
     }
@@ -20358,6 +20440,23 @@ impl DesktopLauncher {
         }
         if route == DesktopMenuRoute::Join {
             if let Some(action) = self.join_route_shell_action_at_surface_point(viewport, x, y) {
+                return Some(action);
+            }
+        }
+        if matches!(
+            route,
+            DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
+        ) {
+            if let Some(action) =
+                self.map_list_route_shell_action_at_surface_point(viewport, route, x, y)
+            {
+                return Some(action);
+            }
+        }
+        if route == DesktopMenuRoute::Schematics {
+            if let Some(action) =
+                self.schematics_route_shell_action_at_surface_point(viewport, x, y)
+            {
                 return Some(action);
             }
         }
@@ -20478,6 +20577,9 @@ impl DesktopLauncher {
     fn dispatch_menu_route_shell_action(&mut self, action: DesktopMenuRouteShellAction) {
         self.last_menu_route_shell_action = Some(action);
         match action {
+            DesktopMenuRouteShellAction::CloseRoute => {
+                self.active_menu_route = None;
+            }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
                     self.last_menu_route_shell_action = None;
@@ -20497,6 +20599,21 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
+            }
+            DesktopMenuRouteShellAction::OpenMapListFilters => {
+                self.map_list_filter_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::NewEditorMap => {
+                self.editor_new_map_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::ImportEditorMap => {
+                self.editor_import_map_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::OpenSchematicImport => {
+                self.schematic_import_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::OpenSchematicTags => {
+                self.schematic_tags_dialog_open = true;
             }
             DesktopMenuRouteShellAction::ShowAboutCredits => {
                 self.about_route_page = DesktopAboutRoutePage::Credits;
@@ -20884,6 +21001,14 @@ impl DesktopLauncher {
         panel: RenderRect,
         route: DesktopMenuRoute,
     ) {
+        self.push_settings_text_button(
+            pass,
+            Self::route_back_button_rect_for_panel(panel),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.024,
+        );
+
         if route == DesktopMenuRoute::Editor {
             self.push_settings_text_button(
                 pass,
@@ -20982,6 +21107,14 @@ impl DesktopLauncher {
     }
 
     fn push_schematics_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        self.push_settings_text_button(
+            pass,
+            Self::route_back_button_rect_for_panel(panel),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.024,
+        );
+
         self.push_settings_text_button(
             pass,
             Self::schematics_import_button_rect_for_panel(panel),
@@ -38543,6 +38676,7 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(texts.contains(&"@editor.search"));
             assert!(texts.contains(&"@maps.none"));
+            assert!(texts.contains(&"@back"));
             assert!(!texts
                 .iter()
                 .any(|text| text.starts_with("dialog: MapListDialog")));
@@ -38557,6 +38691,69 @@ mod tests {
                     if symbol == &pane_symbol && *rect == DesktopLauncher::map_list_pane_rect_for_panel(panel, route)
             )));
         }
+    }
+
+    #[test]
+    fn desktop_launcher_map_list_route_controls_dispatch_actions() {
+        let surface = DesktopSurfaceSize::new(1280, 720);
+
+        let mut custom = DesktopLauncher::new(Vec::new());
+        custom.dispatch_menu_action(MenuButtonRole::CustomGame);
+        let viewport = custom.default_render_viewport_for_surface(surface);
+        let custom_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let filter = DesktopLauncher::map_list_filter_button_rect_for_panel(
+            custom_panel,
+            super::DesktopMenuRoute::CustomGame,
+        )
+        .center();
+        assert_eq!(
+            custom.active_menu_route_shell_action_at_surface_point(surface, filter.x, filter.y),
+            Some(super::DesktopMenuRouteShellAction::OpenMapListFilters)
+        );
+        custom.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenMapListFilters,
+        );
+        assert!(custom.map_list_filter_dialog_open);
+
+        let back = DesktopLauncher::route_back_button_rect_for_panel(custom_panel).center();
+        assert_eq!(
+            custom.active_menu_route_shell_action_at_surface_point(surface, back.x, back.y),
+            Some(super::DesktopMenuRouteShellAction::CloseRoute)
+        );
+        custom.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
+        assert_eq!(custom.active_menu_route, None);
+
+        let mut editor = DesktopLauncher::new(Vec::new());
+        editor.dispatch_menu_action(MenuButtonRole::Editor);
+        let editor_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Editor,
+        );
+        let new_map =
+            DesktopLauncher::map_list_action_button_rect_for_panel(editor_panel, 0).center();
+        assert_eq!(
+            editor.active_menu_route_shell_action_at_surface_point(surface, new_map.x, new_map.y),
+            Some(super::DesktopMenuRouteShellAction::NewEditorMap)
+        );
+        editor.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::NewEditorMap);
+        assert!(editor.editor_new_map_dialog_open);
+
+        let import_map =
+            DesktopLauncher::map_list_action_button_rect_for_panel(editor_panel, 1).center();
+        assert_eq!(
+            editor.active_menu_route_shell_action_at_surface_point(
+                surface,
+                import_map.x,
+                import_map.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ImportEditorMap)
+        );
+        editor
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::ImportEditorMap);
+        assert!(editor.editor_import_map_dialog_open);
     }
 
     #[test]
@@ -38608,6 +38805,7 @@ mod tests {
         assert!(texts.contains(&"@schematic.search"));
         assert!(texts.contains(&"@schematic.tags"));
         assert!(texts.contains(&"@none"));
+        assert!(texts.contains(&"@back"));
         assert!(!texts
             .iter()
             .any(|text| text.starts_with("pane: schematic grid")));
@@ -38618,6 +38816,46 @@ mod tests {
             RenderCommand::DrawSprite { symbol, rect, .. }
                 if symbol == &pane_symbol && *rect == DesktopLauncher::schematics_grid_rect_for_panel(panel)
         )));
+    }
+
+    #[test]
+    fn desktop_launcher_schematics_route_controls_dispatch_actions() {
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Schematics);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Schematics,
+        );
+
+        let import = DesktopLauncher::schematics_import_button_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, import.x, import.y),
+            Some(super::DesktopMenuRouteShellAction::OpenSchematicImport)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenSchematicImport,
+        );
+        assert!(launcher.schematic_import_dialog_open);
+
+        let tags = DesktopLauncher::schematics_tag_edit_button_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, tags.x, tags.y),
+            Some(super::DesktopMenuRouteShellAction::OpenSchematicTags)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenSchematicTags,
+        );
+        assert!(launcher.schematic_tags_dialog_open);
+
+        let back = DesktopLauncher::route_back_button_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, back.x, back.y),
+            Some(super::DesktopMenuRouteShellAction::CloseRoute)
+        );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
+        assert_eq!(launcher.active_menu_route, None);
     }
 
     #[test]
