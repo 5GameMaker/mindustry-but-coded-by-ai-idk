@@ -92,9 +92,10 @@ use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
     parse_upstream_icon_properties, upstream_check_box_style_skin, upstream_font_assets,
-    upstream_font_source_paths, upstream_slider_style_skin, upstream_ui_drawable_alias,
-    upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw,
-    UpstreamContentIcon, UpstreamFontRole, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
+    upstream_font_source_paths, upstream_scroll_pane_style_skin, upstream_slider_style_skin,
+    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan,
+    BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole,
+    UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -18965,15 +18966,38 @@ impl DesktopLauncher {
         Self::settings_drawable_symbol(style.knob)
     }
 
+    fn settings_scroll_track_symbol() -> String {
+        let style = upstream_scroll_pane_style_skin("defaultPane")
+            .expect("defaultPane should be present in upstream style registry");
+        style
+            .v_scroll
+            .map(Self::settings_drawable_symbol)
+            .unwrap_or_else(|| Self::settings_drawable_symbol("clear"))
+    }
+
+    fn settings_scroll_knob_symbol() -> String {
+        let style = upstream_scroll_pane_style_skin("defaultPane")
+            .expect("defaultPane should be present in upstream style registry");
+        style
+            .v_scroll_knob
+            .map(Self::settings_drawable_symbol)
+            .unwrap_or_else(|| Self::settings_drawable_symbol("clear"))
+    }
+
     fn settings_pref_label(key: &str) -> String {
         format!("@setting.{key}.name")
     }
 
     fn settings_pref_widget_specs(table: &str) -> Vec<&'static DesktopSettingsPrefSpec> {
-        settings_pref_highlight_keys(table)
-            .iter()
-            .filter_map(|key| settings_pref_spec(table, key))
-            .collect()
+        Self::settings_pref_group(table)
+            .map(|group| {
+                group
+                    .entries
+                    .iter()
+                    .filter_map(|key| settings_pref_spec(table, key))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn setting_bool_effective_value(&self, spec: &DesktopSettingsPrefSpec) -> bool {
@@ -18993,16 +19017,56 @@ impl DesktopLauncher {
             .and_then(|value| value.parse::<i32>().ok())
     }
 
-    fn settings_pref_widget_row_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
-        let row_width = (panel.width - 84.0).max(160.0);
-        let row_height = 42.0;
-        let top = panel.y + panel.height - 250.0;
+    fn settings_pref_widget_clip_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let height = (panel.height - 300.0).clamp(160.0, 300.0);
         RenderRect::new(
-            panel.x + 42.0,
-            top - index as f32 * 50.0,
-            row_width,
-            row_height,
+            panel.x + 36.0,
+            panel.y + 56.0,
+            (panel.width - 84.0).max(160.0),
+            height,
         )
+    }
+
+    fn settings_pref_widget_row_rect_for_clip(clip: RenderRect, index: usize) -> RenderRect {
+        let row_width = (clip.width - 18.0).max(140.0);
+        let row_height = 42.0;
+        let top = clip.y + clip.height - row_height - index as f32 * 50.0;
+        RenderRect::new(clip.x, top, row_width, row_height)
+    }
+
+    fn push_settings_scrollbar(
+        pass: &mut RenderPass,
+        clip: RenderRect,
+        row_count: usize,
+        scroll_track_symbol: String,
+        scroll_knob_symbol: String,
+    ) {
+        let total_height = row_count as f32 * 50.0;
+        if total_height <= clip.height {
+            return;
+        }
+        let track = RenderRect::new(clip.x + clip.width - 8.0, clip.y, 6.0, clip.height);
+        let knob_height = (clip.height * (clip.height / total_height)).clamp(36.0, clip.height);
+        let knob = RenderRect::new(
+            track.x - 2.0,
+            clip.y + clip.height - knob_height,
+            10.0,
+            knob_height,
+        );
+        pass.push(RenderCommand::draw_sprite(
+            scroll_track_symbol,
+            track,
+            [1.0, 1.0, 1.0, 0.86],
+            0.0,
+            Layer::END_PIXELED + 0.031,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            scroll_knob_symbol,
+            knob,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            Layer::END_PIXELED + 0.032,
+        ));
     }
 
     fn push_settings_route_controls(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -19016,12 +19080,14 @@ impl DesktopLauncher {
         let pane_symbol = Self::settings_drawable_symbol("pane");
         let track_symbol = Self::settings_slider_track_symbol();
         let knob_symbol = Self::settings_slider_knob_symbol();
+        let scroll_track_symbol = Self::settings_scroll_track_symbol();
+        let scroll_knob_symbol = Self::settings_scroll_knob_symbol();
+        let specs = Self::settings_pref_widget_specs(table);
+        let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
 
-        for (index, spec) in Self::settings_pref_widget_specs(table)
-            .into_iter()
-            .enumerate()
-        {
-            let row = Self::settings_pref_widget_row_rect_for_panel(panel, index);
+        pass.push(RenderCommand::set_clip(clip));
+        for (index, spec) in specs.iter().copied().enumerate() {
+            let row = Self::settings_pref_widget_row_rect_for_clip(clip, index);
             pass.push(RenderCommand::draw_sprite(
                 pane_symbol.clone(),
                 row,
@@ -19131,6 +19197,14 @@ impl DesktopLauncher {
                 }
             }
         }
+        pass.push(RenderCommand::clear_clip());
+        Self::push_settings_scrollbar(
+            pass,
+            clip,
+            specs.len(),
+            scroll_track_symbol,
+            scroll_knob_symbol,
+        );
     }
 
     fn settings_route_lines(&self) -> Vec<String> {
@@ -38225,6 +38299,8 @@ mod tests {
         assert!(sprites.contains(&"pane.9"));
         assert!(sprites.contains(&"slider-back.9"));
         assert!(sprites.contains(&"slider-knob"));
+        assert!(sprites.contains(&"scroll.9"));
+        assert!(sprites.contains(&"scroll-knob-vertical-black"));
         assert!(sprites.contains(&"check-off"));
         assert!(sprites.contains(&"check-on"));
 
@@ -38237,11 +38313,30 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.contains(&"@setting.saveinterval.name"));
         assert!(texts.contains(&"@setting.communityservers.name"));
+        assert!(texts.contains(&"@setting.playerlimit.name"));
         assert!(texts.contains(&"value: 60"));
         assert!(texts.contains(&"off"));
 
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Graphics;
+        let graphics_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let graphics_texts = graphics_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("graphics settings frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(graphics_texts.contains(&"@setting.fullscreen.name"));
+        assert!(graphics_texts.contains(&"@setting.macnotch.name"));
+
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Sound;
-        let sound_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let sound_frame = launcher.menu_graphics_frame_for_surface(2, viewport);
         let sound_texts = sound_frame
             .bundle
             .render_frame

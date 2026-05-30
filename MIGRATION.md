@@ -18608,3 +18608,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - checkbox/slider 还未接真实控件 hit-test、hover/pressed、拖拽与持久化写入；
   - Reset/Back 的原版尺寸和底部按钮层级还需继续拆出，不能把它们长期混在摘要行里；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 521. SettingsMenuDialog 完整设置项列表与 ScrollPane 资源输出
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.7%**，仍未达到完整可玩；继续把 Settings 页控件渲染从“关键项骨架”推进到按 `SETTINGS_PREF_GROUPS` 输出完整 SettingsTable 行列表，并开始模拟原版 ScrollPane 的裁剪与滚动条资源。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `settings_pref_widget_specs()` 改为按当前页 group entries 输出全部设置项，而不是只输出 highlight keys；
+    - 新增 `settings_pref_widget_clip_rect_for_panel()` 与 `RenderCommand::set_clip/clear_clip`，让 SettingsTable 行进入独立裁剪区域；
+    - 使用 `upstream_scroll_pane_style_skin("defaultPane")` 将 Java `scroll/scrollKnobVerticalBlack` 映射为 atlas symbol `scroll.9/scroll-knob-vertical-black`，在设置项超过可视区时绘制滚动条；
+    - Game/Graphics/Sound 页现在会生成完整设置项文本与控件命令，例如 `@setting.playerlimit.name`、`@setting.macnotch.name` 等条件项也进入渲染命令流。
+  - 测试：
+    - 扩展 `desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets`，验证完整列表包含 `@setting.playerlimit.name`、`@setting.macnotch.name`，并输出 `scroll.9` / `scroll-knob-vertical-black`。
+- 迁移意义：
+  - SettingsTable 不再只渲染少数关键项，Rust UI render pass 已能承载完整上游设置项列表；
+  - 使用原版 ScrollPane 资源和裁剪命令，为后续真实滚动位置、鼠标滚轮、拖拽滑块和焦点管理打基础；
+  - 仍接在真实桌面菜单 frame/render pass 主链路上，不是独立 demo。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - ScrollPane 还没有真实 scroll position、鼠标滚轮/拖动控制与平台条件过滤；
+  - checkbox/slider 行还未按 Java `padTop(3/4)`、`stack(slider, content)`、`460f` 宽度上限完全精确复刻；
+  - Reset/Back 仍需拆成页内/对话框级真实按钮，并接入原版尺寸与底部布局；
+  - 未达到完整可玩，不能宣告目标完成。
