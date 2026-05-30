@@ -15513,3 +15513,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `PuddleUpdateEvent` 的 `affect_units/create_fire/puddle_on_building/liquid_update` 仍需继续消费到完整 runtime；
   - Unit body sprite、weather custom lowering、更多 native OpenGL smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.8%，仍未达到完整可玩。
+
+## 421. 最新闭环记录：Unit snapshot 基础 body sprite 接入 Overlay pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.9%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/comp/UnitComp.java`
+  - `core/src/mindustry/type/UnitType.java`
+  - 最小对齐单位 `drawBody` 入口：按 unit type sprite、实体位置、`rotation - 90`、ground/flying layer 选择输出 body sprite。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 默认 atlas 计划加入 `ContentLoader::units()` 枚举出的 `sprites/{unit}.png` body sprite 候选；
+    - 新增 `desktop_unit_body_layer(...)`，按 grounded/flying/low-altitude 与 unit type layer 字段选择基础 layer；
+    - 新增 `unit_snapshot_render_command(...)`，把有效且 `draw_body` 的 typed `UnitComp` snapshot 转成 `RenderCommand::DrawSprite`；
+    - 新增 `unit_snapshot_render_pass()`，将 `runtime.client_unit_snapshot_entities` 接入 `RenderPassKind::Overlay`；
+    - `graphics_frame_for_render()` 已推入 unit body overlay pass；
+    - 新增 `desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot`，覆盖 dagger snapshot body sprite 输出。
+- 迁移意义：
+  - typed unit snapshot 不再只停留在网络/runtime/小地图链路，基础单位本体已经进入 desktop `RenderFramePlan`；
+  - 这是 Unit 渲染主链路的第一步，后续 shadow/cell/weapon/leg/payload/item/flying trail 都应继续挂在同一条单位渲染 aggregation 上，避免形成互不相连的模块。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Unit shadow、cell/team color、weapons、legs、payload/item、engine trail、hit/elevation/flying 专用层级仍未接入；
+  - 当前 unit pass 仍临时复用 Overlay，后续必须接入更精确 Java layer sorting / entity world pass；
+  - Weather custom lowering、更多 native OpenGL smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.9%，仍未达到完整可玩。

@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **40.8%**。
+- 当前总体迁移完成度：约 **40.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -12744,3 +12744,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 puddle layer 从临时 Overlay 过渡到更精确的 Java layer sorting；
   2. 补 liquid floor 抖动、CellLiquid/neoplasm 额外 cell 圆、Arc `Rand` 精确随机；
   3. 推进 Unit body sprite snapshot → RenderFrame 闭环。
+
+### 2026-05-30：Unit snapshot 基础 body sprite 接入 Overlay pass
+
+- 当前整体完成度：约 **40.9%**。
+- 已完成：
+  - 默认 texture atlas 计划加入 `sprites/{unit}.png` 单位 body sprite 候选；
+  - `DesktopLauncher::unit_snapshot_render_command(...)` 会把有效、已加入且 `draw_body` 的 typed `UnitComp` snapshot 转成 body `DrawSprite`；
+  - body sprite 使用 unit type 名称作为 symbol，位置来自 `unit.x()/unit.y()`，旋转为 `unit.rotation() - 90.0`；
+  - `desktop_unit_body_layer(...)` 已按 grounded/flying/low-altitude 与 unit type layer 字段选择基础 layer；
+  - `DesktopLauncher::unit_snapshot_render_pass()` 将 `client_unit_snapshot_entities` 推入 `RenderPassKind::Overlay`；
+  - `graphics_frame_for_render()` 已接入 unit body overlay pass。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. Unit 渲染继续沿同一条 aggregation 补 shadow、cell/team color、weapon、leg、payload/item、engine trail，禁止拆成彼此独立的孤立模块；
+  2. 把 Unit/Fire/Bullet/Puddle 从临时 Overlay 收口到更接近 Java `Layer`/`Groups.draw` 的统一 entity/world layer sorting；
+  3. Weather custom commands 继续 lower 到真实 sprite/line/noise backend，并补 native OpenGL smoke。

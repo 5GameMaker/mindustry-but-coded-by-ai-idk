@@ -20,7 +20,7 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
 use mindustry_core::mindustry::entities::comp::{
-    BuildingComp, BulletComp, DecalColor, FireComp, PuddleComp,
+    BuildingComp, BulletComp, DecalColor, FireComp, PuddleComp, UnitComp,
 };
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect, standard_effect_color_symbol,
@@ -170,6 +170,30 @@ fn desktop_basic_bullet_kind_renderable(kind: BulletKind) -> bool {
 fn desktop_bullet_layer(spec: &BulletSpec) -> f32 {
     let layer = spec.layer.strip_prefix("Layer.").unwrap_or(&spec.layer);
     Layer::by_name(layer).unwrap_or(Layer::BULLET)
+}
+
+fn desktop_unit_body_sprite_virtual_source_paths(content_loader: &ContentLoader) -> Vec<String> {
+    content_loader
+        .units()
+        .iter()
+        .map(|unit| format!("sprites/{}.png", unit.name()))
+        .collect()
+}
+
+fn desktop_unit_body_layer(unit: &UnitComp) -> f32 {
+    if unit.is_grounded() {
+        if unit.type_info.ground_layer >= 0.0 {
+            unit.type_info.ground_layer
+        } else {
+            Layer::GROUND_UNIT
+        }
+    } else if unit.type_info.flying_layer >= 0.0 {
+        unit.type_info.flying_layer
+    } else if unit.type_info.low_altitude {
+        Layer::FLYING_UNIT_LOW
+    } else {
+        Layer::FLYING_UNIT
+    }
 }
 
 fn desktop_puddle_fraction(amount: f32) -> f32 {
@@ -10146,6 +10170,9 @@ fn default_desktop_texture_atlas(
                     .iter()
                     .flat_map(|bullet| desktop_bullet_sprite_virtual_source_paths(&bullet.spec)),
             )
+            .chain(desktop_unit_body_sprite_virtual_source_paths(
+                content_loader,
+            ))
             .chain(desktop_weather_virtual_source_paths(content_loader).into_iter()),
     )
 }
@@ -11702,6 +11729,42 @@ impl DesktopLauncher {
         (!pass.commands.is_empty()).then_some(pass)
     }
 
+    fn unit_snapshot_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
+        if !unit.is_valid() || !unit.type_info.draw_body {
+            return None;
+        }
+
+        let symbol = unit.type_info.name().to_string();
+        let region = self.texture_atlas.lookup(&symbol).ok()?;
+        let width = region.region.width.max(1) as f32;
+        let height = region.region.height.max(1) as f32;
+        let rect = RenderRect::from_center(RenderPoint::new(unit.x(), unit.y()), width, height);
+
+        Some(RenderCommand::draw_sprite(
+            symbol,
+            rect,
+            [1.0, 1.0, 1.0, 1.0],
+            unit.rotation() - 90.0,
+            desktop_unit_body_layer(unit),
+        ))
+    }
+
+    fn unit_snapshot_render_pass(&self) -> Option<RenderPass> {
+        let mut pass = RenderPass::new(RenderPassKind::Overlay)
+            .with_order(RenderPassKind::Overlay.default_order());
+
+        for (entity_id, unit) in &self.runtime.client_unit_snapshot_entities {
+            if self.runtime.client_hidden_entity_ids.contains(entity_id) {
+                continue;
+            }
+            if let Some(command) = self.unit_snapshot_render_command(unit) {
+                pass.commands.push(command);
+            }
+        }
+
+        (!pass.commands.is_empty()).then_some(pass)
+    }
+
     fn weather_snapshot_base_properties(
         entity_id: i32,
         state: &WeatherState,
@@ -11933,6 +11996,9 @@ impl DesktopLauncher {
             }
         }
         if let Some(pass) = self.puddle_snapshot_render_pass() {
+            render_frame.push_pass(pass);
+        }
+        if let Some(pass) = self.unit_snapshot_render_pass() {
             render_frame.push_pass(pass);
         }
         if let Some(pass) = self.standard_effect_render_frame().to_render_pass() {
@@ -15924,6 +15990,68 @@ mod tests {
                 assert!((color[3] - (0x66 as f32 / 255.0 * 0.6)).abs() < 0.0001);
             }
             other => panic!("expected puddle light DrawCircle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+        assert!(launcher.texture_atlas.has("dagger"));
+
+        let mut unit = UnitComp::new(7400, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(180.0);
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7400, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            21,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger")
+                    })
+            })
+            .expect("unit snapshot should emit a body sprite overlay pass");
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "dagger")
+        }) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(40.0, 56.0));
+                assert_eq!(rect.width, 1.0);
+                assert_eq!(rect.height, 1.0);
+                assert_eq!(*tint, [1.0, 1.0, 1.0, 1.0]);
+                assert_eq!(*rotation, 90.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected unit body DrawSprite, got {other:?}"),
         }
     }
 
