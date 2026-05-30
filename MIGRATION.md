@@ -16469,3 +16469,14 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `LightCommand::Runnable` 仍不是可执行闭包语义，只是审计 marker；
   - `UnitDrawStage::Legs` / `Payload` / `Items` / `Parts` / `Abilities` 仍需继续填充；
   - weather / accelerator 等 custom marker 仍需逐项判断并 lowering 到真实渲染命令或明确审计保留。
+## 450. 最新闭环记录：UnitType drawItems 接入客户端单位渲染链
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.8%**，仍未达到完整可玩。
+- Java 对照：`D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1683-1715`，`drawItems(unit)` 在 `drawWeapons(unit)` 后执行，使用 `fullIcon`、`ring-item`、`Pal.accent`、`Vars.itemSize = 5f`、`itemOffsetY = 3f`。
+- 本轮主改动：
+  - `core/src/mindustry/type/unit_type.rs`：`UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 插入 `UnitDrawStage::Items`，顺序为 `Weapons -> Items -> Shield`，并更新 stage contract 测试。
+  - `desktop/src/lib.rs`：默认 atlas 加入 `sprites/ring-item.png`；新增 item full icon 解析、item center、item render commands；`UnitDrawStage::Items` 分支输出真实 item icon、accent ring、本地玩家数量文本。
+  - 新增测试 `desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack`，验证位置、大小、颜色、mix color、层级与 weapons/shield 相对顺序。
+- 迁移意义：Java `drawItems` 已进入 `runtime client unit snapshot -> UnitType stage contract -> Overlay RenderPass -> RenderCommand -> backend` 主链，carried item 不再是孤立 sync 数据。
+- 已验证：`cargo fmt --all`、`cargo fmt --all --check`、`cargo check -p mindustry-core`、`cargo check -p mindustry-desktop --features opengl-native-runtime`、`cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack --features opengl-native-runtime`。
+- 仍未完成：`UnitDrawStage::Legs` / `Payload` / `Parts` / `Abilities` 仍需继续填充；`drawItems()` 的 `applyColor(unit)` 全局单位颜色叠加尚未完整复刻；weather / accelerator custom marker 仍需逐项 lowering 或保留审计 marker。

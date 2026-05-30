@@ -13569,3 +13569,31 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 推荐优先补 `UnitDrawStage::Items`，它是剩余 unit stage 中数据最完整、风险最低的闭环；
   2. 继续清理 weather / accelerator custom marker，能 lowering 的转真实命令，不能的保留审计测试；
   3. 后续再推进 `Legs` / `Payload` / `Parts` / `Abilities`，所有新增视觉都必须接入 `unit_snapshot_render_pass()` 主链。
+### 2026-05-30：UnitType drawItems 接入客户端单位渲染链
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **43.8%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/type/unit_type.rs`
+    - `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 插入 `UnitDrawStage::Items`；
+    - snapshot 顺序现在包含 `Weapons -> Items -> Shield`；
+    - `unit_type_draw_stage_contract_preserves_java_and_snapshot_order` 已同步。
+  - `desktop/src/lib.rs`
+    - 默认 atlas 加入 `ring-item`；
+    - 新增 item full icon 解析、item center、item render commands；
+    - `UnitDrawStage::Items` 分支输出真实 item icon、accent ring、本地玩家数量文本；
+    - 新增 `desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack --features opengl-native-runtime`
+- 下一步：
+  1. 优先推进 `UnitDrawStage::Parts` 或 `Legs`，但必须接入 `unit_snapshot_render_pass()` 主链；
+  2. `Payload` / `Abilities` 继续按同一 stage contract 补齐；
+  3. 不要把新增渲染 helper 留成孤立模块；每个视觉能力都要进入 runtime/render/backend 主链或在 `MIGRATION.md` 标注过渡点。

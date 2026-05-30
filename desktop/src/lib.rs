@@ -20,7 +20,7 @@ use mindustry_core::mindustry::core::{
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
 use mindustry_core::mindustry::entities::comp::{
-    BuildingComp, BulletComp, DecalColor, FireComp, PuddleComp, UnitComp,
+    BuildingComp, BulletComp, DecalColor, FireComp, PuddleComp, UnitComp, UnitControllerState,
 };
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect, standard_effect_color_symbol,
@@ -1118,6 +1118,7 @@ fn desktop_unit_body_sprite_virtual_source_paths(content_loader: &ContentLoader)
             "sprites/particle.png".to_string(),
             "sprites/circle-shadow.png".to_string(),
             "sprites/square-shadow.png".to_string(),
+            "sprites/ring-item.png".to_string(),
             "sprites/power-cell.png".to_string(),
         ])
         .chain(desktop_unit_weapon_sprite_virtual_source_paths(
@@ -1194,6 +1195,19 @@ fn desktop_unit_body_layer(unit: &UnitComp) -> f32 {
     } else {
         Layer::FLYING_UNIT
     }
+}
+
+const DESKTOP_UNIT_ITEM_BASE_SIZE: f32 = 5.0;
+const DESKTOP_UNIT_ITEM_RING_SYMBOL: &str = "ring-item";
+
+fn desktop_unit_item_center(unit: &UnitComp) -> RenderPoint {
+    let offset = if unit.type_info.item_offset_y.is_finite() {
+        unit.type_info.item_offset_y
+    } else {
+        0.0
+    };
+    let (offset_x, offset_y) = desktop_rotate_offset(unit.rotation() + 180.0, offset, 0.0);
+    RenderPoint::new(unit.x() + offset_x, unit.y() + offset_y)
 }
 
 fn desktop_unit_soft_shadow_sprite(unit: &UnitComp) -> &'static str {
@@ -11054,6 +11068,12 @@ fn unit_full_icon_region_symbol(unit_name: &str, content_loader: &ContentLoader)
     candidates.full_candidates.into_iter().next()
 }
 
+fn item_full_icon_region_symbol(item_name: &str, content_loader: &ContentLoader) -> Option<String> {
+    let item = content_loader.item_by_name(item_name)?;
+    let candidates = item.base.icon_candidates(None);
+    candidates.full_candidates.into_iter().next()
+}
+
 fn block_full_icon_region_symbol(block: &BlockDef) -> Option<String> {
     let base = block.base();
     let content = UnlockableContentBase::new(base.id, ContentType::Block, base.name.clone());
@@ -13303,6 +13323,84 @@ impl DesktopLauncher {
         commands
     }
 
+    fn unit_snapshot_item_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid() || !unit.type_info.draw_items {
+            return Vec::new();
+        }
+
+        let item_time = unit.items.item_time;
+        if !item_time.is_finite() || item_time <= 0.01 || unit.items.stack.amount <= 0 {
+            return Vec::new();
+        }
+        let Some(item_name) = unit
+            .items
+            .stack
+            .item
+            .as_deref()
+            .filter(|name| !name.is_empty())
+        else {
+            return Vec::new();
+        };
+
+        let center = desktop_unit_item_center(unit);
+        let sin = desktop_absin(self.render_time, 5.0, 1.0);
+        let layer = desktop_unit_body_layer(unit);
+        let accent = desktop_effect_render_color(Some(Pal::ACCENT), 1.0);
+        let mut commands = Vec::new();
+
+        if let Some(symbol) = item_full_icon_region_symbol(item_name, &self.content_loader)
+            .filter(|symbol| self.texture_atlas.lookup(symbol).is_ok())
+        {
+            let size = (DESKTOP_UNIT_ITEM_BASE_SIZE + sin) * item_time.max(0.0);
+            if size > f32::EPSILON {
+                commands.push(RenderCommand::draw_sprite_mixed(
+                    symbol,
+                    RenderRect::from_center(center, size, size),
+                    [1.0, 1.0, 1.0, 1.0],
+                    [accent[0], accent[1], accent[2], (sin * 0.1).clamp(0.0, 1.0)],
+                    unit.rotation(),
+                    layer,
+                ));
+            }
+        }
+
+        if self
+            .texture_atlas
+            .lookup(DESKTOP_UNIT_ITEM_RING_SYMBOL)
+            .is_ok()
+        {
+            let ring_size = ((3.0 + sin) * item_time.max(0.0) + 0.5) * 2.0;
+            if ring_size > f32::EPSILON {
+                commands.push(RenderCommand::draw_sprite(
+                    DESKTOP_UNIT_ITEM_RING_SYMBOL,
+                    RenderRect::from_center(center, ring_size, ring_size),
+                    accent,
+                    0.0,
+                    layer,
+                ));
+            }
+        }
+
+        if matches!(
+            &unit.controller,
+            UnitControllerState::Player { player_id } if *player_id == self.player.id
+        ) {
+            commands.push(RenderCommand::draw_text_styled(
+                unit.items.stack.amount.to_string(),
+                RenderPoint::new(center.x, center.y - 3.0),
+                accent,
+                0.25 * item_time.max(0.0),
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_outline(true),
+                layer,
+            ));
+        }
+
+        commands
+    }
+
     fn unit_snapshot_shield_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_shields || unit.shield.shield_alpha <= 0.0 {
             return None;
@@ -13582,6 +13680,9 @@ impl DesktopLauncher {
                     UnitDrawStage::Weapons => pass
                         .commands
                         .extend(self.unit_snapshot_weapon_render_commands(unit)),
+                    UnitDrawStage::Items => pass
+                        .commands
+                        .extend(self.unit_snapshot_item_render_commands(unit)),
                     UnitDrawStage::Shield => {
                         if let Some(command) = self.unit_snapshot_shield_render_command(unit) {
                             pass.commands.push(command);
@@ -13589,7 +13690,6 @@ impl DesktopLauncher {
                     }
                     UnitDrawStage::Legs
                     | UnitDrawStage::Payload
-                    | UnitDrawStage::Items
                     | UnitDrawStage::Parts
                     | UnitDrawStage::Abilities => {}
                 }
@@ -19347,6 +19447,161 @@ mod tests {
                 assert!((color[3] - 0.6).abs() < 0.0001);
             }
             other => panic!("expected unit light DrawCircle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+        assert!(launcher.texture_atlas.has("large-weapon"));
+        assert!(launcher.texture_atlas.has("item-copper-full"));
+        assert!(launcher.texture_atlas.has("ring-item"));
+
+        let mut unit = UnitComp::new(7404, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(180.0);
+        unit.set_controller(UnitControllerState::Player {
+            player_id: launcher.player.id,
+        });
+        unit.items.stack.item = Some("copper".into());
+        unit.items.stack.amount = 3;
+        unit.items.item_time = 1.0;
+        unit.shield.shield_alpha = 0.5;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7404, unit);
+
+        launcher.render_time = 0.0;
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            25,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "item-copper-full")
+                    })
+            })
+            .expect("carried item should emit overlay sprites");
+
+        let index_of_sprite = |symbol_name: &str| {
+            overlay
+                .commands
+                .iter()
+                .position(|command| {
+                    matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == symbol_name)
+                })
+                .unwrap_or_else(|| panic!("missing sprite {symbol_name}"))
+        };
+        let weapon_index = index_of_sprite("large-weapon");
+        let item_index = index_of_sprite("item-copper-full");
+        let ring_index = index_of_sprite("ring-item");
+        let text_index = overlay
+            .commands
+            .iter()
+            .position(
+                |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "3"),
+            )
+            .expect("local carried stack should emit amount text");
+        let shield_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawCircle { center, .. }
+                    if *center == RenderPoint::new(40.0, 56.0))
+            })
+            .expect("unit shield should render after carried item");
+
+        assert!(weapon_index < item_index);
+        assert!(item_index < ring_index);
+        assert!(ring_index < text_index);
+        assert!(text_index < shield_index);
+
+        match &overlay.commands[item_index] {
+            RenderCommand::DrawSprite {
+                rect,
+                tint,
+                mix_color,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(rect.center(), RenderPoint::new(43.0, 56.0));
+                assert_eq!(rect.width, 5.0);
+                assert_eq!(rect.height, 5.0);
+                assert_eq!(*tint, [1.0, 1.0, 1.0, 1.0]);
+                assert_eq!(
+                    *mix_color,
+                    [1.0, 0xd3 as f32 / 255.0, 0x7f as f32 / 255.0, 0.0]
+                );
+                assert_eq!(*rotation, 180.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected carried item DrawSprite, got {other:?}"),
+        }
+
+        match &overlay.commands[ring_index] {
+            RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(rect.center(), RenderPoint::new(43.0, 56.0));
+                assert_eq!(rect.width, 7.0);
+                assert_eq!(rect.height, 7.0);
+                assert_eq!(
+                    *tint,
+                    super::desktop_effect_render_color(Some(Pal::ACCENT), 1.0)
+                );
+                assert_eq!(*rotation, 0.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected carried item ring DrawSprite, got {other:?}"),
+        }
+
+        match &overlay.commands[text_index] {
+            RenderCommand::DrawText {
+                position,
+                color,
+                size,
+                rotation,
+                style,
+                layer,
+                ..
+            } => {
+                assert_eq!(*position, RenderPoint::new(43.0, 53.0));
+                assert_eq!(
+                    *color,
+                    super::desktop_effect_render_color(Some(Pal::ACCENT), 1.0)
+                );
+                assert_eq!(*size, 0.25);
+                assert_eq!(*rotation, 0.0);
+                assert_eq!(style.horizontal_align, RenderTextAlign::Center);
+                assert_eq!(style.vertical_align, RenderTextVerticalAlign::Center);
+                assert!(style.outline);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected carried item amount DrawText, got {other:?}"),
         }
     }
 
