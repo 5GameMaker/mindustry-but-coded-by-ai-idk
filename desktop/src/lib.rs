@@ -91,7 +91,8 @@ use mindustry_core::mindustry::service::{
 use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
-    parse_upstream_icon_properties, upstream_font_assets, upstream_font_source_paths,
+    parse_upstream_icon_properties, upstream_check_box_style_skin, upstream_font_assets,
+    upstream_font_source_paths, upstream_slider_style_skin, upstream_ui_drawable_alias,
     upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw,
     UpstreamContentIcon, UpstreamFontRole, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
 };
@@ -18935,6 +18936,203 @@ impl DesktopLauncher {
         format!("icon:{icon} glyph:{glyph}")
     }
 
+    fn settings_drawable_symbol(java_drawable: &str) -> String {
+        upstream_ui_drawable_alias(java_drawable)
+            .map(|alias| alias.atlas_symbol.to_string())
+            .unwrap_or_else(|| java_drawable.to_string())
+    }
+
+    fn settings_check_box_symbol(checked: bool) -> String {
+        let style = upstream_check_box_style_skin("defaultCheck")
+            .expect("defaultCheck should be present in upstream style registry");
+        let drawable = if checked {
+            style.checkbox_on
+        } else {
+            style.checkbox_off
+        };
+        Self::settings_drawable_symbol(drawable)
+    }
+
+    fn settings_slider_track_symbol() -> String {
+        let style = upstream_slider_style_skin("defaultSlider")
+            .expect("defaultSlider should be present in upstream style registry");
+        Self::settings_drawable_symbol(style.background)
+    }
+
+    fn settings_slider_knob_symbol() -> String {
+        let style = upstream_slider_style_skin("defaultSlider")
+            .expect("defaultSlider should be present in upstream style registry");
+        Self::settings_drawable_symbol(style.knob)
+    }
+
+    fn settings_pref_label(key: &str) -> String {
+        format!("@setting.{key}.name")
+    }
+
+    fn settings_pref_widget_specs(table: &str) -> Vec<&'static DesktopSettingsPrefSpec> {
+        settings_pref_highlight_keys(table)
+            .iter()
+            .filter_map(|key| settings_pref_spec(table, key))
+            .collect()
+    }
+
+    fn setting_bool_effective_value(&self, spec: &DesktopSettingsPrefSpec) -> bool {
+        let value = self
+            .setting_effective_value(spec.table, spec.key)
+            .unwrap_or_else(|| spec.default_value.text());
+        match value.as_str() {
+            "true" | "1" | "!mobile" => true,
+            "false" | "0" => false,
+            _ => false,
+        }
+    }
+
+    fn setting_slider_effective_value(&self, spec: &DesktopSettingsPrefSpec) -> Option<i32> {
+        self.setting_effective_value(spec.table, spec.key)
+            .or_else(|| Some(spec.default_value.text()))
+            .and_then(|value| value.parse::<i32>().ok())
+    }
+
+    fn settings_pref_widget_row_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let row_width = (panel.width - 84.0).max(160.0);
+        let row_height = 42.0;
+        let top = panel.y + panel.height - 250.0;
+        RenderRect::new(
+            panel.x + 42.0,
+            top - index as f32 * 50.0,
+            row_width,
+            row_height,
+        )
+    }
+
+    fn push_settings_route_controls(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let (DesktopSettingsPage::Game
+        | DesktopSettingsPage::Graphics
+        | DesktopSettingsPage::Sound) = self.settings_dialog_state.page
+        else {
+            return;
+        };
+        let table = self.settings_dialog_state.page.key();
+        let pane_symbol = Self::settings_drawable_symbol("pane");
+        let track_symbol = Self::settings_slider_track_symbol();
+        let knob_symbol = Self::settings_slider_knob_symbol();
+
+        for (index, spec) in Self::settings_pref_widget_specs(table)
+            .into_iter()
+            .enumerate()
+        {
+            let row = Self::settings_pref_widget_row_rect_for_panel(panel, index);
+            pass.push(RenderCommand::draw_sprite(
+                pane_symbol.clone(),
+                row,
+                [1.0, 1.0, 1.0, 0.82],
+                0.0,
+                Layer::END_PIXELED + 0.025,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                row,
+                [0.25, 0.42, 0.52, 0.72],
+                1.0,
+                Layer::END_PIXELED + 0.026,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                Self::settings_pref_label(spec.key),
+                RenderPoint::new(row.x + 16.0, row.y + row.height * 0.5),
+                [0.82, 0.9, 0.96, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.03,
+            ));
+
+            match spec.kind {
+                DesktopSettingsPrefKind::Check => {
+                    let checked = self.setting_bool_effective_value(spec);
+                    let control_size = 30.0;
+                    let control = RenderRect::new(
+                        row.x + row.width - control_size - 14.0,
+                        row.y + (row.height - control_size) * 0.5,
+                        control_size,
+                        control_size,
+                    );
+                    pass.push(RenderCommand::draw_sprite(
+                        Self::settings_check_box_symbol(checked),
+                        control,
+                        [1.0, 1.0, 1.0, 1.0],
+                        0.0,
+                        Layer::END_PIXELED + 0.032,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        if checked { "on" } else { "off" },
+                        RenderPoint::new(control.x - 12.0, row.y + row.height * 0.5),
+                        [0.72, 0.84, 0.9, 1.0],
+                        11.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::End)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.033,
+                    ));
+                }
+                DesktopSettingsPrefKind::Slider => {
+                    let Some(range) = spec.range_step else {
+                        continue;
+                    };
+                    let value = self
+                        .setting_slider_effective_value(spec)
+                        .unwrap_or(range.min)
+                        .clamp(range.min, range.max);
+                    let track = RenderRect::new(
+                        row.x + row.width - 218.0,
+                        row.y + row.height * 0.5 - 6.0,
+                        152.0,
+                        12.0,
+                    );
+                    let t = if range.max > range.min {
+                        (value - range.min) as f32 / (range.max - range.min) as f32
+                    } else {
+                        0.0
+                    }
+                    .clamp(0.0, 1.0);
+                    let knob_size = 24.0;
+                    let knob = RenderRect::new(
+                        track.x + t * track.width - knob_size * 0.5,
+                        row.y + row.height * 0.5 - knob_size * 0.5,
+                        knob_size,
+                        knob_size,
+                    );
+                    pass.push(RenderCommand::draw_sprite(
+                        track_symbol.clone(),
+                        track,
+                        [1.0, 1.0, 1.0, 1.0],
+                        0.0,
+                        Layer::END_PIXELED + 0.032,
+                    ));
+                    pass.push(RenderCommand::draw_sprite(
+                        knob_symbol.clone(),
+                        knob,
+                        [1.0, 1.0, 1.0, 1.0],
+                        0.0,
+                        Layer::END_PIXELED + 0.033,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        format!("value: {value}"),
+                        RenderPoint::new(row.x + row.width - 18.0, row.y + row.height * 0.5),
+                        [0.72, 0.84, 0.9, 1.0],
+                        11.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::End)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.034,
+                    ));
+                }
+            }
+        }
+    }
+
     fn settings_route_lines(&self) -> Vec<String> {
         let state = &self.settings_dialog_state;
         let mut lines = vec![
@@ -19915,6 +20113,9 @@ impl DesktopLauncher {
                         .with_integer_position(true),
                     Layer::END_PIXELED + 0.02,
                 ));
+            }
+            if route == DesktopMenuRoute::Settings {
+                self.push_settings_route_controls(pass, panel);
             }
         }
         if let Some(primary_rect) =
@@ -37994,6 +38195,68 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.contains(&"upstream: SettingsMenuDialog"));
         assert!(texts.contains(&"settings page: data"));
+    }
+
+    #[test]
+    fn desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+        launcher.set_setting_override("game", "communityservers", "false");
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("settings frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let sprites = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, .. } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(sprites.contains(&"pane.9"));
+        assert!(sprites.contains(&"slider-back.9"));
+        assert!(sprites.contains(&"slider-knob"));
+        assert!(sprites.contains(&"check-off"));
+        assert!(sprites.contains(&"check-on"));
+
+        let texts = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@setting.saveinterval.name"));
+        assert!(texts.contains(&"@setting.communityservers.name"));
+        assert!(texts.contains(&"value: 60"));
+        assert!(texts.contains(&"off"));
+
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Sound;
+        let sound_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let sound_texts = sound_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("sound settings frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(sound_texts.contains(&"@setting.musicvol.name"));
+        assert!(sound_texts.contains(&"value: 100"));
     }
 
     #[test]

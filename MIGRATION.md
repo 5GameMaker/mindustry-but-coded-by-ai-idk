@@ -18582,3 +18582,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 复选框/滑条还没有真实 Scene2D/MDT UI 控件、拖动、键鼠焦点与滚动行为；
   - Language/Controls 子对话框与 Data 清理/导入/导出副作用仍待迁移；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 520. SettingsMenuDialog 设置页 check/slider 可视控件骨架
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.6%**，仍未达到完整可玩；继续把 SettingsMenuDialog 从纯文本摘要推进为使用上游 `defaultCheck/defaultSlider/pane` 皮肤资源的可视控件渲染骨架。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Settings 渲染路径引入 `upstream_check_box_style_skin()`、`upstream_slider_style_skin()` 与 `upstream_ui_drawable_alias()`，把 Java drawable 名转换为真实 atlas symbol；
+    - 新增 `push_settings_route_controls()`：在 `Game/Graphics/Sound` 页为关键设置项绘制 `pane.9` 行背景、`check-on/check-off` 复选框、`slider-back.9/slider-knob` 滑条与 bundle key 文本；
+    - checkbox 读取 `settings_overrides` 与 spec 默认值后渲染 on/off；slider 按 `DesktopSettingsPrefRange` 计算 knob 位置并显示当前数值；
+    - 仍保留现有 `settings_route_lines()` 摘要与 hit-test，作为真实 SettingsTable 控件全部接入前的可测桥。
+  - 测试：
+    - 新增 `desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets`，验证 Game/Sound 设置页 render frame 里出现 `pane.9`、`slider-back.9`、`slider-knob`、`check-on/check-off`，并输出 `@setting.saveinterval.name`、`@setting.communityservers.name`、`@setting.musicvol.name` 等原版 bundle key 文本。
+- 迁移意义：
+  - Settings 页开始使用原版 UI atlas/Style 资源绘制控件，不再只是亮屏文本壳；
+  - 这一步仍接在 `DesktopLauncher -> menu_graphics_frame_for_surface -> push_active_menu_route_shell` 主链路上，不是独立 demo；
+  - 后续可在该骨架上继续补完整 SettingsTable 行列表、滚动、hover/pressed、拖动 slider 与 checkbox 点击写入 settings。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前只渲染关键项骨架，还未完整绘制所有 62 个设置项与 ScrollPane；
+  - checkbox/slider 还未接真实控件 hit-test、hover/pressed、拖拽与持久化写入；
+  - Reset/Back 的原版尺寸和底部按钮层级还需继续拆出，不能把它们长期混在摘要行里；
+  - 未达到完整可玩，不能宣告目标完成。
