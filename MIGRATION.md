@@ -15410,3 +15410,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Fire region 尺寸仍需从真实 atlas metadata 读取；
   - primitive mesh path、Bullet/Weather/Puddle/Unit render aggregation、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.5%，仍未达到完整可玩。
+
+## 418. 最新闭环记录：Basic bullet snapshot 接入 Overlay sprite pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.6%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/comp/BulletComp.java`
+  - `core/src/mindustry/entities/bullet/BasicBulletType.java`
+  - 最小对齐 `BasicBulletType.draw(Bullet)` 中 front/back sprite、`fout` shrink、`rotation - 90 + rotationOffset`、front/back color。
+- 本轮主改动：
+  - `core/src/mindustry/content/mod.rs`
+    - 新增 `ContentCatalog::bullets()`，允许桌面层枚举 bullet content。
+  - `core/src/mindustry/core/content_loader.rs`
+    - 新增 `ContentLoader::bullets()`。
+  - `desktop/src/lib.rs`
+    - 默认 atlas 计划加入 bullet front/back sprite 候选路径；
+    - 新增 bullet 颜色解析 helper，兼容 `bulletYellow` / `Pal.bulletYellow` 这类 content 字段；
+    - 新增 `basic_bullet_snapshot_render_commands(...)`，把 Basic/Bomb/Missile/Flak/Artillery/LaserBolt 风格 snapshot bullet 转成 front/back `DrawSprite`；
+    - 新增 `bullet_snapshot_render_pass()`，将客户端 `client_bullet_snapshot_entities` 接入 `RenderPassKind::Overlay`；
+    - `graphics_frame_for_render()` 已推入 bullet overlay pass。
+- 迁移意义：
+  - bullet snapshot 不再只作为 effect parent transform 的位置来源；
+  - 最常见 BasicBulletType 风格子弹已进入真实 `RenderFramePlan` / OpenGL sprite path；
+  - 这是 Bullet/Unit/Weather/Puddle 等实体渲染继续接入主链路的第二个样板。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_basic_bullet_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - bullet trail/parts/light、laser/liquid/sap/shrapnel/continuous 等专用 bullet draw plan 尚未接入；
+  - spin 的 Java `Mathf.randomSeed(b.id, 360f)` 还未精确还原；
+  - bullet 仍临时复用 overlay pass，后续应纳入统一 entity/world render pass 或更精确的 layer sorting；
+  - explorer 建议下一条优先推进 Weather → Environment pass，因为 Weather 已有 pass-level 计划基础；
+  - 当前总体迁移约 40.6%，仍未达到完整可玩。

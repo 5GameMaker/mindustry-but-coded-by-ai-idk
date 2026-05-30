@@ -169,6 +169,10 @@ impl ContentCatalog {
         self.bullets.iter().find(|bullet| bullet.name() == name)
     }
 
+    pub fn bullets(&self) -> &[bullets::BulletContent] {
+        &self.bullets
+    }
+
     pub fn status_effect_by_name(&self, name: &str) -> Option<&StatusEffect> {
         self.status_effects
             .iter()

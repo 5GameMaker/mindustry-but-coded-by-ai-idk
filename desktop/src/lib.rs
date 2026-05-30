@@ -1,6 +1,6 @@
 use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::content::blocks::{
-    BlockDef, CampaignBlockData, CampaignBlockKind, DistributionBlockKind,
+    BlockDef, BulletKind, BulletSpec, CampaignBlockData, CampaignBlockKind, DistributionBlockKind,
 };
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeBlockVisualRuntimeSnapshot, GameRuntimeCampaignBlockState,
@@ -18,9 +18,9 @@ use mindustry_core::mindustry::core::{
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
-use mindustry_core::mindustry::entities::comp::{BuildingComp, DecalColor, FireComp};
+use mindustry_core::mindustry::entities::comp::{BuildingComp, BulletComp, DecalColor, FireComp};
 use mindustry_core::mindustry::entities::{
-    entity_class_kind, shake_intensity, standard_effect,
+    entity_class_kind, shake_intensity, standard_effect, standard_effect_color_symbol,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
     PlayerUnitSwitchContext, ShieldArcAbility, StandardEffectCircleRenderPrimitive,
@@ -108,6 +108,63 @@ pub struct DesktopStandardEffectRenderFrame {
 fn desktop_effect_render_color(color: Option<DecalColor>, alpha: f32) -> [f32; 4] {
     let color = color.unwrap_or(DecalColor::WHITE);
     [color.r, color.g, color.b, color.a * alpha]
+}
+
+fn desktop_resolve_color_symbol(name: &str) -> Option<DecalColor> {
+    if name.is_empty() {
+        return None;
+    }
+    standard_effect_color_symbol(name)
+        .or_else(|| standard_effect_color_symbol(&format!("Pal.{name}")))
+        .or_else(|| standard_effect_color_symbol(&format!("Color.{name}")))
+}
+
+fn desktop_bullet_render_color(name: &str, fallback: DecalColor) -> [f32; 4] {
+    let color = desktop_resolve_color_symbol(name).unwrap_or(fallback);
+    desktop_effect_render_color(Some(color), 1.0)
+}
+
+fn desktop_bullet_front_sprite(spec: &BulletSpec) -> String {
+    if spec.sprite.is_empty() {
+        "bullet".into()
+    } else {
+        spec.sprite.clone()
+    }
+}
+
+fn desktop_bullet_back_sprite(spec: &BulletSpec, front_sprite: &str) -> String {
+    if spec.back_sprite.is_empty() {
+        format!("{front_sprite}-back")
+    } else {
+        spec.back_sprite.clone()
+    }
+}
+
+fn desktop_bullet_sprite_virtual_source_paths(spec: &BulletSpec) -> Vec<String> {
+    let front = desktop_bullet_front_sprite(spec);
+    let back = desktop_bullet_back_sprite(spec, &front);
+    let mut paths = vec![format!("sprites/{front}.png")];
+    if back != front {
+        paths.push(format!("sprites/{back}.png"));
+    }
+    paths
+}
+
+fn desktop_basic_bullet_kind_renderable(kind: BulletKind) -> bool {
+    matches!(
+        kind,
+        BulletKind::Basic
+            | BulletKind::Bomb
+            | BulletKind::Missile
+            | BulletKind::Flak
+            | BulletKind::Artillery
+            | BulletKind::LaserBolt
+    )
+}
+
+fn desktop_bullet_layer(spec: &BulletSpec) -> f32 {
+    let layer = spec.layer.strip_prefix("Layer.").unwrap_or(&spec.layer);
+    Layer::by_name(layer).unwrap_or(Layer::BULLET)
 }
 
 fn desktop_block_full_icon_region_content_id(region: &str) -> Option<ContentId> {
@@ -10008,6 +10065,12 @@ fn default_desktop_texture_atlas(
             }))
             .chain(
                 (0..FireComp::FRAMES).map(|frame| format!("sprites/blocks/fire/fire{frame}.png")),
+            )
+            .chain(
+                content_loader
+                    .bullets()
+                    .iter()
+                    .flat_map(|bullet| desktop_bullet_sprite_virtual_source_paths(&bullet.spec)),
             ),
     )
 }
@@ -11389,6 +11452,66 @@ impl DesktopLauncher {
         (!pass.commands.is_empty()).then_some(pass)
     }
 
+    fn basic_bullet_snapshot_render_commands(
+        &self,
+        bullet: &BulletComp,
+        spec: &BulletSpec,
+    ) -> Vec<RenderCommand> {
+        if !desktop_basic_bullet_kind_renderable(spec.kind) || bullet.removed {
+            return Vec::new();
+        }
+
+        let fin = if bullet.lifetime > f32::EPSILON {
+            (bullet.time / bullet.lifetime).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let fout = 1.0 - fin;
+        let width = spec.width.max(5.0) * ((1.0 - spec.shrink_x) + spec.shrink_x * fout);
+        let height = spec.height.max(7.0) * ((1.0 - spec.shrink_y) + spec.shrink_y * fout);
+        let front_sprite = desktop_bullet_front_sprite(spec);
+        let back_sprite = desktop_bullet_back_sprite(spec, &front_sprite);
+        let rect = RenderRect::from_center(RenderPoint::new(bullet.x, bullet.y), width, height);
+        let rotation = bullet.rotation() - 90.0 + spec.rotation_offset;
+        let layer = desktop_bullet_layer(spec);
+        let mut commands = Vec::with_capacity(2);
+
+        if back_sprite != front_sprite && self.texture_atlas.has(&back_sprite) {
+            commands.push(RenderCommand::draw_sprite(
+                back_sprite,
+                rect,
+                desktop_bullet_render_color(&spec.back_color, Pal::BULLET_YELLOW_BACK),
+                rotation,
+                layer,
+            ));
+        }
+
+        commands.push(RenderCommand::draw_sprite(
+            front_sprite,
+            rect,
+            desktop_bullet_render_color(&spec.front_color, Pal::BULLET_YELLOW),
+            rotation,
+            layer,
+        ));
+        commands
+    }
+
+    fn bullet_snapshot_render_pass(&self) -> Option<RenderPass> {
+        let mut pass = RenderPass::new(RenderPassKind::Overlay)
+            .with_order(RenderPassKind::Overlay.default_order());
+        for (entity_id, bullet) in &self.runtime.client_bullet_snapshot_entities {
+            if bullet.removed || self.runtime.client_hidden_entity_ids.contains(entity_id) {
+                continue;
+            }
+            let Some(content) = self.content_loader.bullet_by_id(bullet.bullet_type_id) else {
+                continue;
+            };
+            pass.commands
+                .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec));
+        }
+        (!pass.commands.is_empty()).then_some(pass)
+    }
+
     pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
         let plan = self.load_renderer_state.build_plan(input);
         DesktopFrame {
@@ -11469,6 +11592,9 @@ impl DesktopLauncher {
             render_frame.push_pass(pass);
         }
         if let Some(pass) = self.fire_snapshot_render_pass() {
+            render_frame.push_pass(pass);
+        }
+        if let Some(pass) = self.bullet_snapshot_render_pass() {
             render_frame.push_pass(pass);
         }
         if let Some(pass) = self.world_label_render_pass() {
@@ -13298,8 +13424,8 @@ mod tests {
     use mindustry_core::mindustry::{
         entities::{
             comp::{
-                BuildingComp, BuildingTetherAction, BuildingTetherRef, PayloadKind, PuddleComp,
-                UnitComp, UnitControllerState, WorldLabelComp,
+                BuildingComp, BuildingTetherAction, BuildingTetherRef, BulletComp, PayloadKind,
+                PuddleComp, UnitComp, UnitControllerState, WorldLabelComp,
             },
             entity_class_id, standard_effect_id, LegDestroyData, PlayerComp, PuddleLiquidInfo,
             StandardEffectDrawKind, TextureRegionRef, BULLET_CLASS_ID, DECAL_CLASS_ID,
@@ -15174,6 +15300,98 @@ mod tests {
                 assert!((color[3] - 0.3).abs() < 0.0001);
             }
             other => panic!("expected fire light DrawCircle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_routes_basic_bullet_snapshot_entities_into_overlay_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_content = launcher
+            .content_loader
+            .bullet_by_name("dagger_basic")
+            .expect("base content should include dagger basic bullet");
+        assert!(launcher.texture_atlas.has("bullet"));
+        assert!(launcher.texture_atlas.has("bullet-back"));
+
+        let mut bullet = BulletComp::new(
+            bullet_content.id(),
+            TeamId(1),
+            type_io::EntityRef::null(),
+            32.0,
+            48.0,
+        );
+        bullet.lifetime = 60.0;
+        bullet.time = 30.0;
+        bullet.rotation = 180.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7103, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            18,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "bullet")
+                    })
+            })
+            .expect("basic bullet snapshot should emit an overlay sprite pass");
+        let sprites = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    tint,
+                    rotation,
+                    layer,
+                    ..
+                } => Some((symbol.as_str(), *rect, *tint, *rotation, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(sprites.len(), 2);
+        assert_eq!(sprites[0].0, "bullet-back");
+        assert_eq!(sprites[1].0, "bullet");
+        assert_eq!(
+            sprites[0].2,
+            [
+                Pal::BULLET_YELLOW_BACK.r,
+                Pal::BULLET_YELLOW_BACK.g,
+                Pal::BULLET_YELLOW_BACK.b,
+                Pal::BULLET_YELLOW_BACK.a,
+            ]
+        );
+        assert_eq!(
+            sprites[1].2,
+            [
+                Pal::BULLET_YELLOW.r,
+                Pal::BULLET_YELLOW.g,
+                Pal::BULLET_YELLOW.b,
+                Pal::BULLET_YELLOW.a,
+            ]
+        );
+        for (_, rect, _, rotation, layer) in sprites {
+            assert_eq!(rect.center(), RenderPoint::new(32.0, 48.0));
+            assert_eq!(rect.width, 7.0);
+            assert_eq!(rect.height, 6.75);
+            assert_eq!(rotation, 90.0);
+            assert_eq!(layer, Layer::BULLET);
         }
     }
 

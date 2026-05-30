@@ -12679,3 +12679,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 建统一 entity/world render pass 或排序策略，把 Fire 从 overlay 过渡到更接近 Java `Layer.effect` 的实体绘制链；
   2. 为 `FireComp::DRAW_SIZE` 接入真实 atlas region metadata；
   3. 继续推进 Bullet/Weather/Puddle/Unit 的 snapshot/draw plan 到 `RenderCommand`/`RenderPass` 主链路。
+
+### 2026-05-30：Basic bullet snapshot 接入 Overlay sprite pass
+
+- 当前整体完成度：约 **40.6%**。
+- 已完成：
+  - `ContentCatalog::bullets()` / `ContentLoader::bullets()` 可枚举 bullet content；
+  - 默认 texture atlas 计划加入 bullet front/back sprite 候选；
+  - `DesktopLauncher::basic_bullet_snapshot_render_commands(...)` 支持 Basic/Bomb/Missile/Flak/Artillery/LaserBolt 风格 bullet snapshot；
+  - 已按 Java `BasicBulletType.draw()` 输出 back/front `DrawSprite`，包含 `fout` shrink、front/back color、`rotation - 90 + rotationOffset`；
+  - `DesktopLauncher::bullet_snapshot_render_pass()` 将 `client_bullet_snapshot_entities` 接入 `RenderPassKind::Overlay`；
+  - `graphics_frame_for_render()` 已推入 bullet overlay pass。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_basic_bullet_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 按 explorer 建议，优先推进 Weather snapshot → Environment pass，因为 Weather 已有 pass-level plan；
+  2. Bullet 后续继续补 trail/parts/light、laser/liquid/sap/shrapnel/continuous draw plan；
+  3. 建统一 entity/world pass 或更精确 layer sorting，把 Fire/Bullet 从 overlay 过渡到接近 Java `Groups.draw`/`Layer` 的实体绘制链。
