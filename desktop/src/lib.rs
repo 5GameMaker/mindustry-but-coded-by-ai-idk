@@ -94,10 +94,10 @@ use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
     parse_upstream_icon_properties, upstream_check_box_style_skin, upstream_font_assets,
-    upstream_font_source_paths, upstream_scroll_pane_style_skin, upstream_slider_style_skin,
-    upstream_text_button_style_skin, upstream_ui_drawable_alias, upstream_ui_icon_glyph_string,
-    Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw, UpstreamContentIcon,
-    UpstreamFontRole, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
+    upstream_font_source_paths, upstream_image_button_style_skin, upstream_scroll_pane_style_skin,
+    upstream_slider_style_skin, upstream_text_button_style_skin, upstream_ui_drawable_alias,
+    upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw,
+    UpstreamContentIcon, UpstreamFontRole, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -152,6 +152,13 @@ const SCHEMATICS_IMPORT_BUTTON_WIDTH: f32 = 210.0;
 const SCHEMATICS_IMPORT_BUTTON_HEIGHT: f32 = 54.0;
 const SCHEMATICS_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const SCHEMATICS_TAG_HEIGHT: f32 = 42.0;
+const SCHEMATICS_CARD_CELL_WIDTH: f32 = 230.0;
+const SCHEMATICS_CARD_WIDTH: f32 = 200.0;
+const SCHEMATICS_CARD_BUTTON_HEIGHT: f32 = 50.0;
+const SCHEMATICS_CARD_PREVIEW_SIZE: f32 = 200.0;
+const SCHEMATICS_CARD_HEIGHT: f32 = SCHEMATICS_CARD_BUTTON_HEIGHT + SCHEMATICS_CARD_PREVIEW_SIZE;
+const SCHEMATICS_CARD_GAP: f32 = 8.0;
+const SCHEMATICS_CARD_ACTION_SIZE: f32 = 50.0;
 const DATABASE_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const DATABASE_TAB_SIZE: f32 = 36.0;
 const DATABASE_CONTENT_CELL_SIZE: f32 = 32.0;
@@ -416,6 +423,54 @@ pub enum DesktopSettingsAction {
     ImportData,
     OpenDataFolder,
     ExportCrashLogs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopSchematicCardEntry {
+    pub name: String,
+    pub description: String,
+    pub width: i32,
+    pub height: i32,
+    pub tile_count: usize,
+    pub labels: Vec<String>,
+    pub has_steam_id: bool,
+    pub mod_name: Option<String>,
+}
+
+impl DesktopSchematicCardEntry {
+    pub fn new(name: impl Into<String>, width: i32, height: i32, tile_count: usize) -> Self {
+        Self {
+            name: name.into(),
+            description: String::new(),
+            width,
+            height,
+            tile_count,
+            labels: Vec::new(),
+            has_steam_id: false,
+            mod_name: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSchematicCardActionKind {
+    Info,
+    Export,
+    Edit,
+    Delete,
+    ViewWorkshop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopSchematicCardAction {
+    pub index: usize,
+    pub kind: DesktopSchematicCardActionKind,
+}
+
+impl DesktopSchematicCardAction {
+    pub const fn new(index: usize, kind: DesktopSchematicCardActionKind) -> Self {
+        Self { index, kind }
+    }
 }
 
 impl DesktopMenuRoute {
@@ -1535,6 +1590,7 @@ pub enum DesktopMenuRouteShellAction {
     ImportEditorMap,
     OpenSchematicImport,
     OpenSchematicTags,
+    SchematicCard(DesktopSchematicCardAction),
     ShowAboutCredits,
     ShowAboutLinks,
     OpenDiscordLink,
@@ -14344,6 +14400,8 @@ pub struct DesktopLauncher {
     pub editor_import_map_dialog_open: bool,
     pub schematic_import_dialog_open: bool,
     pub schematic_tags_dialog_open: bool,
+    pub schematic_cards: Vec<DesktopSchematicCardEntry>,
+    pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
     pub settings_dialog_state: DesktopSettingsDialogState,
     pub last_settings_action: Option<DesktopSettingsAction>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
@@ -14877,6 +14935,9 @@ fn default_desktop_texture_atlas(
 ) -> TextureAtlasPlan<bool> {
     TextureAtlasPlan::from_virtual_source_paths(
         std::iter::once("sprites/logo.png".to_string())
+            .chain(std::iter::once(
+                "sprites/schematic-background.png".to_string(),
+            ))
             .chain(upstream_ui_skin_sprite_source_paths().map(str::to_string))
             .chain(content_icon_candidate_virtual_source_paths(content_loader))
             .into_iter()
@@ -15055,6 +15116,8 @@ impl DesktopLauncher {
             editor_import_map_dialog_open: false,
             schematic_import_dialog_open: false,
             schematic_tags_dialog_open: false,
+            schematic_cards: Vec::new(),
+            last_schematic_card_action: None,
             settings_dialog_state: DesktopSettingsDialogState::default(),
             last_settings_action: None,
             last_settings_hovered_control: None,
@@ -18623,8 +18686,10 @@ impl DesktopLauncher {
             self.last_menu_route_shell_action = None;
             return true;
         }
-        if self.menu_renderer_state.selected_root != MenuButtonRole::Play {
-            self.menu_renderer_state.selected_root = MenuButtonRole::Play;
+        if self.menu_renderer_state.selected_root != MenuButtonRole::Play
+            || self.menu_renderer_state.has_active_desktop_submenu()
+        {
+            self.menu_renderer_state.reset_desktop_root();
             return true;
         }
         false
@@ -18943,6 +19008,20 @@ impl DesktopLauncher {
             style.up
         }
         .unwrap_or("button");
+        Self::settings_drawable_symbol(drawable)
+    }
+
+    fn settings_image_button_symbol(style_name: &str, hovered: bool, pressed: bool) -> String {
+        let style = upstream_image_button_style_skin(style_name)
+            .unwrap_or_else(|| panic!("{style_name} should be present in upstream style registry"));
+        let drawable = if pressed {
+            style.down.or(style.over).or(style.up)
+        } else if hovered {
+            style.over.or(style.up)
+        } else {
+            style.up
+        }
+        .unwrap_or("clear");
         Self::settings_drawable_symbol(drawable)
     }
 
@@ -20065,7 +20144,7 @@ impl DesktopLauncher {
         }
         if route == DesktopMenuRoute::Schematics {
             let panel_width = (viewport.width * 0.66).clamp(380.0, 740.0);
-            let panel_height = (viewport.height - 130.0).clamp(330.0, 600.0);
+            let panel_height = (viewport.height - 80.0).clamp(430.0, 700.0);
             return RenderRect::new(
                 viewport.x + viewport.width - panel_width - 48.0,
                 viewport.y + (viewport.height - panel_height) * 0.5,
@@ -20303,6 +20382,101 @@ impl DesktopLauncher {
         )
     }
 
+    fn schematics_card_columns_for_grid(grid: RenderRect) -> usize {
+        ((grid.width / SCHEMATICS_CARD_CELL_WIDTH).floor() as usize).max(1)
+    }
+
+    fn schematics_card_rect_for_grid(grid: RenderRect, index: usize) -> RenderRect {
+        let columns = Self::schematics_card_columns_for_grid(grid);
+        let column = index % columns;
+        let row = index / columns;
+        let x = grid.x + 8.0 + column as f32 * SCHEMATICS_CARD_CELL_WIDTH;
+        let y = grid.y + grid.height
+            - 8.0
+            - SCHEMATICS_CARD_HEIGHT
+            - row as f32 * (SCHEMATICS_CARD_HEIGHT + SCHEMATICS_CARD_GAP);
+        RenderRect::new(x, y, SCHEMATICS_CARD_WIDTH, SCHEMATICS_CARD_HEIGHT)
+    }
+
+    #[cfg(test)]
+    fn schematics_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        Self::schematics_card_rect_for_grid(Self::schematics_grid_rect_for_panel(panel), index)
+    }
+
+    fn schematics_card_preview_rect(card: RenderRect) -> RenderRect {
+        RenderRect::new(
+            card.x,
+            card.y,
+            SCHEMATICS_CARD_PREVIEW_SIZE,
+            SCHEMATICS_CARD_PREVIEW_SIZE,
+        )
+    }
+
+    fn schematics_card_name_bar_rect(card: RenderRect) -> RenderRect {
+        let preview = Self::schematics_card_preview_rect(card);
+        RenderRect::new(
+            preview.x + 4.0,
+            preview.y + preview.height - 30.0,
+            (preview.width - 8.0).max(0.0),
+            26.0,
+        )
+    }
+
+    fn schematics_card_action_button_rect(card: RenderRect, action_index: usize) -> RenderRect {
+        RenderRect::new(
+            card.x + action_index as f32 * SCHEMATICS_CARD_ACTION_SIZE,
+            card.y + SCHEMATICS_CARD_PREVIEW_SIZE,
+            SCHEMATICS_CARD_ACTION_SIZE,
+            SCHEMATICS_CARD_BUTTON_HEIGHT,
+        )
+    }
+
+    fn schematics_card_visible_in_grid(grid: RenderRect, card: RenderRect) -> bool {
+        card.y >= grid.y && card.right() <= grid.right() + f32::EPSILON
+    }
+
+    fn schematics_card_action_for_index(
+        entry: &DesktopSchematicCardEntry,
+        card_index: usize,
+        action_index: usize,
+    ) -> Option<DesktopSchematicCardAction> {
+        let kind = match action_index {
+            0 => DesktopSchematicCardActionKind::Info,
+            1 => DesktopSchematicCardActionKind::Export,
+            2 => DesktopSchematicCardActionKind::Edit,
+            3 if entry.has_steam_id => DesktopSchematicCardActionKind::ViewWorkshop,
+            3 => DesktopSchematicCardActionKind::Delete,
+            _ => return None,
+        };
+        Some(DesktopSchematicCardAction::new(card_index, kind))
+    }
+
+    fn schematics_card_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopSchematicCardAction> {
+        let grid = Self::schematics_grid_rect_for_panel(panel);
+        for (index, entry) in self.schematic_cards.iter().enumerate() {
+            let card = Self::schematics_card_rect_for_grid(grid, index);
+            if !Self::schematics_card_visible_in_grid(grid, card) || !card.contains_point(point) {
+                continue;
+            }
+            for action_index in 0..4 {
+                if Self::schematics_card_action_button_rect(card, action_index)
+                    .contains_point(point)
+                {
+                    return Self::schematics_card_action_for_index(entry, index, action_index);
+                }
+            }
+            return Some(DesktopSchematicCardAction::new(
+                index,
+                DesktopSchematicCardActionKind::Info,
+            ));
+        }
+        None
+    }
+
     fn join_route_shell_action_at_surface_point(
         &self,
         viewport: RenderViewport,
@@ -20375,6 +20549,9 @@ impl DesktopLauncher {
         }
         if Self::schematics_tag_edit_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::OpenSchematicTags);
+        }
+        if let Some(action) = self.schematics_card_action_at_point(panel, point) {
+            return Some(DesktopMenuRouteShellAction::SchematicCard(action));
         }
         None
     }
@@ -20614,6 +20791,9 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenSchematicTags => {
                 self.schematic_tags_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::SchematicCard(action) => {
+                self.last_schematic_card_action = Some(action);
             }
             DesktopMenuRouteShellAction::ShowAboutCredits => {
                 self.about_route_page = DesktopAboutRoutePage::Credits;
@@ -20995,6 +21175,137 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_schematics_card(
+        &self,
+        pass: &mut RenderPass,
+        card: RenderRect,
+        index: usize,
+        entry: &DesktopSchematicCardEntry,
+    ) {
+        let hovered = self
+            .last_menu_cursor
+            .map(|point| card.contains_point(point))
+            .unwrap_or(false);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            card,
+            if hovered {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [1.0, 1.0, 1.0, 0.88]
+            },
+            0.0,
+            Layer::END_PIXELED + 0.031 + index as f32 * 0.0001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            card,
+            if hovered {
+                [0.58, 0.78, 0.94, 0.92]
+            } else {
+                [0.28, 0.38, 0.46, 0.78]
+            },
+            1.0,
+            Layer::END_PIXELED + 0.032 + index as f32 * 0.0001,
+        ));
+
+        let action_icons = [
+            "info",
+            "upload",
+            "pencil",
+            if entry.has_steam_id { "link" } else { "trash" },
+        ];
+        for (action_index, icon) in action_icons.iter().enumerate() {
+            let button = Self::schematics_card_action_button_rect(card, action_index);
+            let button_hovered = self
+                .last_menu_cursor
+                .map(|point| button.contains_point(point))
+                .unwrap_or(false);
+            let symbol = Self::settings_image_button_symbol("emptyi", button_hovered, false);
+            if symbol != "clear" {
+                pass.push(RenderCommand::draw_sprite(
+                    symbol,
+                    button,
+                    [1.0, 1.0, 1.0, 0.88],
+                    0.0,
+                    Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
+                ));
+            }
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label(icon, icon),
+                button.center(),
+                [0.86, 0.94, 1.0, 1.0],
+                16.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.036 + index as f32 * 0.0001,
+            ));
+        }
+
+        let preview = Self::schematics_card_preview_rect(card);
+        pass.push(RenderCommand::draw_sprite(
+            "schematic-background",
+            preview,
+            [0.70, 0.78, 0.86, 0.72],
+            0.0,
+            Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            preview,
+            [0.20, 0.28, 0.34, 0.82],
+            1.0,
+            Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "{}x{} | {} blocks",
+                entry.width, entry.height, entry.tile_count
+            ),
+            RenderPoint::new(preview.center().x, preview.center().y - 8.0),
+            [0.68, 0.78, 0.86, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.036 + index as f32 * 0.0001,
+        ));
+        if !entry.labels.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("tags: {}", entry.labels.join(", ")),
+                RenderPoint::new(preview.center().x, preview.center().y - 28.0),
+                [0.56, 0.66, 0.74, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.036 + index as f32 * 0.0001,
+            ));
+        }
+
+        let name_bar = Self::schematics_card_name_bar_rect(card);
+        pass.push(RenderCommand::fill_rect(
+            name_bar,
+            [0.0, 0.0, 0.0, 0.58],
+            Layer::END_PIXELED + 0.037 + index as f32 * 0.0001,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            entry.name.clone(),
+            name_bar.center(),
+            [0.96, 0.98, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.038 + index as f32 * 0.0001,
+        ));
+    }
+
     fn push_map_list_route_page(
         &self,
         pass: &mut RenderPass,
@@ -21219,17 +21530,28 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.028,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            "@none",
-            grid.center(),
-            [0.70, 0.78, 0.84, 1.0],
-            13.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.032,
-        ));
+        if self.schematic_cards.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@none",
+                grid.center(),
+                [0.70, 0.78, 0.84, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.032,
+            ));
+            return;
+        }
+
+        for (index, entry) in self.schematic_cards.iter().enumerate() {
+            let card = Self::schematics_card_rect_for_grid(grid, index);
+            if !Self::schematics_card_visible_in_grid(grid, card) {
+                continue;
+            }
+            self.push_schematics_card(pass, card, index, entry);
+        }
     }
 
     fn push_load_game_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -21857,14 +22179,20 @@ impl DesktopLauncher {
     }
 
     fn schematics_route_lines(&self) -> Vec<String> {
-        vec![
+        let mut lines = vec![
             "button: @schematic.import Icon.download".into(),
             "search: @schematic.search Icon.zoom".into(),
             "tags: @schematic.tags Icon.pencilSmall".into(),
-            "pane: schematic grid Styles.flati/Tex.pane".into(),
-            "card buttons: @info.title / @editor.export / @schematic.edit / @save.delete".into(),
-            "empty: @none".into(),
-        ]
+            format!(
+                "pane: schematic grid Styles.flati/Tex.pane cards={}",
+                self.schematic_cards.len()
+            ),
+            "card buttons: @info.title / @editor.export / @schematic.edit / @save.delete/@view.workshop".into(),
+        ];
+        if self.schematic_cards.is_empty() {
+            lines.push("empty: @none".into());
+        }
+        lines
     }
 
     fn tech_tree_route_lines(&self) -> Vec<String> {
@@ -38815,6 +39143,86 @@ mod tests {
             command,
             RenderCommand::DrawSprite { symbol, rect, .. }
                 if symbol == &pane_symbol && *rect == DesktopLauncher::schematics_grid_rect_for_panel(panel)
+            )));
+    }
+
+    #[test]
+    fn desktop_launcher_schematics_route_renders_schematic_card_grid() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.schematic_cards = vec![
+            super::DesktopSchematicCardEntry {
+                name: "Core Starter".into(),
+                description: "basic launch schematic".into(),
+                width: 12,
+                height: 8,
+                tile_count: 42,
+                labels: vec!["power".into(), "core".into()],
+                has_steam_id: false,
+                mod_name: None,
+            },
+            super::DesktopSchematicCardEntry {
+                name: "Steam Drill".into(),
+                description: "workshop schematic".into(),
+                width: 16,
+                height: 16,
+                tile_count: 85,
+                labels: Vec::new(),
+                has_steam_id: true,
+                mod_name: None,
+            },
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Schematics);
+        let viewport =
+            launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(1280, 720));
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Schematics,
+        );
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Schematics);
+        assert!(lines
+            .iter()
+            .any(|line| line == "pane: schematic grid Styles.flati/Tex.pane cards=2"));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("@save.delete/@view.workshop")));
+        assert!(!lines.iter().any(|line| line == "empty: @none"));
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("schematics card route should produce a render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&"Core Starter"));
+        assert!(texts.contains(&"Steam Drill"));
+        assert!(texts.contains(&"12x8 | 42 blocks"));
+        assert!(texts.contains(&"tags: power, core"));
+        assert!(!texts.contains(&"@none"));
+
+        let first_card = DesktopLauncher::schematics_card_rect_for_panel(panel, 0);
+        let first_preview = DesktopLauncher::schematics_card_preview_rect(first_card);
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol == "schematic-background" && *rect == first_preview
+        )));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol == &DesktopLauncher::settings_drawable_symbol("pane") && *rect == first_card
         )));
     }
 
@@ -38822,6 +39230,12 @@ mod tests {
     fn desktop_launcher_schematics_route_controls_dispatch_actions() {
         let surface = DesktopSurfaceSize::new(1280, 720);
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.schematic_cards = vec![super::DesktopSchematicCardEntry::new(
+            "Core Starter",
+            12,
+            8,
+            42,
+        )];
         launcher.dispatch_menu_action(MenuButtonRole::Schematics);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
@@ -38856,6 +39270,28 @@ mod tests {
         );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);
+
+        launcher.dispatch_menu_action(MenuButtonRole::Schematics);
+        let card = DesktopLauncher::schematics_card_rect_for_panel(panel, 0);
+        for (action_index, expected_kind) in [
+            (0, super::DesktopSchematicCardActionKind::Info),
+            (1, super::DesktopSchematicCardActionKind::Export),
+            (2, super::DesktopSchematicCardActionKind::Edit),
+            (3, super::DesktopSchematicCardActionKind::Delete),
+        ] {
+            let center =
+                DesktopLauncher::schematics_card_action_button_rect(card, action_index).center();
+            let expected = super::DesktopSchematicCardAction::new(0, expected_kind);
+            assert_eq!(
+                launcher
+                    .active_menu_route_shell_action_at_surface_point(surface, center.x, center.y),
+                Some(super::DesktopMenuRouteShellAction::SchematicCard(expected))
+            );
+            launcher.dispatch_menu_route_shell_action(
+                super::DesktopMenuRouteShellAction::SchematicCard(expected),
+            );
+            assert_eq!(launcher.last_schematic_card_action, Some(expected));
+        }
     }
 
     #[test]
@@ -41417,6 +41853,30 @@ mod tests {
         let surface = DesktopSurfaceSize::new(800, 600);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let play_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Play)
+            .expect("menu ui should include PLAY root")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: play_center.x,
+                    y: play_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
         let campaign_center = launcher
             .menu_renderer_state
             .ui_plan(input)
@@ -41501,6 +41961,30 @@ mod tests {
         let surface = DesktopSurfaceSize::new(800, 600);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let play_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Play)
+            .expect("menu ui should include PLAY root")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: play_center.x,
+                    y: play_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
         let campaign_center = launcher
             .menu_renderer_state
             .ui_plan(input)
@@ -41698,6 +42182,30 @@ mod tests {
         let surface = DesktopSurfaceSize::new(800, 600);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let play_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Play)
+            .expect("menu ui should include PLAY root")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: play_center.x,
+                    y: play_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
         let campaign_center = launcher
             .menu_renderer_state
             .ui_plan(input)
@@ -41789,6 +42297,30 @@ mod tests {
         let surface = DesktopSurfaceSize::new(800, 600);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let play_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Play)
+            .expect("menu ui should include PLAY root")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: play_center.x,
+                    y: play_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
         let join_center = launcher
             .menu_renderer_state
             .ui_plan(input)

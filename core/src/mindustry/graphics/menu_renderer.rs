@@ -680,7 +680,6 @@ impl MenuUiPlan {
         self.buttons
             .iter()
             .rev()
-            .filter(|button| !button.submenu || self.submenu_alpha > f32::EPSILON)
             .find(|button| {
                 x >= button.rect.x
                     && x <= button.rect.x + button.rect.width
@@ -1048,6 +1047,8 @@ pub struct MenuRendererState {
     pub flyer_count: usize,
     pub flyer_type: &'static str,
     pub selected_root: MenuButtonRole,
+    active_root: Option<MenuButtonRole>,
+    submenu_root: Option<MenuButtonRole>,
     pub submenu_alpha: f32,
     pub submenu_target_alpha: f32,
     pub custom_buttons: Vec<MenuCustomButton>,
@@ -1064,8 +1065,10 @@ impl MenuRendererState {
             flyer_count: flyer_count_for_seed(config.seed),
             flyer_type: flyer_type_for_seed(config.seed),
             selected_root: MenuButtonRole::Play,
-            submenu_alpha: 1.0,
-            submenu_target_alpha: 1.0,
+            active_root: None,
+            submenu_root: None,
+            submenu_alpha: 0.0,
+            submenu_target_alpha: 0.0,
             custom_buttons: Vec::new(),
         }
     }
@@ -1122,7 +1125,10 @@ impl MenuRendererState {
                 input,
                 self.config.mobile,
                 self.selected_root,
+                self.active_root,
+                self.submenu_root,
                 self.submenu_alpha,
+                self.submenu_target_alpha,
                 self.config.desktop_workshop_enabled,
                 &self.custom_buttons,
             ),
@@ -1177,7 +1183,10 @@ impl MenuRendererState {
             input,
             self.config.mobile,
             self.selected_root,
+            self.active_root,
+            self.submenu_root,
             self.submenu_alpha,
+            self.submenu_target_alpha,
             self.config.desktop_workshop_enabled,
             &self.custom_buttons,
         )
@@ -1191,15 +1200,14 @@ impl MenuRendererState {
         if self.config.mobile || !role.has_desktop_submenu() {
             return false;
         }
-        if self.selected_root == role {
-            self.submenu_target_alpha = if self.submenu_target_alpha > 0.0 {
-                0.0
-            } else {
-                1.0
-            };
+        if self.active_root == Some(role) {
+            self.active_root = None;
+            self.submenu_target_alpha = 0.0;
             return true;
         }
+        self.active_root = Some(role);
         self.selected_root = role;
+        self.submenu_root = Some(role);
         self.submenu_target_alpha = 1.0;
         true
     }
@@ -1232,6 +1240,22 @@ impl MenuRendererState {
 
     pub fn clear_custom_buttons(&mut self) {
         self.custom_buttons.clear();
+    }
+
+    pub fn has_active_desktop_submenu(&self) -> bool {
+        !self.config.mobile
+            && (self.active_root.is_some()
+                || self.submenu_root.is_some()
+                || self.submenu_alpha > f32::EPSILON
+                || self.submenu_target_alpha > f32::EPSILON)
+    }
+
+    pub fn reset_desktop_root(&mut self) {
+        self.selected_root = MenuButtonRole::Play;
+        self.active_root = None;
+        self.submenu_root = None;
+        self.submenu_alpha = 0.0;
+        self.submenu_target_alpha = 0.0;
     }
 }
 
@@ -1632,7 +1656,10 @@ fn menu_mobile_button_plan(
 fn menu_desktop_ui_plan(
     input: MenuFrameInput,
     selected_root: MenuButtonRole,
+    active_root: Option<MenuButtonRole>,
+    submenu_root: Option<MenuButtonRole>,
     submenu_alpha: f32,
+    submenu_target_alpha: f32,
     desktop_workshop_enabled: bool,
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
@@ -1660,9 +1687,11 @@ fn menu_desktop_ui_plan(
         MenuButtonRole::ContentDatabase,
         MenuButtonRole::About,
     ];
-    let submenu_roles: &[MenuButtonRole] = match selected_root {
-        MenuButtonRole::Play if submenu_alpha > f32::EPSILON => &play_submenu_roles,
-        MenuButtonRole::Database if submenu_alpha > f32::EPSILON => &database_submenu_roles,
+    let submenu_visible = submenu_alpha > f32::EPSILON || submenu_target_alpha > f32::EPSILON;
+    let submenu_root = submenu_root.unwrap_or(selected_root);
+    let submenu_roles: &[MenuButtonRole] = match submenu_root {
+        MenuButtonRole::Play if submenu_visible => &play_submenu_roles,
+        MenuButtonRole::Database if submenu_visible => &database_submenu_roles,
         _ => &[],
     };
     let main_role_count = main_roles.len();
@@ -1674,7 +1703,7 @@ fn menu_desktop_ui_plan(
     let submenu_x = left_x + button_width;
     let selected_root_index = main_roles
         .iter()
-        .position(|role| *role == selected_root)
+        .position(|role| *role == submenu_root)
         .unwrap_or(0);
     let submenu_start_y = start_y + selected_root_index as f32 * (button_height + gap);
 
@@ -1688,7 +1717,7 @@ fn menu_desktop_ui_plan(
                 button_width,
                 button_height,
             ),
-            role == selected_root,
+            active_root == Some(role),
         ));
     }
     for (custom_index, custom) in custom_buttons.iter().enumerate() {
@@ -1713,7 +1742,7 @@ fn menu_desktop_ui_plan(
             button_width,
             button_height,
         ),
-        MenuButtonRole::Quit == selected_root,
+        active_root == Some(MenuButtonRole::Quit),
     ));
     for (index, role) in submenu_roles.iter().copied().enumerate() {
         buttons.push(menu_button_plan(
@@ -1840,7 +1869,10 @@ fn menu_ui_plan(
     input: MenuFrameInput,
     mobile: bool,
     selected_root: MenuButtonRole,
+    active_root: Option<MenuButtonRole>,
+    submenu_root: Option<MenuButtonRole>,
     submenu_alpha: f32,
+    submenu_target_alpha: f32,
     desktop_workshop_enabled: bool,
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
@@ -1850,7 +1882,10 @@ fn menu_ui_plan(
         menu_desktop_ui_plan(
             input,
             selected_root,
+            active_root,
+            submenu_root,
             submenu_alpha,
+            submenu_target_alpha,
             desktop_workshop_enabled,
             custom_buttons,
         )
@@ -1884,9 +1919,46 @@ mod tests {
     }
 
     #[test]
+    fn menu_renderer_state_starts_without_a_visible_desktop_submenu() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scl4: 4.0,
+            delta: 0.0,
+        });
+
+        assert_eq!(state.selected_root, MenuButtonRole::Play);
+        assert_eq!(state.active_root, None);
+        assert_eq!(state.submenu_alpha, 0.0);
+        assert_eq!(state.submenu_target_alpha, 0.0);
+        assert_eq!(plan.ui.submenu_alpha, 0.0);
+        assert_eq!(
+            plan.ui
+                .buttons
+                .iter()
+                .map(|button| button.role)
+                .collect::<Vec<_>>(),
+            vec![
+                MenuButtonRole::Play,
+                MenuButtonRole::Database,
+                MenuButtonRole::Editor,
+                MenuButtonRole::Mods,
+                MenuButtonRole::Settings,
+                MenuButtonRole::Quit,
+            ]
+        );
+        assert!(plan.ui.buttons.iter().all(|button| !button.selected));
+        assert!(plan.ui.buttons.iter().all(|button| !button.submenu));
+        assert!(plan.ui.hit_test(0.0, 0.0).is_none());
+    }
+
+    #[test]
     fn render_plan_keeps_java_cache_shadow_wall_flyers_darkness_order() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 7));
         state.flyer_count = 2;
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
 
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1920.0,
@@ -1959,6 +2031,7 @@ mod tests {
     fn menu_frame_plan_to_render_pass_preserves_menu_command_order() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 7));
         state.flyer_count = 1;
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
 
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1920.0,
@@ -2089,13 +2162,41 @@ mod tests {
         };
 
         assert_eq!(state.selected_root, MenuButtonRole::Play);
-        assert_eq!(state.submenu_alpha, 1.0);
+        assert_eq!(state.active_root, None);
+        assert_eq!(state.submenu_alpha, 0.0);
+        assert_eq!(state.submenu_target_alpha, 0.0);
         assert!(state.select_desktop_root(MenuButtonRole::Play));
+        assert_eq!(state.active_root, Some(MenuButtonRole::Play));
+        assert_eq!(state.submenu_target_alpha, 1.0);
+
+        let opened = state.render_plan(input(0.0));
+        assert!(opened
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Campaign));
+        assert!(opened
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Play && button.selected));
+
+        let fading_in = state.render_plan(input(MENU_SUBMENU_FADE_IN_SECONDS * 0.5));
+        assert!((state.submenu_alpha - 0.5).abs() < 0.0001);
+        assert!((fading_in.ui.submenu_alpha - 0.5).abs() < 0.0001);
+        assert!(fading_in
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Campaign));
+
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
+        assert_eq!(state.active_root, None);
         assert_eq!(state.submenu_target_alpha, 0.0);
 
-        let fading_out = state.render_plan(input(MENU_SUBMENU_FADE_OUT_SECONDS * 0.5));
-        assert!((state.submenu_alpha - 0.5).abs() < 0.0001);
-        assert!((fading_out.ui.submenu_alpha - 0.5).abs() < 0.0001);
+        let fading_out = state.render_plan(input(MENU_SUBMENU_FADE_OUT_SECONDS * 0.25));
+        assert!((state.submenu_alpha - 0.25).abs() < 0.0001);
+        assert!((fading_out.ui.submenu_alpha - 0.25).abs() < 0.0001);
         assert!(fading_out
             .ui
             .buttons
@@ -2699,6 +2800,7 @@ mod tests {
         let mut state = MenuRendererState::new(
             MenuRendererConfig::new(false, 11).with_desktop_workshop_enabled(true),
         );
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
@@ -2752,6 +2854,7 @@ mod tests {
             state.add_custom_button("SERVER BROWSER"),
             MenuButtonRole::Custom(0)
         );
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
         let input = MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,

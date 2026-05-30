@@ -19096,3 +19096,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 默认 sprite shader 仍通过 native `Mesh` program override 承接，后续应继续拆成显式 2D sprite shader id，避免与 3D/planet mesh 语义混用；
   - 主菜单仍需继续补齐 Scene2D 可见性门控、becheck update pulse、customButtons 完整对象模型、logo/version 精确几何和弹窗 UI 卡片化；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 536. MenuFragment 初始状态与 SchematicsDialog 卡片网格继续对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **56.6%**，仍未达到完整可玩；继续优先前端/UI，目标是完整还原原版 `MenuFragment` 与 `SchematicsDialog`，不能只保留亮屏壳。
+- Java 对照证据：
+  - `MenuFragment.buildDesktop()` 初始只显示主菜单列，`Play/Database` 的 submenu 需要点击 root 后才淡入；
+  - submenu root 再次点击会淡出关闭，切换 root 时 submenu 内容立即切换到对应 root；
+  - `SchematicsDialog` 主体是卡片网格，卡片包含背景、预览、名称栏和 info/export/edit/delete 等动作按钮。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuRendererState` 区分 `selected_root`、`active_root` 与 `submenu_root`，默认不再展开 `Play` submenu；
+    - `select_desktop_root(...)` 按 Java 桌面菜单行为实现 root 打开、重复点击关闭、切换 root 立即替换 submenu；
+    - `reset_desktop_root()` 用于返回键关闭 route 后继续关闭 submenu 并回到未展开的 `Play` 初始状态；
+    - `MenuUiPlan::hit_test(...)` 允许已进入 target-visible 状态的 submenu 在首帧 alpha 尚未推进时响应点击，避免 root 点击后下一次输入被丢掉。
+  - `desktop/src/lib.rs`
+    - `Schematics` route 从纯空态推进到卡片网格：新增蓝图卡片 entry、卡片几何、预览区、名称栏、动作按钮和 hit-test/dispatch；
+    - route 文本与控件记录包含 `cards=N` 以及 `@save.delete/@view.workshop` 等原版动作提示；
+    - 菜单回归测试更新为先点击 `Play` root 再进入 `Campaign/Join` submenu，锁定新的 Java 初始状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_renderer --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `SchematicsDialog` 还未接真实 schematic 存储、搜索栏、tag 过滤/持久化、导入/导出/编辑子弹窗、真实预览图刷新和 `useSchematic(...)` 快捷使用；
+  - 主菜单仍需继续补完整 Scene2D hover/down/tooltip/visible 条件、becheck update pulse、customButtons 对象模型、logo/version 几何和完整弹窗路由；
+  - 未达到完整可玩，不能宣告目标完成。
