@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **41.1%**。
+- 当前总体迁移完成度：约 **41.2%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -12805,3 +12805,22 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 接 unit light/shield 或 engine circles，继续使用同一 unit aggregation；
   2. 再推进 weapons/legs/payload/items；
   3. 继续收口统一 entity layer sorting，避免 Overlay 临时层长期化。
+
+### 2026-05-30：Unit light 接入 Lighting pass
+
+- 当前整体完成度：约 **41.2%**。
+- 已完成：
+  - `DesktopLauncher::unit_snapshot_light_primitive(...)` 按 `UnitType.resolved_light_radius()`、`light_color_rgba`、`light_opacity` 生成 light primitive；
+  - `DesktopLauncher::unit_snapshot_light_render_pass()` 将可见 typed unit snapshot 汇总到 `LightRendererPlan`；
+  - `graphics_frame_for_render()` 已推入 unit lighting pass；
+  - dagger 快照测试覆盖默认 60 半径、`0xfbd367ff` 颜色和 0.6 opacity。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 接 unit shield 或 engine circles/trail；
+  2. 再推进 weapons/legs/payload/items；
+  3. 持续把 Unit/Fire/Bullet/Puddle 的临时 Overlay 收口到统一 layer sorting。

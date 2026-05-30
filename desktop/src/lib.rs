@@ -11903,6 +11903,44 @@ impl DesktopLauncher {
         (!pass.commands.is_empty()).then_some(pass)
     }
 
+    fn unit_snapshot_light_primitive(&self, unit: &UnitComp) -> Option<LightPrimitive> {
+        if !unit.is_valid() {
+            return None;
+        }
+
+        let radius = unit.type_info.resolved_light_radius();
+        if radius <= f32::EPSILON || unit.type_info.light_opacity <= f32::EPSILON {
+            return None;
+        }
+
+        Some(LightPrimitive {
+            center: (unit.x(), unit.y()),
+            radius,
+            color: DecalColor::from_rgba(unit.type_info.light_color_rgba),
+            opacity: unit.type_info.light_opacity,
+        })
+    }
+
+    fn unit_snapshot_light_render_pass(&self) -> Option<RenderPass> {
+        let circle_lights = self
+            .runtime
+            .client_unit_snapshot_entities
+            .iter()
+            .filter(|(entity_id, _)| !self.runtime.client_hidden_entity_ids.contains(entity_id))
+            .filter_map(|(_, unit)| self.unit_snapshot_light_primitive(unit))
+            .collect::<Vec<_>>();
+
+        if circle_lights.is_empty() {
+            return None;
+        }
+
+        LightRendererPlan {
+            circle_lights,
+            commands: Vec::new(),
+        }
+        .to_render_pass()
+    }
+
     fn weather_snapshot_base_properties(
         entity_id: i32,
         state: &WeatherState,
@@ -12085,6 +12123,9 @@ impl DesktopLauncher {
             render_frame.push_pass(light_pass);
         }
         if let Some(light_pass) = self.puddle_snapshot_light_render_pass() {
+            render_frame.push_pass(light_pass);
+        }
+        if let Some(light_pass) = self.unit_snapshot_light_render_pass() {
             render_frame.push_pass(light_pass);
         }
         let block_renderer = self.block_render_plan(camera, viewport);
@@ -16258,6 +16299,38 @@ mod tests {
                 assert_eq!(*layer, Layer::GROUND_UNIT);
             }
             other => panic!("expected unit cell DrawSprite, got {other:?}"),
+        }
+        let light_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawCircle { center, .. }
+                            if *center == RenderPoint::new(40.0, 56.0))
+                    })
+            })
+            .expect("unit snapshot should emit a light pass");
+        match light_pass.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawCircle { center, .. }
+                if *center == RenderPoint::new(40.0, 56.0))
+        }) {
+            Some(RenderCommand::DrawCircle {
+                radius,
+                color,
+                filled,
+                layer,
+                ..
+            }) => {
+                assert!((*radius - 60.0).abs() < 0.0001);
+                assert!(*filled);
+                assert_eq!(*layer, 50.0);
+                assert!((color[0] - 0xfb as f32 / 255.0).abs() < 0.0001);
+                assert!((color[1] - 0xd3 as f32 / 255.0).abs() < 0.0001);
+                assert!((color[2] - 0x67 as f32 / 255.0).abs() < 0.0001);
+                assert!((color[3] - 0.6).abs() < 0.0001);
+            }
+            other => panic!("expected unit light DrawCircle, got {other:?}"),
         }
     }
 

@@ -15605,3 +15605,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java `cellColor` 的低血量闪烁 `absin(Time.time)` 尚未接入；
   - hard shadow、weapons、legs、payload/item、engine trail、unit light/shield 仍未接入；
   - Unit/Fire/Bullet/Puddle 仍需统一 Java layer sorting；Weather custom lowering 与 native OpenGL smoke 仍需继续。
+
+## 424. 最新闭环记录：Unit light 接入 Lighting pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.2%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/UnitType.java#draw(...)`
+  - `core/src/mindustry/type/UnitType.java#drawLight(...)`
+  - `core/src/mindustry/type/UnitType.java#init()` 中 `lightRadius < 0` 时的默认半径。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `unit_snapshot_light_primitive(...)`，按 typed `UnitComp` 的位置、`resolved_light_radius()`、`light_color_rgba`、`light_opacity` 生成 `LightPrimitive`；
+    - 新增 `unit_snapshot_light_render_pass()`，将可见单位 snapshot 汇总到 `LightRendererPlan` / `RenderPassKind::Lighting`；
+    - `graphics_frame_for_render()` 已在 puddle light 后推入 unit light pass；
+    - 扩展 dagger snapshot 测试，覆盖默认 60 半径、`0xfbd367ff` light color 与 0.6 opacity。
+- 迁移意义：
+  - Unit 渲染不仅有 Overlay sprite 层，也接入了现有 Lighting 主链路；
+  - 继续保持 Unit 视觉在同一 runtime/render frame 闭环中推进，而不是只做独立 helper。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - hard shadow、shield、weapons、legs、payload/item、engine circles/trail 仍未接入；
+  - Lighting pass 后续需要统一多个实体来源的排序/合批策略；
+  - Unit/Fire/Bullet/Puddle 仍需统一 Java layer sorting；Weather custom lowering 与 native OpenGL smoke 仍需继续。
