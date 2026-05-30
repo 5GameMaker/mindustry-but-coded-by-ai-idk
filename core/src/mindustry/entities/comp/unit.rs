@@ -950,6 +950,40 @@ impl UnitComp {
         }
     }
 
+    pub fn trail_sample_point(&self) -> Vec2 {
+        let scale = if self.type_info.use_engine_elevation {
+            self.elevation
+        } else {
+            1.0
+        };
+        let offset =
+            self.type_info.engine_offset * 0.5 + self.type_info.engine_offset * 0.5 * scale;
+        let rotation = self.rotation() + 180.0;
+        Vec2 {
+            x: self.x() + trnsx(rotation, offset),
+            y: self.y() + trnsy(rotation, offset),
+        }
+    }
+
+    pub fn update_trail(&mut self, delta: f32) -> Option<Vec2> {
+        let length = self.type_info.trail_length.max(0) as usize;
+        if length == 0
+            || self.type_info.naval
+            || (!self.is_flying() && self.type_info.use_engine_elevation)
+        {
+            return None;
+        }
+
+        let sample = self.trail_sample_point();
+        let width = self.type_info.engine_size * self.type_info.trail_scl;
+        let trail = self
+            .trail
+            .get_or_insert_with(|| UnitTrailState::new(length, width));
+        trail.length = length;
+        trail.update(sample.x, sample.y, width, delta);
+        Some(sample)
+    }
+
     pub fn legs_destroy_regions(&self) -> Option<LegsDestroyRegions> {
         self.legs.as_ref()?;
         Some(LegsDestroyRegions::new(
@@ -1714,6 +1748,14 @@ fn lerp(from: f32, to: f32, t: f32) -> f32 {
     from + (to - from) * t.clamp(0.0, 1.0)
 }
 
+fn trnsx(angle_degrees: f32, length: f32) -> f32 {
+    angle_degrees.to_radians().cos() * length
+}
+
+fn trnsy(angle_degrees: f32, length: f32) -> f32 {
+    angle_degrees.to_radians().sin() * length
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2465,5 +2507,65 @@ mod tests {
         assert_eq!(segments[0].start.y, 0.0);
         assert_eq!(segments[0].end.x, 8.0);
         assert_eq!(segments[0].end.y, 0.0);
+    }
+
+    #[test]
+    fn unit_component_updates_trail_from_engine_back_sample_point() {
+        let mut unit_type = unit_type();
+        unit_type.trail_length = 4;
+        unit_type.engine_offset = 10.0;
+        unit_type.engine_size = 2.0;
+        unit_type.trail_scl = 1.5;
+        unit_type.use_engine_elevation = true;
+
+        let mut unit = UnitComp::new(99, unit_type, TeamId(1));
+        unit.add();
+        unit.trail = Some(UnitTrailState::new(4, 0.0));
+        unit.set_pos(100.0, 200.0);
+        unit.set_rotation(0.0);
+        unit.elevation = 0.5;
+
+        let first_sample = unit.update_trail(1.0).expect("trail sample should exist");
+        assert!((first_sample.x - 92.5).abs() < 0.0001);
+        assert!((first_sample.y - 200.0).abs() < 0.0001);
+
+        unit.set_pos(120.0, 220.0);
+        unit.set_rotation(90.0);
+        unit.elevation = 1.0;
+
+        let second_sample = unit
+            .update_trail(1.0)
+            .expect("second trail sample should exist");
+        assert!((second_sample.x - 120.0).abs() < 0.0001);
+        assert!((second_sample.y - 210.0).abs() < 0.0001);
+
+        let state = unit
+            .trail
+            .as_ref()
+            .expect("trail state should remain attached");
+        assert_eq!(state.length, 4);
+        assert_eq!(state.width, 3.0);
+        assert_eq!(state.trail.size(), 2);
+        let segments = state.segment_plans();
+        assert_eq!(segments.len(), 2);
+        assert!((segments[0].start.x - 92.5).abs() < 0.0001);
+        assert!((segments[0].start.y - 200.0).abs() < 0.0001);
+        assert!((segments[0].end.x - 120.0).abs() < 0.0001);
+        assert!((segments[0].end.y - 210.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn unit_component_skips_engine_elevation_trail_until_flying() {
+        let mut unit_type = unit_type();
+        unit_type.trail_length = 4;
+        unit_type.use_engine_elevation = true;
+
+        let mut unit = UnitComp::new(100, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(8.0, 8.0);
+        unit.elevation = 0.0;
+
+        assert_eq!(unit.update_trail(1.0), None);
+        assert!(unit.trail.is_none());
     }
 }

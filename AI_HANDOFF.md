@@ -13259,3 +13259,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. Rail 视觉接 effect/init plan；
   3. Unit trail runtime update 的子代理结果需要回收验收；
   4. weapon/unit parts 结构化与 sideMultiplier 仍需推进。
+
+### 2026-05-30：Unit trail runtime 采样 helper 接入核心 UnitComp
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.8%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::trail_sample_point()`；
+    - 新增 `UnitComp::update_trail(delta)`；
+    - 新增 `trnsx/trnsy`；
+    - 新增测试 `unit_component_updates_trail_from_engine_back_sample_point`；
+    - 新增测试 `unit_component_skips_engine_elevation_trail_until_flying`。
+- Java 对照：
+  - `UnitComp.update()` 采样点：`rotation + 180`、`engineOffset/2 + engineOffset/2 * scale`；
+  - `UnitType.draw()` gating：`trailLength > 0 && !naval && (unit.isFlying() || !useEngineElevation)`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-core`
+  - `cargo test -p mindustry-core unit_component_updates_trail_from_engine_back_sample_point --lib`
+  - `cargo test -p mindustry-core unit_component_skips_engine_elevation_trail_until_flying --lib`
+  - `cargo test -p mindustry-core unit_trail_state_wraps_graphics_trail_segments --lib`
+  - `git diff --check`
+- 下一步：
+  1. 把 `unit.update_trail(delta)` 接入真实 GameRuntime/unit tick 或客户端 snapshot 增量推进；
+  2. remove/death 补 Java `Fx.trailFade` 等价事件；
+  3. Rail effect 按 explorer 结论走 `RailInitPlan`/`LightRendererPlan`；
+  4. PointLaser/ContinuousFlame 后续升级 textured/polygon 精度。

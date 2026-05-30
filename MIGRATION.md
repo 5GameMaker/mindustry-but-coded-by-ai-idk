@@ -16129,3 +16129,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java `super.draw(b)` 的默认 bullet sprite 行为尚未为 PointLaser 完整复刻；
   - `Damage.collidePoint`、`beamEffect`、trail at aim endpoint、timer side-effects 仍需进入 runtime/effect 链；
   - Rail effect、Unit trail runtime update、weapon/unit parts、hard shadow、legs、payload/item 仍需继续。
+
+## 440. 最新闭环记录：Unit trail runtime 采样 helper 接入核心 UnitComp
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.8%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/comp/UnitComp.java#update()`：当 trail 已存在时同步 `trail.length = type.trailLength`，按 `rotation + 180`、`engineOffset` 与 `elevation/useEngineElevation` 计算机体后方采样点；
+  - `core/src/mindustry/type/UnitType.java#draw()`：仅在 `trailLength > 0 && !naval && (unit.isFlying() || !useEngineElevation)` 时创建/绘制 trail。
+- 本轮主改动：
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - 新增 `UnitComp::trail_sample_point()`，复刻 Java 后方采样点计算；
+    - 新增 `UnitComp::update_trail(delta)`，按 Java gating 初始化/推进 `UnitTrailState`；
+    - 新增内部 `trnsx/trnsy`，避免把角度换算散落在调用点；
+    - 新增 `unit_component_updates_trail_from_engine_back_sample_point` 和 `unit_component_skips_engine_elevation_trail_until_flying`。
+- 迁移意义：
+  - Unit trail 已从“可被 desktop 消费的手动状态”推进到“核心 UnitComp 可按 Java 语义生成 runtime trail sample”的阶段；
+  - 后续真实 unit tick/client snapshot merge 只需调用 `unit.update_trail(delta)`，即可喂给已接入的 desktop trail 渲染链。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-core`
+  - `cargo test -p mindustry-core unit_component_updates_trail_from_engine_back_sample_point --lib`
+  - `cargo test -p mindustry-core unit_component_skips_engine_elevation_trail_until_flying --lib`
+  - `cargo test -p mindustry-core unit_trail_state_wraps_graphics_trail_segments --lib`
+  - `git diff --check`
+- 仍未完成：
+  - `update_trail(delta)` 还未接进真实 GameRuntime/unit tick 循环；
+  - remove/death 仍未产出 Java `Fx.trailFade` 等价 effect；
+  - trail 宽度动态脉动仍未完全复刻 `UnitType.drawTrail()` 中的 `absin(Time.time, 2f, engineSize/4f)`；
+  - Rail effect、PointLaser textured laser、weapon/unit parts、hard shadow、legs、payload/item 仍需继续。
