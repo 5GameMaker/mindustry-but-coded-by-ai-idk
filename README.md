@@ -8,12 +8,13 @@
 - Rust 工作区：`D:\MDT\rust-mindustry`。
 - 禁止使用废案目录：`D:\MDT\mindustry-rust`。
 - 迁移目标是整体化、可运行、可游玩的 Rust 版 MDT/Mindustry；过渡 helper/plan 必须继续接入 runtime/render/backend 主链路。
+- UI 必须按 `D:\MDT\mindustry-upstream-v157.4` 原版结构/布局/交互完整还原，不能只做亮屏壳或独立模块。
 - 遇到文字乱码时优先按 UTF-8 读取，再尝试其他编码。
 - 当前工程仍处于迁移中，暂未达到完整可玩状态。
 
 ## 迁移进度
 
-- 当前总体完成度：约 **52.5%**。
+- 当前总体完成度：约 **52.6%**。
 
 ## 作者的话
 

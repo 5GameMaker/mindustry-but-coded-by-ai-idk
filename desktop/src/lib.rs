@@ -231,6 +231,43 @@ pub struct AboutLinkEntry {
     pub color_hex: &'static str,
 }
 
+impl AboutLinkEntry {
+    fn color_rgba(&self) -> [f32; 4] {
+        about_color_hex_to_rgba(self.color_hex)
+    }
+
+    fn dark_color_rgba(&self) -> [f32; 4] {
+        let [r, g, b, a] = self.color_rgba();
+        [r * 0.6, g * 0.6, b * 0.8, a]
+    }
+}
+
+fn about_hex_pair_to_unit(bytes: &[u8], index: usize) -> Option<f32> {
+    let high = bytes.get(index).copied()?;
+    let low = bytes.get(index + 1).copied()?;
+    let high = (high as char).to_digit(16)?;
+    let low = (low as char).to_digit(16)?;
+    Some(((high << 4) + low) as f32 / 255.0)
+}
+
+fn about_color_hex_to_rgba(color_hex: &str) -> [f32; 4] {
+    if color_hex == "accent" {
+        return [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a];
+    }
+    let hex = color_hex.strip_prefix('#').unwrap_or(color_hex);
+    let bytes = hex.as_bytes();
+    let Some(r) = about_hex_pair_to_unit(bytes, 0) else {
+        return [1.0, 1.0, 1.0, 1.0];
+    };
+    let Some(g) = about_hex_pair_to_unit(bytes, 2) else {
+        return [1.0, 1.0, 1.0, 1.0];
+    };
+    let Some(b) = about_hex_pair_to_unit(bytes, 4) else {
+        return [1.0, 1.0, 1.0, 1.0];
+    };
+    [r, g, b, 1.0]
+}
+
 const ABOUT_BANNED_LINK_NAMES: &[&str] = &["google-play", "itch.io", "dev-builds", "f-droid"];
 
 const ABOUT_LINKS: &[AboutLinkEntry] = &[
@@ -18037,6 +18074,41 @@ impl DesktopLauncher {
         )
     }
 
+    fn active_menu_route_shell_panel_for_route(
+        viewport: RenderViewport,
+        route: DesktopMenuRoute,
+    ) -> RenderRect {
+        if route != DesktopMenuRoute::About {
+            return Self::active_menu_route_shell_panel_for_viewport(viewport);
+        }
+        let panel_width = (viewport.width * 0.72).clamp(360.0, 720.0);
+        let panel_height = (viewport.height - 120.0).clamp(360.0, 700.0);
+        RenderRect::new(
+            viewport.x + viewport.width - panel_width - 48.0,
+            viewport.y + (viewport.height - panel_height) * 0.5,
+            panel_width,
+            panel_height,
+        )
+    }
+
+    fn about_link_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let columns = if panel.width >= 340.0 { 2usize } else { 1usize };
+        let gap = 8.0;
+        let outer_pad = 22.0;
+        let card_height = 54.0;
+        let usable_width = panel.width - outer_pad * 2.0 - gap * (columns.saturating_sub(1)) as f32;
+        let card_width = usable_width / columns as f32;
+        let col = index % columns;
+        let row = index / columns;
+        let top = panel.y + panel.height - 134.0;
+        RenderRect::new(
+            panel.x + outer_pad + col as f32 * (card_width + gap),
+            top - card_height - row as f32 * (card_height + gap),
+            card_width,
+            card_height,
+        )
+    }
+
     fn active_menu_route_shell_primary_rect_for_viewport(
         viewport: RenderViewport,
         route: DesktopMenuRoute,
@@ -18050,7 +18122,7 @@ impl DesktopLauncher {
         ) {
             return None;
         }
-        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
         Some(RenderRect::new(
             panel.x + 36.0,
             panel.y + 18.0,
@@ -18066,7 +18138,7 @@ impl DesktopLauncher {
         if route != DesktopMenuRoute::Discord {
             return None;
         }
-        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
         Some(RenderRect::new(
             panel.x + 36.0,
             panel.y + 60.0,
@@ -18130,12 +18202,11 @@ impl DesktopLauncher {
             return None;
         }
         let viewport = self.default_render_viewport_for_surface(surface_size);
-        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::About);
         let point = RenderPoint::new(x, y);
         for (index, link) in self.visible_about_links().into_iter().enumerate() {
-            let description_line = 3 + index * 2;
-            let center_y = panel.y + panel.height - 118.0 - description_line as f32 * 20.0;
-            let rect = RenderRect::new(panel.x + 24.0, center_y - 18.0, panel.width - 48.0, 36.0);
+            let rect = Self::about_link_card_rect_for_panel(panel, index);
             if rect.contains_point(point) {
                 return Some(link.name);
             }
@@ -18305,6 +18376,236 @@ impl DesktopLauncher {
         lines
     }
 
+    fn push_about_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        match self.about_route_page {
+            DesktopAboutRoutePage::Links => self.push_about_links_page(pass, panel),
+            DesktopAboutRoutePage::Credits => self.push_about_credits_page(pass, panel),
+        }
+    }
+
+    fn push_about_links_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let layer = Layer::END_PIXELED + 0.025;
+        pass.push(RenderCommand::draw_text_styled(
+            ABOUT_CREDITS_LINE,
+            RenderPoint::new(panel.x + 22.0, panel.y + panel.height - 112.0),
+            [0.82, 0.90, 0.96, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            layer,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.about_links_line(),
+            RenderPoint::new(panel.x + 22.0, panel.y + panel.height - 128.0),
+            [0.54, 0.64, 0.72, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            layer,
+        ));
+
+        for (index, link) in self.visible_about_links().into_iter().enumerate() {
+            let rect = Self::about_link_card_rect_for_panel(panel, index);
+            self.push_about_link_card(pass, rect, link, index);
+        }
+    }
+
+    fn push_about_link_card(
+        &self,
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        link: &AboutLinkEntry,
+        index: usize,
+    ) {
+        let base_layer = Layer::END_PIXELED + 0.03 + index as f32 * 0.0001;
+        pass.push(RenderCommand::fill_rect(
+            rect,
+            [0.10, 0.11, 0.14, 0.94],
+            base_layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            "whiteui",
+            rect,
+            [0.12, 0.13, 0.16, 0.96],
+            0.0,
+            base_layer + 0.001,
+        ));
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(rect.x, rect.y, 10.0, rect.height - 5.0),
+            link.color_rgba(),
+            base_layer + 0.002,
+        ));
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(rect.x, rect.y, 10.0, 5.0),
+            link.dark_color_rgba(),
+            base_layer + 0.003,
+        ));
+
+        let icon_rect = RenderRect::new(rect.x + 12.0, rect.y + 5.0, 42.0, rect.height - 10.0);
+        pass.push(RenderCommand::fill_rect(
+            icon_rect,
+            [0.08, 0.09, 0.12, 0.98],
+            base_layer + 0.004,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            icon_rect,
+            link.dark_color_rgba(),
+            1.0,
+            base_layer + 0.005,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            link.icon,
+            icon_rect.center(),
+            [0.92, 0.96, 1.0, 1.0],
+            8.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            base_layer + 0.006,
+        ));
+
+        let action_rect =
+            RenderRect::new(rect.right() - 35.0, rect.y + 6.0, 28.0, rect.height - 12.0);
+        pass.push(RenderCommand::draw_sprite(
+            "button.9",
+            action_rect,
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            base_layer + 0.006,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "link",
+            action_rect.center(),
+            [0.92, 0.98, 1.0, 1.0],
+            8.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            base_layer + 0.007,
+        ));
+
+        let text_x = icon_rect.right() + 8.0;
+        let text_width = (action_rect.x - text_x - 6.0).max(48.0);
+        pass.push(RenderCommand::draw_text_styled(
+            link.title,
+            RenderPoint::new(text_x, rect.y + rect.height - 13.0),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            11.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            base_layer + 0.008,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("{}: {}", link.name, link.description),
+            RenderPoint::new(text_x, rect.y + rect.height - 29.0),
+            [0.74, 0.78, 0.82, 1.0],
+            if text_width < 120.0 { 8.0 } else { 9.0 },
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            base_layer + 0.009,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("url: {}", link.url),
+            RenderPoint::new(text_x, rect.y + 11.0),
+            [0.48, 0.56, 0.64, 1.0],
+            7.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            base_layer + 0.010,
+        ));
+    }
+
+    fn push_about_credits_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        pass.push(RenderCommand::draw_text_styled(
+            format!("credits.text: {ABOUT_CREDITS_TEXT}"),
+            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 112.0),
+            [0.92, 0.96, 1.0, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.03,
+        ));
+        pass.push(RenderCommand::fill_rect(
+            RenderRect::new(
+                panel.x + 22.0,
+                panel.y + panel.height - 134.0,
+                panel.width - 44.0,
+                3.0,
+            ),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            Layer::END_PIXELED + 0.031,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("contributors: {} entries", ABOUT_CONTRIBUTORS.len()),
+            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 154.0),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.032,
+        ));
+
+        let row_height = 15.0;
+        let top = panel.y + panel.height - 174.0;
+        let visible_rows = ((top - (panel.y + 62.0)) / row_height).max(0.0) as usize;
+        pass.push(RenderCommand::set_clip(RenderRect::new(
+            panel.x + 22.0,
+            panel.y + 62.0,
+            panel.width - 44.0,
+            top - (panel.y + 62.0) + 8.0,
+        )));
+        for (row, chunk) in ABOUT_CONTRIBUTORS.chunks(3).enumerate() {
+            pass.push(RenderCommand::draw_text_styled(
+                chunk.join(" | "),
+                RenderPoint::new(panel.x + 28.0, top - row as f32 * row_height),
+                [0.76, 0.80, 0.84, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.033,
+            ));
+        }
+        pass.push(RenderCommand::clear_clip());
+        let total_rows = ABOUT_CONTRIBUTORS.chunks(3).count();
+        if visible_rows < total_rows {
+            pass.push(RenderCommand::draw_text_styled(
+                format!(
+                    "scroll: {} more contributor rows",
+                    total_rows - visible_rows
+                ),
+                RenderPoint::new(panel.x + panel.width * 0.5, panel.y + 52.0),
+                [0.54, 0.64, 0.72, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.033,
+            ));
+        }
+    }
+
     fn apply_menu_input_events(
         &mut self,
         surface_size: DesktopSurfaceSize,
@@ -18452,7 +18753,7 @@ impl DesktopLauncher {
             return;
         };
 
-        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
         let dialog = BaseDialog::new(route.title());
         let stage_rect = RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height);
         for command in
@@ -18477,21 +18778,25 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.02,
         ));
-        for (index, line) in self.active_menu_route_shell_lines(route).iter().enumerate() {
-            pass.push(RenderCommand::draw_text_styled(
-                line.clone(),
-                RenderPoint::new(
-                    panel.x + panel.width * 0.5,
-                    panel.y + panel.height - 118.0 - index as f32 * 20.0,
-                ),
-                [0.56, 0.64, 0.72, 1.0],
-                12.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.02,
-            ));
+        if route == DesktopMenuRoute::About {
+            self.push_about_route_page(pass, panel);
+        } else {
+            for (index, line) in self.active_menu_route_shell_lines(route).iter().enumerate() {
+                pass.push(RenderCommand::draw_text_styled(
+                    line.clone(),
+                    RenderPoint::new(
+                        panel.x + panel.width * 0.5,
+                        panel.y + panel.height - 118.0 - index as f32 * 20.0,
+                    ),
+                    [0.56, 0.64, 0.72, 1.0],
+                    12.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.02,
+                ));
+            }
         }
         if let Some(primary_rect) =
             Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)
@@ -35675,6 +35980,71 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(540, 960);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        launcher.dispatch_menu_action(MenuButtonRole::About);
+
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::About,
+        );
+        assert!(
+            panel.height
+                > DesktopLauncher::active_menu_route_shell_panel_for_viewport(viewport).height
+        );
+
+        let first_card = DesktopLauncher::about_link_card_rect_for_panel(panel, 0);
+        assert_eq!(
+            launcher.about_link_name_at_surface_point(
+                surface,
+                first_card.center().x,
+                first_card.center().y
+            ),
+            Some("discord")
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "whiteui" && *rect == first_card
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "Discord"
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "link"
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. }
+                    if text == super::ABOUT_DISCORD_LINE
+            )
+        }));
+    }
+
+    #[test]
     fn desktop_launcher_about_menu_route_filters_banned_links_for_ios_or_steam_mode() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.about_filter_banned_links = true;
@@ -35764,17 +36134,17 @@ mod tests {
         let viewport = launcher.default_render_viewport_for_surface(surface);
         launcher.dispatch_menu_action(MenuButtonRole::About);
 
-        let panel = DesktopLauncher::active_menu_route_shell_panel_for_viewport(viewport);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::About,
+        );
         let wiki_index = launcher
             .visible_about_links()
             .iter()
             .position(|link| link.name == "wiki")
             .expect("About links should contain wiki");
-        let description_line = 3 + wiki_index * 2;
-        let wiki_point = RenderPoint::new(
-            panel.x + panel.width * 0.5,
-            panel.y + panel.height - 118.0 - description_line as f32 * 20.0,
-        );
+        let wiki_point =
+            DesktopLauncher::about_link_card_rect_for_panel(panel, wiki_index).center();
         assert_eq!(
             launcher.about_link_name_at_surface_point(surface, wiki_point.x, wiki_point.y),
             Some("wiki")

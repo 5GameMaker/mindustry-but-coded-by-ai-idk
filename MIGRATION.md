@@ -18297,3 +18297,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - OpenGL DrawText 尚未改为 glyph quads；
   - 字体 upload 仍是 ready 条件下的 placeholder generated pixels；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 510. AboutDialog 链接页从文本壳推进到原版卡片式 UI
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.6%**，仍未达到完整可玩；按上游 `AboutDialog.java` 的 `Styles.grayPanel + colored strip + icon + link button + credits scroll pane` 结构，把 About route 从纯文本 shell 推进到结构化卡片渲染。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `AboutLinkEntry` 增加颜色解析与深色条 tint 计算，保留 `Links.java` 的 `color` 语义；
+    - About route 使用更大的专用 dialog panel，避免 12 个链接仍挤在 220px 文本壳内；
+    - 新增 link card rect/hitbox 统一计算，点击命中与渲染布局共享同一套矩形；
+    - Links 页逐项绘制 `grayPanel` 风格卡片、左侧颜色条、icon 占位、`button.9` link action、title/description/url 文案；
+    - Credits 页加入 accent 分隔线、contributors 计数、剪裁区域内的 3 列贡献者行，并继续保留完整 contributor 文本命令；
+    - 新增/修正测试，验证 About link card 使用上游 UI drawable、扩大面板、hitbox 能命中 wiki/discord，原有链接过滤/失败复制/credits 数据仍通过。
+  - `README.md`
+    - 当前总体完成度更新为约 `52.6%`；
+    - 保留 UI 必须完整还原原版结构/布局/交互、不能只做亮屏壳或独立模块的约束。
+- 迁移意义：
+  - AboutDialog 不再只是“几行文本 + 一个按钮”，已经开始按上游 Scene2D 卡片组织还原 UI；
+  - 点击区域从旧文本行坐标迁移到与实际卡片一致的 hitbox，减少后续真实 widget 化时的返工；
+  - Credits 开始保留 scroll pane/clip 语义，为后续真实 ScrollPane/LabelWrap 接入留接口。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_about --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_hit_test_and_actions_share_layout --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_link_action --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - AboutDialog 仍未拆入 `core/src/mindustry/ui/dialogs/about_dialog.rs` 的独立状态对象；
+  - icon 仍使用文本占位，未接真实 `Icon.*` glyph/drawable；
+  - ScrollPane/LabelWrap/clearNonei/Scene2D event bubbling 仍未完整等价；
+  - 未达到完整可玩，不能宣告目标完成。
