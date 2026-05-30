@@ -15509,6 +15509,28 @@ impl DesktopLauncher {
         pass.push(RenderCommand::clear_clip());
     }
 
+    fn push_startup_menu_preview_text(
+        pass: &mut RenderPass,
+        text: &'static str,
+        position: RenderPoint,
+        size: f32,
+        color: [f32; 4],
+        layer: f32,
+    ) {
+        pass.push(RenderCommand::draw_text_styled(
+            text,
+            position,
+            color,
+            size,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer,
+        ));
+    }
+
     fn startup_menu_preview_render_pass(&self, viewport: RenderViewport) -> RenderPass {
         let camera = self.default_render_camera_for_viewport(viewport);
         let width = viewport.width.max(1.0);
@@ -15570,6 +15592,58 @@ impl DesktopLauncher {
             &mut pass,
             RenderRect::new(button_x, second_button_y, button_width, button_height),
             [0.13, 0.23, 0.34, 1.0],
+        );
+        Self::push_startup_menu_preview_text(
+            &mut pass,
+            "MINDUSTRY",
+            RenderPoint::new(
+                panel_x + panel_width * 0.5,
+                panel_y + panel_height - accent_height * 0.52,
+            ),
+            18.0,
+            [0.90, 0.98, 1.0, 1.0],
+            101.0,
+        );
+        Self::push_startup_menu_preview_text(
+            &mut pass,
+            "RUST MDT PREVIEW",
+            RenderPoint::new(
+                panel_x + panel_width * 0.5,
+                panel_y + panel_height - accent_height - 26.0,
+            ),
+            8.0,
+            [0.70, 0.88, 0.95, 1.0],
+            101.1,
+        );
+        Self::push_startup_menu_preview_text(
+            &mut pass,
+            "PLAY",
+            RenderPoint::new(
+                button_x + button_width * 0.5,
+                first_button_y + button_height * 0.5,
+            ),
+            10.0,
+            [0.92, 1.0, 1.0, 1.0],
+            101.2,
+        );
+        Self::push_startup_menu_preview_text(
+            &mut pass,
+            "SETTINGS",
+            RenderPoint::new(
+                button_x + button_width * 0.5,
+                second_button_y + button_height * 0.5,
+            ),
+            10.0,
+            [0.75, 0.88, 0.96, 1.0],
+            101.3,
+        );
+        Self::push_startup_menu_preview_text(
+            &mut pass,
+            "WORLD NOT LOADED",
+            RenderPoint::new(panel_x + panel_width * 0.5, panel_y + 28.0),
+            7.0,
+            [0.58, 0.70, 0.80, 1.0],
+            101.4,
         );
         pass
     }
@@ -31170,6 +31244,19 @@ mod tests {
         assert!(preview_pass.commands.iter().any(
             |command| matches!(command, RenderCommand::Custom { name, .. } if name == "startup-menu-preview")
         ));
+        let preview_texts = preview_pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(preview_texts.contains(&"MINDUSTRY"));
+        assert!(preview_texts.contains(&"RUST MDT PREVIEW"));
+        assert!(preview_texts.contains(&"PLAY"));
+        assert!(preview_texts.contains(&"SETTINGS"));
+        assert!(preview_texts.contains(&"WORLD NOT LOADED"));
         assert!(menu_pass
             .commands
             .iter()
@@ -31215,6 +31302,11 @@ mod tests {
                 command,
                 super::DesktopGraphicsOpenGlBackendDrawCommand::SetScissor { .. }
             )));
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "primitive:DrawText"));
     }
 
     #[test]

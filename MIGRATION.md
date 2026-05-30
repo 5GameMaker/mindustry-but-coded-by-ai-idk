@@ -16901,3 +16901,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `curStroke/anyNearby` 尚未网络化或 snapshot 化，因此 range 外圈 arc 与 `Drawf.light` 暂未输出；
   - Java 可配置 `color/layer/effectRadius/sectorRad/rotateSpeed/sectors` 当前 Rust descriptor 尚未携带，先按 Java 默认值；
   - 后续可继续接 `ArmorPlateAbility`，或切回真实 font atlas / 菜单 Scene UI。
+
+## 465. 启动菜单预览接入 DrawText 可见文字
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.8%**，仍未达到完整可玩；继续优先推进前端/客户端可见性。
+- 问题背景：
+  - no-world 默认帧此前已经接入 `startup-menu-preview` 安全底图与真实 `menu` pass；
+  - `DrawText` 也已下沉到 placeholder glyph quads，但启动菜单预览仍主要是色块，用户实际打开客户端时缺少可读菜单信息。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `push_startup_menu_preview_text(...)`；
+    - `startup_menu_preview_render_pass(...)` 增加 `MINDUSTRY`、`RUST MDT PREVIEW`、`PLAY`、`SETTINGS`、`WORLD NOT LOADED` 文本；
+    - 文本使用 `RenderTextStyle::Center + Center vertical + integer_position + outline`，进入现有 `DrawText -> glyph quads -> primitive/OpenGL` 主链；
+    - `desktop_launcher_default_surface_frame_bridges_menu_plan_without_world` 断言 preview pass 包含上述文本，并且 headless OpenGL executor 产生 `primitive:DrawText` sprite quads。
+- 迁移意义：
+  - no-world 客户端启动画面从“非黑屏色块”推进到“可见标题/按钮文字”，对实际前端可见性更接近可操作菜单；
+  - 该改动复用现有 render/backend 链路，不是独立 UI mock。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_preserves_draw_text_style --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 启动预览不是最终 Java `MenuFragment` / Scene UI；
+  - 字体仍是 placeholder bitmap glyph，不是真实 Arc/FreeType font atlas；
+  - 菜单按钮交互、设置/加入/编辑器页面与真实 UI layout 仍需继续迁移。

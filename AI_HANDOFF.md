@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **47.7%**。
+- 当前总体迁移完成度：约 **47.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -14044,3 +14044,28 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. Java `curStroke/anyNearby` 目前没有进入 snapshot/wire，本轮暂未绘制 range 扩展 arc 与 `Drawf.light`；
   2. Java 自定义 `color/layer/effectRadius/sectorRad/rotateSpeed/sectors` 目前 Rust descriptor 未携带，先按默认值；
   3. 后续可继续补 `ArmorPlateAbility` 或转入真实 font atlas / 菜单 Scene UI。
+
+### 2026-05-30：启动菜单预览接入可见文字
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **47.8%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `startup_menu_preview_render_pass(...)` 不再只是色块；
+    - 新增 `push_startup_menu_preview_text(...)`，在 no-world 启动预览中绘制 `MINDUSTRY`、`RUST MDT PREVIEW`、`PLAY`、`SETTINGS`、`WORLD NOT LOADED`；
+    - 文本走现有 `RenderCommand::DrawText -> placeholder glyph quads -> primitive-white texture -> sprite mesh/OpenGL` 主链；
+    - `desktop_launcher_default_surface_frame_bridges_menu_plan_without_world` 增加 preview DrawText 与 `primitive:DrawText` 断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_preserves_draw_text_style --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. 这仍是启动预览，不是完整 Java `MenuFragment` / Scene UI；
+  2. 文字仍是 placeholder bitmap glyph，不是真实 font atlas；
+  3. 后续应把真实菜单按钮/交互/字体 atlas 接入同一 frame/backend 主链。
