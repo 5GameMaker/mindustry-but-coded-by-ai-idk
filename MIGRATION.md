@@ -18715,3 +18715,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - SettingsTable 还未按平台条件过滤实际可见项；
   - settings 持久化与各项设置真实 side effects 尚未接入；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 525. SettingsMenuDialog slider 拖拽连续更新
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.1%**，仍未达到完整可玩；继续把 SettingsTable 的 slider 从点击写入推进到 Scene2D 式按住拖动连续更新。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_drag_action_at_surface_point()`，按 `last_settings_pressed_control` 找回当前页已按住的 slider 控件；
+    - 拖动时复用当前 SettingsTable 的 clip、scroll offset、row rect 与 `settings_pref_widget_slider_track_rect()`，保证滑条 value 计算和渲染/命中共用同一布局；
+    - `CursorMoved` 事件在更新 hover 后，如果当前按住的是 slider，会持续分发 `SetSliderValue(table, key, value)` 并写入 `settings_overrides`；
+    - 拖出 track 左右两端时继续按 min/max clamp，符合 slider 拖动时持续跟随鼠标的预期。
+  - 测试：
+    - 新增 `desktop_launcher_settings_slider_drag_updates_override_continuously`，验证按住 `saveinterval` 滑条最小值后不松开移动到最右侧，会把 override 从 `10` 连续更新到 `600`，释放后清空 pressed 状态。
+- 迁移意义：
+  - Settings slider 交互进入“按住-拖动-持续更新-释放”的真实输入链路，不再只是 click-to-set；
+  - 该行为仍接在 `DesktopLauncher.apply_menu_input_events()` / `DesktopMenuRouteShellAction::Settings` 主链路上，不是独立 helper；
+  - 为后续 scroll knob 拖拽、tooltip、disabled 条件、设置持久化与 runtime side effects 继续铺路。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - scroll knob 还不能拖拽，SettingsTable 布局还未完全复刻 Java 的 `padTop/stack/460f` 等细节；
+  - Settings 平台条件过滤、tooltip description、持久化 settings 文件和 side effects 仍未接入；
+  - 完整 UI 还必须继续还原 Join/Load/About/剩余 route，不能把当前 Settings 闭环误认为完整前端；
+  - 未达到完整可玩，不能宣告目标完成。

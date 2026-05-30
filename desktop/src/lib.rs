@@ -19382,6 +19382,48 @@ impl DesktopLauncher {
             .and_then(Self::settings_control_id_from_action)
     }
 
+    fn settings_drag_action_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        _y: f32,
+    ) -> Option<DesktopSettingsAction> {
+        if self.active_menu_route != Some(DesktopMenuRoute::Settings) {
+            return None;
+        }
+        let pressed = self.last_settings_pressed_control?;
+        let (DesktopSettingsPage::Game
+        | DesktopSettingsPage::Graphics
+        | DesktopSettingsPage::Sound) = self.settings_dialog_state.page
+        else {
+            return None;
+        };
+        let table = self.settings_dialog_state.page.key();
+        if pressed.table != table {
+            return None;
+        }
+        let spec = settings_pref_spec(pressed.table, pressed.key)?;
+        if spec.kind != DesktopSettingsPrefKind::Slider {
+            return None;
+        }
+        let range = spec.range_step?;
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
+        let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
+        let index = Self::settings_pref_widget_specs(table)
+            .iter()
+            .position(|candidate| candidate.table == spec.table && candidate.key == spec.key)?;
+        let row =
+            Self::settings_pref_widget_row_rect_for_clip_with_scroll(clip, index, scroll_offset);
+        let track = Self::settings_pref_widget_slider_track_rect(row);
+        let value = Self::settings_slider_value_from_track_x(range, track, x);
+        Some(DesktopSettingsAction::SetSliderValue(
+            spec.table, spec.key, value,
+        ))
+    }
+
     fn apply_settings_scroll_delta(
         &mut self,
         surface_size: DesktopSurfaceSize,
@@ -20250,6 +20292,11 @@ impl DesktopLauncher {
                         self.menu_button_at_surface_point(surface_size, point.x, point.y);
                     self.last_settings_hovered_control =
                         self.settings_control_id_at_surface_point(surface_size, point.x, point.y);
+                    if let Some(action) =
+                        self.settings_drag_action_at_surface_point(surface_size, point.x, point.y)
+                    {
+                        self.dispatch_settings_action(action);
+                    }
                 }
                 DesktopInputTickEvent::MouseButton { button, pressed }
                     if !*pressed && Self::is_primary_menu_mouse_button(button) =>
@@ -38759,6 +38806,91 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(pressed_sprites.contains(&"slider-knob-down"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::MouseButton {
+                button: "primary".into(),
+                pressed: false,
+            }],
+        );
+        assert_eq!(launcher.last_settings_pressed_control, None);
+    }
+
+    #[test]
+    fn desktop_launcher_settings_slider_drag_updates_override_continuously() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let clip = DesktopLauncher::settings_pref_widget_clip_rect_for_panel(panel);
+        let specs = DesktopLauncher::settings_pref_widget_specs("game");
+        let save_index = specs
+            .iter()
+            .position(|spec| spec.key == "saveinterval")
+            .expect("game settings should include saveinterval");
+        let save_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip_with_scroll(
+            clip, save_index, 0.0,
+        );
+        let save_track = DesktopLauncher::settings_pref_widget_slider_track_rect(save_row);
+        let min_point = RenderPoint::new(save_track.x, save_track.center().y);
+        let max_point = RenderPoint::new(save_track.x + save_track.width, save_track.center().y);
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: min_point.x,
+                    y: min_point.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_settings_pressed_control,
+            Some(super::DesktopSettingsControlId::new("game", "saveinterval"))
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("game", "saveinterval")
+                .as_deref(),
+            Some("10")
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: max_point.x,
+                y: max_point.y,
+            }],
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::SetSliderValue(
+                "game",
+                "saveinterval",
+                600
+            ))
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("game", "saveinterval")
+                .as_deref(),
+            Some("600")
+        );
+        assert_eq!(
+            launcher.last_settings_pressed_control,
+            Some(super::DesktopSettingsControlId::new("game", "saveinterval"))
+        );
 
         launcher.apply_menu_input_events(
             surface,
