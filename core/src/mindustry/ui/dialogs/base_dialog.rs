@@ -1,9 +1,16 @@
 //! Base dialog state shell mirroring upstream `mindustry.ui.dialogs.BaseDialog`.
 //!
-//! This module intentionally stays data-oriented: it captures the dialog skin
-//! contract from Java (`Styles.defaultDialog` / `Styles.fullDialog`) without
-//! implementing any rendering.  The symbolic fields here are meant to be wired
-//! into real Tex / nine-patch resources later.
+//! This module intentionally keeps the runtime state data-oriented, while also
+//! exposing a small backend-neutral render seam for the Java
+//! `Styles.defaultDialog` / `Styles.fullDialog` skin contract.  The generated
+//! commands name the real atlas resources (`window-empty.9`, `whiteui`) so the
+//! desktop/backend layer can resolve them as Arc/Java drawables instead of
+//! falling back to ad-hoc solid rectangles.
+
+use crate::mindustry::graphics::{
+    Layer, Pal, RenderCommand, RenderPoint, RenderRect, RenderTextAlign, RenderTextStyle,
+    RenderTextVerticalAlign,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogDrawableRef {
@@ -18,6 +25,33 @@ impl DialogDrawableRef {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Named(name) => name,
+        }
+    }
+
+    /// Atlas symbol used by the render backend.
+    ///
+    /// Java exposes `Tex.windowEmpty` from `window-empty.9.png`, while `black`,
+    /// `black9` and `whiteui` are all `whiteui` texture drawables with different
+    /// tints in `Styles.load()`.
+    pub fn atlas_symbol(self) -> &'static str {
+        let Self::Named(name) = self;
+        if name == "window-empty" || name == "window-empty.9" {
+            "window-empty.9"
+        } else if name == "black" || name == "black9" || name == "whiteui" {
+            "whiteui"
+        } else {
+            name
+        }
+    }
+
+    pub fn default_tint(self) -> [f32; 4] {
+        let Self::Named(name) = self;
+        if name == "black" {
+            [0.0, 0.0, 0.0, 1.0]
+        } else if name == "black9" {
+            [0.0, 0.0, 0.0, 0.9]
+        } else {
+            [1.0, 1.0, 1.0, 1.0]
         }
     }
 }
@@ -35,6 +69,19 @@ impl DialogColorRef {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Named(name) => name,
+        }
+    }
+
+    pub fn rgba(self) -> [f32; 4] {
+        let Self::Named(name) = self;
+        if name == "accent" {
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a]
+        } else if name == "white" {
+            [1.0, 1.0, 1.0, 1.0]
+        } else if name == "black" {
+            [0.0, 0.0, 0.0, 1.0]
+        } else {
+            [1.0, 1.0, 1.0, 1.0]
         }
     }
 }
@@ -107,6 +154,35 @@ impl DialogStyle {
             }),
         }
     }
+
+    pub fn skin_commands(&self, layout: DialogShellLayout) -> Vec<RenderCommand> {
+        let mut commands = Vec::new();
+        if let Some(stage_background) = self.stage_background {
+            commands.push(draw_dialog_drawable(
+                stage_background,
+                layout.stage_rect,
+                None,
+                layout.stage_layer,
+            ));
+        }
+        if let Some(background) = self.background {
+            commands.push(draw_dialog_drawable(
+                background,
+                layout.panel_rect,
+                None,
+                layout.panel_layer,
+            ));
+        }
+        if let Some(accent_line) = &self.accent_line {
+            commands.push(draw_dialog_drawable(
+                accent_line.drawable,
+                layout.accent_line_rect,
+                accent_line.tint.map(DialogColorRef::rgba),
+                layout.accent_layer,
+            ));
+        }
+        commands
+    }
 }
 
 impl Default for DialogStyle {
@@ -175,6 +251,58 @@ pub struct BaseDialog {
     close_listener: bool,
     close_button_width: Option<f32>,
     resize_focus_updates: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DialogShellLayout {
+    pub stage_rect: RenderRect,
+    pub panel_rect: RenderRect,
+    pub title_position: RenderPoint,
+    pub title_font_size: f32,
+    pub accent_line_rect: RenderRect,
+    pub stage_layer: f32,
+    pub panel_layer: f32,
+    pub accent_layer: f32,
+    pub title_layer: f32,
+}
+
+impl DialogShellLayout {
+    pub fn from_stage_and_panel(stage_rect: RenderRect, panel_rect: RenderRect) -> Self {
+        Self {
+            stage_rect,
+            panel_rect,
+            title_position: RenderPoint::new(
+                panel_rect.x + panel_rect.width * 0.5,
+                panel_rect.y + panel_rect.height - 38.0,
+            ),
+            title_font_size: 24.0,
+            accent_line_rect: RenderRect::new(
+                panel_rect.x + 24.0,
+                panel_rect.y + panel_rect.height - 62.0,
+                (panel_rect.width - 48.0).max(0.0),
+                3.0,
+            ),
+            stage_layer: Layer::END_PIXELED - 0.03,
+            panel_layer: Layer::END_PIXELED,
+            accent_layer: Layer::END_PIXELED + 0.01,
+            title_layer: Layer::END_PIXELED + 0.02,
+        }
+    }
+}
+
+fn draw_dialog_drawable(
+    drawable: DialogDrawableRef,
+    rect: RenderRect,
+    tint: Option<[f32; 4]>,
+    layer: f32,
+) -> RenderCommand {
+    RenderCommand::draw_sprite(
+        drawable.atlas_symbol(),
+        rect,
+        tint.unwrap_or_else(|| drawable.default_tint()),
+        0.0,
+        layer,
+    )
 }
 
 impl BaseDialog {
@@ -263,6 +391,32 @@ impl BaseDialog {
     pub fn add_close_button(&mut self) {
         self.add_close_button_with_width(210.0);
     }
+
+    pub fn shell_render_commands(&self, layout: DialogShellLayout) -> Vec<RenderCommand> {
+        let mut commands = self.style.skin_commands(layout);
+        if !self.title.is_empty() {
+            commands.insert(
+                2.min(commands.len()),
+                RenderCommand::draw_text_styled(
+                    self.title.clone(),
+                    layout.title_position,
+                    self.style
+                        .title
+                        .color
+                        .map(DialogColorRef::rgba)
+                        .unwrap_or([1.0, 1.0, 1.0, 1.0]),
+                    layout.title_font_size,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    layout.title_layer,
+                ),
+            );
+        }
+        commands
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +473,106 @@ mod tests {
                 pad: 4.0,
             })
         );
+    }
+
+    #[test]
+    fn dialog_drawable_refs_resolve_to_java_tex_atlas_symbols() {
+        assert_eq!(
+            DialogDrawableRef::named("window-empty").atlas_symbol(),
+            "window-empty.9"
+        );
+        assert_eq!(
+            DialogDrawableRef::named("window-empty.9").atlas_symbol(),
+            "window-empty.9"
+        );
+        assert_eq!(DialogDrawableRef::named("black9").atlas_symbol(), "whiteui");
+        assert_eq!(DialogDrawableRef::named("black").atlas_symbol(), "whiteui");
+        assert_eq!(
+            DialogDrawableRef::named("whiteui").atlas_symbol(),
+            "whiteui"
+        );
+        assert_eq!(
+            DialogDrawableRef::named("black9").default_tint(),
+            [0.0, 0.0, 0.0, 0.9]
+        );
+    }
+
+    #[test]
+    fn base_dialog_shell_commands_use_window_empty_nine_patch_skin() {
+        let dialog = BaseDialog::new("@title");
+        let layout = DialogShellLayout::from_stage_and_panel(
+            RenderRect::new(0.0, 0.0, 800.0, 600.0),
+            RenderRect::new(140.0, 160.0, 520.0, 220.0),
+        );
+
+        let commands = dialog.shell_render_commands(layout);
+
+        assert_eq!(commands.len(), 4);
+        match &commands[0] {
+            RenderCommand::DrawSprite {
+                symbol, tint, rect, ..
+            } => {
+                assert_eq!(symbol, "whiteui");
+                assert_eq!(*rect, layout.stage_rect);
+                assert_eq!(*tint, [0.0, 0.0, 0.0, 0.9]);
+            }
+            other => panic!("expected black9 stage sprite, got {other:?}"),
+        }
+        match &commands[1] {
+            RenderCommand::DrawSprite {
+                symbol, rect, tint, ..
+            } => {
+                assert_eq!(symbol, "window-empty.9");
+                assert_eq!(*rect, layout.panel_rect);
+                assert_eq!(*tint, [1.0, 1.0, 1.0, 1.0]);
+            }
+            other => panic!("expected window-empty.9 panel sprite, got {other:?}"),
+        }
+        match &commands[2] {
+            RenderCommand::DrawText { text, color, .. } => {
+                assert_eq!(text, "@title");
+                assert_eq!(
+                    *color,
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a]
+                );
+            }
+            other => panic!("expected dialog title text, got {other:?}"),
+        }
+        match &commands[3] {
+            RenderCommand::DrawSprite {
+                symbol, rect, tint, ..
+            } => {
+                assert_eq!(symbol, "whiteui");
+                assert_eq!(*rect, layout.accent_line_rect);
+                assert_eq!(
+                    *tint,
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, Pal::ACCENT.a]
+                );
+            }
+            other => panic!("expected accent whiteui separator sprite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn full_dialog_shell_uses_opaque_black_stage_background() {
+        let dialog = BaseDialog::with_style("@full", DialogStyle::full_dialog());
+        let layout = DialogShellLayout::from_stage_and_panel(
+            RenderRect::new(0.0, 0.0, 320.0, 240.0),
+            RenderRect::new(20.0, 30.0, 280.0, 180.0),
+        );
+
+        let commands = dialog.shell_render_commands(layout);
+
+        match &commands[0] {
+            RenderCommand::DrawSprite {
+                symbol, tint, rect, ..
+            } => {
+                assert_eq!(symbol, "whiteui");
+                assert_eq!(*rect, layout.stage_rect);
+                assert_eq!(*tint, [0.0, 0.0, 0.0, 1.0]);
+            }
+            other => panic!("expected black stage sprite, got {other:?}"),
+        }
     }
 
     #[test]

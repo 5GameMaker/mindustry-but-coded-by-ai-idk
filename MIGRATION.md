@@ -17894,3 +17894,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 字体与 Icon glyph atlas 仍是 UI 还原的关键缺口，`DrawText` 仍需替换掉 placeholder；
   - rotated nine-patch 尚未展开，完整 Scene2D widget 树仍未迁移；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 497. Dialog 外壳接入原版 window-empty 皮肤
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.3%**，仍未达到完整可玩；继续优先推进原版 UI 还原，不能把 route shell 当最终 UI。
+- 问题背景：
+  - Java `Styles.defaultDialog/fullDialog` 使用 `black9/black` stage background、`window-empty` panel background、`Fonts.def + Pal.accent` 标题和 `whiteui + accent` 标题分隔线；
+  - 496 已经让 desktop OpenGL 能展开 `.9.png`，但 `DesktopMenuRoute` 的 Dialog/页面 shell 仍是手写色块；
+  - 本轮把 DialogStyle 的资源语义真正接到 render command 和 desktop route shell。
+- 本轮主改动：
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - `DialogDrawableRef` 增加 atlas 映射：`window-empty/window-empty.9 -> window-empty.9`，`black/black9/whiteui -> whiteui`；
+    - 增加 drawable 默认 tint：`black9 = [0,0,0,0.9]`，`black = [0,0,0,1]`；
+    - `DialogColorRef::rgba()` 承接 `accent/white/black`；
+    - 新增 `DialogShellLayout`、`DialogStyle::skin_commands(...)`、`BaseDialog::shell_render_commands(...)`，让 BaseDialog 直接输出真实 `DrawSprite(window-empty.9/whiteui)` 和标题文本；
+    - 新增测试覆盖 Java Tex atlas symbol、default/full dialog skin command。
+  - `core/src/mindustry/ui/dialogs/mod.rs`
+    - 导出 `DialogShellLayout`，供 desktop route shell 复用 core Dialog 契约。
+  - `desktop/src/lib.rs`
+    - 默认 desktop atlas 增加 `window-empty.9`、`pane.9`、`button.9`、`button-down.9`、`whiteui`；
+    - `push_active_menu_route_shell(...)` 改用 `BaseDialog::shell_render_commands(...)` 绘制 stage/panel/title/accent，不再把 Dialog 外壳硬编码成纯色块；
+    - route shell 主按钮/复制按钮接入 `button.9` sprite，继续保留 fallback fill/stroke 保障可见性；
+    - 回归测试断言默认 atlas 包含新增 UI skin，并验证 route shell 输出 `window-empty.9/whiteui/button.9`。
+- 迁移意义：
+  - Dialog 外壳开始复用 core 的 `BaseDialog/DialogStyle` 契约，模块不再孤立存在；
+  - `window-empty.9` 现在从 Java skin 语义一路接到 desktop OpenGL 九宫格绘制链路；
+  - 后续 Settings/Load/About/Mods 等真实 Dialog 可以在同一 shell 上扩展，不需要继续堆临时面板色块。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core base_dialog --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - route shell 内容仍大量是文本占位，Settings/Mods/Database/TechTree/Editor 等真实 Scene2D 页面还未完整迁移；
+  - `pane-2/pane-left/pane-right/pane-top/button-over/button-disabled/scroll/slider/check/textfield` 等 Styles 资源仍需纳入统一 skin 表；
+  - `DrawText` 仍是占位 glyph，必须继续接真实字体和 icon atlas；
+  - 未达到完整可玩，不能宣告目标完成。

@@ -88,6 +88,7 @@ use mindustry_core::mindustry::r#type::{
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
+use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::{Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw};
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -13355,9 +13356,18 @@ fn default_desktop_texture_atlas(
     TextureAtlasPlan::from_virtual_source_paths(
         std::iter::once("sprites/logo.png".to_string())
             .chain(
-                ["discord-banner", "info-banner", "flat-down-base.9"]
-                    .into_iter()
-                    .map(|name| format!("sprites/ui/{name}.png")),
+                [
+                    "discord-banner",
+                    "info-banner",
+                    "flat-down-base.9",
+                    "window-empty.9",
+                    "pane.9",
+                    "button.9",
+                    "button-down.9",
+                    "whiteui",
+                ]
+                .into_iter()
+                .map(|name| format!("sprites/ui/{name}.png")),
             )
             .chain(content_icon_candidate_virtual_source_paths(content_loader))
             .into_iter()
@@ -17878,28 +17888,18 @@ impl DesktopLauncher {
         };
 
         let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
-        pass.push(RenderCommand::fill_rect(
-            panel,
-            [0.02, 0.025, 0.03, 0.82],
-            Layer::END_PIXELED,
-        ));
+        let dialog = BaseDialog::new(route.title());
+        let stage_rect = RenderRect::new(viewport.x, viewport.y, viewport.width, viewport.height);
+        for command in
+            dialog.shell_render_commands(DialogShellLayout::from_stage_and_panel(stage_rect, panel))
+        {
+            pass.push(command);
+        }
         pass.push(RenderCommand::stroke_rect(
             panel,
             [0.32, 0.42, 0.5, 0.95],
             2.0,
             Layer::END_PIXELED + 0.01,
-        ));
-        pass.push(RenderCommand::draw_text_styled(
-            route.title(),
-            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 46.0),
-            [0.92, 0.96, 1.0, 1.0],
-            24.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
-            Layer::END_PIXELED + 0.02,
         ));
         pass.push(RenderCommand::draw_text_styled(
             format!("upstream: {}", route.upstream_dialog()),
@@ -17939,6 +17939,13 @@ impl DesktopLauncher {
                 [0.18, 0.35, 0.58, 0.92],
                 Layer::END_PIXELED + 0.03,
             ));
+            pass.push(RenderCommand::draw_sprite(
+                "button.9",
+                primary_rect,
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                Layer::END_PIXELED + 0.035,
+            ));
             pass.push(RenderCommand::stroke_rect(
                 primary_rect,
                 [0.58, 0.75, 0.92, 1.0],
@@ -17963,6 +17970,13 @@ impl DesktopLauncher {
                 copy_rect,
                 [0.16, 0.24, 0.32, 0.9],
                 Layer::END_PIXELED + 0.03,
+            ));
+            pass.push(RenderCommand::draw_sprite(
+                "button.9",
+                copy_rect,
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                Layer::END_PIXELED + 0.035,
             ));
             pass.push(RenderCommand::stroke_rect(
                 copy_rect,
@@ -34307,7 +34321,7 @@ mod tests {
         );
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
-        let route_text_present = frame
+        let commands = frame
             .bundle
             .render_frame
             .as_ref()
@@ -34315,13 +34329,23 @@ mod tests {
             .passes
             .iter()
             .flat_map(|pass| pass.commands.iter())
-            .any(|command| {
-                matches!(
-                    command,
-                    RenderCommand::DrawText { text, .. } if text == "upstream: DatabaseDialog"
-                )
-            });
+            .collect::<Vec<_>>();
+        let route_text_present = commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "upstream: DatabaseDialog"
+            )
+        });
         assert!(route_text_present);
+        let route_shell_symbols = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, .. } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(route_shell_symbols.contains(&"window-empty.9"));
+        assert!(route_shell_symbols.contains(&"whiteui"));
     }
 
     #[test]
@@ -34331,6 +34355,11 @@ mod tests {
         assert!(launcher.texture_atlas.lookup("discord-banner").is_ok());
         assert!(launcher.texture_atlas.lookup("info-banner").is_ok());
         assert!(launcher.texture_atlas.lookup("flat-down-base.9").is_ok());
+        assert!(launcher.texture_atlas.lookup("window-empty.9").is_ok());
+        assert!(launcher.texture_atlas.lookup("pane.9").is_ok());
+        assert!(launcher.texture_atlas.lookup("button.9").is_ok());
+        assert!(launcher.texture_atlas.lookup("button-down.9").is_ok());
+        assert!(launcher.texture_atlas.lookup("whiteui").is_ok());
 
         let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
@@ -34893,7 +34922,7 @@ mod tests {
         assert_eq!(launcher.last_menu_action, None);
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
-        let texts = frame
+        let commands = frame
             .bundle
             .render_frame
             .as_ref()
@@ -34901,8 +34930,18 @@ mod tests {
             .passes
             .iter()
             .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
             .filter_map(|command| match command {
                 RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let symbols = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, .. } => Some(symbol.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -34910,6 +34949,7 @@ mod tests {
         assert!(texts.contains(&"discord: Join the Mindustry Discord!"));
         assert!(texts.contains(&"url: https://discord.gg/mindustry"));
         assert!(texts.contains(&"COPYLINK"));
+        assert!(symbols.contains(&"button.9"));
 
         let open_center = DesktopLauncher::active_menu_route_shell_primary_rect_for_viewport(
             viewport,
