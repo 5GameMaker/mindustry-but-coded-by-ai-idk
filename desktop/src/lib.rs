@@ -13078,7 +13078,7 @@ impl DesktopLauncher {
         surface_size: DesktopSurfaceSize,
     ) -> RenderViewport {
         let viewport = self.default_render_viewport();
-        if viewport.width > 0.0 && viewport.height > 0.0 {
+        if self.has_renderable_world_for_default_frame() {
             return viewport;
         }
 
@@ -15660,6 +15660,9 @@ impl DesktopLauncher {
     }
 
     fn has_renderable_world_for_default_frame(&self) -> bool {
+        if !self.game_state.is_game() {
+            return false;
+        }
         let size = self.current_render_world_size();
         size.width > 0.0 && size.height > 0.0
     }
@@ -31930,6 +31933,63 @@ mod tests {
             launcher.last_menu_hovered_button,
             Some(MenuButtonRole::Play)
         );
+        assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Play));
+    }
+
+    #[test]
+    fn desktop_launcher_default_surface_frame_bridges_menu_plan_while_menu_state_has_world_size() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        assert!(launcher.game_state.is_menu());
+
+        let surface = DesktopSurfaceSize::new(800, 600);
+        assert_eq!(
+            launcher.default_render_viewport_for_surface(surface),
+            RenderViewport::new(0.0, 0.0, 800.0, 600.0)
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        let stats =
+            launcher.render_default_graphics_frame_for_surface_with(0, surface, 2, &mut renderer);
+
+        assert_eq!(renderer.frames_rendered, 1);
+        assert_eq!(stats.render_passes, 2);
+        assert_eq!(renderer.last_trace.render_passes.len(), 2);
+        assert_eq!(
+            renderer.last_trace.render_passes[0].kind,
+            RenderPassKind::Custom("startup-menu-preview".to_string())
+        );
+        assert_eq!(
+            renderer.last_trace.render_passes[1].kind,
+            RenderPassKind::Custom("menu".to_string())
+        );
+
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let play_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Play)
+            .expect("menu ui should include PLAY")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: play_center.x,
+                    y: play_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
         assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Play));
     }
 

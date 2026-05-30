@@ -209,6 +209,23 @@ void main(){
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+fn prepare_default_framebuffer_state<BindFramebuffer, SetViewport, DisableScissor>(
+    width: i32,
+    height: i32,
+    mut bind_framebuffer: BindFramebuffer,
+    mut set_viewport: SetViewport,
+    mut disable_scissor: DisableScissor,
+) where
+    BindFramebuffer: FnMut(),
+    SetViewport: FnMut(i32, i32),
+    DisableScissor: FnMut(),
+{
+    bind_framebuffer();
+    set_viewport(width, height);
+    disable_scissor();
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 impl DesktopNativeOpenGlRuntime {
     fn new(
         event_loop: &winit::event_loop::ActiveEventLoop,
@@ -321,20 +338,32 @@ impl DesktopNativeOpenGlRuntime {
     }
 
     fn clear_backbuffer(&self) {
+        let size = self.window_surface_size();
+        let width = size.width.min(i32::MAX as u32) as i32;
+        let height = size.height.min(i32::MAX as u32) as i32;
+        prepare_default_framebuffer_state(
+            width,
+            height,
+            || unsafe {
+                self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            },
+            |width, height| unsafe {
+                self.gl.viewport(0, 0, width, height);
+            },
+            || unsafe {
+                // The no-world menu path uses SetClip/ClearClip heavily for preview
+                // rects. Reset native scissor before the next backbuffer clear so a
+                // stale clip state can never turn the following frame into a black
+                // screen even if a previous frame was interrupted mid-pass.
+                self.gl.disable(glow::SCISSOR_TEST);
+            },
+        );
         unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            let size = self.window_surface_size();
-            self.gl.viewport(
-                0,
-                0,
-                size.width.min(i32::MAX as u32) as i32,
-                size.height.min(i32::MAX as u32) as i32,
-            );
-            // The no-world menu path uses SetClip/ClearClip heavily for preview
-            // rects. Reset native scissor before the next backbuffer clear so a
-            // stale clip state can never turn the following frame into a black
-            // screen even if a previous frame was interrupted mid-pass.
-            self.gl.disable(glow::SCISSOR_TEST);
+            self.gl.use_program(None);
+            self.gl.bind_vertex_array(None);
+            self.gl.disable(glow::BLEND);
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.disable(glow::STENCIL_TEST);
             self.gl.clear_color(0.015, 0.018, 0.025, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
@@ -528,9 +557,36 @@ impl DesktopNativeOpenGlDriver<'_> {
             return false;
         };
         let (width, height) = self.viewport_for_render_target(target);
-        unsafe {
-            self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
-            self.gl.viewport(0, 0, width, height);
+        if framebuffer.is_none() {
+            // Returning to the screen/default framebuffer must also drop any stale
+            // clip state so an offscreen pass cannot crop the next visible frame.
+            prepare_default_framebuffer_state(
+                width,
+                height,
+                || unsafe {
+                    self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+                },
+                |width, height| unsafe {
+                    self.gl.viewport(0, 0, width, height);
+                },
+                || unsafe {
+                    self.gl.disable(glow::SCISSOR_TEST);
+                },
+            );
+            unsafe {
+                self.gl.use_program(None);
+                self.gl.bind_vertex_array(None);
+                self.gl.disable(glow::BLEND);
+                self.gl.disable(glow::DEPTH_TEST);
+                self.gl.disable(glow::STENCIL_TEST);
+            }
+            *self.current_program = None;
+            *self.current_vertex_array = None;
+        } else {
+            unsafe {
+                self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+                self.gl.viewport(0, 0, width, height);
+            }
         }
         true
     }
@@ -1879,6 +1935,15 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
 #[cfg(all(test, feature = "opengl-native-runtime"))]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum DefaultFramebufferStateOp {
+        BindDefaultFramebuffer,
+        SetViewport(i32, i32),
+        DisableScissorTest,
+    }
 
     #[test]
     fn native_opengl_app_initializes_frame_loop_from_native_surface_config() {
@@ -1900,6 +1965,43 @@ mod tests {
         assert!(app.window_id.is_none());
         assert!(app.graphics_renderer.is_none());
         assert!(app.pending_events.is_empty());
+    }
+
+    #[test]
+    fn default_framebuffer_state_trace_binds_viewport_and_disables_scissor() {
+        let trace = Rc::new(RefCell::new(Vec::new()));
+        let bind_trace = Rc::clone(&trace);
+        let viewport_trace = Rc::clone(&trace);
+        let scissor_trace = Rc::clone(&trace);
+
+        prepare_default_framebuffer_state(
+            960,
+            540,
+            move || {
+                bind_trace
+                    .borrow_mut()
+                    .push(DefaultFramebufferStateOp::BindDefaultFramebuffer);
+            },
+            move |width, height| {
+                viewport_trace
+                    .borrow_mut()
+                    .push(DefaultFramebufferStateOp::SetViewport(width, height));
+            },
+            move || {
+                scissor_trace
+                    .borrow_mut()
+                    .push(DefaultFramebufferStateOp::DisableScissorTest);
+            },
+        );
+
+        assert_eq!(
+            &*trace.borrow(),
+            &[
+                DefaultFramebufferStateOp::BindDefaultFramebuffer,
+                DefaultFramebufferStateOp::SetViewport(960, 540),
+                DefaultFramebufferStateOp::DisableScissorTest,
+            ]
+        );
     }
 
     #[test]

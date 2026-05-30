@@ -17228,3 +17228,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 尚未实现 PlanetDialog 的 planet grid / sector list / hover hit-test / locked state / launch candidate；
   - `LAUNCH` 仍使用 smoke world，真实 sector save/generator/loadout 还需继续；
   - `new_preset_sector_ids` 目前只是会话字段与 shell 数据源，尚未实现 Java 自动轮播和 shown 持久化。
+
+## 476. 启动菜单黑屏收口：default framebuffer 状态加固 + 菜单 world/surface 分流
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.0%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 抽出 `prepare_default_framebuffer_state(...)`；
+    - `clear_backbuffer()` 与 `bind_framebuffer_target(None)` 切回默认 framebuffer 时统一执行 bind + viewport + disable scissor，并重置 native program / vertex array / blend / depth / stencil 状态，减少离屏 pass 与上一帧状态泄漏；
+    - 新增回归测试 `default_framebuffer_state_trace_binds_viewport_and_disables_scissor`。
+  - `desktop/src/lib.rs`
+    - `default_render_viewport_for_surface(...)` 只有在 `game_state.is_game()` 且 world 尺寸有效时才走 world viewport，否则回退 surface viewport；
+    - `has_renderable_world_for_default_frame()` 增加 `is_game()` 门控，避免菜单态因残留 world size 误走 world 渲染链；
+    - 新增回归测试 `desktop_launcher_default_surface_frame_bridges_menu_plan_while_menu_state_has_world_size`。
+- 迁移意义：
+  - 菜单主链现在不会再因为残留 world 尺寸误切到世界 viewport；
+  - 默认 framebuffer 切回屏幕时统一清掉 scissor 与常见 GPU pipeline 残留状态，减少“逻辑已跑但屏幕仍黑”的状态泄漏风险；
+  - 这仍只是前端/渲染长链中的一个可见性闭环，不是最终完整可玩闭环。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_while_menu_state_has_world_size --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop default_framebuffer_state_trace_binds_viewport_and_disables_scissor --features opengl-native-runtime`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 还需要继续收口完整菜单/UI 叠层、字体 atlas、真实 world load / `PlanetDialog` 主链等；
+  - 当前修复只把菜单最短可见链路与默认 framebuffer 状态链路拉稳，不代表已达到完整可玩。
