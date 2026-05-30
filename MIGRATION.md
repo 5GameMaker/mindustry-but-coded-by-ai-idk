@@ -16425,3 +16425,47 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `UnitDrawStage::Legs` / `Payload` / `Items` / `Parts` / `Abilities` 仍是显式 no-op；
   - hard shadow 当前仍基于 snapshot unit 自身状态与本地 floor lookup，后续若同步协议扩展 `shadowAlpha` 或更完整 floor 语义，需要继续对齐 Java 客户端行为；
   - `LightCommand::Region` / `Runnable`、weather/accelerator custom marker 等渲染后端 lowering 仍需继续。
+
+## 449. 最新闭环记录：Light region 进入真实 sprite 绘制链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.7%**，仍未达到完整可玩。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\graphics\LightRenderer.java:48-63`
+    - `add(float x, float y, TextureRegion region, float rotation, Color color, float opacity)` 在 lighting buffer 内执行 `Draw.rect(region, x, y, rotation)`；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\graphics\LightRenderer.java:26-30`
+    - `add(Runnable)` 是无法直接序列化的回调容器，Rust 侧暂时应保持审计 marker。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_light_render_color(...)`，复用 Java light 色彩语义：`color.a * opacity`；
+    - 新增 `DesktopLauncher::light_renderer_plan_to_render_pass(...)`；
+    - `LightCommand::Region` 在 desktop 侧从原先 `RenderCommand::Custom("light-region")` 转换为真实 `RenderCommand::DrawSprite`；
+    - region sprite 尺寸从当前 `TextureAtlasPlan` 查找，缺失时回退到 `radius * 2` 或最小 `1x1`，保证仍可进入 atlas missing / backend 审计链；
+    - `LightCommand::Runnable` 继续输出 `RenderCommand::Custom("light-runnable")`，保留不可序列化回调的审计标记；
+    - `DesktopLauncher::graphics_frame_for_render(...)` 改为使用 desktop lowering 后的 lighting pass。
+  - 测试：
+    - `desktop_launcher_light_region_custom_command_lowers_to_sprite_draw`
+      - 验证 `add_region(...)` 进入 `Lighting` pass 后是 `DrawSprite`；
+      - 验证 region 名、中心点、atlas 尺寸、rotation、tint、`LIGHT_RENDER_LAYER`；
+      - 验证 `DesktopGraphicsExecutionTrace` 能解析 atlas sprite；
+      - 验证 headless OpenGL backend executor 记录 `circle-shadow` sprite quad。
+    - `desktop_launcher_light_runnable_custom_command_stays_as_audit_marker_only`
+      - 验证 runnable 仍为 `light-runnable` custom marker；
+      - 验证 headless OpenGL backend 只记录 marker，不生成 sprite quad。
+- 迁移意义：
+  - `LightCommand::Region` 不再只是 custom marker，已经进入 `LightRendererState → Desktop lighting pass → DrawSprite → atlas resolve → OpenGL sprite quad/backend` 主链；
+  - `Runnable` 的不可序列化差异被明确保留为审计点，避免伪装成已完整迁移；
+  - 后续 weather/accelerator 等 custom marker 可以复用“能 lowering 就转真实 command，不能 lowering 就保留 marker 并测试”的策略。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_drains_light_renderer_into_render_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_light_region_custom_command_lowers_to_sprite_draw --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_light_runnable_custom_command_stays_as_audit_marker_only --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `LightCommand::Runnable` 仍不是可执行闭包语义，只是审计 marker；
+  - `UnitDrawStage::Legs` / `Payload` / `Items` / `Parts` / `Abilities` 仍需继续填充；
+  - weather / accelerator 等 custom marker 仍需逐项判断并 lowering 到真实渲染命令或明确审计保留。

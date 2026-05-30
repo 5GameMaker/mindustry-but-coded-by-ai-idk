@@ -13540,3 +13540,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续补 `UnitDrawStage::Legs`，参考 `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1827-1900`；
   2. 或先补 `Payload` / `Items` / `Parts`，但必须接入 `unit_snapshot_render_pass()` 的 stage 分支，不能留下孤立 helper；
   3. 并行推进 `LightCommand::Region` / `Runnable` 从 custom marker 到真实 backend lowering。
+
+### 2026-05-30：Light region 进入真实 sprite 绘制链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **43.7%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_light_render_color(...)`；
+    - 新增 `DesktopLauncher::light_renderer_plan_to_render_pass(...)`；
+    - `LightCommand::Region` 现在在 desktop lighting pass 中 lowering 为真实 `DrawSprite`；
+    - `LightCommand::Runnable` 继续保留 `light-runnable` custom marker，作为不可序列化回调的审计点；
+    - `graphics_frame_for_render(...)` 使用 desktop lowering 后的 light renderer pass。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_drains_light_renderer_into_render_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_light_region_custom_command_lowers_to_sprite_draw --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_light_runnable_custom_command_stays_as_audit_marker_only --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 推荐优先补 `UnitDrawStage::Items`，它是剩余 unit stage 中数据最完整、风险最低的闭环；
+  2. 继续清理 weather / accelerator custom marker，能 lowering 的转真实命令，不能的保留审计测试；
+  3. 后续再推进 `Legs` / `Payload` / `Parts` / `Abilities`，所有新增视觉都必须接入 `unit_snapshot_render_pass()` 主链。

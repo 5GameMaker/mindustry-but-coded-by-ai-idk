@@ -34,6 +34,7 @@ use mindustry_core::mindustry::entities::{
     WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
+use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 use mindustry_core::mindustry::graphics::{
     png_rgba8888_from_path, BlockRendererBlockParticleWorldSample, BlockRendererBuildingSnapshot,
     BlockRendererBuildingVisualRuntimeLiquidSnapshot,
@@ -115,6 +116,15 @@ pub struct DesktopStandardEffectRenderFrame {
 fn desktop_effect_render_color(color: Option<DecalColor>, alpha: f32) -> [f32; 4] {
     let color = color.unwrap_or(DecalColor::WHITE);
     [color.r, color.g, color.b, color.a * alpha]
+}
+
+fn desktop_light_render_color(light: LightPrimitive) -> [f32; 4] {
+    [
+        light.color.r,
+        light.color.g,
+        light.color.b,
+        light.color.a * light.opacity,
+    ]
 }
 
 fn desktop_resolve_color_symbol(name: &str) -> Option<DecalColor> {
@@ -12284,6 +12294,77 @@ impl DesktopLauncher {
         self.light_renderer_state.drain_plan()
     }
 
+    pub fn light_renderer_plan_to_render_pass(
+        &self,
+        plan: LightRendererPlan,
+    ) -> Option<RenderPass> {
+        let mut pass = RenderPass::new(RenderPassKind::Lighting);
+
+        for light in plan.circle_lights {
+            pass.push(RenderCommand::draw_circle(
+                RenderPoint::new(light.center.0, light.center.1),
+                light.radius,
+                desktop_light_render_color(light),
+                true,
+                LIGHT_RENDER_LAYER,
+            ));
+        }
+
+        for command in plan.commands {
+            match command {
+                LightCommand::Runnable { label } => {
+                    pass.push(RenderCommand::custom(
+                        "light-runnable",
+                        vec![RenderProperty::new("label", label)],
+                    ));
+                }
+                LightCommand::Region(region) => {
+                    let symbol = region.region;
+                    let fallback_size = (region.color.radius * 2.0).max(1.0);
+                    let (width, height) = self
+                        .texture_atlas
+                        .lookup(&symbol)
+                        .map(|sprite| {
+                            (
+                                sprite.region.width.max(1) as f32,
+                                sprite.region.height.max(1) as f32,
+                            )
+                        })
+                        .unwrap_or((fallback_size, fallback_size));
+                    pass.push(RenderCommand::draw_sprite(
+                        symbol,
+                        RenderRect::from_center(
+                            RenderPoint::new(region.x, region.y),
+                            width,
+                            height,
+                        ),
+                        desktop_light_render_color(region.color),
+                        region.rotation,
+                        LIGHT_RENDER_LAYER,
+                    ));
+                }
+                LightCommand::Line {
+                    x,
+                    y,
+                    x2,
+                    y2,
+                    stroke,
+                    tint,
+                } => {
+                    pass.push(RenderCommand::draw_line(
+                        RenderPoint::new(x, y),
+                        RenderPoint::new(x2, y2),
+                        stroke,
+                        desktop_light_render_color(tint),
+                        LIGHT_RENDER_LAYER,
+                    ));
+                }
+            }
+        }
+
+        (!pass.commands.is_empty()).then_some(pass)
+    }
+
     pub fn env_render_plan(&self) -> Option<EnvRendererPlan> {
         let context = EnvRendererContext::new(
             self.game_state.rules.env,
@@ -13728,7 +13809,8 @@ impl DesktopLauncher {
         }
         let accelerator_launching_pass =
             self.accelerator_launching_render_pass(camera, viewport, 8.0);
-        if let Some(light_pass) = self.drain_light_renderer_plan().to_render_pass() {
+        let light_renderer_plan = self.drain_light_renderer_plan();
+        if let Some(light_pass) = self.light_renderer_plan_to_render_pass(light_renderer_plan) {
             render_frame.push_pass(light_pass);
         }
         if let Some(light_pass) = self.standard_effect_render_frame().to_light_render_pass() {
@@ -26496,6 +26578,125 @@ mod tests {
         );
         assert_eq!(empty_frame.bundle.stats.render_passes, 0);
         assert_eq!(empty_frame.bundle.stats.render_commands, 0);
+    }
+
+    #[test]
+    fn desktop_launcher_light_region_custom_command_lowers_to_sprite_draw() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let atlas_region = launcher
+            .texture_atlas
+            .lookup("circle-shadow")
+            .expect("base atlas should include circle-shadow");
+        let atlas_region_width = atlas_region.region.width;
+        let atlas_region_height = atlas_region.region.height;
+        let light = LightPrimitive {
+            center: (0.0, 0.0),
+            radius: 0.0,
+            color: DecalColor::from_rgba(0x20406080),
+            opacity: 0.5,
+        };
+        assert!(launcher
+            .light_renderer_state
+            .add_region(12.0, 16.0, "circle-shadow", 45.0, light));
+
+        let viewport = RenderViewport::new(0.0, 0.0, 48.0, 48.0);
+        let camera = RenderCamera::new(RenderPoint::new(24.0, 24.0), viewport);
+        let minimap_camera = MinimapCamera::new(24.0, 24.0, 48.0, 48.0);
+        let frame = launcher.graphics_frame_for_render(
+            13,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let light_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Lighting)
+            .expect("region light should emit a lighting pass");
+        assert_eq!(light_pass.commands.len(), 1);
+        match &light_pass.commands[0] {
+            RenderCommand::DrawSprite {
+                symbol,
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(symbol, "circle-shadow");
+                assert_eq!(rect.center(), RenderPoint::new(12.0, 16.0));
+                assert_eq!(rect.width, atlas_region_width.max(1) as f32);
+                assert_eq!(rect.height, atlas_region_height.max(1) as f32);
+                assert_eq!(*tint, super::desktop_light_render_color(light));
+                assert_eq!(*rotation, 45.0);
+                assert_eq!(*layer, LIGHT_RENDER_LAYER);
+            }
+            other => panic!("expected light-region to lower to DrawSprite, got {other:?}"),
+        }
+
+        let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
+        assert_eq!(trace.render_passes[0].resolved_sprites.len(), 1);
+        assert_eq!(
+            trace.render_passes[0].resolved_sprites[0].symbol,
+            "circle-shadow"
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "circle-shadow"));
+    }
+
+    #[test]
+    fn desktop_launcher_light_runnable_custom_command_stays_as_audit_marker_only() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        assert!(launcher.light_renderer_state.add_runnable("custom-light"));
+
+        let viewport = RenderViewport::new(0.0, 0.0, 48.0, 48.0);
+        let camera = RenderCamera::new(RenderPoint::new(24.0, 24.0), viewport);
+        let minimap_camera = MinimapCamera::new(24.0, 24.0, 48.0, 48.0);
+        let frame = launcher.graphics_frame_for_render(
+            14,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let light_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Lighting)
+            .expect("runnable light should emit an auditable lighting pass marker");
+        assert_eq!(light_pass.commands.len(), 1);
+        match &light_pass.commands[0] {
+            RenderCommand::Custom { name, properties } => {
+                assert_eq!(name, "light-runnable");
+                assert!(properties
+                    .iter()
+                    .any(|property| property.key == "label" && property.value == "custom-light"));
+            }
+            other => panic!("expected light-runnable to remain a Custom marker, got {other:?}"),
+        }
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        renderer.render_graphics_frame(&frame);
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .custom_markers
+            .iter()
+            .any(|marker| marker == "light-runnable"));
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .is_empty());
     }
 
     #[test]
