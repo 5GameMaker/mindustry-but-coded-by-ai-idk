@@ -17754,3 +17754,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `LoadDialog` 还不是完整 Java Dialog，尚未真正加载存档进入 world runtime；
   - `CustomGame / Mods / Editor / Settings / About / Discord / mobile console` 仍大量是 route shell；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 493. Native OpenGL 原始 UI 贴图直载与菜单样式承接
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.9%**，仍未达到完整可玩；UI 目标是完整还原 MDT/Mindustry 原版 `Tex/Styles/Dialog/MenuFragment` 视觉与交互，而不是长期保留色块/文本 shell。
+- 问题背景：
+  - 原版主菜单与 Dialog 的识别度主要来自真实 UI PNG、九宫格 Drawable、字体和 `Styles` 状态，而当前 Rust native fallback 仍大量是纯色块；
+  - 默认 atlas 里保留 `sprites/logo.png`、`sprites/blocks/router.png` 这类虚拟路径，但真实 upstream raw 资源常在更深目录，例如 `sprites/ui/logo.png`、`sprites/blocks/distribution/router.png`；
+  - 如果 native OpenGL 只尝试直接拼同名路径，会继续退回虚拟 atlas page，导致 logo/banner/block 等资源不能稳定直载真实 PNG。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 增强 `desktop_existing_sprite_source_path(...)`，在 `MINDUSTRY_ASSET_ROOT` 的 sibling `assets-raw` 与 `MINDUSTRY_ASSET_RAW_ROOT` 下支持按文件名递归查找，并按虚拟 source path 的目录前缀打分选择最佳 raw PNG；
+    - 增加查找缓存，避免同一 raw root/source path 在后续帧重复扫目录；
+    - `DesktopGraphicsOpenGlBackendTextureBinding::from_resolved_sprite(...)` 继续沿用单图直载路径：真实 raw PNG 存在时用真实尺寸、真实路径和全幅 UV `[0,0,1,1]` 生成上传计划；
+    - 新增测试覆盖 `sprites/logo.png -> assets-raw/sprites/ui/logo.png` 与 `sprites/blocks/router.png -> assets-raw/sprites/blocks/distribution/router.png` 的虚拟路径解析，以及 UI sprite 直载上传计划。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 将主菜单按钮当前 fallback 色值/文字层级/文字样式集中到 `MenuFlatToggleMenuStyle` / `MENU_FLAT_TOGGLE_MENU_STYLE`；
+    - 按 Java `Styles.flatToggleMenut` 的状态语义保留 `Down/Up/Checked/Over/Disabled`，为后续替换成真实 `Tex`/九宫格 Drawable 留出稳定接入点；
+    - 新增状态映射与样式回归测试，确保默认布局/role 逻辑不变。
+- 迁移意义：
+  - native OpenGL 可以从上游 `core/assets-raw` 直接吃到 logo、UI banner、block sprite 等真实 PNG，贴图级 UI 还原进入主链；
+  - 菜单按钮不再把视觉参数散落在渲染逻辑中，下一步可把 fallback fill 替换为原版 button/pane/window 九宫格贴图；
+  - 这仍只是资源/样式承接层，不是完整 UI 终点；字体 atlas、完整 Dialog widget/scroll/table/skin 仍需继续迁移。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu_ -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_resolves_virtual_sprite_source_from_asset_raw_tree --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_uses_existing_sprite_source_as_direct_texture_upload --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_emits_texture_upload_plan_for_sprite_atlas_page --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 菜单按钮和 Dialog 背景仍未真正绘制原版 `button*.9.png`、`window-empty.9.png`、`pane*.9.png`；
+  - `DrawText` 仍是 5x7 placeholder quads，必须接真实 `font.woff`/`logic.ttf`/icon glyph atlas；
+  - `Settings / Mods / CustomGame / Editor / Database / TechTree` 仍缺通用 `Table/ScrollPane/Slider/CheckBox/TextField/skin` widget 层；
+  - 未达到完整可玩，不能宣告目标完成。

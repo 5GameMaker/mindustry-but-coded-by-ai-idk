@@ -12,6 +12,74 @@ use super::{
 pub const MENU_DARKNESS: f32 = 0.3;
 pub const MENU_TILE_SIZE: f32 = 8.0;
 
+/// Native-safe approximation of Java `Styles.flatToggleMenut`.
+///
+/// The state names stay explicit so the renderer can later swap the fallback
+/// fills for actual drawable/texture-backed skins without changing the menu
+/// layout or role selection logic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MenuFlatToggleMenuStyle {
+    pub down_fill: [f32; 4],
+    pub up_fill: [f32; 4],
+    pub checked_fill: [f32; 4],
+    pub over_fill: [f32; 4],
+    pub disabled_fill: [f32; 4],
+    pub text_color: [f32; 4],
+    pub disabled_text_color: [f32; 4],
+    pub text_style: RenderTextStyle,
+    pub fill_layer: f32,
+    pub text_layer: f32,
+    pub desktop_text_size: f32,
+    pub mobile_text_size: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuFlatToggleMenuState {
+    Down,
+    Up,
+    Checked,
+    Over,
+    Disabled,
+}
+
+pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleMenuStyle {
+    down_fill: [0.19, 0.38, 0.50, 0.92],
+    up_fill: [0.07, 0.11, 0.16, 0.88],
+    checked_fill: [0.19, 0.38, 0.50, 0.92],
+    over_fill: [0.10, 0.16, 0.22, 0.86],
+    disabled_fill: [0.0, 0.0, 0.0, 1.0],
+    text_color: [0.88, 0.96, 1.0, 1.0],
+    disabled_text_color: [0.5, 0.5, 0.5, 1.0],
+    text_style: RenderTextStyle::new(RenderTextAlign::Center)
+        .with_vertical_align(RenderTextVerticalAlign::Center)
+        .with_integer_position(true)
+        .with_outline(true),
+    fill_layer: 101.0,
+    text_layer: 101.1,
+    desktop_text_size: 8.0,
+    mobile_text_size: 7.0,
+};
+
+impl MenuFlatToggleMenuStyle {
+    pub const fn fill_for(self, state: MenuFlatToggleMenuState) -> [f32; 4] {
+        match state {
+            MenuFlatToggleMenuState::Down => self.down_fill,
+            MenuFlatToggleMenuState::Up => self.up_fill,
+            MenuFlatToggleMenuState::Checked => self.checked_fill,
+            MenuFlatToggleMenuState::Over => self.over_fill,
+            MenuFlatToggleMenuState::Disabled => self.disabled_fill,
+        }
+    }
+
+    pub const fn text_size(self, mobile: bool) -> f32 {
+        if mobile {
+            self.mobile_text_size
+        } else {
+            self.desktop_text_size
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuBlockKind {
     Air,
@@ -292,6 +360,18 @@ pub struct MenuButtonPlan {
     pub submenu: bool,
 }
 
+impl MenuButtonPlan {
+    pub const fn flat_toggle_menu_state(&self) -> MenuFlatToggleMenuState {
+        if self.selected {
+            MenuFlatToggleMenuState::Checked
+        } else if self.submenu {
+            MenuFlatToggleMenuState::Over
+        } else {
+            MenuFlatToggleMenuState::Up
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MenuUiPlan {
     pub mobile: bool,
@@ -313,27 +393,22 @@ impl MenuUiPlan {
     }
 
     pub fn to_render_commands(&self) -> Vec<RenderCommand> {
+        let style = MENU_FLAT_TOGGLE_MENU_STYLE;
         let mut commands = Vec::with_capacity(self.buttons.len() * 2);
         for button in &self.buttons {
-            let fill = if button.selected {
-                [0.19, 0.38, 0.50, 0.92]
-            } else if button.submenu {
-                [0.10, 0.16, 0.22, 0.86]
-            } else {
-                [0.07, 0.11, 0.16, 0.88]
-            };
-            commands.push(RenderCommand::fill_rect(button.rect, fill, 101.0));
+            commands.push(RenderCommand::fill_rect(
+                button.rect,
+                style.fill_for(button.flat_toggle_menu_state()),
+                style.fill_layer,
+            ));
             commands.push(RenderCommand::draw_text_styled(
                 button.label.as_str(),
                 button.rect.center(),
-                [0.88, 0.96, 1.0, 1.0],
-                if self.mobile { 7.0 } else { 8.0 },
+                style.text_color,
+                style.text_size(self.mobile),
                 0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
-                101.1,
+                style.text_style,
+                style.text_layer,
             ));
         }
         commands
@@ -1742,6 +1817,45 @@ mod tests {
         assert!(MenuButtonRole::Workshop.is_desktop_root());
         assert!(!MenuButtonRole::Workshop.has_desktop_submenu());
         assert!(!MenuButtonRole::Workshop.is_submenu());
+    }
+
+    #[test]
+    fn menu_flat_toggle_menu_style_keeps_upstream_state_names_and_current_fallback_fills() {
+        let style = MENU_FLAT_TOGGLE_MENU_STYLE;
+
+        assert_eq!(style.down_fill, [0.19, 0.38, 0.50, 0.92]);
+        assert_eq!(style.up_fill, [0.07, 0.11, 0.16, 0.88]);
+        assert_eq!(style.checked_fill, style.down_fill);
+        assert_eq!(style.over_fill, [0.10, 0.16, 0.22, 0.86]);
+        assert_eq!(style.disabled_fill, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(style.text_color, [0.88, 0.96, 1.0, 1.0]);
+        assert_eq!(style.disabled_text_color, [0.5, 0.5, 0.5, 1.0]);
+        assert_eq!(
+            style.fill_for(MenuFlatToggleMenuState::Down),
+            style.down_fill
+        );
+        assert_eq!(style.fill_for(MenuFlatToggleMenuState::Up), style.up_fill);
+        assert_eq!(
+            style.fill_for(MenuFlatToggleMenuState::Checked),
+            style.checked_fill
+        );
+        assert_eq!(
+            style.fill_for(MenuFlatToggleMenuState::Over),
+            style.over_fill
+        );
+        assert_eq!(
+            style.fill_for(MenuFlatToggleMenuState::Disabled),
+            style.disabled_fill
+        );
+        assert_eq!(style.text_size(false), 8.0);
+        assert_eq!(style.text_size(true), 7.0);
+        assert_eq!(
+            style.text_style,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true)
+        );
     }
 
     #[test]

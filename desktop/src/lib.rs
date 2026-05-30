@@ -41,8 +41,8 @@ use mindustry_core::mindustry::entities::{
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 use mindustry_core::mindustry::graphics::{
-    png_rgba8888_from_path, BlockRendererBlockParticleWorldSample, BlockRendererBuildingSnapshot,
-    BlockRendererBuildingVisualRuntimeLiquidSnapshot,
+    png_dimensions_from_path, png_rgba8888_from_path, BlockRendererBlockParticleWorldSample,
+    BlockRendererBuildingSnapshot, BlockRendererBuildingVisualRuntimeLiquidSnapshot,
     BlockRendererBuildingVisualRuntimePowerSnapshot, BlockRendererBuildingVisualRuntimeSnapshot,
     BlockRendererBuildingVisualRuntimeTurretSnapshot, BlockRendererPlan, BlockRendererState,
     BlockRendererTileSnapshot, BlockRendererWorldSnapshot, CacheLayer as GraphicsCacheLayer, Drawf,
@@ -100,6 +100,7 @@ use mindustry_core::mindustry::UPSTREAM_BASELINE;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_MINDUSTRY_PORT: u16 = 6567;
@@ -4095,6 +4096,169 @@ impl DesktopGraphicsOpenGlBackendTextureResourceTable {
     }
 }
 
+fn desktop_candidate_asset_raw_root_from_asset_root(
+    asset_root: &std::path::Path,
+) -> Option<PathBuf> {
+    asset_root.parent().map(|parent| parent.join("assets-raw"))
+}
+
+fn desktop_sprite_source_path_cache() -> &'static Mutex<BTreeMap<String, Option<PathBuf>>> {
+    static CACHE: OnceLock<Mutex<BTreeMap<String, Option<PathBuf>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn desktop_normalized_path_string(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn desktop_path_components_for_sprite_lookup(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter(|component| !component.is_empty() && *component != "." && *component != "..")
+        .map(|component| component.to_ascii_lowercase())
+        .collect()
+}
+
+fn desktop_sprite_source_lookup_score(
+    raw_root: &Path,
+    candidate: &Path,
+    normalized_source_path: &str,
+) -> usize {
+    let Ok(relative) = candidate.strip_prefix(raw_root) else {
+        return 0;
+    };
+    let candidate_components =
+        desktop_path_components_for_sprite_lookup(&desktop_normalized_path_string(relative));
+    let source_components = desktop_path_components_for_sprite_lookup(normalized_source_path);
+    if source_components.is_empty() || candidate_components.is_empty() {
+        return 0;
+    }
+
+    let source_parent_len = source_components.len().saturating_sub(1);
+    let shared_prefix_len = candidate_components
+        .iter()
+        .zip(source_components.iter())
+        .take(source_parent_len)
+        .take_while(|(candidate, source)| candidate == source)
+        .count();
+    let exact_suffix_bonus = if candidate_components.ends_with(&source_components) {
+        1000
+    } else {
+        0
+    };
+
+    exact_suffix_bonus + shared_prefix_len
+}
+
+fn desktop_find_sprite_source_path_by_filename(
+    raw_root: &Path,
+    normalized_source_path: &str,
+) -> Option<PathBuf> {
+    let source_file_name = Path::new(normalized_source_path).file_name()?.to_owned();
+    let mut pending = vec![raw_root.to_path_buf()];
+    let mut best: Option<(usize, String, PathBuf)> = None;
+
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if !file_type.is_file() || path.file_name() != Some(source_file_name.as_os_str()) {
+                continue;
+            }
+
+            let score = desktop_sprite_source_lookup_score(raw_root, &path, normalized_source_path);
+            let normalized_candidate = desktop_normalized_path_string(&path);
+            let replace_best = best
+                .as_ref()
+                .map(|(best_score, best_path, _)| {
+                    score > *best_score
+                        || (score == *best_score && normalized_candidate < *best_path)
+                })
+                .unwrap_or(true);
+            if replace_best {
+                best = Some((score, normalized_candidate, path));
+            }
+        }
+    }
+
+    best.map(|(_, _, path)| path)
+}
+
+fn desktop_existing_sprite_source_path_from_raw_root(
+    raw_root: &Path,
+    normalized_source_path: &str,
+) -> Option<PathBuf> {
+    let raw_path = raw_root.join(normalized_source_path);
+    if raw_path.exists() {
+        return Some(raw_path);
+    }
+
+    let cache_key = format!(
+        "{}::{}",
+        desktop_normalized_path_string(raw_root),
+        normalized_source_path
+    );
+    if let Ok(cache) = desktop_sprite_source_path_cache().lock() {
+        if let Some(cached) = cache.get(&cache_key) {
+            return cached.clone();
+        }
+    }
+
+    let found = desktop_find_sprite_source_path_by_filename(raw_root, normalized_source_path);
+    if let Ok(mut cache) = desktop_sprite_source_path_cache().lock() {
+        cache.insert(cache_key, found.clone());
+    }
+    found
+}
+
+fn desktop_existing_sprite_source_path(source_path: &str) -> Option<PathBuf> {
+    let normalized = source_path.trim().replace('\\', "/");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let direct = PathBuf::from(&normalized);
+    if direct.exists() {
+        return Some(direct);
+    }
+
+    if let Ok(asset_root) = std::env::var("MINDUSTRY_ASSET_ROOT") {
+        let asset_root = PathBuf::from(asset_root);
+        let asset_path = asset_root.join(&normalized);
+        if asset_path.exists() {
+            return Some(asset_path);
+        }
+
+        if let Some(asset_raw_root) = desktop_candidate_asset_raw_root_from_asset_root(&asset_root)
+        {
+            if let Some(raw_path) =
+                desktop_existing_sprite_source_path_from_raw_root(&asset_raw_root, &normalized)
+            {
+                return Some(raw_path);
+            }
+        }
+    }
+
+    if let Ok(asset_raw_root) = std::env::var("MINDUSTRY_ASSET_RAW_ROOT") {
+        if let Some(raw_path) = desktop_existing_sprite_source_path_from_raw_root(
+            &PathBuf::from(asset_raw_root),
+            &normalized,
+        ) {
+            return Some(raw_path);
+        }
+    }
+
+    None
+}
+
 impl DesktopGraphicsOpenGlBackendTextureBinding {
     pub fn from_resolved_sprite(sprite: &DesktopGraphicsResolvedSpriteTrace) -> Option<Self> {
         if sprite.missing {
@@ -4102,6 +4266,35 @@ impl DesktopGraphicsOpenGlBackendTextureBinding {
         }
         let page_type = sprite.page_type?;
         let page_source_path = sprite.page_source_path.clone()?;
+        if let Some(region_source_path) = sprite.region_source_path.as_deref() {
+            if let Some(existing_source_path) =
+                desktop_existing_sprite_source_path(region_source_path)
+            {
+                if let Some((page_width, page_height)) =
+                    png_dimensions_from_path(&existing_source_path)
+                {
+                    let direct_page_source_path =
+                        existing_source_path.to_string_lossy().replace('\\', "/");
+                    return Some(Self {
+                        command_index: sprite.command_index,
+                        symbol: sprite.symbol.clone(),
+                        texture_identity:
+                            DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                                page_type,
+                                direct_page_source_path.clone(),
+                            ),
+                        page_type,
+                        page_source_path: direct_page_source_path,
+                        page_width,
+                        page_height,
+                        sampler: sprite.sampler,
+                        uv: [0.0, 0.0, 1.0, 1.0],
+                        region_width: page_width,
+                        region_height: page_height,
+                    });
+                }
+            }
+        }
         Some(Self {
             command_index: sprite.command_index,
             symbol: sprite.symbol.clone(),
@@ -26780,6 +26973,145 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_resolves_virtual_sprite_source_from_asset_raw_tree() {
+        let root = temp_desktop_path("opengl-virtual-sprite-raw-root");
+        let asset_root = root.join("assets");
+        let raw_root = root.join("assets-raw");
+        let logo_path = raw_root.join("sprites/ui/logo.png");
+        let router_path = raw_root.join("sprites/blocks/distribution/router.png");
+        std::fs::create_dir_all(&asset_root).expect("asset fixture dir should be writable");
+        std::fs::create_dir_all(logo_path.parent().unwrap())
+            .expect("raw ui fixture dir should be writable");
+        std::fs::create_dir_all(router_path.parent().unwrap())
+            .expect("raw block fixture dir should be writable");
+        write_test_png(&logo_path);
+        write_test_png(&router_path);
+
+        let _asset_guard = EnvVarGuard::set("MINDUSTRY_ASSET_ROOT", &asset_root);
+        let _raw_guard = EnvVarGuard::set("MINDUSTRY_ASSET_RAW_ROOT", &raw_root);
+
+        assert_eq!(
+            super::desktop_existing_sprite_source_path("sprites/logo.png"),
+            Some(logo_path.clone())
+        );
+        assert_eq!(
+            super::desktop_existing_sprite_source_path("sprites/blocks/router.png"),
+            Some(router_path.clone())
+        );
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(44, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Ui).with_target(RenderTarget::Screen);
+        pass.push(RenderCommand::draw_sprite(
+            "logo",
+            RenderRect::new(8.0, 8.0, 32.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::END,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/logo.png"]),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        plan.drive_step_sink(&mut executor);
+
+        let normalized_logo_path = logo_path.to_string_lossy().replace('\\', "/");
+        assert_eq!(executor.state.sprite_texture_upload_plans.len(), 1);
+        let upload = &executor.state.sprite_texture_upload_plans[0];
+        assert_eq!(
+            upload.texture_key,
+            format!("atlas:Main:{normalized_logo_path}")
+        );
+        assert_eq!(upload.page_source_path, normalized_logo_path);
+        assert_eq!(upload.page_width, 1);
+        assert_eq!(upload.page_height, 1);
+        assert_eq!(
+            executor.state.sprite_quads[0]
+                .vertices
+                .iter()
+                .map(|vertex| vertex.uv)
+                .collect::<Vec<_>>(),
+            vec![[0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_uses_existing_sprite_source_as_direct_texture_upload() {
+        let root = temp_desktop_path("opengl-direct-sprite-root");
+        let sprite_dir = root.join("sprites");
+        std::fs::create_dir_all(&sprite_dir).expect("direct sprite fixture dir should be writable");
+        let sprite_path = sprite_dir.join("router.png");
+        write_test_png(&sprite_path);
+        let source_path = sprite_path.to_string_lossy().replace('\\', "/");
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(43, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Block).with_target(RenderTarget::Screen);
+        pass.push(RenderCommand::draw_sprite(
+            "router",
+            RenderRect::new(8.0, 8.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::BLOCK,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: TextureAtlasPlan::from_source_paths([source_path.clone()]),
+        };
+
+        let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
+        let mut executor = DesktopGraphicsOpenGlBackendExecutor::default();
+        plan.drive_step_sink(&mut executor);
+
+        assert_eq!(
+            executor.state.sprite_texture_resource_table.resources.len(),
+            1
+        );
+        assert_eq!(executor.state.sprite_texture_upload_plans.len(), 1);
+        let upload = &executor.state.sprite_texture_upload_plans[0];
+        assert_eq!(upload.texture_key, format!("atlas:Main:{source_path}"));
+        assert_eq!(upload.page_source_path, source_path);
+        assert_eq!(upload.page_width, 1);
+        assert_eq!(upload.page_height, 1);
+        assert_eq!(upload.bind_count, 1);
+        assert_eq!(
+            upload.kind,
+            super::DesktopGraphicsOpenGlBackendTextureUploadKind::FullPage
+        );
+        assert_eq!(
+            executor.state.sprite_quads[0]
+                .vertices
+                .iter()
+                .map(|vertex| vertex.uv)
+                .collect::<Vec<_>>(),
+            vec![[0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn desktop_graphics_opengl_texture_upload_executor_emits_tex_image_2d_for_atlas_full_page() {
         let upload = super::DesktopGraphicsOpenGlBackendTextureUploadPlan {
             texture_key: "atlas:Main:sprites.png".into(),
@@ -31469,6 +31801,29 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
         ];
         std::fs::write(path, PNG_1X1_TRANSPARENT).expect("test png should be writable");
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
     }
 
     fn create_mod_sprite_fixture_root() -> std::path::PathBuf {
