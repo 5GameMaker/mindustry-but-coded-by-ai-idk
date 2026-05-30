@@ -17626,3 +17626,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - DiscordDialog 的 `copylink` 独立按钮尚未接入；
   - Discord route 仍是 shell 文本布局，不是完整 Java Dialog/card；
   - 真实 OS/browser 打开链接的 desktop backend 尚未实现。
+
+## 489. Mobile ConsoleFragment shell 可见化
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.4%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:90`
+    - mobile terminal chrome 点击 `ui.consolefrag.toggleMobile()`；
+  - `core/src/mindustry/ui/fragments/ConsoleFragment.java`
+    - mobile `toggleMobile()` 切换 `shown`，并保持 `open = false`；
+    - mobile 底部按钮包括 chat/up/down/file/cancel；
+    - `messagesShown = 30`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 保留既有 `menu_mobile_terminal_open` toggle；
+    - 新增 `push_mobile_terminal_overlay(...)`，在菜单 render pass 中渲染可见 consolefrag shell；
+    - shell 显示 mobile/open=false/buttons/history/messagesShown 等关键 Java 状态；
+    - 新增测试从 terminal chrome 点击进入 overlay，并验证 render frame 中出现 consolefrag 文本。
+- 迁移意义：
+  - mobile terminal 不再只是内部 bool，已经进入菜单渲染主链；
+  - 后续可在该 shell 上继续接真实消息、scroll、file chooser、cancel hit-test 和脚本执行。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_mobile_terminal_toggle_renders_consolefrag_shell --lib`
+- 仍未完成：
+  - consolefrag 仍未执行脚本、未接真实输入框/历史/滚动；
+  - mobile terminal 的 chat/up/down/file/cancel 仍是文本 shell，尚未接点击区域；
+  - desktop console 模式尚未迁移。

@@ -192,6 +192,7 @@ const ABOUT_CREDITS_TEXT: &str = "Created by [royal]Anuken[] - [sky]anukendev@gm
 const ABOUT_CREDITS_LINE: &str = "credits: Created by Anuken - anukendev@gmail.com";
 pub const ABOUT_DISCORD_LINE: &str = "discord: The official Mindustry Discord chatroom";
 pub const ABOUT_GITHUB_LINE: &str = "github: Game source code";
+const MOBILE_CONSOLE_MESSAGES_SHOWN: usize = 30;
 const MENU_PLAY_GUARD_MESSAGE: &str = "@mod.noerrorplay";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17143,6 +17144,61 @@ impl DesktopLauncher {
         ));
     }
 
+    fn push_mobile_terminal_overlay(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+        if !self.menu_mobile_terminal_open {
+            return;
+        }
+        let panel_width = (viewport.width - 40.0).clamp(260.0, 460.0);
+        let panel = RenderRect::new(viewport.x + 20.0, viewport.y + 72.0, panel_width, 150.0);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.72],
+            Layer::END_PIXELED + 0.09,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            panel,
+            [0.35, 0.75, 0.85, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.1,
+        ));
+        for (index, line) in [
+            "consolefrag: mobile",
+            "open: false",
+            "buttons: chat, up, down, file, cancel",
+            "history: empty",
+        ]
+        .iter()
+        .enumerate()
+        {
+            pass.push(RenderCommand::draw_text_styled(
+                (*line).to_string(),
+                RenderPoint::new(
+                    panel.x + 16.0,
+                    panel.y + panel.height - 24.0 - index as f32 * 20.0,
+                ),
+                [0.78, 0.95, 1.0, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.11,
+            ));
+        }
+        pass.push(RenderCommand::draw_text_styled(
+            format!("messages shown: {MOBILE_CONSOLE_MESSAGES_SHOWN}"),
+            RenderPoint::new(panel.x + 16.0, panel.y + 28.0),
+            [0.62, 0.72, 0.8, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.11,
+        ));
+    }
+
     fn menu_graphics_frame_for_surface(
         &mut self,
         frame_index: u64,
@@ -17157,6 +17213,7 @@ impl DesktopLauncher {
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
         self.push_active_menu_route_shell(&mut menu_pass, frame_viewport);
         self.push_menu_guard_message(&mut menu_pass, frame_viewport);
+        self.push_mobile_terminal_overlay(&mut menu_pass, frame_viewport);
         Self::push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
         let camera = menu_pass
             .camera
@@ -33368,6 +33425,53 @@ mod tests {
             launcher.last_menu_chrome_action,
             Some(super::DesktopMenuChromeAction::MobileTerminalToggle)
         );
+    }
+
+    #[test]
+    fn desktop_launcher_mobile_terminal_toggle_renders_consolefrag_shell() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(540, 960);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
+        let terminal_center = chrome
+            .terminal_rect
+            .expect("mobile chrome layout should include terminal")
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: terminal_center.x,
+                    y: terminal_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert!(launcher.menu_mobile_terminal_open);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&"consolefrag: mobile"));
+        assert!(texts.contains(&"open: false"));
+        assert!(texts.contains(&"buttons: chat, up, down, file, cancel"));
+        assert!(texts.contains(&"messages shown: 30"));
     }
 
     #[test]
