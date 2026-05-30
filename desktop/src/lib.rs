@@ -589,6 +589,46 @@ fn desktop_ui_icon_glyph_or_label(icon_name: &str, fallback: &str) -> String {
     upstream_ui_icon_glyph_string(icon_name).unwrap_or_else(|| fallback.to_string())
 }
 
+fn schematic_search_normalize(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .filter(|ch| {
+            !matches!(
+                ch,
+                '`' | '~'
+                    | '!'
+                    | '@'
+                    | '#'
+                    | '$'
+                    | '%'
+                    | '^'
+                    | '&'
+                    | '*'
+                    | '('
+                    | ')'
+                    | '-'
+                    | '_'
+                    | '='
+                    | '+'
+                    | '{'
+                    | '}'
+                    | '|'
+                    | ';'
+                    | ':'
+                    | '\''
+                    | '"'
+                    | ','
+                    | '<'
+                    | '.'
+                    | '>'
+                    | '/'
+                    | '?'
+            )
+        })
+        .collect()
+}
+
 const ABOUT_BANNED_LINK_NAMES: &[&str] = &["google-play", "itch.io", "dev-builds", "f-droid"];
 
 const SETTINGS_MENU_ENTRIES: &[DesktopSettingsMenuEntry] = &[
@@ -1588,6 +1628,9 @@ pub enum DesktopMenuRouteShellAction {
     OpenMapListFilters,
     NewEditorMap,
     ImportEditorMap,
+    FocusSchematicSearch,
+    ClearSchematicSearch,
+    ToggleSchematicTag(usize),
     OpenSchematicImport,
     OpenSchematicTags,
     SchematicCard(DesktopSchematicCardAction),
@@ -14400,6 +14443,10 @@ pub struct DesktopLauncher {
     pub editor_import_map_dialog_open: bool,
     pub schematic_import_dialog_open: bool,
     pub schematic_tags_dialog_open: bool,
+    pub schematic_search: String,
+    pub schematic_search_focused: bool,
+    pub schematic_selected_tags: Vec<String>,
+    pub last_schematic_tag_toggled: Option<String>,
     pub schematic_cards: Vec<DesktopSchematicCardEntry>,
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
     pub settings_dialog_state: DesktopSettingsDialogState,
@@ -15116,6 +15163,10 @@ impl DesktopLauncher {
             editor_import_map_dialog_open: false,
             schematic_import_dialog_open: false,
             schematic_tags_dialog_open: false,
+            schematic_search: String::new(),
+            schematic_search_focused: false,
+            schematic_selected_tags: Vec::new(),
+            last_schematic_tag_toggled: None,
             schematic_cards: Vec::new(),
             last_schematic_card_action: None,
             settings_dialog_state: DesktopSettingsDialogState::default(),
@@ -18640,6 +18691,13 @@ impl DesktopLauncher {
         )
     }
 
+    fn is_secondary_menu_mouse_button(button: &str) -> bool {
+        matches!(
+            button,
+            "right" | "Right" | "secondary" | "Secondary" | "MouseRight" | "mouse-right" | "1"
+        )
+    }
+
     fn is_menu_back_key(key_code: &str) -> bool {
         matches!(
             key_code,
@@ -18744,6 +18802,11 @@ impl DesktopLauncher {
                 self.last_settings_pressed_control = None;
                 self.settings_scroll_drag_state = None;
                 self.settings_scroll_offsets.clear();
+            } else if route == DesktopMenuRoute::Schematics {
+                self.schematic_search.clear();
+                self.schematic_search_focused = true;
+                self.last_schematic_card_action = None;
+                self.last_schematic_tag_toggled = None;
             }
         }
         let close_requested = role == MenuButtonRole::Quit;
@@ -20371,6 +20434,81 @@ impl DesktopLauncher {
         )
     }
 
+    fn schematics_tag_names(&self) -> Vec<String> {
+        let mut tags = Vec::new();
+        for entry in &self.schematic_cards {
+            for tag in &entry.labels {
+                if !tags.iter().any(|known| known == tag) {
+                    tags.push(tag.clone());
+                }
+            }
+        }
+        tags.sort();
+        tags
+    }
+
+    fn schematics_tag_chip_rects_for_panel(panel: RenderRect, tags: &[String]) -> Vec<RenderRect> {
+        let pane = Self::schematics_tag_pane_rect_for_panel(panel);
+        let mut rects = Vec::with_capacity(tags.len());
+        let mut x = pane.x + 6.0;
+        let y = pane.y + 4.0;
+        let max_right = pane.right() - 6.0;
+        let height = (pane.height - 8.0).max(1.0);
+        for tag in tags {
+            let width = (tag.chars().count() as f32 * 7.0 + 26.0).clamp(54.0, 148.0);
+            if x + width > max_right {
+                break;
+            }
+            rects.push(RenderRect::new(x, y, width, height));
+            x += width + 5.0;
+        }
+        rects
+    }
+
+    fn schematics_tag_chip_index_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<usize> {
+        let tags = self.schematics_tag_names();
+        Self::schematics_tag_chip_rects_for_panel(panel, &tags)
+            .into_iter()
+            .enumerate()
+            .find_map(|(index, rect)| rect.contains_point(point).then_some(index))
+    }
+
+    fn schematic_filter_active(&self) -> bool {
+        !self.schematic_search.is_empty() || !self.schematic_selected_tags.is_empty()
+    }
+
+    fn schematic_card_matches_filters(&self, entry: &DesktopSchematicCardEntry) -> bool {
+        if !self.schematic_selected_tags.is_empty()
+            && !self
+                .schematic_selected_tags
+                .iter()
+                .all(|tag| entry.labels.iter().any(|label| label == tag))
+        {
+            return false;
+        }
+        if !self.schematic_search.is_empty() {
+            let search = schematic_search_normalize(&self.schematic_search);
+            if !schematic_search_normalize(&entry.name).contains(&search) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn filtered_schematic_card_indices(&self) -> Vec<usize> {
+        self.schematic_cards
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                self.schematic_card_matches_filters(entry).then_some(index)
+            })
+            .collect()
+    }
+
     fn schematics_grid_rect_for_panel(panel: RenderRect) -> RenderRect {
         let tags = Self::schematics_tags_row_rect_for_panel(panel);
         let bottom = Self::route_back_button_rect_for_panel(panel).bottom() + 18.0;
@@ -20457,8 +20595,13 @@ impl DesktopLauncher {
         point: RenderPoint,
     ) -> Option<DesktopSchematicCardAction> {
         let grid = Self::schematics_grid_rect_for_panel(panel);
-        for (index, entry) in self.schematic_cards.iter().enumerate() {
-            let card = Self::schematics_card_rect_for_grid(grid, index);
+        for (visible_index, card_index) in self
+            .filtered_schematic_card_indices()
+            .into_iter()
+            .enumerate()
+        {
+            let entry = &self.schematic_cards[card_index];
+            let card = Self::schematics_card_rect_for_grid(grid, visible_index);
             if !Self::schematics_card_visible_in_grid(grid, card) || !card.contains_point(point) {
                 continue;
             }
@@ -20466,11 +20609,11 @@ impl DesktopLauncher {
                 if Self::schematics_card_action_button_rect(card, action_index)
                     .contains_point(point)
                 {
-                    return Self::schematics_card_action_for_index(entry, index, action_index);
+                    return Self::schematics_card_action_for_index(entry, card_index, action_index);
                 }
             }
             return Some(DesktopSchematicCardAction::new(
-                index,
+                card_index,
                 DesktopSchematicCardActionKind::Info,
             ));
         }
@@ -20544,11 +20687,17 @@ impl DesktopLauncher {
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
         }
+        if Self::schematics_search_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusSchematicSearch);
+        }
         if Self::schematics_import_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::OpenSchematicImport);
         }
         if Self::schematics_tag_edit_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::OpenSchematicTags);
+        }
+        if let Some(tag_index) = self.schematics_tag_chip_index_at_point(panel, point) {
+            return Some(DesktopMenuRouteShellAction::ToggleSchematicTag(tag_index));
         }
         if let Some(action) = self.schematics_card_action_at_point(panel, point) {
             return Some(DesktopMenuRouteShellAction::SchematicCard(action));
@@ -20785,6 +20934,27 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ImportEditorMap => {
                 self.editor_import_map_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::FocusSchematicSearch => {
+                self.schematic_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::ClearSchematicSearch => {
+                self.schematic_search.clear();
+                self.schematic_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::ToggleSchematicTag(tag_index) => {
+                if let Some(tag) = self.schematics_tag_names().get(tag_index).cloned() {
+                    if let Some(selected_index) = self
+                        .schematic_selected_tags
+                        .iter()
+                        .position(|selected| selected == &tag)
+                    {
+                        self.schematic_selected_tags.remove(selected_index);
+                    } else {
+                        self.schematic_selected_tags.push(tag.clone());
+                    }
+                    self.last_schematic_tag_toggled = Some(tag);
+                }
             }
             DesktopMenuRouteShellAction::OpenSchematicImport => {
                 self.schematic_import_dialog_open = true;
@@ -21454,10 +21624,19 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.031,
         ));
+        let search_text = if self.schematic_search.is_empty() {
+            "@schematic.search".to_string()
+        } else {
+            self.schematic_search.clone()
+        };
         pass.push(RenderCommand::draw_text_styled(
-            "@schematic.search",
+            search_text,
             RenderPoint::new(search.x + 44.0, search.center().y),
-            [0.60, 0.70, 0.78, 1.0],
+            if self.schematic_search.is_empty() {
+                [0.60, 0.70, 0.78, 1.0]
+            } else {
+                [0.88, 0.94, 1.0, 1.0]
+            },
             12.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Start)
@@ -21494,6 +21673,44 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.029,
         ));
+        let tag_names = self.schematics_tag_names();
+        for (index, rect) in Self::schematics_tag_chip_rects_for_panel(panel, &tag_names)
+            .into_iter()
+            .enumerate()
+        {
+            let tag = &tag_names[index];
+            let selected = self
+                .schematic_selected_tags
+                .iter()
+                .any(|known| known == tag);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("flatTogglet", false, selected),
+                rect,
+                if selected {
+                    [1.0, 1.0, 1.0, 0.96]
+                } else {
+                    [1.0, 1.0, 1.0, 0.78]
+                },
+                0.0,
+                Layer::END_PIXELED + 0.030 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                tag.clone(),
+                rect.center(),
+                if selected {
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                } else {
+                    [0.74, 0.84, 0.92, 1.0]
+                },
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
+            ));
+        }
 
         let edit = Self::schematics_tag_edit_button_rect_for_panel(panel);
         pass.push(RenderCommand::draw_sprite(
@@ -21530,9 +21747,14 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.028,
         ));
-        if self.schematic_cards.is_empty() {
+        let filtered_indices = self.filtered_schematic_card_indices();
+        if filtered_indices.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
-                "@none",
+                if self.schematic_filter_active() {
+                    "@none.found"
+                } else {
+                    "@none"
+                },
                 grid.center(),
                 [0.70, 0.78, 0.84, 1.0],
                 13.0,
@@ -21545,12 +21767,13 @@ impl DesktopLauncher {
             return;
         }
 
-        for (index, entry) in self.schematic_cards.iter().enumerate() {
-            let card = Self::schematics_card_rect_for_grid(grid, index);
+        for (visible_index, card_index) in filtered_indices.into_iter().enumerate() {
+            let entry = &self.schematic_cards[card_index];
+            let card = Self::schematics_card_rect_for_grid(grid, visible_index);
             if !Self::schematics_card_visible_in_grid(grid, card) {
                 continue;
             }
-            self.push_schematics_card(pass, card, index, entry);
+            self.push_schematics_card(pass, card, card_index, entry);
         }
     }
 
@@ -21968,6 +22191,18 @@ impl DesktopLauncher {
                 {
                     self.apply_menu_back_key();
                 }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Schematics)
+                        && self.schematic_search_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.schematic_search.pop();
+                    } else {
+                        self.schematic_search.clear();
+                    }
+                }
                 DesktopInputTickEvent::CursorMoved { x, y } => {
                     let point = RenderPoint::new(*x, *y);
                     self.last_menu_cursor = Some(point);
@@ -21994,6 +22229,27 @@ impl DesktopLauncher {
                     self.last_menu_pressed_button = None;
                     self.last_settings_pressed_control = None;
                     self.settings_scroll_drag_state = None;
+                }
+                DesktopInputTickEvent::MouseButton { button, pressed }
+                    if *pressed && Self::is_secondary_menu_mouse_button(button) =>
+                {
+                    if let Some(cursor) = self.last_menu_cursor {
+                        if self.active_menu_route == Some(DesktopMenuRoute::Schematics) {
+                            let viewport = self.default_render_viewport_for_surface(surface_size);
+                            let panel = Self::active_menu_route_shell_panel_for_route(
+                                viewport,
+                                DesktopMenuRoute::Schematics,
+                            );
+                            if Self::schematics_search_rect_for_panel(panel).contains_point(cursor)
+                            {
+                                self.dispatch_menu_route_shell_action(
+                                    DesktopMenuRouteShellAction::ClearSchematicSearch,
+                                );
+                                self.last_menu_action = None;
+                                continue;
+                            }
+                        }
+                    }
                 }
                 DesktopInputTickEvent::MouseButton { button, pressed }
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
@@ -22058,6 +22314,14 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Scroll { delta_y, .. } => {
                     if self.apply_settings_scroll_delta(surface_size, *delta_y) {
                         continue;
+                    }
+                }
+                DesktopInputTickEvent::Text(text) => {
+                    if self.active_menu_route == Some(DesktopMenuRoute::Schematics)
+                        && self.schematic_search_focused
+                    {
+                        self.schematic_search
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
                     }
                 }
                 _ => {}
@@ -22179,18 +22443,34 @@ impl DesktopLauncher {
     }
 
     fn schematics_route_lines(&self) -> Vec<String> {
+        let filtered_count = self.filtered_schematic_card_indices().len();
         let mut lines = vec![
             "button: @schematic.import Icon.download".into(),
             "search: @schematic.search Icon.zoom".into(),
-            "tags: @schematic.tags Icon.pencilSmall".into(),
+            format!(
+                "tags: @schematic.tags Icon.pencilSmall selected={}",
+                self.schematic_selected_tags.len()
+            ),
             format!(
                 "pane: schematic grid Styles.flati/Tex.pane cards={}",
-                self.schematic_cards.len()
+                filtered_count
             ),
             "card buttons: @info.title / @editor.export / @schematic.edit / @save.delete/@view.workshop".into(),
         ];
-        if self.schematic_cards.is_empty() {
-            lines.push("empty: @none".into());
+        if self.schematic_filter_active() {
+            lines.push(format!(
+                "filter: search={} tags={:?} total={}",
+                self.schematic_search,
+                self.schematic_selected_tags,
+                self.schematic_cards.len()
+            ));
+        }
+        if filtered_count == 0 {
+            lines.push(if self.schematic_filter_active() {
+                "empty: @none.found".into()
+            } else {
+                "empty: @none".into()
+            });
         }
         lines
     }
@@ -39292,6 +39572,140 @@ mod tests {
             );
             assert_eq!(launcher.last_schematic_card_action, Some(expected));
         }
+    }
+
+    #[test]
+    fn desktop_launcher_schematics_route_filters_search_and_tags_like_upstream() {
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.schematic_cards = vec![
+            super::DesktopSchematicCardEntry {
+                name: "Core-Starter".into(),
+                description: "basic launch schematic".into(),
+                width: 12,
+                height: 8,
+                tile_count: 42,
+                labels: vec!["core".into(), "power".into()],
+                has_steam_id: false,
+                mod_name: None,
+            },
+            super::DesktopSchematicCardEntry {
+                name: "Steam Drill".into(),
+                description: "drill schematic".into(),
+                width: 16,
+                height: 16,
+                tile_count: 85,
+                labels: vec!["drill".into()],
+                has_steam_id: false,
+                mod_name: None,
+            },
+            super::DesktopSchematicCardEntry {
+                name: "Power Node".into(),
+                description: "power schematic".into(),
+                width: 8,
+                height: 8,
+                tile_count: 18,
+                labels: vec!["power".into()],
+                has_steam_id: false,
+                mod_name: None,
+            },
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Schematics);
+        assert!(launcher.schematic_search_focused);
+
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("core!!".into())]);
+        assert_eq!(launcher.schematic_search, "core!!");
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Schematics);
+        assert!(lines
+            .iter()
+            .any(|line| line == "pane: schematic grid Styles.flati/Tex.pane cards=1"));
+
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("schematics route should produce a render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"Core-Starter"));
+        assert!(!texts.contains(&"Steam Drill"));
+        assert!(!texts.contains(&"Power Node"));
+
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Schematics,
+        );
+        let search_center = DesktopLauncher::schematics_search_rect_for_panel(panel).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: search_center.x,
+                    y: search_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "right".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.schematic_search, "");
+
+        let tag_names = launcher.schematics_tag_names();
+        let power_index = tag_names
+            .iter()
+            .position(|tag| tag == "power")
+            .expect("derived schematic tags should include power");
+        let power_rect =
+            DesktopLauncher::schematics_tag_chip_rects_for_panel(panel, &tag_names)[power_index];
+        let power_center = power_rect.center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                power_center.x,
+                power_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ToggleSchematicTag(
+                power_index
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleSchematicTag(power_index),
+        );
+        assert_eq!(launcher.schematic_selected_tags, vec!["power".to_string()]);
+        assert_eq!(
+            launcher.last_schematic_tag_toggled.as_deref(),
+            Some("power")
+        );
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Schematics);
+        assert!(lines
+            .iter()
+            .any(|line| line == "pane: schematic grid Styles.flati/Tex.pane cards=2"));
+
+        let grid = DesktopLauncher::schematics_grid_rect_for_panel(panel);
+        let second_visible_card = DesktopLauncher::schematics_card_rect_for_grid(grid, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                second_visible_card.x,
+                second_visible_card.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::SchematicCard(
+                super::DesktopSchematicCardAction::new(
+                    2,
+                    super::DesktopSchematicCardActionKind::Info
+                )
+            ))
+        );
     }
 
     #[test]

@@ -19126,3 +19126,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `SchematicsDialog` 还未接真实 schematic 存储、搜索栏、tag 过滤/持久化、导入/导出/编辑子弹窗、真实预览图刷新和 `useSchematic(...)` 快捷使用；
   - 主菜单仍需继续补完整 Scene2D hover/down/tooltip/visible 条件、becheck update pulse、customButtons 对象模型、logo/version 几何和完整弹窗路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 537. SchematicsDialog 搜索栏与标签筛选骨架
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **56.8%**，仍未达到完整可玩；继续优先前端/UI，目标是让 `SchematicsDialog` 的搜索、标签、卡片网格形成同一个可交互 UI 流。
+- Java 对照证据：
+  - `SchematicsDialog.setup()` 中搜索框 `TextField` 会修改 `search` 并立即 `rebuildPane.run()`；
+  - 右键搜索框会清空搜索并重建；
+  - 搜索匹配使用 `ignoreSymbols` 删除 `` `~!@#$%^&*()-_=+{}|;:'",<.>/? `` 后再小写包含匹配；
+  - 标签按钮使用 `Styles.togglet`，点击后在 `selectedTags` 内增删，并按 `s.labels.containsAll(selectedTags)` 过滤卡片；
+  - 无匹配时搜索/标签过滤态显示 `@none.found`，普通空态显示 `@none`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 增加 `schematic_search`、`schematic_search_focused`、`schematic_selected_tags` 与 `last_schematic_tag_toggled`；
+    - 新增 `schematic_search_normalize(...)`，按 Java `ignoreSymbols` 规则做搜索规整；
+    - `Schematics` route 打开时自动聚焦搜索框并清空搜索文本，保留标签选择；
+    - `DesktopInputTickEvent::Text`、`Backspace/Delete` 接入搜索框，右键搜索框清空；
+    - tag pane 从纯背景推进到可点击 tag chip，使用 `flatTogglet` 的 selected/up 状态表现；
+    - 卡片渲染和 hit-test 改为使用过滤后的可见索引，同时保留原始 schematic card index 作为动作目标；
+    - route lines 记录过滤后的 `cards=N`、选中 tag 数量和过滤状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 当前 tag 列表仍从临时 `schematic_cards.labels` 派生，尚未迁移 Java `schematic-tags` settings 持久化、`checkTags()/tagsChanged()`、tag 重命名/删除/排序和 icon tag；
+  - 搜索框还不是完整 Scene2D `TextField`，缺选择、光标、输入法、键位绑定和 `Binding.chat` 快捷使用；
+  - `SchematicImage` 真实预览、导入/导出/编辑/info 子弹窗、真实 schematic 存储与 `control.input.useSchematic(...)` 仍待继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
