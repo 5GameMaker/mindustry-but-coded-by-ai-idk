@@ -17862,3 +17862,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - DialogStyle 尚未接到 desktop route shell 的实际 Dialog 渲染；
   - `ScrollPane/Table/Slider/CheckBox/TextField/Tooltip/ButtonGroup` 和真实字体/icon atlas 仍缺；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 496. desktop OpenGL 九宫格贴图展开
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.2%**，仍未达到完整可玩；继续优先推进原版 UI 还原，尤其是九宫格、字体、Scene2D widget 和 Dialog/Page 路由。
+- 问题背景：
+  - Java/Arc UI 大量依赖 `.9.png` 九宫格 drawable，主菜单 `flat-down-base.9`、Dialog 的 `window-empty.9`、面板 `pane*.9` 都不能长期按单张贴图拉伸；
+  - 495 已经让 core 侧输出 `flat-down-base.9`，但 desktop OpenGL 后端此前只会生成单个 quad，视觉还原会继续失真；
+  - 本轮先在 native OpenGL 的 sprite resolve → texture binding → quad generation 链路中接入真实 `.9.png` marker 解析和 9-slice 展开。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopGraphicsOpenGlBackendNinePatch`，在 `DesktopGraphicsOpenGlBackendTextureBinding` 中携带九宫格 split；
+    - 直载 raw `.9.png` 时解析 top/left 黑色 marker，得到 `left/right/top/bottom` 固定边；
+    - `.9.png` UV 自动 inset 1px，剔除九宫格文件外框 marker，并把 `region_width/region_height` 视为去边框后的实际内容尺寸；
+    - 新增 `opengl_backend_sprite_quads_from_draw_sprite(...)`，普通 sprite 仍生成 1 个 quad，axis-aligned nine-patch 展开为 9 个 quads；
+    - rotated nine-patch 暂时保守 fallback 为单 quad，避免在旋转矩阵和九宫格切片坐标未完全对齐前引入错误；
+    - classifying adapter 与 executor 两条消费路径都改为记录多个 quad，确保测试分类和真实执行一致。
+- 迁移意义：
+  - 原版 `.9.png` 不再只是“能上传的贴图”，而是开始按 Java UI 的九宫格语义参与 native OpenGL 绘制；
+  - 主菜单按钮、Dialog/window/pane 的后续还原可以复用同一九宫格展开能力，不再需要每个控件写一次临时拉伸逻辑；
+  - 这仍只是 desktop 后端级最小实现，完整 UI 还需要继续迁移 `Skin/Styles/Table/ScrollPane/Button/Slider/CheckBox/TextField` 与真实字体/icon atlas。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_expands_nine_patch_sprite_to_nine_quads --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_resolves_virtual_sprite_source_from_asset_raw_tree --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `window-empty.9.png`、`pane*.9.png` 尚未接到 Dialog/route shell 的真实绘制路径；
+  - 字体与 Icon glyph atlas 仍是 UI 还原的关键缺口，`DrawText` 仍需替换掉 placeholder；
+  - rotated nine-patch 尚未展开，完整 Scene2D widget 树仍未迁移；
+  - 未达到完整可玩，不能宣告目标完成。

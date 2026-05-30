@@ -54,16 +54,17 @@ use mindustry_core::mindustry::graphics::{
     MinimapCamera, MinimapFogLayer, MinimapOverlayCommand, MinimapOverlayInput, MinimapOverlayPlan,
     MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
     OverlayRendererPlan, OverlayRendererState, PageType, Pal, PixelatorCamera, PixelatorFramePlan,
-    PixelatorInput, PixelatorState, PngRgba8888DecodeError, RenderBackendFlushBoundary,
-    RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
-    RenderEngineState, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
-    RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
-    RenderTextStyle, RenderTextVerticalAlign, RenderTextureSampleFlip, RenderTextureSamplePlan,
-    RenderUvRect, RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan,
-    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask,
-    ShaderParameters, ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport,
-    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord,
-    UniformValue, Viewport as FloorViewport,
+    PixelatorInput, PixelatorState, PngRgba8888DecodeError, PngRgba8888Image,
+    RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
+    RenderCommand, RenderEngineState, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind,
+    RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget,
+    RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderTextureSampleFlip,
+    RenderTextureSamplePlan, RenderUvRect, RenderViewport, ShaderApplyContext,
+    ShaderApplyOperation, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
+    ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
+    ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
+    TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -3411,6 +3412,15 @@ pub struct DesktopGraphicsOpenGlBackendTextureBinding {
     pub uv: [f32; 4],
     pub region_width: u32,
     pub region_height: u32,
+    pub nine_patch: Option<DesktopGraphicsOpenGlBackendNinePatch>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopGraphicsOpenGlBackendNinePatch {
+    pub left: u32,
+    pub right: u32,
+    pub top: u32,
+    pub bottom: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4219,6 +4229,100 @@ fn desktop_existing_sprite_source_path_from_raw_root(
     found
 }
 
+fn desktop_sprite_source_path_is_nine_patch(source_path: &str) -> bool {
+    source_path
+        .trim()
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+        .ends_with(".9.png")
+}
+
+fn desktop_png_rgba8888_pixel(image: &PngRgba8888Image, x: u32, y: u32) -> Option<[u8; 4]> {
+    if x >= image.width || y >= image.height {
+        return None;
+    }
+    let offset = usize::try_from((y * image.width + x) * 4).ok()?;
+    Some([
+        *image.pixels.get(offset)?,
+        *image.pixels.get(offset + 1)?,
+        *image.pixels.get(offset + 2)?,
+        *image.pixels.get(offset + 3)?,
+    ])
+}
+
+fn desktop_nine_patch_marker_pixel(image: &PngRgba8888Image, x: u32, y: u32) -> bool {
+    desktop_png_rgba8888_pixel(image, x, y)
+        .map(|[r, g, b, a]| a > 0 && r < 16 && g < 16 && b < 16)
+        .unwrap_or(false)
+}
+
+fn desktop_nine_patch_horizontal_marker_run(
+    image: &PngRgba8888Image,
+    y: u32,
+) -> Option<(u32, u32)> {
+    if image.width <= 2 || y >= image.height {
+        return None;
+    }
+    let mut run = None;
+    for x in 1..image.width - 1 {
+        if desktop_nine_patch_marker_pixel(image, x, y) {
+            run = Some(match run {
+                Some((start, _)) => (start, x),
+                None => (x, x),
+            });
+        }
+    }
+    run
+}
+
+fn desktop_nine_patch_vertical_marker_run(image: &PngRgba8888Image, x: u32) -> Option<(u32, u32)> {
+    if image.height <= 2 || x >= image.width {
+        return None;
+    }
+    let mut run = None;
+    for y in 1..image.height - 1 {
+        if desktop_nine_patch_marker_pixel(image, x, y) {
+            run = Some(match run {
+                Some((start, _)) => (start, y),
+                None => (y, y),
+            });
+        }
+    }
+    run
+}
+
+fn desktop_nine_patch_from_path(path: &Path) -> Option<DesktopGraphicsOpenGlBackendNinePatch> {
+    let image = png_rgba8888_from_path(path).ok()?;
+    if image.width <= 2 || image.height <= 2 {
+        return None;
+    }
+    let inner_width = image.width - 2;
+    let inner_height = image.height - 2;
+    let (left, right) = desktop_nine_patch_horizontal_marker_run(&image, 0)
+        .map(|(start, end)| {
+            (
+                start.saturating_sub(1).min(inner_width),
+                inner_width.saturating_sub(end).min(inner_width),
+            )
+        })
+        .unwrap_or((1.min(inner_width), 1.min(inner_width)));
+    let (top, bottom) = desktop_nine_patch_vertical_marker_run(&image, 0)
+        .map(|(start, end)| {
+            (
+                start.saturating_sub(1).min(inner_height),
+                inner_height.saturating_sub(end).min(inner_height),
+            )
+        })
+        .unwrap_or((1.min(inner_height), 1.min(inner_height)));
+
+    Some(DesktopGraphicsOpenGlBackendNinePatch {
+        left,
+        right,
+        top,
+        bottom,
+    })
+}
+
 fn desktop_existing_sprite_source_path(source_path: &str) -> Option<PathBuf> {
     let normalized = source_path.trim().replace('\\', "/");
     if normalized.is_empty() {
@@ -4275,6 +4379,24 @@ impl DesktopGraphicsOpenGlBackendTextureBinding {
                 {
                     let direct_page_source_path =
                         existing_source_path.to_string_lossy().replace('\\', "/");
+                    let nine_patch = desktop_sprite_source_path_is_nine_patch(region_source_path)
+                        .then(|| desktop_nine_patch_from_path(&existing_source_path))
+                        .flatten();
+                    let (uv, region_width, region_height) =
+                        if nine_patch.is_some() && page_width > 2 && page_height > 2 {
+                            (
+                                [
+                                    1.0 / page_width as f32,
+                                    1.0 / page_height as f32,
+                                    (page_width - 1) as f32 / page_width as f32,
+                                    (page_height - 1) as f32 / page_height as f32,
+                                ],
+                                page_width - 2,
+                                page_height - 2,
+                            )
+                        } else {
+                            ([0.0, 0.0, 1.0, 1.0], page_width, page_height)
+                        };
                     return Some(Self {
                         command_index: sprite.command_index,
                         symbol: sprite.symbol.clone(),
@@ -4288,9 +4410,10 @@ impl DesktopGraphicsOpenGlBackendTextureBinding {
                         page_width,
                         page_height,
                         sampler: sprite.sampler,
-                        uv: [0.0, 0.0, 1.0, 1.0],
-                        region_width: page_width,
-                        region_height: page_height,
+                        uv,
+                        region_width,
+                        region_height,
+                        nine_patch,
                     });
                 }
             }
@@ -4310,6 +4433,7 @@ impl DesktopGraphicsOpenGlBackendTextureBinding {
             uv: [sprite.u?, sprite.v?, sprite.u2?, sprite.v2?],
             region_width: sprite.region_width?,
             region_height: sprite.region_height?,
+            nine_patch: None,
         })
     }
 }
@@ -4425,7 +4549,37 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
         rotation: f32,
         layer: f32,
     ) -> Self {
-        let [u, v, u2, v2] = binding.uv;
+        Self::from_draw_sprite_uv(
+            binding,
+            target,
+            shader_program,
+            blend_state,
+            clip,
+            rect,
+            origin,
+            tint,
+            mix_color,
+            rotation,
+            layer,
+            binding.uv,
+        )
+    }
+
+    fn from_draw_sprite_uv(
+        binding: &DesktopGraphicsOpenGlBackendTextureBinding,
+        target: Option<RenderTarget>,
+        shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+        blend_state: DesktopGraphicsOpenGlBackendBlendState,
+        clip: Option<RenderRect>,
+        rect: RenderRect,
+        origin: RenderPoint,
+        tint: [f32; 4],
+        mix_color: [f32; 4],
+        rotation: f32,
+        layer: f32,
+        uv: [f32; 4],
+    ) -> Self {
+        let [u, v, u2, v2] = uv;
         let positions = opengl_backend_sprite_quad_positions(rect, origin, rotation);
         Self {
             command_index: binding.command_index,
@@ -4468,6 +4622,115 @@ impl DesktopGraphicsOpenGlBackendSpriteQuad {
             ],
         }
     }
+}
+
+fn opengl_backend_nine_patch_edge_lengths(total: f32, leading: u32, trailing: u32) -> (f32, f32) {
+    let mut leading = leading as f32;
+    let mut trailing = trailing as f32;
+    let fixed = leading + trailing;
+    if fixed > total.max(0.0) && fixed > f32::EPSILON {
+        let scale = total.max(0.0) / fixed;
+        leading *= scale;
+        trailing *= scale;
+    }
+    (leading, trailing)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn opengl_backend_sprite_quads_from_draw_sprite(
+    binding: &DesktopGraphicsOpenGlBackendTextureBinding,
+    target: Option<RenderTarget>,
+    shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+    blend_state: DesktopGraphicsOpenGlBackendBlendState,
+    clip: Option<RenderRect>,
+    rect: RenderRect,
+    origin: RenderPoint,
+    tint: [f32; 4],
+    mix_color: [f32; 4],
+    rotation: f32,
+    layer: f32,
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteQuad> {
+    let Some(nine_patch) = binding.nine_patch else {
+        return vec![DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            binding,
+            target,
+            shader_program,
+            blend_state,
+            clip,
+            rect,
+            origin,
+            tint,
+            mix_color,
+            rotation,
+            layer,
+        )];
+    };
+    if rotation.abs() > f32::EPSILON || binding.region_width == 0 || binding.region_height == 0 {
+        return vec![DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            binding,
+            target,
+            shader_program,
+            blend_state,
+            clip,
+            rect,
+            origin,
+            tint,
+            mix_color,
+            rotation,
+            layer,
+        )];
+    }
+
+    let (left, right) =
+        opengl_backend_nine_patch_edge_lengths(rect.width, nine_patch.left, nine_patch.right);
+    let (top, bottom) =
+        opengl_backend_nine_patch_edge_lengths(rect.height, nine_patch.top, nine_patch.bottom);
+    let x = [rect.x, rect.x + left, rect.right() - right, rect.right()];
+    let y = [rect.y, rect.y + top, rect.bottom() - bottom, rect.bottom()];
+
+    let [u, v, u2, v2] = binding.uv;
+    let u_span = u2 - u;
+    let v_span = v2 - v;
+    let region_width = binding.region_width.max(1) as f32;
+    let region_height = binding.region_height.max(1) as f32;
+    let left_u = u + u_span * (nine_patch.left.min(binding.region_width) as f32 / region_width);
+    let right_u = u2 - u_span * (nine_patch.right.min(binding.region_width) as f32 / region_width);
+    let top_v = v2 - v_span * (nine_patch.top.min(binding.region_height) as f32 / region_height);
+    let bottom_v =
+        v + v_span * (nine_patch.bottom.min(binding.region_height) as f32 / region_height);
+    let u_coords = [u, left_u, right_u, u2];
+    let v_coords = [v2, top_v, bottom_v, v];
+
+    let mut quads = Vec::with_capacity(9);
+    for row in 0..3 {
+        for col in 0..3 {
+            let segment_width = x[col + 1] - x[col];
+            let segment_height = y[row + 1] - y[row];
+            if segment_width <= f32::EPSILON || segment_height <= f32::EPSILON {
+                continue;
+            }
+            quads.push(DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite_uv(
+                binding,
+                target.clone(),
+                shader_program.clone(),
+                blend_state,
+                clip,
+                RenderRect::new(x[col], y[row], segment_width, segment_height),
+                RenderPoint::new(0.0, 0.0),
+                tint,
+                mix_color,
+                0.0,
+                layer,
+                [
+                    u_coords[col],
+                    v_coords[row + 1],
+                    u_coords[col + 1],
+                    v_coords[row],
+                ],
+            ));
+        }
+    }
+    quads
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -5120,6 +5383,7 @@ fn opengl_backend_primitive_texture_binding(
         uv: [0.0, 0.0, 1.0, 1.0],
         region_width: 1,
         region_height: 1,
+        nine_patch: None,
     }
 }
 
@@ -10048,24 +10312,24 @@ impl DesktopGraphicsClassifyingOpenGlBackendAdapter {
                         ..
                     } = action
                     {
-                        self.state.record_sprite_quad(
-                            DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
-                                &binding,
-                                Some(target.clone()),
-                                self.state
-                                    .current_shader_program
-                                    .clone()
-                                    .unwrap_or_else(opengl_backend_default_sprite_shader_program),
-                                self.state.current_blend_state,
-                                self.state.current_clip,
-                                *rect,
-                                *origin,
-                                *tint,
-                                *mix_color,
-                                *rotation,
-                                *layer,
-                            ),
-                        );
+                        for quad in opengl_backend_sprite_quads_from_draw_sprite(
+                            &binding,
+                            Some(target.clone()),
+                            self.state
+                                .current_shader_program
+                                .clone()
+                                .unwrap_or_else(opengl_backend_default_sprite_shader_program),
+                            self.state.current_blend_state,
+                            self.state.current_clip,
+                            *rect,
+                            *origin,
+                            *tint,
+                            *mix_color,
+                            *rotation,
+                            *layer,
+                        ) {
+                            self.state.record_sprite_quad(quad);
+                        }
                     }
                     self.state
                         .sprite_texture_resource_table
@@ -10685,24 +10949,24 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                         ..
                     } = action
                     {
-                        self.state.record_sprite_quad(
-                            DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
-                                &binding,
-                                self.state.current_target.clone(),
-                                self.state
-                                    .current_shader_program
-                                    .clone()
-                                    .unwrap_or_else(opengl_backend_default_sprite_shader_program),
-                                self.state.current_blend_state,
-                                self.state.current_clip,
-                                *rect,
-                                *origin,
-                                *tint,
-                                *mix_color,
-                                *rotation,
-                                *layer,
-                            ),
-                        );
+                        for quad in opengl_backend_sprite_quads_from_draw_sprite(
+                            &binding,
+                            self.state.current_target.clone(),
+                            self.state
+                                .current_shader_program
+                                .clone()
+                                .unwrap_or_else(opengl_backend_default_sprite_shader_program),
+                            self.state.current_blend_state,
+                            self.state.current_clip,
+                            *rect,
+                            *origin,
+                            *tint,
+                            *mix_color,
+                            *rotation,
+                            *layer,
+                        ) {
+                            self.state.record_sprite_quad(quad);
+                        }
                     }
                     self.state
                         .sprite_texture_resource_table
@@ -26684,6 +26948,7 @@ mod tests {
             uv: [0.0, 0.0, 0.25, 0.25],
             region_width: 16,
             region_height: 16,
+            nine_patch: None,
         };
         let rect = RenderRect::new(8.0, 8.0, 16.0, 16.0);
 
@@ -26797,6 +27062,80 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_expands_nine_patch_sprite_to_nine_quads() {
+        let binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
+            command_index: Some(11),
+            symbol: "flat-down-base.9".into(),
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Ui,
+                    "sprites3.png",
+                ),
+            page_type: PageType::Ui,
+            page_source_path: "sprites3.png".into(),
+            page_width: 20,
+            page_height: 20,
+            sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+            uv: [0.0, 0.0, 1.0, 1.0],
+            region_width: 20,
+            region_height: 20,
+            nine_patch: Some(super::DesktopGraphicsOpenGlBackendNinePatch {
+                left: 2,
+                right: 3,
+                top: 4,
+                bottom: 5,
+            }),
+        };
+
+        let quads = super::opengl_backend_sprite_quads_from_draw_sprite(
+            &binding,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            RenderRect::new(0.0, 0.0, 20.0, 30.0),
+            RenderPoint::new(10.0, 15.0),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            0.0,
+            Layer::END_PIXELED,
+        );
+
+        assert_eq!(quads.len(), 9);
+        assert_eq!(quads[0].symbol, "flat-down-base.9");
+        assert_eq!(quads[0].vertices[0].position, RenderPoint::new(0.0, 0.0));
+        assert_eq!(quads[0].vertices[1].position, RenderPoint::new(0.0, 4.0));
+        assert_eq!(quads[0].vertices[2].position, RenderPoint::new(2.0, 4.0));
+        assert_eq!(quads[0].vertices[3].position, RenderPoint::new(2.0, 0.0));
+        assert_eq!(
+            quads[0]
+                .vertices
+                .iter()
+                .map(|vertex| vertex.uv)
+                .collect::<Vec<_>>(),
+            vec![[0.0, 1.0], [0.0, 0.8], [0.1, 0.8], [0.1, 1.0]]
+        );
+
+        let center = &quads[4];
+        assert_eq!(
+            center
+                .vertices
+                .iter()
+                .map(|vertex| vertex.position)
+                .collect::<Vec<_>>(),
+            vec![
+                RenderPoint::new(2.0, 4.0),
+                RenderPoint::new(2.0, 25.0),
+                RenderPoint::new(17.0, 25.0),
+                RenderPoint::new(17.0, 4.0),
+            ]
+        );
+        assert!(quads
+            .iter()
+            .all(|quad| quad.texture_identity == binding.texture_identity));
+    }
+
+    #[test]
     fn desktop_graphics_opengl_triangle_primitive_matches_java_drawf_tri_vertices() {
         let positions = super::opengl_backend_triangle_primitive_positions(
             RenderPoint::new(0.0, 0.0),
@@ -26845,6 +27184,7 @@ mod tests {
             uv: [0.0, 0.0, 0.25, 0.25],
             region_width: 16,
             region_height: 16,
+            nine_patch: None,
         };
         let high_binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
             texture_identity:
