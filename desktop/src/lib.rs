@@ -70,7 +70,8 @@ use mindustry_core::mindustry::input::input_handler::{
     OtherPlayerPreviewOverlayPlan,
 };
 use mindustry_core::mindustry::io::{
-    read_bullet_sync, read_decal_sync, read_effect_state_sync, read_fire_sync, read_puddle_sync,
+    backup_file_for_path, collect_valid_save_slot_records, read_bullet_sync, read_decal_sync,
+    read_deflated_save_meta_with_backup, read_effect_state_sync, read_fire_sync, read_puddle_sync,
     read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
     LegacyTeamBlocks, SaveSlotRecord, TeamId, TypeValue, Vec2,
 };
@@ -9701,6 +9702,7 @@ pub struct DesktopGraphicsOpenGlBackendAdapterExecutionState {
     pub sprite_mesh_resource_table: DesktopGraphicsOpenGlBackendSpriteMeshResourceTable,
     pub sprite_mesh_upload_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>,
     pub sprite_draw_call_plans: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
+    pub sprite_mesh_plans_dirty: bool,
     pub missing_sprite_texture_bindings: usize,
 }
 
@@ -9753,6 +9755,7 @@ impl Default for DesktopGraphicsOpenGlBackendAdapterExecutionState {
                 DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::default(),
             sprite_mesh_upload_plans: Vec::new(),
             sprite_draw_call_plans: Vec::new(),
+            sprite_mesh_plans_dirty: false,
             missing_sprite_texture_bindings: 0,
         }
     }
@@ -9917,6 +9920,13 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
             &self.sprite_mesh_batches,
             &self.sprite_mesh_resource_plans,
         );
+        self.sprite_mesh_plans_dirty = false;
+    }
+
+    fn refresh_sprite_mesh_plans_if_dirty(&mut self) {
+        if self.sprite_mesh_plans_dirty {
+            self.refresh_sprite_mesh_plans();
+        }
     }
 
     fn record_primitive_quads(
@@ -9937,7 +9947,7 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
             return;
         }
         self.sprite_quads.extend(quads);
-        self.refresh_sprite_mesh_plans();
+        self.sprite_mesh_plans_dirty = true;
         let binding = opengl_backend_primitive_texture_binding("primitive");
         self.sprite_texture_resource_table
             .register_binding(&binding);
@@ -9946,7 +9956,7 @@ impl DesktopGraphicsOpenGlBackendAdapterExecutionState {
 
     fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
         self.sprite_quads.push(quad);
-        self.refresh_sprite_mesh_plans();
+        self.sprite_mesh_plans_dirty = true;
     }
 }
 
@@ -10131,8 +10141,14 @@ impl DesktopGraphicsOpenGlBackendAdapter for DesktopGraphicsClassifyingOpenGlBac
             } => {
                 self.consume_command(target, command, resolved_sprite);
             }
-            DesktopGraphicsOpenGlBackendEvent::EndPass { .. } => self.state.end_passes += 1,
-            DesktopGraphicsOpenGlBackendEvent::Resolve { .. } => self.state.resolves += 1,
+            DesktopGraphicsOpenGlBackendEvent::EndPass { .. } => {
+                self.state.refresh_sprite_mesh_plans_if_dirty();
+                self.state.end_passes += 1;
+            }
+            DesktopGraphicsOpenGlBackendEvent::Resolve { .. } => {
+                self.state.refresh_sprite_mesh_plans_if_dirty();
+                self.state.resolves += 1;
+            }
             DesktopGraphicsOpenGlBackendEvent::Error { .. } => self.state.errors += 1,
         }
     }
@@ -10185,6 +10201,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub sprite_mesh_resource_table: DesktopGraphicsOpenGlBackendSpriteMeshResourceTable,
     pub sprite_mesh_upload_plans: Vec<DesktopGraphicsOpenGlBackendSpriteMeshUploadPlan>,
     pub sprite_draw_call_plans: Vec<DesktopGraphicsOpenGlBackendSpriteDrawCallPlan>,
+    pub sprite_mesh_plans_dirty: bool,
     pub missing_sprite_texture_bindings: usize,
     pub resource_table: DesktopGraphicsOpenGlBackendResourceTable,
     pub last_command_kind: Option<&'static str>,
@@ -10240,6 +10257,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
                 DesktopGraphicsOpenGlBackendSpriteMeshResourceTable::default(),
             sprite_mesh_upload_plans: Vec::new(),
             sprite_draw_call_plans: Vec::new(),
+            sprite_mesh_plans_dirty: false,
             missing_sprite_texture_bindings: 0,
             resource_table: DesktopGraphicsOpenGlBackendResourceTable::default(),
             last_command_kind: None,
@@ -10550,6 +10568,13 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             &self.sprite_mesh_batches,
             &self.sprite_mesh_resource_plans,
         );
+        self.sprite_mesh_plans_dirty = false;
+    }
+
+    fn refresh_sprite_mesh_plans_if_dirty(&mut self) {
+        if self.sprite_mesh_plans_dirty {
+            self.refresh_sprite_mesh_plans();
+        }
     }
 
     fn ensure_framebuffer_attachment_plan_for_target(&mut self, target: &RenderTarget) {
@@ -10578,7 +10603,7 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
 
     fn record_sprite_quad(&mut self, quad: DesktopGraphicsOpenGlBackendSpriteQuad) {
         self.sprite_quads.push(quad);
-        self.refresh_sprite_mesh_plans();
+        self.sprite_mesh_plans_dirty = true;
     }
 
     fn record_primitive_quads(
@@ -10599,7 +10624,7 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
             return;
         }
         self.sprite_quads.extend(quads);
-        self.refresh_sprite_mesh_plans();
+        self.sprite_mesh_plans_dirty = true;
         let binding = opengl_backend_primitive_texture_binding("primitive");
         self.sprite_texture_resource_table
             .register_binding(&binding);
@@ -10787,6 +10812,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                 if !self.state.pass_active {
                     self.record_error("opengl backend ended a pass while no pass was active");
                 }
+                self.state.refresh_sprite_mesh_plans_if_dirty();
                 self.state.pass_active = false;
                 self.state.active_pass = None;
                 self.state.current_target = Some(target.clone());
@@ -10803,6 +10829,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                 if self.state.pass_active {
                     self.record_error("opengl backend resolved while a pass was active");
                 }
+                self.state.refresh_sprite_mesh_plans_if_dirty();
                 if let Some(attachment_plan) =
                     opengl_backend_framebuffer_attachment_plan_for_render_target(&target)
                 {
@@ -16737,6 +16764,8 @@ impl DesktopLauncher {
                 ));
             } else if route == DesktopMenuRoute::About {
                 self.about_route_page = DesktopAboutRoutePage::Links;
+            } else if route == DesktopMenuRoute::LoadGame {
+                self.refresh_load_game_slots();
             }
         }
         let close_requested = role == MenuButtonRole::Quit;
@@ -16785,6 +16814,124 @@ impl DesktopLauncher {
             }
         }
         self.last_menu_action = None;
+    }
+
+    pub fn refresh_load_game_slots(&mut self) -> usize {
+        let save_dir = PathBuf::from(&self.client.context.paths.save_dir);
+        let entries = match std::fs::read_dir(&save_dir) {
+            Ok(entries) => entries
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .collect::<Vec<_>>(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.load_game_slots.clear();
+                self.load_game_error = None;
+                return 0;
+            }
+            Err(error) => {
+                self.load_game_slots.clear();
+                self.load_game_error = Some(format!(
+                    "failed to read save dir {}: {error}",
+                    save_dir.display()
+                ));
+                return 0;
+            }
+        };
+
+        let mut slots = collect_valid_save_slot_records(entries.iter(), |path| {
+            let primary = std::fs::read(path)?;
+            let backup_path = backup_file_for_path(path);
+            let backup = std::fs::read(backup_path).ok();
+            read_deflated_save_meta_with_backup(primary.as_slice(), backup.as_deref())
+        });
+        slots.sort_by(|a, b| {
+            b.timestamp()
+                .cmp(&a.timestamp())
+                .then_with(|| a.index().cmp(&b.index()))
+        });
+        let count = slots.len();
+        self.load_game_slots = slots;
+        self.load_game_error = None;
+        count
+    }
+
+    fn load_game_slot_title(slot: &SaveSlotRecord) -> String {
+        slot.meta
+            .as_ref()
+            .and_then(|meta| meta.map_name.clone())
+            .unwrap_or_else(|| slot.index())
+    }
+
+    fn load_game_slot_lines(&self) -> Vec<String> {
+        if let Some(error) = self.load_game_error.as_ref() {
+            return vec![format!("save slots: error"), error.clone()];
+        }
+        let mut lines = vec![format!("save slots: {}", self.load_game_slots.len())];
+        if self.load_game_slots.is_empty() {
+            lines.push("empty: no valid .msav files found".into());
+            lines.push(format!("dir: {}", self.client.context.paths.save_dir));
+            return lines;
+        }
+        for (index, slot) in self.load_game_slots.iter().take(4).enumerate() {
+            let title = Self::load_game_slot_title(slot);
+            let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
+            lines.push(format!(
+                "#{index} {} | wave {} | saved {}",
+                title,
+                wave,
+                slot.timestamp()
+            ));
+        }
+        if self.load_game_slots.len() > 4 {
+            lines.push(format!("more: {} hidden", self.load_game_slots.len() - 4));
+        }
+        lines
+    }
+
+    fn load_game_slot_line_rect_for_viewport(
+        viewport: RenderViewport,
+        slot_index: usize,
+    ) -> RenderRect {
+        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
+        let line_index = 1 + slot_index;
+        let center_y = panel.y + panel.height - 118.0 - line_index as f32 * 20.0;
+        RenderRect::new(panel.x + 22.0, center_y - 9.0, panel.width - 44.0, 18.0)
+    }
+
+    fn load_game_slot_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        y: f32,
+    ) -> Option<usize> {
+        if self.active_menu_route != Some(DesktopMenuRoute::LoadGame) {
+            return None;
+        }
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let point = RenderPoint::new(x, y);
+        self.load_game_slots
+            .iter()
+            .take(4)
+            .enumerate()
+            .find(|(index, _)| {
+                Self::load_game_slot_line_rect_for_viewport(viewport, *index).contains_point(point)
+            })
+            .map(|(index, _)| index)
+    }
+
+    fn dispatch_load_game_slot_action(
+        &mut self,
+        slot_index: usize,
+    ) -> Option<DesktopLoadGameAction> {
+        let slot = self.load_game_slots.get(slot_index)?;
+        let action = DesktopLoadGameAction {
+            slot: slot.index(),
+            file: slot.file.display().to_string(),
+            map_name: slot.meta.as_ref().and_then(|meta| meta.map_name.clone()),
+            timestamp: slot.timestamp(),
+            status: "selected-for-load".into(),
+        };
+        self.last_load_game_action = Some(action.clone());
+        Some(action)
     }
 
     fn active_menu_route_shell_panel_for_viewport(viewport: RenderViewport) -> RenderRect {
@@ -17093,6 +17240,13 @@ impl DesktopLauncher {
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
                 {
                     if let Some(cursor) = self.last_menu_cursor {
+                        if let Some(slot_index) =
+                            self.load_game_slot_at_surface_point(surface_size, cursor.x, cursor.y)
+                        {
+                            self.dispatch_load_game_slot_action(slot_index);
+                            self.last_menu_action = None;
+                            continue;
+                        }
                         if let Some(action) = self.active_menu_route_shell_action_at_surface_point(
                             surface_size,
                             cursor.x,
@@ -17178,7 +17332,7 @@ impl DesktopLauncher {
                     vec!["target: not selected".into()]
                 }
             }
-            DesktopMenuRoute::LoadGame => vec!["save slots: pending LoadDialog port".into()],
+            DesktopMenuRoute::LoadGame => self.load_game_slot_lines(),
             DesktopMenuRoute::CustomGame => vec!["maps: pending CustomGameDialog port".into()],
             DesktopMenuRoute::Schematics => vec!["library: pending SchematicsDialog port".into()],
             DesktopMenuRoute::Database => {
@@ -17435,7 +17589,6 @@ impl DesktopLauncher {
             camera,
             frame_viewport,
         );
-        render_frame.push_pass(self.startup_menu_preview_render_pass(frame_viewport));
         render_frame.push_pass(menu_pass);
 
         let mut bridge = RenderBridge::new();
@@ -19429,8 +19582,8 @@ mod tests {
         UniformValue,
     };
     use mindustry_core::mindustry::io::{
-        ContentHeaderEntry, ContentHeaderSnapshot, LegacyMapBlockRecord, LegacyMapFloorRecord,
-        LegacyShortChunkMap,
+        write_deflated_save_meta_prefix, ContentHeaderEntry, ContentHeaderSnapshot,
+        LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, LATEST_SAVE_VERSION,
     };
     use mindustry_core::mindustry::modsys::{ModResourcePlan, ModSpritePackSource};
     use mindustry_core::mindustry::net::{
@@ -34062,6 +34215,92 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click() {
+        let root = temp_desktop_path("load-game-route");
+        let save_dir = root.join("saves");
+        std::fs::create_dir_all(&save_dir).expect("save fixture dir should be writable");
+
+        let mut old_tags = BTreeMap::new();
+        old_tags.insert("mapname".into(), "Old Map".into());
+        old_tags.insert("saved".into(), "100".into());
+        old_tags.insert("wave".into(), "3".into());
+        let mut old_bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut old_bytes, LATEST_SAVE_VERSION, &old_tags)
+            .expect("old save meta should encode");
+        std::fs::write(save_dir.join("1.msav"), old_bytes).expect("old save should write");
+
+        let mut new_tags = BTreeMap::new();
+        new_tags.insert("mapname".into(), "New Map".into());
+        new_tags.insert("saved".into(), "200".into());
+        new_tags.insert("wave".into(), "9".into());
+        let mut new_bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut new_bytes, LATEST_SAVE_VERSION, &new_tags)
+            .expect("new save meta should encode");
+        std::fs::write(save_dir.join("2.msav"), new_bytes).expect("new save should write");
+        std::fs::write(save_dir.join("backup-ignored.msav"), b"not scanned")
+            .expect("backup decoy should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.save_dir = save_dir.display().to_string();
+        launcher.dispatch_menu_action(MenuButtonRole::LoadGame);
+
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::LoadGame)
+        );
+        assert_eq!(launcher.load_game_slots.len(), 2);
+        assert_eq!(
+            launcher.load_game_slots[0]
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.map_name.as_deref()),
+            Some("New Map")
+        );
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::LoadGame);
+        assert!(lines.contains(&"save slots: 2".to_string()));
+        assert!(lines.iter().any(|line| line.contains("#0 New Map")));
+        assert!(lines.iter().any(|line| line.contains("wave 9")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.contains("pending LoadDialog port")));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let slot_center =
+            DesktopLauncher::load_game_slot_line_rect_for_viewport(viewport, 0).center();
+        assert_eq!(
+            launcher.load_game_slot_at_surface_point(surface, slot_center.x, slot_center.y),
+            Some(0)
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: slot_center.x,
+                    y: slot_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        let action = launcher
+            .last_load_game_action
+            .as_ref()
+            .expect("clicking a save slot should record a load action");
+        assert_eq!(action.slot, "2");
+        assert!(action.file.ends_with("2.msav"));
+        assert_eq!(action.map_name.as_deref(), Some("New Map"));
+        assert_eq!(action.timestamp, 200);
+        assert_eq!(action.status, "selected-for-load");
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn desktop_launcher_menu_back_key_closes_route_shell_then_submenu() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let surface = DesktopSurfaceSize::new(800, 600);
@@ -34581,25 +34820,25 @@ mod tests {
                 .graphics_stats
                 .as_ref()
                 .map(|stats| stats.render_passes),
-            Some(2)
+            Some(1)
         );
         assert_eq!(
-            graphics_renderer.last_trace.render_passes[1].kind,
+            graphics_renderer.last_trace.render_passes[0].kind,
             RenderPassKind::Custom("menu".to_string())
         );
-        assert!(graphics_renderer.last_trace.render_passes[1]
+        assert!(graphics_renderer.last_trace.render_passes[0]
             .commands
             .iter()
             .all(|command| !matches!(command, RenderCommand::Custom { .. })));
-        assert!(graphics_renderer.last_trace.render_passes[1]
+        assert!(graphics_renderer.last_trace.render_passes[0]
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::DrawSprite { .. })));
-        assert!(graphics_renderer.last_trace.render_passes[1]
+        assert!(graphics_renderer.last_trace.render_passes[0]
             .commands
             .iter()
             .any(|command| matches!(command, RenderCommand::FillRect { .. })));
-        assert!(graphics_renderer.last_trace.render_passes[1]
+        assert!(graphics_renderer.last_trace.render_passes[0]
             .commands
             .iter()
             .any(
@@ -34609,7 +34848,7 @@ mod tests {
             graphics_renderer
                 .last_opengl_backend_executor_state
                 .clear_commands
-                >= 6
+                >= 1
         );
     }
 

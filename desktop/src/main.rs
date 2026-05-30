@@ -103,9 +103,6 @@ fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
 
 #[cfg(feature = "opengl-native-runtime")]
 fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
-    if std::env::var_os("MINDUSTRY_DESKTOP_FAST_MENU").is_none() {
-        std::env::set_var("MINDUSTRY_DESKTOP_FAST_MENU", "1");
-    }
     let event_loop = winit::event_loop::EventLoop::new()
         .expect("failed to create winit event loop for native OpenGL runtime");
     let native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::default();

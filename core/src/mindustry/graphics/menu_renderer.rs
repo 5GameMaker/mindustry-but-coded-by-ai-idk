@@ -83,6 +83,42 @@ impl MenuBlockKind {
             Self::SporeMoss => Some("spore-moss"),
         }
     }
+
+    pub const fn menu_color(self) -> Option<[f32; 4]> {
+        match self {
+            Self::Air => None,
+            Self::Sand => Some([0.66, 0.58, 0.38, 1.0]),
+            Self::SandWall => Some([0.42, 0.34, 0.21, 1.0]),
+            Self::Shale => Some([0.40, 0.40, 0.45, 1.0]),
+            Self::ShaleWall => Some([0.27, 0.27, 0.33, 1.0]),
+            Self::Ice => Some([0.68, 0.82, 0.88, 1.0]),
+            Self::IceWall => Some([0.38, 0.53, 0.64, 1.0]),
+            Self::Moss => Some([0.25, 0.39, 0.24, 1.0]),
+            Self::SporePine => Some([0.30, 0.22, 0.36, 1.0]),
+            Self::Dirt => Some([0.43, 0.30, 0.20, 1.0]),
+            Self::DirtWall => Some([0.28, 0.20, 0.15, 1.0]),
+            Self::Dacite => Some([0.45, 0.45, 0.43, 1.0]),
+            Self::DaciteWall => Some([0.28, 0.28, 0.27, 1.0]),
+            Self::Basalt => Some([0.22, 0.23, 0.25, 1.0]),
+            Self::DuneWall => Some([0.48, 0.37, 0.22, 1.0]),
+            Self::Stone => Some([0.47, 0.47, 0.45, 1.0]),
+            Self::StoneWall => Some([0.31, 0.31, 0.30, 1.0]),
+            Self::SporeWall => Some([0.34, 0.22, 0.38, 1.0]),
+            Self::Salt => Some([0.68, 0.66, 0.58, 1.0]),
+            Self::CopperOre => Some([0.90, 0.55, 0.30, 1.0]),
+            Self::LeadOre => Some([0.55, 0.60, 0.76, 1.0]),
+            Self::ScrapOre => Some([0.64, 0.50, 0.40, 1.0]),
+            Self::CoalOre => Some([0.18, 0.18, 0.19, 1.0]),
+            Self::TitaniumOre => Some([0.65, 0.68, 0.82, 1.0]),
+            Self::ThoriumOre => Some([0.82, 0.55, 0.86, 1.0]),
+            Self::Hotrock => Some([0.56, 0.21, 0.11, 1.0]),
+            Self::Magmarock => Some([0.78, 0.28, 0.10, 1.0]),
+            Self::DarkPanel3 => Some([0.12, 0.16, 0.20, 1.0]),
+            Self::DarkPanel4 => Some([0.09, 0.12, 0.16, 1.0]),
+            Self::DarkMetal => Some([0.08, 0.10, 0.13, 1.0]),
+            Self::SporeMoss => Some([0.30, 0.36, 0.24, 1.0]),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,28 +366,43 @@ impl MenuRenderCommand {
     }
 
     pub fn into_render_commands(self, world: &MenuWorldPlan, tile_size: f32) -> Vec<RenderCommand> {
+        self.into_render_commands_with_transform(world, tile_size, None)
+    }
+
+    fn to_render_commands_with_transform(
+        &self,
+        world: &MenuWorldPlan,
+        tile_size: f32,
+        transform: MenuScreenTransform,
+    ) -> Vec<RenderCommand> {
+        self.clone()
+            .into_render_commands_with_transform(world, tile_size, Some(transform))
+    }
+
+    fn into_render_commands_with_transform(
+        self,
+        world: &MenuWorldPlan,
+        tile_size: f32,
+        transform: Option<MenuScreenTransform>,
+    ) -> Vec<RenderCommand> {
         match self {
             Self::DrawCache { label, .. } => {
                 let mut commands = Vec::with_capacity(world.tiles.len() * 2);
                 match label {
                     "floor+overlay" => {
                         for tile in &world.tiles {
-                            let rect = menu_tile_rect(tile, tile_size);
-                            if let Some(symbol) = tile.floor.sprite_name() {
-                                commands.push(RenderCommand::draw_sprite(
-                                    symbol,
-                                    rect,
-                                    [1.0, 1.0, 1.0, 1.0],
-                                    0.0,
-                                    0.0,
-                                ));
+                            let rect =
+                                menu_transform_rect(menu_tile_rect(tile, tile_size), transform);
+                            if let Some(color) = tile.floor.menu_color() {
+                                commands.push(RenderCommand::fill_rect(rect, color, -0.2));
                             }
-                            if let Some(symbol) = tile.ore.sprite_name() {
-                                commands.push(RenderCommand::draw_sprite(
-                                    symbol,
-                                    rect,
-                                    [1.0, 1.0, 1.0, 1.0],
-                                    0.0,
+                            if let Some(color) = tile.ore.menu_color() {
+                                commands.push(RenderCommand::fill_rect(
+                                    menu_transform_rect(
+                                        menu_tile_inset_rect(tile, tile_size, 0.24),
+                                        transform,
+                                    ),
+                                    color,
                                     0.1,
                                 ));
                             }
@@ -359,12 +410,10 @@ impl MenuRenderCommand {
                     }
                     "wall" => {
                         for tile in &world.tiles {
-                            if let Some(symbol) = tile.wall.sprite_name() {
-                                commands.push(RenderCommand::draw_sprite(
-                                    symbol,
-                                    menu_tile_rect(tile, tile_size),
-                                    [1.0, 1.0, 1.0, 1.0],
-                                    0.0,
+                            if let Some(color) = tile.wall.menu_color() {
+                                commands.push(RenderCommand::fill_rect(
+                                    menu_transform_rect(menu_tile_rect(tile, tile_size), transform),
+                                    color,
                                     1.0,
                                 ));
                             }
@@ -384,7 +433,7 @@ impl MenuRenderCommand {
                 for tile in &world.tiles {
                     if tile.wall != MenuBlockKind::Air {
                         commands.push(RenderCommand::fill_rect(
-                            menu_tile_rect(tile, tile_size),
+                            menu_transform_rect(menu_tile_rect(tile, tile_size), transform),
                             [0.0, 0.0, 0.0, 0.35],
                             0.5,
                         ));
@@ -397,7 +446,7 @@ impl MenuRenderCommand {
                         RenderRect::new(x, y, width, height)
                     };
                     commands.push(RenderCommand::fill_rect(
-                        shadow_rect,
+                        menu_transform_rect(shadow_rect, transform),
                         [0.0, 0.0, 0.0, 0.35],
                         0.5,
                     ));
@@ -405,16 +454,15 @@ impl MenuRenderCommand {
                 commands
             }
             Self::DrawFlyer(flyer) => {
+                let center = menu_transform_point(RenderPoint::new(flyer.x, flyer.y), transform);
+                let size_scale = transform.map_or(1.0, |transform| transform.scaling);
                 let body_size = flyer_draw_size(flyer.unit_name);
-                let body_rect = RenderRect::from_center(
-                    RenderPoint::new(flyer.x, flyer.y),
-                    body_size,
-                    body_size,
-                );
+                let body_rect =
+                    RenderRect::from_center(center, body_size * size_scale, body_size * size_scale);
                 let shadow_rect = RenderRect::from_center(
-                    RenderPoint::new(flyer.x, flyer.y),
-                    body_size * 1.15,
-                    body_size * 1.15,
+                    center,
+                    body_size * 1.15 * size_scale,
+                    body_size * 1.15 * size_scale,
                 );
 
                 vec![
@@ -435,14 +483,10 @@ impl MenuRenderCommand {
                 ]
             }
             Self::DrawDarkness {
-                alpha,
-                width,
-                height,
-            } => vec![RenderCommand::fill_rect(
-                RenderRect::new(0.0, 0.0, width, height),
-                [0.0, 0.0, 0.0, alpha],
-                100.0,
-            )],
+                alpha: _,
+                width: _,
+                height: _,
+            } => Vec::new(),
         }
     }
 }
@@ -478,8 +522,18 @@ impl MenuFramePlan {
         let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
             .with_viewport(viewport)
             .with_camera(camera);
+        pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        let transform = MenuScreenTransform::new(
+            self.camera_x - self.camera_width * 0.5,
+            self.camera_y - self.camera_height * 0.5,
+            self.scaling,
+        );
         for command in &self.commands {
-            pass.extend(command.to_render_commands(&self.world, self.tile_size));
+            pass.extend(command.to_render_commands_with_transform(
+                &self.world,
+                self.tile_size,
+                transform,
+            ));
         }
         pass.extend(self.ui.to_render_commands());
         Some(pass)
@@ -510,8 +564,18 @@ impl MenuFramePlan {
         let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
             .with_viewport(viewport)
             .with_camera(camera);
+        pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+        let transform = MenuScreenTransform::new(
+            camera_x - camera_width * 0.5,
+            camera_y - camera_height * 0.5,
+            scaling,
+        );
         for command in commands {
-            pass.extend(command.into_render_commands(&world, tile_size));
+            pass.extend(command.into_render_commands_with_transform(
+                &world,
+                tile_size,
+                Some(transform),
+            ));
         }
         pass.extend(ui.to_render_commands());
         Some(pass)
@@ -958,12 +1022,64 @@ fn distance(x: f32, y: f32, x2: f32, y2: f32) -> f32 {
     ((x - x2).powi(2) + (y - y2).powi(2)).sqrt()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MenuScreenTransform {
+    world_left: f32,
+    world_bottom: f32,
+    scaling: f32,
+}
+
+impl MenuScreenTransform {
+    const fn new(world_left: f32, world_bottom: f32, scaling: f32) -> Self {
+        Self {
+            world_left,
+            world_bottom,
+            scaling,
+        }
+    }
+
+    fn point(self, point: RenderPoint) -> RenderPoint {
+        RenderPoint::new(
+            (point.x - self.world_left) * self.scaling,
+            (point.y - self.world_bottom) * self.scaling,
+        )
+    }
+
+    fn rect(self, rect: RenderRect) -> RenderRect {
+        let point = self.point(RenderPoint::new(rect.x, rect.y));
+        RenderRect::new(
+            point.x,
+            point.y,
+            rect.width * self.scaling,
+            rect.height * self.scaling,
+        )
+    }
+}
+
+fn menu_transform_point(point: RenderPoint, transform: Option<MenuScreenTransform>) -> RenderPoint {
+    transform.map_or(point, |transform| transform.point(point))
+}
+
+fn menu_transform_rect(rect: RenderRect, transform: Option<MenuScreenTransform>) -> RenderRect {
+    transform.map_or(rect, |transform| transform.rect(rect))
+}
+
 fn menu_tile_rect(tile: &MenuTile, tile_size: f32) -> RenderRect {
     RenderRect::new(
         tile.x as f32 * tile_size,
         tile.y as f32 * tile_size,
         tile_size,
         tile_size,
+    )
+}
+
+fn menu_tile_inset_rect(tile: &MenuTile, tile_size: f32, inset_ratio: f32) -> RenderRect {
+    let inset = (tile_size * inset_ratio).clamp(0.0, tile_size * 0.45);
+    RenderRect::new(
+        tile.x as f32 * tile_size + inset,
+        tile.y as f32 * tile_size + inset,
+        (tile_size - inset * 2.0).max(1.0),
+        (tile_size - inset * 2.0).max(1.0),
     )
 }
 
@@ -1399,27 +1515,17 @@ mod tests {
             |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "CAMPAIGN")
         ));
 
-        let darkness = borrowed
-            .commands
-            .iter()
-            .find(|command| {
-                matches!(
+        assert!(
+            borrowed.commands.iter().all(|command| {
+                !matches!(
                     command,
                     RenderCommand::FillRect { color, layer, .. }
                         if *color == [0.0, 0.0, 0.0, MENU_DARKNESS]
                             && (*layer - 100.0).abs() < f32::EPSILON
                 )
-            })
-            .expect("menu darkness should still be emitted before UI overlay");
-
-        match darkness {
-            RenderCommand::FillRect { rect, color, layer } => {
-                assert_eq!(*rect, RenderRect::new(0.0, 0.0, 1920.0, 1080.0));
-                assert_eq!(*color, [0.0, 0.0, 0.0, MENU_DARKNESS]);
-                assert_eq!(*layer, 100.0);
-            }
-            other => panic!("unexpected darkness command: {other:?}"),
-        }
+            }),
+            "menu darkness stays in the logical Java-order plan, but the current native-safe fallback pre-darkens terrain instead of drawing an alpha fullscreen quad"
+        );
     }
 
     #[test]

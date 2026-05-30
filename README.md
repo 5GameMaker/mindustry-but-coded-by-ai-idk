@@ -13,8 +13,8 @@
 
 ## 迁移进度
 
-- 当前总体完成度：约 **50.6%**。
-- 当前 desktop 客户端已能用 native OpenGL 启动并显示主菜单快速前端层；仍处于迁移中，菜单世界背景暂走快速路径，后续继续接完整 Java 菜单世界批处理与真实页面。
+- 当前总体完成度：约 **50.8%**。
+- 当前 desktop 客户端已能用 native OpenGL 启动并默认显示完整菜单世界前端层；`MINDUSTRY_DESKTOP_FAST_MENU=1` 仅保留为手动 fallback。仍处于迁移中，后续继续补真实 Java Dialog/UI 页面与资源贴图级还原。
 
 ## 作者的话
 

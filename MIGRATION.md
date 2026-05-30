@@ -17714,3 +17714,43 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - shader lifecycle 仍未正式接入 native runtime，只做了 Mesh 懒加载兜底；
   - `LoadGame / CustomGame / Editor / Mods / Settings` 仍需从 route shell 接入真实页面；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 492. Native OpenGL 完整菜单世界默认恢复与 LoadGame slot 最小接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.8%**，仍未达到完整可玩；前端继续优先，目标是完整还原 MDT/Mindustry UI，而不是长期保留文本 shell。
+- 问题背景：
+  - 用户明确要求完整还原 MDT UI，`FAST_MENU` 不能作为最终主菜单；
+  - 关闭 `MINDUSTRY_DESKTOP_FAST_MENU` 后，完整菜单世界路径曾经首帧未响应/白屏或黑屏；
+  - trace 确认完整菜单世界会展开约 1 万条 render command，旧 OpenGL backend 对每个 sprite/primitive 立即重建 mesh，存在 O(n²) 卡顿。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - OpenGL backend 的 sprite/primitive mesh plan 改为 dirty 后在 `EndPass/Resolve` 统一刷新，避免 100x50 菜单世界逐 quad 重建；
+    - `LoadGame` route shell 从 `pending LoadDialog port` 推进到真实读取 save dir、解析 `.msav` meta、排序并展示 slot 列表，点击 slot 会记录待加载动作；
+    - 菜单图形帧不再叠加 `startup-menu-preview` 占位 pass，完整菜单 pass 直接负责首屏。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 菜单世界 `DrawCache` 增加 native-safe screen-space 色块 fallback，并按 Java camera/scaling 将菜单世界坐标投到屏幕坐标；
+    - 逻辑计划仍保留 Java 顺序 `floor/cache -> shadow -> wall -> flyers -> darkness -> UI`，但当前 native-safe fallback 暂不输出 fullscreen darkness quad，避免首屏再次被黑色透明层吞掉；
+    - 后续需要继续把真实 raw/packed sprite atlas 接入，替换色块 fallback。
+  - `desktop/src/main.rs`
+    - 移除 native OpenGL 启动时默认设置 `MINDUSTRY_DESKTOP_FAST_MENU=1` 的逻辑；
+    - `MINDUSTRY_DESKTOP_FAST_MENU=1` 只保留为手动 fallback。
+- 迁移意义：
+  - desktop native OpenGL 从“快速菜单可见”推进到“默认走完整 Java `MenuRenderer` 菜单世界路径且窗口响应”；
+  - 这是 UI 还原主线的关键前置，后续可以在真实菜单背景上继续替换右侧 route shell 为 Java Dialog；
+  - LoadGame 已有 save slot 列表/点击主链入口，下一步要接真实存档加载 runtime。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_frame_plan_to_render_pass_preserves_menu_command_order --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - `MINDUSTRY_DESKTOP_FAST_MENU=0` 启动 `target/debug/mindustry-desktop.exe` 后 Windows 进程 `Responding=True`；
+  - 本地截图确认完整菜单世界色块背景、主菜单按钮与版本文本可见，不再是黑屏/白屏/未响应。
+- 仍未完成：
+  - 色块 fallback 不是最终贴图级还原；必须继续接 `assets-raw`/packed atlas 或等价纹理生成；
+  - fullscreen darkness quad 暂未在 native-safe fallback 输出，后续要修好透明混合/批次排序后恢复；
+  - `LoadDialog` 还不是完整 Java Dialog，尚未真正加载存档进入 world runtime；
+  - `CustomGame / Mods / Editor / Settings / About / Discord / mobile console` 仍大量是 route shell；
+  - 未达到完整可玩，不能宣告目标完成。
