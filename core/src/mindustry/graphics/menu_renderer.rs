@@ -14,6 +14,8 @@ use crate::mindustry::ui::{
 
 pub const MENU_DARKNESS: f32 = 0.3;
 pub const MENU_TILE_SIZE: f32 = 8.0;
+pub const MENU_SUBMENU_FADE_IN_SECONDS: f32 = 0.15;
+pub const MENU_SUBMENU_FADE_OUT_SECONDS: f32 = 0.2;
 
 /// Native-safe approximation of Java `Styles.flatToggleMenut`.
 ///
@@ -129,9 +131,10 @@ fn menu_push_flat_toggle_menu_state_background(
     rect: RenderRect,
     state: MenuFlatToggleMenuState,
     style: MenuFlatToggleMenuStyle,
+    alpha_scale: f32,
 ) {
     if let Some(drawable) = menu_flat_toggle_menu_drawable_for_state(state) {
-        let tint = drawable.tint.rgba();
+        let tint = menu_color_with_alpha(drawable.tint.rgba(), alpha_scale);
         if drawable.tint != UiDrawableTint::Transparent && tint[3] > 0.0 {
             commands.push(RenderCommand::draw_sprite(
                 drawable.atlas_symbol,
@@ -146,7 +149,7 @@ fn menu_push_flat_toggle_menu_state_background(
 
     commands.push(RenderCommand::fill_rect(
         rect,
-        style.fill_for(state),
+        menu_color_with_alpha(style.fill_for(state), alpha_scale),
         style.fill_layer,
     ));
     let drawable = style.drawable_for(state);
@@ -154,11 +157,16 @@ fn menu_push_flat_toggle_menu_state_background(
         commands.push(RenderCommand::draw_sprite(
             drawable,
             rect,
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, alpha_scale],
             0.0,
             style.drawable_layer,
         ));
     }
+}
+
+fn menu_color_with_alpha(mut color: [f32; 4], alpha_scale: f32) -> [f32; 4] {
+    color[3] = (color[3] * alpha_scale.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    color
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -456,6 +464,7 @@ impl MenuButtonPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MenuUiPlan {
     pub mobile: bool,
+    pub submenu_alpha: f32,
     pub buttons: Vec<MenuButtonPlan>,
 }
 
@@ -464,6 +473,7 @@ impl MenuUiPlan {
         self.buttons
             .iter()
             .rev()
+            .filter(|button| !button.submenu || self.submenu_alpha > f32::EPSILON)
             .find(|button| {
                 x >= button.rect.x
                     && x <= button.rect.x + button.rect.width
@@ -477,12 +487,26 @@ impl MenuUiPlan {
         let style = MENU_FLAT_TOGGLE_MENU_STYLE;
         let mut commands = Vec::with_capacity(self.buttons.len() * 3);
         for button in &self.buttons {
+            let alpha = if button.submenu {
+                self.submenu_alpha
+            } else {
+                1.0
+            };
+            if alpha <= f32::EPSILON {
+                continue;
+            }
             let state = button.flat_toggle_menu_state();
-            menu_push_flat_toggle_menu_state_background(&mut commands, button.rect, state, style);
+            menu_push_flat_toggle_menu_state_background(
+                &mut commands,
+                button.rect,
+                state,
+                style,
+                alpha,
+            );
             commands.push(RenderCommand::draw_text_styled(
                 button.label.as_str(),
                 button.rect.center(),
-                style.text_color,
+                menu_color_with_alpha(style.text_color, alpha),
                 style.text_size(self.mobile),
                 0.0,
                 style.text_style,
@@ -744,6 +768,8 @@ pub struct MenuRendererState {
     pub flyer_count: usize,
     pub flyer_type: &'static str,
     pub selected_root: MenuButtonRole,
+    pub submenu_alpha: f32,
+    pub submenu_target_alpha: f32,
     pub custom_buttons: Vec<MenuCustomButton>,
 }
 
@@ -758,12 +784,15 @@ impl MenuRendererState {
             flyer_count: flyer_count_for_seed(config.seed),
             flyer_type: flyer_type_for_seed(config.seed),
             selected_root: MenuButtonRole::Play,
+            submenu_alpha: 1.0,
+            submenu_target_alpha: 1.0,
             custom_buttons: Vec::new(),
         }
     }
 
     pub fn render_plan(&mut self, input: MenuFrameInput) -> MenuFramePlan {
         self.time += input.delta;
+        self.tick_submenu_alpha(input.delta);
 
         let world_width = (self.world.width as f32 - 1.0) * self.config.tile_size;
         let world_height = (self.world.height as f32 - 1.0) * self.config.tile_size;
@@ -813,6 +842,7 @@ impl MenuRendererState {
                 input,
                 self.config.mobile,
                 self.selected_root,
+                self.submenu_alpha,
                 self.config.desktop_workshop_enabled,
                 &self.custom_buttons,
             ),
@@ -867,6 +897,7 @@ impl MenuRendererState {
             input,
             self.config.mobile,
             self.selected_root,
+            self.submenu_alpha,
             self.config.desktop_workshop_enabled,
             &self.custom_buttons,
         )
@@ -880,8 +911,37 @@ impl MenuRendererState {
         if self.config.mobile || !role.has_desktop_submenu() {
             return false;
         }
+        if self.selected_root == role {
+            self.submenu_target_alpha = if self.submenu_target_alpha > 0.0 {
+                0.0
+            } else {
+                1.0
+            };
+            return true;
+        }
         self.selected_root = role;
+        self.submenu_target_alpha = 1.0;
         true
+    }
+
+    pub fn tick_submenu_alpha(&mut self, delta: f32) {
+        let delta = delta.max(0.0);
+        if (self.submenu_alpha - self.submenu_target_alpha).abs() <= f32::EPSILON {
+            self.submenu_alpha = self.submenu_target_alpha;
+            return;
+        }
+        let duration = if self.submenu_target_alpha > self.submenu_alpha {
+            MENU_SUBMENU_FADE_IN_SECONDS
+        } else {
+            MENU_SUBMENU_FADE_OUT_SECONDS
+        }
+        .max(f32::EPSILON);
+        let step = delta / duration;
+        if self.submenu_target_alpha > self.submenu_alpha {
+            self.submenu_alpha = (self.submenu_alpha + step).min(self.submenu_target_alpha);
+        } else {
+            self.submenu_alpha = (self.submenu_alpha - step).max(self.submenu_target_alpha);
+        }
     }
 
     pub fn add_custom_button(&mut self, label: impl Into<String>) -> MenuButtonRole {
@@ -1286,6 +1346,7 @@ fn menu_mobile_button_plan(
 fn menu_desktop_ui_plan(
     input: MenuFrameInput,
     selected_root: MenuButtonRole,
+    submenu_alpha: f32,
     desktop_workshop_enabled: bool,
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
@@ -1314,8 +1375,8 @@ fn menu_desktop_ui_plan(
         MenuButtonRole::About,
     ];
     let submenu_roles: &[MenuButtonRole] = match selected_root {
-        MenuButtonRole::Play => &play_submenu_roles,
-        MenuButtonRole::Database => &database_submenu_roles,
+        MenuButtonRole::Play if submenu_alpha > f32::EPSILON => &play_submenu_roles,
+        MenuButtonRole::Database if submenu_alpha > f32::EPSILON => &database_submenu_roles,
         _ => &[],
     };
     let main_role_count = main_roles.len();
@@ -1383,6 +1444,7 @@ fn menu_desktop_ui_plan(
 
     MenuUiPlan {
         mobile: false,
+        submenu_alpha: submenu_alpha.clamp(0.0, 1.0),
         buttons,
     }
 }
@@ -1487,6 +1549,7 @@ fn menu_mobile_ui_plan(input: MenuFrameInput, custom_buttons: &[MenuCustomButton
 
     MenuUiPlan {
         mobile: true,
+        submenu_alpha: 0.0,
         buttons,
     }
 }
@@ -1495,6 +1558,7 @@ fn menu_ui_plan(
     input: MenuFrameInput,
     mobile: bool,
     selected_root: MenuButtonRole,
+    submenu_alpha: f32,
     desktop_workshop_enabled: bool,
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
@@ -1504,6 +1568,7 @@ fn menu_ui_plan(
         menu_desktop_ui_plan(
             input,
             selected_root,
+            submenu_alpha,
             desktop_workshop_enabled,
             custom_buttons,
         )
@@ -1716,6 +1781,51 @@ mod tests {
             .all(|button| button.role != MenuButtonRole::Campaign));
         assert!(!state.select_desktop_root(MenuButtonRole::Quit));
         assert_eq!(state.selected_root, MenuButtonRole::Database);
+    }
+
+    #[test]
+    fn menu_renderer_state_fades_out_and_in_current_desktop_submenu_like_java_actions() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        let input = |delta| MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scl4: 4.0,
+            delta,
+        };
+
+        assert_eq!(state.selected_root, MenuButtonRole::Play);
+        assert_eq!(state.submenu_alpha, 1.0);
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
+        assert_eq!(state.submenu_target_alpha, 0.0);
+
+        let fading_out = state.render_plan(input(MENU_SUBMENU_FADE_OUT_SECONDS * 0.5));
+        assert!((state.submenu_alpha - 0.5).abs() < 0.0001);
+        assert!((fading_out.ui.submenu_alpha - 0.5).abs() < 0.0001);
+        assert!(fading_out
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Campaign));
+
+        let faded_out = state.render_plan(input(MENU_SUBMENU_FADE_OUT_SECONDS));
+        assert_eq!(state.submenu_alpha, 0.0);
+        assert_eq!(faded_out.ui.submenu_alpha, 0.0);
+        assert!(faded_out
+            .ui
+            .buttons
+            .iter()
+            .all(|button| button.role != MenuButtonRole::Campaign));
+
+        assert!(state.select_desktop_root(MenuButtonRole::Play));
+        assert_eq!(state.submenu_target_alpha, 1.0);
+        let fading_in = state.render_plan(input(MENU_SUBMENU_FADE_IN_SECONDS * 0.5));
+        assert!((state.submenu_alpha - 0.5).abs() < 0.0001);
+        assert!((fading_in.ui.submenu_alpha - 0.5).abs() < 0.0001);
+        assert!(fading_in
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Campaign));
     }
 
     #[test]
@@ -1993,6 +2103,7 @@ mod tests {
         let rect = RenderRect::new(10.0, 20.0, 230.0, 70.0);
         let plan = MenuUiPlan {
             mobile: false,
+            submenu_alpha: 1.0,
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::Play,
                 label: "PLAY".to_string(),

@@ -18329,3 +18329,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - icon 仍使用文本占位，未接真实 `Icon.*` glyph/drawable；
   - ScrollPane/LabelWrap/clearNonei/Scene2D event bubbling 仍未完整等价；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 511. MenuFragment submenu fadeIn/fadeOut 状态链路
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.7%**，仍未达到完整可玩；继续对照 `MenuFragment.fadeInMenu()` / `fadeOutMenu()` 的 `Actions.alpha(1f, 0.15f)` 与 `Actions.alpha(0f, 0.2f)` 行为，把 desktop submenu 从静态展开推进到带 alpha 状态的 UI plan。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MENU_SUBMENU_FADE_IN_SECONDS = 0.15`、`MENU_SUBMENU_FADE_OUT_SECONDS = 0.2`；
+    - `MenuRendererState` 新增 `submenu_alpha` 与 `submenu_target_alpha`，`render_plan()` 按 frame delta 推进 alpha；
+    - 点击当前已选 root 会把 submenu target alpha 在 `1.0/0.0` 间切换，开始对齐 Java 的“再次点击当前菜单收起 submenu”语义；
+    - `MenuUiPlan` 携带 `submenu_alpha`，submenu button 背景、drawable tint、文字 alpha 都随 fade 缩放；
+    - alpha 降到 0 后不再产生 submenu button/hit-test，避免不可见按钮仍可点击；
+    - 新增测试覆盖 fade out 半程、完全收起、再 fade in 半程，以及 submenu button 存在/消失状态。
+- 迁移意义：
+  - MenuFragment 不再只有 selected_root 的静态布局，开始具备 Scene2D action 动画状态；
+  - 后续接 hover/down/checked、submenu clearChildren、动画完成回调时已有状态承载点；
+  - 与 `desktop/src/lib.rs` 的 menu route shell 仍保持兼容，现有菜单/按钮测试未破坏。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu_renderer --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前默认仍保留 Rust 既有的 Play submenu 可见初始状态，尚未完全切到 Java `currentMenu == null` 初始语义；
+  - submenu 仍未实现真正的 Scene2D `Actions.run(() -> clearChildren())` 回调对象；
+  - hover/down/currentMenu 细颗粒输入状态、动画插值 `Interp.fade`、真实 layout table 重建仍需补齐；
+  - 未达到完整可玩，不能宣告目标完成。
