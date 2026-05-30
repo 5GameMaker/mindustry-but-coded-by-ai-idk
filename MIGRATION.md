@@ -15480,3 +15480,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Rain under/over 层级后续应从单个 Environment pass 过渡到更精确的 Java Layer 排序；
   - Puddle/Unit/entity aggregation、更多 native OpenGL smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.7%，仍未达到完整可玩。
+
+## 420. 最新闭环记录：Puddle snapshot 接入 Overlay circle 与 light pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.8%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/comp/PuddleComp.java`
+  - `core/src/mindustry/type/Liquid.java#drawPuddle(...)`
+  - 最小对齐 `Draw.z(Layer.debris - 1)`、中心圆、3 个随机偏移圆、`Drawf.light(...)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 puddle fraction / color / seeded offset helper；
+    - 新增 `puddle_snapshot_render_commands(...)`，将 puddle snapshot 转成 `RenderCommand::DrawCircle`；
+    - 新增 `puddle_snapshot_render_pass()`，将 puddle 本体接入 `RenderPassKind::Overlay`；
+    - 新增 `puddle_snapshot_light_render_pass()`，将有 `light_color_rgba` 的液体 puddle 接入 `LightRendererPlan` / `RenderPassKind::Lighting`；
+    - `graphics_frame_for_render()` 已推入 puddle overlay pass 和 light pass。
+- 迁移意义：
+  - Puddle snapshot 不再只有 sync/update/particle effect；puddle 本体形状与发光已进入 desktop render frame 主链路；
+  - 继续减少“runtime 有实体但画面不可见”的断层；
+  - 该实现仍保留后续接更精确 Java layer sorting / Arc Rand / liquid floor 波动的接入点。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_puddle_snapshot_entities_into_overlay_and_light_passes --features opengl-native-runtime`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `git diff --check`
+- 仍未完成：
+  - Puddle pass 仍临时复用 Overlay，后续应接入更精确 Java layer sorting；
+  - liquid floor `smag/sscl` 抖动、`CellLiquid.drawPuddle()` 额外细胞圆、Arc `Rand` 精确随机尚未补齐；
+  - `PuddleUpdateEvent` 的 `affect_units/create_fire/puddle_on_building/liquid_update` 仍需继续消费到完整 runtime；
+  - Unit body sprite、weather custom lowering、更多 native OpenGL smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.8%，仍未达到完整可玩。

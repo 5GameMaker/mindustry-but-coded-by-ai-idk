@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **40.7%**。
+- 当前总体迁移完成度：约 **40.8%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -12723,3 +12723,24 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 weather custom commands 继续 lower 到真实 primitive/sprite/noise backend，而不是长期停留为 custom marker；
   2. 按 Java `drawWeather/weatherAlpha/showweather` 补渲染 gating；
   3. 继续推进 Puddle/Unit/entity pass aggregation 与更精确 layer sorting。
+
+### 2026-05-30：Puddle snapshot 接入 Overlay circle 与 light pass
+
+- 当前整体完成度：约 **40.8%**。
+- 已完成：
+  - `DesktopLauncher::puddle_snapshot_render_commands(...)` 将 `client_puddle_snapshot_entities` + `client_puddle_snapshot_liquids` 转成 1 个中心圆 + 3 个 seeded 偏移圆；
+  - 半径使用 Java `Liquid.drawPuddle()` 的最小公式：`clamp(amount / (maxLiquid / 1.5)) * 8/5`；
+  - puddle 本体进入 `RenderPassKind::Overlay`，命令 layer 记录为 `Layer::DEBRIS - 1`；
+  - `DesktopLauncher::puddle_snapshot_light_render_pass()` 使用 content liquid 的 `light_color_rgba` 生成 `LightRendererPlan` / `RenderPassKind::Lighting`；
+  - `graphics_frame_for_render()` 已推入 puddle overlay pass 与 light pass。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_puddle_snapshot_entities_into_overlay_and_light_passes --features opengl-native-runtime`
+  - `cargo test -p mindustry-core puddle --lib`
+  - `git diff --check`
+- 下一步：
+  1. 继续把 puddle layer 从临时 Overlay 过渡到更精确的 Java layer sorting；
+  2. 补 liquid floor 抖动、CellLiquid/neoplasm 额外 cell 圆、Arc `Rand` 精确随机；
+  3. 推进 Unit body sprite snapshot → RenderFrame 闭环。

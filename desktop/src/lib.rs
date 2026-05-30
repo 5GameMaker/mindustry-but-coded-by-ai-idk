@@ -19,16 +19,19 @@ use mindustry_core::mindustry::core::{
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
-use mindustry_core::mindustry::entities::comp::{BuildingComp, BulletComp, DecalColor, FireComp};
+use mindustry_core::mindustry::entities::comp::{
+    BuildingComp, BulletComp, DecalColor, FireComp, PuddleComp,
+};
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect, standard_effect_color_symbol,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
     standard_effect_render_lifetime, EffectRenderInput, EntityClassKind, PlayerComp,
-    PlayerUnitSwitchContext, ShieldArcAbility, StandardEffectCircleRenderPrimitive,
-    StandardEffectDrawKind, StandardEffectDrawPlan, StandardEffectLightRenderPrimitive,
-    StandardEffectLineRenderPrimitive, StandardEffectRectRenderPrimitive,
-    StandardEffectShieldArcBreak, StandardEffectSquareRenderPrimitive,
-    StandardEffectTriangleRenderPrimitive, WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
+    PlayerUnitSwitchContext, PuddleLiquidInfo, ShieldArcAbility,
+    StandardEffectCircleRenderPrimitive, StandardEffectDrawKind, StandardEffectDrawPlan,
+    StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
+    StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
+    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, WorldLabelAlign,
+    WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::{
@@ -167,6 +170,37 @@ fn desktop_basic_bullet_kind_renderable(kind: BulletKind) -> bool {
 fn desktop_bullet_layer(spec: &BulletSpec) -> f32 {
     let layer = spec.layer.strip_prefix("Layer.").unwrap_or(&spec.layer);
     Layer::by_name(layer).unwrap_or(Layer::BULLET)
+}
+
+fn desktop_puddle_fraction(amount: f32) -> f32 {
+    (amount / (PuddleComp::MAX_LIQUID / 1.5)).clamp(0.0, 1.0)
+}
+
+fn desktop_puddle_draw_color(rgba: u32) -> [f32; 4] {
+    let mut color = rgba8888_to_render_color(rgba, 1.0);
+    color[0] *= 0.95;
+    color[1] *= 0.95;
+    color[2] *= 0.95;
+    color
+}
+
+fn desktop_puddle_seeded_offsets(id: i32, length: f32) -> [(f32, f32); 3] {
+    let mut state = (id as i64 as u64)
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add(0x632b_e59b_d9b4_e019);
+    let mut next_unit = || {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        let value = state.wrapping_mul(0x2545_f491_4f6c_dd1d);
+        ((value >> 40) as f32) / ((1u64 << 24) as f32)
+    };
+
+    std::array::from_fn(|_| {
+        let angle = next_unit() * std::f32::consts::TAU;
+        let distance = next_unit() * length.max(0.0);
+        (angle.cos() * distance, angle.sin() * distance)
+    })
 }
 
 fn desktop_weather_rgba_property(rgba: u32) -> String {
@@ -11493,6 +11527,121 @@ impl DesktopLauncher {
         (!pass.commands.is_empty()).then_some(pass)
     }
 
+    fn puddle_snapshot_render_commands(
+        &self,
+        puddle: &PuddleComp,
+        liquid: &PuddleLiquidInfo,
+    ) -> Vec<RenderCommand> {
+        if puddle.removed {
+            return Vec::new();
+        }
+
+        let fraction = desktop_puddle_fraction(puddle.amount);
+        if fraction <= f32::EPSILON {
+            return Vec::new();
+        }
+
+        let layer = Layer::DEBRIS - 1.0;
+        let color = desktop_puddle_draw_color(liquid.color_rgba);
+        let center = RenderPoint::new(puddle.x, puddle.y);
+        let mut commands = Vec::with_capacity(4);
+
+        commands.push(RenderCommand::draw_circle(
+            center,
+            fraction * 8.0,
+            color,
+            true,
+            layer,
+        ));
+
+        let length = fraction * 6.0;
+        for (offset_x, offset_y) in desktop_puddle_seeded_offsets(puddle.id, length) {
+            commands.push(RenderCommand::draw_circle(
+                RenderPoint::new(puddle.x + offset_x, puddle.y + offset_y),
+                fraction * 5.0,
+                color,
+                true,
+                layer,
+            ));
+        }
+
+        commands
+    }
+
+    fn puddle_snapshot_render_pass(&self) -> Option<RenderPass> {
+        let mut pass = RenderPass::new(RenderPassKind::Overlay)
+            .with_order(RenderPassKind::Overlay.default_order());
+
+        for (entity_id, puddle) in &self.runtime.client_puddle_snapshot_entities {
+            if self.runtime.client_hidden_entity_ids.contains(entity_id) {
+                continue;
+            }
+            let Some(liquid) = self.runtime.client_puddle_snapshot_liquids.get(entity_id) else {
+                continue;
+            };
+            pass.commands
+                .extend(self.puddle_snapshot_render_commands(puddle, liquid));
+        }
+
+        (!pass.commands.is_empty()).then_some(pass)
+    }
+
+    fn puddle_snapshot_light_primitive(
+        &self,
+        puddle: &PuddleComp,
+        liquid: &PuddleLiquidInfo,
+    ) -> Option<LightPrimitive> {
+        if puddle.removed {
+            return None;
+        }
+
+        let fraction = desktop_puddle_fraction(puddle.amount);
+        if fraction <= f32::EPSILON {
+            return None;
+        }
+
+        let light_color_rgba = self
+            .content_loader
+            .liquid_by_name(&liquid.name)
+            .map(|content| content.light_color_rgba)
+            .unwrap_or(0);
+        let light_color = DecalColor::from_rgba(light_color_rgba);
+        if light_color.a <= 0.001 {
+            return None;
+        }
+
+        let liquid_alpha = rgba8888_to_render_color(liquid.color_rgba, 1.0)[3];
+        Some(LightPrimitive {
+            center: (puddle.x, puddle.y),
+            radius: 30.0 * fraction,
+            color: light_color,
+            opacity: liquid_alpha * fraction * 0.8,
+        })
+    }
+
+    fn puddle_snapshot_light_render_pass(&self) -> Option<RenderPass> {
+        let circle_lights = self
+            .runtime
+            .client_puddle_snapshot_entities
+            .iter()
+            .filter(|(entity_id, _)| !self.runtime.client_hidden_entity_ids.contains(entity_id))
+            .filter_map(|(entity_id, puddle)| {
+                let liquid = self.runtime.client_puddle_snapshot_liquids.get(entity_id)?;
+                self.puddle_snapshot_light_primitive(puddle, liquid)
+            })
+            .collect::<Vec<_>>();
+
+        if circle_lights.is_empty() {
+            return None;
+        }
+
+        LightRendererPlan {
+            circle_lights,
+            commands: Vec::new(),
+        }
+        .to_render_pass()
+    }
+
     fn basic_bullet_snapshot_render_commands(
         &self,
         bullet: &BulletComp,
@@ -11734,6 +11883,9 @@ impl DesktopLauncher {
         if let Some(light_pass) = self.fire_snapshot_light_render_pass() {
             render_frame.push_pass(light_pass);
         }
+        if let Some(light_pass) = self.puddle_snapshot_light_render_pass() {
+            render_frame.push_pass(light_pass);
+        }
         let block_renderer = self.block_render_plan(camera, viewport);
         if let Some(block_renderer) = &block_renderer {
             if let Some(pass) = block_renderer
@@ -11779,6 +11931,9 @@ impl DesktopLauncher {
             for pass in fog_frame.to_render_passes() {
                 render_frame.push_pass(pass);
             }
+        }
+        if let Some(pass) = self.puddle_snapshot_render_pass() {
+            render_frame.push_pass(pass);
         }
         if let Some(pass) = self.standard_effect_render_frame().to_render_pass() {
             render_frame.push_pass(pass);
@@ -15665,7 +15820,111 @@ mod tests {
                 if name == "weather-particles"
                     && properties.iter().any(|property| property.key == "region" && property.value == "particle")
                     && properties.iter().any(|property| property.key == "windx" && property.value == "-2.16")
-        )));
+            )));
+    }
+
+    #[test]
+    fn desktop_launcher_routes_puddle_snapshot_entities_into_overlay_and_light_passes() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let liquid = {
+            let slag = launcher
+                .content_loader
+                .liquid_by_name("slag")
+                .expect("base content should include slag");
+            PuddleLiquidInfo::from(slag)
+        };
+
+        let mut puddle = PuddleComp::new(7300, 24.0, 32.0);
+        puddle.amount = PuddleComp::MAX_LIQUID / 2.0;
+        launcher
+            .runtime
+            .client_puddle_snapshot_entities
+            .insert(7300, puddle);
+        launcher
+            .runtime
+            .client_puddle_snapshot_liquids
+            .insert(7300, liquid);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            20,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawCircle { center, .. }
+                            if *center == RenderPoint::new(24.0, 32.0))
+                    })
+            })
+            .expect("puddle snapshot should emit an overlay circle pass");
+        let puddle_circles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    color,
+                    filled,
+                    layer,
+                    ..
+                } => Some((*center, *radius, *color, *filled, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(puddle_circles.len(), 4);
+        assert_eq!(puddle_circles[0].0, RenderPoint::new(24.0, 32.0));
+        assert!((puddle_circles[0].1 - 6.0).abs() < 0.0001);
+        assert!(puddle_circles[0].3);
+        assert_eq!(puddle_circles[0].4, Layer::DEBRIS - 1.0);
+        assert!((puddle_circles[0].2[0] - 0.95).abs() < 0.0001);
+        assert!((puddle_circles[0].2[1] - (0xa1 as f32 / 255.0 * 0.95)).abs() < 0.0001);
+        assert!((puddle_circles[0].2[2] - (0x66 as f32 / 255.0 * 0.95)).abs() < 0.0001);
+        assert_eq!(puddle_circles[0].2[3], 1.0);
+
+        let light_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawCircle { center, .. }
+                            if *center == RenderPoint::new(24.0, 32.0))
+                    })
+            })
+            .expect("slag puddle should emit a light pass");
+        match light_pass.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawCircle { center, .. }
+                if *center == RenderPoint::new(24.0, 32.0))
+        }) {
+            Some(RenderCommand::DrawCircle {
+                radius,
+                color,
+                filled,
+                layer,
+                ..
+            }) => {
+                assert!((*radius - 22.5).abs() < 0.0001);
+                assert!(*filled);
+                assert_eq!(*layer, 50.0);
+                assert!((color[0] - 0xf0 as f32 / 255.0).abs() < 0.0001);
+                assert!((color[1] - 0x51 as f32 / 255.0).abs() < 0.0001);
+                assert!((color[2] - 0x1d as f32 / 255.0).abs() < 0.0001);
+                assert!((color[3] - (0x66 as f32 / 255.0 * 0.6)).abs() < 0.0001);
+            }
+            other => panic!("expected puddle light DrawCircle, got {other:?}"),
+        }
     }
 
     #[test]
