@@ -16249,3 +16249,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - trail 宽度动态脉动仍未完全复刻 `UnitType.drawTrail()` 中的 `absin(Time.time, 2f, engineSize/4f)`；
   - trail 当前仍以 line primitive 近似，后续应升级到 quad/mesh/polygon；
   - textured laser、weapon/unit parts、hard shadow、legs、payload/item 仍需继续。
+
+## 444. 最新闭环记录：Drawf.laser textured plan 与 Sap/PointLaser sprite 渲染
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.2%**，仍未达到完整可玩。
+- Java 对照：
+  - `Drawf.java#laser(...)`：start cap、end cap 与 body line 三件套，`scl = 8f * scale * Draw.scl`，body stroke 为 `12f * scale`；
+  - `SapBulletType.draw(...)`：`Drawf.laser(laserRegion, laserEndRegion, ..., width * b.fout())`；
+  - `PointLaserBulletType.draw(...)`：`Drawf.laser(laser, laserEnd, ..., fslope * (1 - oscMag + absin(...)))`。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/drawf.rs`
+    - 新增 `LaserDrawPlan`；
+    - 新增 `Drawf::laser(...)`，统一计算 rotation、inset、body_start/body_end、body stroke 与 light 标记；
+    - 新增 `drawf_laser_plan_matches_java_inset_and_stroke`。
+  - `desktop/src/lib.rs`
+    - 新增 `drawf_laser_sprite_commands(...)`，用现有 `RenderCommand::DrawSprite` 输出 start cap、end cap、body sprite；
+    - `Sap` bullet snapshot 渲染从 `DrawLine` 近似升级为 `laser` / `laser-end` sprite 三件套；
+    - `PointLaser` bullet snapshot 渲染从 `DrawLine + DrawCircle cap` 近似升级为 `point-laser` / `point-laser-end` sprite 三件套；
+    - 更新测试为 `desktop_launcher_routes_sap_snapshot_textured_laser_and_light_pass` 与 `desktop_launcher_routes_point_laser_snapshot_textured_beam_to_aim_endpoint`。
+- 迁移意义：
+  - textured laser 不再是每个 bullet 单独手写 primitive，已有 `Drawf::laser(...)` 数据化计划作为统一入口；
+  - Sap/PointLaser 继续沿 `client_bullet_snapshot_entities` → content `BulletSpec` → desktop overlay/light pass → `RenderFramePlan` 主链推进；
+  - 该闭环没有新增孤立 renderer；sprite 命令会继续进入现有 OpenGL sprite mesh/backend 执行链。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core drawf_laser_plan_matches_java_inset_and_stroke --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_sap_snapshot_textured_laser_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_point_laser_snapshot_textured_beam_to_aim_endpoint --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `Drawf.laser` 的 cap 尺寸目前使用最小默认尺寸，尚未读取真实 atlas `TextureRegion.width/height/scl()`；
+  - PowerNode、BeamNode、TractorBeamTurret、BeamDrill、RepairBeamWeapon、unit mining laser 等还未统一迁入该 textured laser helper；
+  - PointLaser 的 `Damage.collidePoint`、beamEffect、trail endpoint effect 仍需接 runtime/effect 链；
+  - weapon/unit parts、hard shadow、legs、payload/item 仍需继续。

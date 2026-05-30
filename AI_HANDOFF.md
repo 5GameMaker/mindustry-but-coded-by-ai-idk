@@ -13382,3 +13382,43 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 推进 OpenGL backend 对 effect/bullet primitive frame 的真实消费；
   3. Unit remove/death 补 `Fx.trailFade`；
   4. weapon/unit parts、hard shadow、legs、payload/item 继续接入整体 unit render pass。
+
+### 2026-05-30：Drawf.laser textured plan 与 Sap/PointLaser sprite 渲染
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **43.2%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/graphics/drawf.rs`
+    - 新增 `LaserDrawPlan`；
+    - 新增 `Drawf::laser(...)`；
+    - 新增测试 `drawf_laser_plan_matches_java_inset_and_stroke`。
+  - `desktop/src/lib.rs`
+    - 新增 `drawf_laser_sprite_commands(...)`；
+    - `Sap` snapshot render 现在输出 `laser` body 与 `laser-end` cap sprites；
+    - `PointLaser` snapshot render 现在输出 `point-laser` body 与 `point-laser-end` cap sprites；
+    - 新增/更新测试 `desktop_launcher_routes_sap_snapshot_textured_laser_and_light_pass`；
+    - 新增/更新测试 `desktop_launcher_routes_point_laser_snapshot_textured_beam_to_aim_endpoint`。
+- Java 对照：
+  - `Drawf.laser(...)` 的 start/end/body 三件套；
+  - `SapBulletType.draw(...)` 的 `width * b.fout()`；
+  - `PointLaserBulletType.draw(...)` 的 `fslope * (1 - oscMag + absin(...))`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core drawf_laser_plan_matches_java_inset_and_stroke --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_sap_snapshot_textured_laser_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_point_laser_snapshot_textured_beam_to_aim_endpoint --features opengl-native-runtime`
+  - `git diff --check`
+- 子代理只读探索结论已纳入：
+  - OpenGL primitive line/circle/square/triangle/light(circle/line) 已经能走真实 OpenGL sprite mesh / `DrawElements` 链路；下一步优先补 effect/bullet primitive 到 backend 的端到端测试，而不是误以为 primitives 仍只停在 frame seam。
+  - 单位渲染后续建议先定 `UnitType.draw()` 等价编排契约，再并行推进 parts、legs、payload/item、hard shadow。
+- 下一步：
+  1. 将 PowerNode/BeamNode/TractorBeamTurret/BeamDrill/RepairBeamWeapon/unit mining laser 逐步迁入 `Drawf::laser(...)` helper；
+  2. 给 effect/bullet primitive → OpenGL draw elements 补端到端测试；
+  3. 建立单位主渲染编排入口，避免 parts/legs/payload/shadow 继续散落。

@@ -411,6 +411,70 @@ fn shrapnel_bullet_snapshot_light_commands(
     }]
 }
 
+const DESKTOP_DRAWF_LASER_CAP_BASE_SIZE: f32 = 16.0;
+
+fn desktop_bullet_laser_line_symbol(spec: &BulletSpec) -> &str {
+    if spec.sprite.is_empty() {
+        "laser"
+    } else {
+        spec.sprite.as_str()
+    }
+}
+
+fn desktop_bullet_laser_end_symbol(line_symbol: &str) -> String {
+    format!("{line_symbol}-end")
+}
+
+fn drawf_laser_sprite_commands(
+    line_symbol: &str,
+    start_symbol: &str,
+    end_symbol: &str,
+    origin: RenderPoint,
+    end: RenderPoint,
+    scale: f32,
+    color: [f32; 4],
+    layer: f32,
+) -> Vec<RenderCommand> {
+    let Some(plan) = Drawf::laser(origin.x, origin.y, end.x, end.y, scale, true) else {
+        return Vec::new();
+    };
+
+    let cap_size = (DESKTOP_DRAWF_LASER_CAP_BASE_SIZE * scale).max(0.5);
+    let mut commands = Vec::with_capacity(3);
+    commands.push(RenderCommand::draw_sprite(
+        start_symbol,
+        RenderRect::from_center(origin, cap_size, cap_size),
+        color,
+        plan.rotation + 180.0,
+        layer,
+    ));
+    commands.push(RenderCommand::draw_sprite(
+        end_symbol,
+        RenderRect::from_center(end, cap_size, cap_size),
+        color,
+        plan.rotation,
+        layer,
+    ));
+
+    let body_length = plan.body_length();
+    if body_length > f32::EPSILON {
+        let (center_x, center_y) = plan.body_center();
+        commands.push(RenderCommand::draw_sprite(
+            line_symbol,
+            RenderRect::from_center(
+                RenderPoint::new(center_x, center_y),
+                body_length,
+                plan.stroke.max(0.5),
+            ),
+            color,
+            plan.rotation,
+            layer,
+        ));
+    }
+
+    commands
+}
+
 fn sap_bullet_snapshot_render_commands(
     bullet: &BulletComp,
     spec: &BulletSpec,
@@ -422,8 +486,8 @@ fn sap_bullet_snapshot_render_commands(
     }
 
     let (fin, fout) = desktop_bullet_fin_fout(bullet);
-    let stroke = spec.width * fout;
-    if stroke <= f32::EPSILON {
+    let scale = spec.width * fout;
+    if scale <= f32::EPSILON {
         return Vec::new();
     }
 
@@ -433,8 +497,19 @@ fn sap_bullet_snapshot_render_commands(
         data_position.y + (origin.y - data_position.y) * fin,
     );
     let color = desktop_bullet_render_color(&spec.color, DecalColor::WHITE);
+    let line_symbol = desktop_bullet_laser_line_symbol(spec);
+    let end_symbol = desktop_bullet_laser_end_symbol(line_symbol);
 
-    vec![RenderCommand::draw_line(origin, end, stroke, color, layer)]
+    drawf_laser_sprite_commands(
+        line_symbol,
+        &end_symbol,
+        &end_symbol,
+        origin,
+        end,
+        scale,
+        color,
+        layer,
+    )
 }
 
 fn sap_bullet_snapshot_light_commands(
@@ -870,14 +945,20 @@ fn point_laser_bullet_snapshot_render_commands(
     if scale <= f32::EPSILON {
         return Vec::new();
     }
-    let stroke = (spec.width.max(6.0) * scale).max(0.5);
     let color = desktop_bullet_render_color(&spec.color, DecalColor::WHITE);
+    let line_symbol = desktop_bullet_laser_line_symbol(spec);
+    let end_symbol = desktop_bullet_laser_end_symbol(line_symbol);
 
-    vec![
-        RenderCommand::draw_line(origin, end, stroke, color, layer),
-        RenderCommand::draw_circle(end, stroke * 1.5, color, true, layer),
-        RenderCommand::draw_circle(origin, stroke * 0.75, color, true, layer),
-    ]
+    drawf_laser_sprite_commands(
+        line_symbol,
+        &end_symbol,
+        &end_symbol,
+        origin,
+        end,
+        scale,
+        color,
+        layer,
+    )
 }
 
 fn rail_bullet_snapshot_render_color(spec: &BulletSpec) -> [f32; 4] {
@@ -17768,7 +17849,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_launcher_routes_sap_snapshot_line_and_light_pass() {
+    fn desktop_launcher_routes_sap_snapshot_textured_laser_and_light_pass() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let bullet_content = launcher
             .content_loader
@@ -17809,38 +17890,48 @@ mod tests {
             .find(|pass| {
                 pass.kind == RenderPassKind::Overlay
                     && pass.commands.iter().any(|command| {
-                        matches!(command, RenderCommand::DrawLine { from, to, .. }
-                            if *from == RenderPoint::new(32.0, 48.0)
-                                && *to == RenderPoint::new(62.0, 48.0))
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. }
+                            if symbol == "laser")
                     })
             })
-            .expect("sap bullet snapshot should emit overlay laser line");
+            .expect("sap bullet snapshot should emit overlay textured laser sprites");
 
-        match overlay
+        let sprites = overlay
             .commands
             .iter()
-            .find(|command| {
-                matches!(command, RenderCommand::DrawLine { from, to, .. }
-                    if *from == RenderPoint::new(32.0, 48.0)
-                        && *to == RenderPoint::new(62.0, 48.0))
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    tint,
+                    rotation,
+                    layer,
+                    ..
+                } if symbol == "laser" || symbol == "laser-end" => {
+                    Some((symbol.as_str(), *rect, *tint, *rotation, *layer))
+                }
+                _ => None,
             })
-            .expect("sap overlay line should be present")
-        {
-            RenderCommand::DrawLine {
-                stroke,
-                color,
-                layer,
-                ..
-            } => {
-                assert_eq!(*stroke, 0.275);
-                assert_eq!(
-                    *color,
-                    super::desktop_bullet_render_color("bf92f9", DecalColor::WHITE)
-                );
-                assert_eq!(*layer, Layer::BULLET);
-            }
-            other => panic!("expected sap overlay DrawLine, got {other:?}"),
-        }
+            .collect::<Vec<_>>();
+        assert_eq!(sprites.len(), 3);
+        assert_eq!(sprites[0].0, "laser-end");
+        assert_eq!(sprites[0].1.center(), RenderPoint::new(32.0, 48.0));
+        assert!((sprites[0].1.width - 4.4).abs() < 0.0001);
+        assert_eq!(sprites[0].3, 180.0);
+        assert_eq!(sprites[1].0, "laser-end");
+        assert_eq!(sprites[1].1.center(), RenderPoint::new(62.0, 48.0));
+        assert!((sprites[1].1.height - 4.4).abs() < 0.0001);
+        assert_eq!(sprites[1].3, 0.0);
+        assert_eq!(sprites[2].0, "laser");
+        assert_eq!(sprites[2].1.center(), RenderPoint::new(47.0, 48.0));
+        assert!((sprites[2].1.width - 25.6).abs() < 0.0001);
+        assert!((sprites[2].1.height - 3.3).abs() < 0.0001);
+        assert_eq!(
+            sprites[2].2,
+            super::desktop_bullet_render_color("bf92f9", DecalColor::WHITE)
+        );
+        assert_eq!(sprites[2].3, 0.0);
+        assert_eq!(sprites[2].4, Layer::BULLET);
 
         let lighting = render_frame
             .passes
@@ -18183,7 +18274,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_launcher_routes_point_laser_snapshot_beam_to_aim_endpoint() {
+    fn desktop_launcher_routes_point_laser_snapshot_textured_beam_to_aim_endpoint() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let bullet_id: ContentId = 9903;
         let mut spec = super::BulletSpec::new(super::BulletKind::PointLaser, 0.0, 210.0);
@@ -18227,64 +18318,48 @@ mod tests {
             .find(|pass| {
                 pass.kind == RenderPassKind::Overlay
                     && pass.commands.iter().any(|command| {
-                        matches!(command, RenderCommand::DrawLine { from, to, .. }
-                            if *from == RenderPoint::new(32.0, 48.0)
-                                && *to == RenderPoint::new(112.0, 48.0))
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. }
+                            if symbol == "point-laser")
                     })
             })
-            .expect("point laser snapshot should emit overlay beam commands");
+            .expect("point laser snapshot should emit overlay textured beam commands");
 
-        match overlay
-            .commands
-            .iter()
-            .find(|command| {
-                matches!(command, RenderCommand::DrawLine { from, to, .. }
-                    if *from == RenderPoint::new(32.0, 48.0)
-                        && *to == RenderPoint::new(112.0, 48.0))
-            })
-            .expect("point laser beam line should be present")
-        {
-            RenderCommand::DrawLine {
-                stroke,
-                color,
-                layer,
-                ..
-            } => {
-                assert!((*stroke - 4.2).abs() < 0.0001);
-                assert_eq!(
-                    *color,
-                    super::desktop_bullet_render_color("white", DecalColor::WHITE)
-                );
-                assert_eq!(*layer, Layer::BULLET);
-            }
-            other => panic!("expected point laser DrawLine, got {other:?}"),
-        }
-
-        let caps = overlay
+        let sprites = overlay
             .commands
             .iter()
             .filter_map(|command| match command {
-                RenderCommand::DrawCircle {
-                    center,
-                    radius,
-                    filled,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    tint,
+                    rotation,
                     layer,
                     ..
-                } if (*center == RenderPoint::new(112.0, 48.0)
-                    || *center == RenderPoint::new(32.0, 48.0))
-                    && *filled
-                    && (*layer - Layer::BULLET).abs() < 0.0001 =>
-                {
-                    Some((*center, *radius))
+                } if symbol == "point-laser" || symbol == "point-laser-end" => {
+                    Some((symbol.as_str(), *rect, *tint, *rotation, *layer))
                 }
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(caps.len(), 2);
-        assert_eq!(caps[0].0, RenderPoint::new(112.0, 48.0));
-        assert!((caps[0].1 - 6.3).abs() < 0.0001);
-        assert_eq!(caps[1].0, RenderPoint::new(32.0, 48.0));
-        assert!((caps[1].1 - 3.15).abs() < 0.0001);
+        assert_eq!(sprites.len(), 3);
+        assert_eq!(sprites[0].0, "point-laser-end");
+        assert_eq!(sprites[0].1.center(), RenderPoint::new(32.0, 48.0));
+        assert!((sprites[0].1.width - 11.2).abs() < 0.0001);
+        assert_eq!(sprites[0].3, 180.0);
+        assert_eq!(sprites[1].0, "point-laser-end");
+        assert_eq!(sprites[1].1.center(), RenderPoint::new(112.0, 48.0));
+        assert!((sprites[1].1.height - 11.2).abs() < 0.0001);
+        assert_eq!(sprites[1].3, 0.0);
+        assert_eq!(sprites[2].0, "point-laser");
+        assert_eq!(sprites[2].1.center(), RenderPoint::new(72.0, 48.0));
+        assert!((sprites[2].1.width - 68.8).abs() < 0.0001);
+        assert!((sprites[2].1.height - 8.4).abs() < 0.0001);
+        assert_eq!(
+            sprites[2].2,
+            super::desktop_bullet_render_color("white", DecalColor::WHITE)
+        );
+        assert_eq!(sprites[2].3, 0.0);
+        assert_eq!(sprites[2].4, Layer::BULLET);
     }
 
     #[test]

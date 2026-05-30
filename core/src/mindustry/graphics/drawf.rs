@@ -41,6 +41,37 @@ pub struct LightDrawPlan {
     pub opacity: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaserDrawPlan {
+    pub start: (f32, f32),
+    pub end: (f32, f32),
+    pub body_start: (f32, f32),
+    pub body_end: (f32, f32),
+    pub rotation: f32,
+    pub scale: f32,
+    pub inset: f32,
+    pub stroke: f32,
+    pub light: bool,
+}
+
+impl LaserDrawPlan {
+    pub fn body_length(self) -> f32 {
+        distance(
+            self.body_start.0,
+            self.body_start.1,
+            self.body_end.0,
+            self.body_end.1,
+        )
+    }
+
+    pub fn body_center(self) -> (f32, f32) {
+        (
+            (self.body_start.0 + self.body_end.0) / 2.0,
+            (self.body_start.1 + self.body_end.1) / 2.0,
+        )
+    }
+}
+
 impl LightDrawPlan {
     pub fn as_effect_primitive(self, color: &'static str) -> StandardEffectLightRenderPrimitive {
         StandardEffectLightRenderPrimitive {
@@ -154,6 +185,46 @@ impl Drawf {
         }
     }
 
+    pub fn laser(
+        x: f32,
+        y: f32,
+        x2: f32,
+        y2: f32,
+        scale: f32,
+        light: bool,
+    ) -> Option<LaserDrawPlan> {
+        if !x.is_finite()
+            || !y.is_finite()
+            || !x2.is_finite()
+            || !y2.is_finite()
+            || !scale.is_finite()
+            || scale <= f32::EPSILON
+        {
+            return None;
+        }
+
+        let length = distance(x, y, x2, y2);
+        if length <= f32::EPSILON {
+            return None;
+        }
+
+        let rotation = angle_deg(x, y, x2, y2);
+        let inset = 8.0 * scale;
+        let (vx, vy) = trns_exact(rotation, inset.min(length / 2.0));
+
+        Some(LaserDrawPlan {
+            start: (x, y),
+            end: (x2, y2),
+            body_start: (x + vx, y + vy),
+            body_end: (x2 - vx, y2 - vy),
+            rotation,
+            scale,
+            inset,
+            stroke: 12.0 * scale,
+            light,
+        })
+    }
+
     pub fn text_layer(pixelate: bool) -> f32 {
         if pixelate {
             Layer::END_PIXELED
@@ -233,6 +304,10 @@ fn distance_sq(x: f32, y: f32, x2: f32, y2: f32) -> f32 {
     dx * dx + dy * dy
 }
 
+fn distance(x: f32, y: f32, x2: f32, y2: f32) -> f32 {
+    distance_sq(x, y, x2, y2).sqrt()
+}
+
 fn round_to_even(value: i32) -> i32 {
     if value % 2 == 0 {
         value
@@ -258,6 +333,23 @@ mod tests {
             Some(DecalColor::from_rgba(0x336699cc))
         );
         assert_eq!(primitive.opacity, 0.5);
+    }
+
+    #[test]
+    fn drawf_laser_plan_matches_java_inset_and_stroke() {
+        let plan = Drawf::laser(10.0, 20.0, 74.0, 20.0, 0.5, true)
+            .expect("valid laser endpoints should emit plan");
+
+        assert_eq!(plan.start, (10.0, 20.0));
+        assert_eq!(plan.end, (74.0, 20.0));
+        assert_eq!(plan.rotation, 0.0);
+        assert_eq!(plan.inset, 4.0);
+        assert_eq!(plan.body_start, (14.0, 20.0));
+        assert_eq!(plan.body_end, (70.0, 20.0));
+        assert_eq!(plan.body_center(), (42.0, 20.0));
+        assert_eq!(plan.body_length(), 56.0);
+        assert_eq!(plan.stroke, 6.0);
+        assert!(plan.light);
     }
 
     #[test]
