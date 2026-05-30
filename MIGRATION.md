@@ -18093,3 +18093,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 未把 `icons.properties` 的 icon 名称映射到可渲染 glyph；
   - `DrawText` 仍走 placeholder；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 503. Desktop 内容图标 glyph registry 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.9%**，仍未达到完整可玩；继续推进真实字体/icon atlas，把 `icons.properties` 从“可解析”接入 desktop launcher 运行态。
+- 问题背景：
+  - Java `Fonts.loadContentIcons()` 会把 `icons/icons.properties` 的 `unicode=name|atlasSymbol` 内容图标注册进字体 glyph 体系；
+  - 502 只验证了字体资源是否存在，`icons.properties` 仍没有形成 desktop runtime 可查询的 icon glyph registry；
+  - 若不先建立 name/unicode/atlas symbol 的三向索引，后续 inline icon、大图标、内容图标和真实文本 atlas 会继续分散实现。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopContentIconGlyphRegistry`，保存从 `icons.properties` 解析出的 `UpstreamContentIcon`；
+    - 建立 `name -> icon`、`unicode -> icon`、`atlasSymbol -> icon` 三向索引；
+    - 新增 `DesktopContentIconGlyphRegistryReport`，暴露 source path、解析路径、icon 数量和加载错误；
+    - 新增 `desktop_read_utf8_lossy_text_file(...)`，读取文本时优先 UTF-8，遇到非 UTF-8 字节时降级为 lossy 读取，避免资源编码问题直接打断启动；
+    - 新增 `default_desktop_content_icon_glyph_registry()`，通过 `MINDUSTRY_ASSET_ROOT/assets/icons/icons.properties` 或直接路径加载上游内容图标；
+    - `DesktopLauncher` 新增 `content_icon_glyph_registry` 字段和 `content_icon_glyph_registry_report()`，启动时把 registry 接入主 runtime 状态；
+    - 新增测试验证 registry 能从临时 asset root 加载、按 name/unicode/atlas symbol 查询，并由 launcher 暴露报告。
+- 迁移意义：
+  - `icons.properties` 不再只是 core 侧 parser，已经进入 desktop launcher 的真实运行态；
+  - 后续 glyph atlas 可以直接消费内容图标索引，把 `Icon.xxx` / 内容 emoji / atlas symbol 的映射统一收口；
+  - 这一步仍未生成真实字体纹理，`DrawText` 仍保留 placeholder fallback，下一步应进入 glyph atlas 计划与 OpenGL 上传。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_content_icon_glyph_registry_loads_upstream_icon_properties --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_exposes_content_icon_glyph_registry_report --lib`
+- 仍未完成：
+  - 未新增真实 `DesktopFontRasterizationPlan/DesktopFontAtlasPlan/DesktopFontGlyphUploadPlan`；
+  - 未把 registry 的 icon 映射转成 glyph bitmap 或 texture quads；
+  - 未替换 `opengl_backend_text_placeholder_quads(...)`；
+  - 主菜单和各 Dialog/Page 仍需继续按 `MenuFragment`/`Styles`/`Fonts` 完整还原；
+  - 未达到完整可玩，不能宣告目标完成。

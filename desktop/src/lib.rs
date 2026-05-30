@@ -91,7 +91,8 @@ use mindustry_core::mindustry::service::{
 use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
-    upstream_font_source_paths, Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw,
+    parse_upstream_icon_properties, upstream_font_source_paths, Bar, BarDrawCommand, BarDrawPlan,
+    BarLayout, BarTextDraw, UpstreamContentIcon, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -3315,6 +3316,109 @@ impl DesktopFontAssetValidationReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopContentIconGlyphRegistryReport {
+    pub source_path: String,
+    pub file_path: Option<String>,
+    pub icon_count: usize,
+    pub load_error: Option<String>,
+}
+
+impl DesktopContentIconGlyphRegistryReport {
+    pub fn loaded(&self) -> bool {
+        self.file_path.is_some() && self.load_error.is_none() && self.icon_count > 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopContentIconGlyphRegistry {
+    pub source_path: String,
+    pub file_path: Option<String>,
+    pub load_error: Option<String>,
+    icons: Vec<UpstreamContentIcon>,
+    by_name: BTreeMap<String, usize>,
+    by_unicode: BTreeMap<u32, usize>,
+    by_atlas_symbol: BTreeMap<String, usize>,
+}
+
+impl DesktopContentIconGlyphRegistry {
+    pub fn new(
+        source_path: impl Into<String>,
+        file_path: Option<String>,
+        icons: Vec<UpstreamContentIcon>,
+        load_error: Option<String>,
+    ) -> Self {
+        let mut by_name = BTreeMap::new();
+        let mut by_unicode = BTreeMap::new();
+        let mut by_atlas_symbol = BTreeMap::new();
+
+        for (index, icon) in icons.iter().enumerate() {
+            by_name.entry(icon.name.clone()).or_insert(index);
+            by_unicode.entry(icon.unicode).or_insert(index);
+            by_atlas_symbol
+                .entry(icon.atlas_symbol.clone())
+                .or_insert(index);
+        }
+
+        Self {
+            source_path: source_path.into(),
+            file_path,
+            load_error,
+            icons,
+            by_name,
+            by_unicode,
+            by_atlas_symbol,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.icons.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.icons.is_empty()
+    }
+
+    pub fn resolved(&self) -> bool {
+        self.file_path.is_some()
+    }
+
+    pub fn loaded(&self) -> bool {
+        self.resolved() && self.load_error.is_none() && !self.icons.is_empty()
+    }
+
+    pub fn icons(&self) -> &[UpstreamContentIcon] {
+        &self.icons
+    }
+
+    pub fn get_by_name(&self, name: &str) -> Option<&UpstreamContentIcon> {
+        self.by_name
+            .get(name)
+            .and_then(|index| self.icons.get(*index))
+    }
+
+    pub fn get_by_unicode(&self, unicode: u32) -> Option<&UpstreamContentIcon> {
+        self.by_unicode
+            .get(&unicode)
+            .and_then(|index| self.icons.get(*index))
+    }
+
+    pub fn get_by_atlas_symbol(&self, atlas_symbol: &str) -> Option<&UpstreamContentIcon> {
+        self.by_atlas_symbol
+            .get(atlas_symbol)
+            .and_then(|index| self.icons.get(*index))
+    }
+
+    pub fn validation_report(&self) -> DesktopContentIconGlyphRegistryReport {
+        DesktopContentIconGlyphRegistryReport {
+            source_path: self.source_path.clone(),
+            file_path: self.file_path.clone(),
+            icon_count: self.icons.len(),
+            load_error: self.load_error.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsShaderApplyExecutionTrace {
     pub shader: ShaderId,
     pub operation_count: usize,
@@ -4421,6 +4525,43 @@ fn default_desktop_font_asset_source_traces() -> Vec<DesktopFontAssetSourceTrace
                 .map(|path| path.to_string_lossy().replace('\\', "/")),
         })
         .collect()
+}
+
+fn desktop_read_utf8_lossy_text_file(path: &Path) -> io::Result<String> {
+    let bytes = std::fs::read(path)?;
+    Ok(match String::from_utf8(bytes) {
+        Ok(contents) => contents,
+        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+    })
+}
+
+fn default_desktop_content_icon_glyph_registry() -> DesktopContentIconGlyphRegistry {
+    let source_path = UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH.to_string();
+    let file_path = desktop_existing_asset_source_path(UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH)
+        .map(|path| path.to_string_lossy().replace('\\', "/"));
+
+    let Some(file_path_ref) = file_path.as_ref() else {
+        return DesktopContentIconGlyphRegistry::new(source_path, file_path, Vec::new(), None);
+    };
+
+    let path = PathBuf::from(file_path_ref);
+    match desktop_read_utf8_lossy_text_file(&path) {
+        Ok(contents) => match parse_upstream_icon_properties(&contents) {
+            Ok(icons) => DesktopContentIconGlyphRegistry::new(source_path, file_path, icons, None),
+            Err(error) => DesktopContentIconGlyphRegistry::new(
+                source_path,
+                file_path,
+                Vec::new(),
+                Some(error.to_string()),
+            ),
+        },
+        Err(error) => DesktopContentIconGlyphRegistry::new(
+            source_path,
+            file_path,
+            Vec::new(),
+            Some(error.to_string()),
+        ),
+    }
 }
 
 fn desktop_validate_font_asset_sources(
@@ -12940,6 +13081,7 @@ pub struct DesktopLauncher {
     pub args: Vec<String>,
     pub texture_atlas: TextureAtlasPlan<bool>,
     pub font_asset_sources: Vec<DesktopFontAssetSourceTrace>,
+    pub content_icon_glyph_registry: DesktopContentIconGlyphRegistry,
     content_loader: ContentLoader,
     last_applied_world_data: Option<mindustry_core::mindustry::net::NetworkWorldData>,
     last_applied_state_snapshot: Option<StateSnapshotCallPacket>,
@@ -13567,6 +13709,7 @@ impl DesktopLauncher {
         let content_loader = ContentLoader::create_base_content_or_panic();
         let texture_atlas = default_desktop_texture_atlas(&block_renderer_state, &content_loader);
         let font_asset_sources = default_desktop_font_asset_source_traces();
+        let content_icon_glyph_registry = default_desktop_content_icon_glyph_registry();
         let mut ui_status_bar = Bar::new_clamped("client", 0x66cc_ffff, 0.0);
         ui_status_bar.outline(0x0000_00ff, 1.0);
         Self {
@@ -13632,6 +13775,7 @@ impl DesktopLauncher {
             args,
             texture_atlas,
             font_asset_sources,
+            content_icon_glyph_registry,
             content_loader,
             last_applied_world_data: None,
             last_applied_state_snapshot: None,
@@ -13667,6 +13811,10 @@ impl DesktopLauncher {
 
     pub fn font_asset_validation_report(&self) -> DesktopFontAssetValidationReport {
         desktop_validate_font_asset_sources(&self.font_asset_sources)
+    }
+
+    pub fn content_icon_glyph_registry_report(&self) -> DesktopContentIconGlyphRegistryReport {
+        self.content_icon_glyph_registry.validation_report()
     }
 
     pub fn merge_mod_directory_into_texture_atlas(
@@ -34544,6 +34692,81 @@ mod tests {
         assert!(report
             .missing_source_paths
             .contains(&"fonts/icon.ttf".to_string()));
+    }
+
+    #[test]
+    fn desktop_content_icon_glyph_registry_loads_upstream_icon_properties() {
+        let root = temp_desktop_path("content-icon-glyph-root");
+        let asset_root = root.join("assets");
+        let icon_properties_path = asset_root.join("icons/icons.properties");
+        std::fs::create_dir_all(icon_properties_path.parent().unwrap())
+            .expect("icon fixture dir should be writable");
+        std::fs::write(
+            &icon_properties_path,
+            b"63743=spawn|block-spawn-ui\n63744=router|block-router-ui\n",
+        )
+        .expect("icons fixture should be writable");
+
+        let _asset_guard = EnvVarGuard::set("MINDUSTRY_ASSET_ROOT", &asset_root);
+        let registry = super::default_desktop_content_icon_glyph_registry();
+        let expected_icons_path = icon_properties_path.to_string_lossy().replace('\\', "/");
+
+        assert_eq!(registry.source_path, "icons/icons.properties");
+        assert_eq!(
+            registry.file_path.as_deref(),
+            Some(expected_icons_path.as_str())
+        );
+        assert!(registry.loaded());
+        assert_eq!(registry.len(), 2);
+        assert_eq!(
+            registry
+                .get_by_name("spawn")
+                .map(|icon| icon.atlas_symbol.as_str()),
+            Some("block-spawn-ui")
+        );
+        assert_eq!(
+            registry
+                .get_by_unicode(63744)
+                .map(|icon| icon.name.as_str()),
+            Some("router")
+        );
+        assert_eq!(
+            registry
+                .get_by_atlas_symbol("block-router-ui")
+                .map(|icon| icon.unicode),
+            Some(63744)
+        );
+
+        let report = registry.validation_report();
+        assert!(report.loaded());
+        assert_eq!(report.icon_count, 2);
+        assert!(report.load_error.is_none());
+    }
+
+    #[test]
+    fn desktop_launcher_exposes_content_icon_glyph_registry_report() {
+        let root = temp_desktop_path("launcher-content-icon-glyph-root");
+        let asset_root = root.join("assets");
+        let icon_properties_path = asset_root.join("icons/icons.properties");
+        std::fs::create_dir_all(icon_properties_path.parent().unwrap())
+            .expect("icon fixture dir should be writable");
+        std::fs::write(&icon_properties_path, b"63743=spawn|block-spawn-ui\n")
+            .expect("icons fixture should be writable");
+
+        let _asset_guard = EnvVarGuard::set("MINDUSTRY_ASSET_ROOT", &asset_root);
+        let launcher = DesktopLauncher::new(Vec::new());
+        let report = launcher.content_icon_glyph_registry_report();
+
+        assert_eq!(report.source_path, "icons/icons.properties");
+        assert!(report.loaded());
+        assert_eq!(report.icon_count, 1);
+        assert_eq!(
+            launcher
+                .content_icon_glyph_registry
+                .get_by_name("spawn")
+                .map(|icon| icon.emoji_string()),
+            Some(Some('\u{f8ff}'.to_string()))
+        );
     }
 
     #[test]
