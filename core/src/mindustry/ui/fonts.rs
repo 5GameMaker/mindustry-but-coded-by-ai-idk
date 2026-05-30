@@ -16,6 +16,7 @@ pub const UPSTREAM_MONOSPACE_FONT_SOURCE_PATH: &str = "fonts/monospace.woff";
 pub const UPSTREAM_TECH_FONT_SOURCE_PATH: &str = "fonts/tech.ttf";
 pub const UPSTREAM_JAPANESE_FONT_SOURCE_PATH: &str = "fonts/font_jp.woff";
 pub const UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH: &str = "icons/icons.properties";
+pub const UPSTREAM_UI_ICON_FONTGEN_CONFIG_SOURCE_PATH: &str = "fontgen/config.json";
 
 pub const UPSTREAM_LOGIC_FONT_CHARACTERS: &str =
     "\0ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890\"!`?'.,;:()[]{}<>|/@\\^$€-%+=#_&~*";
@@ -207,7 +208,159 @@ pub fn upstream_font_source_paths() -> impl Iterator<Item = &'static str> {
     UPSTREAM_FONT_ASSETS
         .iter()
         .map(|asset| asset.source_path)
-        .chain([UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH])
+        .chain([
+            UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
+            UPSTREAM_UI_ICON_FONTGEN_CONFIG_SOURCE_PATH,
+        ])
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UpstreamUiIconGlyph {
+    pub java_name: &'static str,
+    pub css_name: &'static str,
+    pub codepoint: u32,
+}
+
+impl UpstreamUiIconGlyph {
+    pub fn glyph_char(self) -> Option<char> {
+        char::from_u32(self.codepoint)
+    }
+
+    pub fn glyph_string(self) -> Option<String> {
+        self.glyph_char().map(|glyph| glyph.to_string())
+    }
+}
+
+pub const UPSTREAM_UI_ICON_GLYPHS: &[UpstreamUiIconGlyph] = &[
+    UpstreamUiIconGlyph {
+        java_name: "discord",
+        css_name: "discord_",
+        codepoint: 0xe80d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "list",
+        css_name: "list",
+        codepoint: 0xe811,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "trello",
+        css_name: "trello",
+        codepoint: 0xf181,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "book",
+        css_name: "book",
+        codepoint: 0xe85b,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "add",
+        css_name: "add",
+        codepoint: 0xe813,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "redditAlien",
+        css_name: "reddit-alien",
+        codepoint: 0xf281,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "itchio",
+        css_name: "itchio",
+        codepoint: 0xe82a,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "googleplay",
+        css_name: "googleplay",
+        codepoint: 0xe83d,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "android",
+        css_name: "android",
+        codepoint: 0xe845,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "github",
+        css_name: "github_",
+        codepoint: 0xf308,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "githubSquare",
+        css_name: "github-square",
+        codepoint: 0xf300,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "wrench",
+        css_name: "wrench",
+        codepoint: 0xe80f,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "link",
+        css_name: "link",
+        codepoint: 0xe81c,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "terminal",
+        css_name: "terminal",
+        codepoint: 0xf120,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "info",
+        css_name: "info",
+        codepoint: 0xf129,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "refresh",
+        css_name: "refresh",
+        codepoint: 0xe86a,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "play",
+        css_name: "play",
+        codepoint: 0xe829,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "download",
+        css_name: "download",
+        codepoint: 0xe879,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "settings",
+        css_name: "settings",
+        codepoint: 0xe87c,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "menu",
+        css_name: "menu",
+        codepoint: 0xe88c,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "paste",
+        css_name: "paste",
+        codepoint: 0xe852,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "terrain",
+        css_name: "terrain",
+        codepoint: 0xe864,
+    },
+    UpstreamUiIconGlyph {
+        java_name: "exit",
+        css_name: "exit",
+        codepoint: 0xe85f,
+    },
+];
+
+pub fn upstream_ui_icon_glyph(name: &str) -> Option<&'static UpstreamUiIconGlyph> {
+    UPSTREAM_UI_ICON_GLYPHS
+        .iter()
+        .find(|glyph| glyph.java_name == name || glyph.css_name == name)
+}
+
+pub fn upstream_ui_icon_glyph_char(name: &str) -> Option<char> {
+    upstream_ui_icon_glyph(name).and_then(|glyph| glyph.glyph_char())
+}
+
+pub fn upstream_ui_icon_glyph_string(name: &str) -> Option<String> {
+    upstream_ui_icon_glyph(name).and_then(|glyph| glyph.glyph_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -372,6 +525,38 @@ mod tests {
         assert!(paths.contains(&"fonts/monospace.woff"));
         assert!(paths.contains(&"fonts/tech.ttf"));
         assert!(paths.contains(&"icons/icons.properties"));
+        assert!(paths.contains(&"fontgen/config.json"));
+    }
+
+    #[test]
+    fn upstream_ui_icon_glyph_registry_covers_menu_and_about_icons() {
+        for (name, expected) in [
+            ("discord", 0xe80d),
+            ("list", 0xe811),
+            ("trello", 0xf181),
+            ("book", 0xe85b),
+            ("add", 0xe813),
+            ("redditAlien", 0xf281),
+            ("itchio", 0xe82a),
+            ("googleplay", 0xe83d),
+            ("android", 0xe845),
+            ("github", 0xf308),
+            ("githubSquare", 0xf300),
+            ("wrench", 0xe80f),
+            ("link", 0xe81c),
+            ("terminal", 0xf120),
+            ("info", 0xf129),
+            ("refresh", 0xe86a),
+        ] {
+            let glyph = upstream_ui_icon_glyph(name).expect("icon glyph should be registered");
+            assert_eq!(glyph.codepoint, expected);
+            assert_eq!(upstream_ui_icon_glyph_char(name), char::from_u32(expected));
+        }
+        assert_eq!(
+            upstream_ui_icon_glyph("reddit-alien").map(|glyph| glyph.java_name),
+            Some("redditAlien")
+        );
+        assert_eq!(upstream_ui_icon_glyph_char("missing-icon"), None);
     }
 
     #[test]

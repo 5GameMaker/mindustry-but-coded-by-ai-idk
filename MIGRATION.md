@@ -18414,3 +18414,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 按住拖出/拖回的 pressed 取消/恢复还未补齐；
   - disabled/keyboard focus/tooltip 仍未迁移；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 514. UI 图标 glyph 名称表接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.0%**，仍未达到完整可玩；继续把上游 `core/assets-raw/fontgen/config.json` 的 `Icon.*` / `Iconc` 映射纳入 Rust 的 UI glyph registry，让 About/Menu chrome 不再只画文本占位。
+- 本轮主改动：
+  - `core/src/mindustry/ui/fonts.rs`
+    - 新增 `UPSTREAM_UI_ICON_FONTGEN_CONFIG_SOURCE_PATH` 与 `UPSTREAM_UI_ICON_GLYPHS`；
+    - 新增 `UpstreamUiIconGlyph` 结构，以及 `upstream_ui_icon_glyph/char/string()` 查询函数；
+    - 将 `upstream_font_source_paths()` 扩展为同时包含 `fontgen/config.json`，避免 UI 图标资源被遗漏；
+    - 新增测试锁定 `discord/list/trello/book/add/redditAlien/itchio/googleplay/android/github/githubSquare/wrench/link/terminal/info/refresh/play/download/settings/menu/paste/terrain/exit` 等关键图标 codepoint。
+  - `core/src/mindustry/ui/mod.rs`
+    - 导出 `UpstreamUiIconGlyph` 与 glyph 查询函数，供 desktop/UI 渲染层直接使用。
+  - `desktop/src/lib.rs`
+    - About 卡片 `link.icon` 从裸文本改为 glyph 字符回退链；
+    - 菜单 chrome 的 `discord` / `terminal` / `refresh @be.check` 开始走 glyph 字符，不再直接画原始文字占位；
+    - 新增测试覆盖 About 卡片图标 glyph 解析与菜单 chrome glyph 渲染。
+- 迁移意义：
+  - UI 图标开始从“名字字符串”向“真实字体 glyph”过渡；
+  - About/Menu chrome 的视觉与上游 `Icon.*` 语义开始收口；
+  - 后续可以继续把 `DrawText` placeholder 替换成真实字体 atlas 渲染，而不是只保留占位文本。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core upstream_ui_icon_glyph_registry_covers_menu_and_about_icons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_route_uses_upstream_link_cards_and_hitboxes --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 真实字体 atlas / `DrawText` 仍是 placeholder，尚未替换为真正 glyph quad 渲染；
+  - 其它上游 `Iconc.*` 的大范围文本图标未完全替换；
+  - 未达到完整可玩，不能宣告目标完成。

@@ -91,9 +91,9 @@ use mindustry_core::mindustry::service::{
 use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
-    parse_upstream_icon_properties, upstream_font_assets, upstream_font_source_paths, Bar,
-    BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole,
-    UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
+    parse_upstream_icon_properties, upstream_font_assets, upstream_font_source_paths,
+    upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw,
+    UpstreamContentIcon, UpstreamFontRole, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -266,6 +266,10 @@ fn about_color_hex_to_rgba(color_hex: &str) -> [f32; 4] {
         return [1.0, 1.0, 1.0, 1.0];
     };
     [r, g, b, 1.0]
+}
+
+fn desktop_ui_icon_glyph_or_label(icon_name: &str, fallback: &str) -> String {
+    upstream_ui_icon_glyph_string(icon_name).unwrap_or_else(|| fallback.to_string())
 }
 
 const ABOUT_BANNED_LINK_NAMES: &[&str] = &["google-play", "itch.io", "dev-builds", "f-droid"];
@@ -17514,15 +17518,16 @@ impl DesktopLauncher {
             }
         }
 
+        let discord_glyph = desktop_ui_icon_glyph_or_label("discord", "discord");
         Self::push_menu_chrome_sprite_button(
             pass,
             chrome.discord_rect,
             "discord-banner",
-            Some("discord"),
+            Some(discord_glyph.as_str()),
             "discord",
             [0.16, 0.27, 0.52, 0.94],
             [0.58, 0.74, 1.0, 0.98],
-            14.0,
+            18.0,
             [0.95, 0.98, 1.0, 1.0],
         );
 
@@ -17533,13 +17538,14 @@ impl DesktopLauncher {
             let info_rect = chrome
                 .info_rect
                 .expect("mobile chrome layout should include an info rect");
+            let terminal_glyph = desktop_ui_icon_glyph_or_label("terminal", "terminal");
             Self::push_menu_chrome_button(
                 pass,
                 terminal_rect,
-                "terminal",
+                terminal_glyph.as_str(),
                 [0.12, 0.18, 0.22, 0.92],
                 [0.46, 0.64, 0.74, 0.96],
-                12.0,
+                18.0,
                 [0.92, 0.98, 1.0, 1.0],
             );
             Self::push_menu_chrome_sprite_button(
@@ -17554,10 +17560,12 @@ impl DesktopLauncher {
                 [0.95, 0.98, 1.0, 1.0],
             );
         } else if let Some(becheck_rect) = chrome.becheck_rect {
+            let refresh = desktop_ui_icon_glyph_or_label("refresh", "refresh");
+            let becheck_label = format!("{refresh} @be.check");
             Self::push_menu_chrome_button(
                 pass,
                 becheck_rect,
-                "becheck",
+                becheck_label.as_str(),
                 [0.14, 0.18, 0.27, 0.92],
                 [0.58, 0.72, 0.90, 0.98],
                 14.0,
@@ -18463,11 +18471,12 @@ impl DesktopLauncher {
             1.0,
             base_layer + 0.005,
         ));
+        let icon_glyph = desktop_ui_icon_glyph_or_label(link.icon, link.icon);
         pass.push(RenderCommand::draw_text_styled(
-            link.icon,
+            icon_glyph,
             icon_rect.center(),
             [0.92, 0.96, 1.0, 1.0],
-            8.5,
+            18.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -18485,11 +18494,12 @@ impl DesktopLauncher {
             0.0,
             base_layer + 0.006,
         ));
+        let link_glyph = desktop_ui_icon_glyph_or_label("link", "link");
         pass.push(RenderCommand::draw_text_styled(
-            "link",
+            link_glyph,
             action_rect.center(),
             [0.92, 0.98, 1.0, 1.0],
-            8.0,
+            14.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -35795,7 +35805,8 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, .. } if text == "discord"
+                RenderCommand::DrawText { text, .. }
+                    if text == &super::desktop_ui_icon_glyph_or_label("discord", "discord")
             )
         }));
         assert!(commands.iter().any(|command| {
@@ -35807,7 +35818,11 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, .. } if text == "becheck"
+                RenderCommand::DrawText { text, .. }
+                    if text == &format!(
+                        "{} @be.check",
+                        super::desktop_ui_icon_glyph_or_label("refresh", "refresh")
+                    )
             )
         }));
         assert!(!commands.iter().any(|command| {
@@ -35862,7 +35877,8 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, .. } if text == "terminal"
+                RenderCommand::DrawText { text, .. }
+                    if text == &super::desktop_ui_icon_glyph_or_label("terminal", "terminal")
             )
         }));
         assert!(commands.iter().any(|command| {
@@ -35880,7 +35896,11 @@ mod tests {
             )
         }));
         assert!(commands.iter().any(|command| {
-            matches!(command, RenderCommand::DrawText { text, .. } if text == "discord")
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. }
+                    if text == &super::desktop_ui_icon_glyph_or_label("discord", "discord")
+            )
         }));
         assert!(!commands.iter().any(|command| {
             matches!(command, RenderCommand::DrawText { text, .. } if text == "becheck")
@@ -36159,7 +36179,15 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, .. } if text == "link"
+                RenderCommand::DrawText { text, .. }
+                    if text == &super::desktop_ui_icon_glyph_or_label("discord", "discord")
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. }
+                    if text == &super::desktop_ui_icon_glyph_or_label("link", "link")
             )
         }));
         assert!(commands.iter().any(|command| {
