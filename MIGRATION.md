@@ -17051,3 +17051,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `last_menu_action` 尚未 dispatch 到 campaign/join/settings/editor/database 页面或 quit 流程；
   - submenu 还缺 hover/selected 的更细视觉反馈、点击音效、返回键/Esc 与移动端触控对齐；
   - 字体仍是 placeholder glyph，真实 font atlas 与 Java Scene 样式仍需继续接入。
+
+## 470. 菜单 action dispatch 与数据库子入口对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.3%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链。
+- 子代理只读对照结论：
+  - Java `MenuFragment.java` 的 desktop `DATABASE` 根按钮子菜单为 `SCHEMATICS / DATABASE / ABOUT`，不是 `SCHEMATICS / TECH TREE / ABOUT`；
+  - `last_menu_action` 之前只记录 role，没有真正消费到页面/退出/连接等动作。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuButtonRole::ContentDatabase` 区分 desktop 根按钮 `DATABASE` 与 submenu 里的 `DATABASE` 动作；
+    - desktop 数据库 submenu 对齐 Java：`SCHEMATICS / DATABASE / ABOUT`；
+    - 保留 `TechTree` role 作为后续 tech tree 入口，不再把它误放进 desktop 数据库 submenu。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRoute` 与 `DesktopMenuActionDispatch`，将菜单按钮 role 消费为明确 route、submenu 切换或 quit 请求；
+    - `DesktopLauncher` 新增 `active_menu_route` / `last_menu_dispatch`，不再只停留在 `last_menu_action`；
+    - no-world 菜单点击 submenu 动作后会打开对应 dialog shell，并在正式 menu pass 中渲染当前 route 标题和上游 dialog 名；
+    - `QUIT` 点击会通过 `step_desktop_frame_loop(...)` 请求关闭 frame loop，对齐 Java `Core.app.exit()` 的最小可验证语义。
+- 迁移意义：
+  - 菜单从“点到哪个按钮”推进到“点击后进入哪个前端 route / 是否退出”的真实分发入口；
+  - route shell 仍接在 `DesktopLauncher -> MenuFramePlan -> RenderPass -> backend` 主链，不是独立测试 helper；
+  - 为后续把 `PlanetDialog / JoinDialog / LoadDialog / SettingsMenuDialog / EditorMapsDialog / DatabaseDialog` 替换成真实 Rust UI 页面留出统一入口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_quit_menu_action_requests_close --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_primary_action_switches_database_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_records_no_world_menu_hover_and_primary_action --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - route shell 还不是 Java 等价完整 dialog，只是确保动作分发和可见页面状态进入主渲染链；
+  - `CAMPAIGN/JOIN/LOAD/CUSTOM/EDITOR/SETTINGS/MODS/SCHEMATICS/ABOUT` 的真实 dialog 内容、列表、网络连接和存档流程仍需逐类迁移；
+  - 真实 font atlas、按钮图标、fade 动画、点击音效、键盘/触控输入仍需继续补齐。

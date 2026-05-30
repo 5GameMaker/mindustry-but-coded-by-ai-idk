@@ -105,6 +105,80 @@ pub struct DesktopConnectTarget {
     pub port: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopMenuRoute {
+    Campaign,
+    Join,
+    CustomGame,
+    LoadGame,
+    Schematics,
+    Database,
+    TechTree,
+    About,
+    Editor,
+    Mods,
+    Settings,
+}
+
+impl DesktopMenuRoute {
+    pub const fn from_menu_button(role: MenuButtonRole) -> Option<Self> {
+        match role {
+            MenuButtonRole::Campaign => Some(Self::Campaign),
+            MenuButtonRole::Join => Some(Self::Join),
+            MenuButtonRole::CustomGame => Some(Self::CustomGame),
+            MenuButtonRole::LoadGame => Some(Self::LoadGame),
+            MenuButtonRole::Schematics => Some(Self::Schematics),
+            MenuButtonRole::ContentDatabase => Some(Self::Database),
+            MenuButtonRole::TechTree => Some(Self::TechTree),
+            MenuButtonRole::About => Some(Self::About),
+            MenuButtonRole::Editor => Some(Self::Editor),
+            MenuButtonRole::Mods => Some(Self::Mods),
+            MenuButtonRole::Settings => Some(Self::Settings),
+            MenuButtonRole::Play | MenuButtonRole::Database | MenuButtonRole::Quit => None,
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Campaign => "CAMPAIGN",
+            Self::Join => "JOIN GAME",
+            Self::CustomGame => "CUSTOM GAME",
+            Self::LoadGame => "LOAD GAME",
+            Self::Schematics => "SCHEMATICS",
+            Self::Database => "DATABASE",
+            Self::TechTree => "TECH TREE",
+            Self::About => "ABOUT",
+            Self::Editor => "EDITOR",
+            Self::Mods => "MODS",
+            Self::Settings => "SETTINGS",
+        }
+    }
+
+    pub const fn upstream_dialog(self) -> &'static str {
+        match self {
+            Self::Campaign => "PlanetDialog",
+            Self::Join => "JoinDialog",
+            Self::CustomGame => "CustomGameDialog",
+            Self::LoadGame => "LoadDialog",
+            Self::Schematics => "SchematicsDialog",
+            Self::Database => "DatabaseDialog",
+            Self::TechTree => "TechTreeDialog",
+            Self::About => "AboutDialog",
+            Self::Editor => "EditorMapsDialog",
+            Self::Mods => "ModsDialog",
+            Self::Settings => "SettingsMenuDialog",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopMenuActionDispatch {
+    pub role: MenuButtonRole,
+    pub submenu_changed: bool,
+    pub route: Option<DesktopMenuRoute>,
+    pub close_requested: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesktopStandardEffectRenderFrame {
     pub draw_plans: Vec<StandardEffectDrawPlan>,
@@ -11673,6 +11747,8 @@ pub struct DesktopLauncher {
     pub last_menu_cursor: Option<RenderPoint>,
     pub last_menu_hovered_button: Option<MenuButtonRole>,
     pub last_menu_action: Option<MenuButtonRole>,
+    pub active_menu_route: Option<DesktopMenuRoute>,
+    pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
     pub load_renderer_state: LoadRendererState,
     pub ui_status_bar: Bar,
     pub pixelator_state: PixelatorState,
@@ -12344,6 +12420,8 @@ impl DesktopLauncher {
             last_menu_cursor: None,
             last_menu_hovered_button: None,
             last_menu_action: None,
+            active_menu_route: None,
+            last_menu_dispatch: None,
             load_renderer_state: LoadRendererState::default(),
             ui_status_bar,
             pixelator_state: PixelatorState::default(),
@@ -15721,15 +15799,41 @@ impl DesktopLauncher {
         )
     }
 
+    fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
+        let submenu_changed = self.menu_renderer_state.select_desktop_root(role);
+        let route = if submenu_changed {
+            self.active_menu_route = None;
+            None
+        } else {
+            DesktopMenuRoute::from_menu_button(role)
+        };
+        if let Some(route) = route {
+            self.active_menu_route = Some(route);
+        }
+        let close_requested = role == MenuButtonRole::Quit;
+        if close_requested {
+            self.active_menu_route = None;
+        }
+        let dispatch = DesktopMenuActionDispatch {
+            role,
+            submenu_changed,
+            route,
+            close_requested,
+        };
+        self.last_menu_dispatch = Some(dispatch);
+        dispatch
+    }
+
     fn apply_menu_input_events(
         &mut self,
         surface_size: DesktopSurfaceSize,
         input_events: &[DesktopInputTickEvent],
-    ) {
+    ) -> bool {
         if self.has_renderable_world_for_default_frame() {
-            return;
+            return false;
         }
 
+        let mut close_requested = false;
         for input in input_events {
             match input {
                 DesktopInputTickEvent::CursorMoved { x, y } => {
@@ -15745,7 +15849,9 @@ impl DesktopLauncher {
                         let action =
                             self.menu_button_at_surface_point(surface_size, cursor.x, cursor.y);
                         if let Some(role) = action {
-                            self.menu_renderer_state.select_desktop_root(role);
+                            close_requested |= self.dispatch_menu_action(role).close_requested;
+                        } else {
+                            self.last_menu_dispatch = None;
                         }
                         self.last_menu_action = action;
                     }
@@ -15753,6 +15859,67 @@ impl DesktopLauncher {
                 _ => {}
             }
         }
+        close_requested
+    }
+
+    fn push_active_menu_route_shell(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+        let Some(route) = self.active_menu_route else {
+            return;
+        };
+
+        let panel_width = (viewport.width * 0.46).clamp(280.0, 520.0);
+        let panel_height = 168.0;
+        let panel = RenderRect::new(
+            viewport.x + viewport.width - panel_width - 48.0,
+            viewport.y + (viewport.height - panel_height) * 0.5,
+            panel_width,
+            panel_height,
+        );
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.02, 0.025, 0.03, 0.82],
+            Layer::END_PIXELED,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            panel,
+            [0.32, 0.42, 0.5, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.01,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            route.title(),
+            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 46.0),
+            [0.92, 0.96, 1.0, 1.0],
+            24.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.02,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("upstream: {}", route.upstream_dialog()),
+            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 84.0),
+            [0.72, 0.82, 0.9, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.02,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "dialog shell routed from MenuFragment",
+            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + 42.0),
+            [0.56, 0.64, 0.72, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.02,
+        ));
     }
 
     fn menu_graphics_frame_for_surface(
@@ -15762,11 +15929,12 @@ impl DesktopLauncher {
     ) -> DesktopGraphicsFrame {
         let input = Self::default_menu_frame_input_for_viewport(viewport);
         let plan = self.menu_renderer_state.render_plan(input);
-        let Some(menu_pass) = plan.into_render_pass() else {
+        let Some(mut menu_pass) = plan.into_render_pass() else {
             return self.startup_menu_preview_graphics_frame(frame_index, viewport);
         };
 
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
+        self.push_active_menu_route_shell(&mut menu_pass, frame_viewport);
         let camera = menu_pass
             .camera
             .unwrap_or_else(|| self.default_render_camera_for_viewport(frame_viewport));
@@ -16111,7 +16279,20 @@ impl DesktopLauncher {
             };
         }
 
-        self.apply_menu_input_events(loop_state.surface.size, &input_events);
+        if self.apply_menu_input_events(loop_state.surface.size, &input_events) {
+            loop_state.request_close();
+            return DesktopPresentResult {
+                frame_index,
+                surface: loop_state.surface.clone(),
+                presented: false,
+                skip_reason: Some(DesktopFrameSkipReason::CloseRequested),
+                close_requested: true,
+                resized_to,
+                input_events,
+                graphics_stats: None,
+                effect_stats: None,
+            };
+        }
         self.update();
         let graphics_stats = self.render_default_graphics_frame_for_surface_with(
             frame_index,
@@ -17032,6 +17213,11 @@ impl DesktopLauncher {
         self.fog_renderer_state = FogRendererState::default();
         self.minimap_renderer_state = MinimapRendererState::new(MinimapWorldSize::new(0, 0));
         self.menu_renderer_state = MenuRendererState::new(MenuRendererConfig::new(false, 7));
+        self.last_menu_cursor = None;
+        self.last_menu_hovered_button = None;
+        self.last_menu_action = None;
+        self.active_menu_route = None;
+        self.last_menu_dispatch = None;
         self.load_renderer_state = LoadRendererState::default();
         self.pixelator_state = PixelatorState::default();
     }
@@ -31470,7 +31656,158 @@ mod tests {
         assert!(updated
             .buttons
             .iter()
+            .any(|button| button.role == MenuButtonRole::ContentDatabase));
+        assert!(updated
+            .buttons
+            .iter()
             .all(|button| button.role != MenuButtonRole::Campaign));
+        assert!(updated
+            .buttons
+            .iter()
+            .all(|button| button.role != MenuButtonRole::TechTree));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_sub_action_routes_to_database_dialog_shell() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let database_root_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Database)
+            .expect("menu ui should include DATABASE root")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: database_root_center.x,
+                    y: database_root_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        let content_database_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::ContentDatabase)
+            .expect("database submenu should include DATABASE action")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: content_database_center.x,
+                    y: content_database_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(
+            launcher.last_menu_action,
+            Some(MenuButtonRole::ContentDatabase)
+        );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Database)
+        );
+        assert_eq!(
+            launcher.last_menu_dispatch,
+            Some(super::DesktopMenuActionDispatch {
+                role: MenuButtonRole::ContentDatabase,
+                submenu_changed: false,
+                route: Some(super::DesktopMenuRoute::Database),
+                close_requested: false,
+            })
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let route_text_present = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawText { text, .. } if text == "upstream: DatabaseDialog"
+                )
+            });
+        assert!(route_text_present);
+    }
+
+    #[test]
+    fn desktop_frame_loop_quit_menu_action_requests_close() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let viewport = launcher.default_render_viewport_for_surface(frame_loop.surface.size);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let quit_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Quit)
+            .expect("menu ui should include QUIT")
+            .rect
+            .center();
+
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::CursorMoved {
+                    x: quit_center.x,
+                    y: quit_center.y,
+                }),
+                DesktopFrameLoopEvent::Input(DesktopInputTickEvent::MouseButton {
+                    button: "MouseLeft".into(),
+                    pressed: true,
+                }),
+            ],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Quit));
+        assert_eq!(
+            launcher.last_menu_dispatch,
+            Some(super::DesktopMenuActionDispatch {
+                role: MenuButtonRole::Quit,
+                submenu_changed: false,
+                route: None,
+                close_requested: true,
+            })
+        );
+        assert!(result.close_requested);
+        assert_eq!(
+            result.skip_reason,
+            Some(DesktopFrameSkipReason::CloseRequested)
+        );
+        assert!(frame_loop.closed);
     }
 
     #[test]

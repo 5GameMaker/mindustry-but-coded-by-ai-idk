@@ -14175,3 +14175,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `last_menu_action` 仍未真正打开 campaign/join/settings/editor/database 页面，也未执行 quit；
   2. 菜单视觉反馈、音效、返回键/Esc、移动端触控还需继续迁移；
   3. 真实 font atlas 与 Java Scene UI 样式仍未完成。
+
+### 2026-05-30：菜单 action dispatch 与数据库子入口对齐
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **48.3%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuButtonRole::ContentDatabase`；
+    - desktop `DATABASE` submenu 改为 Java 对齐的 `SCHEMATICS / DATABASE / ABOUT`；
+    - `TechTree` 不再误作为 desktop 数据库 submenu 第二项。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRoute` / `DesktopMenuActionDispatch`；
+    - `DesktopLauncher` 新增 `active_menu_route` / `last_menu_dispatch`；
+    - submenu action 点击后会进入对应 route shell，并在正式 menu pass 里显示 route 标题和上游 dialog 名；
+    - `QUIT` 点击会请求关闭 `DesktopFrameLoopState`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_quit_menu_action_requests_close --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_primary_action_switches_database_submenu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_records_no_world_menu_hover_and_primary_action --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. route shell 只是主链中的前端页面占位，不是完整 Java dialog；
+  2. 下一步优先把 `CAMPAIGN -> PlanetDialog/可玩入口` 做成真实页面或最小可玩路径；
+  3. 字体 atlas、图标、fade 动画、音效、键盘/触控输入仍未完成。

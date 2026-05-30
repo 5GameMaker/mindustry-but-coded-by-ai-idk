@@ -162,6 +162,7 @@ pub enum MenuButtonRole {
     LoadGame,
     Database,
     Schematics,
+    ContentDatabase,
     TechTree,
     About,
     Editor,
@@ -180,6 +181,7 @@ impl MenuButtonRole {
             Self::LoadGame => "LOAD GAME",
             Self::Database => "DATABASE",
             Self::Schematics => "SCHEMATICS",
+            Self::ContentDatabase => "DATABASE",
             Self::TechTree => "TECH TREE",
             Self::About => "ABOUT",
             Self::Editor => "EDITOR",
@@ -197,6 +199,7 @@ impl MenuButtonRole {
                 | Self::CustomGame
                 | Self::LoadGame
                 | Self::Schematics
+                | Self::ContentDatabase
                 | Self::TechTree
                 | Self::About
         )
@@ -948,7 +951,7 @@ fn menu_desktop_ui_plan(input: MenuFrameInput, selected_root: MenuButtonRole) ->
     ];
     let database_submenu_roles = [
         MenuButtonRole::Schematics,
-        MenuButtonRole::TechTree,
+        MenuButtonRole::ContentDatabase,
         MenuButtonRole::About,
     ];
     let submenu_roles: &[MenuButtonRole] = match selected_root {
@@ -1262,7 +1265,7 @@ mod tests {
             .ui
             .buttons
             .iter()
-            .any(|button| button.role == MenuButtonRole::TechTree));
+            .any(|button| button.role == MenuButtonRole::ContentDatabase));
         assert!(plan
             .ui
             .buttons
