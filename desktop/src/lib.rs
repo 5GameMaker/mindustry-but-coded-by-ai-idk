@@ -142,6 +142,10 @@ const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const LOAD_SLOT_CARD_HEIGHT: f32 = 82.0;
 const LOAD_SLOT_CARD_GAP: f32 = 8.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
+const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
+const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
+const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
+const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const DATABASE_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const DATABASE_TAB_SIZE: f32 = 36.0;
 const DATABASE_CONTENT_CELL_SIZE: f32 = 32.0;
@@ -20024,6 +20028,19 @@ impl DesktopLauncher {
                 panel_height,
             );
         }
+        if matches!(
+            route,
+            DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
+        ) {
+            let panel_width = (viewport.width * 0.66).clamp(380.0, 740.0);
+            let panel_height = (viewport.height - 130.0).clamp(330.0, 600.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
         Self::active_menu_route_shell_panel_for_viewport(viewport)
     }
 
@@ -20137,6 +20154,52 @@ impl DesktopLauncher {
         self.connect_target.as_ref()?;
         let rect = Self::join_route_server_card_rect_for_panel(panel, 0);
         rect.contains_point(point).then_some(0)
+    }
+
+    fn map_list_action_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0 + index as f32 * (MAP_LIST_ACTION_BUTTON_WIDTH + 10.0),
+            panel.y + panel.height - 136.0,
+            MAP_LIST_ACTION_BUTTON_WIDTH,
+            MAP_LIST_ACTION_BUTTON_HEIGHT,
+        )
+    }
+
+    fn map_list_search_rect_for_panel(panel: RenderRect, route: DesktopMenuRoute) -> RenderRect {
+        let action_offset = if route == DesktopMenuRoute::Editor {
+            MAP_LIST_ACTION_BUTTON_HEIGHT + 12.0
+        } else {
+            0.0
+        };
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + panel.height - 132.0 - action_offset,
+            (panel.width - 56.0 - MAP_LIST_FILTER_BUTTON_SIZE - 8.0).max(120.0),
+            MAP_LIST_SEARCH_BAR_HEIGHT,
+        )
+    }
+
+    fn map_list_filter_button_rect_for_panel(
+        panel: RenderRect,
+        route: DesktopMenuRoute,
+    ) -> RenderRect {
+        let search = Self::map_list_search_rect_for_panel(panel, route);
+        RenderRect::new(
+            search.right() + 8.0,
+            search.y + (search.height - MAP_LIST_FILTER_BUTTON_SIZE) * 0.5,
+            MAP_LIST_FILTER_BUTTON_SIZE,
+            MAP_LIST_FILTER_BUTTON_SIZE,
+        )
+    }
+
+    fn map_list_pane_rect_for_panel(panel: RenderRect, route: DesktopMenuRoute) -> RenderRect {
+        let search = Self::map_list_search_rect_for_panel(panel, route);
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + 38.0,
+            panel.width - 56.0,
+            (search.y - panel.y - 52.0).max(90.0),
+        )
     }
 
     fn join_route_shell_action_at_surface_point(
@@ -20741,6 +20804,109 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034,
             ));
         }
+    }
+
+    fn push_map_list_route_page(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        route: DesktopMenuRoute,
+    ) {
+        if route == DesktopMenuRoute::Editor {
+            self.push_settings_text_button(
+                pass,
+                Self::map_list_action_button_rect_for_panel(panel, 0),
+                "@editor.newmap",
+                Some("add"),
+                Layer::END_PIXELED + 0.025,
+            );
+            self.push_settings_text_button(
+                pass,
+                Self::map_list_action_button_rect_for_panel(panel, 1),
+                "@editor.importmap",
+                Some("upload"),
+                Layer::END_PIXELED + 0.026,
+            );
+        }
+
+        let search = Self::map_list_search_rect_for_panel(panel, route);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            search,
+            [1.0, 1.0, 1.0, 0.92],
+            0.0,
+            Layer::END_PIXELED + 0.028,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 22.0, search.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.031,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@editor.search",
+            RenderPoint::new(search.x + 44.0, search.center().y),
+            [0.60, 0.70, 0.78, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.031,
+        ));
+
+        let filter = Self::map_list_filter_button_rect_for_panel(panel, route);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            filter,
+            [1.0, 1.0, 1.0, 0.90],
+            0.0,
+            Layer::END_PIXELED + 0.029,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("filter", "filter"),
+            filter.center(),
+            [0.82, 0.90, 0.98, 1.0],
+            18.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.032,
+        ));
+
+        let pane = Self::map_list_pane_rect_for_panel(panel, route);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            pane,
+            [1.0, 1.0, 1.0, 0.86],
+            0.0,
+            Layer::END_PIXELED + 0.027,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            pane,
+            [0.30, 0.42, 0.50, 0.82],
+            1.0,
+            Layer::END_PIXELED + 0.028,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@maps.none",
+            pane.center(),
+            [0.70, 0.78, 0.84, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.032,
+        ));
     }
 
     fn push_load_game_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -21445,6 +21611,11 @@ impl DesktopLauncher {
             self.push_load_game_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Database {
             self.push_database_route_page(pass, panel);
+        } else if matches!(
+            route,
+            DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
+        ) {
+            self.push_map_list_route_page(pass, panel, route);
         } else if route == DesktopMenuRoute::Settings
             && self.settings_dialog_state.page == DesktopSettingsPage::Main
         {
@@ -38131,6 +38302,68 @@ mod tests {
                     "{route:?} should include {expected}; got {lines:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_custom_and_editor_routes_render_map_list_widgets() {
+        for (role, route, action_buttons) in [
+            (
+                MenuButtonRole::CustomGame,
+                super::DesktopMenuRoute::CustomGame,
+                &[][..],
+            ),
+            (
+                MenuButtonRole::Editor,
+                super::DesktopMenuRoute::Editor,
+                &["@editor.newmap", "@editor.importmap"][..],
+            ),
+        ] {
+            let mut launcher = DesktopLauncher::new(Vec::new());
+            let dispatch = launcher.dispatch_menu_action(role);
+            assert_eq!(dispatch.route, Some(route));
+            assert_eq!(launcher.active_menu_route, Some(route));
+
+            let viewport =
+                launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(1280, 720));
+            let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(viewport, route);
+            assert!(
+                panel.height > 220.0,
+                "{route:?} should use the larger MapListDialog panel"
+            );
+
+            let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+            let commands = frame
+                .bundle
+                .render_frame
+                .as_ref()
+                .expect("map list route should produce a render frame")
+                .passes
+                .iter()
+                .flat_map(|pass| pass.commands.iter())
+                .collect::<Vec<_>>();
+            let texts = commands
+                .iter()
+                .filter_map(|command| match command {
+                    RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert!(texts.contains(&"@editor.search"));
+            assert!(texts.contains(&"@maps.none"));
+            assert!(!texts
+                .iter()
+                .any(|text| text.starts_with("dialog: MapListDialog")));
+            for action_button in action_buttons {
+                assert!(texts.contains(action_button));
+            }
+
+            let pane_symbol = DesktopLauncher::settings_drawable_symbol("pane");
+            assert!(commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == &pane_symbol && *rect == DesktopLauncher::map_list_pane_rect_for_panel(panel, route)
+            )));
         }
     }
 
