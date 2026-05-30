@@ -13229,3 +13229,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. Rail 视觉优先接 effect/init plan，不建议当普通 bullet body；
   3. ContinuousFlame 后续应把 line-outline 近似升级成 polygon/triangle fan/mesh；
   4. Unit trail runtime update/remove fade 与 weapon/unit parts 仍是下一批重点。
+
+### 2026-05-30：PointLaser aim endpoint beam 接入客户端 bullet 渲染链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.7%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `point_laser_bullet_aim_endpoint(...)`；
+    - 新增 `point_laser_bullet_width_scale(...)`；
+    - 新增 `point_laser_bullet_snapshot_render_commands(...)`；
+    - `bullet_snapshot_render_pass()` 已接入 `BulletKind::PointLaser`；
+    - 新增测试 `desktop_launcher_routes_point_laser_snapshot_beam_to_aim_endpoint`。
+- Java 对照：
+  - `PointLaserBulletType.draw(Bullet b)` 使用 `Drawf.laser(laser, laserEnd, b.x, b.y, b.aimX, b.aimY, b.fslope() * (1 - oscMag + absin(...)))`；
+  - update 里的 `Damage.collidePoint`、`beamEffect`、trail/effect timer 仍未完整接入。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_point_laser_snapshot_beam_to_aim_endpoint --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. PointLaser 后续应升级为 textured `Drawf.laser` body/end caps，而不是长期停留在 line/circle 近似；
+  2. Rail 视觉接 effect/init plan；
+  3. Unit trail runtime update 的子代理结果需要回收验收；
+  4. weapon/unit parts 结构化与 sideMultiplier 仍需推进。

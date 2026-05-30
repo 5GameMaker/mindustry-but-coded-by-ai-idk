@@ -16098,3 +16098,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Damage.findLength(...)` 仍主要依赖 `BulletComp.fdata` 或 `length * mult` 近似，未完整接入 world collision 截断；
   - ContinuousFlame 的 flare_inner_scl/flareInnerLenScl/flareLayer 等字段仍是 desktop 默认常量，后续应进入 `BulletSpec` schema；
   - PointLaser、Rail effect、weapon/unit parts、Unit trail runtime update、hard shadow、legs、payload/item 仍需继续。
+
+## 439. 最新闭环记录：PointLaser aim endpoint beam 接入客户端 bullet 渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.7%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/bullet/PointLaserBulletType.java#draw(Bullet b)`
+  - Java 先 `super.draw(b)`，再 `Drawf.laser(laser, laserEnd, b.x, b.y, b.aimX, b.aimY, b.fslope() * (1 - oscMag + absin(...)))`；
+  - update 侧 `Damage.collidePoint(...)` 与 `beamEffect.at(...)` 仍属于后续 runtime/effect 接入。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `point_laser_bullet_aim_endpoint(...)`，只在 bullet sync 已提供 `aim_x/aim_y` 时渲染；
+    - 新增 `point_laser_bullet_width_scale(...)`，按 Java `fslope * (1 - oscMag + absin(time, oscScl, oscMag))` 计算 beam 宽度系数；
+    - 新增 `point_laser_bullet_snapshot_render_commands(...)`，将 `BulletKind::PointLaser` 输出为 aim endpoint beam line + origin/end cap circles；
+    - `bullet_snapshot_render_pass()` 增加 `BulletKind::PointLaser` 分支；
+    - 新增 `desktop_launcher_routes_point_laser_snapshot_beam_to_aim_endpoint`，覆盖 aim endpoint、stroke/color/cap。
+- 迁移意义：
+  - PointLaser 不再在客户端 bullet snapshot 中静默不可见；
+  - 该闭环消费 Java 网络同步已有的 `aimX/aimY` 语义，继续沿 `BulletComp` → content `BulletSpec` → desktop overlay pass 主链推进；
+  - Lustre 等 point-laser 类连续武器获得最小可见 beam 表达。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_point_laser_snapshot_beam_to_aim_endpoint --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - PointLaser 当前用 primitive line/circle 近似 Java textured `Drawf.laser(laser, laserEnd, ...)`，后续应接入 sprite/atlas textured laser body/end caps；
+  - Java `super.draw(b)` 的默认 bullet sprite 行为尚未为 PointLaser 完整复刻；
+  - `Damage.collidePoint`、`beamEffect`、trail at aim endpoint、timer side-effects 仍需进入 runtime/effect 链；
+  - Rail effect、Unit trail runtime update、weapon/unit parts、hard shadow、legs、payload/item 仍需继续。

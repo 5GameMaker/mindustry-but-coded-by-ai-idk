@@ -819,6 +819,67 @@ fn continuous_flame_bullet_snapshot_light_commands(
     }]
 }
 
+fn point_laser_bullet_aim_endpoint(bullet: &BulletComp) -> Option<RenderPoint> {
+    if bullet.aim_x < 0.0
+        || bullet.aim_y < 0.0
+        || !bullet.aim_x.is_finite()
+        || !bullet.aim_y.is_finite()
+    {
+        return None;
+    }
+    Some(RenderPoint::new(bullet.aim_x, bullet.aim_y))
+}
+
+fn point_laser_bullet_width_scale(bullet: &BulletComp, spec: &BulletSpec, render_time: f32) -> f32 {
+    let (fin, _) = desktop_bullet_fin_fout(bullet);
+    let fslope = desktop_slope_interp(fin);
+    let osc_scl = if spec.osc_scl > f32::EPSILON {
+        spec.osc_scl
+    } else {
+        2.0
+    };
+    let osc_mag = if spec.osc_mag.abs() > f32::EPSILON {
+        spec.osc_mag
+    } else {
+        0.3
+    };
+    fslope * (1.0 - osc_mag + desktop_absin(render_time, osc_scl, osc_mag))
+}
+
+fn point_laser_bullet_snapshot_render_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    layer: f32,
+    render_time: f32,
+) -> Vec<RenderCommand> {
+    if bullet.removed || spec.kind != BulletKind::PointLaser {
+        return Vec::new();
+    }
+
+    let Some(end) = point_laser_bullet_aim_endpoint(bullet) else {
+        return Vec::new();
+    };
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let dx = end.x - origin.x;
+    let dy = end.y - origin.y;
+    if (dx * dx + dy * dy).sqrt() <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let scale = point_laser_bullet_width_scale(bullet, spec, render_time);
+    if scale <= f32::EPSILON {
+        return Vec::new();
+    }
+    let stroke = (spec.width.max(6.0) * scale).max(0.5);
+    let color = desktop_bullet_render_color(&spec.color, DecalColor::WHITE);
+
+    vec![
+        RenderCommand::draw_line(origin, end, stroke, color, layer),
+        RenderCommand::draw_circle(end, stroke * 1.5, color, true, layer),
+        RenderCommand::draw_circle(origin, stroke * 0.75, color, true, layer),
+    ]
+}
+
 fn laser_bolt_bullet_snapshot_render_commands(
     bullet: &BulletComp,
     spec: &BulletSpec,
@@ -12718,6 +12779,15 @@ impl DesktopLauncher {
                             self.render_time,
                         ));
                 }
+                BulletKind::PointLaser => {
+                    pass.commands
+                        .extend(point_laser_bullet_snapshot_render_commands(
+                            bullet,
+                            &content.spec,
+                            desktop_bullet_layer(&content.spec),
+                            self.render_time,
+                        ));
+                }
                 _ => pass
                     .commands
                     .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec)),
@@ -18052,6 +18122,111 @@ mod tests {
             }
             other => panic!("expected continuous flame lighting DrawLine, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn desktop_launcher_routes_point_laser_snapshot_beam_to_aim_endpoint() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_id: ContentId = 9903;
+        let mut spec = super::BulletSpec::new(super::BulletKind::PointLaser, 0.0, 210.0);
+        spec.sprite = "point-laser".into();
+        spec.color = "white".into();
+        spec.osc_scl = 2.0;
+        spec.osc_mag = 0.3;
+        spec.lifetime = 20.0;
+        launcher
+            .content_loader
+            .catalog_mut()
+            .bullets
+            .push(BulletContent::new(bullet_id, "test_point_laser", spec));
+
+        let mut bullet =
+            BulletComp::new(bullet_id, TeamId(1), type_io::EntityRef::null(), 32.0, 48.0);
+        bullet.lifetime = 20.0;
+        bullet.time = 10.0;
+        bullet.rotation = 0.0;
+        bullet.aim_x = 112.0;
+        bullet.aim_y = 48.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7110, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 160.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(80.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(80.0, 48.0, 160.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            29,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(112.0, 48.0))
+                    })
+            })
+            .expect("point laser snapshot should emit overlay beam commands");
+
+        match overlay
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(32.0, 48.0)
+                        && *to == RenderPoint::new(112.0, 48.0))
+            })
+            .expect("point laser beam line should be present")
+        {
+            RenderCommand::DrawLine {
+                stroke,
+                color,
+                layer,
+                ..
+            } => {
+                assert!((*stroke - 4.2).abs() < 0.0001);
+                assert_eq!(
+                    *color,
+                    super::desktop_bullet_render_color("white", DecalColor::WHITE)
+                );
+                assert_eq!(*layer, Layer::BULLET);
+            }
+            other => panic!("expected point laser DrawLine, got {other:?}"),
+        }
+
+        let caps = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    filled,
+                    layer,
+                    ..
+                } if (*center == RenderPoint::new(112.0, 48.0)
+                    || *center == RenderPoint::new(32.0, 48.0))
+                    && *filled
+                    && (*layer - Layer::BULLET).abs() < 0.0001 =>
+                {
+                    Some((*center, *radius))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(caps.len(), 2);
+        assert_eq!(caps[0].0, RenderPoint::new(112.0, 48.0));
+        assert!((caps[0].1 - 6.3).abs() < 0.0001);
+        assert_eq!(caps[1].0, RenderPoint::new(32.0, 48.0));
+        assert!((caps[1].1 - 3.15).abs() < 0.0001);
     }
 
     #[test]
