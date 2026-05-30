@@ -16775,3 +16775,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `menu-cache` / `menu-shadow-texture` / `menu-flyer` 仍主要是 `RenderCommand::Custom` marker，真实可见菜单元素尚未完全降低到 sprite/primitive；
   - 后续应继续把 menu world cache、flyer unit sprite、shadow texture 与按钮/字体接进同一套 sprite mesh/OpenGL 链路，最终替换安全底图。
+
+## 461. DrawText 下沉为 placeholder bitmap glyph quads
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.3%**，仍未达到完整可玩；继续优先推进前端/客户端。
+- 问题背景：
+  - `RenderCommand::DrawText` 此前能进入 `DesktopGraphicsOpenGlBackendAdapterAction::DrawText` 并被 trace/计数；
+  - 但 backend 没有把文字变成 glyph geometry，也没有登记纹理绑定或生成 sprite mesh/draw call；
+  - 因此 world label、load/menu/status 文本在 OpenGL 路径里仍只存在于命令层，不会真正可见。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 5x7 ASCII/bitmap placeholder glyph 表，覆盖数字、大写字母、常用符号，并把未知字符 fallback 到 `?`；
+    - 新增 `opengl_backend_text_placeholder_quads(...)`，按 `size / align / vertical_align / integer_position / rotation / layer / clip / target` 生成每个 glyph 像素的 primitive quad；
+    - `opengl_backend_primitive_quads_from_action(...)` 新增 `DrawText` 分支，复用现有 primitive-white runtime texture、sprite mesh batching、mesh upload 与 `DrawElements`；
+    - executor 的 `record_texture_binding_from_action(...)` 将 `DrawText` 纳入 primitive quad 记录路径，和 classifying adapter 保持一致。
+- 补充/更新测试：
+  - 扩展 `desktop_graphics_opengl_backend_executor_preserves_draw_text_style`：除保留 style/action 断言外，新增 `DrawText -> primitive:DrawText quads -> sprite mesh batch -> upload/draw call` 断言；
+  - 新增 `desktop_graphics_opengl_backend_draw_text_falls_back_to_question_mark_placeholder_glyph`，锁定未知字符 fallback 行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_preserves_draw_text_style --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_falls_back_to_question_mark_placeholder_glyph --features opengl-native-runtime`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前是 placeholder bitmap glyph，不是 Java/Arc/FreeType 字体 atlas；
+  - `wrap_width` / markup / outline / Unicode / icon font / true baseline kerning 仍未完整等价；
+  - 后续应逐步替换为真实 font atlas，同时保留 `DrawText -> glyph quads -> sprite mesh/OpenGL` 主链。

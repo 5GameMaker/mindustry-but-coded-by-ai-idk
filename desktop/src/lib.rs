@@ -4198,6 +4198,8 @@ const DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_KEY: &str = "runtime-texture:pri
 const DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_SOURCE: &str = "runtime:primitive-white";
 const DESKTOP_GRAPHICS_OPENGL_CIRCLE_MIN_SEGMENTS: usize = 12;
 const DESKTOP_GRAPHICS_OPENGL_CIRCLE_MAX_SEGMENTS: usize = 96;
+const DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_COLUMNS: usize = 5;
+const DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_ROWS: usize = 7;
 
 fn opengl_backend_primitive_texture_binding(
     symbol: impl Into<String>,
@@ -5430,6 +5432,327 @@ fn opengl_backend_circle_primitive_segment_count(radius: f32) -> usize {
     )
 }
 
+fn opengl_backend_placeholder_glyph_rows(character: char) -> [u8; 7] {
+    match character.to_ascii_uppercase() {
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+        ],
+        '3' => [
+            0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b00001, 0b00001, 0b11110,
+        ],
+        '6' => [
+            0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b11100,
+        ],
+        'A' => [
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'B' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ],
+        'C' => [
+            0b01111, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b01111,
+        ],
+        'D' => [
+            0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
+        ],
+        'E' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+        'F' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'G' => [
+            0b01111, 0b10000, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111,
+        ],
+        'H' => [
+            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'I' => [
+            0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        'J' => [
+            0b00001, 0b00001, 0b00001, 0b00001, 0b10001, 0b10001, 0b01110,
+        ],
+        'K' => [
+            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+        ],
+        'L' => [
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ],
+        'M' => [
+            0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+        ],
+        'N' => [
+            0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001,
+        ],
+        'O' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'P' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'Q' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
+        ],
+        'R' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ],
+        'S' => [
+            0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        'T' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'U' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'V' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+        ],
+        'W' => [
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010,
+        ],
+        'X' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
+        ],
+        'Y' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'Z' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+        ],
+        '!' => [
+            0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00000, 0b00100,
+        ],
+        '?' => [
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b00000, 0b00100,
+        ],
+        '.' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00100,
+        ],
+        ',' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00100, 0b01000,
+        ],
+        ':' => [
+            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000,
+        ],
+        ';' => [
+            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b01000,
+        ],
+        '-' => [
+            0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000,
+        ],
+        '_' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11111,
+        ],
+        '+' => [
+            0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000,
+        ],
+        '/' => [
+            0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000,
+        ],
+        '\\' => [
+            0b10000, 0b01000, 0b01000, 0b00100, 0b00010, 0b00010, 0b00001,
+        ],
+        '(' => [
+            0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010,
+        ],
+        ')' => [
+            0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000,
+        ],
+        '[' => [
+            0b01110, 0b01000, 0b01000, 0b01000, 0b01000, 0b01000, 0b01110,
+        ],
+        ']' => [
+            0b01110, 0b00010, 0b00010, 0b00010, 0b00010, 0b00010, 0b01110,
+        ],
+        '=' => [
+            0b00000, 0b00000, 0b11111, 0b00000, 0b11111, 0b00000, 0b00000,
+        ],
+        '<' => [
+            0b00010, 0b00100, 0b01000, 0b10000, 0b01000, 0b00100, 0b00010,
+        ],
+        '>' => [
+            0b01000, 0b00100, 0b00010, 0b00001, 0b00010, 0b00100, 0b01000,
+        ],
+        '\'' => [
+            0b00100, 0b00100, 0b01000, 0b00000, 0b00000, 0b00000, 0b00000,
+        ],
+        '"' => [
+            0b01010, 0b01010, 0b01010, 0b00000, 0b00000, 0b00000, 0b00000,
+        ],
+        _ => [
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b00000, 0b00100,
+        ],
+    }
+}
+
+fn opengl_backend_placeholder_text_advance(character: char, pixel: f32) -> f32 {
+    match character {
+        ' ' => pixel * 3.0,
+        '\t' => pixel * 6.0,
+        _ => pixel * 6.0,
+    }
+}
+
+fn opengl_backend_placeholder_text_line_width(line: &str, pixel: f32) -> f32 {
+    let width = line
+        .chars()
+        .map(|character| opengl_backend_placeholder_text_advance(character, pixel))
+        .sum::<f32>();
+    if width > pixel {
+        width - pixel
+    } else {
+        width
+    }
+}
+
+fn opengl_backend_rotated_rect_primitive_positions(
+    rect: RenderRect,
+    anchor: RenderPoint,
+    rotation: f32,
+) -> [RenderPoint; 4] {
+    let positions = opengl_backend_rect_primitive_positions(rect);
+    if rotation.abs() <= f32::EPSILON {
+        return positions;
+    }
+
+    let radians = rotation.to_radians();
+    let (sin, cos) = radians.sin_cos();
+    positions.map(|point| {
+        let dx = point.x - anchor.x;
+        let dy = point.y - anchor.y;
+        RenderPoint::new(
+            anchor.x + dx * cos - dy * sin,
+            anchor.y + dx * sin + dy * cos,
+        )
+    })
+}
+
+fn opengl_backend_text_placeholder_quads(
+    text: &str,
+    position: RenderPoint,
+    color: [f32; 4],
+    size: f32,
+    rotation: f32,
+    align: RenderTextAlign,
+    style: RenderTextStyle,
+    layer: f32,
+    target: Option<RenderTarget>,
+    shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+    blend_state: DesktopGraphicsOpenGlBackendBlendState,
+    clip: Option<RenderRect>,
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteQuad> {
+    if text.is_empty() || size <= f32::EPSILON || color[3] <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let pixel = (size / DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_ROWS as f32).max(1.0);
+    let glyph_height = pixel * DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_ROWS as f32;
+    let line_height = pixel * (DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_ROWS as f32 + 1.0);
+    let lines = text.split('\n').collect::<Vec<_>>();
+    let total_height = if lines.is_empty() {
+        0.0
+    } else {
+        glyph_height + (lines.len().saturating_sub(1) as f32 * line_height)
+    };
+    let bottom_y = match style.vertical_align {
+        RenderTextVerticalAlign::Top => position.y - total_height,
+        RenderTextVerticalAlign::Center => position.y - total_height * 0.5,
+        RenderTextVerticalAlign::Bottom => position.y,
+        RenderTextVerticalAlign::Baseline => position.y - pixel,
+    };
+    let anchor = if style.integer_position {
+        RenderPoint::new(position.x.round(), position.y.round())
+    } else {
+        position
+    };
+    let mut quads = Vec::new();
+
+    for (line_index, line) in lines.iter().enumerate() {
+        let line_width = opengl_backend_placeholder_text_line_width(line, pixel);
+        let mut cursor_x = match align {
+            RenderTextAlign::Start => position.x,
+            RenderTextAlign::Center => position.x - line_width * 0.5,
+            RenderTextAlign::End => position.x - line_width,
+        };
+        let line_y = bottom_y + (lines.len() - 1 - line_index) as f32 * line_height;
+        if style.integer_position {
+            cursor_x = cursor_x.round();
+        }
+        let line_y = if style.integer_position {
+            line_y.round()
+        } else {
+            line_y
+        };
+
+        for character in line.chars() {
+            if character == ' ' || character == '\t' {
+                cursor_x += opengl_backend_placeholder_text_advance(character, pixel);
+                continue;
+            }
+
+            let rows = opengl_backend_placeholder_glyph_rows(character);
+            for (row_index, row_bits) in rows.iter().enumerate() {
+                for column in 0..DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_COLUMNS {
+                    let mask =
+                        1u8 << (DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_COLUMNS - 1 - column);
+                    if row_bits & mask == 0 {
+                        continue;
+                    }
+                    let rect = RenderRect::new(
+                        cursor_x + column as f32 * pixel,
+                        line_y
+                            + (DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_ROWS - 1 - row_index)
+                                as f32
+                                * pixel,
+                        pixel,
+                        pixel,
+                    );
+                    let positions =
+                        opengl_backend_rotated_rect_primitive_positions(rect, anchor, rotation);
+                    quads.push(
+                        DesktopGraphicsOpenGlBackendSpriteQuad::from_primitive_vertices(
+                            "primitive:DrawText",
+                            target.clone(),
+                            shader_program.clone(),
+                            blend_state,
+                            clip,
+                            layer,
+                            color,
+                            positions,
+                        ),
+                    );
+                }
+            }
+            cursor_x += opengl_backend_placeholder_text_advance(character, pixel);
+        }
+    }
+
+    quads
+}
+
 fn opengl_backend_primitive_quads_from_action(
     action: &DesktopGraphicsOpenGlBackendAdapterAction,
     target: Option<RenderTarget>,
@@ -5656,6 +5979,29 @@ fn opengl_backend_primitive_quads_from_action(
                 ),
             ]
         }
+        DesktopGraphicsOpenGlBackendAdapterAction::DrawText {
+            text,
+            position,
+            color,
+            size,
+            rotation,
+            align,
+            style,
+            layer,
+        } => opengl_backend_text_placeholder_quads(
+            text,
+            *position,
+            *color,
+            *size,
+            *rotation,
+            *align,
+            *style,
+            *layer,
+            target,
+            shader_program,
+            blend_state,
+            clip,
+        ),
         _ => Vec::new(),
     }
 }
@@ -9449,6 +9795,7 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                 self.state.missing_sprite_texture_bindings += 1;
             }
             DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle { .. }
+            | DesktopGraphicsOpenGlBackendAdapterAction::DrawText { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::FillRect { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect { .. }
             | DesktopGraphicsOpenGlBackendAdapterAction::DrawLine { .. }
@@ -25896,6 +26243,21 @@ mod tests {
 
         assert_eq!(executor.state.draw_text_commands, 1);
         assert_eq!(executor.state.action_count, 1);
+        assert_eq!(executor.state.missing_sprite_texture_bindings, 0);
+        assert!(!executor.state.sprite_quads.is_empty());
+        assert!(executor
+            .state
+            .sprite_quads
+            .iter()
+            .all(|quad| quad.symbol == "primitive:DrawText"));
+        assert_eq!(executor.state.sprite_mesh_batches.len(), 1);
+        assert!(!executor.state.sprite_mesh_upload_plans.is_empty());
+        assert!(!executor.state.sprite_draw_call_plans.is_empty());
+        assert!(executor
+            .state
+            .sprite_texture_resource_table
+            .get(super::DESKTOP_GRAPHICS_OPENGL_PRIMITIVE_TEXTURE_KEY)
+            .is_some());
         assert!(matches!(
             &executor.state.actions[0],
             super::DesktopGraphicsOpenGlBackendAdapterAction::DrawText {
@@ -25917,6 +26279,57 @@ mod tests {
         executor.drive_adapter(&mut classifying_adapter);
         assert_eq!(classifying_adapter.state.draw_text_commands, 1);
         assert_eq!(executor.state.actions, classifying_adapter.state.actions);
+        assert_eq!(
+            classifying_adapter.state.sprite_quads.len(),
+            executor.state.sprite_quads.len()
+        );
+        assert_eq!(
+            classifying_adapter.state.sprite_mesh_batches.len(),
+            executor.state.sprite_mesh_batches.len()
+        );
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_draw_text_falls_back_to_question_mark_placeholder_glyph() {
+        assert_eq!(
+            super::opengl_backend_placeholder_glyph_rows('☃'),
+            super::opengl_backend_placeholder_glyph_rows('?')
+        );
+
+        let question_quads = super::opengl_backend_text_placeholder_quads(
+            "?",
+            RenderPoint::new(0.0, 0.0),
+            [1.0, 1.0, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextAlign::Start,
+            RenderTextStyle::default(),
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+        let unknown_quads = super::opengl_backend_text_placeholder_quads(
+            "☃",
+            RenderPoint::new(0.0, 0.0),
+            [1.0, 1.0, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextAlign::Start,
+            RenderTextStyle::default(),
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+
+        assert!(!question_quads.is_empty());
+        assert_eq!(unknown_quads.len(), question_quads.len());
+        assert!(unknown_quads
+            .iter()
+            .all(|quad| quad.symbol == "primitive:DrawText"));
     }
 
     #[test]

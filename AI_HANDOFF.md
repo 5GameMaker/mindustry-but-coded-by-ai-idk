@@ -13928,3 +13928,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 `menu-cache` / `menu-shadow-texture` / `menu-flyer` 从 custom marker 继续降低成真实 sprite/primitive；
   2. 并行推进 `DrawText -> placeholder glyph quad -> OpenGL`，否则菜单和 UI 仍缺文字；
   3. 安全底图只是过渡，真实 menu 图元足够后要逐步移除或降为异常 fallback。
+
+### 2026-05-30：DrawText placeholder glyph quad/OpenGL 闭环
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **47.3%**。
+- 当前用户最新优先级：
+  - 先优先完成前端/客户端，后端可以先等等。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 5x7 ASCII placeholder bitmap glyph 表，未知字符 fallback 到 `?`；
+    - 新增 `opengl_backend_text_placeholder_quads(...)`，按 `size / align / vertical_align / integer_position / rotation / layer / target / clip` 把文本拆成 `primitive:DrawText` quads；
+    - `opengl_backend_primitive_quads_from_action(...)` 新增 `DrawText` 分支；
+    - `DesktopGraphicsOpenGlBackendExecutor::record_texture_binding_from_action(...)` 将 `DrawText` 纳入 primitive quad 记录路径；
+    - 文字现在复用 primitive-white runtime texture 与 sprite mesh/upload/draw-call 主链，不再只停留在 trace/action。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_executor_preserves_draw_text_style --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_draw_text_falls_back_to_question_mark_placeholder_glyph --features opengl-native-runtime`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 下一步：
+  1. 继续把 menu cache/flyer/shadow marker 降低成真实可见图元；
+  2. 后续将 placeholder glyph 替换为真实 font atlas，补 Unicode/icon/markup/wrap/outline；
+  3. 保持 `DrawText -> glyph quads -> sprite mesh/OpenGL` 主链，不要再退回只记录命令。
