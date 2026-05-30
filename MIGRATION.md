@@ -19016,7 +19016,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 ## 534. MenuFragment 主菜单壳层继续对齐
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
-- 本轮总体进度更新：约 **55.5%**，仍未达到完整可玩；继续优先前端/UI，目标是减少黑屏/占位感并按 Java `MenuFragment` 还原主菜单外观。
+- 本轮总体进度更新：约 **55.6%**，仍未达到完整可玩；继续优先前端/UI，目标是减少黑屏/占位感并按 Java `MenuFragment` 还原主菜单外观。
 - Java 对照证据：
   - `MenuFragment.buildDesktop()` 的主菜单和 submenu 都是 `Styles.black6` 竖向 table；
   - `MenuFragment.buildMobile()` 使用 `MobileButton extends ImageButton`，背景来自默认 ImageButton skin，而不是 desktop `flatToggleMenut`；
@@ -19036,6 +19036,8 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
     - logo 在 portrait viewport 下按原版下移 30px；
     - version/baseline 文本 alpha 调整为半透明白。
     - `fast_menu_render_pass_from_plan()` 不再绘制 `RUST MDT CLIENT` 占位面板，优先复用真实 `MenuFramePlan::to_render_pass()` 输出，fast path 下也走同一套菜单世界/UI 命令。
+    - discord/info chrome 不再额外画自制 fill/stroke，改为直接使用原版 `discord-banner` / `info-banner` drawable；
+    - terminal/becheck chrome 背景改为 `button.9` skin，不再用自绘纯色矩形和描边。
   - `core/src/mindustry/graphics/mod.rs`
     - 导出 `MENU_DARKNESS_LAYER`，供 desktop fast-path 回归测试锁定 fullscreen 暗化层。
   - `core/src/mindustry/mod.rs`
@@ -19047,6 +19049,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo test -p mindustry-core upstream_menu_version_uses_java_version_combined_shape --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_fast_menu_path_reuses_real_menu_plan_without_placeholder_panel --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_mobile_terminal_info_and_gutter_chrome --lib`
   - `cargo test -p mindustry-desktop menu_chrome --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
@@ -19054,5 +19057,5 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `startup_menu_preview_render_pass()` 仍有明显非原版占位壳，后续应优先移除或仅作为不可达的错误兜底；
   - logo/version 已使用 `VersionInfo::combined()` 形状，但仍是静态 baseline 常量；后续应接真实 `version.properties`/构建产物和 build=-1 自定义构建分支；
   - desktop/mobile 按钮文字仍是 Rust 硬编码英文 bundle 值，后续必须接入真实 bundle/localization 与运行时语言切换；
-  - chrome 按钮仍有自绘 fill/stroke 近似，未完全等同 Java Scene2D skin；
+  - chrome 按钮已减少自绘 fill/stroke，但仍未完整迁移 Scene2D 的 hover/down/tooltip/visible 条件和 becontrol update color；
   - 未达到完整可玩，不能宣告目标完成。

@@ -18566,12 +18566,11 @@ impl DesktopLauncher {
         sprite_symbol: &str,
         sprite_label: Option<&str>,
         fallback_label: &str,
-        fill: [f32; 4],
-        stroke: [f32; 4],
+        _fill: [f32; 4],
+        _stroke: [f32; 4],
         label_size: f32,
         label_color: [f32; 4],
     ) {
-        Self::push_menu_chrome_button_background(pass, rect, fill, stroke);
         pass.push(RenderCommand::draw_sprite(
             sprite_symbol,
             rect,
@@ -18595,19 +18594,15 @@ impl DesktopLauncher {
     fn push_menu_chrome_button_background(
         pass: &mut RenderPass,
         rect: RenderRect,
-        fill: [f32; 4],
-        stroke: [f32; 4],
+        _fill: [f32; 4],
+        _stroke: [f32; 4],
     ) {
-        pass.push(RenderCommand::fill_rect(
+        pass.push(RenderCommand::draw_sprite(
+            "button.9",
             rect,
-            fill,
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
             Layer::END_PIXELED + 0.05,
-        ));
-        pass.push(RenderCommand::stroke_rect(
-            rect,
-            stroke,
-            1.0,
-            Layer::END_PIXELED + 0.06,
         ));
     }
 
@@ -38710,7 +38705,7 @@ mod tests {
 
         let discord_rect = RenderRect::new(1186.0, 666.0, 84.0, 45.0);
         let becheck_rect = RenderRect::new(1070.0, 598.0, 200.0, 60.0);
-        assert!(commands.iter().any(|command| {
+        assert!(!commands.iter().any(|command| {
             matches!(
                 command,
                 RenderCommand::FillRect { rect, .. } if *rect == discord_rect
@@ -38733,7 +38728,8 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::FillRect { rect, .. } if *rect == becheck_rect
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "button.9" && *rect == becheck_rect
             )
         }));
         assert!(commands.iter().any(|command| {
@@ -38794,8 +38790,15 @@ mod tests {
             }));
         }
 
-        for rect in [terminal_rect, info_rect, discord_rect] {
-            assert!(commands.iter().any(|command| {
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "button.9" && *rect == terminal_rect
+            )
+        }));
+        for rect in [info_rect, discord_rect] {
+            assert!(!commands.iter().any(|command| {
                 matches!(
                     command,
                     RenderCommand::FillRect { rect: candidate, .. } if *candidate == rect
