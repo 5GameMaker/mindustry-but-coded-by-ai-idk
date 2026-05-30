@@ -16187,3 +16187,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Rail 的 `RailInitPlan` / `RailPiercePlan` 仍需桥接到 runtime `client_local_effect_events` 或专用 visual event；
   - `lineEffect` / `pointEffect` / `endEffect` 仍需走标准 effect renderer/light renderer，而不是长期用固定 circle/line marker；
   - weapon/unit parts、Unit trail tick 接入、PointLaser textured laser、hard shadow、legs、payload/item 仍需继续。
+
+## 442. 最新闭环记录：Rail 首次 bullet sync 投递 runtime init effect
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.0%**，仍未达到完整可玩。
+- Java 对照：
+  - `RailBulletType.java#init(Bullet b)`：初始化时一次性触发 `pointEffect`、`endEffect`、`lineEffect`；
+  - `lineEffect.at(...)` 的 data 是终点 `Vec2`；
+  - 同一个 bullet 后续 update 不应重复触发 init effects。
+- 本轮主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `apply_client_bullet_sync_wire(...)` 现在能识别首次插入的 `BulletKind::Rail` snapshot；
+    - 新增 `queue_client_rail_bullet_init_effects(...)`，按 `fdata/spec.length` 计算 result length 并投递 point/end/line effects；
+    - 新增 `queue_client_rail_effect_event(...)` 与 `effect_color_from_symbol(...)`；
+    - `lineEffect` 使用 `TypeValue::Vec2(end)` 表达 Java extra data；
+    - 后续同一 `entity_id` sync 只更新 bullet，不重复投递 init effect。
+- 迁移意义：
+  - Rail 视觉从上一轮 desktop fixed marker 继续推进到 runtime `client_local_effect_events` 主链；
+  - 这条路径会被现有标准 effect materialize/render 逻辑消费，较上一轮 snapshot fallback 更接近 Java `Effect.at(...)`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo test -p mindustry-core game_runtime_queues_rail_init_point_effects_on_first_bullet_sync --lib`
+  - `git diff --check`
+- 仍未完成：
+  - Rail `handlePierce(...)` 的 `pierceEffect` 仍未接入 runtime 命中/穿透事件；
+  - block turret ammo 中的匿名 rail line/end effect 若没有标准 effect id，仍需专用 visual plan 或 effect 注册；
+  - desktop snapshot marker 可在后续 Rail runtime effect 稳定后降级/删除；
+  - weapon/unit parts、Unit trail tick、textured laser、hard shadow、legs、payload/item 仍需继续。

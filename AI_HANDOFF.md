@@ -13319,3 +13319,34 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 不要长期停留在 fixed marker，最终应走 standard effect renderer；
   3. Unit trail 继续接真实 tick；
   4. weapon/unit parts 与 textured laser 继续推进。
+
+### 2026-05-30：Rail 首次 bullet sync 投递 runtime init effect
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **43.0%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - `apply_client_bullet_sync_wire(...)` 对首次插入的 `BulletKind::Rail` 调用 Rail init effect 队列；
+    - 新增 `queue_client_rail_bullet_init_effects(...)`；
+    - 新增 `queue_client_rail_effect_event(...)`；
+    - 新增 `effect_color_from_symbol(...)`；
+    - 新增测试 `game_runtime_queues_rail_init_point_effects_on_first_bullet_sync`。
+- Java 对照：
+  - `RailBulletType.init()` 一次性触发 point/end/line effects；
+  - `lineEffect` 的 data 是终点 `Vec2`；
+  - 同一 bullet 后续 sync 不重复触发 init effects。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo test -p mindustry-core game_runtime_queues_rail_init_point_effects_on_first_bullet_sync --lib`
+  - `git diff --check`
+- 下一步：
+  1. Rail `handlePierce` 的 `pierceEffect` 还未接入；
+  2. 匿名 line/end effect 若无 standard id，需要 effect 注册或专用 visual plan；
+  3. textured `Drawf.laser` 可先用现有 `DrawSprite` 组合 body/caps，不必立即新增命令；
+  4. Unit trail tick 与 weapon/unit parts 继续推进。

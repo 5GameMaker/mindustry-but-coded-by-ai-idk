@@ -15,11 +15,11 @@ use std::{
 use crate::mindustry::{
     audio::standard_sound_id,
     content::blocks::{
-        BlockDef, CampaignBlockKind, CraftingBlockKind, DefenseWallKind, DistributionBlockKind,
-        EffectBlockKind, LegacyBlockKind, LiquidBlockKind, LogicBlockKind, PayloadBlockKind,
-        PayloadLoaderBlockData, PayloadLoaderBlockKind, PayloadMassDriverBlockData, PowerBlockKind,
-        ProductionBlockKind, SandboxBlockKind, StorageBlockKind, TurretBlockKind,
-        UnitAssemblerBlockData, UnitFactoryBlockData,
+        BlockDef, BulletKind, BulletSpec, CampaignBlockKind, CraftingBlockKind, DefenseWallKind,
+        DistributionBlockKind, EffectBlockKind, LegacyBlockKind, LiquidBlockKind, LogicBlockKind,
+        PayloadBlockKind, PayloadLoaderBlockData, PayloadLoaderBlockKind,
+        PayloadMassDriverBlockData, PowerBlockKind, ProductionBlockKind, SandboxBlockKind,
+        StorageBlockKind, TurretBlockKind, UnitAssemblerBlockData, UnitFactoryBlockData,
     },
     core::content_loader::ContentLoader,
     core::game_state::{GameState, GameStateState},
@@ -33,9 +33,10 @@ use crate::mindustry::{
             LegsDestroyPlan, LegsDestroyRegions, PayloadComp, PayloadKind, PayloadState,
             PuddleComp, PuddleTile, UnitComp, UnitControllerState, WorldLabelComp,
         },
-        entity_class_id, entity_class_kind, standard_effect, standard_effect_id, Effect,
-        EntityClassKind, Fires, PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent,
-        Puddles, DEFAULT_EFFECT_CLIP, DEFAULT_EFFECT_LIFETIME, FX_RIPPLE_ID, FX_UNIT_ASSEMBLE_ID,
+        entity_class_id, entity_class_kind, standard_effect, standard_effect_color_symbol,
+        standard_effect_id, Effect, EntityClassKind, Fires, PuddleLiquidInfo,
+        PuddleParticleEffectEvent, PuddleUpdateEvent, Puddles, DEFAULT_EFFECT_CLIP,
+        DEFAULT_EFFECT_LIFETIME, FX_RIPPLE_ID, FX_UNIT_ASSEMBLE_ID,
     },
     game::{vanilla_teams, CampaignStats, CoreInfo, SectorInfo, Trigger},
     input::input_handler::ItemRemoveStackPlan,
@@ -3969,6 +3970,133 @@ impl GameRuntime {
         ticked
     }
 
+    fn effect_color_from_symbol(name: &str) -> type_io::RgbaColor {
+        if name.is_empty() || name == "none" {
+            return type_io::RgbaColor::new(-1);
+        }
+
+        let hex = name.strip_prefix('#').unwrap_or(name);
+        if hex.len() == 6 || hex.len() == 8 {
+            if let Ok(mut rgba) = u32::from_str_radix(hex, 16) {
+                if hex.len() == 6 {
+                    rgba = (rgba << 8) | 0xff;
+                }
+                return type_io::RgbaColor::new(rgba as i32);
+            }
+        }
+
+        let color = standard_effect_color_symbol(name)
+            .or_else(|| standard_effect_color_symbol(&format!("Pal.{name}")))
+            .or_else(|| standard_effect_color_symbol(&format!("Color.{name}")));
+        let Some(color) = color else {
+            return type_io::RgbaColor::new(-1);
+        };
+        let pack = |channel: f32| -> u32 { (channel.clamp(0.0, 1.0) * 255.0).round() as u32 };
+        let rgba =
+            (pack(color.r) << 24) | (pack(color.g) << 16) | (pack(color.b) << 8) | pack(color.a);
+        type_io::RgbaColor::new(rgba as i32)
+    }
+
+    fn queue_client_rail_effect_event(
+        &mut self,
+        effect_name: &str,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: type_io::RgbaColor,
+        data: TypeValue,
+    ) -> bool {
+        if effect_name == "none" {
+            return false;
+        }
+        let Some(effect_id) = standard_effect_id(effect_name) else {
+            return false;
+        };
+        self.client_local_effect_events.push(EffectCallPacket2 {
+            effect: EffectCallPacket {
+                effect_id: effect_id as u16,
+                x,
+                y,
+                rotation,
+                color,
+            },
+            data,
+        });
+        true
+    }
+
+    fn queue_client_rail_bullet_init_effects(
+        &mut self,
+        spec: &BulletSpec,
+        bullet: &BulletComp,
+    ) -> usize {
+        if spec.kind != BulletKind::Rail {
+            return 0;
+        }
+
+        let result_length = if bullet.fdata > f32::EPSILON {
+            bullet.fdata.min(spec.length.max(0.0))
+        } else {
+            spec.length.max(0.0)
+        };
+        if result_length <= f32::EPSILON {
+            return 0;
+        }
+
+        let rotation = bullet.rotation();
+        let radians = rotation.to_radians();
+        let (sin, cos) = radians.sin_cos();
+        let end_x = bullet.x + cos * result_length;
+        let end_y = bullet.y + sin * result_length;
+        let mut queued = 0;
+
+        if spec.point_effect != "none" && spec.point_effect_space > f32::EPSILON {
+            let color = Self::effect_color_from_symbol(&spec.trail_color);
+            let mut distance = 0.0;
+            while distance <= result_length + f32::EPSILON {
+                if self.queue_client_rail_effect_event(
+                    &spec.point_effect,
+                    bullet.x + cos * distance,
+                    bullet.y + sin * distance,
+                    rotation,
+                    color,
+                    TypeValue::Null,
+                ) {
+                    queued += 1;
+                }
+                distance += spec.point_effect_space;
+            }
+        }
+
+        if spec.end_effect != "none" && bullet.collided_ids.is_empty() {
+            if self.queue_client_rail_effect_event(
+                &spec.end_effect,
+                end_x,
+                end_y,
+                rotation,
+                Self::effect_color_from_symbol(&spec.hit_color),
+                TypeValue::Null,
+            ) {
+                queued += 1;
+            }
+        }
+
+        if spec.line_effect != "none" {
+            if self.queue_client_rail_effect_event(
+                &spec.line_effect,
+                bullet.x,
+                bullet.y,
+                rotation,
+                Self::effect_color_from_symbol(&spec.hit_color),
+                TypeValue::Vec2(IoVec2::new(end_x, end_y)),
+            ) {
+                queued += 1;
+            }
+        }
+
+        queued
+    }
+
     pub fn apply_client_bullet_sync_wire(
         &mut self,
         content: &ContentLoader,
@@ -3981,13 +4109,29 @@ impl GameRuntime {
         {
             return false;
         }
-        let bullet = self
+        let was_new = !self
             .client_bullet_snapshot_entities
-            .entry(entity_id)
-            .or_insert_with(|| {
-                BulletComp::new(sync.bullet_type_id, sync.team, sync.owner, sync.x, sync.y)
-            });
-        bullet.apply_sync_wire(sync);
+            .contains_key(&entity_id);
+        {
+            let bullet = self
+                .client_bullet_snapshot_entities
+                .entry(entity_id)
+                .or_insert_with(|| {
+                    BulletComp::new(sync.bullet_type_id, sync.team, sync.owner, sync.x, sync.y)
+                });
+            bullet.apply_sync_wire(sync);
+        }
+        if was_new {
+            let bullet = self
+                .client_bullet_snapshot_entities
+                .get(&entity_id)
+                .cloned();
+            if let (Some(content), Some(bullet)) =
+                (content.bullet_by_id(sync.bullet_type_id), bullet)
+            {
+                self.queue_client_rail_bullet_init_effects(&content.spec, &bullet);
+            }
+        }
         true
     }
 
@@ -23361,6 +23505,57 @@ mod tests {
 
         let hidden = runtime.apply_client_hidden_snapshot_ids(&[7006]);
         assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_queues_rail_init_point_effects_on_first_bullet_sync() {
+        let content = ContentLoader::create_base_content().unwrap();
+        let rail = content
+            .bullet_by_name("omura_cannon")
+            .expect("base content should include omura rail bullet");
+        assert_eq!(rail.spec.kind, BulletKind::Rail);
+        assert_eq!(rail.spec.point_effect, "railTrail");
+        assert_eq!(rail.spec.point_effect_space, 60.0);
+
+        let sync = type_io::BulletSyncWire {
+            collided: Vec::new(),
+            damage: 1250.0,
+            data: TypeValue::Null,
+            fdata: 120.0,
+            lifetime: 1.0,
+            owner: type_io::EntityRef::null(),
+            rotation: 0.0,
+            team: TeamId(2),
+            time: 0.0,
+            bullet_type_id: rail.id(),
+            vel: IoVec2 { x: 0.0, y: 0.0 },
+            x: 10.0,
+            y: 20.0,
+        };
+
+        let mut runtime = GameRuntime::default();
+        assert!(runtime.apply_client_bullet_sync_wire(&content, 7201, &sync));
+        assert_eq!(runtime.client_local_effect_events.len(), 3);
+        let rail_trail = standard_effect_id("railTrail").unwrap() as u16;
+        let positions = runtime
+            .client_local_effect_events
+            .iter()
+            .map(|event| {
+                assert_eq!(event.effect.effect_id, rail_trail);
+                assert_eq!(event.effect.rotation, 0.0);
+                assert_eq!(event.effect.color, type_io::RgbaColor::new(-1));
+                assert_eq!(event.data, TypeValue::Null);
+                (event.effect.x, event.effect.y)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(positions, vec![(10.0, 20.0), (70.0, 20.0), (130.0, 20.0)]);
+
+        assert!(runtime.apply_client_bullet_sync_wire(&content, 7201, &sync));
+        assert_eq!(
+            runtime.client_local_effect_events.len(),
+            3,
+            "existing rail snapshot updates must not duplicate Java init effects"
+        );
     }
 
     #[test]
