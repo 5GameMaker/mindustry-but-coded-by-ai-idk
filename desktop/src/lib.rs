@@ -2,6 +2,7 @@ use mindustry_core::mindustry::client_launcher::ClientLauncher;
 use mindustry_core::mindustry::content::blocks::{
     BlockDef, BulletKind, BulletSpec, CampaignBlockData, CampaignBlockKind, DistributionBlockKind,
 };
+use mindustry_core::mindustry::content::weathers::WeatherContent;
 use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeBlockVisualRuntimeSnapshot, GameRuntimeCampaignBlockState,
     GameRuntimeClientCameraShakeEvent, GameRuntimeClientSnapshotApplyReport,
@@ -69,6 +70,7 @@ use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
+use mindustry_core::mindustry::r#type::WeatherState;
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
@@ -165,6 +167,44 @@ fn desktop_basic_bullet_kind_renderable(kind: BulletKind) -> bool {
 fn desktop_bullet_layer(spec: &BulletSpec) -> f32 {
     let layer = spec.layer.strip_prefix("Layer.").unwrap_or(&spec.layer);
     Layer::by_name(layer).unwrap_or(Layer::BULLET)
+}
+
+fn desktop_weather_rgba_property(rgba: u32) -> String {
+    format!("{rgba:08x}")
+}
+
+fn desktop_weather_splash_regions(splashes: &[String]) -> Vec<String> {
+    if splashes.iter().any(|splash| !splash.is_empty()) {
+        splashes.to_vec()
+    } else {
+        (0..mindustry_core::mindustry::r#type::RainWeather::SPLASH_COUNT)
+            .map(|index| format!("splash-{index}"))
+            .collect()
+    }
+}
+
+fn desktop_weather_virtual_source_paths(content_loader: &ContentLoader) -> Vec<String> {
+    let mut paths = Vec::new();
+
+    for weather in content_loader.weathers() {
+        match weather {
+            WeatherContent::Rain(rain) => {
+                paths.extend(
+                    desktop_weather_splash_regions(&rain.splashes)
+                        .into_iter()
+                        .map(|splash| format!("sprites/{splash}.png")),
+                );
+            }
+            WeatherContent::Particle(particle) => {
+                paths.push(format!("sprites/{}.png", particle.particle_region));
+                if particle.draw_noise {
+                    paths.push(format!("sprites/{}.png", particle.noise_path));
+                }
+            }
+        }
+    }
+
+    paths
 }
 
 fn desktop_block_full_icon_region_content_id(region: &str) -> Option<ContentId> {
@@ -10071,7 +10111,8 @@ fn default_desktop_texture_atlas(
                     .bullets()
                     .iter()
                     .flat_map(|bullet| desktop_bullet_sprite_virtual_source_paths(&bullet.spec)),
-            ),
+            )
+            .chain(desktop_weather_virtual_source_paths(content_loader).into_iter()),
     )
 }
 
@@ -11512,6 +11553,154 @@ impl DesktopLauncher {
         (!pass.commands.is_empty()).then_some(pass)
     }
 
+    fn weather_snapshot_base_properties(
+        entity_id: i32,
+        state: &WeatherState,
+    ) -> Vec<RenderProperty> {
+        vec![
+            RenderProperty::new("entity_id", entity_id.to_string()),
+            RenderProperty::new("weather", state.weather_name.clone()),
+            RenderProperty::new("intensity", state.intensity.to_string()),
+            RenderProperty::new("opacity", state.opacity.to_string()),
+            RenderProperty::new("life", state.life.to_string()),
+            RenderProperty::new("effect_timer", state.effect_timer.to_string()),
+            RenderProperty::new("windx", state.wind_vector.0.to_string()),
+            RenderProperty::new("windy", state.wind_vector.1.to_string()),
+            RenderProperty::new("x", state.x.to_string()),
+            RenderProperty::new("y", state.y.to_string()),
+        ]
+    }
+
+    fn weather_snapshot_environment_render_commands(
+        &self,
+        entity_id: i32,
+        state: &WeatherState,
+    ) -> Vec<RenderCommand> {
+        if !state.added {
+            return Vec::new();
+        }
+
+        let Some(content) = self.content_loader.weather_by_name(&state.weather_name) else {
+            return Vec::new();
+        };
+
+        match content {
+            WeatherContent::Rain(rain) => {
+                let over = rain.draw_over_plan(state);
+                let under = rain.draw_under_plan(state);
+                let mut commands = Vec::with_capacity(2);
+
+                let mut over_properties = Self::weather_snapshot_base_properties(entity_id, state);
+                over_properties.extend([
+                    RenderProperty::new("bucket", "weather"),
+                    RenderProperty::new("kind", "rain-over"),
+                    RenderProperty::new("layer", "Layer.weather"),
+                    RenderProperty::new("size_min", over.size_min.to_string()),
+                    RenderProperty::new("size_max", over.size_max.to_string()),
+                    RenderProperty::new("xspeed", over.xspeed.to_string()),
+                    RenderProperty::new("yspeed", over.yspeed.to_string()),
+                    RenderProperty::new("density", over.density.to_string()),
+                    RenderProperty::new("stroke", over.stroke.to_string()),
+                    RenderProperty::new("color", desktop_weather_rgba_property(over.color_rgba)),
+                ]);
+                commands.push(RenderCommand::custom("weather-rain-over", over_properties));
+
+                let mut under_properties = Self::weather_snapshot_base_properties(entity_id, state);
+                under_properties.extend([
+                    RenderProperty::new("bucket", "weather"),
+                    RenderProperty::new("kind", "rain-splashes"),
+                    RenderProperty::new("layer", "Layer.weather - 1"),
+                    RenderProperty::new(
+                        "splashes",
+                        desktop_weather_splash_regions(&under.splashes).join(","),
+                    ),
+                    RenderProperty::new("padding", under.padding.to_string()),
+                    RenderProperty::new("density", under.density.to_string()),
+                    RenderProperty::new("time_scale", under.time_scale.to_string()),
+                    RenderProperty::new("stroke", under.stroke.to_string()),
+                    RenderProperty::new("liquid", under.liquid),
+                    RenderProperty::new("color", desktop_weather_rgba_property(under.color_rgba)),
+                ]);
+                commands.push(RenderCommand::custom(
+                    "weather-rain-splashes",
+                    under_properties,
+                ));
+
+                commands
+            }
+            WeatherContent::Particle(particle) => {
+                let plan = particle.draw_over_plan(state);
+                let mut commands = Vec::new();
+
+                for (index, noise) in plan.noise_layers.iter().enumerate() {
+                    let mut properties = Self::weather_snapshot_base_properties(entity_id, state);
+                    properties.extend([
+                        RenderProperty::new("bucket", "weather"),
+                        RenderProperty::new("kind", "particle-noise"),
+                        RenderProperty::new("layer", "Layer.weather - 1"),
+                        RenderProperty::new("index", index.to_string()),
+                        RenderProperty::new("texture", noise.noise_path.clone()),
+                        RenderProperty::new(
+                            "color",
+                            desktop_weather_rgba_property(noise.color_rgba),
+                        ),
+                        RenderProperty::new("noise_scale", noise.noise_scale.to_string()),
+                        RenderProperty::new("opacity", noise.opacity.to_string()),
+                        RenderProperty::new("speed", noise.speed.to_string()),
+                        RenderProperty::new("offset", noise.offset.to_string()),
+                    ]);
+                    commands.push(RenderCommand::custom("weather-particle-noise", properties));
+                }
+
+                if let Some(particles) = plan.particles {
+                    let mut properties = Self::weather_snapshot_base_properties(entity_id, state);
+                    properties.extend([
+                        RenderProperty::new("bucket", "weather"),
+                        RenderProperty::new("kind", "particle-draw"),
+                        RenderProperty::new("layer", "Layer.weather"),
+                        RenderProperty::new("region", particles.region),
+                        RenderProperty::new(
+                            "color",
+                            desktop_weather_rgba_property(particles.color_rgba),
+                        ),
+                        RenderProperty::new("size_min", particles.size_min.to_string()),
+                        RenderProperty::new("size_max", particles.size_max.to_string()),
+                        RenderProperty::new("density", particles.density.to_string()),
+                        RenderProperty::new("min_alpha", particles.min_alpha.to_string()),
+                        RenderProperty::new("max_alpha", particles.max_alpha.to_string()),
+                        RenderProperty::new("windx", particles.windx.to_string()),
+                        RenderProperty::new("windy", particles.windy.to_string()),
+                        RenderProperty::new("sin_scl_min", particles.sin_scl_min.to_string()),
+                        RenderProperty::new("sin_scl_max", particles.sin_scl_max.to_string()),
+                        RenderProperty::new("sin_mag_min", particles.sin_mag_min.to_string()),
+                        RenderProperty::new("sin_mag_max", particles.sin_mag_max.to_string()),
+                        RenderProperty::new(
+                            "random_particle_rotation",
+                            particles.random_particle_rotation.to_string(),
+                        ),
+                    ]);
+                    commands.push(RenderCommand::custom("weather-particles", properties));
+                }
+
+                commands
+            }
+        }
+    }
+
+    fn weather_snapshot_environment_render_pass(&self) -> Option<RenderPass> {
+        let mut pass = RenderPass::new(RenderPassKind::Environment)
+            .with_order(RenderPassKind::Environment.default_order());
+        for (entity_id, state) in &self.runtime.client_weather_snapshot_entities {
+            if self.runtime.client_hidden_entity_ids.contains(entity_id) {
+                continue;
+            }
+            pass.commands
+                .extend(self.weather_snapshot_environment_render_commands(*entity_id, state));
+        }
+
+        (!pass.commands.is_empty()).then_some(pass)
+    }
+
     pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
         let plan = self.load_renderer_state.build_plan(input);
         DesktopFrame {
@@ -11581,6 +11770,9 @@ impl DesktopLauncher {
             if let Some(pass) = env_renderer.to_render_pass() {
                 render_frame.push_pass(pass);
             }
+        }
+        if let Some(pass) = self.weather_snapshot_environment_render_pass() {
+            render_frame.push_pass(pass);
         }
         let fog_frame = self.fog_frame_plan(camera, viewport);
         if let Some(fog_frame) = &fog_frame {
@@ -15393,6 +15585,87 @@ mod tests {
             assert_eq!(rotation, 90.0);
             assert_eq!(layer, Layer::BULLET);
         }
+    }
+
+    #[test]
+    fn desktop_launcher_materializes_weather_snapshot_into_environment_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        assert!(launcher.texture_atlas.has("splash-0"));
+        assert!(launcher.texture_atlas.has("splash-11"));
+        assert!(launcher.texture_atlas.has("particle"));
+        assert!(launcher.texture_atlas.has("noisealpha"));
+
+        let mut rain = mindustry_core::mindustry::r#type::WeatherState::new("rain", 0.75, 600.0);
+        rain.opacity = 0.5;
+        rain.effect_timer = 12.0;
+        rain.wind_vector = (-0.25, 0.75);
+        rain.x = 10.0;
+        rain.y = 20.0;
+        launcher
+            .runtime
+            .client_weather_snapshot_entities
+            .insert(7200, rain);
+
+        let mut sandstorm =
+            mindustry_core::mindustry::r#type::WeatherState::new("sandstorm", 0.8, 900.0);
+        sandstorm.opacity = 0.4;
+        sandstorm.wind_vector = (-0.5, 0.25);
+        launcher
+            .runtime
+            .client_weather_snapshot_entities
+            .insert(7201, sandstorm);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            19,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let environment = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Environment
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::Custom { name, .. } if name == "weather-rain-over")
+                    })
+            })
+            .expect("weather snapshots should emit an environment pass");
+        assert!(environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::Custom { name, properties }
+                if name == "weather-rain-over"
+                    && properties.iter().any(|property| property.key == "weather" && property.value == "rain")
+                    && properties.iter().any(|property| property.key == "intensity" && property.value == "0.75")
+                    && properties.iter().any(|property| property.key == "color" && property.value == "7a95eaff")
+        )));
+        assert!(environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::Custom { name, properties }
+                if name == "weather-rain-splashes"
+                    && properties.iter().any(|property| property.key == "splashes" && property.value.contains("splash-11"))
+                    && properties.iter().any(|property| property.key == "liquid" && property.value == "water")
+        )));
+        assert!(environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::Custom { name, properties }
+                if name == "weather-particle-noise"
+                    && properties.iter().any(|property| property.key == "weather" && property.value == "sandstorm")
+                    && properties.iter().any(|property| property.key == "texture" && property.value == "sprites/noiseAlpha.png")
+        )));
+        assert!(environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::Custom { name, properties }
+                if name == "weather-particles"
+                    && properties.iter().any(|property| property.key == "region" && property.value == "particle")
+                    && properties.iter().any(|property| property.key == "windx" && property.value == "-2.16")
+        )));
     }
 
     #[test]

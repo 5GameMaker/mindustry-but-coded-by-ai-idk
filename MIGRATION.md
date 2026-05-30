@@ -15446,3 +15446,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - bullet 仍临时复用 overlay pass，后续应纳入统一 entity/world render pass 或更精确的 layer sorting；
   - explorer 建议下一条优先推进 Weather → Environment pass，因为 Weather 已有 pass-level 计划基础；
   - 当前总体迁移约 40.6%，仍未达到完整可玩。
+
+## 419. 最新闭环记录：Weather snapshot 接入 Environment pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.7%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/Weather.java`
+  - `core/src/mindustry/type/weather/RainWeather.java`
+  - `core/src/mindustry/type/weather/ParticleWeather.java`
+  - `core/src/mindustry/core/Renderer.java` 的 `drawWeather/weatherAlpha` 语义后续仍需补 gating。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 weather atlas 资源收集 helper，将 rain splash、particle region、noise texture 纳入默认 texture atlas；
+    - 新增 `weather_snapshot_environment_render_commands(...)`，把 `WeatherContent::Rain` / `WeatherContent::Particle` 的现有 draw plan 转成可进入 `RenderFramePlan` 的 `RenderCommand::Custom`；
+    - 新增 `weather_snapshot_environment_render_pass()`，将 `runtime.client_weather_snapshot_entities` 接入 `RenderPassKind::Environment`；
+    - `graphics_frame_for_render()` 已推入 weather environment pass。
+- 迁移意义：
+  - Weather typed snapshot 不再只停留在网络同步/runtime map；
+  - Rain 的 over/under 参数与 Particle 的 noise/particle 参数已进入 desktop render frame 主链路；
+  - 这为后续把天气 custom marker lower 成真实 OpenGL primitive/sprite/noise draw path 留出稳定入口。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_weather_snapshot_into_environment_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-core weather --lib`
+  - `cargo test -p mindustry-core env_renderers --lib`
+  - `git diff --check`
+- 仍未完成：
+  - Weather 目前先以 custom render commands 进入 Environment pass，真实视觉仍需继续 lower 到 sprite/line/noise primitives；
+  - Java `renderer.drawWeather`、`weatherAlpha`、`showweather` gating 尚未补齐；
+  - Rain under/over 层级后续应从单个 Environment pass 过渡到更精确的 Java Layer 排序；
+  - Puddle/Unit/entity aggregation、更多 native OpenGL smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.7%，仍未达到完整可玩。

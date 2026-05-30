@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **33.7%**。
+- 当前总体迁移完成度：约 **40.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -12700,3 +12700,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 按 explorer 建议，优先推进 Weather snapshot → Environment pass，因为 Weather 已有 pass-level plan；
   2. Bullet 后续继续补 trail/parts/light、laser/liquid/sap/shrapnel/continuous draw plan；
   3. 建统一 entity/world pass 或更精确 layer sorting，把 Fire/Bullet 从 overlay 过渡到接近 Java `Groups.draw`/`Layer` 的实体绘制链。
+
+### 2026-05-30：Weather snapshot 接入 Environment pass
+
+- 当前整体完成度：约 **40.7%**。
+- 已完成：
+  - 默认 texture atlas 计划加入天气渲染候选资源：rain splash、particle region、noise texture；
+  - `DesktopLauncher::weather_snapshot_environment_render_commands(...)` 会把 `client_weather_snapshot_entities` 中的 `RainWeather` / `ParticleWeather` snapshot 转成 `RenderCommand::Custom`；
+  - rain 同时输出 `weather-rain-over` 与 `weather-rain-splashes`，保留 intensity、opacity、wind、splash、liquid、color 等 Java draw plan 参数；
+  - particle weather 输出 `weather-particle-noise` 与 `weather-particles`，保留 noise layer、region、density、wind、alpha、随机旋转等参数；
+  - `DesktopLauncher::weather_snapshot_environment_render_pass()` 将天气 snapshot 推入 `RenderPassKind::Environment`；
+  - `graphics_frame_for_render()` 已把 weather environment pass 接入主 `RenderFramePlan`，不再只停在 runtime typed snapshot。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_weather_snapshot_into_environment_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-core weather --lib`
+  - `cargo test -p mindustry-core env_renderers --lib`
+  - `git diff --check`
+- 下一步：
+  1. 把 weather custom commands 继续 lower 到真实 primitive/sprite/noise backend，而不是长期停留为 custom marker；
+  2. 按 Java `drawWeather/weatherAlpha/showweather` 补渲染 gating；
+  3. 继续推进 Puddle/Unit/entity pass aggregation 与更精确 layer sorting。
