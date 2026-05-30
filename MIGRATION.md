@@ -15788,3 +15788,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - weapon shadow、flipSprite/xscl、parts、continuous beam、shoot effects 与更精确 client-side recoil/reload/heat 动画仍需继续；
   - Unit engine trail 仍需先补 runtime trail points；hard shadow、legs、payload/item 仍未接入；
   - 当前 unit pass 仍临时复用 Overlay，后续必须统一 Java layer sorting / entity world pass。
+
+## 430. 最新闭环记录：Unit weapon shadow 接入同一单位 Overlay pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.8%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/Weapon.java#draw(...)`
+  - `if(shadow > 0){ Drawf.shadow(wx, wy, shadow); }`
+  - `core/src/mindustry/graphics/Drawf.java#shadow(float x, float y, float rad, float alpha)` 使用 `circle-shadow` 与 `0.4 * alpha` 黑色 tint。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `unit_snapshot_weapon_shadow_render_command(...)`；
+    - 当 `mount.weapon.shadow > 0` 时输出 `circle-shadow` `DrawSprite`；
+    - shadow center 复用 `desktop_unit_weapon_pose(...)`，尺寸直接使用 Java `Drawf.shadow(wx, wy, shadow)` 的 `shadow` 值；
+    - shadow 在 `unit_snapshot_weapon_render_commands(...)` 中位于 weapon body/cell/heat 之前，继续挂同一 Unit render aggregation；
+    - dagger 快照测试覆盖 atlas、顺序、中心 `(38, 60)`、尺寸 `6x6`、颜色 `[0, 0, 0, 0.4]`、旋转 `0` 与 layer。
+- 迁移意义：
+  - Java `Weapon.draw()` 的 shadow → body/cell/heat 基础顺序继续进入同一个 `unit_snapshot_render_pass()`；
+  - 该闭环不新增孤立 shadow 模块，而是走 `client_unit_snapshot_entities` → `RenderCommand::DrawSprite` → 现有 atlas/OpenGL sprite 路径。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `flipSprite` / `Draw.xscl` 还没有一等 RenderCommand 表达，不能用错误旋转替代；
+  - weapon parts、continuous beam、shoot effects 与更精确 client-side recoil/reload/heat 动画仍需继续；
+  - Unit engine trail 仍需先补 runtime trail points；hard shadow、legs、payload/item 仍未接入；
+  - 当前 unit pass 仍临时复用 Overlay，后续必须统一 Java layer sorting / entity world pass。

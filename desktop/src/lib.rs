@@ -12022,6 +12022,29 @@ impl DesktopLauncher {
         ))
     }
 
+    fn unit_snapshot_weapon_shadow_render_command(
+        &self,
+        unit: &UnitComp,
+        mount: &WeaponMount,
+    ) -> Option<RenderCommand> {
+        if !unit.is_valid() || mount.weapon.shadow <= 0.0 {
+            return None;
+        }
+
+        let symbol = "circle-shadow";
+        self.texture_atlas.lookup(symbol).ok()?;
+        let (center, _) = desktop_unit_weapon_pose(unit, mount);
+        let rect = RenderRect::from_center(center, mount.weapon.shadow, mount.weapon.shadow);
+
+        Some(RenderCommand::draw_sprite(
+            symbol,
+            rect,
+            [0.0, 0.0, 0.0, 0.4],
+            0.0,
+            desktop_unit_weapon_layer(unit, &mount.weapon),
+        ))
+    }
+
     fn unit_snapshot_weapon_outline_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
         if !unit.is_valid() {
             return Vec::new();
@@ -12049,6 +12072,9 @@ impl DesktopLauncher {
 
         let mut commands = Vec::new();
         for mount in &unit.weapons.mounts {
+            if let Some(command) = self.unit_snapshot_weapon_shadow_render_command(unit, mount) {
+                commands.push(command);
+            }
             if mount.weapon.top {
                 if let Some(command) = self.unit_snapshot_weapon_sprite_render_command(
                     unit,
@@ -16495,6 +16521,7 @@ mod tests {
         assert!(launcher.texture_atlas.has("large-weapon-cell"));
         assert!(launcher.texture_atlas.has("large-weapon-heat"));
         assert!(launcher.texture_atlas.has("particle"));
+        assert!(launcher.texture_atlas.has("circle-shadow"));
 
         let mut unit = UnitComp::new(7400, dagger, TeamId(1));
         unit.add();
@@ -16502,6 +16529,7 @@ mod tests {
         unit.set_rotation(180.0);
         unit.shield.shield_alpha = 0.5;
         unit.weapons.mounts[0].heat = 0.5;
+        unit.weapons.mounts[0].weapon.shadow = 6.0;
         launcher
             .runtime
             .client_unit_snapshot_entities
@@ -16544,6 +16572,8 @@ mod tests {
         assert!(index_of_symbol("large-weapon-outline") < index_of_symbol("dagger"));
         assert!(index_of_symbol("dagger") < index_of_symbol("dagger-cell"));
         assert!(index_of_symbol("dagger-cell") < index_of_symbol("large-weapon"));
+        assert!(index_of_symbol("dagger-cell") < index_of_symbol("circle-shadow"));
+        assert!(index_of_symbol("circle-shadow") < index_of_symbol("large-weapon"));
         assert!(index_of_symbol("large-weapon") < index_of_symbol("large-weapon-cell"));
         assert!(index_of_symbol("large-weapon-cell") < index_of_symbol("large-weapon-heat"));
         match overlay.commands.iter().find(|command| {
@@ -16634,6 +16664,25 @@ mod tests {
                 assert_eq!(*layer, Layer::GROUND_UNIT);
             }
             other => panic!("expected unit weapon outline DrawSprite, got {other:?}"),
+        }
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "circle-shadow")
+        }) {
+            Some(RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            }) => {
+                assert_eq!(rect.center(), RenderPoint::new(38.0, 60.0));
+                assert_eq!(rect.width, 6.0);
+                assert_eq!(rect.height, 6.0);
+                assert_eq!(*tint, [0.0, 0.0, 0.0, 0.4]);
+                assert_eq!(*rotation, 0.0);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+            }
+            other => panic!("expected unit weapon shadow DrawSprite, got {other:?}"),
         }
         match overlay.commands.iter().find(|command| {
             matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "large-weapon")

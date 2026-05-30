@@ -12927,3 +12927,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 补 weapon shadow、flipSprite/xscl、parts、continuous beam、shoot effects；
   2. 补 unit engine trail runtime points；
   3. 继续统一 Unit/Fire/Bullet/Puddle 的 Java layer sorting。
+
+### 2026-05-30：Unit weapon shadow 接入同一单位 Overlay pass
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **41.8%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::unit_snapshot_weapon_shadow_render_command(...)`；
+    - `unit_snapshot_weapon_render_commands(...)` 在 body/cell/heat 前加入 `circle-shadow`；
+    - shadow center 复用 `desktop_unit_weapon_pose(...)`，即与 weapon body 使用同一 Java `wx/wy` 最小公式；
+    - shadow 尺寸使用 `mount.weapon.shadow`，tint 为 `[0.0, 0.0, 0.0, 0.4]`，layer 复用 `desktop_unit_weapon_layer(...)`；
+    - `desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot` 覆盖 `circle-shadow` atlas、顺序、center `(38, 60)`、尺寸 `6x6`、颜色、旋转 `0`、layer。
+- Java 对照：
+  - `Weapon.draw(Unit unit, WeaponMount mount)`：`if(shadow > 0){ Drawf.shadow(wx, wy, shadow); }`
+  - `Drawf.shadow(...)`：`circle-shadow` + 黑色 `0.4 * alpha`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 子代理只读结论已纳入：
+  - block/building 最小整体化接入点应继续走 `BlockRendererState -> BlockRendererPlan -> RenderPass/RenderCommand -> RenderEngine`，不要做孤立 drawer/block 模块；
+  - unit engine trail 不能直接画空 snapshot，应复用 `core/src/mindustry/graphics/trail.rs`，先补 transient trail point runtime，再接渲染。
+- 下一步：
+  1. weapon `flipSprite` / `Draw.xscl` 需要先扩一等 sprite flip/scale 表达，不能用旋转假代替；
+  2. 继续 weapon parts / continuous beam；
+  3. 按子代理建议设计 Unit transient trail runtime points，再挂同一 Unit render aggregation；
+  4. block/building 渲染继续沿现有 `BlockRendererPlan` 主链推进。
