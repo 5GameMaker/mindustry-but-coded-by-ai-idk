@@ -184,6 +184,7 @@ const ABOUT_LINKS_LINE: &str = "links: discord, github, wiki, bug";
 const ABOUT_DISCORD_LINE: &str = "discord: Join the Mindustry Discord!";
 const ABOUT_GITHUB_LINE: &str = "github: Game source code";
 const ABOUT_CONTRIBUTORS_LINE: &str = "contributors: redloong9527, Prosta4okua, Felix Corvus";
+const MENU_PLAY_GUARD_MESSAGE: &str = "@mod.noerrorplay";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopMenuActionDispatch {
@@ -11939,6 +11940,7 @@ pub struct DesktopLauncher {
     pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
     pub last_menu_chrome_action: Option<DesktopMenuChromeAction>,
     pub last_menu_platform_action: Option<DesktopMenuPlatformAction>,
+    pub last_menu_guard_message: Option<String>,
     pub menu_mobile_terminal_open: bool,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
@@ -12619,6 +12621,7 @@ impl DesktopLauncher {
             last_menu_route_shell_action: None,
             last_menu_chrome_action: None,
             last_menu_platform_action: None,
+            last_menu_guard_message: None,
             menu_mobile_terminal_open: false,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
@@ -16161,6 +16164,29 @@ impl DesktopLauncher {
         )
     }
 
+    fn menu_role_requires_play_guard(role: MenuButtonRole) -> bool {
+        matches!(
+            role,
+            MenuButtonRole::Campaign
+                | MenuButtonRole::CustomGame
+                | MenuButtonRole::LoadGame
+                | MenuButtonRole::Editor
+        )
+    }
+
+    fn block_menu_action_for_content_errors(&mut self, role: MenuButtonRole) -> bool {
+        if !Self::menu_role_requires_play_guard(role) || !self.content_loader.has_content_errors() {
+            return false;
+        }
+        self.active_menu_route = None;
+        if role == MenuButtonRole::Campaign {
+            self.campaign_planet_dialog = None;
+        }
+        self.last_menu_route_shell_action = None;
+        self.last_menu_guard_message = Some(MENU_PLAY_GUARD_MESSAGE.into());
+        true
+    }
+
     fn apply_menu_back_key(&mut self) -> bool {
         if let Some(route) = self.active_menu_route.take() {
             if route == DesktopMenuRoute::Campaign {
@@ -16179,9 +16205,20 @@ impl DesktopLauncher {
 
     fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
         let submenu_changed = self.menu_renderer_state.select_desktop_root(role);
+        self.last_menu_guard_message = None;
         if role == MenuButtonRole::Workshop {
             self.dispatch_menu_platform_action(DesktopMenuPlatformAction::OpenWorkshop);
             self.active_menu_route = None;
+            let dispatch = DesktopMenuActionDispatch {
+                role,
+                submenu_changed,
+                route: None,
+                close_requested: false,
+            };
+            self.last_menu_dispatch = Some(dispatch);
+            return dispatch;
+        }
+        if self.block_menu_action_for_content_errors(role) {
             let dispatch = DesktopMenuActionDispatch {
                 role,
                 submenu_changed,
@@ -16323,6 +16360,10 @@ impl DesktopLauncher {
         self.last_menu_route_shell_action = Some(action);
         match action {
             DesktopMenuRouteShellAction::LaunchCampaign => {
+                if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
+                    self.last_menu_route_shell_action = None;
+                    return;
+                }
                 self.launch_campaign_smoke_world_from_menu();
             }
             DesktopMenuRouteShellAction::ConnectJoin => {
@@ -16568,6 +16609,42 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_menu_guard_message(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+        let Some(message) = self.last_menu_guard_message.as_ref() else {
+            return;
+        };
+        let panel_width = (viewport.width * 0.42).clamp(260.0, 520.0);
+        let panel = RenderRect::new(
+            viewport.x + (viewport.width - panel_width) * 0.5,
+            viewport.y + 56.0,
+            panel_width,
+            52.0,
+        );
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.18, 0.04, 0.04, 0.86],
+            Layer::END_PIXELED + 0.06,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            panel,
+            [0.85, 0.24, 0.18, 0.98],
+            2.0,
+            Layer::END_PIXELED + 0.07,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            message.clone(),
+            panel.center(),
+            [1.0, 0.78, 0.7, 1.0],
+            16.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.08,
+        ));
+    }
+
     fn menu_graphics_frame_for_surface(
         &mut self,
         frame_index: u64,
@@ -16581,6 +16658,7 @@ impl DesktopLauncher {
 
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
         self.push_active_menu_route_shell(&mut menu_pass, frame_viewport);
+        self.push_menu_guard_message(&mut menu_pass, frame_viewport);
         Self::push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
         let camera = menu_pass
             .camera
@@ -17874,6 +17952,7 @@ impl DesktopLauncher {
         self.last_menu_route_shell_action = None;
         self.last_menu_chrome_action = None;
         self.last_menu_platform_action = None;
+        self.last_menu_guard_message = None;
         self.menu_mobile_terminal_open = false;
         self.campaign_planet_dialog = None;
         self.last_campaign_launch_report = None;
@@ -18600,7 +18679,7 @@ mod tests {
             type_io, BuildingRef, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks,
             TeamId, TypeValue, UnitRef, Vec2 as IoVec2,
         },
-        r#type::{ItemStack, PayloadKey, PayloadSeq, Sector, UnitType, Weapon},
+        r#type::{ErrorContent, ItemStack, PayloadKey, PayloadSeq, Sector, UnitType, Weapon},
         world::blocks::campaign::{AcceleratorState, LandingPadState},
         world::blocks::payloads::{PayloadBlockBuildState, PayloadLoaderState, PayloadRef},
         world::blocks::units::{
@@ -33043,6 +33122,128 @@ mod tests {
         assert!(texts.contains(&"planet: serpulo"));
         assert!(texts.contains(&"selected: groundZero #15"));
         assert!(texts.contains(&"mode: Look"));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_play_guard_blocks_play_routes_when_content_has_errors() {
+        for role in [
+            MenuButtonRole::Campaign,
+            MenuButtonRole::CustomGame,
+            MenuButtonRole::LoadGame,
+            MenuButtonRole::Editor,
+        ] {
+            let mut launcher = DesktopLauncher::new(Vec::new());
+            launcher
+                .content_loader
+                .catalog_mut()
+                .errors
+                .push(ErrorContent::new(0));
+
+            let dispatch = launcher.dispatch_menu_action(role);
+
+            assert_eq!(
+                dispatch,
+                super::DesktopMenuActionDispatch {
+                    role,
+                    submenu_changed: false,
+                    route: None,
+                    close_requested: false,
+                }
+            );
+            assert_eq!(launcher.active_menu_route, None);
+            assert_eq!(launcher.campaign_planet_dialog, None);
+            assert_eq!(
+                launcher.last_menu_guard_message.as_deref(),
+                Some(super::MENU_PLAY_GUARD_MESSAGE)
+            );
+            assert_eq!(launcher.last_menu_dispatch, Some(dispatch));
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_menu_play_guard_allows_non_play_actions_when_content_has_errors() {
+        for (role, route) in [
+            (MenuButtonRole::Join, Some(super::DesktopMenuRoute::Join)),
+            (
+                MenuButtonRole::ContentDatabase,
+                Some(super::DesktopMenuRoute::Database),
+            ),
+            (MenuButtonRole::Mods, Some(super::DesktopMenuRoute::Mods)),
+            (
+                MenuButtonRole::Settings,
+                Some(super::DesktopMenuRoute::Settings),
+            ),
+        ] {
+            let mut launcher = DesktopLauncher::new(Vec::new());
+            launcher
+                .content_loader
+                .catalog_mut()
+                .errors
+                .push(ErrorContent::new(0));
+
+            let dispatch = launcher.dispatch_menu_action(role);
+
+            assert_eq!(dispatch.route, route);
+            assert_eq!(launcher.active_menu_route, route);
+            assert_eq!(launcher.last_menu_guard_message, None);
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_menu_play_guard_renders_mod_noerrorplay_message() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .content_loader
+            .catalog_mut()
+            .errors
+            .push(ErrorContent::new(0));
+        launcher.dispatch_menu_action(MenuButtonRole::Campaign);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 800.0, 600.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&super::MENU_PLAY_GUARD_MESSAGE));
+        assert!(!texts.contains(&"upstream: PlanetDialog"));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_play_guard_blocks_campaign_launch_if_errors_appear_late() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dispatch = launcher.dispatch_menu_action(MenuButtonRole::Campaign);
+        assert_eq!(dispatch.route, Some(super::DesktopMenuRoute::Campaign));
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Campaign)
+        );
+
+        launcher
+            .content_loader
+            .catalog_mut()
+            .errors
+            .push(ErrorContent::new(0));
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::LaunchCampaign);
+
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(launcher.last_campaign_launch_report, None);
+        assert!(!launcher.game_state.is_playing());
+        assert_eq!(
+            launcher.last_menu_guard_message.as_deref(),
+            Some(super::MENU_PLAY_GUARD_MESSAGE)
+        );
     }
 
     #[test]

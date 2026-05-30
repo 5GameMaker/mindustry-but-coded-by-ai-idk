@@ -18,13 +18,14 @@ use crate::mindustry::{
     ai::{unit_command::UnitCommand, unit_stance::UnitStance},
     ctype::{Content, ContentId, ContentType},
     io::save::{ContentHeaderEntry, ContentHeaderSnapshot},
-    r#type::{Item, Liquid, SectorPreset, StatusEffect, TeamEntry, UnitType},
+    r#type::{ErrorContent, Item, Liquid, SectorPreset, StatusEffect, TeamEntry, UnitType},
 };
 
 #[derive(Debug, Clone, Default)]
 pub struct ContentCatalog {
     pub blocks: blocks::BlockRegistry,
     pub bullets: Vec<bullets::BulletContent>,
+    pub errors: Vec<ErrorContent>,
     pub items: Vec<Item>,
     pub liquids: Vec<Liquid>,
     pub status_effects: Vec<StatusEffect>,
@@ -50,6 +51,7 @@ impl ContentCatalog {
         Self {
             blocks,
             bullets: bullets::load(),
+            errors: Vec::new(),
             items,
             liquids,
             status_effects: status_effects::load(),
@@ -64,6 +66,47 @@ impl ContentCatalog {
             unit_commands,
             unit_stances,
         }
+    }
+
+    pub fn has_content_errors(&self) -> bool {
+        !self.errors.is_empty()
+            || self.errors.iter().any(|content| content.base.has_errored())
+            || self
+                .bullets
+                .iter()
+                .any(|content| content.base.has_errored())
+            || self
+                .items
+                .iter()
+                .any(|content| content.base.mappable.base.has_errored())
+            || self
+                .liquids
+                .iter()
+                .any(|content| content.base.mappable.base.has_errored())
+            || self
+                .status_effects
+                .iter()
+                .any(|content| content.base.mappable.base.has_errored())
+            || self
+                .units
+                .iter()
+                .any(|content| content.base.mappable.base.has_errored())
+            || self
+                .weathers
+                .iter()
+                .any(|content| content.weather().base.mappable.base.has_errored())
+            || self
+                .team_entries
+                .iter()
+                .any(|content| content.base.mappable.base.has_errored())
+            || self
+                .unit_commands
+                .iter()
+                .any(|content| content.base.base.has_errored())
+            || self
+                .unit_stances
+                .iter()
+                .any(|content| content.base.base.has_errored())
     }
 
     pub fn content_header_snapshot(&self) -> ContentHeaderSnapshot {

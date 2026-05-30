@@ -266,6 +266,10 @@ impl ContentLoader {
         self.buckets.iter().flat_map(|bucket| bucket.entries.iter())
     }
 
+    pub fn has_content_errors(&self) -> bool {
+        self.catalog.has_content_errors() || !self.bucket(ContentType::Error).entries().is_empty()
+    }
+
     pub fn by_name(&self, name: &str) -> Option<&ContentRecord> {
         self.name_map.get(name)
     }
@@ -576,6 +580,12 @@ impl ContentLoader {
         );
         out.extend(
             self.catalog
+                .errors
+                .iter()
+                .map(|content| ContentRecord::content(ContentType::Error, content.id())),
+        );
+        out.extend(
+            self.catalog
                 .units
                 .iter()
                 .map(|unit| ContentRecord::mappable(ContentType::Unit, unit.id(), unit.name())),
@@ -659,6 +669,7 @@ impl std::error::Error for ContentLoaderError {}
 mod tests {
     use super::*;
     use crate::mindustry::io::save::{read_content_header_snapshot, write_content_header_snapshot};
+    use crate::mindustry::r#type::ErrorContent;
 
     #[test]
     fn content_loader_builds_base_indexes_like_java_content_loader() {
@@ -805,5 +816,31 @@ mod tests {
         assert_eq!(loader.remove_last(), Some(copper));
         assert!(loader.by_name("copper").is_none());
         assert!(loader.get_by(ContentType::Item).is_empty());
+    }
+
+    #[test]
+    fn content_loader_reports_real_error_content_like_mod_content_errors() {
+        let mut catalog = ContentCatalog::load_base_content();
+        assert!(!catalog.has_content_errors());
+
+        catalog.errors.push(ErrorContent::new(0));
+        let loader = ContentLoader::from_catalog(catalog).unwrap();
+
+        assert!(loader.has_content_errors());
+        assert_eq!(
+            loader.get_by(ContentType::Error)[0].content_type,
+            ContentType::Error
+        );
+        assert_eq!(loader.get_by(ContentType::Error)[0].id, 0);
+    }
+
+    #[test]
+    fn content_loader_reports_content_base_error_flags() {
+        let mut catalog = ContentCatalog::load_base_content();
+        catalog.items[0].base.mappable.base.error = Some("bad item json".into());
+
+        let loader = ContentLoader::from_catalog(catalog).unwrap();
+
+        assert!(loader.has_content_errors());
     }
 }

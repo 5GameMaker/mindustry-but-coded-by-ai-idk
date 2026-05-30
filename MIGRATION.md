@@ -17476,3 +17476,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - About 仍未实现完整 ScrollPane/link 卡片布局、全部 Links.getLinks() 条目、bannedItems 过滤、credits 子页、openURI/linkfail/clipboard 行为；
   - contributors 当前只接入最小摘要，尚未完整读取/渲染整个 contributors 文件；
   - 真字体 atlas 尚未接入，About 内容仍走当前 DrawText placeholder glyph 路径。
+
+## 484. MenuFragment checkPlay / mod 内容错误 guard 接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.9%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java`
+    - `Campaign / CustomGame / LoadGame / Editor` 均通过 `checkPlay(...)` 包裹；
+    - 当 `mods.hasContentErrors()` 为真时显示 `@mod.noerrorplay`，并阻止对应游玩/编辑入口继续打开。
+- 本轮主改动：
+  - `core/src/mindustry/content/mod.rs`
+    - `ContentCatalog` 新增 `errors: Vec<ErrorContent>`，用于承接 Java `ErrorContent` 类似的错误内容占位；
+    - 新增 `ContentCatalog::has_content_errors()`，聚合 `ErrorContent` 与已迁移内容类型上的 `ContentBase.error` 状态。
+  - `core/src/mindustry/core/content_loader.rs`
+    - 新增 `ContentLoader::has_content_errors()`，并把 `ContentType::Error` 记录纳入 loader 索引；
+    - 补测试验证真实 `ErrorContent` 与真实 `ContentBase.error` 都会触发内容错误状态。
+  - `desktop/src/lib.rs`
+    - 新增 `MENU_PLAY_GUARD_MESSAGE = "@mod.noerrorplay"` 与 `last_menu_guard_message`；
+    - `dispatch_menu_action(...)` 对 `Campaign / CustomGame / LoadGame / Editor` 接入内容错误 guard，命中时不打开 route shell；
+    - `LaunchCampaign` route-shell 动作增加二次 guard，防止 route 已打开后内容错误才出现；
+    - 菜单 render pass 新增 guard 提示渲染，不另起孤立 UI。
+- 迁移意义：
+  - Java `MenuFragment.checkPlay()` 的关键安全/可用性行为进入 Rust 前端输入分发主链；
+  - 内容错误聚合从单个类型测试推进到 `ContentLoader` 统一入口，后续 mod 加载器迁移可直接接入该状态。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core content_loader_reports --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_play_guard --lib`
+- 仍未完成：
+  - 当前还没有完整 Java `Mods` 系统，`has_content_errors()` 先承接 `ErrorContent` 和已迁移内容的 `ContentBase.error`；
+  - `@mod.noerrorplay` 仍是直接 message key，后续需接完整 bundle/i18n 与 Java 风格错误对话框；
+  - `CustomGame / LoadGame / Editor` 的真实 dialog 内容仍是 route shell/pending，需要继续迁移。
