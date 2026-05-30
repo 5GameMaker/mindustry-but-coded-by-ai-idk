@@ -16158,3 +16158,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - remove/death 仍未产出 Java `Fx.trailFade` 等价 effect；
   - trail 宽度动态脉动仍未完全复刻 `UnitType.drawTrail()` 中的 `absin(Time.time, 2f, engineSize/4f)`；
   - Rail effect、PointLaser textured laser、weapon/unit parts、hard shadow、legs、payload/item 仍需继续。
+
+## 441. 最新闭环记录：Rail snapshot effect marker 接入客户端 bullet 渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.9%**，仍未达到完整可玩。
+- Java 对照：
+  - `RailBulletType.java#init(Bullet b)` 中 rail 视觉主要来自 `pointEffect`、`endEffect`、`lineEffect`；
+  - Rail 不适合长期当普通 bullet body 渲染，最终应把 init/effect 事件接入 runtime/effect 队列。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `rail_bullet_snapshot_render_color(...)`；
+    - 新增 `rail_bullet_snapshot_render_commands(...)`；
+    - `bullet_snapshot_render_pass()` 增加 `BulletKind::Rail` 分支；
+    - 新增 `desktop_launcher_routes_rail_snapshot_effect_markers`，覆盖 `fdata` 截断长度、line marker、point markers 与 end marker。
+- 迁移意义：
+  - Rail bullet 若出现在客户端 snapshot 中，不再完全不可见；
+  - 当前闭环是 snapshot fallback，可帮助联机快照观察与后续 effect runtime 接入调试；
+  - 继续沿 `BulletComp` → content `BulletSpec` → desktop overlay pass 主链推进，而不是建立孤立模块。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_rail_snapshot_effect_markers --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 这仍是 Rail snapshot fallback，不是 Java `Effect.at(...)` 的最终等价实现；
+  - Rail 的 `RailInitPlan` / `RailPiercePlan` 仍需桥接到 runtime `client_local_effect_events` 或专用 visual event；
+  - `lineEffect` / `pointEffect` / `endEffect` 仍需走标准 effect renderer/light renderer，而不是长期用固定 circle/line marker；
+  - weapon/unit parts、Unit trail tick 接入、PointLaser textured laser、hard shadow、legs、payload/item 仍需继续。

@@ -13290,3 +13290,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. remove/death 补 Java `Fx.trailFade` 等价事件；
   3. Rail effect 按 explorer 结论走 `RailInitPlan`/`LightRendererPlan`；
   4. PointLaser/ContinuousFlame 后续升级 textured/polygon 精度。
+
+### 2026-05-30：Rail snapshot effect marker 接入客户端 bullet 渲染链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.9%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `rail_bullet_snapshot_render_color(...)`；
+    - 新增 `rail_bullet_snapshot_render_commands(...)`；
+    - `bullet_snapshot_render_pass()` 已接入 `BulletKind::Rail`；
+    - 新增测试 `desktop_launcher_routes_rail_snapshot_effect_markers`。
+- Java 对照：
+  - `RailBulletType.init()` 视觉来自 `pointEffect`、`endEffect`、`lineEffect`；
+  - 本轮是 snapshot fallback，不是最终 `Effect.at(...)` 等价。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_rail_snapshot_effect_markers --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 把 Rail 的 `RailInitPlan`/`RailPiercePlan` 桥到 runtime effect/light event；
+  2. 不要长期停留在 fixed marker，最终应走 standard effect renderer；
+  3. Unit trail 继续接真实 tick；
+  4. weapon/unit parts 与 textured laser 继续推进。

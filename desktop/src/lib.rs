@@ -880,6 +880,58 @@ fn point_laser_bullet_snapshot_render_commands(
     ]
 }
 
+fn rail_bullet_snapshot_render_color(spec: &BulletSpec) -> [f32; 4] {
+    let color_name = [&spec.hit_color, &spec.light_color, &spec.color]
+        .into_iter()
+        .find(|name| !name.is_empty() && name.as_str() != "none")
+        .map(String::as_str)
+        .unwrap_or("white");
+    desktop_bullet_render_color(color_name, Pal::LANCER_LASER)
+}
+
+fn rail_bullet_snapshot_render_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    layer: f32,
+) -> Vec<RenderCommand> {
+    if bullet.removed || spec.kind != BulletKind::Rail {
+        return Vec::new();
+    }
+
+    let result_length = if bullet.fdata > f32::EPSILON {
+        bullet.fdata.min(spec.length.max(0.0))
+    } else {
+        spec.length.max(0.0)
+    };
+    if result_length <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let (_, end) = desktop_line_angle_points(origin, bullet.rotation(), result_length);
+    let color = rail_bullet_snapshot_render_color(spec);
+    let mut commands = Vec::new();
+
+    if spec.line_effect != "none" {
+        commands.push(RenderCommand::draw_line(origin, end, 2.0, color, layer));
+    }
+
+    if spec.point_effect != "none" && spec.point_effect_space > f32::EPSILON {
+        let mut distance = 0.0;
+        while distance <= result_length + f32::EPSILON {
+            let (_, point) = desktop_line_angle_points(origin, bullet.rotation(), distance);
+            commands.push(RenderCommand::draw_circle(point, 2.0, color, true, layer));
+            distance += spec.point_effect_space;
+        }
+    }
+
+    if spec.end_effect != "none" && bullet.collided_ids.is_empty() {
+        commands.push(RenderCommand::draw_circle(end, 3.0, color, false, layer));
+    }
+
+    commands
+}
+
 fn laser_bolt_bullet_snapshot_render_commands(
     bullet: &BulletComp,
     spec: &BulletSpec,
@@ -12788,6 +12840,11 @@ impl DesktopLauncher {
                             self.render_time,
                         ));
                 }
+                BulletKind::Rail => pass.commands.extend(rail_bullet_snapshot_render_commands(
+                    bullet,
+                    &content.spec,
+                    desktop_bullet_layer(&content.spec),
+                )),
                 _ => pass
                     .commands
                     .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec)),
@@ -18227,6 +18284,105 @@ mod tests {
         assert!((caps[0].1 - 6.3).abs() < 0.0001);
         assert_eq!(caps[1].0, RenderPoint::new(32.0, 48.0));
         assert!((caps[1].1 - 3.15).abs() < 0.0001);
+    }
+
+    #[test]
+    fn desktop_launcher_routes_rail_snapshot_effect_markers() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_id: ContentId = 9904;
+        let mut spec = super::BulletSpec::new(super::BulletKind::Rail, 0.0, 0.0);
+        spec.length = 60.0;
+        spec.point_effect = "instTrail".into();
+        spec.point_effect_space = 20.0;
+        spec.line_effect = "railLine".into();
+        spec.end_effect = "railEnd".into();
+        spec.hit_color = "fda981".into();
+        launcher
+            .content_loader
+            .catalog_mut()
+            .bullets
+            .push(BulletContent::new(bullet_id, "test_rail", spec));
+
+        let mut bullet =
+            BulletComp::new(bullet_id, TeamId(1), type_io::EntityRef::null(), 32.0, 48.0);
+        bullet.lifetime = 1.0;
+        bullet.time = 0.0;
+        bullet.rotation = 0.0;
+        bullet.fdata = 45.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7111, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 48.0, 128.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            30,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(77.0, 48.0))
+                    })
+            })
+            .expect("rail snapshot should emit overlay effect markers");
+
+        match overlay
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(32.0, 48.0)
+                        && *to == RenderPoint::new(77.0, 48.0))
+            })
+            .expect("rail line effect marker should be present")
+        {
+            RenderCommand::DrawLine {
+                stroke,
+                color,
+                layer,
+                ..
+            } => {
+                assert_eq!(*stroke, 2.0);
+                assert_eq!(
+                    *color,
+                    super::desktop_bullet_render_color("fda981", Pal::LANCER_LASER)
+                );
+                assert_eq!(*layer, Layer::BULLET);
+            }
+            other => panic!("expected rail DrawLine marker, got {other:?}"),
+        }
+
+        let circles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    filled,
+                    layer,
+                    ..
+                } if (*layer - Layer::BULLET).abs() < 0.0001 => Some((*center, *radius, *filled)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(circles.len(), 4);
+        assert_eq!(circles[0], (RenderPoint::new(32.0, 48.0), 2.0, true));
+        assert_eq!(circles[1], (RenderPoint::new(52.0, 48.0), 2.0, true));
+        assert_eq!(circles[2], (RenderPoint::new(72.0, 48.0), 2.0, true));
+        assert_eq!(circles[3], (RenderPoint::new(77.0, 48.0), 3.0, false));
     }
 
     #[test]
