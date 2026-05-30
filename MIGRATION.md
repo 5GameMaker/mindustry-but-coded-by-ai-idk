@@ -17821,3 +17821,44 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 菜单主按钮仍未使用原版 `Styles.flatToggleMenut` 的真实 drawable/九宫格；
   - Dialog 背景、scroll/table/slider/check/textfield 和字体 atlas 仍未完成；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 495. flatToggleMenut 真实 drawable 承接与 DialogStyle 皮肤契约
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.1%**，仍未达到完整可玩；继续优先推进原版 UI skin，而不是停留在临时色块。
+- 问题背景：
+  - Java 主菜单按钮使用 `Styles.flatToggleMenut`，其 `checked/down` 不是普通 `button-down.9.png`，而是 `createFlatDown()` 引用的 `flat-down-base`；
+  - `Styles.defaultDialog/fullDialog` 依赖 `window-empty`、`black9/black`、`whiteui + accent` 标题线，而 Rust `DialogStyle` 之前只有名字，无法承接真实皮肤；
+  - 当前 `RenderCommand::DrawSprite` 还不能表达真正九宫格切片，但可以先把 `.9.png` 作为普通 sprite 接入主渲染链，后续在 desktop quad 生成阶段展开九宫格。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuFlatToggleMenuStyle` 新增 drawable 状态字段与 `drawable_for(...)`；
+    - `Checked/Down` 状态输出 `flat-down-base.9` sprite，保留 fallback fill，文字层继续保持；
+    - `MenuUiPlan::to_render_commands()` 现在会把选中主菜单按钮降成 `FillRect + DrawSprite(flat-down-base.9) + DrawText`；
+    - 新增测试证明选中按钮会输出 Java `flatDown` 对应 drawable。
+  - `desktop/src/lib.rs`
+    - 默认 desktop atlas 增加 `sprites/ui/flat-down-base.9.png`，确保 core 侧输出的主菜单 drawable 能被 native OpenGL 解析上传。
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - `DialogStyle` 从纯 `name` 扩为可承载 `stage_background/background/title/accent_line` 的数据结构；
+    - 新增 `DialogDrawableRef`、`DialogColorRef`、`DialogTitleStyle`、`DialogAccentLineStyle`；
+    - `DialogStyle::default_dialog()` 对齐 Java default dialog：`black9 + window-empty + Fonts.def/accent + whiteui/accent 3px line`；
+    - `DialogStyle::full_dialog()` 对齐 Java full dialog：`black + window-empty + Fonts.def/accent + whiteui/accent 3px line`；
+    - `DialogStyle::bare(...)` 保留过渡 shell 兼容。
+- 迁移意义：
+  - 主菜单按钮 skin 不再只是色块语义，已经开始消费 Java `flat-down-base.9` 资源；
+  - Dialog 体系有了接真实 `Tex`/九宫格/颜色/标题线的结构入口，后续 Settings/Load/About/Mods 等页面可以复用；
+  - 这仍是承接层和过渡 draw_sprite，真正九宫格切片、字体/icon glyph、完整 widget 树还未完成。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu_flat_toggle_menu_style_keeps_upstream_state_names_and_current_fallback_fills --lib`
+  - `cargo test -p mindustry-core menu_ui_plan_selected_buttons_emit_java_flat_down_drawable --lib`
+  - `cargo test -p mindustry-core base_dialog --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `.9.png` 当前仍按普通 sprite 过渡绘制，尚未按 atlas splits/pads 展开九宫格；
+  - `flatOver/clear/black` 仍主要依赖 fallback fill/tint 语义，未完整接 Java drawable/tint pipeline；
+  - DialogStyle 尚未接到 desktop route shell 的实际 Dialog 渲染；
+  - `ScrollPane/Table/Slider/CheckBox/TextField/Tooltip/ButtonGroup` 和真实字体/icon atlas 仍缺；
+  - 未达到完整可玩，不能宣告目标完成。

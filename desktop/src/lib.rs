@@ -13091,7 +13091,7 @@ fn default_desktop_texture_atlas(
     TextureAtlasPlan::from_virtual_source_paths(
         std::iter::once("sprites/logo.png".to_string())
             .chain(
-                ["discord-banner", "info-banner"]
+                ["discord-banner", "info-banner", "flat-down-base.9"]
                     .into_iter()
                     .map(|name| format!("sprites/ui/{name}.png")),
             )
@@ -33990,6 +33990,7 @@ mod tests {
         assert!(launcher.texture_atlas.lookup("logo").is_ok());
         assert!(launcher.texture_atlas.lookup("discord-banner").is_ok());
         assert!(launcher.texture_atlas.lookup("info-banner").is_ok());
+        assert!(launcher.texture_atlas.lookup("flat-down-base.9").is_ok());
 
         let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);

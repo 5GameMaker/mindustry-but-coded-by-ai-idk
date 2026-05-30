@@ -24,10 +24,16 @@ pub struct MenuFlatToggleMenuStyle {
     pub checked_fill: [f32; 4],
     pub over_fill: [f32; 4],
     pub disabled_fill: [f32; 4],
+    pub down_drawable: &'static str,
+    pub up_drawable: &'static str,
+    pub checked_drawable: &'static str,
+    pub over_drawable: &'static str,
+    pub disabled_drawable: &'static str,
     pub text_color: [f32; 4],
     pub disabled_text_color: [f32; 4],
     pub text_style: RenderTextStyle,
     pub fill_layer: f32,
+    pub drawable_layer: f32,
     pub text_layer: f32,
     pub desktop_text_size: f32,
     pub mobile_text_size: f32,
@@ -48,6 +54,11 @@ pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleM
     checked_fill: [0.19, 0.38, 0.50, 0.92],
     over_fill: [0.10, 0.16, 0.22, 0.86],
     disabled_fill: [0.0, 0.0, 0.0, 1.0],
+    down_drawable: "flat-down-base.9",
+    up_drawable: "",
+    checked_drawable: "flat-down-base.9",
+    over_drawable: "",
+    disabled_drawable: "",
     text_color: [0.88, 0.96, 1.0, 1.0],
     disabled_text_color: [0.5, 0.5, 0.5, 1.0],
     text_style: RenderTextStyle::new(RenderTextAlign::Center)
@@ -55,6 +66,7 @@ pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleM
         .with_integer_position(true)
         .with_outline(true),
     fill_layer: 101.0,
+    drawable_layer: 101.05,
     text_layer: 101.1,
     desktop_text_size: 8.0,
     mobile_text_size: 7.0,
@@ -68,6 +80,16 @@ impl MenuFlatToggleMenuStyle {
             MenuFlatToggleMenuState::Checked => self.checked_fill,
             MenuFlatToggleMenuState::Over => self.over_fill,
             MenuFlatToggleMenuState::Disabled => self.disabled_fill,
+        }
+    }
+
+    pub const fn drawable_for(self, state: MenuFlatToggleMenuState) -> &'static str {
+        match state {
+            MenuFlatToggleMenuState::Down => self.down_drawable,
+            MenuFlatToggleMenuState::Up => self.up_drawable,
+            MenuFlatToggleMenuState::Checked => self.checked_drawable,
+            MenuFlatToggleMenuState::Over => self.over_drawable,
+            MenuFlatToggleMenuState::Disabled => self.disabled_drawable,
         }
     }
 
@@ -394,13 +416,24 @@ impl MenuUiPlan {
 
     pub fn to_render_commands(&self) -> Vec<RenderCommand> {
         let style = MENU_FLAT_TOGGLE_MENU_STYLE;
-        let mut commands = Vec::with_capacity(self.buttons.len() * 2);
+        let mut commands = Vec::with_capacity(self.buttons.len() * 3);
         for button in &self.buttons {
+            let state = button.flat_toggle_menu_state();
             commands.push(RenderCommand::fill_rect(
                 button.rect,
-                style.fill_for(button.flat_toggle_menu_state()),
+                style.fill_for(state),
                 style.fill_layer,
             ));
+            let drawable = style.drawable_for(state);
+            if !drawable.is_empty() {
+                commands.push(RenderCommand::draw_sprite(
+                    drawable,
+                    button.rect,
+                    [1.0, 1.0, 1.0, 1.0],
+                    0.0,
+                    style.drawable_layer,
+                ));
+            }
             commands.push(RenderCommand::draw_text_styled(
                 button.label.as_str(),
                 button.rect.center(),
@@ -1828,6 +1861,11 @@ mod tests {
         assert_eq!(style.checked_fill, style.down_fill);
         assert_eq!(style.over_fill, [0.10, 0.16, 0.22, 0.86]);
         assert_eq!(style.disabled_fill, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(style.down_drawable, "flat-down-base.9");
+        assert_eq!(style.up_drawable, "");
+        assert_eq!(style.checked_drawable, "flat-down-base.9");
+        assert_eq!(style.over_drawable, "");
+        assert_eq!(style.disabled_drawable, "");
         assert_eq!(style.text_color, [0.88, 0.96, 1.0, 1.0]);
         assert_eq!(style.disabled_text_color, [0.5, 0.5, 0.5, 1.0]);
         assert_eq!(
@@ -1847,6 +1885,17 @@ mod tests {
             style.fill_for(MenuFlatToggleMenuState::Disabled),
             style.disabled_fill
         );
+        assert_eq!(
+            style.drawable_for(MenuFlatToggleMenuState::Down),
+            "flat-down-base.9"
+        );
+        assert_eq!(style.drawable_for(MenuFlatToggleMenuState::Up), "");
+        assert_eq!(
+            style.drawable_for(MenuFlatToggleMenuState::Checked),
+            "flat-down-base.9"
+        );
+        assert_eq!(style.drawable_for(MenuFlatToggleMenuState::Over), "");
+        assert_eq!(style.drawable_for(MenuFlatToggleMenuState::Disabled), "");
         assert_eq!(style.text_size(false), 8.0);
         assert_eq!(style.text_size(true), 7.0);
         assert_eq!(
@@ -1856,6 +1905,42 @@ mod tests {
                 .with_integer_position(true)
                 .with_outline(true)
         );
+    }
+
+    #[test]
+    fn menu_ui_plan_selected_buttons_emit_java_flat_down_drawable() {
+        let rect = RenderRect::new(10.0, 20.0, 230.0, 70.0);
+        let plan = MenuUiPlan {
+            mobile: false,
+            buttons: vec![MenuButtonPlan {
+                role: MenuButtonRole::Play,
+                label: "PLAY".to_string(),
+                rect,
+                selected: true,
+                submenu: false,
+            }],
+        };
+
+        let commands = plan.to_render_commands();
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: sprite_rect,
+                    layer,
+                    ..
+                } if symbol == "flat-down-base.9"
+                    && *sprite_rect == rect
+                    && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.drawable_layer).abs() < f32::EPSILON
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "PLAY"
+            )
+        }));
     }
 
     #[test]
