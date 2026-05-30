@@ -14252,3 +14252,29 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. `LAUNCH` 当前进入的是 smoke world，不是完整 sector/generator/save；
   2. 下一步应实现真实 `PlanetDialog` sector selection 或把 smoke bridge 替换为 sector load；
   3. Join 输入/提交、真实字体 atlas、按钮图标/音效/动画仍待继续。
+
+### 2026-05-30：Join route CONNECT 按钮复用连接 helper
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **48.6%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `DEFAULT_MINDUSTRY_PORT = 6567`；
+    - `parse_host_port(...)` 支持省略端口时回退默认端口；
+    - 抽出 `connect_to_target(...)` 作为 CLI 与菜单 Join 共用连接 helper；
+    - Join route shell 的 `CONNECT` primary button 会触发 `DesktopMenuRouteShellAction::ConnectJoin`；
+    - 新增 `desktop_launcher_join_route_connect_button_uses_connect_target_helper` 与默认端口解析测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib`
+  - `cargo test -p mindustry-desktop desktop_parse_connect_target_uses_java_default_port_when_missing --lib`
+  - `cargo test -p mindustry-desktop desktop_run_connect_arg_starts_real_client_handshake --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. JoinDialog 还没有真实输入框和服务器列表；
+  2. `CONNECT` 现在只提交已有 `connect_target`；
+  3. 版本检查、load fragment、错误归一与 ping 列表还需继续迁移。

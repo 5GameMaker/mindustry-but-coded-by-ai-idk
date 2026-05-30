@@ -17141,3 +17141,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 Campaign 仍需 sector 选择、launch loadout、campaign rules、sector save/generator、统计事件与可失败/可胜利流程；
   - 当前 `LAUNCH` 只是从菜单进入 smoke world 的过渡桥；
   - 还需接入 keyboard/touch、真实 dialog 组件、字体 atlas 与 Java Scene UI 样式。
+
+## 473. Join route CONNECT 按钮复用连接 helper
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.6%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链。
+- 子代理只读对照结论：
+  - Java `JoinDialog` 的输入允许省略端口并回退 `Vars.port`；
+  - Rust 之前只有 `--connect host:port` 自动连接和 Join route shell，缺少菜单内提交动作；
+  - 状态栏已经能消费 `connect_target` / `connect_error` / `NetClientState`，因此应复用同一套连接状态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DEFAULT_MINDUSTRY_PORT = 6567`；
+    - `parse_host_port(...)` 支持只输入 host 时回退 Java 默认端口；
+    - 抽出 `DesktopLauncher::connect_to_target(...)`，供 CLI `connect_from_args()` 与菜单 Join route 共用；
+    - `DesktopMenuRouteShellAction::ConnectJoin` 让 Join route shell 的 `CONNECT` 按钮提交当前 `connect_target`；
+    - 无 target 时写入 `connect_error = "missing connect target"`，有 target 时进入真实 `NetClient` 连接流程。
+- 迁移意义：
+  - `JOIN` 从纯 shell 文案推进到真实连接提交入口；
+  - CLI 自动连接和菜单连接不再是两套逻辑，后续 JoinDialog 输入框/服务器列表都可以写回同一个 `connect_target` 并复用 helper；
+  - 与状态栏主链衔接，连接中/错误/ready 状态继续由现有 `desktop_ui_status_bar_model()` 显示。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib`
+  - `cargo test -p mindustry-desktop desktop_parse_connect_target_uses_java_default_port_when_missing --lib`
+  - `cargo test -p mindustry-desktop desktop_run_connect_arg_starts_real_client_handshake --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Join route 还没有真实文本输入框、服务器列表、版本检查、安全连接提示与 load fragment；
+  - 当前 `CONNECT` 只能提交已有 `connect_target`（例如 CLI 或后续 UI 输入写入的 target）；
+  - 后续需要把 Java `JoinDialog` 的服务器列表、ping、错误归一和版本兼容检查继续迁移。

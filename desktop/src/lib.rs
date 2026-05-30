@@ -100,6 +100,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub const DEFAULT_MINDUSTRY_PORT: u16 = 6567;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopConnectTarget {
     pub host: String,
@@ -183,6 +185,7 @@ pub struct DesktopMenuActionDispatch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopMenuRouteShellAction {
     LaunchCampaign,
+    ConnectJoin,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -15849,7 +15852,7 @@ impl DesktopLauncher {
         viewport: RenderViewport,
         route: DesktopMenuRoute,
     ) -> Option<RenderRect> {
-        if route != DesktopMenuRoute::Campaign {
+        if !matches!(route, DesktopMenuRoute::Campaign | DesktopMenuRoute::Join) {
             return None;
         }
         let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
@@ -15859,6 +15862,14 @@ impl DesktopLauncher {
             panel.width - 72.0,
             36.0,
         ))
+    }
+
+    fn active_menu_route_shell_primary_label(route: DesktopMenuRoute) -> Option<&'static str> {
+        match route {
+            DesktopMenuRoute::Campaign => Some("LAUNCH"),
+            DesktopMenuRoute::Join => Some("CONNECT"),
+            _ => None,
+        }
     }
 
     fn active_menu_route_shell_action_at_surface_point(
@@ -15871,7 +15882,11 @@ impl DesktopLauncher {
         let viewport = self.default_render_viewport_for_surface(surface_size);
         let rect = Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)?;
         rect.contains_point(RenderPoint::new(x, y))
-            .then_some(DesktopMenuRouteShellAction::LaunchCampaign)
+            .then_some(match route {
+                DesktopMenuRoute::Campaign => DesktopMenuRouteShellAction::LaunchCampaign,
+                DesktopMenuRoute::Join => DesktopMenuRouteShellAction::ConnectJoin,
+                _ => return None,
+            })
     }
 
     fn launch_campaign_smoke_world_from_menu(&mut self) -> GameRuntimePlayableSmokeReport {
@@ -15890,6 +15905,13 @@ impl DesktopLauncher {
         match action {
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 self.launch_campaign_smoke_world_from_menu();
+            }
+            DesktopMenuRouteShellAction::ConnectJoin => {
+                let Some(target) = self.connect_target.clone() else {
+                    self.connect_error = Some("missing connect target".into());
+                    return;
+                };
+                let _ = self.connect_to_target(target);
             }
         }
     }
@@ -16044,6 +16066,7 @@ impl DesktopLauncher {
         if let Some(primary_rect) =
             Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)
         {
+            let label = Self::active_menu_route_shell_primary_label(route).unwrap_or("OPEN");
             pass.push(RenderCommand::fill_rect(
                 primary_rect,
                 [0.18, 0.35, 0.58, 0.92],
@@ -16056,7 +16079,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.04,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "LAUNCH",
+                label,
                 primary_rect.center(),
                 [0.95, 0.98, 1.0, 1.0],
                 16.0,
@@ -16566,11 +16589,8 @@ impl DesktopLauncher {
         self.playable_smoke_status().ready()
     }
 
-    pub fn connect_from_args(&mut self) {
-        let Some(target) = self.connect_target.clone() else {
-            return;
-        };
-
+    pub fn connect_to_target(&mut self, target: DesktopConnectTarget) -> io::Result<()> {
+        self.connect_target = Some(target.clone());
         self.net_client
             .set_connect_config(Some(ClientConnectConfig::default()));
         self.net_client.begin_connecting();
@@ -16578,10 +16598,19 @@ impl DesktopLauncher {
             let mut net = self.net_client.net_mut();
             net.connect(&target.host, target.port, Box::new(|| {}))
         };
-        match result {
+        match &result {
             Ok(()) => self.connect_error = None,
             Err(error) => self.connect_error = Some(error.to_string()),
         }
+        result
+    }
+
+    pub fn connect_from_args(&mut self) {
+        let Some(target) = self.connect_target.clone() else {
+            return;
+        };
+
+        let _ = self.connect_to_target(target);
     }
 
     fn sync_loaded_world_data(&mut self) {
@@ -17979,8 +18008,16 @@ fn parse_mods_directory_arg(args: &[String]) -> Option<String> {
 }
 
 fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
-    let (host, port) = value.rsplit_once(':')?;
-    let port = port.parse().ok()?;
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let (host, port) = match value.rsplit_once(':') {
+        Some((host, port)) if !host.is_empty() && !port.is_empty() => {
+            (host.trim_matches(['[', ']']), port.parse().ok()?)
+        }
+        _ => (value.trim_matches(['[', ']']), DEFAULT_MINDUSTRY_PORT),
+    };
     (!host.is_empty()).then(|| DesktopConnectTarget {
         host: host.to_string(),
         port,
@@ -32044,6 +32081,86 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_join_route_connect_button_uses_connect_target_helper() {
+        let port = free_local_port();
+        let mut server = ArcNetProvider::new();
+        server.host_server(port).unwrap();
+        let mut launcher = DesktopLauncher::new(vec![
+            "mindustry-desktop".into(),
+            "--connect".into(),
+            format!("127.0.0.1:{port}"),
+        ]);
+        launcher.client.setup();
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let join_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Join)
+            .expect("play submenu should include JOIN")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: join_center.x,
+                    y: join_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Join)
+        );
+
+        let connect_center = DesktopLauncher::active_menu_route_shell_primary_rect_for_viewport(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        )
+        .expect("join route should expose a primary connect button")
+        .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: connect_center.x,
+                    y: connect_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "Left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::ConnectJoin)
+        );
+        assert_eq!(launcher.connect_error, None);
+
+        launcher.update();
+        let state = launcher.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.connection_attempts, 1);
+        assert_eq!(state.connect_events, 1);
+        assert!(state.connect_packet_sent);
+        drop(state);
+
+        launcher.net_client.net_mut().disconnect();
+        server.close_server();
+    }
+
+    #[test]
     fn desktop_frame_loop_quit_menu_action_requests_close() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let mut frame_loop =
@@ -38260,6 +38377,24 @@ mod tests {
 
         launcher.net_client.net_mut().disconnect();
         server.close_server();
+    }
+
+    #[test]
+    fn desktop_parse_connect_target_uses_java_default_port_when_missing() {
+        assert_eq!(
+            super::parse_host_port("127.0.0.1"),
+            Some(super::DesktopConnectTarget {
+                host: "127.0.0.1".into(),
+                port: super::DEFAULT_MINDUSTRY_PORT,
+            })
+        );
+        assert_eq!(
+            super::parse_host_port("example.org:7001"),
+            Some(super::DesktopConnectTarget {
+                host: "example.org".into(),
+                port: 7001,
+            })
+        );
     }
 
     #[test]
