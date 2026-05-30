@@ -959,7 +959,7 @@ pub struct MenuFramePlan {
 
 impl MenuFramePlan {
     pub fn to_render_pass(&self) -> Option<RenderPass> {
-        if self.commands.is_empty() {
+        if self.commands.is_empty() && self.ui.buttons.is_empty() {
             return None;
         }
 
@@ -1005,7 +1005,7 @@ impl MenuFramePlan {
             ui,
         } = self;
 
-        if commands.is_empty() {
+        if commands.is_empty() && ui.buttons.is_empty() {
             return None;
         }
 

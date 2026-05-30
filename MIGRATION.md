@@ -300,6 +300,7 @@ git -C "D:/MDT/rust-mindustry" checkout -- "core/src/mindustry/game/rules.rs"
 - native driver 已给 `RenderResolveKind::Blit` 接入真实 `glBlitFramebuffer`：source attachment 会绑定到 `READ_FRAMEBUFFER`，screen/offscreen resolve target 会绑定到 `DRAW_FRAMEBUFFER` 或默认 framebuffer；`ShaderBlit/DrawRectSample/DrawFboSample` 继续按 Java/Arc 语义走已生成的 shader/sample quad draw commands，避免把采样 resolve 误降级为普通 blit。
 - 后续真实 backend 方向预期保持 OpenGL-compatible，倾向 `winit + glow` 组合。
 - 迁移时需要持续对齐原版 Java / Arc 的 GL 渲染语义，避免只做接口替换而丢失实际绘制行为。
+- 2026-05-31：`desktop` 无 world/default surface 菜单帧已移除 `startup-menu-preview` 自制占位 pass，不再输出 `RUST MDT PREVIEW` / `WORLD NOT LOADED` 这类非原版启动壳；`MenuFramePlan::to_render_pass/into_render_pass` 允许在菜单背景命令缺失但 UI button plan 存在时仍生成真实 `menu` pass，默认无 world 与 menu-state world-size 两条路径均直接走 `MenuRendererState` 的真实菜单渲染链。验证：`cargo test -p mindustry-core menu_frame_plan_to_render_pass_preserves_menu_command_order --lib`、`cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`、`cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_while_menu_state_has_world_size --lib`、`cargo test -p mindustry-desktop desktop_launcher_menu --lib`、`cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --lib`、`cargo test -p mindustry-desktop desktop_graphics_opengl_state_commands_reach_driver_in_target_order --lib`。
 
 ### 6.6 提交与推送
 

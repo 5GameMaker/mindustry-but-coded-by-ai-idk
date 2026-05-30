@@ -40,6 +40,8 @@ use mindustry_core::mindustry::entities::{
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
+#[cfg(test)]
+use mindustry_core::mindustry::graphics::menu_renderer::{MENU_DARKNESS, MENU_DARKNESS_LAYER};
 use mindustry_core::mindustry::graphics::{
     png_dimensions_from_path, png_rgba8888_from_path, BlockRendererBlockParticleWorldSample,
     BlockRendererBuildingSnapshot, BlockRendererBuildingVisualRuntimeLiquidSnapshot,
@@ -64,7 +66,7 @@ use mindustry_core::mindustry::graphics::{
     ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
     ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
     TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
-    Viewport as FloorViewport, MENU_DARKNESS, MENU_DARKNESS_LAYER,
+    Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -18270,158 +18272,6 @@ impl DesktopLauncher {
         size.width > 0.0 && size.height > 0.0
     }
 
-    fn push_startup_menu_preview_clear_rect(
-        pass: &mut RenderPass,
-        rect: RenderRect,
-        color: [f32; 4],
-    ) {
-        if rect.width <= f32::EPSILON || rect.height <= f32::EPSILON {
-            return;
-        }
-        pass.push(RenderCommand::set_clip(rect));
-        pass.push(RenderCommand::clear(color));
-        pass.push(RenderCommand::clear_clip());
-    }
-
-    fn push_startup_menu_preview_text(
-        pass: &mut RenderPass,
-        text: &'static str,
-        position: RenderPoint,
-        size: f32,
-        color: [f32; 4],
-        layer: f32,
-    ) {
-        pass.push(RenderCommand::draw_text_styled(
-            text,
-            position,
-            color,
-            size,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
-            layer,
-        ));
-    }
-
-    fn startup_menu_preview_render_pass(&self, viewport: RenderViewport) -> RenderPass {
-        let camera = self.default_render_camera_for_viewport(viewport);
-        let width = viewport.width.max(1.0);
-        let height = viewport.height.max(1.0);
-        let panel_width = (width * 0.42).max(260.0).min((width - 48.0).max(1.0));
-        let panel_height = (height * 0.44).max(180.0).min((height - 48.0).max(1.0));
-        let panel_x = ((width - panel_width) * 0.5).max(0.0);
-        let panel_y = ((height - panel_height) * 0.5).max(0.0);
-        let accent_height = (panel_height * 0.16).max(28.0).min(panel_height);
-        let button_width = (panel_width * 0.68).max(120.0).min(panel_width - 32.0);
-        let button_height = 24.0_f32.min(panel_height * 0.18).max(12.0);
-        let button_x = panel_x + (panel_width - button_width) * 0.5;
-        let first_button_y = panel_y + panel_height * 0.38;
-        let second_button_y = first_button_y + button_height + 10.0;
-
-        let mut pass = RenderPass::new(RenderPassKind::Custom("startup-menu-preview".to_string()))
-            .with_viewport(viewport)
-            .with_camera(camera);
-        pass.push(RenderCommand::custom(
-            "startup-menu-preview",
-            vec![
-                RenderProperty::new("reason", "world-not-loaded"),
-                RenderProperty::new("width", width.to_string()),
-                RenderProperty::new("height", height.to_string()),
-            ],
-        ));
-        pass.push(RenderCommand::clear([0.025, 0.035, 0.058, 1.0]));
-        Self::push_startup_menu_preview_clear_rect(
-            &mut pass,
-            RenderRect::new(panel_x, panel_y, panel_width, panel_height),
-            [0.075, 0.105, 0.155, 1.0],
-        );
-        Self::push_startup_menu_preview_clear_rect(
-            &mut pass,
-            RenderRect::new(
-                panel_x,
-                panel_y + panel_height - accent_height,
-                panel_width,
-                accent_height,
-            ),
-            [0.17, 0.34, 0.46, 1.0],
-        );
-        Self::push_startup_menu_preview_clear_rect(
-            &mut pass,
-            RenderRect::new(
-                panel_x + 14.0,
-                panel_y + panel_height - accent_height - 18.0,
-                panel_width - 28.0,
-                8.0,
-            ),
-            [0.48, 0.74, 0.86, 1.0],
-        );
-        Self::push_startup_menu_preview_clear_rect(
-            &mut pass,
-            RenderRect::new(button_x, first_button_y, button_width, button_height),
-            [0.21, 0.45, 0.60, 1.0],
-        );
-        Self::push_startup_menu_preview_clear_rect(
-            &mut pass,
-            RenderRect::new(button_x, second_button_y, button_width, button_height),
-            [0.13, 0.23, 0.34, 1.0],
-        );
-        Self::push_startup_menu_preview_text(
-            &mut pass,
-            "MINDUSTRY",
-            RenderPoint::new(
-                panel_x + panel_width * 0.5,
-                panel_y + panel_height - accent_height * 0.52,
-            ),
-            18.0,
-            [0.90, 0.98, 1.0, 1.0],
-            101.0,
-        );
-        Self::push_startup_menu_preview_text(
-            &mut pass,
-            "RUST MDT PREVIEW",
-            RenderPoint::new(
-                panel_x + panel_width * 0.5,
-                panel_y + panel_height - accent_height - 26.0,
-            ),
-            8.0,
-            [0.70, 0.88, 0.95, 1.0],
-            101.1,
-        );
-        Self::push_startup_menu_preview_text(
-            &mut pass,
-            "PLAY",
-            RenderPoint::new(
-                button_x + button_width * 0.5,
-                first_button_y + button_height * 0.5,
-            ),
-            10.0,
-            [0.92, 1.0, 1.0, 1.0],
-            101.2,
-        );
-        Self::push_startup_menu_preview_text(
-            &mut pass,
-            "SETTINGS",
-            RenderPoint::new(
-                button_x + button_width * 0.5,
-                second_button_y + button_height * 0.5,
-            ),
-            10.0,
-            [0.75, 0.88, 0.96, 1.0],
-            101.3,
-        );
-        Self::push_startup_menu_preview_text(
-            &mut pass,
-            "WORLD NOT LOADED",
-            RenderPoint::new(panel_x + panel_width * 0.5, panel_y + 28.0),
-            7.0,
-            [0.58, 0.70, 0.80, 1.0],
-            101.4,
-        );
-        pass
-    }
-
     fn menu_chrome_layout_for_viewport(viewport: RenderViewport) -> DesktopMenuChromeLayout {
         DesktopMenuChromeLayout::for_viewport(viewport)
     }
@@ -18625,31 +18475,6 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.07,
         ));
-    }
-
-    fn startup_menu_preview_graphics_frame(
-        &self,
-        frame_index: u64,
-        viewport: RenderViewport,
-    ) -> DesktopGraphicsFrame {
-        let camera = self.default_render_camera_for_viewport(viewport);
-        let mut render_frame = RenderFramePlan::new(
-            frame_index,
-            RenderSize::new(viewport.width, viewport.height),
-            camera,
-            viewport,
-        );
-        render_frame.push_pass(self.startup_menu_preview_render_pass(viewport));
-
-        let mut bridge = RenderBridge::new();
-        bridge.set_render_frame(render_frame);
-        DesktopGraphicsFrame {
-            bundle: bridge.finish(),
-            floor_chunk_batches: Vec::new(),
-            minimap_texture_frame: None,
-            font_glyph_upload_plan: Some(self.font_glyph_upload_plan()),
-            texture_atlas: self.texture_atlas.clone(),
-        }
     }
 
     fn default_menu_frame_input_for_viewport(viewport: RenderViewport) -> MenuFrameInput {
@@ -21752,10 +21577,14 @@ impl DesktopLauncher {
         let mut menu_pass = if desktop_fast_menu_enabled() {
             self.fast_menu_render_pass_from_plan(&plan, viewport)
         } else {
-            let Some(menu_pass) = plan.into_render_pass() else {
-                return self.startup_menu_preview_graphics_frame(frame_index, viewport);
-            };
-            menu_pass
+            plan.into_render_pass().unwrap_or_else(|| {
+                let camera = self.default_render_camera_for_viewport(viewport);
+                let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
+                    .with_viewport(viewport)
+                    .with_camera(camera);
+                pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+                pass
+            })
         };
 
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
@@ -37754,22 +37583,17 @@ mod tests {
             launcher.render_default_graphics_frame_for_surface_with(0, surface, 2, &mut renderer);
 
         assert_eq!(renderer.frames_rendered, 1);
-        assert_eq!(stats.render_passes, 2);
-        assert!(stats.render_commands >= 22);
-        assert_eq!(renderer.last_trace.render_passes.len(), 2);
-        let preview_pass = &renderer.last_trace.render_passes[0];
-        let menu_pass = &renderer.last_trace.render_passes[1];
-        assert_eq!(
-            preview_pass.kind,
-            RenderPassKind::Custom("startup-menu-preview".to_string())
-        );
+        assert_eq!(stats.render_passes, 1);
+        assert!(stats.render_commands >= 18);
+        assert_eq!(renderer.last_trace.render_passes.len(), 1);
+        let menu_pass = &renderer.last_trace.render_passes[0];
         assert_eq!(menu_pass.kind, RenderPassKind::Custom("menu".to_string()));
-        assert_eq!(preview_pass.target, RenderTarget::Screen);
         assert_eq!(menu_pass.target, RenderTarget::Screen);
-        assert!(preview_pass.commands.iter().any(
-            |command| matches!(command, RenderCommand::Custom { name, .. } if name == "startup-menu-preview")
-        ));
-        let preview_texts = preview_pass
+        assert!(menu_pass
+            .commands
+            .iter()
+            .all(|command| !matches!(command, RenderCommand::Custom { name, .. } if name == "startup-menu-preview")));
+        let menu_texts = menu_pass
             .commands
             .iter()
             .filter_map(|command| match command {
@@ -37777,11 +37601,8 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(preview_texts.contains(&"MINDUSTRY"));
-        assert!(preview_texts.contains(&"RUST MDT PREVIEW"));
-        assert!(preview_texts.contains(&"PLAY"));
-        assert!(preview_texts.contains(&"SETTINGS"));
-        assert!(preview_texts.contains(&"WORLD NOT LOADED"));
+        assert!(!menu_texts.contains(&"RUST MDT PREVIEW"));
+        assert!(!menu_texts.contains(&"WORLD NOT LOADED"));
         assert!(menu_pass
             .commands
             .iter()
@@ -37801,38 +37622,14 @@ mod tests {
             |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Campaign")
         ));
         assert!(
-            preview_pass
+            menu_pass
                 .commands
                 .iter()
                 .filter(|command| matches!(command, RenderCommand::Clear { .. }))
                 .count()
-                >= 6
+                >= 1
         );
-        assert!(
-            preview_pass
-                .commands
-                .iter()
-                .filter(|command| matches!(command, RenderCommand::SetClip { .. }))
-                .count()
-                >= 5
-        );
-        assert!(
-            preview_pass
-                .commands
-                .iter()
-                .filter(|command| matches!(command, RenderCommand::ClearClip))
-                .count()
-                >= 5
-        );
-        assert!(renderer.last_opengl_backend_executor_state.clear_commands >= 6);
-        assert!(renderer
-            .last_opengl_backend_executor_state
-            .draw_commands
-            .iter()
-            .any(|command| matches!(
-                command,
-                super::DesktopGraphicsOpenGlBackendDrawCommand::SetScissor { .. }
-            )));
+        assert!(renderer.last_opengl_backend_executor_state.clear_commands >= 1);
         assert!(renderer
             .last_opengl_backend_executor_state
             .sprite_quads
@@ -38058,14 +37855,10 @@ mod tests {
             launcher.render_default_graphics_frame_for_surface_with(0, surface, 2, &mut renderer);
 
         assert_eq!(renderer.frames_rendered, 1);
-        assert_eq!(stats.render_passes, 2);
-        assert_eq!(renderer.last_trace.render_passes.len(), 2);
+        assert_eq!(stats.render_passes, 1);
+        assert_eq!(renderer.last_trace.render_passes.len(), 1);
         assert_eq!(
             renderer.last_trace.render_passes[0].kind,
-            RenderPassKind::Custom("startup-menu-preview".to_string())
-        );
-        assert_eq!(
-            renderer.last_trace.render_passes[1].kind,
             RenderPassKind::Custom("menu".to_string())
         );
 
