@@ -17284,3 +17284,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 备注：
   - 并行运行多条 cargo 命令时曾触发一次本机内存不足/CLR 加载失败；已改为 `CARGO_BUILD_JOBS=1` 顺序重跑并通过；
   - 仍未迁移 `customButtons`、fadeIn/fadeOut 动作、logo/version/discord/info/terminal/becheck chrome，以及移动端 Java 精确顺序与尺寸。
+
+## 478. MenuFragment mobile 主按钮网格对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.2%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:134-194`
+    - mobile 按钮基础尺寸 `120f`；
+    - 横屏主按钮顺序为 `campaign / join / customgame / loadgame`，第二行为 `editor / settings / mods / quit`；
+    - 竖屏主按钮顺序为 `campaign / loadgame`、`customgame / join`、`editor / settings`、`mods / quit`；
+    - `about/info` 是独立 chrome 入口，不应塞回主按钮网格伪装成普通按钮。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `menu_mobile_button_plan(...)`，移动端按钮不再继承 desktop submenu 标记；
+    - `menu_mobile_ui_plan(...)` 改为 Java 风格的横屏 2x4 / 竖屏 4x2 网格；
+    - 移除旧 mobile 平铺里的 `Database / Schematics / TechTree / About` 普通按钮；
+    - 首个 mobile 主按钮使用 `MenuButtonRole::Campaign`，避免点按后落到 desktop-only `Play` root 而不触发路由。
+- 迁移意义：
+  - 移动端主菜单从“桌面角色平铺”推进到 Java `buildMobile()` 的主按钮网格语义；
+  - mobile `CAMPAIGN` 现在仍可通过现有 `DesktopMenuRoute::Campaign` 主链进入 Campaign route shell，不是孤立按钮。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu_ui_plan_mobile_matches_upstream_portrait_grid_geometry --lib`
+  - `cargo test -p mindustry-core menu_ui_plan_mobile_matches_upstream_landscape_grid_geometry --lib`
+  - `cargo test -p mindustry-core --lib`
+  - `cargo check -p mindustry-core`
+- 仍未完成：
+  - `customButtons` 的 mobile 奇/偶插入规则尚未迁移；
+  - mobile 独立 `info/about` 与 `terminal` chrome 尚未迁移；
+  - fadeIn/fadeOut、logo/version/discord/becheck 等完整 `MenuFragment.build()` chrome 仍待继续接入。

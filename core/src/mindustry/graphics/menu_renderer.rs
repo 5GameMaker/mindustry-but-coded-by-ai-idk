@@ -930,6 +930,19 @@ fn menu_button_plan(role: MenuButtonRole, rect: RenderRect, selected: bool) -> M
     }
 }
 
+fn menu_mobile_button_plan(
+    role: MenuButtonRole,
+    rect: RenderRect,
+    selected: bool,
+) -> MenuButtonPlan {
+    MenuButtonPlan {
+        role,
+        rect,
+        selected,
+        submenu: false,
+    }
+}
+
 fn menu_desktop_ui_plan(input: MenuFrameInput, selected_root: MenuButtonRole) -> MenuUiPlan {
     let button_width = 230.0;
     let button_height = 70.0;
@@ -1002,50 +1015,55 @@ fn menu_desktop_ui_plan(input: MenuFrameInput, selected_root: MenuButtonRole) ->
 }
 
 fn menu_mobile_ui_plan(input: MenuFrameInput) -> MenuUiPlan {
-    let roles = [
-        MenuButtonRole::Play,
-        MenuButtonRole::Campaign,
-        MenuButtonRole::Join,
-        MenuButtonRole::CustomGame,
-        MenuButtonRole::LoadGame,
-        MenuButtonRole::Database,
-        MenuButtonRole::Schematics,
-        MenuButtonRole::TechTree,
-        MenuButtonRole::About,
-        MenuButtonRole::Editor,
-        MenuButtonRole::Mods,
-        MenuButtonRole::Settings,
-        MenuButtonRole::Quit,
-    ];
-    let margin = input.scl4.max(1.0) * 3.0;
-    let gap = 6.0;
-    let columns = if input.graphics_width > input.graphics_height {
-        3
+    let rows: &[&[MenuButtonRole]] = if input.graphics_width > input.graphics_height {
+        &[
+            &[
+                MenuButtonRole::Campaign,
+                MenuButtonRole::Join,
+                MenuButtonRole::CustomGame,
+                MenuButtonRole::LoadGame,
+            ],
+            &[
+                MenuButtonRole::Editor,
+                MenuButtonRole::Settings,
+                MenuButtonRole::Mods,
+                MenuButtonRole::Quit,
+            ],
+        ]
     } else {
-        2
+        &[
+            &[MenuButtonRole::Campaign, MenuButtonRole::LoadGame],
+            &[MenuButtonRole::CustomGame, MenuButtonRole::Join],
+            &[MenuButtonRole::Editor, MenuButtonRole::Settings],
+            &[MenuButtonRole::Mods, MenuButtonRole::Quit],
+        ]
     };
-    let button_width = ((input.graphics_width - margin * 2.0 - gap * (columns as f32 - 1.0))
-        / columns as f32)
-        .max(72.0);
-    let button_height = 28.0;
-    let rows = (roles.len() + columns - 1) / columns;
-    let total_height = rows as f32 * button_height + rows.saturating_sub(1) as f32 * gap;
-    let start_y = ((input.graphics_height - total_height) * 0.5).max(margin);
+    let button_size = 120.0;
+    let gap = 10.0;
+    let column_count = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+    let total_width =
+        column_count as f32 * button_size + column_count.saturating_sub(1) as f32 * gap;
+    let start_x = ((input.graphics_width - total_width) * 0.5).max(0.0);
+    let start_y = if input.graphics_width > input.graphics_height {
+        60.0
+    } else {
+        0.0
+    };
 
-    let mut buttons = Vec::with_capacity(roles.len());
-    for (index, role) in roles.into_iter().enumerate() {
-        let column = index % columns;
-        let row = index / columns;
-        buttons.push(menu_button_plan(
-            role,
-            RenderRect::new(
-                margin + column as f32 * (button_width + gap),
-                start_y + row as f32 * (button_height + gap),
-                button_width,
-                button_height,
-            ),
-            role == MenuButtonRole::Play,
-        ));
+    let mut buttons = Vec::with_capacity(rows.iter().map(|row| row.len()).sum());
+    for (row_index, row) in rows.iter().enumerate() {
+        for (column_index, role) in row.iter().copied().enumerate() {
+            buttons.push(menu_mobile_button_plan(
+                role,
+                RenderRect::new(
+                    start_x + column_index as f32 * (button_size + gap),
+                    start_y + row_index as f32 * (button_size + gap),
+                    button_size,
+                    button_size,
+                ),
+                role == MenuButtonRole::Campaign,
+            ));
+        }
     }
 
     MenuUiPlan {
@@ -1326,14 +1344,15 @@ mod tests {
     }
 
     #[test]
-    fn menu_ui_plan_preserves_mobile_flat_button_order() {
+    fn menu_ui_plan_mobile_matches_upstream_portrait_grid_geometry() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(true, 9));
-        let plan = state.render_plan(MenuFrameInput {
+        let input = MenuFrameInput {
             graphics_width: 720.0,
             graphics_height: 1280.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
-        });
+        };
+        let plan = state.render_plan(input);
 
         assert!(plan.ui.mobile);
         assert_eq!(
@@ -1343,37 +1362,110 @@ mod tests {
                 .map(|button| button.role)
                 .collect::<Vec<_>>(),
             vec![
-                MenuButtonRole::Play,
+                MenuButtonRole::Campaign,
+                MenuButtonRole::LoadGame,
+                MenuButtonRole::CustomGame,
+                MenuButtonRole::Join,
+                MenuButtonRole::Editor,
+                MenuButtonRole::Settings,
+                MenuButtonRole::Mods,
+                MenuButtonRole::Quit,
+            ]
+        );
+        assert!(plan.ui.buttons.iter().all(|button| !button.submenu));
+        assert!(plan.ui.buttons[0].selected);
+        assert_eq!(
+            plan.ui.buttons[0].rect,
+            RenderRect::new(235.0, 0.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[1].rect,
+            RenderRect::new(365.0, 0.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[2].rect,
+            RenderRect::new(235.0, 130.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[3].rect,
+            RenderRect::new(365.0, 130.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[6].rect,
+            RenderRect::new(235.0, 390.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[7].rect,
+            RenderRect::new(365.0, 390.0, 120.0, 120.0)
+        );
+
+        let quit_center = plan.ui.buttons.last().unwrap().rect.center();
+        assert_eq!(
+            state.hit_test_ui(input, quit_center.x, quit_center.y),
+            Some(MenuButtonRole::Quit)
+        );
+    }
+
+    #[test]
+    fn menu_ui_plan_mobile_matches_upstream_landscape_grid_geometry() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(true, 9));
+        let input = MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        };
+        let plan = state.render_plan(input);
+
+        assert!(plan.ui.mobile);
+        assert_eq!(
+            plan.ui
+                .buttons
+                .iter()
+                .map(|button| button.role)
+                .collect::<Vec<_>>(),
+            vec![
                 MenuButtonRole::Campaign,
                 MenuButtonRole::Join,
                 MenuButtonRole::CustomGame,
                 MenuButtonRole::LoadGame,
-                MenuButtonRole::Database,
-                MenuButtonRole::Schematics,
-                MenuButtonRole::TechTree,
-                MenuButtonRole::About,
                 MenuButtonRole::Editor,
-                MenuButtonRole::Mods,
                 MenuButtonRole::Settings,
+                MenuButtonRole::Mods,
                 MenuButtonRole::Quit,
             ]
         );
-        assert!(plan.ui.to_render_commands().iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "TECH TREE")
-        ));
-        let quit_center = plan.ui.buttons.last().unwrap().rect.center();
+        assert!(plan.ui.buttons.iter().all(|button| !button.submenu));
+        assert!(plan.ui.buttons[0].selected);
         assert_eq!(
-            state.hit_test_ui(
-                MenuFrameInput {
-                    graphics_width: 720.0,
-                    graphics_height: 1280.0,
-                    scl4: 4.0,
-                    delta: 1.0 / 60.0,
-                },
-                quit_center.x,
-                quit_center.y,
-            ),
-            Some(MenuButtonRole::Quit)
+            plan.ui.buttons[0].rect,
+            RenderRect::new(385.0, 60.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[1].rect,
+            RenderRect::new(515.0, 60.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[2].rect,
+            RenderRect::new(645.0, 60.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[3].rect,
+            RenderRect::new(775.0, 60.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[4].rect,
+            RenderRect::new(385.0, 190.0, 120.0, 120.0)
+        );
+        assert_eq!(
+            plan.ui.buttons[7].rect,
+            RenderRect::new(775.0, 190.0, 120.0, 120.0)
+        );
+
+        let join_center = plan.ui.buttons[1].rect.center();
+        assert_eq!(
+            state.hit_test_ui(input, join_center.x, join_center.y),
+            Some(MenuButtonRole::Join)
         );
     }
 }
