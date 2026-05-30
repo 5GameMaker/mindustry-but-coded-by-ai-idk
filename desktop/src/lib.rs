@@ -90,7 +90,9 @@ use mindustry_core::mindustry::service::{
 };
 use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
-use mindustry_core::mindustry::ui::{Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw};
+use mindustry_core::mindustry::ui::{
+    upstream_font_source_paths, Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw,
+};
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
     draw_block_dispatch_icons, DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
@@ -3288,6 +3290,18 @@ impl DesktopGraphicsFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopFontAssetSourceTrace {
+    pub source_path: String,
+    pub file_path: Option<String>,
+}
+
+impl DesktopFontAssetSourceTrace {
+    pub fn resolved(&self) -> bool {
+        self.file_path.is_some()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsShaderApplyExecutionTrace {
     pub shader: ShaderId,
     pub operation_count: usize,
@@ -4363,6 +4377,37 @@ fn desktop_existing_sprite_source_path(source_path: &str) -> Option<PathBuf> {
     }
 
     None
+}
+
+fn desktop_existing_asset_source_path(source_path: &str) -> Option<PathBuf> {
+    let normalized = source_path.trim().replace('\\', "/");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let direct = PathBuf::from(&normalized);
+    if direct.exists() {
+        return Some(direct);
+    }
+
+    if let Ok(asset_root) = std::env::var("MINDUSTRY_ASSET_ROOT") {
+        let asset_path = PathBuf::from(asset_root).join(&normalized);
+        if asset_path.exists() {
+            return Some(asset_path);
+        }
+    }
+
+    None
+}
+
+fn default_desktop_font_asset_source_traces() -> Vec<DesktopFontAssetSourceTrace> {
+    upstream_font_source_paths()
+        .map(|source_path| DesktopFontAssetSourceTrace {
+            source_path: source_path.to_string(),
+            file_path: desktop_existing_asset_source_path(source_path)
+                .map(|path| path.to_string_lossy().replace('\\', "/")),
+        })
+        .collect()
 }
 
 impl DesktopGraphicsOpenGlBackendTextureBinding {
@@ -12857,6 +12902,7 @@ pub struct DesktopLauncher {
     pub last_mods_directory_merge_count: Option<usize>,
     pub args: Vec<String>,
     pub texture_atlas: TextureAtlasPlan<bool>,
+    pub font_asset_sources: Vec<DesktopFontAssetSourceTrace>,
     content_loader: ContentLoader,
     last_applied_world_data: Option<mindustry_core::mindustry::net::NetworkWorldData>,
     last_applied_state_snapshot: Option<StateSnapshotCallPacket>,
@@ -13483,6 +13529,7 @@ impl DesktopLauncher {
         let block_renderer_state = BlockRendererState::default();
         let content_loader = ContentLoader::create_base_content_or_panic();
         let texture_atlas = default_desktop_texture_atlas(&block_renderer_state, &content_loader);
+        let font_asset_sources = default_desktop_font_asset_source_traces();
         let mut ui_status_bar = Bar::new_clamped("client", 0x66cc_ffff, 0.0);
         ui_status_bar.outline(0x0000_00ff, 1.0);
         Self {
@@ -13547,6 +13594,7 @@ impl DesktopLauncher {
             last_mods_directory_merge_count: None,
             args,
             texture_atlas,
+            font_asset_sources,
             content_loader,
             last_applied_world_data: None,
             last_applied_state_snapshot: None,
@@ -34388,6 +34436,60 @@ mod tests {
                         && (*layer - (Layer::END_PIXELED + 0.09)).abs() < f32::EPSILON
             )
         }));
+    }
+
+    #[test]
+    fn desktop_launcher_default_font_asset_sources_follow_upstream_fonts_registry() {
+        let launcher = DesktopLauncher::new(Vec::new());
+        let source_paths = launcher
+            .font_asset_sources
+            .iter()
+            .map(|source| source.source_path.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(source_paths.contains(&"fonts/font.woff"));
+        assert!(source_paths.contains(&"fonts/font_jp.woff"));
+        assert!(source_paths.contains(&"fonts/icon.ttf"));
+        assert!(source_paths.contains(&"fonts/logic.ttf"));
+        assert!(source_paths.contains(&"fonts/monospace.woff"));
+        assert!(source_paths.contains(&"fonts/tech.ttf"));
+        assert!(source_paths.contains(&"icons/icons.properties"));
+    }
+
+    #[test]
+    fn desktop_font_asset_sources_resolve_from_mindustry_asset_root() {
+        let root = temp_desktop_path("font-asset-root");
+        let asset_root = root.join("assets");
+        let font_path = asset_root.join("fonts/font.woff");
+        let icon_properties_path = asset_root.join("icons/icons.properties");
+        std::fs::create_dir_all(font_path.parent().unwrap())
+            .expect("font fixture dir should be writable");
+        std::fs::create_dir_all(icon_properties_path.parent().unwrap())
+            .expect("icon fixture dir should be writable");
+        std::fs::write(&font_path, b"font").expect("font fixture should be writable");
+        std::fs::write(&icon_properties_path, b"63743=spawn|block-spawn-ui\n")
+            .expect("icons fixture should be writable");
+
+        let _asset_guard = EnvVarGuard::set("MINDUSTRY_ASSET_ROOT", &asset_root);
+        let sources = super::default_desktop_font_asset_source_traces();
+        let font = sources
+            .iter()
+            .find(|source| source.source_path == "fonts/font.woff")
+            .expect("font source should be listed");
+        let icons = sources
+            .iter()
+            .find(|source| source.source_path == "icons/icons.properties")
+            .expect("icons properties source should be listed");
+        let expected_font_path = font_path.to_string_lossy().replace('\\', "/");
+        let expected_icons_path = icon_properties_path.to_string_lossy().replace('\\', "/");
+
+        assert!(font.resolved());
+        assert!(icons.resolved());
+        assert_eq!(font.file_path.as_deref(), Some(expected_font_path.as_str()));
+        assert_eq!(
+            icons.file_path.as_deref(),
+            Some(expected_icons_path.as_str())
+        );
     }
 
     #[test]

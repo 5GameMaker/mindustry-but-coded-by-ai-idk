@@ -18033,3 +18033,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Icon` 字体 glyph、内容图标 emoji、markup/wrap/outline/shadow 等渲染细节尚未完成；
   - 原版 Settings/Mods/Database/TechTree 等页面仍需接真实 widget；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 501. Desktop 字体资源加载计划接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.7%**，仍未达到完整可玩；继续推进真实字体 atlas，把 500 的 core 字体契约接到 desktop 运行链。
+- 问题背景：
+  - 500 已固定 `Fonts.java` 的字体资源与 `icons.properties` 解析，但如果 desktop 侧不消费 `upstream_font_source_paths()`，字体模块仍会停留在孤立数据；
+  - desktop 现有 raw sprite/atlas 链路已经可从 `MINDUSTRY_ASSET_ROOT` 解析贴图，本轮给字体资源建立同类加载计划。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopFontAssetSourceTrace`，记录字体/icon source path 与可选实际文件路径；
+    - 新增 `desktop_existing_asset_source_path(...)`，通过直接路径和 `MINDUSTRY_ASSET_ROOT` 查找普通 asset 文件；
+    - 新增 `default_desktop_font_asset_source_traces()`，消费 core 的 `upstream_font_source_paths()`；
+    - `DesktopLauncher` 新增 `font_asset_sources` 字段，启动时生成字体资源加载计划；
+    - 新增测试确认 launcher 暴露 `font.woff/font_jp.woff/icon.ttf/logic.ttf/monospace.woff/tech.ttf/icons.properties`；
+    - 新增测试用临时 `MINDUSTRY_ASSET_ROOT` 验证 `fonts/font.woff` 和 `icons/icons.properties` 能解析到真实文件路径。
+- 迁移意义：
+  - 字体资源不再只是 core 静态表，已经进入 desktop launcher 状态，后续 renderer 可以直接消费；
+  - 为替换 OpenGL `DrawText` placeholder 建立了 asset discovery 前置链路；
+  - 这仍不是最终字体渲染，下一步应进入 glyph raster/cache/atlas/upload/draw-call。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_font_asset_sources_follow_upstream_fonts_registry --lib`
+  - `cargo test -p mindustry-desktop desktop_font_asset_sources_resolve_from_mindustry_asset_root --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 未实际读取/解析字体二进制和生成 glyph atlas；
+  - `icons.properties` 解析结果尚未进入 desktop icon glyph registry；
+  - `DrawText` placeholder quads 尚未替换为真实 font texture quads；
+  - 未达到完整可玩，不能宣告目标完成。
