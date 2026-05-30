@@ -16479,4 +16479,17 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 新增测试 `desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack`，验证位置、大小、颜色、mix color、层级与 weapons/shield 相对顺序。
 - 迁移意义：Java `drawItems` 已进入 `runtime client unit snapshot -> UnitType stage contract -> Overlay RenderPass -> RenderCommand -> backend` 主链，carried item 不再是孤立 sync 数据。
 - 已验证：`cargo fmt --all`、`cargo fmt --all --check`、`cargo check -p mindustry-core`、`cargo check -p mindustry-desktop --features opengl-native-runtime`、`cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack --features opengl-native-runtime`。
-- 仍未完成：`UnitDrawStage::Legs` / `Payload` / `Parts` / `Abilities` 仍需继续填充；`drawItems()` 的 `applyColor(unit)` 全局单位颜色叠加尚未完整复刻；weather / accelerator custom marker 仍需逐项 lowering 或保留审计 marker。
+- 仍未完成：`Payload` / `Parts` / `Abilities` 仍需继续填充；`drawItems()` 的 `applyColor(unit)` 全局单位颜色叠加尚未完整复刻；weather / accelerator custom marker 仍需逐项 lowering 或保留审计 marker。
+
+## 451. 最新闭环记录：UnitType drawLegs 接入客户端单位渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **43.9%**，仍未达到完整可玩。
+- Java 对照：`D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java:1827-1900`，`drawLegs(unit)` 在 hard shadow 后、payload/soft shadow 前执行，按 front-first 腿索引顺序绘制 foot shadow、foot、`legRegion`、`legBaseRegion`、joint、base joint 与 base。
+- 本轮主改动：
+  - `core/src/mindustry/type/unit_type.rs`：`UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 加入 `UnitDrawStage::Legs`，并补齐 Java `load()` 侧腿部贴图引用字段 `foot_region`、`joint_region`、`base_joint_region`、`base_region` 默认值。
+  - `desktop/src/lib.rs`：默认 unit atlas 虚拟源加入 leg / leg-base / foot / joint / joint-base / base；新增 textured-line sprite helper 与 `unit_snapshot_leg_render_commands(...)`；`UnitDrawStage::Legs` 分支输出真实腿段、腿根段、脚、关节、base joint、base 与脚底阴影命令。
+  - 新增测试 `desktop_launcher_emits_unit_leg_sprites_before_soft_shadow_for_legged_snapshot`，验证 front-first 第一条腿的几何、负 stroke 翻转、`legBaseUnder=false` 顺序，以及 legs 位于 soft shadow 前。
+- 迁移意义：Java `drawLegs` 已进入 `runtime client unit snapshot -> UnitType stage contract -> Overlay RenderPass -> DrawSprite textured lines -> backend` 主链；腿部渲染不再是 no-op 或死亡特效专用 helper。
+- 已验证：`cargo fmt --all`、`cargo check -p mindustry-core`、`cargo check -p mindustry-desktop --features opengl-native-runtime`、`cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_leg_sprites_before_soft_shadow_for_legged_snapshot --features opengl-native-runtime`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack --features opengl-native-runtime`、`cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`。
+- 仍未完成：`Payload` / `Parts` / `Abilities` 仍需继续填充；`drawLegs()` 的 `applyColor(unit)` mix color、真实 asset 尺寸/scale 与所有水下/foot shadow 细节仍需继续精细对齐；weather / accelerator custom marker 仍需逐项 lowering 或保留审计 marker。

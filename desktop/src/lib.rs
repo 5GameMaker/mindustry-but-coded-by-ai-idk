@@ -30,8 +30,8 @@ use mindustry_core::mindustry::entities::{
     StandardEffectCircleRenderPrimitive, StandardEffectDrawKind, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
     StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
-    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, WeaponMount,
-    WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
+    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, TextureRegionRef,
+    WeaponMount, WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
@@ -1108,11 +1108,24 @@ fn desktop_unit_body_sprite_virtual_source_paths(content_loader: &ContentLoader)
         .units()
         .iter()
         .flat_map(|unit| {
-            [
+            let mut paths = vec![
                 format!("sprites/{}.png", unit.name()),
                 format!("sprites/{}-outline.png", unit.name()),
                 format!("sprites/{}-cell.png", unit.name()),
-            ]
+            ];
+            for region in [
+                &unit.leg_region,
+                &unit.leg_base_region,
+                &unit.foot_region,
+                &unit.joint_region,
+                &unit.base_joint_region,
+                &unit.base_region,
+            ] {
+                if !region.name.is_empty() {
+                    paths.push(format!("sprites/{}.png", region.name));
+                }
+            }
+            paths
         })
         .chain([
             "sprites/particle.png".to_string(),
@@ -1195,6 +1208,71 @@ fn desktop_unit_body_layer(unit: &UnitComp) -> f32 {
     } else {
         Layer::FLYING_UNIT
     }
+}
+
+fn desktop_unit_leg_layer(unit: &UnitComp) -> f32 {
+    desktop_unit_body_layer(unit) - 0.02
+}
+
+fn desktop_texture_region_symbol(region: &TextureRegionRef) -> Option<&str> {
+    let name = region.name.trim();
+    (!name.is_empty()).then_some(name)
+}
+
+fn desktop_texture_region_width(region: &TextureRegionRef, fallback: u32) -> f32 {
+    if region.width > 0 {
+        region.width as f32
+    } else {
+        fallback.max(1) as f32
+    }
+}
+
+fn desktop_texture_region_height(region: &TextureRegionRef, fallback: u32) -> f32 {
+    if region.height > 0 {
+        region.height as f32
+    } else {
+        fallback.max(1) as f32
+    }
+}
+
+fn desktop_angle_between(from: RenderPoint, to: RenderPoint) -> f32 {
+    (to.y - from.y).atan2(to.x - from.x).to_degrees()
+}
+
+fn desktop_set_vector_length(x: f32, y: f32, target: f32) -> (f32, f32) {
+    let length = (x * x + y * y).sqrt();
+    if length <= f32::EPSILON || target.abs() <= f32::EPSILON {
+        (0.0, 0.0)
+    } else {
+        (x / length * target, y / length * target)
+    }
+}
+
+fn desktop_textured_line_sprite_command(
+    symbol: impl Into<String>,
+    from: RenderPoint,
+    to: RenderPoint,
+    stroke: f32,
+    tint: [f32; 4],
+    layer: f32,
+) -> Option<RenderCommand> {
+    let dx = to.x - from.x;
+    let dy = to.y - from.y;
+    let length = (dx * dx + dy * dy).sqrt();
+    if length <= f32::EPSILON || stroke.abs() <= f32::EPSILON {
+        return None;
+    }
+    Some(RenderCommand::draw_sprite(
+        symbol,
+        RenderRect::from_center(
+            RenderPoint::new((from.x + to.x) * 0.5, (from.y + to.y) * 0.5),
+            length,
+            stroke,
+        ),
+        tint,
+        dy.atan2(dx).to_degrees(),
+        layer,
+    ))
 }
 
 const DESKTOP_UNIT_ITEM_BASE_SIZE: f32 = 5.0;
@@ -13520,6 +13598,279 @@ impl DesktopLauncher {
             .collect()
     }
 
+    fn unit_snapshot_leg_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid() {
+            return Vec::new();
+        }
+        let Some(legs) = unit.legs.as_ref() else {
+            return Vec::new();
+        };
+        let leg_count = legs.legs.len();
+        if leg_count == 0 {
+            return Vec::new();
+        }
+
+        let leg_texture =
+            desktop_texture_region_symbol(&unit.type_info.leg_region).and_then(|symbol| {
+                self.texture_atlas.lookup(symbol).ok().map(|region| {
+                    (
+                        symbol.to_string(),
+                        desktop_texture_region_height(
+                            &unit.type_info.leg_region,
+                            region.region.height,
+                        ),
+                    )
+                })
+            });
+        let base_texture = desktop_texture_region_symbol(&unit.type_info.leg_base_region)
+            .and_then(|symbol| {
+                self.texture_atlas.lookup(symbol).ok().map(|region| {
+                    (
+                        symbol.to_string(),
+                        desktop_texture_region_height(
+                            &unit.type_info.leg_base_region,
+                            region.region.height,
+                        ),
+                    )
+                })
+            })
+            .or_else(|| leg_texture.clone());
+        if leg_texture.is_none() && base_texture.is_none() {
+            return Vec::new();
+        }
+
+        let foot_texture =
+            desktop_texture_region_symbol(&unit.type_info.foot_region).and_then(|symbol| {
+                self.texture_atlas.lookup(symbol).ok().map(|region| {
+                    (
+                        symbol.to_string(),
+                        desktop_texture_region_width(
+                            &unit.type_info.foot_region,
+                            region.region.width,
+                        ),
+                        desktop_texture_region_height(
+                            &unit.type_info.foot_region,
+                            region.region.height,
+                        ),
+                    )
+                })
+            });
+        let joint_texture =
+            desktop_texture_region_symbol(&unit.type_info.joint_region).and_then(|symbol| {
+                self.texture_atlas.lookup(symbol).ok().map(|region| {
+                    (
+                        symbol.to_string(),
+                        desktop_texture_region_width(
+                            &unit.type_info.joint_region,
+                            region.region.width,
+                        ),
+                        desktop_texture_region_height(
+                            &unit.type_info.joint_region,
+                            region.region.height,
+                        ),
+                    )
+                })
+            });
+        let base_joint_texture = desktop_texture_region_symbol(&unit.type_info.base_joint_region)
+            .and_then(|symbol| {
+                self.texture_atlas.lookup(symbol).ok().map(|region| {
+                    (
+                        symbol.to_string(),
+                        desktop_texture_region_width(
+                            &unit.type_info.base_joint_region,
+                            region.region.width,
+                        ),
+                        desktop_texture_region_height(
+                            &unit.type_info.base_joint_region,
+                            region.region.height,
+                        ),
+                    )
+                })
+            });
+        let base_region_texture = desktop_texture_region_symbol(&unit.type_info.base_region)
+            .and_then(|symbol| {
+                self.texture_atlas.lookup(symbol).ok().map(|region| {
+                    (
+                        symbol.to_string(),
+                        desktop_texture_region_width(
+                            &unit.type_info.base_region,
+                            region.region.width,
+                        ),
+                        desktop_texture_region_height(
+                            &unit.type_info.base_region,
+                            region.region.height,
+                        ),
+                    )
+                })
+            });
+
+        let layer = desktop_unit_leg_layer(unit);
+        let tint = [1.0, 1.0, 1.0, 1.0];
+        let inv_drown = (1.0 - unit.drown_time).clamp(0.0, 1.0);
+        let shadow_tint = desktop_effect_render_color(Some(Pal::SHADOW), inv_drown);
+        let mut commands = Vec::new();
+
+        if let (Some((_, foot_width, _)), true) = (
+            &foot_texture,
+            self.texture_atlas.lookup("circle-shadow").is_ok(),
+        ) {
+            let shadow_size = foot_width * 1.5;
+            if shadow_size > f32::EPSILON && inv_drown > f32::EPSILON {
+                for leg in &legs.legs {
+                    commands.push(RenderCommand::draw_sprite(
+                        "circle-shadow",
+                        RenderRect::from_center(
+                            RenderPoint::new(leg.base.x, leg.base.y),
+                            shadow_size,
+                            shadow_size,
+                        ),
+                        shadow_tint,
+                        0.0,
+                        layer,
+                    ));
+                }
+            }
+        }
+
+        for j in (0..leg_count).rev() {
+            let index = if j % 2 == 0 {
+                j / 2
+            } else {
+                leg_count - 1 - j / 2
+            };
+            let leg = legs.legs[index];
+            let flip_sign = if index as f32 >= leg_count as f32 / 2.0 {
+                -1.0
+            } else {
+                1.0
+            };
+
+            let offset = legs.leg_offset(index);
+            let position = RenderPoint::new(unit.x() + offset.x, unit.y() + offset.y);
+            let joint = RenderPoint::new(leg.joint.x, leg.joint.y);
+            let base = RenderPoint::new(leg.base.x, leg.base.y);
+            let (extension_x, extension_y) = desktop_set_vector_length(
+                leg.joint.x - leg.base.x,
+                leg.joint.y - leg.base.y,
+                unit.type_info.leg_extension,
+            );
+            let base_start = RenderPoint::new(leg.joint.x + extension_x, leg.joint.y + extension_y);
+            let foot_rotation = desktop_angle_between(position, base);
+
+            if let Some((symbol, foot_width, foot_height)) = &foot_texture {
+                if leg.moving && unit.type_info.shadow_elevation > 0.0 {
+                    let elev = desktop_slope_interp(1.0 - leg.stage)
+                        * unit.type_info.shadow_elevation
+                        * inv_drown;
+                    if elev > f32::EPSILON {
+                        commands.push(RenderCommand::draw_sprite(
+                            symbol.clone(),
+                            RenderRect::from_center(
+                                RenderPoint::new(
+                                    base.x + UNIT_SHADOW_TX * elev,
+                                    base.y + UNIT_SHADOW_TY * elev,
+                                ),
+                                *foot_width,
+                                *foot_height,
+                            ),
+                            desktop_effect_render_color(Some(Pal::SHADOW), 1.0),
+                            foot_rotation,
+                            layer,
+                        ));
+                    }
+                }
+                commands.push(RenderCommand::draw_sprite(
+                    symbol.clone(),
+                    RenderRect::from_center(base, *foot_width, *foot_height),
+                    tint,
+                    foot_rotation,
+                    layer,
+                ));
+            }
+
+            let leg_command = leg_texture.as_ref().and_then(|(symbol, stroke)| {
+                desktop_textured_line_sprite_command(
+                    symbol.clone(),
+                    position,
+                    joint,
+                    *stroke * flip_sign,
+                    tint,
+                    layer,
+                )
+            });
+            let base_command = base_texture.as_ref().and_then(|(symbol, stroke)| {
+                desktop_textured_line_sprite_command(
+                    symbol.clone(),
+                    base_start,
+                    base,
+                    *stroke * flip_sign,
+                    tint,
+                    layer,
+                )
+            });
+
+            if unit.type_info.leg_base_under {
+                if let Some(command) = base_command {
+                    commands.push(command);
+                }
+                if let Some(command) = leg_command {
+                    commands.push(command);
+                }
+            } else {
+                if let Some(command) = leg_command {
+                    commands.push(command);
+                }
+                if let Some(command) = base_command {
+                    commands.push(command);
+                }
+            }
+
+            if let Some((symbol, width, height)) = &joint_texture {
+                commands.push(RenderCommand::draw_sprite(
+                    symbol.clone(),
+                    RenderRect::from_center(joint, *width, *height),
+                    tint,
+                    0.0,
+                    layer,
+                ));
+            }
+        }
+
+        if let Some((symbol, width, height)) = &base_joint_texture {
+            for j in (0..leg_count).rev() {
+                let index = if j % 2 == 0 {
+                    j / 2
+                } else {
+                    leg_count - 1 - j / 2
+                };
+                let offset = legs.leg_offset(index);
+                commands.push(RenderCommand::draw_sprite(
+                    symbol.clone(),
+                    RenderRect::from_center(
+                        RenderPoint::new(unit.x() + offset.x, unit.y() + offset.y),
+                        *width,
+                        *height,
+                    ),
+                    tint,
+                    legs.base_rotation,
+                    layer,
+                ));
+            }
+        }
+
+        if let Some((symbol, width, height)) = &base_region_texture {
+            commands.push(RenderCommand::draw_sprite(
+                symbol.clone(),
+                RenderRect::from_center(RenderPoint::new(unit.x(), unit.y()), *width, *height),
+                tint,
+                legs.base_rotation - 90.0,
+                layer,
+            ));
+        }
+
+        commands
+    }
+
     fn unit_snapshot_shadow_floor_can_shadow(&self, center: RenderPoint) -> bool {
         let floor_id = self.game_state.world.floor_world_id(center.x, center.y);
         self.content_loader
@@ -13648,6 +13999,9 @@ impl DesktopLauncher {
                             pass.commands.push(command);
                         }
                     }
+                    UnitDrawStage::Legs => pass
+                        .commands
+                        .extend(self.unit_snapshot_leg_render_commands(unit)),
                     UnitDrawStage::SoftShadow => {
                         if let Some(command) = self.unit_snapshot_soft_shadow_render_command(unit) {
                             pass.commands.push(command);
@@ -13688,10 +14042,7 @@ impl DesktopLauncher {
                             pass.commands.push(command);
                         }
                     }
-                    UnitDrawStage::Legs
-                    | UnitDrawStage::Payload
-                    | UnitDrawStage::Parts
-                    | UnitDrawStage::Abilities => {}
+                    UnitDrawStage::Payload | UnitDrawStage::Parts | UnitDrawStage::Abilities => {}
                 }
             }
         }
@@ -19713,6 +20064,169 @@ mod tests {
             }
             other => panic!("expected unit hard shadow DrawSprite, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn desktop_launcher_emits_unit_leg_sprites_before_soft_shadow_for_legged_snapshot() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.texture_atlas = TextureAtlasPlan::from_virtual_source_paths([
+            "sprites/crawler.png",
+            "sprites/crawler-outline.png",
+            "sprites/crawler-cell.png",
+            "sprites/crawler-leg.png",
+            "sprites/crawler-leg-base.png",
+            "sprites/crawler-foot.png",
+            "sprites/crawler-joint.png",
+            "sprites/crawler-joint-base.png",
+            "sprites/crawler-base.png",
+            "sprites/particle.png",
+            "sprites/circle-shadow.png",
+        ]);
+
+        let mut unit_type = UnitType::new(9914, "crawler");
+        unit_type.allow_leg_step = true;
+        unit_type.leg_count = 2;
+        unit_type.leg_length = 10.0;
+        unit_type.leg_extension = 3.0;
+        unit_type.leg_region = TextureRegionRef::with_size("crawler-leg", 16, 8);
+        unit_type.leg_base_region = TextureRegionRef::with_size("crawler-leg-base", 12, 6);
+        unit_type.foot_region = TextureRegionRef::with_size("crawler-foot", 10, 6);
+        unit_type.joint_region = TextureRegionRef::with_size("crawler-joint", 4, 4);
+        unit_type.base_joint_region = TextureRegionRef::with_size("crawler-joint-base", 5, 5);
+        unit_type.base_region = TextureRegionRef::with_size("crawler-base", 18, 12);
+        unit_type.shadow_elevation = 1.0;
+
+        let mut unit = UnitComp::new(9914, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(10.0, 20.0);
+        unit.set_rotation(0.0);
+        {
+            let legs = unit.legs.as_mut().expect("legged unit should own LegsComp");
+            legs.base_rotation = 30.0;
+            legs.legs[0].joint = IoVec2::new(14.0, 20.0);
+            legs.legs[0].base = IoVec2::new(18.0, 20.0);
+            legs.legs[0].moving = false;
+            legs.legs[0].stage = 0.25;
+            legs.legs[1].joint = IoVec2::new(8.0, 20.0);
+            legs.legs[1].base = IoVec2::new(4.0, 20.0);
+            legs.legs[1].moving = true;
+            legs.legs[1].stage = 0.5;
+        }
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(9914, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let minimap_camera = MinimapCamera::new(32.0, 32.0, 64.0, 64.0);
+        let frame = launcher.graphics_frame_for_render(
+            26,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "crawler-leg")
+                    })
+            })
+            .expect("legged unit snapshot should emit leg sprites in the overlay pass");
+
+        let first_leg_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "crawler-leg")
+            })
+            .expect("leg region should render");
+        let first_base_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "crawler-leg-base")
+            })
+            .expect("leg base region should render");
+        let soft_shadow_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, rect, layer, .. }
+                    if (symbol == "particle" || symbol == "circle-shadow")
+                        && rect.center() == RenderPoint::new(10.0, 20.0)
+                        && (*layer - (Layer::GROUND_UNIT - 0.01)).abs() < 0.0001)
+            })
+            .expect("unit soft shadow should render after legs");
+
+        assert!(
+            first_leg_index < first_base_index,
+            "legBaseUnder=false should draw leg segment before leg base segment"
+        );
+        assert!(
+            first_base_index < soft_shadow_index,
+            "UnitType.draw should draw legs before soft shadow"
+        );
+        assert_eq!(
+            overlay
+                .commands
+                .iter()
+                .filter(|command| matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "crawler-leg"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            overlay
+                .commands
+                .iter()
+                .filter(|command| matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "crawler-leg-base"))
+                .count(),
+            2
+        );
+
+        match &overlay.commands[first_leg_index] {
+            RenderCommand::DrawSprite {
+                rect,
+                tint,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(rect.center(), RenderPoint::new(9.0, 20.0));
+                assert!((rect.width - 2.0).abs() < 0.0001);
+                assert!((rect.height + 8.0).abs() < 0.0001);
+                assert_eq!(*tint, [1.0, 1.0, 1.0, 1.0]);
+                assert!((*rotation - 180.0).abs() < 0.0001);
+                assert!((*layer - (Layer::GROUND_UNIT - 0.02)).abs() < 0.0001);
+            }
+            other => panic!("expected first leg DrawSprite, got {other:?}"),
+        }
+        match &overlay.commands[first_base_index] {
+            RenderCommand::DrawSprite {
+                rect,
+                rotation,
+                layer,
+                ..
+            } => {
+                assert_eq!(rect.center(), RenderPoint::new(7.5, 20.0));
+                assert!((rect.width - 7.0).abs() < 0.0001);
+                assert!((rect.height + 6.0).abs() < 0.0001);
+                assert!((*rotation - 180.0).abs() < 0.0001);
+                assert!((*layer - (Layer::GROUND_UNIT - 0.02)).abs() < 0.0001);
+            }
+            other => panic!("expected first leg-base DrawSprite, got {other:?}"),
+        }
+        assert!(overlay.commands.iter().any(|command| {
+            matches!(command, RenderCommand::DrawSprite { symbol, rect, rotation, .. }
+                if symbol == "crawler-base"
+                    && rect.center() == RenderPoint::new(10.0, 20.0)
+                    && (*rotation + 60.0).abs() < 0.0001)
+        }));
     }
 
     #[test]

@@ -52,8 +52,9 @@ pub const UNIT_TYPE_JAVA_DRAW_STAGES: [UnitDrawStage; 15] = [
     UnitDrawStage::Shield,
 ];
 
-pub const UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES: [UnitDrawStage; 11] = [
+pub const UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES: [UnitDrawStage; 12] = [
     UnitDrawStage::HardShadow,
+    UnitDrawStage::Legs,
     UnitDrawStage::SoftShadow,
     UnitDrawStage::Outline,
     UnitDrawStage::WeaponOutlines,
@@ -262,6 +263,10 @@ pub struct UnitType {
     pub leg_splash_range: f32,
     pub leg_region: TextureRegionRef,
     pub leg_base_region: TextureRegionRef,
+    pub foot_region: TextureRegionRef,
+    pub joint_region: TextureRegionRef,
+    pub base_joint_region: TextureRegionRef,
+    pub base_region: TextureRegionRef,
     pub base_leg_straightness: f32,
     pub leg_straightness: f32,
     pub leg_base_under: bool,
@@ -500,6 +505,10 @@ impl UnitType {
             leg_splash_range: 5.0,
             leg_region: TextureRegionRef::new(format!("{atlas_name}-leg")),
             leg_base_region: TextureRegionRef::new(format!("{atlas_name}-leg-base")),
+            foot_region: TextureRegionRef::new(format!("{atlas_name}-foot")),
+            joint_region: TextureRegionRef::new(format!("{atlas_name}-joint")),
+            base_joint_region: TextureRegionRef::new(format!("{atlas_name}-joint-base")),
+            base_region: TextureRegionRef::new(format!("{atlas_name}-base")),
             base_leg_straightness: 0.0,
             leg_straightness: 0.0,
             leg_base_under: false,
@@ -1114,6 +1123,13 @@ mod tests {
             unit.leg_base_region,
             TextureRegionRef::new("toxopid-leg-base")
         );
+        assert_eq!(unit.foot_region, TextureRegionRef::new("toxopid-foot"));
+        assert_eq!(unit.joint_region, TextureRegionRef::new("toxopid-joint"));
+        assert_eq!(
+            unit.base_joint_region,
+            TextureRegionRef::new("toxopid-joint-base")
+        );
+        assert_eq!(unit.base_region, TextureRegionRef::new("toxopid-base"));
         assert!(!unit.leg_base_under);
         assert!(!unit.lock_leg_base);
         assert!(!unit.leg_continuous_move);
@@ -1350,6 +1366,7 @@ mod tests {
             unit.client_snapshot_draw_stages(),
             &[
                 UnitDrawStage::HardShadow,
+                UnitDrawStage::Legs,
                 UnitDrawStage::SoftShadow,
                 UnitDrawStage::Outline,
                 UnitDrawStage::WeaponOutlines,

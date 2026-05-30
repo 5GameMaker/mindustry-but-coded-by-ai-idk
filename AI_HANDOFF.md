@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **41.3%**。
+- 当前总体迁移完成度：约 **43.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -13594,6 +13594,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack --features opengl-native-runtime`
 - 下一步：
-  1. 优先推进 `UnitDrawStage::Parts` 或 `Legs`，但必须接入 `unit_snapshot_render_pass()` 主链；
-  2. `Payload` / `Abilities` 继续按同一 stage contract 补齐；
+  1. 优先推进 `UnitDrawStage::Parts` 或 `Payload`，但必须接入 `unit_snapshot_render_pass()` 主链；
+  2. `Abilities` 继续按同一 stage contract 补齐；
   3. 不要把新增渲染 helper 留成孤立模块；每个视觉能力都要进入 runtime/render/backend 主链或在 `MIGRATION.md` 标注过渡点。
+
+### 2026-05-30：UnitType drawLegs 接入客户端单位渲染链
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **43.9%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/type/unit_type.rs`
+    - `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 加入 `UnitDrawStage::Legs`；
+    - `UnitType` 补齐 Java 腿部贴图引用：`foot_region`、`joint_region`、`base_joint_region`、`base_region`。
+  - `desktop/src/lib.rs`
+    - 默认 unit atlas 虚拟源加入 leg / leg-base / foot / joint / joint-base / base；
+    - 新增 textured-line sprite helper；
+    - 新增 `unit_snapshot_leg_render_commands(...)`；
+    - `UnitDrawStage::Legs` 输出真实腿部 `DrawSprite` 命令并位于 soft shadow 前。
+  - 新增测试：
+    - `desktop_launcher_emits_unit_leg_sprites_before_soft_shadow_for_legged_snapshot`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_leg_sprites_before_soft_shadow_for_legged_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_item_sprites_after_weapons_for_carried_stack --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`
+- 下一步：
+  1. `Payload` / `Parts` / `Abilities` 仍是当前单位渲染主链缺口；
+  2. `drawLegs()` 还要继续细化 `applyColor(unit)` mix color、asset scale、水下/foot shadow 全细节；
+  3. 继续保持所有新增渲染能力接入 `runtime -> render pass -> backend`，不要留下孤立模块。
