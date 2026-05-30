@@ -18432,23 +18432,29 @@ impl DesktopLauncher {
         if chrome.is_mobile {
             let gutter_layer = Layer::END_PIXELED + 0.04;
             if let Some(rect) = chrome.left_gutter {
-                pass.push(RenderCommand::fill_rect(
+                pass.push(RenderCommand::draw_sprite(
+                    "pane-right.9",
                     rect,
-                    [0.05, 0.07, 0.10, 0.58],
+                    [1.0, 1.0, 1.0, 1.0],
+                    0.0,
                     gutter_layer,
                 ));
             }
             if let Some(rect) = chrome.right_gutter {
-                pass.push(RenderCommand::fill_rect(
+                pass.push(RenderCommand::draw_sprite(
+                    "pane-left.9",
                     rect,
-                    [0.05, 0.07, 0.10, 0.58],
+                    [1.0, 1.0, 1.0, 1.0],
+                    0.0,
                     gutter_layer,
                 ));
             }
             if let Some(rect) = chrome.bottom_gutter {
-                pass.push(RenderCommand::fill_rect(
+                pass.push(RenderCommand::draw_sprite(
+                    "pane-top.9",
                     rect,
-                    [0.04, 0.06, 0.09, 0.46],
+                    [1.0, 1.0, 1.0, 1.0],
+                    0.0,
                     gutter_layer,
                 ));
             }
@@ -18512,7 +18518,11 @@ impl DesktopLauncher {
         let logo_width = 768.0_f32.min((width - 20.0).max(1.0));
         let logo_height = (logo_width / 4.0).max(1.0);
         let logo_x = viewport.x + ((width - logo_width) * 0.5).floor();
-        let logo_y = viewport.y + (height - 6.0 - logo_height).max(0.0).floor();
+        let portrait_logo_offset = if height > width { 30.0 } else { 0.0 };
+        let logo_y = viewport.y
+            + (height - 6.0 - logo_height - portrait_logo_offset)
+                .max(0.0)
+                .floor();
 
         pass.push(RenderCommand::draw_sprite(
             "logo",
@@ -18524,7 +18534,7 @@ impl DesktopLauncher {
         pass.push(RenderCommand::draw_text_styled(
             UPSTREAM_BASELINE,
             RenderPoint::new(viewport.x + width * 0.5, (logo_y - 8.0).max(viewport.y)),
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 0.73],
             12.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
@@ -38798,14 +38808,21 @@ mod tests {
         let info_rect = RenderRect::new(74.0, 906.0, 84.0, 45.0);
         let discord_rect = RenderRect::new(446.0, 906.0, 84.0, 45.0);
 
-        for rect in [
-            left_gutter,
-            right_gutter,
-            bottom_gutter,
-            terminal_rect,
-            info_rect,
-            discord_rect,
+        for (symbol, rect) in [
+            ("pane-right.9", left_gutter),
+            ("pane-left.9", right_gutter),
+            ("pane-top.9", bottom_gutter),
         ] {
+            assert!(commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol: candidate, rect: candidate_rect, .. }
+                        if candidate == symbol && *candidate_rect == rect
+                )
+            }));
+        }
+
+        for rect in [terminal_rect, info_rect, discord_rect] {
             assert!(commands.iter().any(|command| {
                 matches!(
                     command,

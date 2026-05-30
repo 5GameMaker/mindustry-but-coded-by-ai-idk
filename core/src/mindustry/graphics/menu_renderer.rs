@@ -9,13 +9,24 @@ use super::{
     RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
 use crate::mindustry::ui::{
-    upstream_text_button_style_skin, upstream_ui_drawable_alias, UiDrawableAlias, UiDrawableTint,
+    upstream_image_button_style_skin, upstream_text_button_style_skin, upstream_ui_drawable_alias,
+    upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
+pub const MENU_DARKNESS_LAYER: f32 = 90.0;
 pub const MENU_TILE_SIZE: f32 = 8.0;
 pub const MENU_SUBMENU_FADE_IN_SECONDS: f32 = 0.15;
 pub const MENU_SUBMENU_FADE_OUT_SECONDS: f32 = 0.2;
+pub const MENU_DESKTOP_BUTTON_WIDTH: f32 = 230.0;
+pub const MENU_DESKTOP_BUTTON_HEIGHT: f32 = 70.0;
+pub const MENU_DESKTOP_BUTTON_ICON_X: f32 = 30.0;
+pub const MENU_DESKTOP_BUTTON_LABEL_GAP: f32 = 23.0;
+pub const MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE: f32 = 14.0;
+pub const MENU_DESKTOP_BACKGROUND_LAYER: f32 = 100.95;
+pub const MENU_MOBILE_BUTTON_ICON_OFFSET_Y: f32 = 17.0;
+pub const MENU_MOBILE_BUTTON_LABEL_OFFSET_Y: f32 = -25.0;
+pub const MENU_MOBILE_BUTTON_ICON_TEXT_SIZE: f32 = 18.0;
 
 /// Native-safe approximation of Java `Styles.flatToggleMenut`.
 ///
@@ -49,6 +60,14 @@ pub enum MenuFlatToggleMenuState {
     Down,
     Up,
     Checked,
+    Over,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuImageButtonState {
+    Down,
+    Up,
     Over,
     Disabled,
 }
@@ -161,6 +180,119 @@ fn menu_push_flat_toggle_menu_state_background(
             0.0,
             style.drawable_layer,
         ));
+    }
+}
+
+fn menu_image_button_java_drawable_for_state(state: MenuImageButtonState) -> Option<&'static str> {
+    let style = upstream_image_button_style_skin("defaulti")?;
+    match state {
+        MenuImageButtonState::Down => style.down,
+        MenuImageButtonState::Up => style.up,
+        MenuImageButtonState::Over => style.over,
+        MenuImageButtonState::Disabled => style.disabled,
+    }
+}
+
+fn menu_image_button_drawable_for_state(
+    state: MenuImageButtonState,
+) -> Option<&'static UiDrawableAlias> {
+    menu_image_button_java_drawable_for_state(state).and_then(upstream_ui_drawable_alias)
+}
+
+fn menu_push_mobile_image_button_background(
+    commands: &mut Vec<RenderCommand>,
+    rect: RenderRect,
+    state: MenuImageButtonState,
+    alpha_scale: f32,
+) {
+    if let Some(drawable) = menu_image_button_drawable_for_state(state) {
+        let tint = menu_color_with_alpha(drawable.tint.rgba(), alpha_scale);
+        if drawable.tint != UiDrawableTint::Transparent && tint[3] > 0.0 {
+            commands.push(RenderCommand::draw_sprite(
+                drawable.atlas_symbol,
+                rect,
+                tint,
+                0.0,
+                MENU_FLAT_TOGGLE_MENU_STYLE.drawable_layer,
+            ));
+        }
+        return;
+    }
+
+    let color = match state {
+        MenuImageButtonState::Down => [0.18, 0.28, 0.36, 0.92],
+        MenuImageButtonState::Up => [0.055, 0.075, 0.095, 0.88],
+        MenuImageButtonState::Over => [0.10, 0.16, 0.22, 0.90],
+        MenuImageButtonState::Disabled => [0.0, 0.0, 0.0, 0.88],
+    };
+    commands.push(RenderCommand::fill_rect(
+        rect,
+        menu_color_with_alpha(color, alpha_scale),
+        MENU_FLAT_TOGGLE_MENU_STYLE.fill_layer,
+    ));
+}
+
+fn menu_push_black6_panel(commands: &mut Vec<RenderCommand>, rect: RenderRect, alpha_scale: f32) {
+    if let Some(drawable) = upstream_ui_drawable_alias("black6") {
+        commands.push(RenderCommand::draw_sprite(
+            drawable.atlas_symbol,
+            rect,
+            menu_color_with_alpha(drawable.tint.rgba(), alpha_scale),
+            0.0,
+            MENU_DESKTOP_BACKGROUND_LAYER,
+        ));
+    } else {
+        commands.push(RenderCommand::fill_rect(
+            rect,
+            menu_color_with_alpha([0.0, 0.0, 0.0, 0.6], alpha_scale),
+            MENU_DESKTOP_BACKGROUND_LAYER,
+        ));
+    }
+}
+
+fn menu_union_rect(a: RenderRect, b: RenderRect) -> RenderRect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let right = a.right().max(b.right());
+    let top = a.bottom().max(b.bottom());
+    RenderRect::new(x, y, right - x, top - y)
+}
+
+fn menu_push_desktop_panel_backgrounds(
+    commands: &mut Vec<RenderCommand>,
+    buttons: &[MenuButtonPlan],
+    submenu_alpha: f32,
+) {
+    let mut main_bounds: Option<RenderRect> = None;
+    let mut submenu_bounds: Option<RenderRect> = None;
+
+    for button in buttons {
+        let bounds = if button.submenu {
+            &mut submenu_bounds
+        } else {
+            &mut main_bounds
+        };
+        *bounds = Some(bounds.map_or(button.rect, |rect| menu_union_rect(rect, button.rect)));
+    }
+
+    let Some(main_bounds) = main_bounds else {
+        return;
+    };
+    let inferred_stage_height =
+        (main_bounds.y * 2.0 + main_bounds.height).max(main_bounds.bottom());
+    let main_panel = RenderRect::new(main_bounds.x, 0.0, main_bounds.width, inferred_stage_height);
+    menu_push_black6_panel(commands, main_panel, 1.0);
+
+    if let Some(submenu_bounds) = submenu_bounds {
+        if submenu_alpha > f32::EPSILON {
+            let submenu_panel = RenderRect::new(
+                submenu_bounds.x,
+                0.0,
+                submenu_bounds.width,
+                inferred_stage_height,
+            );
+            menu_push_black6_panel(commands, submenu_panel, submenu_alpha);
+        }
     }
 }
 
@@ -425,6 +557,26 @@ impl MenuButtonRole {
     pub const fn has_desktop_submenu(self) -> bool {
         matches!(self, Self::Play | Self::Database)
     }
+
+    pub const fn icon_name(self, mobile: bool) -> Option<&'static str> {
+        match self {
+            Self::Play | Self::Campaign => Some("play"),
+            Self::Join => Some("add"),
+            Self::CustomGame if mobile => Some("rightOpenOut"),
+            Self::CustomGame => Some("terrain"),
+            Self::LoadGame => Some("download"),
+            Self::Database => Some("menu"),
+            Self::Schematics => Some("paste"),
+            Self::ContentDatabase | Self::Mods => Some("book"),
+            Self::TechTree => Some("tree"),
+            Self::About => Some("info"),
+            Self::Editor => Some("terrain"),
+            Self::Workshop => Some("steam"),
+            Self::Settings => Some("settings"),
+            Self::Quit => Some("exit"),
+            Self::Custom(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -461,6 +613,16 @@ impl MenuButtonPlan {
             MenuFlatToggleMenuState::Over
         } else {
             MenuFlatToggleMenuState::Up
+        }
+    }
+
+    pub const fn image_button_state(&self) -> MenuImageButtonState {
+        if self.pressed {
+            MenuImageButtonState::Down
+        } else if self.hovered {
+            MenuImageButtonState::Over
+        } else {
+            MenuImageButtonState::Up
         }
     }
 }
@@ -503,7 +665,10 @@ impl MenuUiPlan {
 
     pub fn to_render_commands(&self) -> Vec<RenderCommand> {
         let style = MENU_FLAT_TOGGLE_MENU_STYLE;
-        let mut commands = Vec::with_capacity(self.buttons.len() * 3);
+        let mut commands = Vec::with_capacity(self.buttons.len() * 4 + 2);
+        if !self.mobile {
+            menu_push_desktop_panel_backgrounds(&mut commands, &self.buttons, self.submenu_alpha);
+        }
         for button in &self.buttons {
             let alpha = if button.submenu {
                 self.submenu_alpha
@@ -513,26 +678,92 @@ impl MenuUiPlan {
             if alpha <= f32::EPSILON {
                 continue;
             }
-            let state = button.flat_toggle_menu_state();
-            menu_push_flat_toggle_menu_state_background(
-                &mut commands,
-                button.rect,
-                state,
-                style,
-                alpha,
-            );
+            if self.mobile {
+                menu_push_mobile_image_button_background(
+                    &mut commands,
+                    button.rect,
+                    button.image_button_state(),
+                    alpha,
+                );
+            } else {
+                let state = button.flat_toggle_menu_state();
+                menu_push_flat_toggle_menu_state_background(
+                    &mut commands,
+                    button.rect,
+                    state,
+                    style,
+                    alpha,
+                );
+            }
+            let icon_name = button.role.icon_name(self.mobile);
+            if let Some(icon_name) = icon_name {
+                let icon = menu_icon_text(icon_name);
+                let icon_point = if self.mobile {
+                    RenderPoint::new(
+                        button.rect.center().x,
+                        button.rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y,
+                    )
+                } else {
+                    RenderPoint::new(
+                        button.rect.x + MENU_DESKTOP_BUTTON_ICON_X,
+                        button.rect.center().y,
+                    )
+                };
+                commands.push(RenderCommand::draw_text_styled(
+                    icon,
+                    icon_point,
+                    menu_color_with_alpha(style.text_color, alpha),
+                    if self.mobile {
+                        MENU_MOBILE_BUTTON_ICON_TEXT_SIZE
+                    } else {
+                        MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE
+                    },
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    style.text_layer,
+                ));
+            }
+            let (label_point, label_style) = if self.mobile {
+                (
+                    RenderPoint::new(
+                        button.rect.center().x,
+                        button.rect.center().y + MENU_MOBILE_BUTTON_LABEL_OFFSET_Y,
+                    ),
+                    style.text_style,
+                )
+            } else if icon_name.is_some() {
+                (
+                    RenderPoint::new(
+                        button.rect.x + MENU_DESKTOP_BUTTON_ICON_X + MENU_DESKTOP_BUTTON_LABEL_GAP,
+                        button.rect.center().y,
+                    ),
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                )
+            } else {
+                (button.rect.center(), style.text_style)
+            };
             commands.push(RenderCommand::draw_text_styled(
                 button.label.as_str(),
-                button.rect.center(),
+                label_point,
                 menu_color_with_alpha(style.text_color, alpha),
                 style.text_size(self.mobile),
                 0.0,
-                style.text_style,
+                label_style,
                 style.text_layer,
             ));
         }
         commands
     }
+}
+
+fn menu_icon_text(icon_name: &str) -> String {
+    upstream_ui_icon_glyph_string(icon_name).unwrap_or_else(|| icon_name.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -678,10 +909,14 @@ impl MenuRenderCommand {
                 ]
             }
             Self::DrawDarkness {
-                alpha: _,
-                width: _,
-                height: _,
-            } => Vec::new(),
+                alpha,
+                width,
+                height,
+            } => vec![RenderCommand::fill_rect(
+                RenderRect::new(0.0, 0.0, width, height),
+                [0.0, 0.0, 0.0, alpha.clamp(0.0, 1.0)],
+                MENU_DARKNESS_LAYER,
+            )],
         }
     }
 }
@@ -1374,8 +1609,8 @@ fn menu_desktop_ui_plan(
     desktop_workshop_enabled: bool,
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
-    let button_width = 230.0;
-    let button_height = 70.0;
+    let button_width = MENU_DESKTOP_BUTTON_WIDTH;
+    let button_height = MENU_DESKTOP_BUTTON_HEIGHT;
     let gap = 0.0;
     let mut main_roles = vec![
         MenuButtonRole::Play,
@@ -1474,11 +1709,7 @@ fn menu_desktop_ui_plan(
 }
 
 fn menu_mobile_button_entry(role: MenuButtonRole) -> (MenuButtonRole, String, bool) {
-    (
-        role,
-        role.label().to_string(),
-        role == MenuButtonRole::Campaign,
-    )
+    (role, role.label().to_string(), false)
 }
 
 fn menu_mobile_custom_entry(
@@ -1757,17 +1988,15 @@ mod tests {
             |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "CAMPAIGN")
         ));
 
-        assert!(
-            borrowed.commands.iter().all(|command| {
-                !matches!(
-                    command,
-                    RenderCommand::FillRect { color, layer, .. }
-                        if *color == [0.0, 0.0, 0.0, MENU_DARKNESS]
-                            && (*layer - 100.0).abs() < f32::EPSILON
-                )
-            }),
-            "menu darkness stays in the logical Java-order plan, but the current native-safe fallback pre-darkens terrain instead of drawing an alpha fullscreen quad"
-        );
+        assert!(borrowed.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::FillRect { rect, color, layer }
+                    if *rect == RenderRect::new(0.0, 0.0, 1920.0, 1080.0)
+                        && *color == [0.0, 0.0, 0.0, MENU_DARKNESS]
+                        && (*layer - MENU_DARKNESS_LAYER).abs() < f32::EPSILON
+            )
+        }));
     }
 
     #[test]
@@ -1898,6 +2127,41 @@ mod tests {
     }
 
     #[test]
+    fn menu_ui_plan_desktop_draws_black6_main_and_submenu_panels_like_java_tables() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        assert!(state.select_desktop_root(MenuButtonRole::Database));
+
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        });
+        let commands = plan.ui.to_render_commands();
+
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, tint, layer, .. }
+                    if symbol == "whiteui"
+                        && *rect == RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0)
+                        && (tint[3] - UiDrawableTint::Black6.rgba()[3]).abs() < 0.0001
+                        && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, tint, layer, .. }
+                    if symbol == "whiteui"
+                        && *rect == RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0)
+                        && (tint[3] - UiDrawableTint::Black6.rgba()[3] * plan.ui.submenu_alpha).abs() < 0.0001
+                        && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+            )
+        }));
+    }
+
+    #[test]
     fn menu_ui_plan_mobile_matches_upstream_portrait_grid_geometry() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(true, 9));
         let input = MenuFrameInput {
@@ -1927,7 +2191,7 @@ mod tests {
             ]
         );
         assert!(plan.ui.buttons.iter().all(|button| !button.submenu));
-        assert!(plan.ui.buttons[0].selected);
+        assert!(plan.ui.buttons.iter().all(|button| !button.selected));
         assert_eq!(
             plan.ui.buttons[0].rect,
             RenderRect::new(235.0, 0.0, 120.0, 120.0)
@@ -1990,7 +2254,7 @@ mod tests {
             ]
         );
         assert!(plan.ui.buttons.iter().all(|button| !button.submenu));
-        assert!(plan.ui.buttons[0].selected);
+        assert!(plan.ui.buttons.iter().all(|button| !button.selected));
         assert_eq!(
             plan.ui.buttons[0].rect,
             RenderRect::new(385.0, 60.0, 120.0, 120.0)
@@ -2159,6 +2423,25 @@ mod tests {
                 RenderCommand::DrawText { text, .. } if text == "PLAY"
             )
         }));
+        let play_icon = menu_icon_text("play");
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, position, style, .. }
+                    if text == &play_icon
+                        && (position.x - (rect.x + MENU_DESKTOP_BUTTON_ICON_X)).abs() < f32::EPSILON
+                        && style.horizontal_align == RenderTextAlign::Center
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, position, style, .. }
+                    if text == "PLAY"
+                        && (position.x - (rect.x + MENU_DESKTOP_BUTTON_ICON_X + MENU_DESKTOP_BUTTON_LABEL_GAP)).abs() < f32::EPSILON
+                        && style.horizontal_align == RenderTextAlign::Start
+            )
+        }));
     }
 
     #[test]
@@ -2230,6 +2513,98 @@ mod tests {
                     rect: sprite_rect,
                     ..
                 } if symbol == "flat-down-base.9" && *sprite_rect == rect
+            )
+        }));
+    }
+
+    #[test]
+    fn menu_button_roles_expose_upstream_menu_fragment_icons() {
+        assert_eq!(MenuButtonRole::Play.icon_name(false), Some("play"));
+        assert_eq!(MenuButtonRole::Database.icon_name(false), Some("menu"));
+        assert_eq!(MenuButtonRole::Join.icon_name(false), Some("add"));
+        assert_eq!(MenuButtonRole::CustomGame.icon_name(false), Some("terrain"));
+        assert_eq!(
+            MenuButtonRole::CustomGame.icon_name(true),
+            Some("rightOpenOut")
+        );
+        assert_eq!(MenuButtonRole::LoadGame.icon_name(true), Some("download"));
+        assert_eq!(MenuButtonRole::Schematics.icon_name(false), Some("paste"));
+        assert_eq!(
+            MenuButtonRole::ContentDatabase.icon_name(false),
+            Some("book")
+        );
+        assert_eq!(MenuButtonRole::About.icon_name(false), Some("info"));
+        assert_eq!(MenuButtonRole::Workshop.icon_name(false), Some("steam"));
+        assert_eq!(MenuButtonRole::Quit.icon_name(true), Some("exit"));
+        assert_eq!(MenuButtonRole::Custom(0).icon_name(false), None);
+
+        for icon in [
+            "play",
+            "menu",
+            "add",
+            "terrain",
+            "rightOpenOut",
+            "download",
+            "paste",
+            "book",
+            "info",
+            "steam",
+            "settings",
+            "exit",
+        ] {
+            assert!(
+                upstream_ui_icon_glyph_string(icon).is_some(),
+                "upstream Icon.{icon} glyph should be registered"
+            );
+        }
+    }
+
+    #[test]
+    fn menu_mobile_buttons_render_icon_above_label_like_mobile_button() {
+        let rect = RenderRect::new(30.0, 40.0, 120.0, 120.0);
+        let plan = MenuUiPlan {
+            mobile: true,
+            submenu_alpha: 0.0,
+            buttons: vec![MenuButtonPlan {
+                role: MenuButtonRole::CustomGame,
+                label: "CUSTOM GAME".to_string(),
+                rect,
+                selected: false,
+                hovered: false,
+                pressed: false,
+                submenu: false,
+            }],
+        };
+
+        let commands = plan.to_render_commands();
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: sprite_rect,
+                    ..
+                } if symbol == "button.9" && *sprite_rect == rect
+            )
+        }));
+        let custom_icon = menu_icon_text("rightOpenOut");
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, position, style, .. }
+                    if text == &custom_icon
+                        && (position.x - rect.center().x).abs() < f32::EPSILON
+                        && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y)).abs() < f32::EPSILON
+                        && style.horizontal_align == RenderTextAlign::Center
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, position, style, .. }
+                    if text == "CUSTOM GAME"
+                        && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_LABEL_OFFSET_Y)).abs() < f32::EPSILON
+                        && style.horizontal_align == RenderTextAlign::Center
             )
         }));
     }

@@ -19012,3 +19012,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Database 的 icon 仍是内容 cell 骨架，真实 `UnlockableContent.uiIcon`/字体/tooltip 链路仍待补齐；
   - 主页面完整 UI 还必须继续推进 CustomGame/Schematics/TechTree/Editor/Mods 等仍 pending 的路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 534. MenuFragment 主菜单壳层继续对齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **55.2%**，仍未达到完整可玩；继续优先前端/UI，目标是减少黑屏/占位感并按 Java `MenuFragment` 还原主菜单外观。
+- Java 对照证据：
+  - `MenuFragment.buildDesktop()` 的主菜单和 submenu 都是 `Styles.black6` 竖向 table；
+  - `MenuFragment.buildMobile()` 使用 `MobileButton extends ImageButton`，背景来自默认 ImageButton skin，而不是 desktop `flatToggleMenut`；
+  - 菜单世界绘制后会 `Draw.alpha(menuDarkness)` 画 fullscreen 暗化层；
+  - mobile gutter 使用 `paneRight/paneLeft/paneTop` drawable；
+  - logo 在 portrait 下移 `Scl.scl(30f)`，version 文本是半透明白。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增桌面 `black6` 主菜单面板和 submenu 面板渲染，按按钮列推导全屏高 table 区域；
+    - `DrawDarkness` 不再空实现，输出 fullscreen alpha 黑色 overlay；
+    - mobile 菜单按钮背景改走上游 `defaulti` ImageButton skin（`button/buttonDown/buttonOver/buttonDisabled`）；
+    - mobile 默认不再把 Campaign 标成 checked，避免把 ImageButton 当 desktop toggle；
+    - 保留已有 `Icon.*` glyph 文本链路，并补充 black6 panel / defaulti background / darkness 回归测试。
+  - `desktop/src/lib.rs`
+    - mobile gutter 从填充色改为原版 `pane-right.9`、`pane-left.9`、`pane-top.9` sprite；
+    - logo 在 portrait viewport 下按原版下移 30px；
+    - version/baseline 文本 alpha 调整为半透明白。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_mobile_terminal_info_and_gutter_chrome --lib`
+  - `cargo test -p mindustry-desktop menu_chrome --lib`
+- 仍未完成：
+  - `fast_menu_render_pass_from_plan()` 和 `startup_menu_preview_render_pass()` 仍有明显非原版占位壳，后续应优先移除或改成真实 MenuRenderer 输出；
+  - logo/version 仍使用 `UPSTREAM_BASELINE`，还未完全接 `Version.combined()` 与 build=-1 橙色分支；
+  - desktop/mobile 按钮文字仍是当前 Rust 硬编码英文大写，后续必须接入 bundle/localization；
+  - chrome 按钮仍有自绘 fill/stroke 近似，未完全等同 Java Scene2D skin；
+  - 未达到完整可玩，不能宣告目标完成。
