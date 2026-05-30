@@ -18189,3 +18189,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - dialog/widget shell 对 `black8/black6/black5/black3/grayPanel/flatOver/accentDrawable` 等 tint 语义的消费面仍需扩大；
   - 原版 Settings/Mods/Database/TechTree/Editor 等页面仍未完整 Scene2D 等价实现；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 506. 主菜单 flatToggleMenut 渲染改用 UI style registry
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.2%**，仍未达到完整可玩；继续把主菜单从纯色 fallback 推向原版 `MenuFragment.buttons(... Styles.flatToggleMenut ...)` 的统一 style/drawable 驱动。
+- 问题背景：
+  - Rust `MenuRenderer` 之前虽然标注为 `Styles.flatToggleMenut` approximation，但实际按钮背景仍主要由 hard-coded fill 颜色驱动；
+  - 505 已补齐 `flatToggleMenut` 的 core style 数据和 drawable alias，本轮把菜单按钮渲染切到该 registry，减少独立 fallback 逻辑。
+- 本轮主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - `UiDrawableTint` 新增 `rgba()`，为 renderer 消费 `black/black9/black6/flatOver/accentDrawable/none` 等 tint 提供统一颜色出口；
+    - `UPSTREAM_UI_DRAWABLE_ALIASES` 新增 `clear -> clear`，用于 `flatToggleMenut.up` 对齐上游 `Styles.clear`。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 引入 `upstream_text_button_style_skin("flatToggleMenut")` 和 `upstream_ui_drawable_alias(...)`；
+    - 新增 `menu_flat_toggle_menu_java_drawable_for_state(...)` / `menu_flat_toggle_menu_drawable_for_state(...)`；
+    - `MenuUiPlan::to_render_commands()` 改为优先用 `flatToggleMenut` 状态 drawable 生成 sprite/tint 命令，只有 registry 缺失时才回退旧 fill/drawable fallback；
+    - 新增测试确认 Up/Down/Checked/Over/Disabled 分别解析到 `clear/flatDown/flatDown/flatOver/black`，并验证 selected 仍绘制 `flat-down-base.9`。
+- 迁移意义：
+  - 主菜单按钮开始消费 `Styles.java` 等价数据，而不是独立硬编码；
+  - up 状态对齐 `clear`，selected/down 对齐 `flat-down-base.9`，over/disabled 可通过 `whiteui + tint` 表达；
+  - 后续把其它 widget/dialog 接入 `UiDrawableTint::rgba()` 时可以复用同一 tint 出口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_flat_toggle --lib`
+  - `cargo test -p mindustry-core styles --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 主菜单 layout 还不是完整 Scene2D `MenuFragment.buildDesktop/buildMobile` 逐项还原；
+  - hover/animation/fadeInMenu/fadeOutMenu/currentMenu 行为仍需继续补齐；
+  - 真实字体 glyph atlas 仍未替换 placeholder；
+  - 未达到完整可玩，不能宣告目标完成。

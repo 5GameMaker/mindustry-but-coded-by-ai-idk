@@ -8,6 +8,9 @@ use super::{
     RenderCamera, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
     RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
+use crate::mindustry::ui::{
+    upstream_text_button_style_skin, upstream_ui_drawable_alias, UiDrawableAlias, UiDrawableTint,
+};
 
 pub const MENU_DARKNESS: f32 = 0.3;
 pub const MENU_TILE_SIZE: f32 = 8.0;
@@ -99,6 +102,62 @@ impl MenuFlatToggleMenuStyle {
         } else {
             self.desktop_text_size
         }
+    }
+}
+
+fn menu_flat_toggle_menu_java_drawable_for_state(
+    state: MenuFlatToggleMenuState,
+) -> Option<&'static str> {
+    let style = upstream_text_button_style_skin("flatToggleMenut")?;
+    match state {
+        MenuFlatToggleMenuState::Down => style.down,
+        MenuFlatToggleMenuState::Up => style.up,
+        MenuFlatToggleMenuState::Checked => style.checked.or(style.down),
+        MenuFlatToggleMenuState::Over => style.over,
+        MenuFlatToggleMenuState::Disabled => style.disabled,
+    }
+}
+
+fn menu_flat_toggle_menu_drawable_for_state(
+    state: MenuFlatToggleMenuState,
+) -> Option<&'static UiDrawableAlias> {
+    menu_flat_toggle_menu_java_drawable_for_state(state).and_then(upstream_ui_drawable_alias)
+}
+
+fn menu_push_flat_toggle_menu_state_background(
+    commands: &mut Vec<RenderCommand>,
+    rect: RenderRect,
+    state: MenuFlatToggleMenuState,
+    style: MenuFlatToggleMenuStyle,
+) {
+    if let Some(drawable) = menu_flat_toggle_menu_drawable_for_state(state) {
+        let tint = drawable.tint.rgba();
+        if drawable.tint != UiDrawableTint::Transparent && tint[3] > 0.0 {
+            commands.push(RenderCommand::draw_sprite(
+                drawable.atlas_symbol,
+                rect,
+                tint,
+                0.0,
+                style.drawable_layer,
+            ));
+        }
+        return;
+    }
+
+    commands.push(RenderCommand::fill_rect(
+        rect,
+        style.fill_for(state),
+        style.fill_layer,
+    ));
+    let drawable = style.drawable_for(state);
+    if !drawable.is_empty() {
+        commands.push(RenderCommand::draw_sprite(
+            drawable,
+            rect,
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            style.drawable_layer,
+        ));
     }
 }
 
@@ -419,21 +478,7 @@ impl MenuUiPlan {
         let mut commands = Vec::with_capacity(self.buttons.len() * 3);
         for button in &self.buttons {
             let state = button.flat_toggle_menu_state();
-            commands.push(RenderCommand::fill_rect(
-                button.rect,
-                style.fill_for(state),
-                style.fill_layer,
-            ));
-            let drawable = style.drawable_for(state);
-            if !drawable.is_empty() {
-                commands.push(RenderCommand::draw_sprite(
-                    drawable,
-                    button.rect,
-                    [1.0, 1.0, 1.0, 1.0],
-                    0.0,
-                    style.drawable_layer,
-                ));
-            }
+            menu_push_flat_toggle_menu_state_background(&mut commands, button.rect, state, style);
             commands.push(RenderCommand::draw_text_styled(
                 button.label.as_str(),
                 button.rect.center(),
@@ -1905,6 +1950,42 @@ mod tests {
                 .with_integer_position(true)
                 .with_outline(true)
         );
+    }
+
+    #[test]
+    fn menu_flat_toggle_menu_resolves_java_style_drawables_from_ui_registry() {
+        assert_eq!(
+            menu_flat_toggle_menu_java_drawable_for_state(MenuFlatToggleMenuState::Up),
+            Some("clear")
+        );
+        assert_eq!(
+            menu_flat_toggle_menu_java_drawable_for_state(MenuFlatToggleMenuState::Down),
+            Some("flatDown")
+        );
+        assert_eq!(
+            menu_flat_toggle_menu_java_drawable_for_state(MenuFlatToggleMenuState::Checked),
+            Some("flatDown")
+        );
+        assert_eq!(
+            menu_flat_toggle_menu_java_drawable_for_state(MenuFlatToggleMenuState::Over),
+            Some("flatOver")
+        );
+        assert_eq!(
+            menu_flat_toggle_menu_java_drawable_for_state(MenuFlatToggleMenuState::Disabled),
+            Some("black")
+        );
+
+        let checked =
+            menu_flat_toggle_menu_drawable_for_state(MenuFlatToggleMenuState::Checked).unwrap();
+        assert_eq!(checked.atlas_symbol, "flat-down-base.9");
+        assert_eq!(checked.tint, UiDrawableTint::None);
+
+        let over = menu_flat_toggle_menu_drawable_for_state(MenuFlatToggleMenuState::Over).unwrap();
+        assert_eq!(over.atlas_symbol, "whiteui");
+        assert_eq!(over.tint, UiDrawableTint::FlatOver);
+
+        let up = menu_flat_toggle_menu_drawable_for_state(MenuFlatToggleMenuState::Up).unwrap();
+        assert_eq!(up.atlas_symbol, "clear");
     }
 
     #[test]

@@ -54,6 +54,25 @@ pub enum UiDrawableTint {
     DarkestestGray,
 }
 
+impl UiDrawableTint {
+    pub const fn rgba(self) -> [f32; 4] {
+        match self {
+            Self::None => [1.0, 1.0, 1.0, 1.0],
+            Self::Black => [0.0, 0.0, 0.0, 1.0],
+            Self::Black9 => [0.0, 0.0, 0.0, 0.9],
+            Self::Black8 => [0.0, 0.0, 0.0, 0.8],
+            Self::Black6 => [0.0, 0.0, 0.0, 0.6],
+            Self::Black5 => [0.0, 0.0, 0.0, 0.5],
+            Self::Black3 => [0.0, 0.0, 0.0, 0.3],
+            Self::Transparent => [1.0, 1.0, 1.0, 0.0],
+            Self::FlatOver => [1.0, 1.0, 1.0, 0.18],
+            Self::Accent => [0.48, 0.74, 0.86, 1.0],
+            Self::DarkestGray => [0.12, 0.13, 0.16, 1.0],
+            Self::DarkestestGray => [0.08, 0.09, 0.11, 1.0],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UiDrawableAlias {
     pub java_name: &'static str,
@@ -503,6 +522,12 @@ pub const UPSTREAM_UI_DRAWABLE_ALIASES: &[UiDrawableAlias] = &[
         "whiteui",
         "sprites/ui/whiteui.png",
         UiDrawableTint::Black,
+    ),
+    UiDrawableAlias::new(
+        "clear",
+        "clear",
+        "sprites/ui/clear.png",
+        UiDrawableTint::None,
     ),
     UiDrawableAlias::new(
         "black9",
@@ -1163,6 +1188,16 @@ mod tests {
         assert_eq!(black9.atlas_symbol, "whiteui");
         assert_eq!(black9.source_path, "sprites/ui/whiteui.png");
         assert_eq!(black9.tint, UiDrawableTint::Black9);
+        assert_eq!(black9.tint.rgba(), [0.0, 0.0, 0.0, 0.9]);
+
+        let black6 = upstream_ui_drawable_alias("black6").unwrap();
+        assert_eq!(black6.atlas_symbol, "whiteui");
+        assert_eq!(black6.tint.rgba(), [0.0, 0.0, 0.0, 0.6]);
+
+        let clear = upstream_ui_drawable_alias("clear").unwrap();
+        assert_eq!(clear.atlas_symbol, "clear");
+        assert_eq!(clear.source_path, "sprites/ui/clear.png");
+        assert_eq!(clear.tint.rgba(), [1.0, 1.0, 1.0, 1.0]);
 
         let window = upstream_ui_drawable_alias("windowEmpty").unwrap();
         assert_eq!(window.atlas_symbol, "window-empty.9");
