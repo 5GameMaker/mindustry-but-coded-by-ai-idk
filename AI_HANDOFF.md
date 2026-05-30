@@ -12656,3 +12656,26 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 把 `FireComp::draw_plan(...)` 从实体集合接入真实 entity/world render aggregation 与 light pass，避免长期停留在 plan；
   2. 接入真实 atlas metadata，替换当前 `DRAW_SIZE=25` 的过渡表达；
   3. 继续推进 Bullet/Weather/Effect/Puddle 的 plan→RenderCommand/RenderPass 桥接，再补 primitive mesh path 与 UI pass。
+
+### 2026-05-30：Fire snapshot 接入 graphics frame
+
+- 当前整体完成度：约 **40.5%**。
+- 已完成：
+  - `GameRuntime::tick_client_fire_snapshot_entities(...)` 会用 `FireUpdateContext { net_client: true, ... }` 推进客户端 fire snapshot 的 warmup/animation/time；
+  - `DesktopLauncher::update()` 已调用该 tick，避免网络同步生成的 fire 因 transient warmup 为 0 长期不可见；
+  - 默认 atlas 计划加入 `sprites/blocks/fire/fire0.png` 到 `fire39.png`；
+  - `DesktopLauncher::fire_snapshot_render_pass()` 将 fire sprite 接入 `RenderPassKind::Overlay`；
+  - `DesktopLauncher::fire_snapshot_light_render_pass()` 将 fire light 接入 `LightRendererPlan` / `RenderPassKind::Lighting`；
+  - `graphics_frame_for_render()` 已同时推入 Fire sprite pass 和 light pass；
+  - `core/src/mindustry/entities/mod.rs` 已导出 `FireDrawPlan`。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core game_runtime_ticks_client_fire_snapshot_entities_for_render`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_fire_snapshot_entities_into_overlay_and_light_passes --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 建统一 entity/world render pass 或排序策略，把 Fire 从 overlay 过渡到更接近 Java `Layer.effect` 的实体绘制链；
+  2. 为 `FireComp::DRAW_SIZE` 接入真实 atlas region metadata；
+  3. 继续推进 Bullet/Weather/Puddle/Unit 的 snapshot/draw plan 到 `RenderCommand`/`RenderPass` 主链路。

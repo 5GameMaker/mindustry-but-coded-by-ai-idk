@@ -29,9 +29,9 @@ use crate::mindustry::{
         comp::{
             BuildingComp, BuildingTetherComp, BuildingTetherRef, BulletComp, CargoAiRuntimeState,
             ChildParent, DecalColor, DecalComp, DecalRegion, EffectRenderInput, EffectStateComp,
-            FireComp, LaunchCoreBlock, LaunchCoreComp, LegsComp, LegsDestroyPlan,
-            LegsDestroyRegions, PayloadComp, PayloadKind, PayloadState, PuddleComp, PuddleTile,
-            UnitComp, UnitControllerState, WorldLabelComp,
+            FireComp, FireUpdateContext, LaunchCoreBlock, LaunchCoreComp, LegsComp,
+            LegsDestroyPlan, LegsDestroyRegions, PayloadComp, PayloadKind, PayloadState,
+            PuddleComp, PuddleTile, UnitComp, UnitControllerState, WorldLabelComp,
         },
         entity_class_id, entity_class_kind, standard_effect, standard_effect_id, Effect,
         EntityClassKind, Fires, PuddleLiquidInfo, PuddleParticleEffectEvent, PuddleUpdateEvent,
@@ -3944,6 +3944,29 @@ impl GameRuntime {
             .or_insert_with(|| FireComp::new(sync.x, sync.y, sync.lifetime));
         fire.apply_sync_wire(sync);
         true
+    }
+
+    pub fn tick_client_fire_snapshot_entities(
+        &mut self,
+        delta: f32,
+        headless: bool,
+        env_water: f32,
+    ) -> usize {
+        let mut ticked = 0;
+        for fire in self.client_fire_snapshot_entities.values_mut() {
+            if fire.removed {
+                continue;
+            }
+            fire.update(FireUpdateContext {
+                delta,
+                headless,
+                env_water,
+                net_client: true,
+                puddle_flammability: 0.0,
+            });
+            ticked += 1;
+        }
+        ticked
     }
 
     pub fn apply_client_bullet_sync_wire(
@@ -23213,6 +23236,25 @@ mod tests {
 
         let hidden = runtime.apply_client_hidden_snapshot_ids(&[7001]);
         assert_eq!(hidden.hidden_existing_entities, 1);
+    }
+
+    #[test]
+    fn game_runtime_ticks_client_fire_snapshot_entities_for_render() {
+        let mut runtime = GameRuntime::default();
+        runtime
+            .client_fire_snapshot_entities
+            .insert(7002, FireComp::new(16.0, 24.0, 120.0));
+
+        assert_eq!(
+            runtime.tick_client_fire_snapshot_entities(1.0, false, 0.0),
+            1
+        );
+
+        let fire = runtime.client_fire_snapshot_entities.get(&7002).unwrap();
+        assert_eq!(fire.warmup, 1.0);
+        assert_eq!(fire.animation, 1.0 / FireComp::TICKS_PER_FRAME);
+        assert_eq!(fire.time, 1.0);
+        assert!(!fire.removed);
     }
 
     #[test]

@@ -18,7 +18,7 @@ use mindustry_core::mindustry::core::{
     GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
-use mindustry_core::mindustry::entities::comp::{BuildingComp, DecalColor};
+use mindustry_core::mindustry::entities::comp::{BuildingComp, DecalColor, FireComp};
 use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
@@ -10005,7 +10005,10 @@ fn default_desktop_texture_atlas(
             .chain(content_loader.blocks().map(|block| {
                 let name = &block.base().name;
                 format!("sprites/blocks/{}.png", name)
-            })),
+            }))
+            .chain(
+                (0..FireComp::FRAMES).map(|frame| format!("sprites/blocks/fire/fire{frame}.png")),
+            ),
     )
 }
 
@@ -10382,6 +10385,8 @@ impl DesktopLauncher {
         self.sync_remote_preview_plan_packets(now_millis);
         self.rebuild_other_player_preview_overlays_at(now_millis, 1.0, None);
         self.runtime.tick_client_move_effect_abilities(1.0, false);
+        self.runtime
+            .tick_client_fire_snapshot_entities(1.0, false, 0.0);
         self.tick_accelerator_launch_animations_for_render(1.0);
         let mut puddle_particle_rand_state = self.puddle_particle_rand_state;
         self.runtime
@@ -11346,6 +11351,44 @@ impl DesktopLauncher {
         (!pass.commands.is_empty()).then_some(pass)
     }
 
+    fn fire_snapshot_light_render_pass(&self) -> Option<RenderPass> {
+        let circle_lights = self
+            .runtime
+            .client_fire_snapshot_entities
+            .iter()
+            .filter(|(entity_id, fire)| {
+                !fire.removed && !self.runtime.client_hidden_entity_ids.contains(entity_id)
+            })
+            .map(|(_, fire)| {
+                fire.draw_plan(self.game_state.tick as f32)
+                    .light_primitive()
+            })
+            .filter(|primitive| primitive.radius > f32::EPSILON && primitive.opacity > 0.0)
+            .collect::<Vec<_>>();
+        if circle_lights.is_empty() {
+            return None;
+        }
+
+        LightRendererPlan {
+            circle_lights,
+            commands: Vec::new(),
+        }
+        .to_render_pass()
+    }
+
+    fn fire_snapshot_render_pass(&self) -> Option<RenderPass> {
+        let mut pass = RenderPass::new(RenderPassKind::Overlay)
+            .with_order(RenderPassKind::Overlay.default_order());
+        for (entity_id, fire) in &self.runtime.client_fire_snapshot_entities {
+            if fire.removed || self.runtime.client_hidden_entity_ids.contains(entity_id) {
+                continue;
+            }
+            let plan = fire.draw_plan(self.game_state.tick as f32);
+            pass.commands.extend(plan.render_commands());
+        }
+        (!pass.commands.is_empty()).then_some(pass)
+    }
+
     pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
         let plan = self.load_renderer_state.build_plan(input);
         DesktopFrame {
@@ -11374,6 +11417,9 @@ impl DesktopLauncher {
             render_frame.push_pass(light_pass);
         }
         if let Some(light_pass) = self.standard_effect_render_frame().to_light_render_pass() {
+            render_frame.push_pass(light_pass);
+        }
+        if let Some(light_pass) = self.fire_snapshot_light_render_pass() {
             render_frame.push_pass(light_pass);
         }
         let block_renderer = self.block_render_plan(camera, viewport);
@@ -11420,6 +11466,9 @@ impl DesktopLauncher {
             }
         }
         if let Some(pass) = self.standard_effect_render_frame().to_render_pass() {
+            render_frame.push_pass(pass);
+        }
+        if let Some(pass) = self.fire_snapshot_render_pass() {
             render_frame.push_pass(pass);
         }
         if let Some(pass) = self.world_label_render_pass() {
@@ -13211,14 +13260,14 @@ mod tests {
     };
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::ctype::{Content, ContentId};
-    use mindustry_core::mindustry::entities::comp::DecalColor;
+    use mindustry_core::mindustry::entities::comp::{DecalColor, FireComp};
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
         Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
         MinimapCamera, MinimapEntitySnapshot, MinimapFullUpdatePlan, MinimapIndicatorSnapshot,
         MinimapMarkerSnapshot, MinimapOverlayInput, MinimapPlayerSnapshot, MinimapSpawnSnapshot,
         MinimapTextureFramePlan, MinimapTexturePixelUpdate, MinimapTextureSize, MinimapTilePos,
-        PageType, ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor,
+        PageType, Pal, ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor,
         RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan,
         RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind,
         RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
@@ -15032,6 +15081,100 @@ mod tests {
                 .draw_text_commands
                 >= 1
         );
+    }
+
+    #[test]
+    fn desktop_launcher_routes_fire_snapshot_entities_into_overlay_and_light_passes() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut fire = FireComp::new(42.25, 133.75, 120.0);
+        fire.animation = 38.9;
+        fire.warmup = 9.0;
+        launcher
+            .runtime
+            .client_fire_snapshot_entities
+            .insert(7002, fire);
+
+        launcher.update();
+
+        let viewport = RenderViewport::new(0.0, 0.0, 180.0, 180.0);
+        let camera = RenderCamera::new(RenderPoint::new(90.0, 90.0), viewport);
+        let minimap_camera = MinimapCamera::new(90.0, 90.0, 180.0, 180.0);
+        let frame = launcher.graphics_frame_for_render(
+            17,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        assert!(frame.texture_atlas.has("fire39"));
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "fire39")
+                    })
+            })
+            .expect("fire snapshot should emit an overlay sprite pass");
+        let sprite = overlay
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "fire39")
+            })
+            .expect("fire overlay pass should contain fire sprite");
+        match sprite {
+            RenderCommand::DrawSprite {
+                symbol,
+                rect,
+                tint,
+                layer,
+                ..
+            } => {
+                assert_eq!(symbol, "fire39");
+                assert!((rect.center().x - 42.25).abs() <= 2.0);
+                assert!((rect.center().y - 133.75).abs() <= 2.0);
+                assert_eq!(*tint, [1.0, 1.0, 1.0, 0.5]);
+                assert_eq!(*layer, Layer::EFFECT);
+            }
+            other => panic!("expected fire DrawSprite, got {other:?}"),
+        }
+
+        let light_pass = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawCircle { center, .. }
+                            if *center == RenderPoint::new(42.25, 133.75))
+                    })
+            })
+            .expect("fire snapshot should emit a light render pass");
+        match light_pass.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawCircle { center, .. }
+                if *center == RenderPoint::new(42.25, 133.75))
+        }) {
+            Some(RenderCommand::DrawCircle {
+                radius,
+                color,
+                filled,
+                layer,
+                ..
+            }) => {
+                assert!(*radius > 50.0);
+                assert!(*filled);
+                assert_eq!(*layer, 50.0);
+                assert!((color[0] - Pal::LIGHT_FLAME.r).abs() < 0.0001);
+                assert!((color[1] - Pal::LIGHT_FLAME.g).abs() < 0.0001);
+                assert!((color[2] - Pal::LIGHT_FLAME.b).abs() < 0.0001);
+                assert!((color[3] - 0.3).abs() < 0.0001);
+            }
+            other => panic!("expected fire light DrawCircle, got {other:?}"),
+        }
     }
 
     #[test]

@@ -15377,3 +15377,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Fire atlas region 尺寸目前使用 `clipSize()/DRAW_SIZE=25` 的过渡表达，后续应接入真实 atlas metadata；
   - entity/world draw、primitive mesh path、UI pass、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
   - 当前总体迁移约 40.4%，仍未达到完整可玩。
+
+## 417. 最新闭环记录：Fire snapshot 接入 graphics frame
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **40.5%**，仍未达到完整可玩。
+- 本轮主改动：
+  - `core/src/mindustry/core/game_runtime.rs`
+    - 新增 `tick_client_fire_snapshot_entities(...)`，客户端 snapshot 中的 fire 会按 `FireComp::update(... net_client=true)` 推进 warmup/animation/time；
+    - 这对齐 Java 客户端实体在两次网络同步之间仍继续本地 update/draw 的行为，避免同步出来的 Fire 因 transient warmup 永远为 0 而不可见。
+  - `core/src/mindustry/entities/mod.rs`
+    - 导出 `FireDrawPlan`，供更高层 entity/world render aggregation 继续使用。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher::update()` 现在 tick 客户端 fire snapshot；
+    - 默认 texture atlas 增加 `sprites/blocks/fire/fire0.png` 到 `fire39.png`；
+    - 新增 `fire_snapshot_render_pass()`，把 `FireDrawPlan::render_commands()` 接入 `RenderPassKind::Overlay`；
+    - 新增 `fire_snapshot_light_render_pass()`，把 `FireDrawPlan::light_primitive()` 接入 `LightRendererPlan` / `RenderPassKind::Lighting`；
+    - `graphics_frame_for_render()` 同时推入 Fire sprite pass 与 light pass。
+- 迁移意义：
+  - Fire 不再停留在独立 `draw_plan()` helper；客户端 snapshot fire 已进入真实 `DesktopGraphicsFrame` / `RenderFramePlan`；
+  - fire atlas binding、sprite RenderCommand、light pass 均可被 OpenGL backend 后续消费；
+  - 这是 entity/world draw 主链路的第一个小型实体接入样板，后续 Bullet/Weather/Puddle/Unit 应沿类似路径收口。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core game_runtime_ticks_client_fire_snapshot_entities_for_render`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_fire_snapshot_entities_into_overlay_and_light_passes --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Fire draw 仍需进一步接入统一 entity pass/排序策略，而不是长期复用 overlay pass；
+  - Fire region 尺寸仍需从真实 atlas metadata 读取；
+  - primitive mesh path、Bullet/Weather/Puddle/Unit render aggregation、更多 native runtime smoke、Java↔Rust 联机 smoke 仍未完成；
+  - 当前总体迁移约 40.5%，仍未达到完整可玩。

@@ -343,7 +343,7 @@ pub use comp::{CrawlComp, CrawlSolidPred, CrawlType, CrawlUpdateInput};
 pub use comp::{DecalColor, DecalComp, DecalDrawPlan, DecalRegion};
 pub use comp::{EffectRenderInput, EffectStateComp};
 pub use comp::{EntityComp, EntityIoState, EntityLocality};
-pub use comp::{FireComp, FireTile, FireUpdateContext, FireUpdatePlan};
+pub use comp::{FireComp, FireDrawPlan, FireTile, FireUpdateContext, FireUpdatePlan};
 pub use comp::{HealthComp, ItemStackSlot, ItemsComp};
 pub use comp::{HitboxComp, HitboxRect};
 pub use comp::{LaunchCoreBlock, LaunchCoreComp, LaunchCoreDrawPlan, LaunchCoreSmoke};
