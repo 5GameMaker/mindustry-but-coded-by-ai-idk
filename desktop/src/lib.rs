@@ -146,6 +146,10 @@ const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
 const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
 const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 44.0;
+const SCHEMATICS_IMPORT_BUTTON_WIDTH: f32 = 210.0;
+const SCHEMATICS_IMPORT_BUTTON_HEIGHT: f32 = 54.0;
+const SCHEMATICS_SEARCH_BAR_HEIGHT: f32 = 34.0;
+const SCHEMATICS_TAG_HEIGHT: f32 = 42.0;
 const DATABASE_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const DATABASE_TAB_SIZE: f32 = 36.0;
 const DATABASE_CONTENT_CELL_SIZE: f32 = 32.0;
@@ -20041,6 +20045,16 @@ impl DesktopLauncher {
                 panel_height,
             );
         }
+        if route == DesktopMenuRoute::Schematics {
+            let panel_width = (viewport.width * 0.66).clamp(380.0, 740.0);
+            let panel_height = (viewport.height - 130.0).clamp(330.0, 600.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
         Self::active_menu_route_shell_panel_for_viewport(viewport)
     }
 
@@ -20199,6 +20213,64 @@ impl DesktopLauncher {
             panel.y + 38.0,
             panel.width - 56.0,
             (search.y - panel.y - 52.0).max(90.0),
+        )
+    }
+
+    fn schematics_import_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + panel.height - 136.0,
+            SCHEMATICS_IMPORT_BUTTON_WIDTH,
+            SCHEMATICS_IMPORT_BUTTON_HEIGHT,
+        )
+    }
+
+    fn schematics_search_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + panel.height - 202.0,
+            panel.width - 56.0,
+            SCHEMATICS_SEARCH_BAR_HEIGHT,
+        )
+    }
+
+    fn schematics_tags_row_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let search = Self::schematics_search_rect_for_panel(panel);
+        RenderRect::new(
+            panel.x + 28.0,
+            search.y - SCHEMATICS_TAG_HEIGHT - 10.0,
+            panel.width - 56.0,
+            SCHEMATICS_TAG_HEIGHT,
+        )
+    }
+
+    fn schematics_tag_edit_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let row = Self::schematics_tags_row_rect_for_panel(panel);
+        RenderRect::new(
+            row.right() - SCHEMATICS_TAG_HEIGHT,
+            row.y,
+            SCHEMATICS_TAG_HEIGHT,
+            SCHEMATICS_TAG_HEIGHT,
+        )
+    }
+
+    fn schematics_tag_pane_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let row = Self::schematics_tags_row_rect_for_panel(panel);
+        RenderRect::new(
+            row.x + 112.0,
+            row.y,
+            (row.width - 112.0 - SCHEMATICS_TAG_HEIGHT - 8.0).max(80.0),
+            row.height,
+        )
+    }
+
+    fn schematics_grid_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let tags = Self::schematics_tags_row_rect_for_panel(panel);
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + 38.0,
+            panel.width - 56.0,
+            (tags.y - panel.y - 52.0).max(90.0),
         )
     }
 
@@ -20899,6 +20971,124 @@ impl DesktopLauncher {
         pass.push(RenderCommand::draw_text_styled(
             "@maps.none",
             pane.center(),
+            [0.70, 0.78, 0.84, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.032,
+        ));
+    }
+
+    fn push_schematics_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        self.push_settings_text_button(
+            pass,
+            Self::schematics_import_button_rect_for_panel(panel),
+            "@schematic.import",
+            Some("download"),
+            Layer::END_PIXELED + 0.025,
+        );
+
+        let search = Self::schematics_search_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            search,
+            [1.0, 1.0, 1.0, 0.92],
+            0.0,
+            Layer::END_PIXELED + 0.028,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 22.0, search.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.031,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@schematic.search",
+            RenderPoint::new(search.x + 44.0, search.center().y),
+            [0.60, 0.70, 0.78, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.031,
+        ));
+
+        let tags = Self::schematics_tags_row_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_text_styled(
+            "@schematic.tags",
+            RenderPoint::new(tags.x, tags.center().y),
+            [0.72, 0.82, 0.9, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.031,
+        ));
+
+        let tag_pane = Self::schematics_tag_pane_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("black6"),
+            tag_pane,
+            [1.0, 1.0, 1.0, 0.76],
+            0.0,
+            Layer::END_PIXELED + 0.028,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tag_pane,
+            [0.28, 0.38, 0.46, 0.70],
+            1.0,
+            Layer::END_PIXELED + 0.029,
+        ));
+
+        let edit = Self::schematics_tag_edit_button_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            edit,
+            [1.0, 1.0, 1.0, 0.90],
+            0.0,
+            Layer::END_PIXELED + 0.029,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("pencilSmall", "pencilSmall"),
+            edit.center(),
+            [0.82, 0.90, 0.98, 1.0],
+            16.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.032,
+        ));
+
+        let grid = Self::schematics_grid_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            grid,
+            [1.0, 1.0, 1.0, 0.86],
+            0.0,
+            Layer::END_PIXELED + 0.027,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            grid,
+            [0.30, 0.42, 0.50, 0.82],
+            1.0,
+            Layer::END_PIXELED + 0.028,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@none",
+            grid.center(),
             [0.70, 0.78, 0.84, 1.0],
             13.0,
             0.0,
@@ -21616,6 +21806,8 @@ impl DesktopLauncher {
             DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
         ) {
             self.push_map_list_route_page(pass, panel, route);
+        } else if route == DesktopMenuRoute::Schematics {
+            self.push_schematics_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Settings
             && self.settings_dialog_state.page == DesktopSettingsPage::Main
         {
@@ -38365,6 +38557,67 @@ mod tests {
                     if symbol == &pane_symbol && *rect == DesktopLauncher::map_list_pane_rect_for_panel(panel, route)
             )));
         }
+    }
+
+    #[test]
+    fn desktop_launcher_schematics_route_renders_upstream_controls() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dispatch = launcher.dispatch_menu_action(MenuButtonRole::Schematics);
+        assert_eq!(dispatch.route, Some(super::DesktopMenuRoute::Schematics));
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Schematics)
+        );
+
+        let viewport =
+            launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(1280, 720));
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Schematics,
+        );
+        assert!(
+            panel.height > 220.0,
+            "SchematicsDialog should use a large grid-capable panel"
+        );
+        assert_eq!(
+            DesktopLauncher::active_menu_route_shell_primary_rect_for_viewport(
+                viewport,
+                super::DesktopMenuRoute::Schematics
+            ),
+            None
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("schematics route should produce a render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@schematic.import"));
+        assert!(texts.contains(&"@schematic.search"));
+        assert!(texts.contains(&"@schematic.tags"));
+        assert!(texts.contains(&"@none"));
+        assert!(!texts
+            .iter()
+            .any(|text| text.starts_with("pane: schematic grid")));
+
+        let pane_symbol = DesktopLauncher::settings_drawable_symbol("pane");
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol == &pane_symbol && *rect == DesktopLauncher::schematics_grid_rect_for_panel(panel)
+        )));
     }
 
     #[test]
