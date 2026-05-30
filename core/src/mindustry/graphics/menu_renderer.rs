@@ -446,6 +446,7 @@ pub struct MenuButtonPlan {
     pub label: String,
     pub rect: RenderRect,
     pub selected: bool,
+    pub hovered: bool,
     pub submenu: bool,
 }
 
@@ -453,7 +454,7 @@ impl MenuButtonPlan {
     pub const fn flat_toggle_menu_state(&self) -> MenuFlatToggleMenuState {
         if self.selected {
             MenuFlatToggleMenuState::Checked
-        } else if self.submenu {
+        } else if self.hovered {
             MenuFlatToggleMenuState::Over
         } else {
             MenuFlatToggleMenuState::Up
@@ -469,6 +470,13 @@ pub struct MenuUiPlan {
 }
 
 impl MenuUiPlan {
+    pub fn with_hovered_role(mut self, hovered_role: Option<MenuButtonRole>) -> Self {
+        for button in &mut self.buttons {
+            button.hovered = hovered_role == Some(button.role);
+        }
+        self
+    }
+
     pub fn hit_test(&self, x: f32, y: f32) -> Option<MenuButtonRole> {
         self.buttons
             .iter()
@@ -1311,6 +1319,7 @@ fn menu_button_plan(role: MenuButtonRole, rect: RenderRect, selected: bool) -> M
         label: role.label().to_string(),
         rect,
         selected,
+        hovered: false,
         submenu: role.is_submenu(),
     }
 }
@@ -1325,6 +1334,7 @@ fn menu_custom_button_plan(
         label: button.label.clone(),
         rect,
         selected: false,
+        hovered: false,
         submenu: false,
     }
 }
@@ -1339,6 +1349,7 @@ fn menu_mobile_button_plan(
         label: role.label().to_string(),
         rect,
         selected,
+        hovered: false,
         submenu: false,
     }
 }
@@ -2109,6 +2120,7 @@ mod tests {
                 label: "PLAY".to_string(),
                 rect,
                 selected: true,
+                hovered: false,
                 submenu: false,
             }],
         };
@@ -2131,6 +2143,43 @@ mod tests {
             matches!(
                 command,
                 RenderCommand::DrawText { text, .. } if text == "PLAY"
+            )
+        }));
+    }
+
+    #[test]
+    fn menu_ui_plan_hovered_buttons_emit_java_flat_over_drawable() {
+        let rect = RenderRect::new(10.0, 20.0, 230.0, 70.0);
+        let plan = MenuUiPlan {
+            mobile: false,
+            submenu_alpha: 1.0,
+            buttons: vec![MenuButtonPlan {
+                role: MenuButtonRole::Mods,
+                label: "MODS".to_string(),
+                rect,
+                selected: false,
+                hovered: false,
+                submenu: false,
+            }],
+        }
+        .with_hovered_role(Some(MenuButtonRole::Mods));
+
+        assert_eq!(
+            plan.buttons[0].flat_toggle_menu_state(),
+            MenuFlatToggleMenuState::Over
+        );
+        let commands = plan.to_render_commands();
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: sprite_rect,
+                    tint,
+                    ..
+                } if symbol == "whiteui"
+                    && *sprite_rect == rect
+                    && (tint[3] - UiDrawableTint::FlatOver.rgba()[3]).abs() < 0.0001
             )
         }));
     }

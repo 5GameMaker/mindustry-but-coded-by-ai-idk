@@ -15233,7 +15233,8 @@ impl DesktopLauncher {
     }
 
     pub fn menu_frame_for_render(&mut self, input: MenuFrameInput) -> DesktopFrame {
-        let plan = self.menu_renderer_state.render_plan(input);
+        let mut plan = self.menu_renderer_state.render_plan(input);
+        plan.ui = plan.ui.with_hovered_role(self.last_menu_hovered_button);
         DesktopFrame {
             kind: DesktopFrameKind::Menu,
             payload: DesktopFramePayload::Menu(plan),
@@ -18966,7 +18967,8 @@ impl DesktopLauncher {
         viewport: RenderViewport,
     ) -> DesktopGraphicsFrame {
         let input = Self::default_menu_frame_input_for_viewport(viewport);
-        let plan = self.menu_renderer_state.render_plan(input);
+        let mut plan = self.menu_renderer_state.render_plan(input);
+        plan.ui = plan.ui.with_hovered_role(self.last_menu_hovered_button);
         let mut menu_pass = if desktop_fast_menu_enabled() {
             self.fast_menu_render_pass_from_plan(&plan, viewport)
         } else {
@@ -35013,6 +35015,53 @@ mod tests {
             Some(MenuButtonRole::Play)
         );
         assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Play));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_frame_applies_hovered_button_over_drawable() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let mods_rect = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Mods)
+            .expect("menu ui should include MODS")
+            .rect;
+        let mods_center = mods_rect.center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: mods_center.x,
+                y: mods_center.y,
+            }],
+        );
+        assert_eq!(
+            launcher.last_menu_hovered_button,
+            Some(MenuButtonRole::Mods)
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "whiteui" && *rect == mods_rect
+            )
+        }));
     }
 
     #[test]

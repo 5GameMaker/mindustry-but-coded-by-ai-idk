@@ -18356,3 +18356,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - submenu 仍未实现真正的 Scene2D `Actions.run(() -> clearChildren())` 回调对象；
   - hover/down/currentMenu 细颗粒输入状态、动画插值 `Interp.fade`、真实 layout table 重建仍需补齐；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 512. MenuFragment hover/over 样式接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.8%**，仍未达到完整可玩；继续对照 `Styles.flatToggleMenut`，把主菜单按钮的 `over` 状态从静态占位改为真实 cursor hover 驱动。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuButtonPlan` 新增 `hovered` 字段；
+    - `flat_toggle_menu_state()` 改为 `selected -> Checked`、`hovered -> Over`、默认 `Up`，不再把所有 submenu 子按钮错误地固定为 `Over`；
+    - `MenuUiPlan::with_hovered_role()` 统一给按钮写入 hover 状态；
+    - 新增测试验证 hover 按钮会发出上游 `flatToggleMenut.over` 对应的 `whiteui + flatOver tint` drawable。
+  - `desktop/src/lib.rs`
+    - `menu_frame_for_render()` 与 `menu_graphics_frame_for_surface()` 都把 `last_menu_hovered_button` 写回 `MenuUiPlan`；
+    - 新增测试验证 cursor 移到 `MODS` 后，菜单帧会在对应按钮 rect 发出 `whiteui` over drawable。
+- 迁移意义：
+  - MenuFragment 主按钮不再只有 checked/up 两态，开始消费真实 hover/over 输入；
+  - Scene2D `TextButtonStyle.over` 语义进入渲染主链路，减少后续接 down/disabled/focus 状态的阻力；
+  - hover 由 desktop 输入事件驱动，不是独立测试片段。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu_renderer --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - down/pressed、disabled、tooltip、keyboard focus 仍未完全迁移；
+  - submenu 动画仍未使用完整 `Interp.fade` 曲线；
+  - `MenuFragment` 仍未完全拆成 core UI fragment 结构；
+  - 未达到完整可玩，不能宣告目标完成。
