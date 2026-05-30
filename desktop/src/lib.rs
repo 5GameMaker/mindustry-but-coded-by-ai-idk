@@ -192,6 +192,7 @@ const ABOUT_CREDITS_TEXT: &str = "Created by [royal]Anuken[] - [sky]anukendev@gm
 const ABOUT_CREDITS_LINE: &str = "credits: Created by Anuken - anukendev@gmail.com";
 pub const ABOUT_DISCORD_LINE: &str = "discord: The official Mindustry Discord chatroom";
 pub const ABOUT_GITHUB_LINE: &str = "github: Game source code";
+const DISCORD_URL: &str = "https://discord.gg/mindustry";
 const MOBILE_CONSOLE_MESSAGES_SHOWN: usize = 30;
 const MENU_PLAY_GUARD_MESSAGE: &str = "@mod.noerrorplay";
 
@@ -212,7 +213,7 @@ const ABOUT_LINKS: &[AboutLinkEntry] = &[
         name: "discord",
         title: "Discord",
         description: "The official Mindustry Discord chatroom",
-        url: "https://discord.gg/mindustry",
+        url: DISCORD_URL,
         icon: "discord",
         color_hex: "7289da",
     },
@@ -574,6 +575,7 @@ pub enum DesktopMenuRouteShellAction {
     ShowAboutCredits,
     ShowAboutLinks,
     OpenDiscordLink,
+    CopyDiscordLink,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12279,6 +12281,7 @@ pub struct DesktopLauncher {
     pub about_filter_banned_links: bool,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
+    pub last_discord_clipboard_text: Option<String>,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
     pub load_renderer_state: LoadRendererState,
@@ -12964,6 +12967,7 @@ impl DesktopLauncher {
             about_filter_banned_links: false,
             last_about_link_action: None,
             last_about_linkfail_message: None,
+            last_discord_clipboard_text: None,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
             load_renderer_state: LoadRendererState::default(),
@@ -16674,6 +16678,22 @@ impl DesktopLauncher {
         ))
     }
 
+    fn discord_route_shell_copy_rect_for_viewport(
+        viewport: RenderViewport,
+        route: DesktopMenuRoute,
+    ) -> Option<RenderRect> {
+        if route != DesktopMenuRoute::Discord {
+            return None;
+        }
+        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
+        Some(RenderRect::new(
+            panel.x + 36.0,
+            panel.y + 60.0,
+            panel.width - 72.0,
+            32.0,
+        ))
+    }
+
     fn active_menu_route_shell_primary_label(
         &self,
         route: DesktopMenuRoute,
@@ -16698,6 +16718,11 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let route = self.active_menu_route?;
         let viewport = self.default_render_viewport_for_surface(surface_size);
+        if let Some(rect) = Self::discord_route_shell_copy_rect_for_viewport(viewport, route) {
+            if rect.contains_point(RenderPoint::new(x, y)) {
+                return Some(DesktopMenuRouteShellAction::CopyDiscordLink);
+            }
+        }
         let rect = Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)?;
         rect.contains_point(RenderPoint::new(x, y))
             .then_some(match route {
@@ -16779,6 +16804,9 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::OpenDiscordLink => {
                 self.dispatch_about_link_action("discord");
             }
+            DesktopMenuRouteShellAction::CopyDiscordLink => {
+                self.copy_discord_link();
+            }
         }
     }
 
@@ -16849,6 +16877,17 @@ impl DesktopLauncher {
     pub fn dispatch_about_link_action(&mut self, name: &str) -> Option<DesktopAboutLinkAction> {
         let mut platform = DefaultPlatform;
         self.dispatch_about_link_action_with_platform(name, &mut platform)
+    }
+
+    pub fn copy_discord_link_with_platform<P: Platform>(&mut self, platform: &mut P) -> String {
+        platform.set_clipboard_text(DISCORD_URL);
+        self.last_discord_clipboard_text = Some(DISCORD_URL.to_string());
+        DISCORD_URL.to_string()
+    }
+
+    pub fn copy_discord_link(&mut self) -> String {
+        let mut platform = DefaultPlatform;
+        self.copy_discord_link_with_platform(&mut platform)
     }
 
     fn about_links_line(&self) -> String {
@@ -17010,9 +17049,9 @@ impl DesktopLauncher {
             },
             DesktopMenuRoute::Discord => vec![
                 "discord: Join the Mindustry Discord!".into(),
-                "url: https://discord.gg/mindustry".into(),
+                format!("url: {DISCORD_URL}"),
                 "button: openlink".into(),
-                "copylink: pending clipboard button".into(),
+                "button: copylink".into(),
             ],
             DesktopMenuRoute::Editor => vec!["maps: pending EditorMapsDialog port".into()],
             DesktopMenuRoute::Mods => vec!["mods: pending ModsDialog port".into()],
@@ -17098,6 +17137,31 @@ impl DesktopLauncher {
                 primary_rect.center(),
                 [0.95, 0.98, 1.0, 1.0],
                 16.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.05,
+            ));
+        }
+        if let Some(copy_rect) = Self::discord_route_shell_copy_rect_for_viewport(viewport, route) {
+            pass.push(RenderCommand::fill_rect(
+                copy_rect,
+                [0.16, 0.24, 0.32, 0.9],
+                Layer::END_PIXELED + 0.03,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                copy_rect,
+                [0.48, 0.68, 0.82, 1.0],
+                1.0,
+                Layer::END_PIXELED + 0.04,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "COPYLINK",
+                copy_rect.center(),
+                [0.9, 0.96, 1.0, 1.0],
+                15.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -18513,6 +18577,7 @@ impl DesktopLauncher {
         self.about_filter_banned_links = false;
         self.last_about_link_action = None;
         self.last_about_linkfail_message = None;
+        self.last_discord_clipboard_text = None;
         self.campaign_planet_dialog = None;
         self.last_campaign_launch_report = None;
         self.load_renderer_state = LoadRendererState::default();
@@ -33752,6 +33817,7 @@ mod tests {
         assert!(texts.contains(&"upstream: DiscordDialog"));
         assert!(texts.contains(&"discord: Join the Mindustry Discord!"));
         assert!(texts.contains(&"url: https://discord.gg/mindustry"));
+        assert!(texts.contains(&"COPYLINK"));
 
         let open_center = DesktopLauncher::active_menu_route_shell_primary_rect_for_viewport(
             viewport,
@@ -33779,6 +33845,34 @@ mod tests {
         assert_eq!(action.name, "discord");
         assert_eq!(action.url, "https://discord.gg/mindustry");
         assert_eq!(action.error_message.as_deref(), Some("@linkfail"));
+
+        let copy_center = DesktopLauncher::discord_route_shell_copy_rect_for_viewport(
+            viewport,
+            super::DesktopMenuRoute::Discord,
+        )
+        .expect("Discord route should expose a copylink button")
+        .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: copy_center.x,
+                    y: copy_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::CopyDiscordLink)
+        );
+        assert_eq!(
+            launcher.last_discord_clipboard_text.as_deref(),
+            Some("https://discord.gg/mindustry")
+        );
 
         let becheck_center = chrome
             .becheck_rect

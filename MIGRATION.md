@@ -17654,3 +17654,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - consolefrag 仍未执行脚本、未接真实输入框/历史/滚动；
   - mobile terminal 的 chat/up/down/file/cancel 仍是文本 shell，尚未接点击区域；
   - desktop console 模式尚未迁移。
+
+## 490. DiscordDialog copylink 独立按钮接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.5%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/DiscordDialog.java`
+    - `@copylink` 按钮调用 `Core.app.setClipboardText(discordURL)`；
+    - `@openlink` 按钮调用 `openURI`，失败时 `@linkfail` 并复制 URL。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DISCORD_URL` 常量，统一 DiscordDialog 与 About link 使用的 URL；
+    - `DesktopMenuRouteShellAction` 新增 `CopyDiscordLink`；
+    - 新增 `last_discord_clipboard_text` 状态；
+    - Discord route shell 除 `OPEN` 外新增 `COPYLINK` 按钮绘制与命中；
+    - 点击 `COPYLINK` 调用 `Platform::set_clipboard_text` 并记录 URL。
+- 迁移意义：
+  - Java DiscordDialog 的两个关键按钮 `openlink/copylink` 都有了 Rust route shell 主链入口；
+  - copy 行为复用平台边界，后续接真实 OS clipboard 时不需要改 UI dispatch。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions --lib`
+- 仍未完成：
+  - DiscordDialog 仍是 shell 文本布局，不是完整 Java Dialog/card；
+  - copy 成功提示 `@copied` 尚未渲染；
+  - 真实 OS clipboard backend 尚未实现。
