@@ -13093,3 +13093,36 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 继续补 bullet init side-effects：Laser/Shrapnel 的 collideLaser、lightning/effect timing；
   3. Unit trail 仍需先补 runtime trail points；
   4. Weapon parts 仍需先结构化 `parts` 和 `sideMultiplier`，不要把 continuous beam 当普通 sprite。
+
+### 2026-05-30：SapBullet line 与 light pass 接入客户端 bullet 渲染链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.3%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `desktop_resolve_color_symbol(...)` 已支持 6/8 位十六进制颜色，能解析 Sap content 的 `bf92f9`；
+    - 新增 `sap_bullet_snapshot_render_commands(...)`，从 bullet data endpoint 和 `fin/fout` 输出 overlay `DrawLine`；
+    - 新增 `sap_bullet_snapshot_light_commands(...)`，输出 Java `Drawf.light(...)` 对应的 lighting line；
+    - 新增 `DesktopLauncher::sap_bullet_snapshot_data_position(...)`，支持 `TypeValue::Vec2` 和 `TypeValue::Unit(id)`；
+    - `bullet_snapshot_render_pass()` / `bullet_snapshot_light_render_pass()` 已接入 `BulletKind::Sap`；
+    - 新增测试 `desktop_launcher_routes_sap_snapshot_line_and_light_pass`，覆盖 `arkyid_sapper`。
+- Java 对照：
+  - `SapBulletType.draw(Bullet b)` 只在 `b.data instanceof Position` 时绘制，终点为 `data.lerp(b, fin)`，主体是 `Drawf.laser(...)`，光照是 `Drawf.light(...)`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_sap_snapshot_line_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. Bullet 渲染剩余优先项：`ContinuousLaserBulletType`；
+  2. Sap 仍需从 primitive line 进化到 textured `Drawf.laser(laserRegion, laserEndRegion, ...)`；
+  3. Sap data 的 Building/其他 Position 解析还不完整；
+  4. Unit trail 仍需先补 runtime trail points；
+  5. Weapon parts 仍需先结构化 `parts` 和 `sideMultiplier`。

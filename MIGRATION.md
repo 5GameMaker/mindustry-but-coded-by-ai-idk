@@ -15951,3 +15951,40 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Shrapnel 的 collideLaser init side-effects、hit/effect timing、trail/impact 细节仍需继续；
   - Bullet 渲染仍临时复用 Overlay，后续需要统一 Java layer sorting / world entity pass；
   - Unit engine trail、weapon parts/continuous beam/hard shadow/legs/payload/item 仍未完成。
+
+## 435. 最新闭环记录：SapBullet line 与 light pass 接入客户端 bullet 渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.3%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/bullet/SapBulletType.java#draw(Bullet b)`
+  - 仅当 `b.data instanceof Position` 时绘制；
+  - `Tmp.v1.set(data).lerp(b, b.fin())` 得到当前可视终点；
+  - `Draw.color(color); Drawf.laser(laserRegion, laserEndRegion, b.x, b.y, end.x, end.y, width * b.fout())`
+  - `Drawf.light(b.x, b.y, end.x, end.y, 15f * b.fout(), lightColor, lightOpacity)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_resolve_color_symbol(...)` 支持 6/8 位十六进制颜色，覆盖 `bf92f9` 这类 Sap content tint；
+    - 新增 `sap_bullet_snapshot_render_commands(...)`，将 `BulletKind::Sap` 的 `TypeValue::Vec2` / `TypeValue::Unit` data 解析为 Position 后输出 overlay `DrawLine`；
+    - 新增 `sap_bullet_snapshot_light_commands(...)`，将 Java `Drawf.light(...)` 映射进现有 `LightRendererPlan` / `RenderPassKind::Lighting`；
+    - 新增 `DesktopLauncher::sap_bullet_snapshot_data_position(...)`，优先消费 bullet sync data 中的 Vec2；若 data 是 Unit id，则使用 `client_unit_snapshot_entities` 中的 unit position；
+    - `bullet_snapshot_render_pass()` 与 `bullet_snapshot_light_render_pass()` 增加 `BulletKind::Sap` 分支；
+    - 新增 `desktop_launcher_routes_sap_snapshot_line_and_light_pass`，覆盖 `arkyid_sapper` 的 data endpoint lerp、overlay line stroke/color、lighting line stroke/color。
+- 迁移意义：
+  - Sap bullet 不再在客户端 snapshot 中静默不可见，已进入与 Laser/LaserBolt/Shrapnel 相同的 bullet render 主链；
+  - 该闭环继续走网络同步 data → `BulletComp.data` → content `BulletSpec` → desktop render pass 的整体路径；
+  - 十六进制色名解析可继续服务 content 中其他非 Pal 命名颜色。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_sap_snapshot_line_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Sap 当前用 primitive line 近似 Java `Drawf.laser(...)` 的纹理 laser body/end caps，后续应接入 textured laser region/endRegion；
+  - Sap target 若以 Building/其他 Position 对象同步，仍需更完整的位置解析；
+  - ContinuousLaser 的客户端 bullet render pass 仍未接入；
+  - Bullet 渲染仍临时复用 Overlay，后续需要统一 Java layer sorting / world entity pass；
+  - Unit engine trail、weapon parts/continuous beam/hard shadow/legs/payload/item 仍未完成。

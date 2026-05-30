@@ -128,6 +128,16 @@ fn desktop_resolve_color_symbol(name: &str) -> Option<DecalColor> {
         }
     }
 
+    let hex = name.strip_prefix('#').unwrap_or(name);
+    if hex.len() == 6 || hex.len() == 8 {
+        if let Ok(mut rgba) = u32::from_str_radix(hex, 16) {
+            if hex.len() == 6 {
+                rgba = (rgba << 8) | 0xff;
+            }
+            return Some(DecalColor::from_rgba(rgba));
+        }
+    }
+
     standard_effect_color_symbol(name)
         .or_else(|| Pal::by_name(name))
         .or_else(|| standard_effect_color_symbol(&format!("Pal.{name}")))
@@ -380,6 +390,69 @@ fn shrapnel_bullet_snapshot_light_commands(
         y: origin.y,
         x2: light_end.x,
         y2: light_end.y,
+        stroke,
+        tint: LightPrimitive {
+            center: (origin.x, origin.y),
+            radius: stroke,
+            color,
+            opacity: spec.light_opacity,
+        },
+    }]
+}
+
+fn sap_bullet_snapshot_render_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    data_position: RenderPoint,
+    layer: f32,
+) -> Vec<RenderCommand> {
+    if bullet.removed || spec.kind != BulletKind::Sap {
+        return Vec::new();
+    }
+
+    let (fin, fout) = desktop_bullet_fin_fout(bullet);
+    let stroke = spec.width * fout;
+    if stroke <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let end = RenderPoint::new(
+        data_position.x + (origin.x - data_position.x) * fin,
+        data_position.y + (origin.y - data_position.y) * fin,
+    );
+    let color = desktop_bullet_render_color(&spec.color, DecalColor::WHITE);
+
+    vec![RenderCommand::draw_line(origin, end, stroke, color, layer)]
+}
+
+fn sap_bullet_snapshot_light_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    data_position: RenderPoint,
+) -> Vec<LightCommand> {
+    if bullet.removed || spec.kind != BulletKind::Sap {
+        return Vec::new();
+    }
+
+    let (fin, fout) = desktop_bullet_fin_fout(bullet);
+    let stroke = 15.0 * fout;
+    if stroke <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let end = RenderPoint::new(
+        data_position.x + (origin.x - data_position.x) * fin,
+        data_position.y + (origin.y - data_position.y) * fin,
+    );
+    let color = desktop_resolve_color_symbol(&spec.light_color).unwrap_or(Pal::SAP);
+
+    vec![LightCommand::Line {
+        x: origin.x,
+        y: origin.y,
+        x2: end.x,
+        y2: end.y,
         stroke,
         tint: LightPrimitive {
             center: (origin.x, origin.y),
@@ -12261,12 +12334,34 @@ impl DesktopLauncher {
                             desktop_bullet_layer(&content.spec),
                         ))
                 }
+                BulletKind::Sap => {
+                    if let Some(data_position) = self.sap_bullet_snapshot_data_position(bullet) {
+                        pass.commands.extend(sap_bullet_snapshot_render_commands(
+                            bullet,
+                            &content.spec,
+                            data_position,
+                            desktop_bullet_layer(&content.spec),
+                        ));
+                    }
+                }
                 _ => pass
                     .commands
                     .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec)),
             }
         }
         (!pass.commands.is_empty()).then_some(pass)
+    }
+
+    fn sap_bullet_snapshot_data_position(&self, bullet: &BulletComp) -> Option<RenderPoint> {
+        match &bullet.data {
+            TypeValue::Vec2(position) => Some(RenderPoint::new(position.x, position.y)),
+            TypeValue::Unit(unit_id) => self
+                .runtime
+                .client_unit_snapshot_entities
+                .get(unit_id)
+                .map(|unit| RenderPoint::new(unit.x(), unit.y())),
+            _ => None,
+        }
     }
 
     fn bullet_snapshot_light_render_pass(&self) -> Option<RenderPass> {
@@ -12287,6 +12382,15 @@ impl DesktopLauncher {
                         bullet,
                         &content.spec,
                     ));
+                }
+                BulletKind::Sap => {
+                    if let Some(data_position) = self.sap_bullet_snapshot_data_position(bullet) {
+                        commands.extend(sap_bullet_snapshot_light_commands(
+                            bullet,
+                            &content.spec,
+                            data_position,
+                        ));
+                    }
                 }
                 _ => {}
             }
@@ -17089,6 +17193,123 @@ mod tests {
                 assert_eq!(*layer, LIGHT_RENDER_LAYER);
             }
             other => panic!("expected shrapnel lighting DrawLine, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_routes_sap_snapshot_line_and_light_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_content = launcher
+            .content_loader
+            .bullet_by_name("arkyid_sapper")
+            .expect("base content should include arkyid sapper bullet");
+        assert_eq!(bullet_content.spec.kind, super::BulletKind::Sap);
+
+        let mut bullet = BulletComp::new(
+            bullet_content.id(),
+            TeamId(1),
+            type_io::EntityRef::null(),
+            32.0,
+            48.0,
+        );
+        bullet.lifetime = 30.0;
+        bullet.time = 15.0;
+        bullet.rotation = 0.0;
+        bullet.data = TypeValue::Vec2(IoVec2::new(92.0, 48.0));
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7107, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            26,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(62.0, 48.0))
+                    })
+            })
+            .expect("sap bullet snapshot should emit overlay laser line");
+
+        match overlay
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(32.0, 48.0)
+                        && *to == RenderPoint::new(62.0, 48.0))
+            })
+            .expect("sap overlay line should be present")
+        {
+            RenderCommand::DrawLine {
+                stroke,
+                color,
+                layer,
+                ..
+            } => {
+                assert_eq!(*stroke, 0.275);
+                assert_eq!(
+                    *color,
+                    super::desktop_bullet_render_color("bf92f9", DecalColor::WHITE)
+                );
+                assert_eq!(*layer, Layer::BULLET);
+            }
+            other => panic!("expected sap overlay DrawLine, got {other:?}"),
+        }
+
+        let lighting = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(62.0, 48.0))
+                    })
+            })
+            .expect("sap bullet snapshot should emit Java Drawf.light equivalent");
+        match lighting
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(32.0, 48.0)
+                        && *to == RenderPoint::new(62.0, 48.0))
+            })
+            .expect("sap lighting line should be present")
+        {
+            RenderCommand::DrawLine {
+                stroke,
+                color,
+                layer,
+                ..
+            } => {
+                assert_eq!(*stroke, 7.5);
+                assert_eq!(
+                    *color,
+                    super::desktop_effect_render_color(
+                        super::desktop_resolve_color_symbol("sap"),
+                        0.6
+                    )
+                );
+                assert_eq!(*layer, LIGHT_RENDER_LAYER);
+            }
+            other => panic!("expected sap lighting DrawLine, got {other:?}"),
         }
     }
 
