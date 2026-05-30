@@ -21,6 +21,7 @@ use crate::mindustry::entities::abilities::{
 use crate::mindustry::entities::units::BuildPlan;
 use crate::mindustry::entities::{EntityPosition, SizedEntity};
 use crate::mindustry::game::{BlockPlan as TeamBlockPlan, TeamData};
+use crate::mindustry::graphics::{Trail, TrailSegmentPlan};
 use crate::mindustry::io::type_io::{
     BuildPlanWire, CommandWire, ControllerWire, MountWire, UnitSyncWire,
 };
@@ -151,6 +152,28 @@ pub enum UnitCollisionLayer {
 pub struct UnitTrailState {
     pub width: f32,
     pub length: usize,
+    pub trail: Trail,
+}
+
+impl UnitTrailState {
+    pub fn new(length: usize, width: f32) -> Self {
+        Self {
+            width,
+            length,
+            trail: Trail::new(length),
+        }
+    }
+
+    pub fn update(&mut self, x: f32, y: f32, width: f32, delta: f32) {
+        self.width = width;
+        self.length = self.length.max(1);
+        self.trail.length = self.length;
+        self.trail.update_with_width_and_delta(x, y, width, delta);
+    }
+
+    pub fn segment_plans(&self) -> Vec<TrailSegmentPlan> {
+        self.trail.segment_plans()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2426,5 +2449,21 @@ mod tests {
                 .map(|tile| (tile.world_x, tile.world_y)),
             Some((32, 40))
         );
+    }
+
+    #[test]
+    fn unit_trail_state_wraps_graphics_trail_segments() {
+        let mut state = UnitTrailState::new(4, 1.0);
+        state.update(0.0, 0.0, 1.0, 1.0);
+        state.update(8.0, 0.0, 2.0, 1.0);
+
+        let segments = state.segment_plans();
+        assert!(!segments.is_empty());
+        assert_eq!(state.width, 2.0);
+        assert_eq!(state.length, 4);
+        assert_eq!(segments[0].start.x, 0.0);
+        assert_eq!(segments[0].start.y, 0.0);
+        assert_eq!(segments[0].end.x, 8.0);
+        assert_eq!(segments[0].end.y, 0.0);
     }
 }

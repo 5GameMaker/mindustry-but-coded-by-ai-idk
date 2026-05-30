@@ -13160,3 +13160,39 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. Laser/Sap/Shrapnel/ContinuousLaser 的 collision-derived length / init side-effects 仍需更精确接入 runtime；
   4. Unit trail 仍需先补 runtime trail points；
   5. Weapon parts 仍需先结构化 `parts` 和 `sideMultiplier`。
+
+### 2026-05-30：Unit trail state 与客户端单位轨迹线渲染接入
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.5%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `UnitTrailState` 现在持有 `graphics::Trail`；
+    - 新增 `UnitTrailState::new/update/segment_plans`；
+    - 新增测试 `unit_trail_state_wraps_graphics_trail_segments`。
+  - `desktop/src/lib.rs`
+    - 新增 `unit_snapshot_trail_render_commands(...)`；
+    - `unit_snapshot_render_pass()` 顺序更新为 weapon outlines 后、engines 前插入 trail；
+    - trail 颜色优先 `trail_color_rgba`，否则 team color；alpha 按 segment fade；
+    - 过滤零长度/零 stroke segment；
+    - 新增测试 `desktop_launcher_emits_unit_trail_lines_before_engine_circles`。
+- Java 对照：
+  - `UnitComp.update()` 负责按 `trailLength/engineOffset/elevation/rotation` 推进 trail；
+  - `UnitType.drawTrail()` 的顺序应在 weapon outlines 后、engines 前；
+  - `UnitComp.remove()` 仍需补 `Fx.trailFade` 等价效果。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_trail_state_wraps_graphics_trail_segments`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 继续 Unit trail runtime update：把 live/client unit 的 trail 初始化与逐帧采样点推进接入真实 runtime；
+  2. remove/death 路径补 trail fade effect 快照；
+  3. Bullet 渲染继续优先 ContinuousFlame，其次 PointLaser；Rail 视觉优先走 effect 系统；
+  4. weapon/unit parts 仍需结构化 `parts` 与 `sideMultiplier`，不能把 beam/parts 做成孤立模块。

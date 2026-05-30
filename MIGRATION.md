@@ -16027,3 +16027,39 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - ContinuousFlame、PointLaser、Rail 等其他 bullet 特化渲染仍需继续；
   - Bullet 渲染仍临时复用 Overlay，后续需要统一 Java layer sorting / world entity pass；
   - Unit engine trail、weapon parts/continuous beam/hard shadow/legs/payload/item 仍未完成。
+
+## 437. 最新闭环记录：Unit trail state 与客户端单位轨迹线渲染接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.5%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/comp/UnitComp.java` 中单位 update 会按 `trailLength/engineOffset/elevation/rotation` 推进 `Trail`；
+  - `core/src/mindustry/type/UnitType.java#drawTrail` 的绘制顺序位于 weapon outlines 之后、engines 之前；
+  - remove/death 路径仍应补 `Fx.trailFade` 等价效果。
+- 本轮主改动：
+  - `core/src/mindustry/entities/comp/unit.rs`
+    - `UnitTrailState` 由 `width/length` 壳扩展为持有 `graphics::Trail` 的 transient state；
+    - 新增 `UnitTrailState::new/update/segment_plans`，把 core trail geometry 作为单位轨迹线的统一数据源；
+    - 新增 `unit_trail_state_wraps_graphics_trail_segments`，覆盖 width/length 同步与 segment plan。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::unit_snapshot_trail_render_commands(...)`，从 `UnitComp.trail` 消费 segment plan 并输出 overlay `DrawLine`；
+    - 轨迹线颜色优先 `UnitType.trail_color_rgba`，否则回退 team color；alpha 按 segment index 做 fade；
+    - 渲染顺序接入现有 unit aggregation：soft shadow → outline → weapon outlines → trail → engines → body → cell → weapons → shield；
+    - 过滤零长度/零 stroke segment，避免输出退化 line；
+    - 新增 `desktop_launcher_emits_unit_trail_lines_before_engine_circles`，断言颜色、stroke、alpha fade 与 trail-before-engine 顺序。
+- 迁移意义：
+  - Unit trail 不再是只存在字段里的空壳，已经进入 `UnitComp.trail` → desktop overlay `RenderCommand` 的真实消费链；
+  - 该路径复用 `core/src/mindustry/graphics/trail.rs`，避免建立孤立的 desktop-only trail map；
+  - 后续 runtime update 可以直接喂 `UnitTrailState::update(...)`，不用重做渲染消费侧。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-core unit_trail_state_wraps_graphics_trail_segments`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_trail_lines_before_engine_circles --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Unit trail runtime update 还未接入 live update/apply snapshot 链路，真实单位仍需按 Java `UnitComp.update()` 计算 engine 后方采样点并推进 trail；
+  - Unit remove/death 仍未产出 Java `Fx.trailFade` 等价效果；
+  - trail 当前用 `DrawLine` 近似，后续应向 `Trail.quad_plans()`/mesh 过渡以更接近 Java 轨迹带宽形状；
+  - ContinuousFlame、PointLaser、Rail、weapon/unit parts、hard shadow、legs、payload/item 仍需继续。

@@ -12811,6 +12811,61 @@ impl DesktopLauncher {
         commands
     }
 
+    fn unit_snapshot_trail_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid()
+            || unit.type_info.trail_length <= 0
+            || unit.type_info.naval
+            || (!unit.is_flying() && unit.type_info.use_engine_elevation)
+        {
+            return Vec::new();
+        }
+
+        let Some(trail) = unit.trail.as_ref() else {
+            return Vec::new();
+        };
+        let segments = trail.segment_plans();
+        if segments.is_empty() {
+            return Vec::new();
+        }
+
+        let base_rgba = unit
+            .type_info
+            .trail_color_rgba
+            .unwrap_or_else(|| desktop_team_color_rgba(unit.team.team));
+        let base_color = rgba8888_to_render_color(base_rgba, 1.0);
+        let layer = desktop_unit_engine_layer(unit);
+
+        segments
+            .into_iter()
+            .filter_map(|segment| {
+                let dx = segment.end.x - segment.start.x;
+                let dy = segment.end.y - segment.start.y;
+                if (dx * dx + dy * dy).sqrt() <= f32::EPSILON {
+                    return None;
+                }
+                let stroke = ((segment.start.width + segment.end.width) * 0.5).max(0.0);
+                if stroke <= f32::EPSILON {
+                    return None;
+                }
+                let fade = if segment.total > 0 {
+                    (segment.index + 1) as f32 / segment.total as f32
+                } else {
+                    1.0
+                }
+                .clamp(0.0, 1.0);
+                let mut color = base_color;
+                color[3] *= fade;
+                Some(RenderCommand::draw_line(
+                    RenderPoint::new(segment.start.x, segment.start.y),
+                    RenderPoint::new(segment.end.x, segment.end.y),
+                    stroke,
+                    color,
+                    layer,
+                ))
+            })
+            .collect()
+    }
+
     fn unit_snapshot_soft_shadow_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_soft_shadow {
             return None;
@@ -12848,6 +12903,8 @@ impl DesktopLauncher {
             }
             pass.commands
                 .extend(self.unit_snapshot_weapon_outline_render_commands(unit));
+            pass.commands
+                .extend(self.unit_snapshot_trail_render_commands(unit));
             pass.commands
                 .extend(self.unit_snapshot_engine_render_commands(unit));
             if let Some(command) = self.unit_snapshot_body_render_command(unit) {
@@ -14984,7 +15041,7 @@ mod tests {
         entities::{
             comp::{
                 BuildingComp, BuildingTetherAction, BuildingTetherRef, BulletComp, PayloadKind,
-                PuddleComp, UnitComp, UnitControllerState, WorldLabelComp,
+                PuddleComp, UnitComp, UnitControllerState, UnitTrailState, WorldLabelComp,
             },
             entity_class_id, standard_effect_id, LegDestroyData, PlayerComp, PuddleLiquidInfo,
             StandardEffectDrawKind, TextureRegionRef, BULLET_CLASS_ID, DECAL_CLASS_ID,
@@ -18262,6 +18319,100 @@ mod tests {
             .next()
             .expect("pulsed unit engine should still emit outer circle");
         assert!((pulsed_engine_radius - 3.125).abs() < 0.0001);
+    }
+
+    #[test]
+    fn desktop_launcher_emits_unit_trail_lines_before_engine_circles() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut unit_type = UnitType::new(9901, "trail-test");
+        unit_type.trail_length = 4;
+        unit_type.trail_color_rgba = Some(0x6bb6ffff);
+        unit_type.engine_size = 2.0;
+        unit_type.engine_offset = 4.0;
+        unit_type.use_engine_elevation = true;
+
+        let mut unit = UnitComp::new(7501, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(32.0, 32.0);
+        unit.set_rotation(90.0);
+        unit.elevation = 1.0;
+
+        let mut trail = UnitTrailState::new(4, 1.0);
+        trail.update(20.0, 20.0, 1.0, 1.0);
+        trail.update(28.0, 20.0, 3.0, 1.0);
+        unit.trail = Some(trail);
+
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7501, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            24,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(20.0, 20.0)
+                                && *to == RenderPoint::new(28.0, 20.0))
+                    })
+            })
+            .expect("unit snapshot should emit a trail line in the overlay pass");
+
+        let trail_line_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(20.0, 20.0)
+                        && *to == RenderPoint::new(28.0, 20.0))
+            })
+            .expect("unit trail should emit a visible trail line");
+        let engine_circle_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawCircle { center, .. }
+                    if *center == RenderPoint::new(32.0, 28.0))
+            })
+            .expect("unit engine should still emit engine circles");
+        assert!(
+            trail_line_index < engine_circle_index,
+            "unit trail should render before engine glow like Java UnitType.drawTrail()/drawEngine order"
+        );
+
+        match &overlay.commands[trail_line_index] {
+            RenderCommand::DrawLine {
+                from,
+                to,
+                stroke,
+                color,
+                layer,
+            } => {
+                assert_eq!(*from, RenderPoint::new(20.0, 20.0));
+                assert_eq!(*to, RenderPoint::new(28.0, 20.0));
+                assert!((*stroke - 2.0).abs() < 0.0001);
+                let expected = super::rgba8888_to_render_color(0x6bb6ffff, 1.0);
+                assert!((color[0] - expected[0]).abs() < 0.0001);
+                assert!((color[1] - expected[1]).abs() < 0.0001);
+                assert!((color[2] - expected[2]).abs() < 0.0001);
+                assert!((color[3] - expected[3] * 0.5).abs() < 0.0001);
+                assert_eq!(*layer, Layer::FLYING_UNIT);
+            }
+            other => panic!("expected unit trail DrawLine, got {other:?}"),
+        }
     }
 
     #[test]
