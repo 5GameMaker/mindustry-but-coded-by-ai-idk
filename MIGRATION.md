@@ -19157,3 +19157,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 搜索框还不是完整 Scene2D `TextField`，缺选择、光标、输入法、键位绑定和 `Binding.chat` 快捷使用；
   - `SchematicImage` 真实预览、导入/导出/编辑/info 子弹窗、真实 schematic 存储与 `control.input.useSchematic(...)` 仍待继续迁移；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 538. SchematicInfoDialog 最小模态弹窗
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **57.0%**，仍未达到完整可玩；继续优先前端/UI，目标是把蓝图卡片动作升级成真实可见模态层，而不是只记录事件。
+- Java 对照证据：
+  - `SchematicsDialog.showInfo(Schematic)` 会进入 `SchematicInfoDialog.show(...)`；
+  - `SchematicInfoDialog.show(...)` 标题为 `[schematic] + name`，主体显示 `schematic.info(width,height,tiles)`、tags、`SchematicImage`、requirements、power、description；
+  - 底部按钮为 `@back`、`@editor.export`、`@edit`；
+  - 模态打开后应优先处理弹窗按钮，底层 grid 不应继续抢点击。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `schematic_info_dialog: Option<usize>`，点击卡片 `Info` 动作后打开对应蓝图的信息弹窗；
+    - 新增 `CloseSchematicInfo`、`SchematicInfoExport`、`SchematicInfoEdit` route shell action；
+    - `push_schematic_info_dialog(...)` 绘制模态遮罩、pane、标题、规格行、标签、预览占位、描述、requirements 待接入提示和三个底部按钮；
+    - `schematics_route_shell_action_at_surface_point(...)` 在信息弹窗打开时优先命中弹窗按钮，并阻断底层 card grid；
+    - info 弹窗中的 export/edit 按钮先复用 `last_schematic_card_action` 记录对应卡片动作，为后续 `showExport()` / `showEdit()` 模态接入留落点。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 目前只完成 `SchematicInfoDialog` 最小可见层，尚未补真实 `Schematic.requirements()`、power consumption/production、真实 preview texture、scroll pane 和资源充足/不足颜色；
+  - `showImport()`、`showExport(Schematic)`、`showEdit(Schematic)` 仍需升级为同样的模态 UI，建议后续收敛为统一 `DesktopSchematicModal` 状态，避免 import/tags/info/export/edit 长期分散；
+  - 未达到完整可玩，不能宣告目标完成。

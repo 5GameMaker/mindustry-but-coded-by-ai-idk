@@ -1633,6 +1633,9 @@ pub enum DesktopMenuRouteShellAction {
     ToggleSchematicTag(usize),
     OpenSchematicImport,
     OpenSchematicTags,
+    CloseSchematicInfo,
+    SchematicInfoExport,
+    SchematicInfoEdit,
     SchematicCard(DesktopSchematicCardAction),
     ShowAboutCredits,
     ShowAboutLinks,
@@ -14447,6 +14450,7 @@ pub struct DesktopLauncher {
     pub schematic_search_focused: bool,
     pub schematic_selected_tags: Vec<String>,
     pub last_schematic_tag_toggled: Option<String>,
+    pub schematic_info_dialog: Option<usize>,
     pub schematic_cards: Vec<DesktopSchematicCardEntry>,
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
     pub settings_dialog_state: DesktopSettingsDialogState,
@@ -15167,6 +15171,7 @@ impl DesktopLauncher {
             schematic_search_focused: false,
             schematic_selected_tags: Vec::new(),
             last_schematic_tag_toggled: None,
+            schematic_info_dialog: None,
             schematic_cards: Vec::new(),
             last_schematic_card_action: None,
             settings_dialog_state: DesktopSettingsDialogState::default(),
@@ -18805,6 +18810,7 @@ impl DesktopLauncher {
             } else if route == DesktopMenuRoute::Schematics {
                 self.schematic_search.clear();
                 self.schematic_search_focused = true;
+                self.schematic_info_dialog = None;
                 self.last_schematic_card_action = None;
                 self.last_schematic_tag_toggled = None;
             }
@@ -20589,6 +20595,56 @@ impl DesktopLauncher {
         Some(DesktopSchematicCardAction::new(card_index, kind))
     }
 
+    fn schematic_info_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 80.0).clamp(360.0, 560.0);
+        let height = (panel.height - 80.0).clamp(340.0, 520.0);
+        RenderRect::new(
+            panel.x + (panel.width - width) * 0.5,
+            panel.y + (panel.height - height) * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn schematic_info_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = ((dialog.width - 56.0) / 3.0).clamp(96.0, 210.0);
+        RenderRect::new(
+            dialog.x + 18.0 + index as f32 * (width + 10.0),
+            dialog.y + 18.0,
+            width,
+            46.0,
+        )
+    }
+
+    fn schematic_info_preview_rect(dialog: RenderRect) -> RenderRect {
+        let size = (dialog.width * 0.54).clamp(180.0, 300.0);
+        RenderRect::new(
+            dialog.x + (dialog.width - size) * 0.5,
+            dialog.y + dialog.height - 252.0,
+            size,
+            size,
+        )
+    }
+
+    fn schematic_info_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        self.schematic_info_dialog?;
+        let dialog = Self::schematic_info_dialog_rect_for_panel(panel);
+        if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseSchematicInfo);
+        }
+        if Self::schematic_info_button_rect(dialog, 1).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::SchematicInfoExport);
+        }
+        if Self::schematic_info_button_rect(dialog, 2).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::SchematicInfoEdit);
+        }
+        None
+    }
+
     fn schematics_card_action_at_point(
         &self,
         panel: RenderRect,
@@ -20684,6 +20740,9 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Schematics);
         let point = RenderPoint::new(x, y);
+        if self.schematic_info_dialog.is_some() {
+            return self.schematic_info_action_at_point(panel, point);
+        }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
         }
@@ -20962,7 +21021,29 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::OpenSchematicTags => {
                 self.schematic_tags_dialog_open = true;
             }
+            DesktopMenuRouteShellAction::CloseSchematicInfo => {
+                self.schematic_info_dialog = None;
+            }
+            DesktopMenuRouteShellAction::SchematicInfoExport => {
+                if let Some(index) = self.schematic_info_dialog {
+                    self.last_schematic_card_action = Some(DesktopSchematicCardAction::new(
+                        index,
+                        DesktopSchematicCardActionKind::Export,
+                    ));
+                }
+            }
+            DesktopMenuRouteShellAction::SchematicInfoEdit => {
+                if let Some(index) = self.schematic_info_dialog {
+                    self.last_schematic_card_action = Some(DesktopSchematicCardAction::new(
+                        index,
+                        DesktopSchematicCardActionKind::Edit,
+                    ));
+                }
+            }
             DesktopMenuRouteShellAction::SchematicCard(action) => {
+                if action.kind == DesktopSchematicCardActionKind::Info {
+                    self.schematic_info_dialog = Some(action.index);
+                }
                 self.last_schematic_card_action = Some(action);
             }
             DesktopMenuRouteShellAction::ShowAboutCredits => {
@@ -21476,6 +21557,140 @@ impl DesktopLauncher {
         ));
     }
 
+    fn push_schematic_info_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(index) = self.schematic_info_dialog else {
+            return;
+        };
+        let Some(entry) = self.schematic_cards.get(index) else {
+            return;
+        };
+        let dialog = Self::schematic_info_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.42],
+            Layer::END_PIXELED + 0.070,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.071,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.072,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("[schematic] {}", entry.name),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.076,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "schematic.info: {}x{} | {} blocks",
+                entry.width, entry.height, entry.tile_count
+            ),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 54.0),
+            [0.72, 0.80, 0.86, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.076,
+        ));
+        if !entry.labels.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("tags: {}", entry.labels.join(", ")),
+                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 76.0),
+                [0.62, 0.72, 0.80, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.076,
+            ));
+        }
+
+        let preview = Self::schematic_info_preview_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            "schematic-background",
+            preview,
+            [0.76, 0.84, 0.90, 0.82],
+            0.0,
+            Layer::END_PIXELED + 0.073,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            preview,
+            [0.22, 0.30, 0.36, 0.95],
+            1.0,
+            Layer::END_PIXELED + 0.074,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "SchematicImage preview",
+            preview.center(),
+            [0.70, 0.80, 0.88, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.077,
+        ));
+        if !entry.description.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("description: {}", entry.description),
+                RenderPoint::new(dialog.center().x, dialog.y + 82.0),
+                [0.70, 0.76, 0.82, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.077,
+            ));
+        }
+        pass.push(RenderCommand::draw_text_styled(
+            "requirements: pending real Schematic.requirements()",
+            RenderPoint::new(dialog.center().x, dialog.y + 104.0),
+            [0.58, 0.66, 0.74, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.077,
+        ));
+
+        for (button_index, (label, icon)) in [
+            ("@back", "left"),
+            ("@editor.export", "upload"),
+            ("@edit", "pencil"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_settings_text_button(
+                pass,
+                Self::schematic_info_button_rect(dialog, button_index),
+                label,
+                Some(icon),
+                Layer::END_PIXELED + 0.078 + button_index as f32 * 0.001,
+            );
+        }
+    }
+
     fn push_map_list_route_page(
         &self,
         pass: &mut RenderPass,
@@ -21764,6 +21979,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.032,
             ));
+            self.push_schematic_info_dialog(pass, panel);
             return;
         }
 
@@ -21775,6 +21991,7 @@ impl DesktopLauncher {
             }
             self.push_schematics_card(pass, card, card_index, entry);
         }
+        self.push_schematic_info_dialog(pass, panel);
     }
 
     fn push_load_game_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -22471,6 +22688,9 @@ impl DesktopLauncher {
             } else {
                 "empty: @none".into()
             });
+        }
+        if let Some(index) = self.schematic_info_dialog {
+            lines.push(format!("modal: SchematicInfoDialog index={index}"));
         }
         lines
     }
@@ -39571,6 +39791,13 @@ mod tests {
                 super::DesktopMenuRouteShellAction::SchematicCard(expected),
             );
             assert_eq!(launcher.last_schematic_card_action, Some(expected));
+            if expected_kind == super::DesktopSchematicCardActionKind::Info {
+                assert_eq!(launcher.schematic_info_dialog, Some(0));
+                launcher.dispatch_menu_route_shell_action(
+                    super::DesktopMenuRouteShellAction::CloseSchematicInfo,
+                );
+                assert_eq!(launcher.schematic_info_dialog, None);
+            }
         }
     }
 
@@ -39706,6 +39933,118 @@ mod tests {
                 )
             ))
         );
+    }
+
+    #[test]
+    fn desktop_launcher_schematics_info_dialog_renders_and_dispatches_buttons() {
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.schematic_cards = vec![super::DesktopSchematicCardEntry {
+            name: "Core Starter".into(),
+            description: "basic launch schematic".into(),
+            width: 12,
+            height: 8,
+            tile_count: 42,
+            labels: vec!["core".into(), "power".into()],
+            has_steam_id: false,
+            mod_name: None,
+        }];
+        launcher.dispatch_menu_action(MenuButtonRole::Schematics);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicCard(
+                super::DesktopSchematicCardAction::new(
+                    0,
+                    super::DesktopSchematicCardActionKind::Info,
+                ),
+            ),
+        );
+        assert_eq!(launcher.schematic_info_dialog, Some(0));
+
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Schematics,
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("schematic info dialog should produce a render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"[schematic] Core Starter"));
+        assert!(texts.contains(&"schematic.info: 12x8 | 42 blocks"));
+        assert!(texts.contains(&"tags: core, power"));
+        assert!(texts.contains(&"description: basic launch schematic"));
+        assert!(texts.contains(&"requirements: pending real Schematic.requirements()"));
+        assert!(texts.contains(&"@back"));
+        assert!(texts.contains(&"@editor.export"));
+        assert!(texts.contains(&"@edit"));
+
+        let dialog = DesktopLauncher::schematic_info_dialog_rect_for_panel(panel);
+        let export_center = DesktopLauncher::schematic_info_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                export_center.x,
+                export_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::SchematicInfoExport)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicInfoExport,
+        );
+        assert_eq!(
+            launcher.last_schematic_card_action,
+            Some(super::DesktopSchematicCardAction::new(
+                0,
+                super::DesktopSchematicCardActionKind::Export
+            ))
+        );
+
+        let edit_center = DesktopLauncher::schematic_info_button_rect(dialog, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                edit_center.x,
+                edit_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::SchematicInfoEdit)
+        );
+
+        let underlying_card = DesktopLauncher::schematics_card_rect_for_panel(panel, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                underlying_card.x,
+                underlying_card.y
+            ),
+            None,
+            "open info dialog should block clicks from reaching the underlying card grid"
+        );
+
+        let close_center = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: close_center.x,
+                    y: close_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.schematic_info_dialog, None);
     }
 
     #[test]
