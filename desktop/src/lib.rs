@@ -27,10 +27,10 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect, standard_effect_color_symbol,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
     standard_effect_render_lifetime, unit_draw_part_kind_from_tag, EffectRenderInput,
-    EntityClassKind, FlarePart, ForceFieldAbility, PartParams, PartProgress, PlayerComp,
-    PlayerUnitSwitchContext, PuddleLiquidInfo, ShapePart, ShapePartKind, ShieldArcAbility,
-    StandardEffectCircleRenderPrimitive, StandardEffectDrawKind, StandardEffectDrawPlan,
-    StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
+    EnergyFieldAbility, EntityClassKind, FlarePart, ForceFieldAbility, PartParams, PartProgress,
+    PlayerComp, PlayerUnitSwitchContext, PuddleLiquidInfo, ShapePart, ShapePartKind,
+    ShieldArcAbility, StandardEffectCircleRenderPrimitive, StandardEffectDrawKind,
+    StandardEffectDrawPlan, StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
     StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
     StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive,
     SuppressionFieldAbility, TextureRegionRef, UnitDrawPartKind, WeaponMount, WorldLabelAlign,
@@ -1300,6 +1300,13 @@ const DESKTOP_SUPPRESSION_FIELD_PARTICLE_LEN: f32 = 7.0;
 const DESKTOP_SUPPRESSION_FIELD_ROTATE_SCL: f32 = 3.0;
 const DESKTOP_SUPPRESSION_FIELD_PARTICLE_LIFE: f32 = 110.0;
 const DESKTOP_SHIELD_ARC_MAX_SEGMENT_DEGREES: f32 = 8.0;
+const DESKTOP_ENERGY_FIELD_EFFECT_RADIUS: f32 = 5.0;
+const DESKTOP_ENERGY_FIELD_SECTOR_RAD: f32 = 0.14;
+const DESKTOP_ENERGY_FIELD_BLINK_SCL: f32 = 20.0;
+const DESKTOP_ENERGY_FIELD_BLINK_SIZE: f32 = 0.1;
+const DESKTOP_ENERGY_FIELD_ROTATE_SPEED: f32 = 0.5;
+const DESKTOP_ENERGY_FIELD_SECTORS: usize = 5;
+const DESKTOP_ENERGY_FIELD_LAYER: f32 = Layer::BULLET - 0.001;
 
 fn desktop_unit_payload_symbol(kind: PayloadKind) -> &'static str {
     match kind {
@@ -1382,9 +1389,41 @@ fn desktop_unit_shield_arc_center(unit: &UnitComp, ability: &ShieldArcAbility) -
     RenderPoint::new(x, y)
 }
 
+fn desktop_unit_energy_field_center(unit: &UnitComp, ability: &EnergyFieldAbility) -> RenderPoint {
+    let (x, y) = ability.center(unit.x(), unit.y(), unit.rotation());
+    RenderPoint::new(x, y)
+}
+
 fn desktop_arc_point(center: RenderPoint, radius: f32, angle: f32) -> RenderPoint {
     let (offset_x, offset_y) = desktop_rotate_offset(angle, radius, 0.0);
     RenderPoint::new(center.x + offset_x, center.y + offset_y)
+}
+
+fn desktop_arc_line_commands(
+    center: RenderPoint,
+    radius: f32,
+    angle_span: f32,
+    start_angle: f32,
+    stroke: f32,
+    color: [f32; 4],
+    layer: f32,
+) -> Vec<RenderCommand> {
+    if radius <= f32::EPSILON || angle_span <= f32::EPSILON || stroke <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let angle_span = angle_span.clamp(0.0, 360.0);
+    let segments =
+        ((angle_span / DESKTOP_SHIELD_ARC_MAX_SEGMENT_DEGREES).ceil() as usize).clamp(1, 128);
+    let mut commands = Vec::with_capacity(segments);
+    for segment in 0..segments {
+        let t0 = segment as f32 / segments as f32;
+        let t1 = (segment + 1) as f32 / segments as f32;
+        let from = desktop_arc_point(center, radius, start_angle + angle_span * t0);
+        let to = desktop_arc_point(center, radius, start_angle + angle_span * t1);
+        commands.push(RenderCommand::draw_line(from, to, stroke, color, layer));
+    }
+    commands
 }
 
 fn desktop_unit_soft_shadow_sprite(unit: &UnitComp) -> &'static str {
@@ -14384,6 +14423,13 @@ impl DesktopLauncher {
                 }
             }
 
+            if let Some(ability) = EnergyFieldAbility::from_descriptor(descriptor) {
+                if ability.base.visible {
+                    commands
+                        .extend(self.unit_snapshot_energy_field_render_commands(unit, &ability));
+                }
+            }
+
             if let Some(ability) = SuppressionFieldAbility::from_descriptor(descriptor) {
                 if ability.base.visible && ability.active {
                     commands.extend(
@@ -14445,6 +14491,57 @@ impl DesktopLauncher {
             let to = desktop_arc_point(center, ability.radius, start_angle + angle_span * t1);
             commands.push(RenderCommand::draw_line(from, to, stroke, color, layer));
         }
+        commands
+    }
+
+    fn unit_snapshot_energy_field_render_commands(
+        &self,
+        unit: &UnitComp,
+        ability: &EnergyFieldAbility,
+    ) -> Vec<RenderCommand> {
+        let center = desktop_unit_energy_field_center(unit, ability);
+        let color = desktop_effect_render_color(Some(Pal::HEAL), 1.0);
+        let orb_radius = DESKTOP_ENERGY_FIELD_EFFECT_RADIUS
+            * (1.0
+                + desktop_absin(
+                    self.render_time,
+                    DESKTOP_ENERGY_FIELD_BLINK_SCL,
+                    DESKTOP_ENERGY_FIELD_BLINK_SIZE,
+                ));
+        let mut commands = Vec::with_capacity(2 + DESKTOP_ENERGY_FIELD_SECTORS * 2);
+        commands.push(RenderCommand::draw_circle(
+            center,
+            orb_radius,
+            color,
+            true,
+            DESKTOP_ENERGY_FIELD_LAYER,
+        ));
+        commands.push(RenderCommand::draw_circle(
+            center,
+            orb_radius / 2.0,
+            [1.0, 1.0, 1.0, 1.0],
+            true,
+            DESKTOP_ENERGY_FIELD_LAYER + 0.0001,
+        ));
+
+        let sector_angle = 360.0 * DESKTOP_ENERGY_FIELD_SECTOR_RAD;
+        let stroke = 0.7 + desktop_absin(self.render_time, DESKTOP_ENERGY_FIELD_BLINK_SCL, 0.7);
+        let sector_radius = orb_radius + 3.0;
+        for sector in 0..DESKTOP_ENERGY_FIELD_SECTORS {
+            let start_angle = unit.rotation()
+                + sector as f32 * 360.0 / DESKTOP_ENERGY_FIELD_SECTORS as f32
+                - self.render_time * DESKTOP_ENERGY_FIELD_ROTATE_SPEED;
+            commands.extend(desktop_arc_line_commands(
+                center,
+                sector_radius,
+                sector_angle,
+                start_angle,
+                stroke,
+                color,
+                DESKTOP_ENERGY_FIELD_LAYER + 0.0002,
+            ));
+        }
+
         commands
     }
 
@@ -21840,6 +21937,140 @@ mod tests {
                 .any(|quad| quad.symbol == "primitive:DrawLine"),
             "shield arc line segments should continue into primitive OpenGL quads"
         );
+    }
+
+    #[test]
+    fn desktop_launcher_lowers_energy_field_ability_to_orb_and_sector_arcs() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut unit_type = UnitType::new(7410, "energy-field-test");
+        unit_type.abilities = vec!["EnergyFieldAbility:40:65:180:1.5:0.5:25".into()];
+
+        let mut unit = UnitComp::new(7410, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(90.0);
+        unit.abilities[0] = type_io::AbilityWire { data: 12.0 };
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7410, unit);
+        launcher.render_time = 0.0;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            31,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(
+                            command,
+                            RenderCommand::DrawCircle {
+                                center,
+                                radius,
+                                filled: true,
+                                layer,
+                                ..
+                            } if *center == RenderPoint::new(40.0, 56.0)
+                                && (*radius - super::DESKTOP_ENERGY_FIELD_EFFECT_RADIUS).abs()
+                                    < 0.0001
+                                && (*layer - super::DESKTOP_ENERGY_FIELD_LAYER).abs() < 0.0001
+                        )
+                    })
+            })
+            .expect("EnergyFieldAbility.draw should emit overlay orb geometry");
+
+        let energy_color = super::desktop_effect_render_color(Some(Pal::HEAL), 1.0);
+        let orb = overlay
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawCircle {
+                        center,
+                        radius,
+                        color,
+                        filled: true,
+                        layer
+                    } if *center == RenderPoint::new(40.0, 56.0)
+                        && (*radius - super::DESKTOP_ENERGY_FIELD_EFFECT_RADIUS).abs() < 0.0001
+                        && *color == energy_color
+                        && (*layer - super::DESKTOP_ENERGY_FIELD_LAYER).abs() < 0.0001
+                )
+            })
+            .expect("energy field should draw the colored outer orb");
+        assert!(matches!(orb, RenderCommand::DrawCircle { .. }));
+
+        assert!(
+            overlay.commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawCircle {
+                        center,
+                        radius,
+                        color,
+                        filled: true,
+                        ..
+                    } if *center == RenderPoint::new(40.0, 56.0)
+                        && (*radius - super::DESKTOP_ENERGY_FIELD_EFFECT_RADIUS / 2.0).abs()
+                            < 0.0001
+                        && *color == [1.0, 1.0, 1.0, 1.0]
+                )
+            }),
+            "energy field should draw the white middle orb like Java Draw.color() reset"
+        );
+
+        let sector_lines = overlay
+            .commands
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawLine {
+                        stroke,
+                        color,
+                        layer,
+                        ..
+                    } if (*stroke - 0.7).abs() < 0.0001
+                        && *color == energy_color
+                        && (*layer - (super::DESKTOP_ENERGY_FIELD_LAYER + 0.0002)).abs()
+                            < 0.0001
+                )
+            })
+            .count();
+        assert_eq!(
+            sector_lines,
+            super::DESKTOP_ENERGY_FIELD_SECTORS
+                * ((360.0 * super::DESKTOP_ENERGY_FIELD_SECTOR_RAD)
+                    / super::DESKTOP_SHIELD_ARC_MAX_SEGMENT_DEGREES)
+                    .ceil() as usize,
+            "energy field should lower each Java Lines.arc sector into line segments"
+        );
+
+        let mut headless = HeadlessDesktopGraphicsRenderer::default();
+        headless.render_graphics_frame(&frame);
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "primitive:DrawCircle"));
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "primitive:DrawLine"));
     }
 
     #[test]

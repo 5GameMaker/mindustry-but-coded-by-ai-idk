@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **47.6%**。
+- 当前总体迁移完成度：约 **47.7%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -14017,3 +14017,30 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. Java `ShieldArcAbility.widthScale/alpha` 是瞬时客户端状态，当前 Rust `UnitSyncWire` 只同步 `AbilityWire.data`，所以本轮先按“有 shield data 且 active 时满宽”渲染；
   2. `region/offsetRegion/color override/animateShields=false` 仍未完整迁移；
   3. 下一步 Ability 渲染建议继续 `EnergyFieldAbility`，或并行回到真实 font atlas / menu UI。
+
+### 2026-05-30：EnergyFieldAbility orb 与 sector arc 渲染闭环
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **47.7%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `unit_snapshot_ability_render_commands(...)` 识别 `EnergyFieldAbility` descriptor；
+    - 新增 energy field center/helper 常量，对照 Java 默认 `effectRadius/blinkScl/blinkSize/sectorRad/rotateSpeed/sectors/layer`；
+    - 把 Java `Fill.circle` 中央 orb 与白色内核降低为 `DrawCircle`；
+    - 把 Java `Lines.arc` 的旋转 sector 降低为 bounded `DrawLine` 弧段；
+    - 新增 `desktop_launcher_lowers_energy_field_ability_to_orb_and_sector_arcs`，断言 orb、内核、sector line 段与 `primitive:DrawCircle/DrawLine`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_energy_field_ability_to_orb_and_sector_arcs --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_shield_arc_ability_to_line_segments_before_unit_shield --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_force_field_ability_to_polygon_before_unit_shield --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_suppression_field_ability_to_visible_circles --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. Java `curStroke/anyNearby` 目前没有进入 snapshot/wire，本轮暂未绘制 range 扩展 arc 与 `Drawf.light`；
+  2. Java 自定义 `color/layer/effectRadius/sectorRad/rotateSpeed/sectors` 目前 Rust descriptor 未携带，先按默认值；
+  3. 后续可继续补 `ArmorPlateAbility` 或转入真实 font atlas / 菜单 Scene UI。

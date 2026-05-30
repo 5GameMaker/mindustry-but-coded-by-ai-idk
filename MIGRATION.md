@@ -16872,3 +16872,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java 的 `widthScale` 与 `alpha` 是 ShieldArcAbility 客户端瞬时状态，当前网络 snapshot 只同步 `AbilityWire.data`，所以暂按 active 满宽渲染；
   - `region`、`offsetRegion`、`color override`、`animateShields=false` 低 alpha 行为尚未补齐；
   - 后续建议继续接 `EnergyFieldAbility` 连续视觉，或回到真实 font atlas / 菜单 Scene UI。
+
+## 464. EnergyFieldAbility 下沉到 orb 与 sector arc 渲染
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.7%**，仍未达到完整可玩；继续优先推进前端/客户端/渲染。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\entities\abilities\EnergyFieldAbility.java:83-110`：`draw(Unit)` 先画 heal 色 orb 和白色内核，再用 `Lines.arc(...)` 画旋转 sector，`curStroke>0` 时额外画 range arc 与 light。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `unit_snapshot_ability_render_commands(...)` 增加 `EnergyFieldAbility` descriptor 识别；
+    - 新增 energy field 默认 draw 常量与 center helper；
+    - 将 Java `Fill.circle(rx, ry, orbRadius)` / `Fill.circle(rx, ry, orbRadius / 2)` 下沉为 `RenderCommand::DrawCircle`；
+    - 将 Java `Lines.arc(rx, ry, orbRadius + 3, sectorRad, rot)` 下沉为 bounded `RenderCommand::DrawLine` 弧段；
+    - 新增 `desktop_launcher_lowers_energy_field_ability_to_orb_and_sector_arcs`，覆盖 render command 与 headless OpenGL primitive quad。
+- 迁移意义：
+  - `EnergyFieldAbility` 已从 ability descriptor 接入 `UnitDrawStage::Abilities -> DrawCircle/DrawLine -> primitive/OpenGL`；
+  - 当前至少形成原版持续可见的中央 orb 与旋转 sector 可观测闭环，不再只是 update/pulse 数据结构。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_energy_field_ability_to_orb_and_sector_arcs --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_shield_arc_ability_to_line_segments_before_unit_shield --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_force_field_ability_to_polygon_before_unit_shield --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_suppression_field_ability_to_visible_circles --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `curStroke/anyNearby` 尚未网络化或 snapshot 化，因此 range 外圈 arc 与 `Drawf.light` 暂未输出；
+  - Java 可配置 `color/layer/effectRadius/sectorRad/rotateSpeed/sectors` 当前 Rust descriptor 尚未携带，先按 Java 默认值；
+  - 后续可继续接 `ArmorPlateAbility`，或切回真实 font atlas / 菜单 Scene UI。
