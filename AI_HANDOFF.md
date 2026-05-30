@@ -13705,3 +13705,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. `shootOnDeathWeapon` 要走武器/死亡行为链，不要误当普通 DrawPart；
   3. 单位渲染剩余主要缺口是 `Abilities`；
   4. 渲染后端建议继续做 `weather-rain-over` lowering 或 `DrawText` glyph/quad/OpenGL 链路。
+
+### 2026-05-30：weather-rain-over 下沉到 DrawLine/OpenGL primitive
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **44.2%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopArcRand` / `desktop_murmur_hash3(...)`，复用 Arc/Mindustry seeded rand 语义；
+    - 新增 `desktop_weather_rain_over_draw_lines(...)`，按 `RainDrawPlan`、`WeatherState`、当前 `RenderCamera` 与 `render_time` 生成雨线；
+    - `weather_snapshot_environment_render_commands(...)` 继续保留 `weather-rain-over` custom marker，同时追加真实 `RenderCommand::DrawLine`；
+    - `weather_snapshot_environment_render_pass(...)` 改为接收当前 camera，避免 weather lowering 脱离实际渲染相机；
+    - `desktop_launcher_materializes_weather_snapshot_into_environment_pass` 增加断言：weather rain-over 有 `DrawLine`，headless OpenGL executor 产生 `primitive:DrawLine` quad。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_weather_snapshot_into_environment_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 子代理结论已回收：
+  1. Weather 后续优先级：`weather-rain-splashes` -> `weather-particles` -> `weather-particle-noise`；不要再把渲染逻辑扩散到 core，继续在 desktop weather snapshot/lowering seam 展开。
+  2. `DrawText` 目前仍只是 trace/计数，没有 glyph atlas、glyph quad 或真实 OpenGL 字形绘制；建议以后从 WorldLabel 窄链路切入。
+  3. `UnitDrawStage::Abilities` 第一刀建议做 `ForceFieldAbility`，因为 Rust 已有 descriptor/runtime shield 状态，最小可落 `DrawPolygon`，再扩 suppression/energy/shield arc。
+- 下一步：
+  1. 若继续天气：优先把 `weather-rain-splashes` 从 custom marker 下沉到 splash sprite / splash line primitives；
+  2. 若继续单位渲染：按子代理建议把 `Abilities` stage 接入 `ForceFieldAbility`；
+  3. 若继续后端：启动 `DrawText -> font atlas/metrics -> glyph quads -> sprite mesh/OpenGL` 窄链路，避免只做 trace 伪实现。

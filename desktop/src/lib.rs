@@ -77,7 +77,7 @@ use mindustry_core::mindustry::net::{
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::r#type::{
-    UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
+    RainDrawPlan, UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
 };
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
@@ -1559,6 +1559,124 @@ fn desktop_puddle_seeded_offsets(id: i32, length: f32) -> [(f32, f32); 3] {
 
 fn desktop_weather_rgba_property(rgba: u32) -> String {
     format!("{rgba:08x}")
+}
+
+const DESKTOP_WEATHER_BOUND_MAX: f32 = 10000.0 * 8.0;
+
+#[derive(Debug, Clone, Copy)]
+struct DesktopArcRand {
+    seed0: u64,
+    seed1: u64,
+}
+
+impl DesktopArcRand {
+    fn with_seed(seed: i64) -> Self {
+        let mut rand = Self { seed0: 0, seed1: 0 };
+        rand.set_seed(seed);
+        rand
+    }
+
+    fn set_seed(&mut self, seed: i64) {
+        let seed = if seed == 0 {
+            0x8000_0000_0000_0000
+        } else {
+            seed as u64
+        };
+        let hashed = desktop_murmur_hash3(seed);
+        self.seed0 = hashed;
+        self.seed1 = desktop_murmur_hash3(hashed);
+    }
+
+    fn next_long(&mut self) -> u64 {
+        let mut seed0 = self.seed0;
+        let seed1 = self.seed1;
+        self.seed0 = seed1;
+        seed0 ^= seed0 << 23;
+        self.seed1 = seed0 ^ seed1 ^ (seed0 >> 17) ^ (seed1 >> 26);
+        self.seed1.wrapping_add(seed1)
+    }
+
+    fn next_float(&mut self) -> f32 {
+        ((self.next_long() >> 40) as f64 * (1.0 / (1u64 << 24) as f64)) as f32
+    }
+
+    fn random(&mut self, range: f32) -> f32 {
+        self.next_float() * range
+    }
+
+    fn random_between(&mut self, min: f32, max: f32) -> f32 {
+        min + self.next_float() * (max - min)
+    }
+}
+
+fn desktop_murmur_hash3(mut value: u64) -> u64 {
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    value ^= value >> 33;
+    value
+}
+
+fn desktop_weather_rain_over_draw_lines(
+    over: &RainDrawPlan,
+    state: &WeatherState,
+    camera: RenderCamera,
+    render_time: f32,
+) -> Vec<RenderCommand> {
+    if over.density <= f32::EPSILON
+        || over.intensity <= f32::EPSILON
+        || state.opacity <= f32::EPSILON
+    {
+        return Vec::new();
+    }
+
+    let camera_rect = camera.world_rect();
+    let padding = over.size_max * 0.9;
+    let rain_rect = camera_rect.inflate(padding);
+    if rain_rect.width <= f32::EPSILON || rain_rect.height <= f32::EPSILON {
+        return Vec::new();
+    }
+    let total =
+        ((rain_rect.width * rain_rect.height) / over.density * over.intensity).max(0.0) as usize;
+    let mut rand = DesktopArcRand::with_seed(0);
+    let mut commands = Vec::with_capacity(total);
+
+    for _ in 0..total {
+        let scl = rand.random_between(0.5, 1.0);
+        let scl2 = rand.random_between(0.5, 1.0);
+        let size = rand.random_between(over.size_min, over.size_max);
+        let mut x = rand.random(DESKTOP_WEATHER_BOUND_MAX) + render_time * over.xspeed * scl2;
+        let mut y = rand.random(DESKTOP_WEATHER_BOUND_MAX) - render_time * over.yspeed * scl;
+        let tint = rand.random(1.0) * state.opacity;
+
+        x = (x - rain_rect.x).rem_euclid(rain_rect.width) + rain_rect.x;
+        y = (y - rain_rect.y).rem_euclid(rain_rect.height) + rain_rect.y;
+
+        if !RenderRect::from_center(RenderPoint::new(x, y), size, size).intersects(camera_rect) {
+            continue;
+        }
+
+        let dx = over.xspeed * scl2;
+        let dy = -over.yspeed * scl;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len <= f32::EPSILON {
+            continue;
+        }
+
+        let line_len = size / 2.0;
+        let from = RenderPoint::new(x, y);
+        let to = RenderPoint::new(x + dx / len * line_len, y + dy / len * line_len);
+        commands.push(RenderCommand::draw_line(
+            from,
+            to,
+            over.stroke,
+            rgba8888_to_render_color(over.color_rgba, tint),
+            Layer::WEATHER,
+        ));
+    }
+
+    commands
 }
 
 fn desktop_weather_splash_regions(splashes: &[String]) -> Vec<String> {
@@ -14302,6 +14420,7 @@ impl DesktopLauncher {
         &self,
         entity_id: i32,
         state: &WeatherState,
+        camera: RenderCamera,
     ) -> Vec<RenderCommand> {
         if !state.added {
             return Vec::new();
@@ -14331,6 +14450,12 @@ impl DesktopLauncher {
                     RenderProperty::new("color", desktop_weather_rgba_property(over.color_rgba)),
                 ]);
                 commands.push(RenderCommand::custom("weather-rain-over", over_properties));
+                commands.extend(desktop_weather_rain_over_draw_lines(
+                    &over,
+                    state,
+                    camera,
+                    self.render_time,
+                ));
 
                 let mut under_properties = Self::weather_snapshot_base_properties(entity_id, state);
                 under_properties.extend([
@@ -14414,15 +14539,16 @@ impl DesktopLauncher {
         }
     }
 
-    fn weather_snapshot_environment_render_pass(&self) -> Option<RenderPass> {
+    fn weather_snapshot_environment_render_pass(&self, camera: RenderCamera) -> Option<RenderPass> {
         let mut pass = RenderPass::new(RenderPassKind::Environment)
             .with_order(RenderPassKind::Environment.default_order());
         for (entity_id, state) in &self.runtime.client_weather_snapshot_entities {
             if self.runtime.client_hidden_entity_ids.contains(entity_id) {
                 continue;
             }
-            pass.commands
-                .extend(self.weather_snapshot_environment_render_commands(*entity_id, state));
+            pass.commands.extend(
+                self.weather_snapshot_environment_render_commands(*entity_id, state, camera),
+            );
         }
 
         (!pass.commands.is_empty()).then_some(pass)
@@ -14508,7 +14634,7 @@ impl DesktopLauncher {
                 render_frame.push_pass(pass);
             }
         }
-        if let Some(pass) = self.weather_snapshot_environment_render_pass() {
+        if let Some(pass) = self.weather_snapshot_environment_render_pass(camera) {
             render_frame.push_pass(pass);
         }
         let fog_frame = self.fog_frame_plan(camera, viewport);
@@ -19569,6 +19695,26 @@ mod tests {
                     && properties.iter().any(|property| property.key == "intensity" && property.value == "0.75")
                     && properties.iter().any(|property| property.key == "color" && property.value == "7a95eaff")
         )));
+        let rain_lines = environment
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawLine {
+                    stroke,
+                    color,
+                    layer,
+                    ..
+                } if (*layer - Layer::WEATHER).abs() < 0.0001 => Some((*stroke, *color)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !rain_lines.is_empty(),
+            "weather-rain-over should lower into visible DrawLine primitives"
+        );
+        assert!(rain_lines
+            .iter()
+            .all(|(stroke, color)| (*stroke - 0.75).abs() < 0.0001 && color[3] <= 0.5));
         assert!(environment.commands.iter().any(|command| matches!(
             command,
             RenderCommand::Custom { name, properties }
@@ -19590,6 +19736,19 @@ mod tests {
                     && properties.iter().any(|property| property.key == "region" && property.value == "particle")
                     && properties.iter().any(|property| property.key == "windx" && property.value == "-2.16")
             )));
+
+        let mut headless = HeadlessDesktopGraphicsRenderer::default();
+        headless.render_graphics_frame(&frame);
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .custom_markers
+            .iter()
+            .any(|name| name == "weather-rain-over"));
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "primitive:DrawLine"));
     }
 
     #[test]

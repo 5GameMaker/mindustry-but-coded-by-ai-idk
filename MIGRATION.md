@@ -16556,3 +16556,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `RegionPart`、`Weapon.parts` 的 under/over、recoilIndex、heat/light/children 仍未接入；
   - `shootOnDeathWeapon` 需要走武器/死亡行为链，不属于本轮 parts 渲染；
   - `Abilities` 仍是单位渲染主链缺口；weather custom command 与 `DrawText` OpenGL lowering 仍需继续推进。
+
+## 454. 最新闭环记录：weather-rain-over 下沉到 DrawLine/OpenGL primitive
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **44.2%**，仍未达到完整可玩。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\weather\RainWeather.java:29-32`：`drawOver` 调用 `drawRain(sizeMin, sizeMax, xspeed, yspeed, density, state.intensity, stroke, color)`；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\Weather.java:156-186`：`drawRain` 用全局 seeded Rand、相机 bounds、`boundMax=10000*8`、`Time.time`、`Lines.lineAngle(...)` 生成雨线。
+- 本轮主改动：
+  - `desktop/src/lib.rs` 新增 `DesktopArcRand` / `desktop_murmur_hash3(...)`，按当前已有 ArcRand 语义复用 seeded xorshift 随机序列；
+  - 新增 `desktop_weather_rain_over_draw_lines(...)`，把 `RainDrawPlan + WeatherState + RenderCamera + render_time` 展开为真实 `RenderCommand::DrawLine`；
+  - `weather_snapshot_environment_render_commands(...)` 继续保留 `RenderCommand::Custom("weather-rain-over", ...)` 审计 marker，同时追加实际雨线；
+  - `weather_snapshot_environment_render_pass(...)` 现在接收当前 render camera，以便按相机世界范围裁剪/包裹雨线；
+  - 既有天气 snapshot 测试同步断言 rain-over 生成 `DrawLine`，并经 headless OpenGL executor 进入 `primitive:DrawLine` sprite quad。
+- 迁移意义：
+  - `weather-rain-over` 不再只是 custom marker，已经进入 `client weather snapshot -> Environment RenderPass -> DrawLine RenderCommand -> OpenGL primitive quad` 主链；
+  - 这是 weather custom command lowering 的第一条真实像素闭环，后续 rain splashes、particle draw、particle noise 可沿同一 seam 继续下沉。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_weather_snapshot_into_environment_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `weather-rain-splashes` 仍只是 custom marker，尚未下沉为 splash sprite / splash line primitives；
+  - `weather-particles` 与 `weather-particle-noise` 仍需继续接入真实 sprite/noise texture draw；
+  - 本轮雨线尚未引入 renderer.weatherAlpha / showweather 设置项，也未完整覆盖 Java `Draw.getColorAlpha()` 上游状态；
+  - `Abilities`、完整 `Payload.draw()`、`RegionPart` / `Weapon.parts`、`DrawText` glyph/quad/OpenGL 仍是渲染长尾缺口。
