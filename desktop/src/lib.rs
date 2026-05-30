@@ -7,8 +7,9 @@ use mindustry_core::mindustry::core::game_runtime::{
     GameRuntimeBlockVisualRuntimeSnapshot, GameRuntimeCampaignBlockState,
     GameRuntimeClientCameraShakeEvent, GameRuntimeClientSnapshotApplyReport,
     GameRuntimeClientUnitEnteredPayloadApplyReport, GameRuntimeCommandBuildingReport,
-    GameRuntimeReconstructorConfigureResult, GameRuntimeUnitBlockState,
-    GameRuntimeUnitCargoUnloadConfigureResult, GameRuntimeUnitFactoryConfigureResult,
+    GameRuntimePlayableSmokeReport, GameRuntimeReconstructorConfigureResult,
+    GameRuntimeUnitBlockState, GameRuntimeUnitCargoUnloadConfigureResult,
+    GameRuntimeUnitFactoryConfigureResult,
 };
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
@@ -177,6 +178,11 @@ pub struct DesktopMenuActionDispatch {
     pub submenu_changed: bool,
     pub route: Option<DesktopMenuRoute>,
     pub close_requested: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopMenuRouteShellAction {
+    LaunchCampaign,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11749,6 +11755,8 @@ pub struct DesktopLauncher {
     pub last_menu_action: Option<MenuButtonRole>,
     pub active_menu_route: Option<DesktopMenuRoute>,
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
+    pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
+    pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
     pub load_renderer_state: LoadRendererState,
     pub ui_status_bar: Bar,
     pub pixelator_state: PixelatorState,
@@ -12422,6 +12430,8 @@ impl DesktopLauncher {
             last_menu_action: None,
             active_menu_route: None,
             last_menu_dispatch: None,
+            last_menu_route_shell_action: None,
+            last_campaign_launch_report: None,
             load_renderer_state: LoadRendererState::default(),
             ui_status_bar,
             pixelator_state: PixelatorState::default(),
@@ -15824,6 +15834,66 @@ impl DesktopLauncher {
         dispatch
     }
 
+    fn active_menu_route_shell_panel_for_viewport(viewport: RenderViewport) -> RenderRect {
+        let panel_width = (viewport.width * 0.46).clamp(280.0, 520.0);
+        let panel_height = 220.0;
+        RenderRect::new(
+            viewport.x + viewport.width - panel_width - 48.0,
+            viewport.y + (viewport.height - panel_height) * 0.5,
+            panel_width,
+            panel_height,
+        )
+    }
+
+    fn active_menu_route_shell_primary_rect_for_viewport(
+        viewport: RenderViewport,
+        route: DesktopMenuRoute,
+    ) -> Option<RenderRect> {
+        if route != DesktopMenuRoute::Campaign {
+            return None;
+        }
+        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
+        Some(RenderRect::new(
+            panel.x + 36.0,
+            panel.y + 18.0,
+            panel.width - 72.0,
+            36.0,
+        ))
+    }
+
+    fn active_menu_route_shell_action_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        let route = self.active_menu_route?;
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let rect = Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)?;
+        rect.contains_point(RenderPoint::new(x, y))
+            .then_some(DesktopMenuRouteShellAction::LaunchCampaign)
+    }
+
+    fn launch_campaign_smoke_world_from_menu(&mut self) -> GameRuntimePlayableSmokeReport {
+        let report = self.runtime.seed_playable_smoke_world(&self.content_loader);
+        self.runtime
+            .set_network_context(GameRuntimeNetworkContext::offline());
+        self.game_state = self.runtime.state.clone();
+        self.player.team = TeamId(self.game_state.rules.default_team as u8);
+        self.active_menu_route = None;
+        self.last_campaign_launch_report = Some(report);
+        report
+    }
+
+    fn dispatch_menu_route_shell_action(&mut self, action: DesktopMenuRouteShellAction) {
+        self.last_menu_route_shell_action = Some(action);
+        match action {
+            DesktopMenuRouteShellAction::LaunchCampaign => {
+                self.launch_campaign_smoke_world_from_menu();
+            }
+        }
+    }
+
     fn apply_menu_input_events(
         &mut self,
         surface_size: DesktopSurfaceSize,
@@ -15846,6 +15916,15 @@ impl DesktopLauncher {
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
                 {
                     if let Some(cursor) = self.last_menu_cursor {
+                        if let Some(action) = self.active_menu_route_shell_action_at_surface_point(
+                            surface_size,
+                            cursor.x,
+                            cursor.y,
+                        ) {
+                            self.dispatch_menu_route_shell_action(action);
+                            self.last_menu_action = None;
+                            continue;
+                        }
                         let action =
                             self.menu_button_at_surface_point(surface_size, cursor.x, cursor.y);
                         if let Some(role) = action {
@@ -15911,14 +15990,7 @@ impl DesktopLauncher {
             return;
         };
 
-        let panel_width = (viewport.width * 0.46).clamp(280.0, 520.0);
-        let panel_height = 168.0;
-        let panel = RenderRect::new(
-            viewport.x + viewport.width - panel_width - 48.0,
-            viewport.y + (viewport.height - panel_height) * 0.5,
-            panel_width,
-            panel_height,
-        );
+        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
         pass.push(RenderCommand::fill_rect(
             panel,
             [0.02, 0.025, 0.03, 0.82],
@@ -15967,6 +16039,33 @@ impl DesktopLauncher {
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.02,
+            ));
+        }
+        if let Some(primary_rect) =
+            Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)
+        {
+            pass.push(RenderCommand::fill_rect(
+                primary_rect,
+                [0.18, 0.35, 0.58, 0.92],
+                Layer::END_PIXELED + 0.03,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                primary_rect,
+                [0.58, 0.75, 0.92, 1.0],
+                1.0,
+                Layer::END_PIXELED + 0.04,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "LAUNCH",
+                primary_rect.center(),
+                [0.95, 0.98, 1.0, 1.0],
+                16.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.05,
             ));
         }
     }
@@ -17267,6 +17366,8 @@ impl DesktopLauncher {
         self.last_menu_action = None;
         self.active_menu_route = None;
         self.last_menu_dispatch = None;
+        self.last_menu_route_shell_action = None;
+        self.last_campaign_launch_report = None;
         self.load_renderer_state = LoadRendererState::default();
         self.pixelator_state = PixelatorState::default();
     }
@@ -31867,6 +31968,79 @@ mod tests {
         assert!(texts.contains(&"upstream: PlanetDialog"));
         assert!(texts.contains(&"planet: serpulo"));
         assert!(texts.contains(&"sector: groundZero #15"));
+    }
+
+    #[test]
+    fn desktop_launcher_campaign_launch_button_seeds_playable_smoke_world() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let campaign_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Campaign)
+            .expect("play submenu should include CAMPAIGN")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: campaign_center.x,
+                    y: campaign_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        let launch_center = DesktopLauncher::active_menu_route_shell_primary_rect_for_viewport(
+            viewport,
+            super::DesktopMenuRoute::Campaign,
+        )
+        .expect("campaign route should expose a primary launch button")
+        .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: launch_center.x,
+                    y: launch_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "Left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::LaunchCampaign)
+        );
+        let report = launcher
+            .last_campaign_launch_report
+            .expect("launch should seed a playable smoke world");
+        assert!(report.state_playing);
+        assert_eq!(report.world_width, 16);
+        assert_eq!(report.world_height, 16);
+        assert_eq!(report.buildings, 1);
+        assert!(launcher.game_state.is_playing());
+        assert!(launcher.runtime.state.is_playing());
+        assert_eq!(launcher.runtime.state.world.width(), 16);
+        assert_eq!(launcher.runtime.state.world.height(), 16);
+        assert_eq!(
+            launcher.runtime.network_context,
+            GameRuntimeNetworkContext::offline()
+        );
     }
 
     #[test]

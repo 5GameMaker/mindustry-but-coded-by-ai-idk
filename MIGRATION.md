@@ -17113,3 +17113,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Campaign shell 尚不能选择 sector 或进入游戏；
   - 下一步需要实现 `PlanetDialog` 的 sector list/selection state，并逐步接 `GameState.sector`、rules、map generator/save load；
   - `JOIN` route 仍需接入连接输入/服务器列表和 `NetClient` 错误反馈。
+
+## 472. Campaign route LAUNCH 按钮接入 playable smoke world
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.5%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链。
+- Java 对照：
+  - `PlanetDialog.playSelected()` 最终进入 `Control.playSector(...) / playNewSector(...)`；
+  - `Control.playNewSector(...)` 会加载 sector/world、设置 `state.rules.sector`、`logic.play()` 并切到 `State.playing`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - route shell 新增 primary button hit-test，当前 `Campaign` route 暴露 `LAUNCH`；
+    - `DesktopMenuRouteShellAction::LaunchCampaign` 通过 `DesktopLauncher::launch_campaign_smoke_world_from_menu(...)` 复用 `GameRuntime::seed_playable_smoke_world(...)`；
+    - 点击 `CAMPAIGN -> LAUNCH` 后会初始化 16x16 smoke world、创建默认 core、同步 `DesktopLauncher.game_state` 与 `runtime.state`、设置 offline network context，并退出菜单 route；
+    - 新增 `desktop_launcher_campaign_launch_button_seeds_playable_smoke_world` 锁定该前端到 runtime 的最小可玩桥。
+- 迁移意义：
+  - 这不是完整 `PlanetDialog.playSelected()` 等价实现，但已经把 `PLAY -> CAMPAIGN -> LAUNCH` 从前端按钮链打通到真实 `GameRuntime` playable smoke world；
+  - 与用户要求的“先优先前端，哪怕先看到主页面/可运行客户端”方向一致，同时不把 smoke world 误标为最终 campaign；
+  - 后续应把 smoke world 替换为真实 sector save/load 或 generator，而不是长期停留在 smoke。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 真实 Campaign 仍需 sector 选择、launch loadout、campaign rules、sector save/generator、统计事件与可失败/可胜利流程；
+  - 当前 `LAUNCH` 只是从菜单进入 smoke world 的过渡桥；
+  - 还需接入 keyboard/touch、真实 dialog 组件、字体 atlas 与 Java Scene UI 样式。

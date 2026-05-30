@@ -14228,3 +14228,27 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 还没有真正 `PlanetDialog` sector 选择、launch loadout、`control.playSector(...)` 等价路径；
   2. 后续应把 Campaign shell 升级为可选择 sector 的前端状态，再接 GameState/rules/world generator/save；
   3. `JOIN` route、真实字体 atlas 和输入覆盖仍待继续。
+
+### 2026-05-30：Campaign route LAUNCH 按钮接入 playable smoke world
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **48.5%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRouteShellAction::LaunchCampaign`；
+    - Campaign route shell 增加 `LAUNCH` primary button 和 hit-test；
+    - `launch_campaign_smoke_world_from_menu(...)` 复用 `GameRuntime::seed_playable_smoke_world(...)`，并同步 `DesktopLauncher.game_state` / `runtime.state`；
+    - 新增 `desktop_launcher_campaign_launch_button_seeds_playable_smoke_world`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_launch_button_seeds_playable_smoke_world --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_campaign_menu_route_shell_uses_content_start_sector --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. `LAUNCH` 当前进入的是 smoke world，不是完整 sector/generator/save；
+  2. 下一步应实现真实 `PlanetDialog` sector selection 或把 smoke bridge 替换为 sector load；
+  3. Join 输入/提交、真实字体 atlas、按钮图标/音效/动画仍待继续。
