@@ -17573,3 +17573,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实 OS/browser 打开链接的 desktop backend 尚未实现；
   - About link card 的鼠标命中区域尚未接到 route shell 输入系统；
   - `@linkfail` 仍是 message key 状态，尚未接完整错误弹窗/i18n 渲染。
+
+## 487. AboutDialog link 行鼠标命中接入菜单输入链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **50.2%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/dialogs/AboutDialog.java:48-76`
+    - 每个 link entry 是独立 card，并带 link button；
+    - 点击 link button 触发上一轮接入的 `openURI/linkfail/clipboard` 行为。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `about_link_name_at_surface_point(...)`，按当前 About links 页渲染行位置反查 link name；
+    - `apply_menu_input_events(...)` 在 route primary action 之后、chrome/menu button 之前处理 About link 行点击；
+    - 点击 About link 行后直接复用 `dispatch_about_link_action(...)`，不新增第二套副作用逻辑；
+    - 新增测试覆盖从鼠标移动/点击事件触发 wiki link 行，验证 `wiki_event_fired`、`@linkfail` 与 clipboard URL 状态。
+- 迁移意义：
+  - About link 行为不再只能由测试直接派发，已经进入真实菜单输入事件主链；
+  - 仍是 route shell 文本行命中，后续替换为真实 card/ScrollPane 时可保留同一 dispatch 行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_about_link_rows_dispatch_from_menu_mouse_input --lib`
+- 仍未完成：
+  - About 链接仍不是完整 Java card 布局，只是文本行命中；
+  - 长列表仍未做滚动与裁剪；
+  - 真实 OS/browser 打开链接的 desktop backend 尚未实现。

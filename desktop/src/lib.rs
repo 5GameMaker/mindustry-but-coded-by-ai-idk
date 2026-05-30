@@ -16700,6 +16700,31 @@ impl DesktopLauncher {
             })
     }
 
+    fn about_link_name_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        y: f32,
+    ) -> Option<&'static str> {
+        if self.active_menu_route != Some(DesktopMenuRoute::About)
+            || self.about_route_page != DesktopAboutRoutePage::Links
+        {
+            return None;
+        }
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::active_menu_route_shell_panel_for_viewport(viewport);
+        let point = RenderPoint::new(x, y);
+        for (index, link) in self.visible_about_links().into_iter().enumerate() {
+            let description_line = 3 + index * 2;
+            let center_y = panel.y + panel.height - 118.0 - description_line as f32 * 20.0;
+            let rect = RenderRect::new(panel.x + 24.0, center_y - 18.0, panel.width - 48.0, 36.0);
+            if rect.contains_point(point) {
+                return Some(link.name);
+            }
+        }
+        None
+    }
+
     fn launch_campaign_smoke_world_from_menu(&mut self) -> GameRuntimePlayableSmokeReport {
         let selected_sector = self.campaign_selected_sector_from_dialog();
         let report = self.runtime.seed_playable_smoke_world(&self.content_loader);
@@ -16878,6 +16903,13 @@ impl DesktopLauncher {
                             cursor.y,
                         ) {
                             self.dispatch_menu_route_shell_action(action);
+                            self.last_menu_action = None;
+                            continue;
+                        }
+                        if let Some(link_name) =
+                            self.about_link_name_at_surface_point(surface_size, cursor.x, cursor.y)
+                        {
+                            self.dispatch_about_link_action(link_name);
                             self.last_menu_action = None;
                             continue;
                         }
@@ -33486,6 +33518,58 @@ mod tests {
 
         assert_eq!(launcher.dispatch_about_link_action("google-play"), None);
         assert_eq!(launcher.last_about_link_action, None);
+    }
+
+    #[test]
+    fn desktop_launcher_about_link_rows_dispatch_from_menu_mouse_input() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        launcher.dispatch_menu_action(MenuButtonRole::About);
+
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_viewport(viewport);
+        let wiki_index = launcher
+            .visible_about_links()
+            .iter()
+            .position(|link| link.name == "wiki")
+            .expect("About links should contain wiki");
+        let description_line = 3 + wiki_index * 2;
+        let wiki_point = RenderPoint::new(
+            panel.x + panel.width * 0.5,
+            panel.y + panel.height - 118.0 - description_line as f32 * 20.0,
+        );
+        assert_eq!(
+            launcher.about_link_name_at_surface_point(surface, wiki_point.x, wiki_point.y),
+            Some("wiki")
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: wiki_point.x,
+                    y: wiki_point.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        let action = launcher
+            .last_about_link_action
+            .as_ref()
+            .expect("clicking wiki row should dispatch About link action");
+        assert_eq!(action.name, "wiki");
+        assert!(action.wiki_event_fired);
+        assert!(!action.opened);
+        assert_eq!(action.error_message.as_deref(), Some("@linkfail"));
+        assert_eq!(
+            action.clipboard_text.as_deref(),
+            Some("https://mindustrygame.github.io/wiki/")
+        );
+        assert_eq!(launcher.last_menu_action, None);
     }
 
     #[test]
