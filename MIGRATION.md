@@ -16929,3 +16929,27 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 启动预览不是最终 Java `MenuFragment` / Scene UI；
   - 字体仍是 placeholder bitmap glyph，不是真实 Arc/FreeType font atlas；
   - 菜单按钮交互、设置/加入/编辑器页面与真实 UI layout 仍需继续迁移。
+
+## 466. native backbuffer clear 重置 scissor 防止菜单黑屏
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.9%**，仍未达到完整可玩；继续优先推进客户端可见性与黑屏风险收口。
+- 问题背景：
+  - no-world 启动菜单预览和菜单 pass 频繁使用 `SetClip/ClearClip`；
+  - native runtime 每帧先 `clear_backbuffer()` 再提交 frame；
+  - 如果上一帧在 clip 状态中断或边界异常，OpenGL scissor 状态可能泄漏到下一帧，使后续菜单绘制被裁掉，看起来像黑屏。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `DesktopNativeOpenGlRuntime::clear_backbuffer()` 在绑定默认 framebuffer、设置窗口 viewport 后，清色前显式调用 `gl.disable(glow::SCISSOR_TEST)`；
+    - 该防护不改变 headless render command 语义，只加强真实 native OpenGL 帧起点状态。
+- 迁移意义：
+  - 与前面 `startup-menu-preview`、真实 `menu` pass、`DrawText` glyph quads 共同收紧“客户端打开黑屏”的高风险路径；
+  - 改动落在 native runtime 主链，不是测试-only helper。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop native_opengl_builtin_sprite_shader_maps_pixels_and_samples_texture --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 需要继续审计 native viewport/uniform/FBO 状态与真实菜单 Scene UI；
+  - 字体仍是 placeholder glyph，真实 font atlas 尚未完成。

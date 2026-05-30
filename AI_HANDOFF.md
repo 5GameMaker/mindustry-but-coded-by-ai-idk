@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **47.8%**。
+- 当前总体迁移完成度：约 **47.9%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -14069,3 +14069,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 这仍是启动预览，不是完整 Java `MenuFragment` / Scene UI；
   2. 文字仍是 placeholder bitmap glyph，不是真实 font atlas；
   3. 后续应把真实菜单按钮/交互/字体 atlas 接入同一 frame/backend 主链。
+
+### 2026-05-30：native backbuffer clear 重置 scissor
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **47.9%**。
+- 本轮实际闭环：
+  - `desktop/src/main.rs`
+    - `DesktopNativeOpenGlRuntime::clear_backbuffer()` 在绑定默认 framebuffer、设置 viewport 后显式 `disable(SCISSOR_TEST)`；
+    - 目标是防止 startup preview / menu pass 的 `SetClip/ClearClip` 状态在 native 帧中断或异常边界下泄漏到下一帧，导致菜单文字/色块被整屏裁掉形成黑屏。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop native_opengl_builtin_sprite_shader_maps_pixels_and_samples_texture --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. 这只是 native 可见性防护，不代表完整 Scene UI；
+  2. 后续仍需真实字体 atlas、菜单交互与更完整的 OpenGL 状态审计。

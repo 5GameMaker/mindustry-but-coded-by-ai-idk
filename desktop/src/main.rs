@@ -330,6 +330,11 @@ impl DesktopNativeOpenGlRuntime {
                 size.width.min(i32::MAX as u32) as i32,
                 size.height.min(i32::MAX as u32) as i32,
             );
+            // The no-world menu path uses SetClip/ClearClip heavily for preview
+            // rects. Reset native scissor before the next backbuffer clear so a
+            // stale clip state can never turn the following frame into a black
+            // screen even if a previous frame was interrupted mid-pass.
+            self.gl.disable(glow::SCISSOR_TEST);
             self.gl.clear_color(0.015, 0.018, 0.025, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
