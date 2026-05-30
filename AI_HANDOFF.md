@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **46.8%**。
+- 当前总体迁移完成度：约 **47.0%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -13798,3 +13798,74 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续优先渲染引擎主链：weather particles/noise 或 `DrawText -> glyph quad -> OpenGL`；
   2. 并行推进单位 `Abilities` 与完整 payload draw；
   3. 每个闭环完成后继续只在 README 更新百分比，不写详细代码进度。
+
+### 2026-05-30：weather particle/noise 下沉到 sprite/OpenGL quad
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **46.9%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_weather_texture_symbol_from_path(...)`，把 `sprites/noiseAlpha.png` 映射到 atlas symbol `noisealpha`；
+    - 新增 `desktop_weather_noise_render_commands(...)`，保留 `weather-particle-noise` marker 的同时生成 `DrawSprite`，让噪声层进入 atlas sprite/OpenGL quad 主链；
+    - 新增 `desktop_weather_particle_render_commands(...)`，按 Java `drawParticles` 的 camera area、seeded Rand、wind、size/alpha/rotation、sin 扰动和裁剪生成真实 `DrawSprite`；
+    - `desktop_launcher_materializes_weather_snapshot_into_environment_pass` 增加 noise/particle sprite 与 headless OpenGL sprite quad 断言。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_weather_snapshot_into_environment_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime`
+- 产物提示：
+  - 当前可预览客户端 debug exe：`D:\MDT\rust-mindustry\target\debug\mindustry-desktop.exe`；这只是阶段性可视化产物，最终目标仍是完整可玩客户端/服务端与联机互通。
+- 下一步：
+  1. 若继续渲染主线：优先 `DrawText -> world label glyph quad -> OpenGL`；
+  2. 并行推进 `UnitDrawStage::Abilities`，从 ForceFieldAbility 多边形盾切入；
+  3. 后续 weather noise 仍需补 UV scroll/repeat/filter 语义，不要误认为已完整等价 Java `drawNoise`。
+
+### 2026-05-30：启动黑屏修复 / no-world startup preview
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **47.0%**。
+- 用户反馈：
+  - `D:\MDT\rust-mindustry\target\debug\mindustry-desktop.exe` 打开完全黑屏。
+- 根因判断：
+  - `default_render_viewport()` 使用 world unit size；
+  - 启动未加载 world 时 world 是 `0x0`；
+  - `step_desktop_frame_loop(...)` 固定走 `render_default_graphics_frame_for_surface_with(...)`，没有使用 `menu_frame_for_render(...)`；
+  - native OpenGL 每帧先清 backbuffer，后续 no-world 没有可见绘制就表现为黑屏。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `default_render_viewport_for_surface(...)`：no-world 时 fallback 到真实窗口 surface，surface 为 `0x0` 时用 `DesktopSurfaceSize::default()`；
+    - 新增 viewport 版本的 default camera/minimap/minimap input helper；
+    - 新增 `startup_menu_preview_render_pass(...)` 与 `startup_menu_preview_graphics_frame(...)`；
+    - `render_default_graphics_frame_for_surface_with(...)` 在 no-world 时直接渲染 `startup-menu-preview` pass；
+    - preview 使用 `Clear + SetClip + Clear + ClearClip` 画背景、面板和按钮色块，避免依赖当前仍未完整接入的 font/textured sprite shader。
+- 新增/调整测试：
+  - `desktop_default_render_viewport_for_surface_falls_back_without_world`
+  - `desktop_launcher_default_surface_frame_emits_visible_startup_menu_preview_without_world`
+  - `desktop_frame_loop_presents_startup_menu_preview_when_world_is_absent`
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check --workspace --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_default_render_viewport_for_surface_falls_back_without_world --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_emits_visible_startup_menu_preview_without_world --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_startup_menu_preview_when_world_is_absent --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test --workspace --features opengl-native-runtime`：desktop/core 等通过，但 server 两个真实端口测试在并发全量中报 `could not reserve a local TCP/UDP port pair`；随后这两个用例单独串行重跑通过：
+    - `cargo test -p mindustry-server server_launcher_opens_real_arc_network_on_configured_port -- --test-threads=1`
+    - `cargo test -p mindustry-server server_launcher_reads_port_arg_before_opening_network -- --test-threads=1`
+- 产物提示：
+  - 当前 exe：`D:\MDT\rust-mindustry\target\debug\mindustry-desktop.exe`
+  - 用户现在重开应能看到非黑屏的启动预览色块；这只是阶段性可视化壳，不是最终菜单/UI。
+- 下一步：
+  1. 不要把 startup preview 当作最终 UI；后续要把真实 menu/Scene/UI 接入 native render；
+  2. 优先推进渲染主线：`DrawText -> glyph quad -> OpenGL` 或 `UnitDrawStage::Abilities -> ForceFieldAbility polygon shield`；
+  3. 同时继续补 world/ui/maps/editor 和完整可玩/联机 smoke，不能让模块孤立存在。

@@ -16647,3 +16647,71 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 下一步：
   - 继续优先推进渲染引擎主链，建议从 `weather-particles` / `weather-particle-noise` 或 `DrawText -> glyph quad -> OpenGL` 窄链路切入；
   - 同步并行推进单位 `Abilities`、完整 payload draw 和 world/ui/maps/editor 大缺口，避免只堆 helper 而不接整体 runtime。
+
+## 457. 最新闭环记录：weather particle/noise 下沉到 sprite/OpenGL quad
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **46.9%**，仍未达到完整可玩。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\weather\ParticleWeather.java:54-88`：`drawOver` 根据 `useWindVector` 计算 wind，先画 noise layers，再画 particles；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\Weather.java:115-154`：`drawParticles` 使用固定 Rand seed、camera area、`Time.time * wind`、随机 size/alpha/rotation 与 `Mathf.sin(...)` 扰动；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\Weather.java:237-265`：`drawNoiseLayers/drawNoise` 每层画一张带 scroll/repeat 的噪声纹理。
+- 本轮主改动：
+  - `desktop/src/lib.rs` 新增 `desktop_weather_texture_symbol_from_path(...)`，按 atlas 虚拟路径规则把 `sprites/noiseAlpha.png` 解析为 `noisealpha`；
+  - 新增 `desktop_weather_noise_render_commands(...)`，在保留 `RenderCommand::Custom("weather-particle-noise")` 审计 marker 的同时，追加 `RenderCommand::DrawSprite`，使 noise layer 进入 atlas sprite/OpenGL quad 主链；
+  - 新增 `desktop_weather_particle_render_commands(...)`，按 Java `drawParticles` 的 seeded Rand、camera rect、wind、size/alpha/rotation、sin 扰动与裁剪生成真实 `DrawSprite`；
+  - `weather_snapshot_environment_render_commands(...)` 对 `ParticleWeather` 同时输出 custom marker 与真实 sprite commands；
+  - `desktop_launcher_materializes_weather_snapshot_into_environment_pass` 增补 `noisealpha` / `particle` 的 environment pass 与 headless OpenGL sprite quad 断言。
+- 迁移意义：
+  - `weather-particle-noise` / `weather-particles` 不再只停留在 custom marker，已经进入 `client weather snapshot -> Environment RenderPass -> DrawSprite -> atlas sprite/OpenGL quad` 主链；
+  - 加上前两轮 rain-over 与 rain-splashes，当前基础天气视觉路径已经形成 rain line、splash sprite/line、particle sprite、noise sprite 四条可观测闭环。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_weather_snapshot_into_environment_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - noise 当前先以 full-camera `DrawSprite` 下沉，尚未完整表达 Java `TextureRegion` UV window、scroll、repeat/filter 与 y-flip；
+  - particle 颜色/随机路径已接入，但仍未接 renderer.weatherAlpha / showweather 开关；
+  - `DrawText` glyph/quad/OpenGL、`UnitDrawStage::Abilities`、完整 `Payload.draw()` 仍是渲染主链长尾。
+
+## 458. 启动黑屏修复：no-world surface viewport fallback + startup menu preview
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.0%**，仍未达到完整可玩；本轮只解决阶段性 native 客户端打开黑屏与默认启动可见性，不改变最终完整游戏目标。
+- 问题根因：
+  - `DesktopLauncher::default_render_viewport()` 直接使用 `game_state.world.unit_width()/unit_height()`；
+  - 启动未加载 world 时 world 为 `0x0`，默认帧循环仍走 world graphics path；
+  - `menu_frame_for_render(...)` 只生成 `DesktopFramePayload::Menu`，没有接入 native 默认 `DesktopGraphicsFrame` 渲染循环；
+  - native runtime 每帧先 `clear_backbuffer()`，后续若没有实际可见绘制就表现为黑屏。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `default_render_viewport_for_surface(...)`，无 world 时使用窗口 `DesktopSurfaceSize`，surface 为 `0x0` 时回退到 `1280x720`；
+    - 新增 `default_render_camera_for_viewport(...)`、`default_minimap_camera_for_viewport(...)`、`default_minimap_overlay_input_for_viewport(...)`，避免 no-world 默认路径继续传播 `0x0` viewport；
+    - 新增 `startup_menu_preview_render_pass(...)` / `startup_menu_preview_graphics_frame(...)`；
+    - `render_default_graphics_frame_for_surface_with(...)` 在 no-world 时输出 `startup-menu-preview` pass；
+    - preview 使用 `Clear + SetClip + Clear + ClearClip` 组合画出可见背景、面板、标题条和按钮块，不依赖尚未完善的字体/贴图 shader，因此能先稳定避免黑屏。
+- 补充测试：
+  - `desktop_default_render_viewport_for_surface_falls_back_without_world`
+  - `desktop_launcher_default_surface_frame_emits_visible_startup_menu_preview_without_world`
+  - `desktop_frame_loop_presents_startup_menu_preview_when_world_is_absent`
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check --workspace --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_default_render_viewport_for_surface_falls_back_without_world --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_emits_visible_startup_menu_preview_without_world --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_startup_menu_preview_when_world_is_absent --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test --workspace --features opengl-native-runtime` 曾因 server 真实端口保留测试并发抢端口失败；两个失败用例随后单独串行重跑均通过：
+    - `cargo test -p mindustry-server server_launcher_opens_real_arc_network_on_configured_port -- --test-threads=1`
+    - `cargo test -p mindustry-server server_launcher_reads_port_arg_before_opening_network -- --test-threads=1`
+- 产物提示：
+  - 当前可预览客户端 debug exe：`D:\MDT\rust-mindustry\target\debug\mindustry-desktop.exe`；
+  - 现在无 world 启动应至少出现非黑屏的启动预览色块；这不是最终菜单/UI，后续仍需接完整 Java 风格 Scene/UI、字体 glyph 与可玩主循环。
+- 下一步：
+  - 继续优先推进渲染引擎主链，建议切入 `DrawText -> glyph quad -> OpenGL` 或 `UnitDrawStage::Abilities -> ForceFieldAbility polygon shield`；
+  - 后续需要把临时 startup preview 替换/融合到真实 menu/UI runtime，而不是长期保留为孤立模块。

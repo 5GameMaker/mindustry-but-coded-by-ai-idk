@@ -77,8 +77,8 @@ use mindustry_core::mindustry::net::{
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::r#type::{
-    RainDrawPlan, SplashDrawPlan, UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX,
-    UNIT_SHADOW_TY,
+    ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, SplashDrawPlan, UnitDrawStage,
+    Weapon, WeatherState, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
 };
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
@@ -1704,6 +1704,108 @@ fn desktop_weather_splash_regions(splashes: &[String]) -> Vec<String> {
             .map(|index| format!("splash-{index}"))
             .collect()
     }
+}
+
+fn desktop_weather_texture_symbol_from_path(path: &str) -> String {
+    let normalized = path.trim().replace('\\', "/").to_ascii_lowercase();
+    let file_name = normalized.rsplit('/').next().unwrap_or(&normalized);
+    file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name)
+        .to_string()
+}
+
+fn desktop_weather_noise_render_commands(
+    noise: &ParticleNoiseLayerPlan,
+    camera: RenderCamera,
+) -> Vec<RenderCommand> {
+    let camera_rect = camera.world_rect();
+    if camera_rect.width.abs() <= f32::EPSILON
+        || camera_rect.height.abs() <= f32::EPSILON
+        || noise.opacity <= f32::EPSILON
+    {
+        return Vec::new();
+    }
+
+    vec![RenderCommand::draw_sprite(
+        desktop_weather_texture_symbol_from_path(&noise.noise_path),
+        camera_rect,
+        rgba8888_to_render_color(noise.color_rgba, noise.opacity),
+        0.0,
+        Layer::WEATHER - 1.0,
+    )]
+}
+
+fn desktop_weather_particle_sin(value: f32, scale: f32, magnitude: f32) -> f32 {
+    if scale.abs() <= f32::EPSILON {
+        0.0
+    } else {
+        (value / scale).sin() * magnitude
+    }
+}
+
+fn desktop_weather_particle_render_commands(
+    particles: &ParticleDrawParticlesPlan,
+    camera: RenderCamera,
+    render_time: f32,
+) -> Vec<RenderCommand> {
+    if particles.density <= f32::EPSILON
+        || particles.intensity <= f32::EPSILON
+        || particles.opacity <= f32::EPSILON
+        || particles.size_max <= f32::EPSILON
+    {
+        return Vec::new();
+    }
+
+    let camera_rect = camera.world_rect();
+    let particle_rect = camera_rect.inflate(particles.size_max * 1.5);
+    if particle_rect.width <= f32::EPSILON || particle_rect.height <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let total = ((particle_rect.width * particle_rect.height) / particles.density
+        * particles.intensity)
+        .max(0.0) as usize;
+    let mut rand = DesktopArcRand::with_seed(0);
+    let mut commands = Vec::with_capacity(total);
+
+    for _ in 0..total {
+        let scl = rand.random_between(0.5, 1.0);
+        let scl2 = rand.random_between(0.5, 1.0);
+        let size = rand.random_between(particles.size_min, particles.size_max);
+        let mut x = rand.random(DESKTOP_WEATHER_BOUND_MAX) + render_time * particles.windx * scl2;
+        let mut y = rand.random(DESKTOP_WEATHER_BOUND_MAX) + render_time * particles.windy * scl;
+        let alpha = rand.random_between(particles.min_alpha, particles.max_alpha);
+        let rotation = if particles.random_particle_rotation {
+            rand.random(360.0)
+        } else {
+            0.0
+        };
+
+        x += desktop_weather_particle_sin(
+            y,
+            rand.random_between(particles.sin_scl_min, particles.sin_scl_max),
+            rand.random_between(particles.sin_mag_min, particles.sin_mag_max),
+        );
+        x = (x - particle_rect.x).rem_euclid(particle_rect.width) + particle_rect.x;
+        y = (y - particle_rect.y).rem_euclid(particle_rect.height) + particle_rect.y;
+
+        let rect = RenderRect::from_center(RenderPoint::new(x, y), size, size);
+        if !rect.intersects(camera_rect) {
+            continue;
+        }
+
+        commands.push(RenderCommand::draw_sprite(
+            particles.region.clone(),
+            rect,
+            rgba8888_to_render_color(particles.color_rgba, alpha * particles.opacity),
+            rotation,
+            Layer::WEATHER,
+        ));
+    }
+
+    commands
 }
 
 fn desktop_weather_virtual_source_paths(content_loader: &ContentLoader) -> Vec<String> {
@@ -12366,16 +12468,36 @@ impl DesktopLauncher {
         RenderViewport::new(0.0, 0.0, size.width, size.height)
     }
 
-    pub fn default_render_camera(&self) -> RenderCamera {
+    pub fn default_render_viewport_for_surface(
+        &self,
+        surface_size: DesktopSurfaceSize,
+    ) -> RenderViewport {
         let viewport = self.default_render_viewport();
+        if viewport.width > 0.0 && viewport.height > 0.0 {
+            return viewport;
+        }
+
+        let fallback = if surface_size.width > 0 && surface_size.height > 0 {
+            surface_size
+        } else {
+            DesktopSurfaceSize::default()
+        };
+        RenderViewport::new(0.0, 0.0, fallback.width as f32, fallback.height as f32)
+    }
+
+    pub fn default_render_camera_for_viewport(&self, viewport: RenderViewport) -> RenderCamera {
         RenderCamera::new(
             RenderPoint::new(viewport.width / 2.0, viewport.height / 2.0),
             viewport,
         )
     }
 
-    pub fn default_minimap_camera(&self) -> MinimapCamera {
+    pub fn default_render_camera(&self) -> RenderCamera {
         let viewport = self.default_render_viewport();
+        self.default_render_camera_for_viewport(viewport)
+    }
+
+    pub fn default_minimap_camera_for_viewport(&self, viewport: RenderViewport) -> MinimapCamera {
         MinimapCamera::new(
             viewport.width / 2.0,
             viewport.height / 2.0,
@@ -12384,8 +12506,15 @@ impl DesktopLauncher {
         )
     }
 
-    pub fn default_minimap_overlay_input(&self) -> MinimapOverlayInput {
+    pub fn default_minimap_camera(&self) -> MinimapCamera {
         let viewport = self.default_render_viewport();
+        self.default_minimap_camera_for_viewport(viewport)
+    }
+
+    pub fn default_minimap_overlay_input_for_viewport(
+        &self,
+        viewport: RenderViewport,
+    ) -> MinimapOverlayInput {
         MinimapOverlayInput {
             screen_x: viewport.x,
             screen_y: viewport.y,
@@ -12412,6 +12541,11 @@ impl DesktopLauncher {
             indicators: Vec::new(),
             markers: Vec::new(),
         }
+    }
+
+    pub fn default_minimap_overlay_input(&self) -> MinimapOverlayInput {
+        let viewport = self.default_render_viewport();
+        self.default_minimap_overlay_input_for_viewport(viewport)
     }
 
     pub fn render_frame_plan(
@@ -14632,6 +14766,7 @@ impl DesktopLauncher {
                         RenderProperty::new("offset", noise.offset.to_string()),
                     ]);
                     commands.push(RenderCommand::custom("weather-particle-noise", properties));
+                    commands.extend(desktop_weather_noise_render_commands(noise, camera));
                 }
 
                 if let Some(particles) = plan.particles {
@@ -14640,7 +14775,7 @@ impl DesktopLauncher {
                         RenderProperty::new("bucket", "weather"),
                         RenderProperty::new("kind", "particle-draw"),
                         RenderProperty::new("layer", "Layer.weather"),
-                        RenderProperty::new("region", particles.region),
+                        RenderProperty::new("region", particles.region.clone()),
                         RenderProperty::new(
                             "color",
                             desktop_weather_rgba_property(particles.color_rgba),
@@ -14662,6 +14797,11 @@ impl DesktopLauncher {
                         ),
                     ]);
                     commands.push(RenderCommand::custom("weather-particles", properties));
+                    commands.extend(desktop_weather_particle_render_commands(
+                        &particles,
+                        camera,
+                        self.render_time,
+                    ));
                 }
 
                 commands
@@ -14682,6 +14822,113 @@ impl DesktopLauncher {
         }
 
         (!pass.commands.is_empty()).then_some(pass)
+    }
+
+    fn has_renderable_world_for_default_frame(&self) -> bool {
+        let size = self.current_render_world_size();
+        size.width > 0.0 && size.height > 0.0
+    }
+
+    fn push_startup_menu_preview_clear_rect(
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        color: [f32; 4],
+    ) {
+        if rect.width <= f32::EPSILON || rect.height <= f32::EPSILON {
+            return;
+        }
+        pass.push(RenderCommand::set_clip(rect));
+        pass.push(RenderCommand::clear(color));
+        pass.push(RenderCommand::clear_clip());
+    }
+
+    fn startup_menu_preview_render_pass(&self, viewport: RenderViewport) -> RenderPass {
+        let camera = self.default_render_camera_for_viewport(viewport);
+        let width = viewport.width.max(1.0);
+        let height = viewport.height.max(1.0);
+        let panel_width = (width * 0.42).max(260.0).min((width - 48.0).max(1.0));
+        let panel_height = (height * 0.44).max(180.0).min((height - 48.0).max(1.0));
+        let panel_x = ((width - panel_width) * 0.5).max(0.0);
+        let panel_y = ((height - panel_height) * 0.5).max(0.0);
+        let accent_height = (panel_height * 0.16).max(28.0).min(panel_height);
+        let button_width = (panel_width * 0.68).max(120.0).min(panel_width - 32.0);
+        let button_height = 24.0_f32.min(panel_height * 0.18).max(12.0);
+        let button_x = panel_x + (panel_width - button_width) * 0.5;
+        let first_button_y = panel_y + panel_height * 0.38;
+        let second_button_y = first_button_y + button_height + 10.0;
+
+        let mut pass = RenderPass::new(RenderPassKind::Custom("startup-menu-preview".to_string()))
+            .with_viewport(viewport)
+            .with_camera(camera);
+        pass.push(RenderCommand::custom(
+            "startup-menu-preview",
+            vec![
+                RenderProperty::new("reason", "world-not-loaded"),
+                RenderProperty::new("width", width.to_string()),
+                RenderProperty::new("height", height.to_string()),
+            ],
+        ));
+        pass.push(RenderCommand::clear([0.025, 0.035, 0.058, 1.0]));
+        Self::push_startup_menu_preview_clear_rect(
+            &mut pass,
+            RenderRect::new(panel_x, panel_y, panel_width, panel_height),
+            [0.075, 0.105, 0.155, 1.0],
+        );
+        Self::push_startup_menu_preview_clear_rect(
+            &mut pass,
+            RenderRect::new(
+                panel_x,
+                panel_y + panel_height - accent_height,
+                panel_width,
+                accent_height,
+            ),
+            [0.17, 0.34, 0.46, 1.0],
+        );
+        Self::push_startup_menu_preview_clear_rect(
+            &mut pass,
+            RenderRect::new(
+                panel_x + 14.0,
+                panel_y + panel_height - accent_height - 18.0,
+                panel_width - 28.0,
+                8.0,
+            ),
+            [0.48, 0.74, 0.86, 1.0],
+        );
+        Self::push_startup_menu_preview_clear_rect(
+            &mut pass,
+            RenderRect::new(button_x, first_button_y, button_width, button_height),
+            [0.21, 0.45, 0.60, 1.0],
+        );
+        Self::push_startup_menu_preview_clear_rect(
+            &mut pass,
+            RenderRect::new(button_x, second_button_y, button_width, button_height),
+            [0.13, 0.23, 0.34, 1.0],
+        );
+        pass
+    }
+
+    fn startup_menu_preview_graphics_frame(
+        &self,
+        frame_index: u64,
+        viewport: RenderViewport,
+    ) -> DesktopGraphicsFrame {
+        let camera = self.default_render_camera_for_viewport(viewport);
+        let mut render_frame = RenderFramePlan::new(
+            frame_index,
+            RenderSize::new(viewport.width, viewport.height),
+            camera,
+            viewport,
+        );
+        render_frame.push_pass(self.startup_menu_preview_render_pass(viewport));
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: self.texture_atlas.clone(),
+        }
     }
 
     pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
@@ -14919,10 +15166,18 @@ impl DesktopLauncher {
     where
         R: DesktopGraphicsRenderer,
     {
-        let viewport = self.default_render_viewport();
-        let camera = self.default_render_camera();
-        let minimap_camera = self.default_minimap_camera();
-        let minimap_input = self.default_minimap_overlay_input();
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        if !self.has_renderable_world_for_default_frame() {
+            let frame = self.startup_menu_preview_graphics_frame(frame_index, viewport);
+            return renderer.render_graphics_frame_for_surface(
+                &frame,
+                DesktopGraphicsEffectBufferSurface::new(surface_size, effect_buffer_generation),
+            );
+        }
+
+        let camera = self.default_render_camera_for_viewport(viewport);
+        let minimap_camera = self.default_minimap_camera_for_viewport(viewport);
+        let minimap_input = self.default_minimap_overlay_input_for_viewport(viewport);
         self.render_graphics_frame_for_surface_with(
             frame_index,
             camera,
@@ -19866,6 +20121,20 @@ mod tests {
                     && properties.iter().any(|property| property.key == "region" && property.value == "particle")
                     && properties.iter().any(|property| property.key == "windx" && property.value == "-2.16")
             )));
+        assert!(environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, tint, layer, .. }
+                if symbol == "noisealpha"
+                    && (*layer - (Layer::WEATHER - 1.0)).abs() < 0.0001
+                    && (tint[3] - 0.14).abs() < 0.0001
+        )));
+        assert!(environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, tint, layer, .. }
+                if symbol == "particle"
+                    && (*layer - Layer::WEATHER).abs() < 0.0001
+                    && tint[3] <= 0.08
+        )));
 
         let mut headless = HeadlessDesktopGraphicsRenderer::default();
         headless.render_graphics_frame(&frame);
@@ -19879,6 +20148,16 @@ mod tests {
             .sprite_quads
             .iter()
             .any(|quad| quad.symbol == "primitive:DrawLine"));
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "noisealpha"));
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "particle"));
     }
 
     #[test]
@@ -29592,6 +29871,115 @@ mod tests {
                 .len()
         );
         assert_eq!(renderer.last_driver_state.framebuffer_attachment_plans, 1);
+    }
+
+    #[test]
+    fn desktop_default_render_viewport_for_surface_falls_back_without_world() {
+        let launcher = DesktopLauncher::new(Vec::new());
+
+        assert_eq!(
+            launcher.default_render_viewport(),
+            RenderViewport::new(0.0, 0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(800, 600)),
+            RenderViewport::new(0.0, 0.0, 800.0, 600.0)
+        );
+        assert_eq!(
+            launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(0, 0)),
+            RenderViewport::new(0.0, 0.0, 1280.0, 720.0)
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_default_surface_frame_emits_visible_startup_menu_preview_without_world() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        let surface = DesktopSurfaceSize::new(800, 600);
+
+        let stats =
+            launcher.render_default_graphics_frame_for_surface_with(0, surface, 2, &mut renderer);
+
+        assert_eq!(renderer.frames_rendered, 1);
+        assert_eq!(stats.render_passes, 1);
+        assert!(stats.render_commands >= 17);
+        assert_eq!(renderer.last_trace.render_passes.len(), 1);
+        let pass = &renderer.last_trace.render_passes[0];
+        assert_eq!(
+            pass.kind,
+            RenderPassKind::Custom("startup-menu-preview".to_string())
+        );
+        assert_eq!(pass.target, RenderTarget::Screen);
+        assert!(pass.commands.iter().any(
+            |command| matches!(command, RenderCommand::Custom { name, .. } if name == "startup-menu-preview")
+        ));
+        assert!(
+            pass.commands
+                .iter()
+                .filter(|command| matches!(command, RenderCommand::Clear { .. }))
+                .count()
+                >= 6
+        );
+        assert!(
+            pass.commands
+                .iter()
+                .filter(|command| matches!(command, RenderCommand::SetClip { .. }))
+                .count()
+                >= 5
+        );
+        assert!(
+            pass.commands
+                .iter()
+                .filter(|command| matches!(command, RenderCommand::ClearClip))
+                .count()
+                >= 5
+        );
+        assert!(renderer.last_opengl_backend_executor_state.clear_commands >= 6);
+        assert!(renderer
+            .last_opengl_backend_executor_state
+            .draw_commands
+            .iter()
+            .any(|command| matches!(
+                command,
+                super::DesktopGraphicsOpenGlBackendDrawCommand::SetScissor { .. }
+            )));
+    }
+
+    #[test]
+    fn desktop_frame_loop_presents_startup_menu_preview_when_world_is_absent() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[DesktopFrameLoopEvent::Tick],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert!(result.presented);
+        assert_eq!(result.skip_reason, None);
+        assert_eq!(graphics_renderer.frames_rendered, 1);
+        assert_eq!(
+            result
+                .graphics_stats
+                .as_ref()
+                .map(|stats| stats.render_passes),
+            Some(1)
+        );
+        assert_eq!(
+            graphics_renderer.last_trace.render_passes[0].kind,
+            RenderPassKind::Custom("startup-menu-preview".to_string())
+        );
+        assert!(
+            graphics_renderer
+                .last_opengl_backend_executor_state
+                .clear_commands
+                >= 6
+        );
     }
 
     #[test]
