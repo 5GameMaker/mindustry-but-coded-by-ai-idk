@@ -16745,3 +16745,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - 当前是 native 侧临时把 `ShaderId::Mesh` 覆盖为 2D sprite shader；后续更理想做法是新增专用 sprite shader id/asset，并让真正 3D mesh/planet 渲染独立恢复；
   - 真实菜单、字体 glyph、完整 atlas/filter/repeat 与 Scene/UI 仍需继续前端优先推进。
+
+## 460. no-world 默认帧接入真实 MenuFramePlan
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.2%**，仍未达到完整可玩；继续按用户要求优先推进前端/客户端，后端暂缓。
+- 问题背景：
+  - `menu_frame_for_render(...)` 此前只返回 `DesktopFramePayload::Menu(MenuFramePlan)`；
+  - native/default frame loop 只消费 `DesktopGraphicsFrame`；
+  - no-world 默认帧此前直接走 `startup-menu-preview`，真实 `MenuFramePlan::to_render_pass()` 没进入 OpenGL/backend 主链。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `default_menu_frame_input_for_viewport(...)`，按 surface viewport 构造默认 menu frame input；
+    - 新增 `menu_graphics_frame_for_surface(...)`，将 `MenuRendererState::render_plan(...) -> MenuFramePlan::into_render_pass() -> RenderFramePlan -> RenderBridge -> DesktopGraphicsFrame` 串起来；
+    - `render_default_graphics_frame_for_surface_with(...)` 在 no-world 时改用真实 menu graphics frame；
+    - 为避免 `menu-cache/menu-flyer/menu-shadow-texture` 尚未完全下沉成真实图元时回归黑屏，当前仍把 `startup-menu-preview` 作为可见安全底图 pass 放在真实 `menu` pass 之前。
+- 补充/更新测试：
+  - `desktop_launcher_default_surface_frame_bridges_menu_plan_without_world`
+  - `desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent`
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --features opengl-native-runtime`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime -- --test-threads=1`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `menu-cache` / `menu-shadow-texture` / `menu-flyer` 仍主要是 `RenderCommand::Custom` marker，真实可见菜单元素尚未完全降低到 sprite/primitive；
+  - 后续应继续把 menu world cache、flyer unit sprite、shadow texture 与按钮/字体接进同一套 sprite mesh/OpenGL 链路，最终替换安全底图。

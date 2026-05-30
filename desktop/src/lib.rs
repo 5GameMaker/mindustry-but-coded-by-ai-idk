@@ -14935,6 +14935,49 @@ impl DesktopLauncher {
         }
     }
 
+    fn default_menu_frame_input_for_viewport(viewport: RenderViewport) -> MenuFrameInput {
+        MenuFrameInput {
+            graphics_width: viewport.width.max(1.0),
+            graphics_height: viewport.height.max(1.0),
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        }
+    }
+
+    fn menu_graphics_frame_for_surface(
+        &mut self,
+        frame_index: u64,
+        viewport: RenderViewport,
+    ) -> DesktopGraphicsFrame {
+        let input = Self::default_menu_frame_input_for_viewport(viewport);
+        let plan = self.menu_renderer_state.render_plan(input);
+        let Some(menu_pass) = plan.into_render_pass() else {
+            return self.startup_menu_preview_graphics_frame(frame_index, viewport);
+        };
+
+        let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
+        let camera = menu_pass
+            .camera
+            .unwrap_or_else(|| self.default_render_camera_for_viewport(frame_viewport));
+        let mut render_frame = RenderFramePlan::new(
+            frame_index,
+            RenderSize::new(frame_viewport.width, frame_viewport.height),
+            camera,
+            frame_viewport,
+        );
+        render_frame.push_pass(self.startup_menu_preview_render_pass(frame_viewport));
+        render_frame.push_pass(menu_pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            texture_atlas: self.texture_atlas.clone(),
+        }
+    }
+
     pub fn load_frame_for_render(&mut self, input: LoadFrameInput) -> DesktopFrame {
         let plan = self.load_renderer_state.build_plan(input);
         DesktopFrame {
@@ -15172,7 +15215,7 @@ impl DesktopLauncher {
     {
         let viewport = self.default_render_viewport_for_surface(surface_size);
         if !self.has_renderable_world_for_default_frame() {
-            let frame = self.startup_menu_preview_graphics_frame(frame_index, viewport);
+            let frame = self.menu_graphics_frame_for_surface(frame_index, viewport);
             return renderer.render_graphics_frame_for_surface(
                 &frame,
                 DesktopGraphicsEffectBufferSurface::new(surface_size, effect_buffer_generation),
@@ -29920,7 +29963,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_launcher_default_surface_frame_emits_visible_startup_menu_preview_without_world() {
+    fn desktop_launcher_default_surface_frame_bridges_menu_plan_without_world() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         let surface = DesktopSurfaceSize::new(800, 600);
@@ -29929,34 +29972,50 @@ mod tests {
             launcher.render_default_graphics_frame_for_surface_with(0, surface, 2, &mut renderer);
 
         assert_eq!(renderer.frames_rendered, 1);
-        assert_eq!(stats.render_passes, 1);
-        assert!(stats.render_commands >= 17);
-        assert_eq!(renderer.last_trace.render_passes.len(), 1);
-        let pass = &renderer.last_trace.render_passes[0];
+        assert_eq!(stats.render_passes, 2);
+        assert!(stats.render_commands >= 22);
+        assert_eq!(renderer.last_trace.render_passes.len(), 2);
+        let preview_pass = &renderer.last_trace.render_passes[0];
+        let menu_pass = &renderer.last_trace.render_passes[1];
         assert_eq!(
-            pass.kind,
+            preview_pass.kind,
             RenderPassKind::Custom("startup-menu-preview".to_string())
         );
-        assert_eq!(pass.target, RenderTarget::Screen);
-        assert!(pass.commands.iter().any(
+        assert_eq!(menu_pass.kind, RenderPassKind::Custom("menu".to_string()));
+        assert_eq!(preview_pass.target, RenderTarget::Screen);
+        assert_eq!(menu_pass.target, RenderTarget::Screen);
+        assert!(preview_pass.commands.iter().any(
             |command| matches!(command, RenderCommand::Custom { name, .. } if name == "startup-menu-preview")
         ));
+        assert!(menu_pass.commands.iter().any(
+            |command| matches!(command, RenderCommand::Custom { name, .. } if name == "menu-cache")
+        ));
+        assert!(menu_pass.commands.iter().any(
+            |command| matches!(command, RenderCommand::Custom { name, .. } if name == "menu-shadow-texture")
+        ));
+        assert!(menu_pass
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::FillRect { .. })));
         assert!(
-            pass.commands
+            preview_pass
+                .commands
                 .iter()
                 .filter(|command| matches!(command, RenderCommand::Clear { .. }))
                 .count()
                 >= 6
         );
         assert!(
-            pass.commands
+            preview_pass
+                .commands
                 .iter()
                 .filter(|command| matches!(command, RenderCommand::SetClip { .. }))
                 .count()
                 >= 5
         );
         assert!(
-            pass.commands
+            preview_pass
+                .commands
                 .iter()
                 .filter(|command| matches!(command, RenderCommand::ClearClip))
                 .count()
@@ -29974,7 +30033,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_frame_loop_presents_startup_menu_preview_when_world_is_absent() {
+    fn desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let mut frame_loop =
             DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
@@ -29996,11 +30055,17 @@ mod tests {
                 .graphics_stats
                 .as_ref()
                 .map(|stats| stats.render_passes),
-            Some(1)
+            Some(2)
         );
         assert_eq!(
-            graphics_renderer.last_trace.render_passes[0].kind,
-            RenderPassKind::Custom("startup-menu-preview".to_string())
+            graphics_renderer.last_trace.render_passes[1].kind,
+            RenderPassKind::Custom("menu".to_string())
+        );
+        assert!(
+            graphics_renderer.last_trace.render_passes[1]
+                .commands
+                .iter()
+                .any(|command| matches!(command, RenderCommand::Custom { name, .. } if name == "menu-cache"))
         );
         assert!(
             graphics_renderer

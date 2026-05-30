@@ -13899,3 +13899,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 优先把真实 `MenuFramePlan -> DesktopGraphicsFrame -> native OpenGL` 接上，startup preview 只能做 fallback；
   2. 同步推进 `DrawText -> ASCII/bitmap placeholder glyph quad -> sprite mesh/OpenGL`；
   3. 后续将临时 `ShaderId::Mesh` 覆盖迁移为专用 sprite shader，避免阻碍未来 3D mesh/planet 渲染。
+
+### 2026-05-30：no-world 默认帧接入真实 MenuFramePlan
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **47.2%**。
+- 当前用户最新优先级：
+  - 先优先完成前端/客户端，后端可以先等等。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `default_menu_frame_input_for_viewport(...)`：从 surface viewport 构造默认 menu input；
+    - `menu_graphics_frame_for_surface(...)`：把 `MenuRendererState::render_plan(...) -> MenuFramePlan::into_render_pass() -> RenderFramePlan -> RenderBridge -> DesktopGraphicsFrame` 接到真实 graphics frame 主链；
+    - no-world 的 `render_default_graphics_frame_for_surface_with(...)` 不再只输出 `startup-menu-preview`，而是输出 `startup-menu-preview` 安全底图 + 真实 `menu` pass；
+    - 更新 no-world surface 与 frame loop 测试，断言 `RenderPassKind::Custom("menu")` 已进入 backend trace。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --features opengl-native-runtime`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime -- --test-threads=1`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 把 `menu-cache` / `menu-shadow-texture` / `menu-flyer` 从 custom marker 继续降低成真实 sprite/primitive；
+  2. 并行推进 `DrawText -> placeholder glyph quad -> OpenGL`，否则菜单和 UI 仍缺文字；
+  3. 安全底图只是过渡，真实 menu 图元足够后要逐步移除或降为异常 fallback。
