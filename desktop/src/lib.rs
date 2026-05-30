@@ -105,7 +105,9 @@ use mindustry_core::mindustry::world::{
     blocks::{campaign::AcceleratorState, LaunchAnimationState, LaunchAnimationStep},
     point2_x, point2_y, BuildingRef, CacheLayer as WorldCacheLayer, Tile,
 };
-use mindustry_core::mindustry::UPSTREAM_BASELINE;
+use mindustry_core::mindustry::{
+    upstream_menu_version_color, upstream_menu_version_text, UPSTREAM_BASELINE,
+};
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -18532,9 +18534,9 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.08,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            UPSTREAM_BASELINE,
+            upstream_menu_version_text(),
             RenderPoint::new(viewport.x + width * 0.5, (logo_y - 8.0).max(viewport.y)),
-            [1.0, 1.0, 1.0, 0.73],
+            upstream_menu_version_color(),
             12.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
@@ -23801,7 +23803,6 @@ mod tests {
         UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::ui::{upstream_font_assets, UpstreamFontRole};
-    use mindustry_core::mindustry::UPSTREAM_BASELINE;
     use mindustry_core::mindustry::{
         entities::{
             comp::{
@@ -23828,6 +23829,7 @@ mod tests {
             UnitCargoUnloadPointState, UnitFactoryState,
         },
     };
+    use mindustry_core::mindustry::{upstream_menu_version_color, upstream_menu_version_text};
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
 
@@ -38377,8 +38379,9 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, layer, .. }
-                    if text == UPSTREAM_BASELINE
+                RenderCommand::DrawText { text, color, layer, .. }
+                    if text == &upstream_menu_version_text()
+                        && *color == upstream_menu_version_color()
                         && (*layer - (Layer::END_PIXELED + 0.09)).abs() < f32::EPSILON
             )
         }));
