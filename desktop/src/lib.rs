@@ -184,6 +184,21 @@ impl DesktopSettingsControlId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesktopSettingsScrollDragState {
+    pub table: &'static str,
+    pub grab_offset_y: f32,
+}
+
+impl DesktopSettingsScrollDragState {
+    pub const fn new(table: &'static str, grab_offset_y: f32) -> Self {
+        Self {
+            table,
+            grab_offset_y,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopSettingsPrefKind {
     Check,
@@ -14270,6 +14285,7 @@ pub struct DesktopLauncher {
     pub last_settings_action: Option<DesktopSettingsAction>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
+    pub settings_scroll_drag_state: Option<DesktopSettingsScrollDragState>,
     pub settings_overrides: BTreeMap<String, String>,
     pub settings_scroll_offsets: BTreeMap<&'static str, i32>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
@@ -14973,6 +14989,7 @@ impl DesktopLauncher {
             last_settings_action: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
+            settings_scroll_drag_state: None,
             settings_overrides: BTreeMap::new(),
             settings_scroll_offsets: BTreeMap::new(),
             last_about_link_action: None,
@@ -18791,6 +18808,7 @@ impl DesktopLauncher {
                 self.last_settings_action = None;
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
+                self.settings_scroll_drag_state = None;
                 self.settings_scroll_offsets.clear();
             }
         }
@@ -19125,6 +19143,27 @@ impl DesktopLauncher {
         stepped.clamp(range.min, range.max)
     }
 
+    fn settings_scrollbar_track_rect_for_clip(clip: RenderRect) -> RenderRect {
+        RenderRect::new(clip.x + clip.width - 8.0, clip.y, 6.0, clip.height)
+    }
+
+    fn settings_scrollbar_knob_rect_for_clip(
+        clip: RenderRect,
+        row_count: usize,
+        scroll_offset: f32,
+    ) -> Option<RenderRect> {
+        let total_height = row_count as f32 * 50.0;
+        if total_height <= clip.height {
+            return None;
+        }
+        let track = Self::settings_scrollbar_track_rect_for_clip(clip);
+        let knob_height = (clip.height * (clip.height / total_height)).clamp(36.0, clip.height);
+        let max_scroll = (total_height - clip.height).max(1.0);
+        let travel = (clip.height - knob_height).max(0.0);
+        let knob_y = clip.y + clip.height - knob_height - travel * (scroll_offset / max_scroll);
+        Some(RenderRect::new(track.x - 2.0, knob_y, 10.0, knob_height))
+    }
+
     fn push_settings_scrollbar(
         pass: &mut RenderPass,
         clip: RenderRect,
@@ -19133,16 +19172,12 @@ impl DesktopLauncher {
         scroll_track_symbol: String,
         scroll_knob_symbol: String,
     ) {
-        let total_height = row_count as f32 * 50.0;
-        if total_height <= clip.height {
+        let Some(knob) =
+            Self::settings_scrollbar_knob_rect_for_clip(clip, row_count, scroll_offset)
+        else {
             return;
-        }
-        let track = RenderRect::new(clip.x + clip.width - 8.0, clip.y, 6.0, clip.height);
-        let knob_height = (clip.height * (clip.height / total_height)).clamp(36.0, clip.height);
-        let max_scroll = (total_height - clip.height).max(1.0);
-        let travel = (clip.height - knob_height).max(0.0);
-        let knob_y = clip.y + clip.height - knob_height - travel * (scroll_offset / max_scroll);
-        let knob = RenderRect::new(track.x - 2.0, knob_y, 10.0, knob_height);
+        };
+        let track = Self::settings_scrollbar_track_rect_for_clip(clip);
         pass.push(RenderCommand::draw_sprite(
             scroll_track_symbol,
             track,
@@ -19422,6 +19457,82 @@ impl DesktopLauncher {
         Some(DesktopSettingsAction::SetSliderValue(
             spec.table, spec.key, value,
         ))
+    }
+
+    fn settings_scrollbar_drag_state_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopSettingsScrollDragState> {
+        if self.active_menu_route != Some(DesktopMenuRoute::Settings) {
+            return None;
+        }
+        let (DesktopSettingsPage::Game
+        | DesktopSettingsPage::Graphics
+        | DesktopSettingsPage::Sound) = self.settings_dialog_state.page
+        else {
+            return None;
+        };
+        let table = self.settings_dialog_state.page.key();
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
+        let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        let row_count = Self::settings_pref_widget_specs(table).len();
+        let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
+        let knob = Self::settings_scrollbar_knob_rect_for_clip(clip, row_count, scroll_offset)?;
+        let point = RenderPoint::new(x, y);
+        if knob.contains_point(point) {
+            Some(DesktopSettingsScrollDragState::new(table, y - knob.y))
+        } else {
+            None
+        }
+    }
+
+    fn apply_settings_scrollbar_drag(&mut self, surface_size: DesktopSurfaceSize, y: f32) -> bool {
+        let Some(drag_state) = self.settings_scroll_drag_state else {
+            return false;
+        };
+        if self.active_menu_route != Some(DesktopMenuRoute::Settings) {
+            return false;
+        }
+        let (DesktopSettingsPage::Game
+        | DesktopSettingsPage::Graphics
+        | DesktopSettingsPage::Sound) = self.settings_dialog_state.page
+        else {
+            return false;
+        };
+        let table = self.settings_dialog_state.page.key();
+        if drag_state.table != table {
+            return false;
+        }
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
+        let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        let row_count = Self::settings_pref_widget_specs(table).len();
+        let max = Self::settings_max_scroll_offset_for_clip(clip, row_count);
+        if max <= 0 {
+            return false;
+        }
+        let Some(knob) = Self::settings_scrollbar_knob_rect_for_clip(
+            clip,
+            row_count,
+            self.settings_scroll_offset_pixels(table, clip),
+        ) else {
+            return false;
+        };
+        let travel = (clip.height - knob.height).max(0.0);
+        if travel <= f32::EPSILON {
+            return false;
+        }
+        let knob_y =
+            (y - drag_state.grab_offset_y).clamp(clip.y, clip.y + clip.height - knob.height);
+        let raw_scroll = ((clip.y + clip.height - knob.height - knob_y) / travel) * max as f32;
+        let next = raw_scroll.round().clamp(0.0, max as f32) as i32;
+        self.settings_scroll_offsets.insert(table, next);
+        true
     }
 
     fn apply_settings_scroll_delta(
@@ -19840,6 +19951,7 @@ impl DesktopLauncher {
                 self.settings_dialog_state.page = page;
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
+                self.settings_scroll_drag_state = None;
             }
             DesktopSettingsAction::BackToMain => {
                 if self.settings_dialog_state.page == DesktopSettingsPage::Main {
@@ -19849,6 +19961,7 @@ impl DesktopLauncher {
                 }
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
+                self.settings_scroll_drag_state = None;
             }
             DesktopSettingsAction::ResetCurrentPage => {
                 self.reset_current_settings_page_overrides();
@@ -20292,6 +20405,9 @@ impl DesktopLauncher {
                         self.menu_button_at_surface_point(surface_size, point.x, point.y);
                     self.last_settings_hovered_control =
                         self.settings_control_id_at_surface_point(surface_size, point.x, point.y);
+                    if self.apply_settings_scrollbar_drag(surface_size, point.y) {
+                        continue;
+                    }
                     if let Some(action) =
                         self.settings_drag_action_at_surface_point(surface_size, point.x, point.y)
                     {
@@ -20307,6 +20423,7 @@ impl DesktopLauncher {
                     }
                     self.last_menu_pressed_button = None;
                     self.last_settings_pressed_control = None;
+                    self.settings_scroll_drag_state = None;
                 }
                 DesktopInputTickEvent::MouseButton { button, pressed }
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
@@ -20317,6 +20434,16 @@ impl DesktopLauncher {
                         self.last_settings_pressed_control = self.last_settings_hovered_control;
                         self.last_menu_visual_pressed_button = None;
                         self.last_menu_visual_pressed_frames = 0;
+                        self.settings_scroll_drag_state = self
+                            .settings_scrollbar_drag_state_at_surface_point(
+                                surface_size,
+                                cursor.x,
+                                cursor.y,
+                            );
+                        if self.settings_scroll_drag_state.is_some() {
+                            self.last_menu_action = None;
+                            continue;
+                        }
                         if let Some(slot_index) =
                             self.load_game_slot_at_surface_point(surface_size, cursor.x, cursor.y)
                         {
@@ -21998,6 +22125,7 @@ impl DesktopLauncher {
         self.last_settings_action = None;
         self.last_settings_hovered_control = None;
         self.last_settings_pressed_control = None;
+        self.settings_scroll_drag_state = None;
         self.settings_scroll_offsets.clear();
         self.last_about_link_action = None;
         self.last_about_linkfail_message = None;
@@ -38962,6 +39090,67 @@ mod tests {
                 super::DesktopSettingsAction::SetSliderValue("game", "playerlimit", 2)
             ))
         );
+    }
+
+    #[test]
+    fn desktop_launcher_settings_scrollbar_knob_drag_updates_scroll_offset() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let clip = DesktopLauncher::settings_pref_widget_clip_rect_for_panel(panel);
+        let specs = DesktopLauncher::settings_pref_widget_specs("game");
+        let max = DesktopLauncher::settings_max_scroll_offset_for_clip(clip, specs.len());
+        assert!(max > 0);
+        let knob = DesktopLauncher::settings_scrollbar_knob_rect_for_clip(clip, specs.len(), 0.0)
+            .expect("settings page should expose a scroll knob when rows overflow");
+        let knob_center = knob.center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: knob_center.x,
+                    y: knob_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        let drag_state = launcher
+            .settings_scroll_drag_state
+            .expect("pressing the scroll knob should enter drag state");
+        assert_eq!(drag_state.table, "game");
+        assert!((drag_state.grab_offset_y - knob.height * 0.5).abs() < 0.01);
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: knob_center.x,
+                y: clip.y + knob.height * 0.5,
+            }],
+        );
+        assert_eq!(
+            launcher.settings_scroll_offsets.get("game").copied(),
+            Some(max)
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::MouseButton {
+                button: "primary".into(),
+                pressed: false,
+            }],
+        );
+        assert_eq!(launcher.settings_scroll_drag_state, None);
     }
 
     #[test]

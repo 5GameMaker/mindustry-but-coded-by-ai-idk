@@ -18741,3 +18741,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 平台条件过滤、tooltip description、持久化 settings 文件和 side effects 仍未接入；
   - 完整 UI 还必须继续还原 Join/Load/About/剩余 route，不能把当前 Settings 闭环误认为完整前端；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 526. SettingsMenuDialog ScrollPane 滚动条拖拽
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.2%**，仍未达到完整可玩；继续把 SettingsTable 的 ScrollPane 从滚轮偏移推进到可按住拖拽滚动条 knob。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSettingsScrollDragState`，记录当前拖拽的 settings table 与鼠标在 knob 内的抓取偏移；
+    - 拆出 `settings_scrollbar_track_rect_for_clip()` 与 `settings_scrollbar_knob_rect_for_clip()`，让渲染、命中和拖拽更新共用同一组 ScrollPane 几何；
+    - 新增 `settings_scrollbar_drag_state_at_surface_point()`，点击原版 `scroll-knob-vertical-black` 对应的 knob 区域时进入拖拽状态；
+    - 新增 `apply_settings_scrollbar_drag()`，在 `CursorMoved` 中按抓取偏移把 knob y 坐标反算为当前页 scroll offset，并 clamp 到 `[0, max]`；
+    - 鼠标释放、切换 Settings 页或关闭 Settings 时清空 scroll drag 状态，避免跨页残留。
+  - 测试：
+    - 新增 `desktop_launcher_settings_scrollbar_knob_drag_updates_scroll_offset`，验证按住 Game 页滚动条 knob 后拖到底部会把 `settings_scroll_offsets["game"]` 更新到最大值，释放后退出拖拽状态。
+- 迁移意义：
+  - Settings ScrollPane 已具备滚轮与 knob 拖拽两条核心滚动路径，更接近 Java Scene2D ScrollPane；
+  - 滚动条交互仍接在真实 `DesktopLauncher.apply_menu_input_events()` 主输入链上，不是独立 demo；
+  - 为后续精确还原 `SettingsTable` padding、tooltip、平台条件过滤与 Data 页真实动作继续打基础。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - SettingsTable 还未完全复刻 Java 的 `padTop(3f/4f)`、`stack(slider, content)`、`460f` 宽度上限与 `prefs.margin(14f)`；
+  - Tooltip description、TextSetting/AreaTextSetting、动态 category、Data 页真实 side effects 仍待迁移；
+  - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
+  - 未达到完整可玩，不能宣告目标完成。
