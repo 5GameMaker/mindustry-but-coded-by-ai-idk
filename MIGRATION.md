@@ -18688,3 +18688,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - checkbox/slider disabled 条件与 tooltip description 尚未渲染；
   - settings 持久化与真实 runtime side effects 尚未接入；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 524. SettingsMenuDialog ScrollPane 滚轮偏移与命中同步
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.0%**，仍未达到完整可玩；继续把 SettingsTable 的 ScrollPane 从静态滚动条推进为可响应滚轮并影响控件命中的状态链路。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_frame_loop_events_from_winit_window_event()` 接入 `WindowEvent::MouseWheel`，生成 `DesktopInputTickEvent::Scroll { delta_x, delta_y }`；
+    - `DesktopLauncher` 新增 `settings_scroll_offsets`，按 `game/graphics/sound` 记录当前 SettingsTable 滚动像素；
+    - `apply_menu_input_events()` 处理滚轮事件，鼠标位于 Settings 控件裁剪区时更新当前页 scroll offset；
+    - 控件渲染与 hit-test 均使用同一 scroll offset，滚动后后续设置项能进入可视/可点击区域；
+    - 滚动条 knob 位置随 scroll offset 变化，继续使用原版 `scroll.9 / scroll-knob-vertical-black` 资源。
+  - 测试：
+    - 新增 `desktop_launcher_settings_scroll_wheel_offsets_table_hit_tests`，验证滚轮后 `playerlimit` 这类后续行进入裁剪区并能被 hit-test 分发为 slider action。
+- 迁移意义：
+  - SettingsTable 开始具备原版 ScrollPane 的核心状态：滚轮影响内容偏移、渲染位置和命中位置；
+  - 这进一步减少“静态 UI 壳”的比例，让 Settings 页更接近真实可操作 UI；
+  - 后续可以继续补 scroll knob 拖拽、惯性/焦点与 platform 条件过滤。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - scroll knob 还不能拖拽，slider 也还没有连续拖动更新；
+  - SettingsTable 还未按平台条件过滤实际可见项；
+  - settings 持久化与各项设置真实 side effects 尚未接入；
+  - 未达到完整可玩，不能宣告目标完成。

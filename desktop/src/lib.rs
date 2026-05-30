@@ -13855,6 +13855,17 @@ pub fn desktop_frame_loop_events_from_winit_window_event(
                 },
             )]
         }
+        winit::event::WindowEvent::MouseWheel { delta, .. } => {
+            let (delta_x, delta_y) = match delta {
+                winit::event::MouseScrollDelta::LineDelta(x, y) => (*x, *y),
+                winit::event::MouseScrollDelta::PixelDelta(position) => {
+                    (position.x as f32 / 40.0, position.y as f32 / 40.0)
+                }
+            };
+            vec![DesktopFrameLoopEvent::Input(
+                DesktopInputTickEvent::Scroll { delta_x, delta_y },
+            )]
+        }
         _ => Vec::new(),
     }
 }
@@ -14260,6 +14271,7 @@ pub struct DesktopLauncher {
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
     pub settings_overrides: BTreeMap<String, String>,
+    pub settings_scroll_offsets: BTreeMap<&'static str, i32>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
     pub last_discord_clipboard_text: Option<String>,
@@ -14962,6 +14974,7 @@ impl DesktopLauncher {
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
             settings_overrides: BTreeMap::new(),
+            settings_scroll_offsets: BTreeMap::new(),
             last_about_link_action: None,
             last_about_linkfail_message: None,
             last_discord_clipboard_text: None,
@@ -18778,6 +18791,7 @@ impl DesktopLauncher {
                 self.last_settings_action = None;
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
+                self.settings_scroll_offsets.clear();
             }
         }
         let close_requested = role == MenuButtonRole::Quit;
@@ -19055,11 +19069,35 @@ impl DesktopLauncher {
         )
     }
 
-    fn settings_pref_widget_row_rect_for_clip(clip: RenderRect, index: usize) -> RenderRect {
+    fn settings_pref_widget_row_rect_for_clip_with_scroll(
+        clip: RenderRect,
+        index: usize,
+        scroll_offset: f32,
+    ) -> RenderRect {
         let row_width = (clip.width - 18.0).max(140.0);
         let row_height = 42.0;
-        let top = clip.y + clip.height - row_height - index as f32 * 50.0;
+        let top = clip.y + clip.height - row_height - index as f32 * 50.0 + scroll_offset;
         RenderRect::new(clip.x, top, row_width, row_height)
+    }
+
+    fn settings_table_total_height(row_count: usize) -> f32 {
+        row_count as f32 * 50.0
+    }
+
+    fn settings_max_scroll_offset_for_clip(clip: RenderRect, row_count: usize) -> i32 {
+        (Self::settings_table_total_height(row_count) - clip.height)
+            .max(0.0)
+            .round() as i32
+    }
+
+    fn settings_scroll_offset_pixels(&self, table: &'static str, clip: RenderRect) -> f32 {
+        let row_count = Self::settings_pref_widget_specs(table).len();
+        let max = Self::settings_max_scroll_offset_for_clip(clip, row_count);
+        self.settings_scroll_offsets
+            .get(table)
+            .copied()
+            .unwrap_or(0)
+            .clamp(0, max) as f32
     }
 
     fn settings_pref_widget_slider_track_rect(row: RenderRect) -> RenderRect {
@@ -19091,6 +19129,7 @@ impl DesktopLauncher {
         pass: &mut RenderPass,
         clip: RenderRect,
         row_count: usize,
+        scroll_offset: f32,
         scroll_track_symbol: String,
         scroll_knob_symbol: String,
     ) {
@@ -19100,12 +19139,10 @@ impl DesktopLauncher {
         }
         let track = RenderRect::new(clip.x + clip.width - 8.0, clip.y, 6.0, clip.height);
         let knob_height = (clip.height * (clip.height / total_height)).clamp(36.0, clip.height);
-        let knob = RenderRect::new(
-            track.x - 2.0,
-            clip.y + clip.height - knob_height,
-            10.0,
-            knob_height,
-        );
+        let max_scroll = (total_height - clip.height).max(1.0);
+        let travel = (clip.height - knob_height).max(0.0);
+        let knob_y = clip.y + clip.height - knob_height - travel * (scroll_offset / max_scroll);
+        let knob = RenderRect::new(track.x - 2.0, knob_y, 10.0, knob_height);
         pass.push(RenderCommand::draw_sprite(
             scroll_track_symbol,
             track,
@@ -19136,13 +19173,18 @@ impl DesktopLauncher {
         let scroll_knob_symbol = Self::settings_scroll_knob_symbol();
         let specs = Self::settings_pref_widget_specs(table);
         let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
 
         pass.push(RenderCommand::set_clip(clip));
         for (index, spec) in specs.iter().copied().enumerate() {
             let control_id = DesktopSettingsControlId::new(spec.table, spec.key);
             let hovered = self.last_settings_hovered_control == Some(control_id);
             let pressed = self.last_settings_pressed_control == Some(control_id);
-            let row = Self::settings_pref_widget_row_rect_for_clip(clip, index);
+            let row = Self::settings_pref_widget_row_rect_for_clip_with_scroll(
+                clip,
+                index,
+                scroll_offset,
+            );
             pass.push(RenderCommand::draw_sprite(
                 pane_symbol.clone(),
                 row,
@@ -19258,6 +19300,7 @@ impl DesktopLauncher {
             pass,
             clip,
             specs.len(),
+            scroll_offset,
             scroll_track_symbol,
             scroll_knob_symbol,
         );
@@ -19276,6 +19319,7 @@ impl DesktopLauncher {
         };
         let table = self.settings_dialog_state.page.key();
         let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
         if !clip.contains_point(point) {
             return None;
         }
@@ -19284,7 +19328,11 @@ impl DesktopLauncher {
             .copied()
             .enumerate()
         {
-            let row = Self::settings_pref_widget_row_rect_for_clip(clip, index);
+            let row = Self::settings_pref_widget_row_rect_for_clip_with_scroll(
+                clip,
+                index,
+                scroll_offset,
+            );
             if !row.contains_point(point) {
                 continue;
             }
@@ -19332,6 +19380,47 @@ impl DesktopLauncher {
         let point = RenderPoint::new(x, y);
         self.settings_route_control_action_at_point(panel, point)
             .and_then(Self::settings_control_id_from_action)
+    }
+
+    fn apply_settings_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        let (DesktopSettingsPage::Game
+        | DesktopSettingsPage::Graphics
+        | DesktopSettingsPage::Sound) = self.settings_dialog_state.page
+        else {
+            return false;
+        };
+        if self.active_menu_route != Some(DesktopMenuRoute::Settings) {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
+        let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        if !clip.contains_point(cursor) {
+            return false;
+        }
+        let table = self.settings_dialog_state.page.key();
+        let row_count = Self::settings_pref_widget_specs(table).len();
+        let max = Self::settings_max_scroll_offset_for_clip(clip, row_count);
+        if max <= 0 {
+            return false;
+        }
+        let current = self
+            .settings_scroll_offsets
+            .get(table)
+            .copied()
+            .unwrap_or(0);
+        let delta = (-delta_y * 40.0).round() as i32;
+        let next = (current + delta).clamp(0, max);
+        self.settings_scroll_offsets.insert(table, next);
+        true
     }
 
     fn settings_route_lines(&self) -> Vec<String> {
@@ -20220,6 +20309,11 @@ impl DesktopLauncher {
                             self.last_menu_dispatch = None;
                         }
                         self.last_menu_action = action;
+                    }
+                }
+                DesktopInputTickEvent::Scroll { delta_y, .. } => {
+                    if self.apply_settings_scroll_delta(surface_size, *delta_y) {
+                        continue;
                     }
                 }
                 _ => {}
@@ -21857,6 +21951,7 @@ impl DesktopLauncher {
         self.last_settings_action = None;
         self.last_settings_hovered_control = None;
         self.last_settings_pressed_control = None;
+        self.settings_scroll_offsets.clear();
         self.last_about_link_action = None;
         self.last_about_linkfail_message = None;
         self.last_discord_clipboard_text = None;
@@ -38532,8 +38627,12 @@ mod tests {
             .iter()
             .position(|spec| spec.key == "communityservers")
             .expect("game settings should include communityservers");
-        let community_center =
-            DesktopLauncher::settings_pref_widget_row_rect_for_clip(clip, community_index).center();
+        let community_center = DesktopLauncher::settings_pref_widget_row_rect_for_clip_with_scroll(
+            clip,
+            community_index,
+            0.0,
+        )
+        .center();
         launcher.apply_menu_input_events(
             surface,
             &[DesktopInputTickEvent::CursorMoved {
@@ -38599,7 +38698,9 @@ mod tests {
             .iter()
             .position(|spec| spec.key == "saveinterval")
             .expect("game settings should include saveinterval");
-        let save_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip(clip, save_index);
+        let save_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip_with_scroll(
+            clip, save_index, 0.0,
+        );
         let save_track = DesktopLauncher::settings_pref_widget_slider_track_rect(save_row);
         let save_point = RenderPoint::new(save_track.x + save_track.width, save_track.center().y);
         assert_eq!(
@@ -38667,6 +38768,68 @@ mod tests {
             }],
         );
         assert_eq!(launcher.last_settings_pressed_control, None);
+    }
+
+    #[test]
+    fn desktop_launcher_settings_scroll_wheel_offsets_table_hit_tests() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let clip = DesktopLauncher::settings_pref_widget_clip_rect_for_panel(panel);
+        let clip_center = clip.center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: clip_center.x,
+                y: clip_center.y,
+            }],
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Scroll {
+                delta_x: 0.0,
+                delta_y: -20.0,
+            }],
+        );
+        let offset = launcher
+            .settings_scroll_offsets
+            .get("game")
+            .copied()
+            .expect("scroll wheel over settings table should store a game page offset");
+        assert!(offset > 0);
+
+        let specs = DesktopLauncher::settings_pref_widget_specs("game");
+        let playerlimit_index = specs
+            .iter()
+            .position(|spec| spec.key == "playerlimit")
+            .expect("game settings should include steam playerlimit");
+        let playerlimit_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip_with_scroll(
+            clip,
+            playerlimit_index,
+            offset as f32,
+        );
+        assert!(
+            clip.contains_point(playerlimit_row.center()),
+            "scroll offset should bring later settings rows into the clipped table"
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                playerlimit_row.center().x,
+                playerlimit_row.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::SetSliderValue("game", "playerlimit", 2)
+            ))
+        );
     }
 
     #[test]
