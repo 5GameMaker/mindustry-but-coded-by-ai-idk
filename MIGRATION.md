@@ -15848,3 +15848,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - weapon parts 的 `sideMultiplier`、continuous beam、shoot effects 与更精确 client-side recoil/reload/heat 动画仍需继续；
   - Unit engine trail 仍需先补 runtime trail points；hard shadow、legs、payload/item 仍未接入；
   - 当前 unit pass 仍临时复用 Overlay，后续必须统一 Java layer sorting / entity world pass。
+
+## 432. 最新闭环记录：LaserBolt bullet line overlay 接入客户端 bullet 渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.0%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/bullet/LaserBoltBulletType.java#draw(Bullet b)`
+  - Java 顺序为 `super.draw(b)` 后追加：
+    - `Draw.color(backColor); Lines.stroke(width); Lines.lineAngleCenter(b.x, b.y, b.rotation(), height);`
+    - `Draw.color(frontColor); Lines.lineAngleCenter(b.x, b.y, b.rotation(), height / 2f);`
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_line_angle_center_points(...)`，表达 Java `Lines.lineAngleCenter` 的中心线端点；
+    - 新增 `laser_bolt_bullet_snapshot_render_commands(...)`；
+    - `basic_bullet_snapshot_render_commands(...)` 在 BasicBullet sprite 后，为 `BulletKind::LaserBolt` 追加 back/front 两条 `DrawLine`；
+    - `desktop_resolve_color_symbol(...)` 增加 `Pal::by_name(...)` 兜底，使 `yellowBoltFront` 这类 content 色名能被客户端渲染解析；
+    - 新增 `desktop_launcher_routes_laser_bolt_snapshot_lines_into_overlay_pass`，覆盖 `beta_laser_bolt` 的 sprite→line 顺序、线段端点、stroke、颜色与 layer。
+- 迁移意义：
+  - LaserBolt 不再只按 BasicBullet sprite 显示，而是开始接入 Java `LaserBoltBulletType.draw()` 的线段叠加层；
+  - 该闭环继续走 `client_bullet_snapshot_entities` → `bullet_snapshot_render_pass()` → `RenderCommand::DrawLine`，没有新增孤立 bullet renderer。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_basic_bullet_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_bolt_snapshot_lines_into_overlay_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Laser / Sap / Shrapnel / ContinuousLaser 的完整 bullet draw plan 仍未接入客户端 bullet render pass；
+  - LaserBolt 仍未补 trail/light 的完整 Java 视觉；
+  - Bullet 渲染仍临时复用 Overlay，后续需要统一 Java layer sorting / world entity pass。

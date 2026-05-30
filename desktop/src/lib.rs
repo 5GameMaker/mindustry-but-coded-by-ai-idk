@@ -120,6 +120,7 @@ fn desktop_resolve_color_symbol(name: &str) -> Option<DecalColor> {
         return None;
     }
     standard_effect_color_symbol(name)
+        .or_else(|| Pal::by_name(name))
         .or_else(|| standard_effect_color_symbol(&format!("Pal.{name}")))
         .or_else(|| standard_effect_color_symbol(&format!("Color.{name}")))
 }
@@ -127,6 +128,41 @@ fn desktop_resolve_color_symbol(name: &str) -> Option<DecalColor> {
 fn desktop_bullet_render_color(name: &str, fallback: DecalColor) -> [f32; 4] {
     let color = desktop_resolve_color_symbol(name).unwrap_or(fallback);
     desktop_effect_render_color(Some(color), 1.0)
+}
+
+fn laser_bolt_bullet_snapshot_render_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    layer: f32,
+) -> Vec<RenderCommand> {
+    let line_width = spec.width.max(0.0);
+    let back_length = spec.height.max(0.0);
+    if line_width <= f32::EPSILON || back_length <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let center = RenderPoint::new(bullet.x, bullet.y);
+    let (back_from, back_to) =
+        desktop_line_angle_center_points(center, bullet.rotation(), back_length);
+    let (front_from, front_to) =
+        desktop_line_angle_center_points(center, bullet.rotation(), back_length / 2.0);
+
+    vec![
+        RenderCommand::draw_line(
+            back_from,
+            back_to,
+            line_width,
+            desktop_bullet_render_color(&spec.back_color, Pal::BULLET_YELLOW_BACK),
+            layer,
+        ),
+        RenderCommand::draw_line(
+            front_from,
+            front_to,
+            line_width,
+            desktop_bullet_render_color(&spec.front_color, Pal::BULLET_YELLOW),
+            layer,
+        ),
+    ]
 }
 
 fn desktop_bullet_front_sprite(spec: &BulletSpec) -> String {
@@ -334,6 +370,18 @@ fn desktop_rotate_offset(rotation: f32, x: f32, y: f32) -> (f32, f32) {
     let radians = rotation.to_radians();
     let (sin, cos) = radians.sin_cos();
     (x * cos - y * sin, x * sin + y * cos)
+}
+
+fn desktop_line_angle_center_points(
+    center: RenderPoint,
+    rotation: f32,
+    length: f32,
+) -> (RenderPoint, RenderPoint) {
+    let (x, y) = desktop_rotate_offset(rotation, length / 2.0, 0.0);
+    (
+        RenderPoint::new(center.x - x, center.y - y),
+        RenderPoint::new(center.x + x, center.y + y),
+    )
 }
 
 fn desktop_unit_engine_entries(unit: &UnitComp) -> Vec<(f32, f32, f32, f32)> {
@@ -11912,6 +11960,11 @@ impl DesktopLauncher {
             rotation,
             layer,
         ));
+        if spec.kind == BulletKind::LaserBolt {
+            commands.extend(laser_bolt_bullet_snapshot_render_commands(
+                bullet, spec, layer,
+            ));
+        }
         commands
     }
 
@@ -16320,6 +16373,119 @@ mod tests {
             assert_eq!(rect.height, 6.75);
             assert_eq!(rotation, 90.0);
             assert_eq!(layer, Layer::BULLET);
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_routes_laser_bolt_snapshot_lines_into_overlay_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_content = launcher
+            .content_loader
+            .bullet_by_name("beta_laser_bolt")
+            .expect("base content should include beta laser bolt bullet");
+        assert_eq!(bullet_content.spec.kind, super::BulletKind::LaserBolt);
+
+        let mut bullet = BulletComp::new(
+            bullet_content.id(),
+            TeamId(1),
+            type_io::EntityRef::null(),
+            32.0,
+            48.0,
+        );
+        bullet.lifetime = 60.0;
+        bullet.time = 12.0;
+        bullet.rotation = 0.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7104, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 96.0, 96.0);
+        let camera = RenderCamera::new(RenderPoint::new(48.0, 48.0), viewport);
+        let minimap_camera = MinimapCamera::new(48.0, 48.0, 96.0, 96.0);
+        let frame = launcher.graphics_frame_for_render(
+            23,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(29.75, 48.0)
+                                && *to == RenderPoint::new(34.25, 48.0))
+                    })
+            })
+            .expect("laser bolt snapshot should emit overlay line commands");
+
+        let bullet_sprite_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "bullet")
+            })
+            .expect("LaserBolt super.draw should still emit the front sprite");
+        let line_indices = overlay
+            .commands
+            .iter()
+            .enumerate()
+            .filter_map(|(index, command)| {
+                matches!(command, RenderCommand::DrawLine { .. }).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(line_indices.len(), 2);
+        assert!(
+            line_indices.iter().all(|index| *index > bullet_sprite_index),
+            "LaserBolt line overlays should follow the BasicBullet sprite commands like Java super.draw()"
+        );
+
+        let lines = line_indices
+            .iter()
+            .map(|index| &overlay.commands[*index])
+            .collect::<Vec<_>>();
+        match lines[0] {
+            RenderCommand::DrawLine {
+                from,
+                to,
+                stroke,
+                color,
+                layer,
+            } => {
+                assert_eq!(*from, RenderPoint::new(29.75, 48.0));
+                assert_eq!(*to, RenderPoint::new(34.25, 48.0));
+                assert_eq!(*stroke, 1.5);
+                assert_eq!(
+                    *color,
+                    super::desktop_effect_render_color(Some(Pal::YELLOW_BOLT_FRONT), 1.0)
+                );
+                assert_eq!(*layer, Layer::BULLET);
+            }
+            other => panic!("expected LaserBolt back DrawLine, got {other:?}"),
+        }
+        match lines[1] {
+            RenderCommand::DrawLine {
+                from,
+                to,
+                stroke,
+                color,
+                layer,
+            } => {
+                assert_eq!(*from, RenderPoint::new(30.875, 48.0));
+                assert_eq!(*to, RenderPoint::new(33.125, 48.0));
+                assert_eq!(*stroke, 1.5);
+                assert_eq!(
+                    *color,
+                    super::desktop_effect_render_color(Some(DecalColor::WHITE), 1.0)
+                );
+                assert_eq!(*layer, Layer::BULLET);
+            }
+            other => panic!("expected LaserBolt front DrawLine, got {other:?}"),
         }
     }
 

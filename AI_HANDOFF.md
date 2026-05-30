@@ -12990,3 +12990,38 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. continuous beam、shoot effects、client-side recoil/reload/heat 动画仍需继续；
   3. Unit engine trail 应复用 `core/src/mindustry/graphics/trail.rs`，先补 transient trail point runtime，再进渲染；
   4. Bullet/Effect 下一步优先把已有 draw plan/primitive 接成 `RenderCommand` / `RenderPass`，不要先大改复杂 trail mesh。
+
+### 2026-05-30：LaserBolt bullet line overlay 接入客户端 bullet 渲染链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.0%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_line_angle_center_points(...)`；
+    - 新增 `laser_bolt_bullet_snapshot_render_commands(...)`；
+    - `basic_bullet_snapshot_render_commands(...)` 在 `BulletKind::LaserBolt` 时，保留 BasicBullet front/back sprite，并追加 back/front 两条 `DrawLine`；
+    - `desktop_resolve_color_symbol(...)` 增加 `Pal::by_name(...)`，让 `yellowBoltFront` 等 content 色名能解析；
+    - 新增测试 `desktop_launcher_routes_laser_bolt_snapshot_lines_into_overlay_pass`。
+- Java 对照：
+  - `LaserBoltBulletType.draw(Bullet b)` 先 `super.draw(b)`，再 `Lines.lineAngleCenter(...)` 绘制 back/front 两条中心线。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_basic_bullet_snapshot_entities_into_overlay_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_bolt_snapshot_lines_into_overlay_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 子代理结论：
+  - Effect primitive → RenderPass 桥已经在 `desktop/src/lib.rs::DesktopStandardEffectRenderFrame`，不是完全缺失；
+  - Bullet 侧 `Basic/LaserBolt/Laser/Sap/Shrapnel` core plan 多数已存在，但客户端 bullet render pass 目前只接了 Basic 风格，本轮补了 LaserBolt 的线段叠加；
+  - Unit trail 应放在 `UnitComp.trail` 作为 transient state，desktop 只读消费，不要建孤立 desktop trail map；
+  - Weapon parts 应先结构化/plan 化，再接 `PartParams.sideMultiplier`，continuous beam 不要当普通 sprite。
+- 下一步：
+  1. 继续 Bullet：Laser / Sap / Shrapnel / ContinuousLaser 的 draw plan → RenderCommand；
+  2. 继续 Unit trail：先补 `UnitTrailState` 的真实点列/`Trail` runtime；
+  3. 继续 Weapon parts：结构化 part seam 与 `sideMultiplier`；
+  4. 将 Unit/Bullet/Effect 从临时 Overlay 逐步收口到统一 Java layer sorting。
