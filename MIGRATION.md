@@ -17933,3 +17933,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `pane-2/pane-left/pane-right/pane-top/button-over/button-disabled/scroll/slider/check/textfield` 等 Styles 资源仍需纳入统一 skin 表；
   - `DrawText` 仍是占位 glyph，必须继续接真实字体和 icon atlas；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 498. Styles UI skin 资源表接入默认 atlas
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **51.4%**，仍未达到完整可玩；继续优先推进原版 UI，还原对象包括 `Styles/Tex/Fonts + Scene2D widget`，不是只做临时 route shell。
+- 问题背景：
+  - Java `Styles.load()` 统一绑定 `button/pane/scroll/slider/check/underline/bar/window/whiteui` 等 UI 资源；
+  - 497 只把 Dialog route shell 接到少量资源，后续若继续在 desktop 里手写资源列表，会导致每个模块各用各的贴图、无法形成完整 UI；
+  - 本轮建立 core 侧 `Styles` skin 数据契约，并让 desktop 默认 atlas 消费它。
+- 本轮主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - 新增 `UiSkinGroup`、`UiSkinSprite`、`UiDrawableAlias`、`UiDrawableTint`、`UiTextButtonStyleSkin`；
+    - 维护 `UPSTREAM_UI_SKIN_SPRITES`，覆盖 `window-empty.9`、`pane*.9`、`inventory.9`、`button*.9`、`button-edge*.9`、`scroll*.9/png`、`slider*`、`check-*`、`underline*.9`、`bar*.9`、`whiteui`、`discord/info-banner` 等原版 UI skin 资源；
+    - 维护 `UPSTREAM_UI_DRAWABLE_ALIASES`，承接 Java `Styles.load()` 中 `black/black9/black6/none/flatOver/accentDrawable/windowEmpty/flatDown/button*` 等 drawable 名称到 atlas symbol/source/tint 的映射；
+    - 维护 `UPSTREAM_TEXT_BUTTON_STYLE_SKINS`，记录 `defaultt/flatBordert/flatToggleMenut/togglet/clearTogglet/squareTogglet` 的常用 drawable 状态；
+    - 新增测试确保关键资源、tinted whiteui 契约、文本按钮样式名和虚拟路径稳定。
+  - `core/src/mindustry/ui/mod.rs`
+    - 导出 styles 资源表和查询函数，供后续 widget/Dialog/desktop 渲染链路共享。
+  - `desktop/src/lib.rs`
+    - `default_desktop_texture_atlas(...)` 不再维护一小段硬编码 UI sprite 列表，改为消费 `upstream_ui_skin_sprite_source_paths()`；
+    - 默认 desktop atlas 因此一次性纳入按钮、button-edge、面板、inventory、滚动条、滑块、勾选框、文本框、bar、菜单 banner 等原版 UI skin 资源。
+- 迁移意义：
+  - UI skin 资源从“desktop 单点硬编码”推进为 core 可复用契约，后续 Scene2D widget 不会变成相互独立的模块；
+  - OpenGL raw 直载与九宫格展开能力现在可以覆盖更多 Java UI 资源，而不仅是 `flat-down-base/window-empty/button`；
+  - 为 Settings/Mods/Database/TechTree/Editor 等页面迁移通用控件打基础。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core styles --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Rust 还没有完整 `ButtonStyle/ScrollPaneStyle/SliderStyle/TextFieldStyle/CheckBoxStyle` 运行时 widget 实现；
+  - 字体/icon glyph atlas 未接入，`DrawText` 仍是占位；
+  - route shell 内容还需要逐步替换为真实 About/Load/Settings/Mods/Database/TechTree 等页面；
+  - 未达到完整可玩，不能宣告目标完成。

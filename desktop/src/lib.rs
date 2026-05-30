@@ -89,6 +89,7 @@ use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
 };
 use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
+use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw};
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -13355,20 +13356,7 @@ fn default_desktop_texture_atlas(
 ) -> TextureAtlasPlan<bool> {
     TextureAtlasPlan::from_virtual_source_paths(
         std::iter::once("sprites/logo.png".to_string())
-            .chain(
-                [
-                    "discord-banner",
-                    "info-banner",
-                    "flat-down-base.9",
-                    "window-empty.9",
-                    "pane.9",
-                    "button.9",
-                    "button-down.9",
-                    "whiteui",
-                ]
-                .into_iter()
-                .map(|name| format!("sprites/ui/{name}.png")),
-            )
+            .chain(upstream_ui_skin_sprite_source_paths().map(str::to_string))
             .chain(content_icon_candidate_virtual_source_paths(content_loader))
             .into_iter()
             .chain(
