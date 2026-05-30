@@ -171,6 +171,118 @@ pub struct DesktopSettingsPrefGroup {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSettingsPrefKind {
+    Check,
+    Slider,
+}
+
+impl DesktopSettingsPrefKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Check => "check",
+            Self::Slider => "slider",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSettingsPrefDefaultValue {
+    Bool(bool),
+    Int(i32),
+    Expr(&'static str),
+}
+
+impl DesktopSettingsPrefDefaultValue {
+    fn text(self) -> String {
+        match self {
+            Self::Bool(value) => value.to_string(),
+            Self::Int(value) => value.to_string(),
+            Self::Expr(value) => value.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopSettingsPrefRange {
+    pub min: i32,
+    pub max: i32,
+    pub step: i32,
+}
+
+impl DesktopSettingsPrefRange {
+    pub const fn new(min: i32, max: i32, step: i32) -> Self {
+        Self { min, max, step }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopSettingsPrefSpec {
+    pub table: &'static str,
+    pub key: &'static str,
+    pub kind: DesktopSettingsPrefKind,
+    pub default_value: DesktopSettingsPrefDefaultValue,
+    pub range_step: Option<DesktopSettingsPrefRange>,
+    pub condition: Option<&'static str>,
+}
+
+impl DesktopSettingsPrefSpec {
+    fn summary(&self) -> String {
+        let mut line = format!(
+            "{}/{} {} default={}",
+            self.table,
+            self.key,
+            self.kind.label(),
+            self.default_value.text()
+        );
+        if let Some(range_step) = self.range_step {
+            line.push_str(&format!(
+                " range={}..{} / {}",
+                range_step.min, range_step.max, range_step.step
+            ));
+        }
+        if let Some(condition) = self.condition {
+            line.push_str(&format!(" condition={condition}"));
+        }
+        line
+    }
+}
+
+const fn settings_check_spec(
+    table: &'static str,
+    key: &'static str,
+    default_value: DesktopSettingsPrefDefaultValue,
+    condition: Option<&'static str>,
+) -> DesktopSettingsPrefSpec {
+    DesktopSettingsPrefSpec {
+        table,
+        key,
+        kind: DesktopSettingsPrefKind::Check,
+        default_value,
+        range_step: None,
+        condition,
+    }
+}
+
+const fn settings_slider_spec(
+    table: &'static str,
+    key: &'static str,
+    default_value: DesktopSettingsPrefDefaultValue,
+    min: i32,
+    max: i32,
+    step: i32,
+    condition: Option<&'static str>,
+) -> DesktopSettingsPrefSpec {
+    DesktopSettingsPrefSpec {
+        table,
+        key,
+        kind: DesktopSettingsPrefKind::Slider,
+        default_value,
+        range_step: Some(DesktopSettingsPrefRange::new(min, max, step)),
+        condition,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopSettingsDataAction {
     pub label: &'static str,
     pub icon: &'static str,
@@ -387,6 +499,8 @@ const SETTINGS_PREF_GROUPS: &[DesktopSettingsPrefGroup] = &[
         table: "game",
         entries: &[
             "saveinterval",
+            "autotarget",
+            "keyboard",
             "communityservers",
             "savecreate",
             "blockreplace",
@@ -398,6 +512,8 @@ const SETTINGS_PREF_GROUPS: &[DesktopSettingsPrefGroup] = &[
             "doubletapmine",
             "commandmodehold",
             "modcrashdisable",
+            "playerlimit",
+            "steampublichost",
             "console",
         ],
     },
@@ -414,8 +530,11 @@ const SETTINGS_PREF_GROUPS: &[DesktopSettingsPrefGroup] = &[
             "lasersopacity",
             "unitlaseropacity",
             "bridgeopacity",
+            "maxmagnificationmultiplierpercent",
+            "minmagnificationmultiplierpercent",
             "vsync",
             "fullscreen",
+            "landscape",
             "effects",
             "atmosphere",
             "drawlight",
@@ -441,6 +560,7 @@ const SETTINGS_PREF_GROUPS: &[DesktopSettingsPrefGroup] = &[
             "linear",
             "skipcoreanimation",
             "hidedisplays",
+            "macnotch",
         ],
     },
     DesktopSettingsPrefGroup {
@@ -448,6 +568,477 @@ const SETTINGS_PREF_GROUPS: &[DesktopSettingsPrefGroup] = &[
         entries: &["alwaysmusic", "musicvol", "sfxvol", "ambientvol"],
     },
 ];
+
+pub const SETTINGS_PREF_SPECS: &[DesktopSettingsPrefSpec] = &[
+    settings_slider_spec(
+        "game",
+        "saveinterval",
+        DesktopSettingsPrefDefaultValue::Int(60),
+        10,
+        600,
+        10,
+        None,
+    ),
+    settings_check_spec(
+        "game",
+        "autotarget",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        Some("mobile"),
+    ),
+    settings_check_spec(
+        "game",
+        "keyboard",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        Some("mobile"),
+    ),
+    settings_check_spec(
+        "game",
+        "communityservers",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "game",
+        "savecreate",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "game",
+        "blockreplace",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "game",
+        "conveyorpathfinding",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "game",
+        "hints",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "game",
+        "backgroundpause",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        Some("!mobile"),
+    ),
+    settings_check_spec(
+        "game",
+        "buildautopause",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        Some("!mobile"),
+    ),
+    settings_check_spec(
+        "game",
+        "distinctcontrolgroups",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        Some("!mobile"),
+    ),
+    settings_check_spec(
+        "game",
+        "doubletapmine",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_check_spec(
+        "game",
+        "commandmodehold",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "game",
+        "modcrashdisable",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        Some("!ios"),
+    ),
+    settings_slider_spec(
+        "game",
+        "playerlimit",
+        DesktopSettingsPrefDefaultValue::Int(16),
+        2,
+        32,
+        1,
+        Some("steam"),
+    ),
+    settings_check_spec(
+        "game",
+        "steampublichost",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        Some("steam&&!beta"),
+    ),
+    settings_check_spec(
+        "game",
+        "console",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "uiEdgePadding",
+        DesktopSettingsPrefDefaultValue::Int(0),
+        0,
+        100,
+        1,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "uiscale",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        25,
+        300,
+        5,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "screenshake",
+        DesktopSettingsPrefDefaultValue::Int(4),
+        0,
+        8,
+        1,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "bloomintensity",
+        DesktopSettingsPrefDefaultValue::Int(6),
+        0,
+        16,
+        1,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "bloomblur",
+        DesktopSettingsPrefDefaultValue::Int(2),
+        1,
+        16,
+        1,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "fpscap",
+        DesktopSettingsPrefDefaultValue::Int(240),
+        10,
+        245,
+        5,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "chatopacity",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        0,
+        100,
+        5,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "lasersopacity",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        0,
+        100,
+        5,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "unitlaseropacity",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        0,
+        100,
+        5,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "bridgeopacity",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        0,
+        100,
+        5,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "maxmagnificationmultiplierpercent",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        100,
+        200,
+        25,
+        None,
+    ),
+    settings_slider_spec(
+        "graphics",
+        "minmagnificationmultiplierpercent",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        100,
+        300,
+        25,
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "vsync",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        Some("!mobile"),
+    ),
+    settings_check_spec(
+        "graphics",
+        "fullscreen",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        Some("!mobile"),
+    ),
+    settings_check_spec(
+        "graphics",
+        "landscape",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        Some("mobile&&!ios"),
+    ),
+    settings_check_spec(
+        "graphics",
+        "effects",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "atmosphere",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "drawlight",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "destroyedblocks",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "blockstatus",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "playerchat",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "coreitems",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        Some("!mobile"),
+    ),
+    settings_check_spec(
+        "graphics",
+        "minimap",
+        DesktopSettingsPrefDefaultValue::Expr("!mobile"),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "smoothcamera",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "detach-camera",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        Some("!mobile"),
+    ),
+    settings_check_spec(
+        "graphics",
+        "position",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "mouseposition",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        Some("!mobile"),
+    ),
+    settings_check_spec(
+        "graphics",
+        "fps",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "playerindicators",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "showpings",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "showotherbuildplans",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "indicators",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "showweather",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "animatedwater",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "animatedshields",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        Some("Shaders.shield != null"),
+    ),
+    settings_check_spec(
+        "graphics",
+        "bloom",
+        DesktopSettingsPrefDefaultValue::Bool(true),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "pixelate",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "linear",
+        DesktopSettingsPrefDefaultValue::Expr("!mobile"),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "skipcoreanimation",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "hidedisplays",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_check_spec(
+        "graphics",
+        "macnotch",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        Some("OS.isMac"),
+    ),
+    settings_check_spec(
+        "sound",
+        "alwaysmusic",
+        DesktopSettingsPrefDefaultValue::Bool(false),
+        None,
+    ),
+    settings_slider_spec(
+        "sound",
+        "musicvol",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        0,
+        100,
+        1,
+        None,
+    ),
+    settings_slider_spec(
+        "sound",
+        "sfxvol",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        0,
+        100,
+        1,
+        None,
+    ),
+    settings_slider_spec(
+        "sound",
+        "ambientvol",
+        DesktopSettingsPrefDefaultValue::Int(100),
+        0,
+        100,
+        1,
+        None,
+    ),
+];
+
+pub fn settings_pref_spec(table: &str, key: &str) -> Option<&'static DesktopSettingsPrefSpec> {
+    SETTINGS_PREF_SPECS
+        .iter()
+        .find(|spec| spec.table == table && spec.key == key)
+}
+
+const SETTINGS_PREF_HIGHLIGHT_KEYS_GAME: &[&str] =
+    &["saveinterval", "communityservers", "savecreate", "console"];
+const SETTINGS_PREF_HIGHLIGHT_KEYS_GRAPHICS: &[&str] =
+    &["fullscreen", "vsync", "minimap", "linear"];
+const SETTINGS_PREF_HIGHLIGHT_KEYS_SOUND: &[&str] =
+    &["alwaysmusic", "musicvol", "sfxvol", "ambientvol"];
+
+pub fn settings_pref_count(table: &str) -> usize {
+    SETTINGS_PREF_SPECS
+        .iter()
+        .filter(|spec| spec.table == table)
+        .count()
+}
+
+pub fn settings_pref_highlight_keys(table: &str) -> &'static [&'static str] {
+    match table {
+        "game" => SETTINGS_PREF_HIGHLIGHT_KEYS_GAME,
+        "graphics" => SETTINGS_PREF_HIGHLIGHT_KEYS_GRAPHICS,
+        "sound" => SETTINGS_PREF_HIGHLIGHT_KEYS_SOUND,
+        _ => &[],
+    }
+}
+
+pub fn settings_pref_summary_line(table: &str, key: &str) -> Option<String> {
+    settings_pref_spec(table, key).map(DesktopSettingsPrefSpec::summary)
+}
+
+pub fn settings_pref_highlight_summary_line(table: &str) -> Option<String> {
+    let summaries = settings_pref_highlight_keys(table)
+        .iter()
+        .filter_map(|key| settings_pref_summary_line(table, key))
+        .collect::<Vec<_>>();
+    if summaries.is_empty() {
+        None
+    } else {
+        Some(summaries.join(" | "))
+    }
+}
 
 const SETTINGS_DATA_ACTIONS: &[DesktopSettingsDataAction] = &[
     DesktopSettingsDataAction {
@@ -13650,6 +14241,7 @@ pub struct DesktopLauncher {
     pub about_filter_banned_links: bool,
     pub settings_dialog_state: DesktopSettingsDialogState,
     pub last_settings_action: Option<DesktopSettingsAction>,
+    pub settings_overrides: BTreeMap<String, String>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
     pub last_discord_clipboard_text: Option<String>,
@@ -14349,6 +14941,7 @@ impl DesktopLauncher {
             about_filter_banned_links: false,
             settings_dialog_state: DesktopSettingsDialogState::default(),
             last_settings_action: None,
+            settings_overrides: BTreeMap::new(),
             last_about_link_action: None,
             last_about_linkfail_message: None,
             last_discord_clipboard_text: None,
@@ -18284,10 +18877,57 @@ impl DesktopLauncher {
         lines
     }
 
+    fn settings_storage_key(table: &str, key: &str) -> String {
+        format!("{table}.{key}")
+    }
+
     fn settings_pref_group(table: &str) -> Option<&'static DesktopSettingsPrefGroup> {
         SETTINGS_PREF_GROUPS
             .iter()
             .find(|group| group.table == table)
+    }
+
+    pub fn set_setting_override(&mut self, table: &str, key: &str, value: impl Into<String>) {
+        self.settings_overrides
+            .insert(Self::settings_storage_key(table, key), value.into());
+    }
+
+    pub fn setting_override_value(&self, table: &str, key: &str) -> Option<&str> {
+        self.settings_overrides
+            .get(&Self::settings_storage_key(table, key))
+            .map(String::as_str)
+    }
+
+    pub fn setting_effective_value(&self, table: &str, key: &str) -> Option<String> {
+        self.setting_override_value(table, key)
+            .map(ToOwned::to_owned)
+            .or_else(|| settings_pref_spec(table, key).map(|spec| spec.default_value.text()))
+    }
+
+    pub fn reset_settings_table_overrides(&mut self, table: &str) -> usize {
+        let Some(group) = Self::settings_pref_group(table) else {
+            return 0;
+        };
+        group
+            .entries
+            .iter()
+            .filter(|key| {
+                self.settings_overrides
+                    .remove(&Self::settings_storage_key(table, key))
+                    .is_some()
+            })
+            .count()
+    }
+
+    pub fn reset_current_settings_page_overrides(&mut self) -> usize {
+        match self.settings_dialog_state.page {
+            DesktopSettingsPage::Game
+            | DesktopSettingsPage::Graphics
+            | DesktopSettingsPage::Sound => {
+                self.reset_settings_table_overrides(self.settings_dialog_state.page.key())
+            }
+            DesktopSettingsPage::Main | DesktopSettingsPage::Data => 0,
+        }
     }
 
     fn settings_icon_line(icon: &str) -> String {
@@ -18313,24 +18953,27 @@ impl DesktopLauncher {
                         entry.target
                     ));
                 }
-                lines.push(format!(
-                    "pref tables: {}",
-                    SETTINGS_PREF_GROUPS
-                        .iter()
-                        .map(|group| format!("{}({})", group.table, group.entries.len()))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
+                for table in ["game", "graphics", "sound"] {
+                    if let Some(highlights) = settings_pref_highlight_summary_line(table) {
+                        lines.push(format!(
+                            "pref table: {table} settings: {} critical: {highlights}",
+                            settings_pref_count(table)
+                        ));
+                    }
+                }
                 lines.push(format!("data actions: {}", SETTINGS_DATA_ACTIONS.len()));
             }
             DesktopSettingsPage::Game
             | DesktopSettingsPage::Graphics
             | DesktopSettingsPage::Sound => {
                 let table = state.page.key();
-                if let Some(group) = Self::settings_pref_group(table) {
-                    lines.push(format!("table: {table} settings: {}", group.entries.len()));
-                    for chunk in group.entries.chunks(6).take(3) {
-                        lines.push(format!("prefs: {}", chunk.join(", ")));
+                lines.push(format!(
+                    "table: {table} settings: {}",
+                    settings_pref_count(table)
+                ));
+                if let Some(highlights) = settings_pref_highlight_summary_line(table) {
+                    for highlight in highlights.split(" | ") {
+                        lines.push(format!("critical: {highlight}"));
                     }
                 }
                 lines.push("button: reset-to-defaults".into());
@@ -18391,9 +19034,7 @@ impl DesktopLauncher {
             | DesktopSettingsPage::Graphics
             | DesktopSettingsPage::Sound => {
                 let table = self.settings_dialog_state.page.key();
-                let group = Self::settings_pref_group(table)?;
-                let chunk_count = group.entries.chunks(6).take(3).count();
-                let reset_line = 3 + chunk_count;
+                let reset_line = 3 + settings_pref_highlight_keys(table).len();
                 let back_line = reset_line + 1;
                 if line_index == reset_line {
                     Some(DesktopSettingsAction::ResetCurrentPage)
@@ -18672,9 +19313,11 @@ impl DesktopLauncher {
                     self.settings_dialog_state.page = DesktopSettingsPage::Main;
                 }
             }
+            DesktopSettingsAction::ResetCurrentPage => {
+                self.reset_current_settings_page_overrides();
+            }
             DesktopSettingsAction::OpenLanguageDialog
             | DesktopSettingsAction::OpenControlsDialog
-            | DesktopSettingsAction::ResetCurrentPage
             | DesktopSettingsAction::ClearAllData
             | DesktopSettingsAction::ClearPlanetData
             | DesktopSettingsAction::ClearSaves
@@ -37117,9 +37760,18 @@ mod tests {
                 entry.icon
             );
         }
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("game(") && line.contains("graphics(")));
+        assert!(lines.iter().any(|line| {
+            line.contains("pref table: game settings:")
+                && line.contains("saveinterval slider default=60 range=10..600 / 10")
+        }));
+        assert!(lines.iter().any(|line| {
+            line.contains("pref table: graphics settings:")
+                && line.contains("fullscreen check default=false condition=!mobile")
+        }));
+        assert!(lines.iter().any(|line| {
+            line.contains("pref table: sound settings:")
+                && line.contains("musicvol slider default=100 range=0..100 / 1")
+        }));
         assert!(lines.iter().any(|line| line == "data actions: 9"));
 
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Data;
@@ -37178,6 +37830,17 @@ mod tests {
                 super::DesktopSettingsPage::Game
             ))
         );
+        let game_lines = launcher.settings_route_lines();
+        assert!(game_lines.contains(&format!(
+            "table: game settings: {}",
+            super::settings_pref_count("game")
+        )));
+        assert!(game_lines.iter().any(|line| {
+            line.contains("critical: game/saveinterval slider default=60 range=10..600 / 10")
+        }));
+        assert!(game_lines
+            .iter()
+            .any(|line| { line.contains("critical: game/communityservers check default=true") }));
 
         let reset_index = launcher
             .settings_route_lines()
@@ -37331,6 +37994,187 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.contains(&"upstream: SettingsMenuDialog"));
         assert!(texts.contains(&"settings page: data"));
+    }
+
+    #[test]
+    fn desktop_launcher_settings_pref_specs_cover_group_keys_and_expected_metadata() {
+        let mut seen = std::collections::BTreeSet::new();
+        for spec in super::SETTINGS_PREF_SPECS {
+            assert!(
+                seen.insert((spec.table, spec.key)),
+                "duplicate settings spec for {}/{}",
+                spec.table,
+                spec.key
+            );
+        }
+
+        let expected_count = super::SETTINGS_PREF_GROUPS
+            .iter()
+            .map(|group| group.entries.len())
+            .sum::<usize>();
+        assert_eq!(expected_count, 62);
+        assert_eq!(super::SETTINGS_PREF_SPECS.len(), expected_count);
+
+        for group in super::SETTINGS_PREF_GROUPS {
+            assert_eq!(
+                super::settings_pref_count(group.table),
+                group.entries.len(),
+                "table {} should expose all keys in route metadata",
+                group.table
+            );
+            for key in group.entries {
+                let spec = super::settings_pref_spec(group.table, key)
+                    .unwrap_or_else(|| panic!("missing settings spec for {}/{}", group.table, key));
+                assert_eq!(spec.table, group.table);
+                assert_eq!(spec.key, *key);
+            }
+        }
+
+        let saveinterval = super::settings_pref_spec("game", "saveinterval").unwrap();
+        assert_eq!(saveinterval.kind, super::DesktopSettingsPrefKind::Slider);
+        assert_eq!(
+            saveinterval.default_value,
+            super::DesktopSettingsPrefDefaultValue::Int(60)
+        );
+        assert_eq!(
+            saveinterval.range_step,
+            Some(super::DesktopSettingsPrefRange::new(10, 600, 10))
+        );
+        assert_eq!(saveinterval.condition, None);
+
+        let fullscreen = super::settings_pref_spec("graphics", "fullscreen").unwrap();
+        assert_eq!(fullscreen.kind, super::DesktopSettingsPrefKind::Check);
+        assert_eq!(
+            fullscreen.default_value,
+            super::DesktopSettingsPrefDefaultValue::Bool(false)
+        );
+        assert_eq!(fullscreen.range_step, None);
+        assert_eq!(fullscreen.condition, Some("!mobile"));
+
+        let max_magnification =
+            super::settings_pref_spec("graphics", "maxmagnificationmultiplierpercent").unwrap();
+        assert_eq!(
+            max_magnification.kind,
+            super::DesktopSettingsPrefKind::Slider
+        );
+        assert_eq!(
+            max_magnification.default_value,
+            super::DesktopSettingsPrefDefaultValue::Int(100)
+        );
+        assert_eq!(
+            max_magnification.range_step,
+            Some(super::DesktopSettingsPrefRange::new(100, 200, 25))
+        );
+
+        let minimap = super::settings_pref_spec("graphics", "minimap").unwrap();
+        assert_eq!(minimap.kind, super::DesktopSettingsPrefKind::Check);
+        assert_eq!(
+            minimap.default_value,
+            super::DesktopSettingsPrefDefaultValue::Expr("!mobile")
+        );
+        assert_eq!(minimap.condition, None);
+
+        let linear = super::settings_pref_spec("graphics", "linear").unwrap();
+        assert_eq!(linear.kind, super::DesktopSettingsPrefKind::Check);
+        assert_eq!(
+            linear.default_value,
+            super::DesktopSettingsPrefDefaultValue::Expr("!mobile")
+        );
+        assert_eq!(linear.condition, None);
+
+        let macnotch = super::settings_pref_spec("graphics", "macnotch").unwrap();
+        assert_eq!(macnotch.kind, super::DesktopSettingsPrefKind::Check);
+        assert_eq!(
+            macnotch.default_value,
+            super::DesktopSettingsPrefDefaultValue::Bool(false)
+        );
+        assert_eq!(macnotch.condition, Some("OS.isMac"));
+
+        let musicvol = super::settings_pref_spec("sound", "musicvol").unwrap();
+        assert_eq!(musicvol.kind, super::DesktopSettingsPrefKind::Slider);
+        assert_eq!(
+            musicvol.default_value,
+            super::DesktopSettingsPrefDefaultValue::Int(100)
+        );
+        assert_eq!(
+            musicvol.range_step,
+            Some(super::DesktopSettingsPrefRange::new(0, 100, 1))
+        );
+        assert_eq!(musicvol.condition, None);
+    }
+
+    #[test]
+    fn desktop_launcher_settings_reset_current_page_removes_only_that_table_overrides() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        launcher.set_setting_override("game", "saveinterval", "120");
+        launcher.set_setting_override("game", "communityservers", "false");
+        launcher.set_setting_override("graphics", "fullscreen", "true");
+        launcher.set_setting_override("sound", "musicvol", "15");
+
+        assert_eq!(
+            launcher
+                .setting_effective_value("game", "saveinterval")
+                .as_deref(),
+            Some("120")
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("graphics", "fullscreen")
+                .as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("sound", "musicvol")
+                .as_deref(),
+            Some("15")
+        );
+
+        launcher.dispatch_settings_action(super::DesktopSettingsAction::ResetCurrentPage);
+
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::ResetCurrentPage)
+        );
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Game
+        );
+        assert_eq!(
+            launcher.setting_override_value("game", "saveinterval"),
+            None
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("game", "saveinterval")
+                .as_deref(),
+            Some("60")
+        );
+        assert_eq!(
+            launcher.setting_override_value("game", "communityservers"),
+            None
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("game", "communityservers")
+                .as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("graphics", "fullscreen")
+                .as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            launcher
+                .setting_effective_value("sound", "musicvol")
+                .as_deref(),
+            Some("15")
+        );
     }
 
     #[test]

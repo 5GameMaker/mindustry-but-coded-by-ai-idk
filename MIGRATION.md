@@ -18557,3 +18557,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Data 动作目前只记录 action，尚未执行清存档/导入导出/崩溃日志导出；
   - 真实 `SettingsTable` 控件、滑条/复选框、Language/Controls 子对话框仍待迁移；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 519. SettingsMenuDialog 设置项规格与当前页重置语义
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.5%**，仍未达到完整可玩；继续按原版 `SettingsMenuDialog.addSettings()` 补齐 `game / graphics / sound` 的 `checkPref / sliderPref` 元数据，并把 Reset 从只记录 action 推进为删除当前页 override 的可验证状态行为。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopSettingsPrefSpec` 使用 typed default/range/condition 记录上游 SettingsTable 规格；
+    - `SETTINGS_PREF_GROUPS / SETTINGS_PREF_SPECS` 补齐上游当前基线的 62 个设置项，包括 mobile/steam/mac/shader 条件项：`autotarget`、`keyboard`、`playerlimit`、`steampublichost`、`maxmagnificationmultiplierpercent`、`minmagnificationmultiplierpercent`、`landscape`、`macnotch` 等；
+    - `settings_route_lines()` 继续暴露每页 settings 数量与关键设置摘要，用于后续把文本壳替换为真实控件时保持可测；
+    - `DesktopLauncher` 新增 `settings_overrides` 过渡状态，以及 `set_setting_override()`、`setting_effective_value()`、`reset_settings_table_overrides()`、`reset_current_settings_page_overrides()`；
+    - `dispatch_settings_action(ResetCurrentPage)` 现在会删除当前 `Game/Graphics/Sound` 页对应 keys 的 override，并按 spec 默认值回退；`Main/Data` 不执行 reset。
+- 迁移意义：
+  - 对齐 Java `SettingsTable.rebuild()` 中 Reset 逐项 `settings.remove(setting.name)` 的核心语义，不再只是 action 记录；
+  - 设置项规格开始覆盖完整上游表，后续可直接生成复选框/滑条控件与真实持久化 settings；
+  - 当前状态仍接在 `DesktopLauncher` 的 Settings route/input/render 主链路上，不是独立 helper。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `settings_overrides` 仍是桌面侧过渡内存状态，尚未接入真正持久化 settings 文件；
+  - 复选框/滑条还没有真实 Scene2D/MDT UI 控件、拖动、键鼠焦点与滚动行为；
+  - Language/Controls 子对话框与 Data 清理/导入/导出副作用仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
