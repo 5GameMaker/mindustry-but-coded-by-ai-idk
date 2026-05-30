@@ -91,8 +91,9 @@ use mindustry_core::mindustry::service::{
 use mindustry_core::mindustry::ui::dialogs::{BaseDialog, DialogShellLayout};
 use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
-    parse_upstream_icon_properties, upstream_font_source_paths, Bar, BarDrawCommand, BarDrawPlan,
-    BarLayout, BarTextDraw, UpstreamContentIcon, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
+    parse_upstream_icon_properties, upstream_font_assets, upstream_font_source_paths, Bar,
+    BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole,
+    UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -3418,6 +3419,131 @@ impl DesktopContentIconGlyphRegistry {
     }
 }
 
+pub const DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME: &str = "runtime:font-glyph-atlas";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopFontRasterizationAssetPlan {
+    pub role: UpstreamFontRole,
+    pub java_static_name: &'static str,
+    pub asset_name: &'static str,
+    pub source_path: &'static str,
+    pub file_path: Option<String>,
+    pub render_font_id: Option<RenderFontId>,
+    pub size: u16,
+    pub incremental: bool,
+    pub scaled: bool,
+    pub border_width: Option<u16>,
+    pub shadow_offset_y: Option<i16>,
+    pub character_seed_count: usize,
+    pub resolved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopContentIconGlyphPlan {
+    pub unicode: u32,
+    pub name: String,
+    pub atlas_symbol: String,
+    pub emoji: Option<String>,
+    pub atlas_region_resolved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopFontRasterizationPlan {
+    pub font_assets: Vec<DesktopFontRasterizationAssetPlan>,
+    pub content_icons: Vec<DesktopContentIconGlyphPlan>,
+    pub content_icon_load_error: Option<String>,
+    pub fallback_placeholder_enabled: bool,
+}
+
+impl DesktopFontRasterizationPlan {
+    pub fn resolved_font_asset_count(&self) -> usize {
+        self.font_assets
+            .iter()
+            .filter(|asset| asset.resolved)
+            .count()
+    }
+
+    pub fn unresolved_font_source_paths(&self) -> Vec<String> {
+        let mut unresolved = BTreeMap::new();
+        for asset in &self.font_assets {
+            if !asset.resolved {
+                unresolved.insert(asset.source_path.to_string(), ());
+            }
+        }
+        unresolved.into_keys().collect()
+    }
+
+    pub fn missing_icon_atlas_symbols(&self) -> Vec<String> {
+        self.content_icons
+            .iter()
+            .filter_map(|icon| (!icon.atlas_region_resolved).then_some(icon.atlas_symbol.clone()))
+            .collect()
+    }
+
+    pub fn planned_glyph_count(&self) -> usize {
+        self.font_assets
+            .iter()
+            .map(|asset| asset.character_seed_count.max(1))
+            .sum::<usize>()
+            + self.content_icons.len()
+    }
+
+    pub fn atlas_plan(&self) -> DesktopFontAtlasPlan {
+        let unresolved_font_source_paths = self.unresolved_font_source_paths();
+        let missing_icon_atlas_symbols = self.missing_icon_atlas_symbols();
+        DesktopFontAtlasPlan {
+            texture_name: DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME.to_string(),
+            font_asset_count: self.font_assets.len(),
+            resolved_font_asset_count: self.resolved_font_asset_count(),
+            content_icon_glyph_count: self.content_icons.len(),
+            planned_glyph_count: self.planned_glyph_count(),
+            unresolved_font_source_paths,
+            missing_icon_atlas_symbols,
+            content_icon_load_error: self.content_icon_load_error.clone(),
+            placeholder_fallback_required: self.fallback_placeholder_enabled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopFontAtlasPlan {
+    pub texture_name: String,
+    pub font_asset_count: usize,
+    pub resolved_font_asset_count: usize,
+    pub content_icon_glyph_count: usize,
+    pub planned_glyph_count: usize,
+    pub unresolved_font_source_paths: Vec<String>,
+    pub missing_icon_atlas_symbols: Vec<String>,
+    pub content_icon_load_error: Option<String>,
+    pub placeholder_fallback_required: bool,
+}
+
+impl DesktopFontAtlasPlan {
+    pub fn ready_for_real_upload(&self) -> bool {
+        self.resolved_font_asset_count == self.font_asset_count
+            && self.content_icon_load_error.is_none()
+            && self.missing_icon_atlas_symbols.is_empty()
+            && self.planned_glyph_count > 0
+    }
+
+    pub fn upload_plan(&self) -> DesktopFontGlyphUploadPlan {
+        DesktopFontGlyphUploadPlan {
+            texture_name: self.texture_name.clone(),
+            expected_glyph_count: self.planned_glyph_count,
+            requires_texture_upload: self.ready_for_real_upload(),
+            fallback_placeholder_enabled: self.placeholder_fallback_required,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopFontGlyphUploadPlan {
+    pub texture_name: String,
+    pub expected_glyph_count: usize,
+    pub requires_texture_upload: bool,
+    pub fallback_placeholder_enabled: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopGraphicsShaderApplyExecutionTrace {
     pub shader: ShaderId,
@@ -4561,6 +4687,65 @@ fn default_desktop_content_icon_glyph_registry() -> DesktopContentIconGlyphRegis
             Vec::new(),
             Some(error.to_string()),
         ),
+    }
+}
+
+fn desktop_font_rasterization_plan(
+    font_asset_sources: &[DesktopFontAssetSourceTrace],
+    content_icon_glyph_registry: &DesktopContentIconGlyphRegistry,
+    texture_atlas: &TextureAtlasPlan<bool>,
+) -> DesktopFontRasterizationPlan {
+    let mut source_paths = BTreeMap::new();
+    for source in font_asset_sources {
+        source_paths
+            .entry(source.source_path.as_str())
+            .or_insert_with(|| source.file_path.clone());
+    }
+
+    let font_assets = upstream_font_assets()
+        .iter()
+        .map(|asset| {
+            let file_path = source_paths
+                .get(asset.source_path)
+                .and_then(|file_path| file_path.clone());
+            DesktopFontRasterizationAssetPlan {
+                role: asset.role,
+                java_static_name: asset.role.java_static_name(),
+                asset_name: asset.asset_name,
+                source_path: asset.source_path,
+                resolved: file_path.is_some(),
+                file_path,
+                render_font_id: asset.render_font_id(),
+                size: asset.size,
+                incremental: asset.incremental,
+                scaled: asset.scaled,
+                border_width: asset.border_width,
+                shadow_offset_y: asset.shadow_offset_y,
+                character_seed_count: asset
+                    .characters
+                    .map(|characters| characters.chars().count())
+                    .unwrap_or(0),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let content_icons = content_icon_glyph_registry
+        .icons()
+        .iter()
+        .map(|icon| DesktopContentIconGlyphPlan {
+            unicode: icon.unicode,
+            name: icon.name.clone(),
+            atlas_symbol: icon.atlas_symbol.clone(),
+            emoji: icon.emoji_string(),
+            atlas_region_resolved: texture_atlas.has(&icon.atlas_symbol),
+        })
+        .collect::<Vec<_>>();
+
+    DesktopFontRasterizationPlan {
+        font_assets,
+        content_icons,
+        content_icon_load_error: content_icon_glyph_registry.load_error.clone(),
+        fallback_placeholder_enabled: true,
     }
 }
 
@@ -13817,6 +14002,22 @@ impl DesktopLauncher {
         self.content_icon_glyph_registry.validation_report()
     }
 
+    pub fn font_rasterization_plan(&self) -> DesktopFontRasterizationPlan {
+        desktop_font_rasterization_plan(
+            &self.font_asset_sources,
+            &self.content_icon_glyph_registry,
+            &self.texture_atlas,
+        )
+    }
+
+    pub fn font_atlas_plan(&self) -> DesktopFontAtlasPlan {
+        self.font_rasterization_plan().atlas_plan()
+    }
+
+    pub fn font_glyph_upload_plan(&self) -> DesktopFontGlyphUploadPlan {
+        self.font_atlas_plan().upload_plan()
+    }
+
     pub fn merge_mod_directory_into_texture_atlas(
         &mut self,
         mod_name: impl Into<String>,
@@ -20301,6 +20502,7 @@ mod tests {
         DesktopInputTickEvent, DesktopLauncher, DesktopSurfaceConfig, DesktopSurfaceSize,
         HeadlessDesktopAudioRenderer, HeadlessDesktopCameraShakeRenderer,
         HeadlessDesktopEffectRenderer, HeadlessDesktopGraphicsRenderer,
+        DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME,
     };
     use mindustry_core::mindustry::content::{blocks::BlockDef, bullets::BulletContent};
     use mindustry_core::mindustry::core::game_runtime::{
@@ -20356,6 +20558,7 @@ mod tests {
         UnitEnvDeathCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
         UnitTetherBlockSpawnedCallPacket,
     };
+    use mindustry_core::mindustry::ui::{upstream_font_assets, UpstreamFontRole};
     use mindustry_core::mindustry::UPSTREAM_BASELINE;
     use mindustry_core::mindustry::{
         entities::{
@@ -34767,6 +34970,84 @@ mod tests {
                 .map(|icon| icon.emoji_string()),
             Some(Some('\u{f8ff}'.to_string()))
         );
+    }
+
+    #[test]
+    fn desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas() {
+        let root = temp_desktop_path("font-rasterization-plan-root");
+        let asset_root = root.join("assets");
+        let font_path = asset_root.join("fonts/font.woff");
+        let logic_path = asset_root.join("fonts/logic.ttf");
+        let icon_properties_path = asset_root.join("icons/icons.properties");
+        std::fs::create_dir_all(font_path.parent().unwrap())
+            .expect("font fixture dir should be writable");
+        std::fs::create_dir_all(icon_properties_path.parent().unwrap())
+            .expect("icon fixture dir should be writable");
+        std::fs::write(&font_path, b"font").expect("font fixture should be writable");
+        std::fs::write(&logic_path, b"logic").expect("logic font fixture should be writable");
+        std::fs::write(
+            &icon_properties_path,
+            b"63743=spawn|whiteui\n63744=missing|missing-atlas-symbol\n",
+        )
+        .expect("icons fixture should be writable");
+
+        let _asset_guard = EnvVarGuard::set("MINDUSTRY_ASSET_ROOT", &asset_root);
+        let launcher = DesktopLauncher::new(Vec::new());
+        let plan = launcher.font_rasterization_plan();
+
+        assert_eq!(plan.font_assets.len(), upstream_font_assets().len());
+        assert!(plan.fallback_placeholder_enabled);
+        assert!(plan
+            .font_assets
+            .iter()
+            .any(|asset| asset.role == UpstreamFontRole::Default
+                && asset.render_font_id == Some(RenderFontId::Default)
+                && asset.resolved));
+        assert!(plan
+            .font_assets
+            .iter()
+            .any(|asset| asset.role == UpstreamFontRole::Logic
+                && asset.render_font_id == Some(RenderFontId::Logic)
+                && asset.resolved
+                && asset.character_seed_count > 0));
+        assert_eq!(plan.content_icons.len(), 2);
+        assert_eq!(
+            plan.content_icons
+                .iter()
+                .find(|icon| icon.name == "spawn")
+                .map(|icon| icon.atlas_region_resolved),
+            Some(true)
+        );
+        assert_eq!(
+            plan.content_icons
+                .iter()
+                .find(|icon| icon.name == "missing")
+                .map(|icon| icon.atlas_region_resolved),
+            Some(false)
+        );
+
+        let atlas_plan = launcher.font_atlas_plan();
+        assert_eq!(
+            atlas_plan.texture_name,
+            DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME
+        );
+        assert_eq!(atlas_plan.content_icon_glyph_count, 2);
+        assert!(atlas_plan
+            .unresolved_font_source_paths
+            .contains(&"fonts/icon.ttf".to_string()));
+        assert_eq!(
+            atlas_plan.missing_icon_atlas_symbols,
+            vec!["missing-atlas-symbol".to_string()]
+        );
+        assert!(!atlas_plan.ready_for_real_upload());
+
+        let upload_plan = launcher.font_glyph_upload_plan();
+        assert_eq!(
+            upload_plan.expected_glyph_count,
+            atlas_plan.planned_glyph_count
+        );
+        assert!(!upload_plan.requires_texture_upload);
+        assert!(upload_plan.fallback_placeholder_enabled);
     }
 
     #[test]

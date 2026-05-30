@@ -180,6 +180,12 @@ pub struct UiTextFieldStyleSkin {
 pub const UPSTREAM_UI_SKIN_SPRITES: &[UiSkinSprite] = &[
     UiSkinSprite::new("whiteui", "sprites/ui/whiteui.png", UiSkinGroup::Utility),
     UiSkinSprite::new("clear", "sprites/ui/clear.png", UiSkinGroup::Utility),
+    UiSkinSprite::new("alpha-bg", "sprites/ui/alpha-bg.png", UiSkinGroup::Utility),
+    UiSkinSprite::new(
+        "alpha-bg-line",
+        "sprites/ui/alpha-bg-line.png",
+        UiSkinGroup::Utility,
+    ),
     UiSkinSprite::new(
         "selection",
         "sprites/ui/selection.png",
@@ -357,6 +363,11 @@ pub const UPSTREAM_UI_SKIN_SPRITES: &[UiSkinSprite] = &[
         UiSkinGroup::Button,
     ),
     UiSkinSprite::new(
+        "logic-node",
+        "sprites/ui/logic-node.png",
+        UiSkinGroup::Button,
+    ),
+    UiSkinSprite::new(
         "sideline.9",
         "sprites/ui/sideline.9.png",
         UiSkinGroup::Button,
@@ -466,6 +477,8 @@ pub const UPSTREAM_UI_SKIN_SPRITES: &[UiSkinSprite] = &[
     ),
     UiSkinSprite::new("bar.9", "sprites/ui/bar.9.png", UiSkinGroup::Bar),
     UiSkinSprite::new("bar-top.9", "sprites/ui/bar-top.9.png", UiSkinGroup::Bar),
+    UiSkinSprite::new("nomap", "sprites/ui/nomap.png", UiSkinGroup::MenuChrome),
+    UiSkinSprite::new("logo", "sprites/ui/logo.png", UiSkinGroup::MenuChrome),
     UiSkinSprite::new(
         "discord-banner",
         "sprites/ui/discord-banner.png",
@@ -737,6 +750,31 @@ pub const UPSTREAM_UI_DRAWABLE_ALIASES: &[UiDrawableAlias] = &[
         "sprites/ui/cursor.png",
         UiDrawableTint::None,
     ),
+    UiDrawableAlias::new(
+        "alphaBg",
+        "alpha-bg",
+        "sprites/ui/alpha-bg.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "alphaBgLine",
+        "alpha-bg-line",
+        "sprites/ui/alpha-bg-line.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "logicNode",
+        "logic-node",
+        "sprites/ui/logic-node.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new(
+        "nomap",
+        "nomap",
+        "sprites/ui/nomap.png",
+        UiDrawableTint::None,
+    ),
+    UiDrawableAlias::new("logo", "logo", "sprites/ui/logo.png", UiDrawableTint::None),
 ];
 
 pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
@@ -745,10 +783,32 @@ pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
         .down("buttonDown")
         .over("buttonOver")
         .disabled("buttonDisabled"),
+    UiTextButtonStyleSkin::new("flatt", "Fonts.def")
+        .up("black")
+        .down("flatOver")
+        .over("flatOver"),
+    UiTextButtonStyleSkin::new("grayt", "Fonts.def")
+        .up("grayPanel")
+        .down("flatOver")
+        .over("flatOver")
+        .disabled("grayPanelDark"),
+    UiTextButtonStyleSkin::new("flatTogglet", "Fonts.def")
+        .up("black")
+        .down("flatDown")
+        .checked("flatDown")
+        .over("flatOver")
+        .disabled("black"),
     UiTextButtonStyleSkin::new("flatBordert", "Fonts.def")
         .up("pane")
         .down("flatOver")
         .over("flatDownBase"),
+    UiTextButtonStyleSkin::new("nonet", "Fonts.outline").up("none"),
+    UiTextButtonStyleSkin::new("logicTogglet", "Fonts.outline")
+        .up("black")
+        .down("accentDrawable")
+        .checked("accentDrawable")
+        .over("flatOver")
+        .disabled("black"),
     UiTextButtonStyleSkin::new("flatToggleMenut", "Fonts.def")
         .up("clear")
         .down("flatDown")
@@ -761,10 +821,20 @@ pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
         .checked("buttonDown")
         .over("buttonOver")
         .disabled("buttonDisabled"),
+    UiTextButtonStyleSkin::new("cleart", "Fonts.def")
+        .up("none")
+        .down("flatDown")
+        .over("flatOver"),
     UiTextButtonStyleSkin::new("clearTogglet", "Fonts.def")
         .up("black6")
         .down("flatDown")
         .checked("flatDown")
+        .over("flatOver")
+        .disabled("black"),
+    UiTextButtonStyleSkin::new("fullTogglet", "Fonts.def")
+        .up("black")
+        .down("flatOver")
+        .checked("flatOver")
         .over("flatOver")
         .disabled("black"),
     UiTextButtonStyleSkin::new("squareTogglet", "Fonts.def")
@@ -773,6 +843,10 @@ pub const UPSTREAM_TEXT_BUTTON_STYLE_SKINS: &[UiTextButtonStyleSkin] = &[
         .checked("flatOver")
         .over("flatOver")
         .disabled("black"),
+    UiTextButtonStyleSkin::new("logict", "Fonts.def")
+        .up("underlineWhite")
+        .down("flatOver")
+        .over("flatOver"),
 ];
 
 pub const UPSTREAM_IMAGE_BUTTON_STYLE_SKINS: &[UiImageButtonStyleSkin] = &[
@@ -785,11 +859,75 @@ pub const UPSTREAM_IMAGE_BUTTON_STYLE_SKINS: &[UiImageButtonStyleSkin] = &[
         disabled: Some("buttonDisabled"),
     },
     UiImageButtonStyleSkin {
+        java_name: "nodei",
+        up: Some("buttonOver"),
+        down: None,
+        over: Some("buttonDown"),
+        checked: None,
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "emptyi",
+        up: None,
+        down: None,
+        over: None,
+        checked: None,
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "emptyTogglei",
+        up: None,
+        down: None,
+        over: None,
+        checked: None,
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
         java_name: "selecti",
         up: Some("none"),
         down: None,
         over: None,
         checked: Some("buttonSelect"),
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "logici",
+        up: None,
+        down: None,
+        over: None,
+        checked: None,
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "geni",
+        up: None,
+        down: None,
+        over: None,
+        checked: None,
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "grayi",
+        up: None,
+        down: None,
+        over: None,
+        checked: None,
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "graySquarei",
+        up: Some("grayPanel"),
+        down: Some("flatOver"),
+        over: Some("flatOver"),
+        checked: None,
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "flati",
+        up: Some("black"),
+        down: Some("flatOver"),
+        over: Some("flatOver"),
+        checked: None,
         disabled: None,
     },
     UiImageButtonStyleSkin {
@@ -803,6 +941,30 @@ pub const UPSTREAM_IMAGE_BUTTON_STYLE_SKINS: &[UiImageButtonStyleSkin] = &[
     UiImageButtonStyleSkin {
         java_name: "squareTogglei",
         up: Some("black"),
+        down: Some("flatDown"),
+        over: Some("flatOver"),
+        checked: Some("flatDown"),
+        disabled: None,
+    },
+    UiImageButtonStyleSkin {
+        java_name: "clearNonei",
+        up: Some("none"),
+        down: Some("flatDown"),
+        over: Some("flatOver"),
+        checked: None,
+        disabled: Some("none"),
+    },
+    UiImageButtonStyleSkin {
+        java_name: "cleari",
+        up: Some("black6"),
+        down: Some("flatDown"),
+        over: Some("flatOver"),
+        checked: None,
+        disabled: Some("black6"),
+    },
+    UiImageButtonStyleSkin {
+        java_name: "clearTogglei",
+        up: Some("black6"),
         down: Some("flatDown"),
         over: Some("flatOver"),
         checked: Some("flatDown"),
@@ -971,6 +1133,8 @@ mod tests {
         for symbol in [
             "window-empty.9",
             "pane.9",
+            "alpha-bg",
+            "alpha-bg-line",
             "button.9",
             "button-down.9",
             "button-over.9",
@@ -981,6 +1145,9 @@ mod tests {
             "check-on",
             "underline.9",
             "bar.9",
+            "logic-node",
+            "nomap",
+            "logo",
             "discord-banner",
         ] {
             assert!(
@@ -1004,12 +1171,62 @@ mod tests {
     }
 
     #[test]
+    fn upstream_ui_drawable_aliases_cover_missing_alpha_logic_logo_resources() {
+        for (java_name, atlas_symbol, source_path) in [
+            ("alphaBg", "alpha-bg", "sprites/ui/alpha-bg.png"),
+            (
+                "alphaBgLine",
+                "alpha-bg-line",
+                "sprites/ui/alpha-bg-line.png",
+            ),
+            ("logicNode", "logic-node", "sprites/ui/logic-node.png"),
+            ("nomap", "nomap", "sprites/ui/nomap.png"),
+            ("logo", "logo", "sprites/ui/logo.png"),
+        ] {
+            let alias = upstream_ui_drawable_alias(java_name).unwrap_or_else(|| {
+                panic!("{java_name} should be present in the drawable alias registry")
+            });
+            assert_eq!(alias.atlas_symbol, atlas_symbol);
+            assert_eq!(alias.source_path, source_path);
+            assert_eq!(alias.tint, UiDrawableTint::None);
+        }
+    }
+
+    #[test]
     fn upstream_text_button_style_skins_match_java_styles_names() {
         let defaultt = upstream_text_button_style_skin("defaultt").unwrap();
         assert_eq!(defaultt.up, Some("button"));
         assert_eq!(defaultt.down, Some("buttonDown"));
         assert_eq!(defaultt.over, Some("buttonOver"));
         assert_eq!(defaultt.disabled, Some("buttonDisabled"));
+
+        for name in [
+            "nonet",
+            "flatt",
+            "grayt",
+            "flatTogglet",
+            "logicTogglet",
+            "cleart",
+            "fullTogglet",
+            "logict",
+        ] {
+            assert!(
+                upstream_text_button_style_skin(name).is_some(),
+                "{name} should be present in the upstream text button style registry"
+            );
+        }
+
+        let logic_toggle = upstream_text_button_style_skin("logicTogglet").unwrap();
+        assert_eq!(logic_toggle.up, Some("black"));
+        assert_eq!(logic_toggle.down, Some("accentDrawable"));
+        assert_eq!(logic_toggle.checked, Some("accentDrawable"));
+        assert_eq!(logic_toggle.over, Some("flatOver"));
+        assert_eq!(logic_toggle.disabled, Some("black"));
+
+        let logic_text = upstream_text_button_style_skin("logict").unwrap();
+        assert_eq!(logic_text.up, Some("underlineWhite"));
+        assert_eq!(logic_text.down, Some("flatOver"));
+        assert_eq!(logic_text.over, Some("flatOver"));
 
         let menu = upstream_text_button_style_skin("flatToggleMenut").unwrap();
         assert_eq!(menu.up, Some("clear"));
@@ -1055,6 +1272,46 @@ mod tests {
         assert_eq!(defaulti.over, Some("buttonOver"));
         assert_eq!(defaulti.disabled, Some("buttonDisabled"));
 
+        for name in [
+            "nodei",
+            "emptyi",
+            "emptyTogglei",
+            "logici",
+            "geni",
+            "grayi",
+            "graySquarei",
+            "flati",
+            "clearNonei",
+            "cleari",
+            "clearTogglei",
+        ] {
+            assert!(
+                upstream_image_button_style_skin(name).is_some(),
+                "{name} should be present in the upstream image button style registry"
+            );
+        }
+
+        let node = upstream_image_button_style_skin("nodei").unwrap();
+        assert_eq!(node.up, Some("buttonOver"));
+        assert_eq!(node.over, Some("buttonDown"));
+
+        let gray_square = upstream_image_button_style_skin("graySquarei").unwrap();
+        assert_eq!(gray_square.up, Some("grayPanel"));
+        assert_eq!(gray_square.down, Some("flatOver"));
+        assert_eq!(gray_square.over, Some("flatOver"));
+
+        let clear_none = upstream_image_button_style_skin("clearNonei").unwrap();
+        assert_eq!(clear_none.up, Some("none"));
+        assert_eq!(clear_none.down, Some("flatDown"));
+        assert_eq!(clear_none.over, Some("flatOver"));
+        assert_eq!(clear_none.disabled, Some("none"));
+
+        let clear_toggle = upstream_image_button_style_skin("clearTogglei").unwrap();
+        assert_eq!(clear_toggle.up, Some("black6"));
+        assert_eq!(clear_toggle.down, Some("flatDown"));
+        assert_eq!(clear_toggle.checked, Some("flatDown"));
+        assert_eq!(clear_toggle.over, Some("flatOver"));
+
         let square = upstream_image_button_style_skin("squarei").unwrap();
         assert_eq!(square.up, Some("pane"));
         assert_eq!(square.down, Some("whiteui"));
@@ -1068,6 +1325,29 @@ mod tests {
         assert!(paths.contains(&"sprites/ui/window-empty.9.png"));
         assert!(paths.contains(&"sprites/ui/whiteui.png"));
         assert!(paths.iter().all(|path| path.starts_with("sprites/ui/")));
+    }
+
+    #[test]
+    fn upstream_ui_skin_registry_has_key_upstream_asset_files_on_disk() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("CARGO_MANIFEST_DIR should have two parent directories")
+            .join("mindustry-upstream-v157.4/core/assets-raw");
+
+        for source_path in [
+            "sprites/ui/alpha-bg.png",
+            "sprites/ui/alpha-bg-line.png",
+            "sprites/ui/logic-node.png",
+            "sprites/ui/nomap.png",
+            "sprites/ui/logo.png",
+        ] {
+            assert!(
+                base.join(source_path).exists(),
+                "expected upstream asset to exist at {}",
+                base.join(source_path).display()
+            );
+        }
     }
 
     #[test]

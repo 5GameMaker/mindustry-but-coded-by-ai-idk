@@ -18125,3 +18125,67 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 未替换 `opengl_backend_text_placeholder_quads(...)`；
   - 主菜单和各 Dialog/Page 仍需继续按 `MenuFragment`/`Styles`/`Fonts` 完整还原；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 504. Desktop 字体 atlas / glyph upload 计划接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.0%**，仍未达到完整可玩；继续推进真实字体/icon atlas，把字体资源、内容图标和 texture atlas 缺口收束成可执行上传计划。
+- 问题背景：
+  - Java `Fonts.loadFonts()/loadContentIcons()/mergeFontAtlas()` 最终会产生可渲染 glyph atlas；
+  - 503 已让 content icon registry 进入 desktop runtime，但 OpenGL 侧仍缺“哪些字体要 rasterize、哪些 icon 缺 atlas region、何时可上传真实字体纹理”的统一计划；
+  - 直接把字体文件塞进 PNG 上传语义会破坏现有 texture pipeline，本轮只建立 backend-neutral 计划层，保留 placeholder fallback 防黑屏。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME`；
+    - 新增 `DesktopFontRasterizationAssetPlan`，记录 `UpstreamFontRole`、Java static name、source path、resolved path、`RenderFontId`、字号、border/shadow、seed character 数等；
+    - 新增 `DesktopContentIconGlyphPlan`，把 `icons.properties` 的 unicode/name/atlas symbol/emoji 与当前 texture atlas 中的 region 是否存在关联起来；
+    - 新增 `DesktopFontRasterizationPlan`，汇总上游字体 assets、内容图标、缺失资源和 placeholder fallback 状态；
+    - 新增 `DesktopFontAtlasPlan`，暴露 planned glyph 数、缺失字体 source path、缺失 icon atlas symbol、是否 ready for real upload；
+    - 新增 `DesktopFontGlyphUploadPlan`，作为后续生成 RGBA glyph atlas 并上传 OpenGL texture 的稳定接入点；
+    - `DesktopLauncher` 新增 `font_rasterization_plan()`、`font_atlas_plan()`、`font_glyph_upload_plan()`。
+- 迁移意义：
+  - 字体链路从“资源发现 + icon registry”推进到“可被 renderer/backend 消费的 atlas/upload plan”；
+  - 后续引入真实 glyph rasterizer 时不需要重新找字体、icon、atlas 缺口，只需要把计划转为 bitmap/UV/texture upload；
+  - fallback 状态被显式保留，真实字体失败时仍能回退到当前 placeholder，避免 UI 因字体问题黑屏。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_content_icon_glyph_registry_loads_upstream_icon_properties --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_exposes_content_icon_glyph_registry_report --lib`
+  - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 未引入真实字体 rasterizer，未生成 glyph bitmap；
+  - 未新增 glyph atlas RGBA pixel buffer、UV packing、OpenGL upload source；
+  - `DrawText` 仍走 placeholder fallback；
+  - UI 主菜单/对话框仍需继续按上游 `MenuFragment` 和 `Styles.java` 完整替换临时 shell；
+  - 未达到完整可玩，不能宣告目标完成。
+
+## 505. UI Styles 文本按钮、图像按钮与关键资源契约补齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **52.1%**，仍未达到完整可玩；继续推进原版 UI 还原，把 `Styles.java` 中主菜单/对话框/逻辑编辑器常用的 style 和 sprite 契约补入 Rust core。
+- 问题背景：
+  - 上游 `Styles.java` 的 `TextButtonStyle` / `ImageButtonStyle` 不只决定按钮背景，也决定主菜单 `flatToggleMenut`、逻辑面板、清透明按钮、灰色按钮等视觉状态；
+  - Rust 之前只覆盖了部分文本按钮和图像按钮状态，导致真实 widget/Scene2D 迁移时仍会硬编码或退化为纯色块；
+  - `assets-raw/sprites/ui` 中 `alpha-bg/alpha-bg-line/logic-node/nomap/logo` 等关键资源也需要进入统一 skin registry。
+- 本轮主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - `UPSTREAM_UI_SKIN_SPRITES` 新增 `alpha-bg`、`alpha-bg-line`、`logic-node`、`nomap`、`logo`，其中 `logo` 对齐上游 `sprites/ui/logo.png`；
+    - `UPSTREAM_UI_DRAWABLE_ALIASES` 新增 `alphaBg`、`alphaBgLine`、`logicNode`、`nomap`、`logo`；
+    - `UPSTREAM_TEXT_BUTTON_STYLE_SKINS` 补齐 `nonet/flatt/grayt/flatTogglet/logicTogglet/cleart/fullTogglet/logict`；
+    - `UPSTREAM_IMAGE_BUTTON_STYLE_SKINS` 补齐 `nodei/emptyi/emptyTogglei/logici/geni/grayi/graySquarei/flati/clearNonei/cleari/clearTogglei`；
+    - 扩展测试覆盖新增 style 查询、关键 sprite source path、drawable alias、以及上游关键 UI 资源文件存在性。
+- 迁移意义：
+  - `Styles.java` 的常用按钮状态表更完整，后续主菜单、Settings、Mods、Logic、ColorPicker/地图目标等 UI 页面可以消费同一份 core 契约；
+  - logo 路径从临时 `sprites/logo.png` 语义进一步对齐上游 `sprites/ui/logo.png`；
+  - 这仍是数据/契约层补齐，后续需要把 `MenuRenderer` 和真实 widget 渲染切到这些 style/drawable，而不是继续纯色 fallback。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core styles --lib`
+  - `cargo test -p mindustry-desktop desktop_font_rasterization_plan_bridges_fonts_icons_and_texture_atlas --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `core/src/mindustry/graphics/menu_renderer.rs` 仍有 `flatToggleMenut` 的 native fallback 色块，需要进一步改为统一 style registry 驱动；
+  - dialog/widget shell 对 `black8/black6/black5/black3/grayPanel/flatOver/accentDrawable` 等 tint 语义的消费面仍需扩大；
+  - 原版 Settings/Mods/Database/TechTree/Editor 等页面仍未完整 Scene2D 等价实现；
+  - 未达到完整可玩，不能宣告目标完成。
