@@ -5,8 +5,8 @@
 /// keeps generation and render planning in `mindustry-core`; concrete backends
 /// are expected to translate `MenuRenderCommand` into GPU/cache calls.
 use super::{
-    RenderCamera, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty,
-    RenderRect, RenderViewport,
+    RenderCamera, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
+    RenderViewport,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
@@ -45,6 +45,44 @@ pub enum MenuBlockKind {
     DarkPanel4,
     DarkMetal,
     SporeMoss,
+}
+
+impl MenuBlockKind {
+    pub const fn sprite_name(self) -> Option<&'static str> {
+        match self {
+            Self::Air => None,
+            Self::Sand => Some("sand"),
+            Self::SandWall => Some("sand-wall"),
+            Self::Shale => Some("shale"),
+            Self::ShaleWall => Some("shale-wall"),
+            Self::Ice => Some("ice-snow"),
+            Self::IceWall => Some("ice-wall"),
+            Self::Moss => Some("moss"),
+            Self::SporePine => Some("spore-pine"),
+            Self::Dirt => Some("dirt"),
+            Self::DirtWall => Some("dirt-wall"),
+            Self::Dacite => Some("dacite"),
+            Self::DaciteWall => Some("dacite-wall"),
+            Self::Basalt => Some("basalt"),
+            Self::DuneWall => Some("dune-wall"),
+            Self::Stone => Some("stone"),
+            Self::StoneWall => Some("stone-wall"),
+            Self::SporeWall => Some("spore-wall"),
+            Self::Salt => Some("salt"),
+            Self::CopperOre => Some("copper-ore"),
+            Self::LeadOre => Some("lead-ore"),
+            Self::ScrapOre => Some("scrap-ore"),
+            Self::CoalOre => Some("coal-ore"),
+            Self::TitaniumOre => Some("titanium-ore"),
+            Self::ThoriumOre => Some("thorium-ore"),
+            Self::Hotrock => Some("hotrock"),
+            Self::Magmarock => Some("magmarock"),
+            Self::DarkPanel3 => Some("dark-panel-3"),
+            Self::DarkPanel4 => Some("dark-panel-4"),
+            Self::DarkMetal => Some("dark-metal"),
+            Self::SporeMoss => Some("spore-moss"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,51 +174,124 @@ pub enum MenuRenderCommand {
 }
 
 impl MenuRenderCommand {
-    pub fn to_render_command(&self) -> RenderCommand {
-        self.clone().into_render_command()
+    pub fn to_render_commands(&self, world: &MenuWorldPlan, tile_size: f32) -> Vec<RenderCommand> {
+        self.clone().into_render_commands(world, tile_size)
     }
 
-    pub fn into_render_command(self) -> RenderCommand {
+    pub fn into_render_commands(self, world: &MenuWorldPlan, tile_size: f32) -> Vec<RenderCommand> {
         match self {
-            Self::DrawCache { cache_id, label } => RenderCommand::custom(
-                "menu-cache",
-                vec![
-                    RenderProperty::new("cache_id", cache_id.to_string()),
-                    RenderProperty::new("label", label),
-                ],
-            ),
+            Self::DrawCache { label, .. } => {
+                let mut commands = Vec::with_capacity(world.tiles.len() * 2);
+                match label {
+                    "floor+overlay" => {
+                        for tile in &world.tiles {
+                            let rect = menu_tile_rect(tile, tile_size);
+                            if let Some(symbol) = tile.floor.sprite_name() {
+                                commands.push(RenderCommand::draw_sprite(
+                                    symbol,
+                                    rect,
+                                    [1.0, 1.0, 1.0, 1.0],
+                                    0.0,
+                                    0.0,
+                                ));
+                            }
+                            if let Some(symbol) = tile.ore.sprite_name() {
+                                commands.push(RenderCommand::draw_sprite(
+                                    symbol,
+                                    rect,
+                                    [1.0, 1.0, 1.0, 1.0],
+                                    0.0,
+                                    0.1,
+                                ));
+                            }
+                        }
+                    }
+                    "wall" => {
+                        for tile in &world.tiles {
+                            if let Some(symbol) = tile.wall.sprite_name() {
+                                commands.push(RenderCommand::draw_sprite(
+                                    symbol,
+                                    menu_tile_rect(tile, tile_size),
+                                    [1.0, 1.0, 1.0, 1.0],
+                                    0.0,
+                                    1.0,
+                                ));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                commands
+            }
             Self::DrawShadowTexture {
                 x,
                 y,
                 width,
                 height,
-            } => RenderCommand::custom(
-                "menu-shadow-texture",
+            } => {
+                let mut commands = Vec::with_capacity(world.tiles.len());
+                for tile in &world.tiles {
+                    if tile.wall != MenuBlockKind::Air {
+                        commands.push(RenderCommand::fill_rect(
+                            menu_tile_rect(tile, tile_size),
+                            [0.0, 0.0, 0.0, 0.35],
+                            0.5,
+                        ));
+                    }
+                }
+                if commands.is_empty() {
+                    let shadow_rect = if height.is_sign_negative() {
+                        RenderRect::new(x, y + height, width, -height)
+                    } else {
+                        RenderRect::new(x, y, width, height)
+                    };
+                    commands.push(RenderCommand::fill_rect(
+                        shadow_rect,
+                        [0.0, 0.0, 0.0, 0.35],
+                        0.5,
+                    ));
+                }
+                commands
+            }
+            Self::DrawFlyer(flyer) => {
+                let body_size = flyer_draw_size(flyer.unit_name);
+                let body_rect = RenderRect::from_center(
+                    RenderPoint::new(flyer.x, flyer.y),
+                    body_size,
+                    body_size,
+                );
+                let shadow_rect = RenderRect::from_center(
+                    RenderPoint::new(flyer.x, flyer.y),
+                    body_size * 1.15,
+                    body_size * 1.15,
+                );
+
                 vec![
-                    RenderProperty::new("x", x.to_string()),
-                    RenderProperty::new("y", y.to_string()),
-                    RenderProperty::new("width", width.to_string()),
-                    RenderProperty::new("height", height.to_string()),
-                ],
-            ),
-            Self::DrawFlyer(flyer) => RenderCommand::custom(
-                "menu-flyer",
-                vec![
-                    RenderProperty::new("x", flyer.x.to_string()),
-                    RenderProperty::new("y", flyer.y.to_string()),
-                    RenderProperty::new("rotation", flyer.rotation.to_string()),
-                    RenderProperty::new("unit_name", flyer.unit_name),
-                ],
-            ),
+                    RenderCommand::draw_sprite(
+                        "circle-shadow",
+                        shadow_rect,
+                        [1.0, 1.0, 1.0, 1.0],
+                        0.0,
+                        1.5,
+                    ),
+                    RenderCommand::draw_sprite(
+                        flyer.unit_name,
+                        body_rect,
+                        [1.0, 1.0, 1.0, 1.0],
+                        flyer.rotation,
+                        2.0,
+                    ),
+                ]
+            }
             Self::DrawDarkness {
                 alpha,
                 width,
                 height,
-            } => RenderCommand::fill_rect(
+            } => vec![RenderCommand::fill_rect(
                 RenderRect::new(0.0, 0.0, width, height),
                 [0.0, 0.0, 0.0, alpha],
-                0.0,
-            ),
+                100.0,
+            )],
         }
     }
 }
@@ -192,6 +303,8 @@ pub struct MenuFramePlan {
     pub camera_width: f32,
     pub camera_height: f32,
     pub scaling: f32,
+    pub tile_size: f32,
+    pub world: MenuWorldPlan,
     pub commands: Vec<MenuRenderCommand>,
 }
 
@@ -213,36 +326,39 @@ impl MenuFramePlan {
         let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
             .with_viewport(viewport)
             .with_camera(camera);
-        pass.extend(
-            self.commands
-                .iter()
-                .map(MenuRenderCommand::to_render_command),
-        );
+        for command in &self.commands {
+            pass.extend(command.to_render_commands(&self.world, self.tile_size));
+        }
         Some(pass)
     }
 
     pub fn into_render_pass(self) -> Option<RenderPass> {
-        if self.commands.is_empty() {
+        let Self {
+            camera_x,
+            camera_y,
+            camera_width,
+            camera_height,
+            scaling,
+            tile_size,
+            world,
+            commands,
+        } = self;
+
+        if commands.is_empty() {
             return None;
         }
 
-        let viewport = RenderViewport::new(
-            0.0,
-            0.0,
-            self.camera_width * self.scaling,
-            self.camera_height * self.scaling,
-        );
-        let camera = RenderCamera::new(RenderPoint::new(self.camera_x, self.camera_y), viewport)
-            .with_zoom(self.scaling);
+        let viewport =
+            RenderViewport::new(0.0, 0.0, camera_width * scaling, camera_height * scaling);
+        let camera =
+            RenderCamera::new(RenderPoint::new(camera_x, camera_y), viewport).with_zoom(scaling);
 
         let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
             .with_viewport(viewport)
             .with_camera(camera);
-        pass.extend(
-            self.commands
-                .into_iter()
-                .map(MenuRenderCommand::into_render_command),
-        );
+        for command in commands {
+            pass.extend(command.into_render_commands(&world, tile_size));
+        }
         Some(pass)
     }
 }
@@ -314,6 +430,8 @@ impl MenuRendererState {
             camera_width,
             camera_height,
             scaling,
+            tile_size: self.config.tile_size,
+            world: self.world.clone(),
             commands,
         }
     }
@@ -642,6 +760,24 @@ fn distance(x: f32, y: f32, x2: f32, y2: f32) -> f32 {
     ((x - x2).powi(2) + (y - y2).powi(2)).sqrt()
 }
 
+fn menu_tile_rect(tile: &MenuTile, tile_size: f32) -> RenderRect {
+    RenderRect::new(
+        tile.x as f32 * tile_size,
+        tile.y as f32 * tile_size,
+        tile_size,
+        tile_size,
+    )
+}
+
+fn flyer_draw_size(unit_name: &str) -> f32 {
+    match unit_name {
+        "horizon" | "zenith" => 18.0,
+        "poly" | "mega" | "alpha" | "gamma" => 16.0,
+        "mono" | "beta" => 14.0,
+        _ => 15.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -748,31 +884,27 @@ mod tests {
                 .with_zoom(4.0)
             )
         );
-        assert_eq!(borrowed.commands.len(), 5);
-        assert_eq!(menu_command_tag(&borrowed.commands[0]), "menu-cache");
-        assert_eq!(
-            menu_command_tag(&borrowed.commands[1]),
-            "menu-shadow-texture"
-        );
-        assert_eq!(menu_command_tag(&borrowed.commands[2]), "menu-cache");
-        assert_eq!(menu_command_tag(&borrowed.commands[3]), "menu-flyer");
-        assert_eq!(menu_command_tag(&borrowed.commands[4]), "fill-rect");
+        assert!(!borrowed.commands.is_empty());
+        assert!(borrowed
+            .commands
+            .iter()
+            .all(|command| !matches!(command, RenderCommand::Custom { .. })));
+        assert!(borrowed
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawSprite { .. })));
+        assert!(borrowed
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::FillRect { .. })));
 
-        match &borrowed.commands[4] {
+        match borrowed.commands.last().unwrap() {
             RenderCommand::FillRect { rect, color, layer } => {
                 assert_eq!(*rect, RenderRect::new(0.0, 0.0, 1920.0, 1080.0));
                 assert_eq!(*color, [0.0, 0.0, 0.0, MENU_DARKNESS]);
-                assert_eq!(*layer, 0.0);
+                assert_eq!(*layer, 100.0);
             }
             other => panic!("unexpected darkness command: {other:?}"),
-        }
-    }
-
-    fn menu_command_tag(command: &RenderCommand) -> &str {
-        match command {
-            RenderCommand::Custom { name, .. } => name.as_str(),
-            RenderCommand::FillRect { .. } => "fill-rect",
-            other => panic!("unexpected menu render command: {other:?}"),
         }
     }
 }

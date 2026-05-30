@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **47.0%**。
+- 当前总体迁移完成度：约 **47.5%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -13954,3 +13954,40 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 继续把 menu cache/flyer/shadow marker 降低成真实可见图元；
   2. 后续将 placeholder glyph 替换为真实 font atlas，补 Unicode/icon/markup/wrap/outline；
   3. 保持 `DrawText -> glyph quads -> sprite mesh/OpenGL` 主链，不要再退回只记录命令。
+
+### 2026-05-30：Unit Ability 与 menu marker 真实渲染闭环
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **47.5%**。
+- 当前用户最新优先级：
+  - 先优先完成前端/客户端/渲染，后端暂缓；
+  - 最终目标仍是完整可玩、整体化、可联机互通的 Rust MDT/Mindustry，不允许把模块做成孤立 helper。
+- 本轮实际闭环：
+  - `core/src/mindustry/type/unit_type.rs`
+    - `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 对齐 Java 顺序补入 `UnitDrawStage::Abilities`，位置为 `Parts -> Abilities -> Shield`。
+  - `desktop/src/lib.rs`
+    - `UnitDrawStage::Abilities` 不再空实现，改为调用 `unit_snapshot_ability_render_commands(...)`；
+    - `ForceFieldAbility` 从 descriptor + `AbilityWire.data`/shield state 下沉为 `DrawPolygon`，进入 primitive/OpenGL 主链；
+    - `SuppressionFieldAbility` 从 descriptor 下沉为 Java-like 粒子圆点、外圈与中心 orb 的 `DrawCircle` commands，进入 primitive/OpenGL 主链。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `menu-cache` / `menu-shadow-texture` / `menu-flyer` 不再只输出 custom marker；
+    - 菜单 floor/ore/wall cache 展开为 `DrawSprite`，wall shadow 展开为 `FillRect`，flyer 展开为 shadow + unit sprite；
+    - `MenuFramePlan` 持有 `world` 和 `tile_size`，`into_render_pass()` 直接生成真实可见 render commands。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_force_field_ability_to_polygon_before_unit_shield --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_suppression_field_ability_to_visible_circles --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. `ForceFieldAbility` 的 `animateShields=false` 分支、低 alpha fill/outline 和独立 alpha 持久化仍需补齐；
+  2. `SuppressionFieldAbility` 粒子 seed 目前稳定可复现，但不是 Java object hash 完全一致；
+  3. 菜单仍不是完整 Java Scene/UI，只是 menu world/cache/flyer/shadow 进一步进入真实 sprite/primitive 链；
+  4. placeholder glyph 仍需替换为真实 font atlas；
+  5. 下一批 Unit Ability 建议优先 `ShieldArcAbility` 与 `EnergyFieldAbility`，同时继续推进真实字体与菜单 UI。

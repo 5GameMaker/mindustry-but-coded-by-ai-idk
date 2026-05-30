@@ -16802,3 +16802,46 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前是 placeholder bitmap glyph，不是 Java/Arc/FreeType 字体 atlas；
   - `wrap_width` / markup / outline / Unicode / icon font / true baseline kerning 仍未完整等价；
   - 后续应逐步替换为真实 font atlas，同时保留 `DrawText -> glyph quads -> sprite mesh/OpenGL` 主链。
+
+## 462. Unit Ability 与 menu marker 下沉到真实渲染命令
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.5%**，仍未达到完整可玩；继续按用户要求优先推进前端/客户端/渲染，后端暂缓。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\UnitType.java`：`draw(...)` 中 `Parts -> Abilities -> Shield` 顺序；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\entities\abilities\ForceFieldAbility.java`：按 shield/radiusScale 画多边形力场盾；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\entities\abilities\SuppressionFieldAbility.java`：按固定参数画粒子、外圈与 orb；
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\graphics\MenuRenderer.java`：menu cache、shadow texture、flyer 与 darkness 的菜单渲染顺序。
+- 本轮主改动：
+  - `core/src/mindustry/type/unit_type.rs`
+    - `UNIT_TYPE_CLIENT_SNAPSHOT_DRAW_STAGES` 从 14 项扩为 15 项，补入 `UnitDrawStage::Abilities`，并保持 Java draw stage 合约测试同步。
+  - `desktop/src/lib.rs`
+    - 新增 `unit_snapshot_ability_render_commands(...)`；
+    - `ForceFieldAbility` 从 unit snapshot descriptor、`AbilityWire.data` 与 shield state 下沉为 `RenderCommand::DrawPolygon`，进入 primitive/OpenGL quad 主链；
+    - `SuppressionFieldAbility` 从 descriptor 下沉为 `DrawCircle` 粒子、外圈和中心 orb，进入 primitive/OpenGL quad 主链；
+    - `UnitDrawStage::Abilities` 分支不再为空，实际消费客户端 unit snapshot 的 ability descriptors。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuBlockKind::sprite_name()` 建立 menu world block 到 atlas symbol 的映射；
+    - `menu-cache` 的 floor/ore/wall cache 展开为 `DrawSprite`；
+    - `menu-shadow-texture` 展开为 wall tile `FillRect` 阴影；
+    - `menu-flyer` 展开为 `circle-shadow` 与对应 flyer unit sprite；
+    - `MenuFramePlan` 保存 `world` 与 `tile_size`，`to_render_pass()/into_render_pass()` 直接输出真实 render commands。
+- 迁移意义：
+  - 单位 ability 绘制不再只停留在 Java stage 名义对齐，已经接到 `client unit snapshot -> UnitDrawStage::Abilities -> RenderCommand -> primitive/OpenGL`；
+  - no-world 菜单 pass 中最核心的 cache/shadow/flyer marker 已进入 `DrawSprite/FillRect -> sprite/primitive OpenGL` 主链，黑屏风险继续降低；
+  - 这些改动都接入现有 frame/render/backend 链路，不是独立测试 helper。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-core unit_type_draw_stage_contract_preserves_java_and_snapshot_order --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_force_field_ability_to_polygon_before_unit_shield --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_suppression_field_ability_to_visible_circles --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_surface_frame_bridges_menu_plan_without_world --lib`
+  - `cargo test -p mindustry-desktop desktop_frame_loop_presents_menu_graphics_frame_when_world_is_absent --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `ForceFieldAbility` 的 `animateShields=false` 分支、低 alpha fill + outline 与独立 alpha 仍需继续补；
+  - `SuppressionFieldAbility` 的随机种子当前是稳定 seed，不是 Java object identity/hash 完全等价；
+  - 菜单当前仍不是完整 Java Scene/UI，只是 menu world/cache/shadow/flyer 渲染进一步真实化；
+  - 真实 font atlas、完整按钮/fragment、菜单交互与最终可玩主界面仍需继续推进；
+  - 下一批 Unit Ability 建议优先 `ShieldArcAbility` 与 `EnergyFieldAbility`，随后 `ArmorPlateAbility`、`MoveLightningAbility`、`UnitSpawnAbility`。

@@ -27,13 +27,14 @@ use mindustry_core::mindustry::entities::{
     entity_class_kind, shake_intensity, standard_effect, standard_effect_color_symbol,
     standard_effect_draw_plans_with_data_value_and_resolved_context,
     standard_effect_render_lifetime, unit_draw_part_kind_from_tag, EffectRenderInput,
-    EntityClassKind, FlarePart, PartParams, PartProgress, PlayerComp, PlayerUnitSwitchContext,
-    PuddleLiquidInfo, ShapePart, ShapePartKind, ShieldArcAbility,
+    EntityClassKind, FlarePart, ForceFieldAbility, PartParams, PartProgress, PlayerComp,
+    PlayerUnitSwitchContext, PuddleLiquidInfo, ShapePart, ShapePartKind, ShieldArcAbility,
     StandardEffectCircleRenderPrimitive, StandardEffectDrawKind, StandardEffectDrawPlan,
     StandardEffectLightRenderPrimitive, StandardEffectLineRenderPrimitive,
     StandardEffectRectRenderPrimitive, StandardEffectShieldArcBreak,
-    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive, TextureRegionRef,
-    UnitDrawPartKind, WeaponMount, WorldLabelAlign, WorldLabelComp, PLAYER_CLASS_ID,
+    StandardEffectSquareRenderPrimitive, StandardEffectTriangleRenderPrimitive,
+    SuppressionFieldAbility, TextureRegionRef, UnitDrawPartKind, WeaponMount, WorldLabelAlign,
+    WorldLabelComp, PLAYER_CLASS_ID,
 };
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
@@ -716,6 +717,11 @@ fn desktop_slope_interp(value: f32) -> f32 {
     }
 }
 
+fn desktop_circle_out_interp(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    (1.0 - (value - 1.0).powi(2)).max(0.0).sqrt()
+}
+
 fn desktop_sin(time: f32, scl: f32, mag: f32) -> f32 {
     if !time.is_finite() || scl.abs() <= f32::EPSILON || !mag.is_finite() {
         return 0.0;
@@ -1284,6 +1290,15 @@ const DESKTOP_UNIT_ITEM_BASE_SIZE: f32 = 5.0;
 const DESKTOP_UNIT_ITEM_RING_SYMBOL: &str = "ring-item";
 const DESKTOP_UNIT_PAYLOAD_UNIT_SYMBOL: &str = "payload-unit";
 const DESKTOP_UNIT_PAYLOAD_BUILD_SYMBOL: &str = "payload-build";
+const DESKTOP_SUPPRESSION_FIELD_ORB_RADIUS: f32 = 4.1;
+const DESKTOP_SUPPRESSION_FIELD_ORB_MID_SCL: f32 = 0.33;
+const DESKTOP_SUPPRESSION_FIELD_ORB_SIN_SCL: f32 = 8.0;
+const DESKTOP_SUPPRESSION_FIELD_ORB_SIN_MAG: f32 = 1.0;
+const DESKTOP_SUPPRESSION_FIELD_PARTICLES: usize = 15;
+const DESKTOP_SUPPRESSION_FIELD_PARTICLE_SIZE: f32 = 4.0;
+const DESKTOP_SUPPRESSION_FIELD_PARTICLE_LEN: f32 = 7.0;
+const DESKTOP_SUPPRESSION_FIELD_ROTATE_SCL: f32 = 3.0;
+const DESKTOP_SUPPRESSION_FIELD_PARTICLE_LIFE: f32 = 110.0;
 
 fn desktop_unit_payload_symbol(kind: PayloadKind) -> &'static str {
     match kind {
@@ -1350,6 +1365,14 @@ fn desktop_unit_item_center(unit: &UnitComp) -> RenderPoint {
         0.0
     };
     let (offset_x, offset_y) = desktop_rotate_offset(unit.rotation() + 180.0, offset, 0.0);
+    RenderPoint::new(unit.x() + offset_x, unit.y() + offset_y)
+}
+
+fn desktop_unit_suppression_field_center(
+    unit: &UnitComp,
+    ability: &SuppressionFieldAbility,
+) -> RenderPoint {
+    let (offset_x, offset_y) = desktop_rotate_offset(unit.rotation() - 90.0, ability.x, ability.y);
     RenderPoint::new(unit.x() + offset_x, unit.y() + offset_y)
 }
 
@@ -1447,6 +1470,19 @@ fn desktop_unit_shield_color(unit: &UnitComp) -> [f32; 4] {
     color[1] = desktop_lerp(color[1], 1.0, hit);
     color[2] = desktop_lerp(color[2], 1.0, hit);
     color[3] = 0.7 * unit.shield.shield_alpha.clamp(0.0, 1.0);
+    color
+}
+
+fn desktop_unit_force_field_color(unit: &UnitComp) -> [f32; 4] {
+    let shield_rgba = unit
+        .type_info
+        .shield_color_rgba
+        .unwrap_or_else(|| desktop_team_color_rgba(unit.team.team));
+    let mut color = rgba8888_to_render_color(shield_rgba, 1.0);
+    let hit_alpha = unit.shield.shield_alpha.clamp(0.0, 1.0);
+    color[0] = desktop_lerp(color[0], 1.0, hit_alpha);
+    color[1] = desktop_lerp(color[1], 1.0, hit_alpha);
+    color[2] = desktop_lerp(color[2], 1.0, hit_alpha);
     color
 }
 
@@ -14299,6 +14335,116 @@ impl DesktopLauncher {
         ))
     }
 
+    fn unit_snapshot_ability_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
+        if !unit.is_valid() {
+            return Vec::new();
+        }
+
+        let mut commands = Vec::new();
+        for (index, descriptor) in unit.type_info.abilities.iter().enumerate() {
+            if let Some(ability) = ForceFieldAbility::from_descriptor(descriptor) {
+                if ability.base.visible && unit.shield.shield > 0.0 {
+                    let radius_scale = unit
+                        .abilities
+                        .get(index)
+                        .map_or(0.0, |wire| wire.data)
+                        .clamp(0.0, 1.0);
+                    let real_radius = ability.radius * radius_scale;
+                    if real_radius > f32::EPSILON {
+                        let alpha = unit.shield.shield_alpha.clamp(0.0, 1.0);
+                        commands.push(RenderCommand::draw_polygon(
+                            RenderPoint::new(unit.x(), unit.y()),
+                            real_radius,
+                            ability.sides.max(3) as usize,
+                            ability.rotation,
+                            desktop_unit_force_field_color(unit),
+                            true,
+                            Layer::SHIELDS + 0.001 * alpha,
+                        ));
+                    }
+                }
+            }
+
+            if let Some(ability) = SuppressionFieldAbility::from_descriptor(descriptor) {
+                if ability.base.visible && ability.active {
+                    commands.extend(
+                        self.unit_snapshot_suppression_field_render_commands(unit, &ability, index),
+                    );
+                }
+            }
+        }
+
+        commands
+    }
+
+    fn unit_snapshot_suppression_field_render_commands(
+        &self,
+        unit: &UnitComp,
+        ability: &SuppressionFieldAbility,
+        ability_index: usize,
+    ) -> Vec<RenderCommand> {
+        let center = desktop_unit_suppression_field_center(unit, ability);
+        let layer = Layer::EFFECT;
+        let particle_color = desktop_effect_render_color(Some(Pal::SAP), 1.0);
+        let orb_color = desktop_effect_render_color(Some(Pal::SUPPRESS), 1.0);
+        let orb_radius = DESKTOP_SUPPRESSION_FIELD_ORB_RADIUS
+            + desktop_absin(
+                self.render_time,
+                DESKTOP_SUPPRESSION_FIELD_ORB_SIN_SCL,
+                DESKTOP_SUPPRESSION_FIELD_ORB_SIN_MAG,
+            );
+        let mut commands = Vec::with_capacity(DESKTOP_SUPPRESSION_FIELD_PARTICLES + 2);
+
+        let base = if DESKTOP_SUPPRESSION_FIELD_PARTICLE_LIFE.abs() > f32::EPSILON {
+            self.render_time / DESKTOP_SUPPRESSION_FIELD_PARTICLE_LIFE
+        } else {
+            0.0
+        };
+        let mut rand = DesktopArcRand::with_seed(
+            ((unit.id() as i64) << 32)
+                ^ ability_index as i64
+                ^ i64::from(desktop_splitmix32(
+                    unit.type_info.base.mappable.base.id as u32,
+                )),
+        );
+
+        for _ in 0..DESKTOP_SUPPRESSION_FIELD_PARTICLES {
+            let fin = (rand.random(1.0) + base).rem_euclid(1.0);
+            let fout = 1.0 - fin;
+            let angle = rand.random(360.0)
+                + (self.render_time / DESKTOP_SUPPRESSION_FIELD_ROTATE_SCL + unit.rotation())
+                    .rem_euclid(360.0);
+            let len = DESKTOP_SUPPRESSION_FIELD_PARTICLE_LEN
+                * desktop_circle_out_interp(desktop_slope_interp(fout));
+            let radius = DESKTOP_SUPPRESSION_FIELD_PARTICLE_SIZE * desktop_slope_interp(fin);
+            if radius <= f32::EPSILON {
+                continue;
+            }
+
+            let (offset_x, offset_y) = desktop_rotate_offset(angle, len, 0.0);
+            commands.push(RenderCommand::draw_circle(
+                RenderPoint::new(center.x + offset_x, center.y + offset_y),
+                radius,
+                particle_color,
+                true,
+                layer,
+            ));
+        }
+
+        commands.push(RenderCommand::draw_circle(
+            center, orb_radius, orb_color, false, layer,
+        ));
+        commands.push(RenderCommand::draw_circle(
+            center,
+            orb_radius * DESKTOP_SUPPRESSION_FIELD_ORB_MID_SCL,
+            orb_color,
+            true,
+            layer,
+        ));
+
+        commands
+    }
+
     fn unit_snapshot_engine_render_commands(&self, unit: &UnitComp) -> Vec<RenderCommand> {
         if !unit.is_valid() {
             return Vec::new();
@@ -14854,7 +15000,9 @@ impl DesktopLauncher {
                             pass.commands.push(command);
                         }
                     }
-                    UnitDrawStage::Abilities => {}
+                    UnitDrawStage::Abilities => pass
+                        .commands
+                        .extend(self.unit_snapshot_ability_render_commands(unit)),
                 }
             }
         }
@@ -21412,6 +21560,211 @@ mod tests {
         assert!(!overlay.commands.iter().any(|command| {
             matches!(command, RenderCommand::Custom { name, .. } if name == "shootOnDeathWeapon")
         }));
+    }
+
+    #[test]
+    fn desktop_launcher_lowers_force_field_ability_to_polygon_before_unit_shield() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+        dagger.draw_shields = true;
+        dagger.abilities = vec!["ForceFieldAbility:60:0.4:500:360:6:0".into()];
+
+        let mut unit = UnitComp::new(7407, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(90.0);
+        unit.shield.shield = 250.0;
+        unit.shield.shield_alpha = 0.25;
+        unit.abilities[0] = type_io::AbilityWire { data: 0.5 };
+        let hit_size = unit.hitbox.hit_size;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7407, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            28,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, RenderCommand::DrawPolygon { .. }))
+            })
+            .expect("force field ability should emit overlay polygon geometry");
+        let force_field_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawPolygon {
+                        center,
+                        radius,
+                        sides,
+                        rotation,
+                        filled,
+                        layer,
+                        ..
+                    } if *center == RenderPoint::new(40.0, 56.0)
+                        && (*radius - 30.0).abs() < 0.0001
+                        && *sides == 6
+                        && (*rotation - 0.0).abs() < 0.0001
+                        && *filled
+                        && (*layer - (Layer::SHIELDS + 0.00025)).abs() < 0.0001
+                )
+            })
+            .expect("ForceFieldAbility.draw should lower to filled DrawPolygon at real radius");
+        let unit_shield_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawCircle { center, radius, layer, .. }
+                        if *center == RenderPoint::new(40.0, 56.0)
+                            && (*radius - hit_size * 1.3).abs() < 0.0001
+                            && (*layer - Layer::GROUND_UNIT).abs() < 0.0001
+                )
+            })
+            .expect("generic unit shield stage should still render after abilities");
+        assert!(force_field_index < unit_shield_index);
+
+        let mut headless = HeadlessDesktopGraphicsRenderer::default();
+        headless.render_graphics_frame(&frame);
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol == "primitive:DrawPolygon"));
+    }
+
+    #[test]
+    fn desktop_launcher_lowers_suppression_field_ability_to_visible_circles() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut unit_type = UnitType::new(7408, "suppression-test");
+        unit_type.abilities = vec!["SuppressionFieldAbility:90:90:40:4:0:true:13".into()];
+
+        let mut unit = UnitComp::new(7408, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(10.0, 20.0);
+        unit.set_rotation(90.0);
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7408, unit);
+        launcher.render_time = 0.0;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            29,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(
+                            command,
+                            RenderCommand::DrawCircle {
+                                center,
+                                filled: false,
+                                ..
+                            } if *center == RenderPoint::new(14.0, 20.0)
+                        )
+                    })
+            })
+            .expect("SuppressionFieldAbility.draw should emit overlay circle geometry");
+
+        let circles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    color,
+                    filled,
+                    layer,
+                } => Some((*center, *radius, *color, *filled, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            circles.len(),
+            super::DESKTOP_SUPPRESSION_FIELD_PARTICLES + 2,
+            "suppression field should render Java-style particles plus orb ring/fill"
+        );
+
+        let orb_ring = circles
+            .iter()
+            .find(|(center, _, _, filled, _)| *center == RenderPoint::new(14.0, 20.0) && !*filled)
+            .expect("suppression field should draw the outer orb ring");
+        assert!((orb_ring.1 - super::DESKTOP_SUPPRESSION_FIELD_ORB_RADIUS).abs() < 0.0001);
+        assert_eq!(
+            orb_ring.2,
+            super::desktop_effect_render_color(Some(Pal::SUPPRESS), 1.0)
+        );
+        assert_eq!(orb_ring.4, Layer::EFFECT);
+
+        let orb_fill = circles
+            .iter()
+            .find(|(center, radius, _, filled, _)| {
+                *center == RenderPoint::new(14.0, 20.0)
+                    && *filled
+                    && (*radius
+                        - super::DESKTOP_SUPPRESSION_FIELD_ORB_RADIUS
+                            * super::DESKTOP_SUPPRESSION_FIELD_ORB_MID_SCL)
+                        .abs()
+                        < 0.0001
+            })
+            .expect("suppression field should draw the filled middle orb");
+        assert_eq!(
+            orb_fill.2,
+            super::desktop_effect_render_color(Some(Pal::SUPPRESS), 1.0)
+        );
+        assert!(circles.iter().any(|(_, _, color, filled, layer)| {
+            *filled
+                && *layer == Layer::EFFECT
+                && *color == super::desktop_effect_render_color(Some(Pal::SAP), 1.0)
+        }));
+
+        let mut headless = HeadlessDesktopGraphicsRenderer::default();
+        headless.render_graphics_frame(&frame);
+        assert!(
+            headless
+                .last_opengl_backend_executor_state
+                .sprite_quads
+                .iter()
+                .any(|quad| quad.symbol == "primitive:DrawCircle"),
+            "suppression field circles should continue into primitive OpenGL quads"
+        );
     }
 
     #[test]
@@ -30400,12 +30753,14 @@ mod tests {
         assert!(preview_pass.commands.iter().any(
             |command| matches!(command, RenderCommand::Custom { name, .. } if name == "startup-menu-preview")
         ));
-        assert!(menu_pass.commands.iter().any(
-            |command| matches!(command, RenderCommand::Custom { name, .. } if name == "menu-cache")
-        ));
-        assert!(menu_pass.commands.iter().any(
-            |command| matches!(command, RenderCommand::Custom { name, .. } if name == "menu-shadow-texture")
-        ));
+        assert!(menu_pass
+            .commands
+            .iter()
+            .all(|command| !matches!(command, RenderCommand::Custom { .. })));
+        assert!(menu_pass
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawSprite { .. })));
         assert!(menu_pass
             .commands
             .iter()
@@ -30474,12 +30829,18 @@ mod tests {
             graphics_renderer.last_trace.render_passes[1].kind,
             RenderPassKind::Custom("menu".to_string())
         );
-        assert!(
-            graphics_renderer.last_trace.render_passes[1]
-                .commands
-                .iter()
-                .any(|command| matches!(command, RenderCommand::Custom { name, .. } if name == "menu-cache"))
-        );
+        assert!(graphics_renderer.last_trace.render_passes[1]
+            .commands
+            .iter()
+            .all(|command| !matches!(command, RenderCommand::Custom { .. })));
+        assert!(graphics_renderer.last_trace.render_passes[1]
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawSprite { .. })));
+        assert!(graphics_renderer.last_trace.render_passes[1]
+            .commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::FillRect { .. })));
         assert!(
             graphics_renderer
                 .last_opengl_backend_executor_state
