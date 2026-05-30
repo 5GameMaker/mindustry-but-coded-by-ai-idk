@@ -15633,3 +15633,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - hard shadow、shield、weapons、legs、payload/item、engine circles/trail 仍未接入；
   - Lighting pass 后续需要统一多个实体来源的排序/合批策略；
   - Unit/Fire/Bullet/Puddle 仍需统一 Java layer sorting；Weather custom lowering 与 native OpenGL smoke 仍需继续。
+
+## 425. 最新闭环记录：Unit shield 圈接入同一单位 Overlay pass
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.3%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/UnitType.java#draw(...)`
+  - `core/src/mindustry/type/UnitType.java#drawShield(...)`
+  - `core/src/mindustry/type/UnitType.java#shieldColor(...)`
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_unit_shield_color(...)`，按 `shield_color_rgba` 或 team color，结合 hit flash 插值与 `shield_alpha` 生成护盾颜色；
+    - 新增 `unit_snapshot_shield_render_command(...)`，当 `draw_shields` 且 `shield_alpha > 0` 时输出填充 `DrawCircle`；
+    - `unit_snapshot_render_pass()` 在 cell 后继续追加 shield 圈，保持 Unit 视觉仍在同一 pass aggregation；
+    - 扩展 dagger snapshot 测试，覆盖 shield 半径 `hit_size * 1.3`、team color、0.7 alpha 系数和 layer。
+- 迁移意义：
+  - Unit 静态 sprite 层之外，首个基于运行时 shield transient state 的可见 overlay 已接入；
+  - 继续减少 typed unit snapshot “有状态但画面不可见”的断层。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - hard shadow、weapons、legs、payload/item、engine circles/trail 仍未接入；
+  - shield 当前以 filled circle 近似 Java `Fill.light(...)`，后续需要更精确的 radial/vertex light 表达；
+  - Unit/Fire/Bullet/Puddle 仍需统一 Java layer sorting；Weather custom lowering 与 native OpenGL smoke 仍需继续。

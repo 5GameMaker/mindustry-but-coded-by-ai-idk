@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **41.2%**。
+- 当前总体迁移完成度：约 **41.3%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -12824,3 +12824,23 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 接 unit shield 或 engine circles/trail；
   2. 再推进 weapons/legs/payload/items；
   3. 持续把 Unit/Fire/Bullet/Puddle 的临时 Overlay 收口到统一 layer sorting。
+
+### 2026-05-30：Unit shield 圈接入同一单位 Overlay pass
+
+- 当前整体完成度：约 **41.3%**。
+- 已完成：
+  - `DesktopLauncher::unit_snapshot_shield_render_command(...)` 将 `shield_alpha > 0` 的 visible unit snapshot 转为 filled `DrawCircle`；
+  - shield 颜色优先使用 `UnitType.shield_color_rgba`，否则使用 team color，并按 `hit_time` 向白色插值；
+  - alpha 使用 Java `0.7 * shieldAlpha` 最小语义；
+  - `unit_snapshot_render_pass()` 在 cell 后追加 shield，仍在同一 Unit pass 聚合；
+  - dagger 快照测试覆盖半径、颜色、alpha、layer。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. 接 Unit engine circles/trail 或 weapons；
+  2. 继续把 shield 从 filled circle 近似推进到 Java `Fill.light(...)` 级别的径向表达；
+  3. 继续统一 entity layer sorting。

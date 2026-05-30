@@ -259,6 +259,20 @@ fn desktop_unit_cell_color(unit: &UnitComp) -> [f32; 4] {
     ]
 }
 
+fn desktop_unit_shield_color(unit: &UnitComp) -> [f32; 4] {
+    let shield_rgba = unit
+        .type_info
+        .shield_color_rgba
+        .unwrap_or_else(|| desktop_team_color_rgba(unit.team.team));
+    let mut color = rgba8888_to_render_color(shield_rgba, 1.0);
+    let hit = (unit.health.hit_time / 2.0).clamp(0.0, 1.0);
+    color[0] = desktop_lerp(color[0], 1.0, hit);
+    color[1] = desktop_lerp(color[1], 1.0, hit);
+    color[2] = desktop_lerp(color[2], 1.0, hit);
+    color[3] = 0.7 * unit.shield.shield_alpha.clamp(0.0, 1.0);
+    color
+}
+
 fn desktop_puddle_fraction(amount: f32) -> f32 {
     (amount / (PuddleComp::MAX_LIQUID / 1.5)).clamp(0.0, 1.0)
 }
@@ -11857,6 +11871,20 @@ impl DesktopLauncher {
         ))
     }
 
+    fn unit_snapshot_shield_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
+        if !unit.is_valid() || !unit.type_info.draw_shields || unit.shield.shield_alpha <= 0.0 {
+            return None;
+        }
+
+        Some(RenderCommand::draw_circle(
+            RenderPoint::new(unit.x(), unit.y()),
+            unit.hitbox.hit_size * 1.3,
+            desktop_unit_shield_color(unit),
+            true,
+            desktop_unit_body_layer(unit),
+        ))
+    }
+
     fn unit_snapshot_soft_shadow_render_command(&self, unit: &UnitComp) -> Option<RenderCommand> {
         if !unit.is_valid() || !unit.type_info.draw_soft_shadow {
             return None;
@@ -11896,6 +11924,9 @@ impl DesktopLauncher {
                 pass.commands.push(command);
             }
             if let Some(command) = self.unit_snapshot_cell_render_command(unit) {
+                pass.commands.push(command);
+            }
+            if let Some(command) = self.unit_snapshot_shield_render_command(unit) {
                 pass.commands.push(command);
             }
         }
@@ -16189,6 +16220,7 @@ mod tests {
         unit.add();
         unit.set_pos(40.0, 56.0);
         unit.set_rotation(180.0);
+        unit.shield.shield_alpha = 0.5;
         launcher
             .runtime
             .client_unit_snapshot_entities
@@ -16299,6 +16331,27 @@ mod tests {
                 assert_eq!(*layer, Layer::GROUND_UNIT);
             }
             other => panic!("expected unit cell DrawSprite, got {other:?}"),
+        }
+        match overlay.commands.iter().find(|command| {
+            matches!(command, RenderCommand::DrawCircle { center, layer, .. }
+                if *center == RenderPoint::new(40.0, 56.0) && (*layer - Layer::GROUND_UNIT).abs() < 0.0001)
+        }) {
+            Some(RenderCommand::DrawCircle {
+                radius,
+                color,
+                filled,
+                layer,
+                ..
+            }) => {
+                assert!((*radius - 10.4).abs() < 0.0001);
+                assert!(*filled);
+                assert_eq!(*layer, Layer::GROUND_UNIT);
+                assert!((color[0] - 0xff as f32 / 255.0).abs() < 0.0001);
+                assert!((color[1] - 0xd3 as f32 / 255.0).abs() < 0.0001);
+                assert!((color[2] - 0x7f as f32 / 255.0).abs() < 0.0001);
+                assert!((color[3] - 0.35).abs() < 0.0001);
+            }
+            other => panic!("expected unit shield DrawCircle, got {other:?}"),
         }
         let light_pass = render_frame
             .passes
