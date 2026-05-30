@@ -16585,3 +16585,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `weather-particles` 与 `weather-particle-noise` 仍需继续接入真实 sprite/noise texture draw；
   - 本轮雨线尚未引入 renderer.weatherAlpha / showweather 设置项，也未完整覆盖 Java `Draw.getColorAlpha()` 上游状态；
   - `Abilities`、完整 `Payload.draw()`、`RegionPart` / `Weapon.parts`、`DrawText` glyph/quad/OpenGL 仍是渲染长尾缺口。
+
+## 455. 最新闭环记录：weather-rain-splashes 下沉到地面 splash sprite/line
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **44.3%**，仍未达到完整可玩；下一步按用户要求先做一次总体进度审查，校准 README 百分比。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\type\Weather.java:190-234`：`drawSplashes` 用相机 bounds、seeded Rand、`time / timeScale` 与 world tile floor 判断生成液体 splash sprite 或两条干地 splash line；
+  - 液体地面条件：`tile.floor().liquidDrop == splasher`；
+  - 干地线条件：`tile.floor().liquidDrop == null && !tile.floor().solid`。
+- 本轮主改动：
+  - `desktop/src/lib.rs` 新增 `desktop_render_color_mul_rgb(...)`、`desktop_weather_splash_slope(...)`、`desktop_angle_vector_degrees(...)`；
+  - 新增 `weather_snapshot_rain_splash_render_commands(...)`，从 `SplashDrawPlan + RenderCamera + game_state.world + ContentLoader` 采样真实 tile/floor/liquid；
+  - `weather-rain-splashes` custom marker 继续保留作审计，同时追加真实 `DrawSprite` / `DrawLine`：
+    - matching liquid floor 输出 `splash-{n}` sprite；
+    - 非液体且非 solid floor 输出 Java 同角度的两条 `DrawLine`；
+  - custom marker 的 layer 属性改为 `Layer.debris`，实际命令也落到 `Layer::DEBRIS`，更贴近 Java `drawUnder` 的 `Layer.debris`。
+- 迁移意义：
+  - `weather-rain-splashes` 不再只是 marker，已经进入 `client weather snapshot -> Environment RenderPass -> world tile floor query -> DrawSprite/DrawLine -> OpenGL sprite/primitive quad` 主链；
+  - weather 渲染已连续完成 rain-over 与 rain-under 两条真实像素闭环。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_weather_rain_splashes_lower_to_floor_commands --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_weather_snapshot_into_environment_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `weather-particles` 与 `weather-particle-noise` 仍是 custom marker，尚未下沉到真实 sprite/noise texture draw；
+  - 本轮 splash sprite 先使用 atlas region 尺寸/8px fallback，尚未校验所有真实 splash 资源尺寸；
+  - dry splash line 已按 Java 角度/长度公式生成，但仍未接 renderer.weatherAlpha / showweather 开关；
+  - `Abilities`、完整 `Payload.draw()`、`RegionPart` / `Weapon.parts`、`DrawText` glyph/quad/OpenGL 仍是渲染长尾缺口。

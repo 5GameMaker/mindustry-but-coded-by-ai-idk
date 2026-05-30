@@ -77,7 +77,8 @@ use mindustry_core::mindustry::net::{
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::r#type::{
-    RainDrawPlan, UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
+    RainDrawPlan, SplashDrawPlan, UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX,
+    UNIT_SHADOW_TY,
 };
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
@@ -1677,6 +1678,22 @@ fn desktop_weather_rain_over_draw_lines(
     }
 
     commands
+}
+
+fn desktop_render_color_mul_rgb(mut color: [f32; 4], multiplier: f32) -> [f32; 4] {
+    color[0] = (color[0] * multiplier).clamp(0.0, 1.0);
+    color[1] = (color[1] * multiplier).clamp(0.0, 1.0);
+    color[2] = (color[2] * multiplier).clamp(0.0, 1.0);
+    color
+}
+
+fn desktop_weather_splash_slope(life: f32) -> f32 {
+    (1.0 - (life * 2.0 - 1.0).abs()).clamp(0.0, 1.0)
+}
+
+fn desktop_angle_vector_degrees(angle_degrees: f32, length: f32) -> (f32, f32) {
+    let radians = angle_degrees.to_radians();
+    (radians.cos() * length, radians.sin() * length)
 }
 
 fn desktop_weather_splash_regions(splashes: &[String]) -> Vec<String> {
@@ -14416,6 +14433,118 @@ impl DesktopLauncher {
         ]
     }
 
+    fn weather_snapshot_rain_splash_render_commands(
+        &self,
+        under: &SplashDrawPlan,
+        camera: RenderCamera,
+    ) -> Vec<RenderCommand> {
+        if under.density <= f32::EPSILON
+            || under.intensity <= f32::EPSILON
+            || under.opacity <= f32::EPSILON
+            || under.time_scale <= f32::EPSILON
+        {
+            return Vec::new();
+        }
+
+        let camera_rect = camera.world_rect();
+        let splash_rect = camera_rect.inflate(under.padding);
+        if splash_rect.width <= f32::EPSILON || splash_rect.height <= f32::EPSILON {
+            return Vec::new();
+        }
+
+        let total = (((splash_rect.width * splash_rect.height) / under.density * under.intensity)
+            .max(0.0) as usize)
+            / 2;
+        let splash_regions = desktop_weather_splash_regions(&under.splashes);
+        if splash_regions.is_empty() {
+            return Vec::new();
+        }
+
+        let splasher_id = self
+            .content_loader
+            .liquid_by_name(&under.liquid)
+            .map(|liquid| liquid.base.mappable.base.id);
+        let mut rand = DesktopArcRand::with_seed(0);
+        let mut commands = Vec::with_capacity(total * 2);
+        let time_base = self.render_time / under.time_scale;
+
+        for _ in 0..total {
+            let offset = rand.random(1.0);
+            let time = time_base + offset;
+            let pos = time as i32;
+            let life = time.fract();
+            let mut x = rand.random(DESKTOP_WEATHER_BOUND_MAX) + pos as f32 * 953.0;
+            let mut y = rand.random(DESKTOP_WEATHER_BOUND_MAX) - pos as f32 * 453.0;
+
+            x = (x - splash_rect.x).rem_euclid(splash_rect.width) + splash_rect.x;
+            y = (y - splash_rect.y).rem_euclid(splash_rect.height) + splash_rect.y;
+
+            if !RenderRect::from_center(RenderPoint::new(x, y), life * 4.0, life * 4.0)
+                .intersects(camera_rect)
+            {
+                continue;
+            }
+
+            let Some(tile) = self.game_state.world.tile_world(x, y) else {
+                continue;
+            };
+            let Some(floor) = self
+                .content_loader
+                .block(tile.floor_id())
+                .and_then(BlockDef::as_floor)
+            else {
+                continue;
+            };
+
+            if floor.liquid_drop == splasher_id {
+                let splash_index = ((life * (splash_regions.len().saturating_sub(1) as f32))
+                    as usize)
+                    .min(splash_regions.len() - 1);
+                let symbol = splash_regions[splash_index].clone();
+                let (width, height) = self
+                    .texture_atlas
+                    .lookup(&symbol)
+                    .map(|sprite| {
+                        (
+                            sprite.region.width.max(1) as f32,
+                            sprite.region.height.max(1) as f32,
+                        )
+                    })
+                    .unwrap_or((8.0, 8.0));
+                commands.push(RenderCommand::draw_sprite(
+                    symbol,
+                    RenderRect::from_center(RenderPoint::new(x, y), width, height),
+                    desktop_render_color_mul_rgb(
+                        rgba8888_to_render_color(floor.base.map_color_rgba, under.opacity),
+                        1.5,
+                    ),
+                    0.0,
+                    Layer::DEBRIS,
+                ));
+            } else if floor.liquid_drop.is_none() && !floor.base.solid {
+                let alpha = desktop_weather_splash_slope(life) * under.opacity;
+                let color = rgba8888_to_render_color(under.color_rgba, alpha);
+                for side in [-1.0_f32, 1.0] {
+                    let angle = 90.0 + side * 45.0;
+                    let (offset_x, offset_y) =
+                        desktop_angle_vector_degrees(angle, 1.0 + 5.0 * life);
+                    let (line_x, line_y) = desktop_angle_vector_degrees(angle, 3.0 * (1.0 - life));
+                    let from = RenderPoint::new(x + offset_x, y + offset_y);
+                    let to = RenderPoint::new(from.x + line_x, from.y + line_y);
+                    commands.push(RenderCommand::draw_line(
+                        from,
+                        to,
+                        under.stroke,
+                        color,
+                        Layer::DEBRIS,
+                    ));
+                }
+            }
+        }
+
+        commands
+    }
+
     fn weather_snapshot_environment_render_commands(
         &self,
         entity_id: i32,
@@ -14434,7 +14563,7 @@ impl DesktopLauncher {
             WeatherContent::Rain(rain) => {
                 let over = rain.draw_over_plan(state);
                 let under = rain.draw_under_plan(state);
-                let mut commands = Vec::with_capacity(2);
+                let mut commands = Vec::new();
 
                 let mut over_properties = Self::weather_snapshot_base_properties(entity_id, state);
                 over_properties.extend([
@@ -14461,7 +14590,7 @@ impl DesktopLauncher {
                 under_properties.extend([
                     RenderProperty::new("bucket", "weather"),
                     RenderProperty::new("kind", "rain-splashes"),
-                    RenderProperty::new("layer", "Layer.weather - 1"),
+                    RenderProperty::new("layer", "Layer.debris"),
                     RenderProperty::new(
                         "splashes",
                         desktop_weather_splash_regions(&under.splashes).join(","),
@@ -14470,13 +14599,14 @@ impl DesktopLauncher {
                     RenderProperty::new("density", under.density.to_string()),
                     RenderProperty::new("time_scale", under.time_scale.to_string()),
                     RenderProperty::new("stroke", under.stroke.to_string()),
-                    RenderProperty::new("liquid", under.liquid),
+                    RenderProperty::new("liquid", under.liquid.clone()),
                     RenderProperty::new("color", desktop_weather_rgba_property(under.color_rgba)),
                 ]);
                 commands.push(RenderCommand::custom(
                     "weather-rain-splashes",
                     under_properties,
                 ));
+                commands.extend(self.weather_snapshot_rain_splash_render_commands(&under, camera));
 
                 commands
             }
@@ -19749,6 +19879,97 @@ mod tests {
             .sprite_quads
             .iter()
             .any(|quad| quad.symbol == "primitive:DrawLine"));
+    }
+
+    #[test]
+    fn desktop_launcher_weather_rain_splashes_lower_to_floor_commands() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let stone_id = launcher
+            .content_loader
+            .block_by_name("stone")
+            .expect("base content should include stone floor")
+            .base()
+            .id;
+        let shallow_water_id = launcher
+            .content_loader
+            .block_by_name("shallow-water")
+            .expect("base content should include shallow-water floor")
+            .base()
+            .id;
+        launcher.game_state.world.resize(40, 40);
+
+        for y in 0..40 {
+            for x in 0..40 {
+                launcher.game_state.world.tile_mut(x, y).unwrap().floor = stone_id;
+            }
+        }
+        let mut rain = mindustry_core::mindustry::r#type::WeatherState::new("rain", 1.0, 600.0);
+        rain.opacity = 1.0;
+        launcher
+            .runtime
+            .client_weather_snapshot_entities
+            .insert(7301, rain.clone());
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(128.0, 128.0), viewport);
+        let minimap_camera = MinimapCamera::new(128.0, 128.0, 128.0, 128.0);
+        let dry_frame = launcher.graphics_frame_for_render(
+            32,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let dry_render_frame = dry_frame.bundle.render_frame.as_ref().unwrap();
+        let dry_environment = dry_render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Environment)
+            .expect("rain snapshot should emit environment pass over dry floors");
+        assert!(dry_environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::Custom { name, .. } if name == "weather-rain-splashes"
+        )));
+        assert!(dry_environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawLine { layer, .. } if (*layer - Layer::DEBRIS).abs() < 0.0001
+        )));
+
+        for y in 0..40 {
+            for x in 0..40 {
+                launcher.game_state.world.tile_mut(x, y).unwrap().floor = shallow_water_id;
+            }
+        }
+        launcher
+            .runtime
+            .client_weather_snapshot_entities
+            .insert(7301, rain);
+        let wet_frame = launcher.graphics_frame_for_render(
+            33,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let wet_render_frame = wet_frame.bundle.render_frame.as_ref().unwrap();
+        let wet_environment = wet_render_frame
+            .passes
+            .iter()
+            .find(|pass| pass.kind == RenderPassKind::Environment)
+            .expect("rain snapshot should emit environment pass over liquid floors");
+        assert!(wet_environment.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, layer, .. }
+                if symbol.starts_with("splash-") && (*layer - Layer::DEBRIS).abs() < 0.0001
+        )));
+
+        let mut headless = HeadlessDesktopGraphicsRenderer::default();
+        headless.render_graphics_frame(&wet_frame);
+        assert!(headless
+            .last_opengl_backend_executor_state
+            .sprite_quads
+            .iter()
+            .any(|quad| quad.symbol.starts_with("splash-")));
     }
 
     #[test]

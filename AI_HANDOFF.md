@@ -13735,3 +13735,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 若继续天气：优先把 `weather-rain-splashes` 从 custom marker 下沉到 splash sprite / splash line primitives；
   2. 若继续单位渲染：按子代理建议把 `Abilities` stage 接入 `ForceFieldAbility`；
   3. 若继续后端：启动 `DrawText -> font atlas/metrics -> glyph quads -> sprite mesh/OpenGL` 窄链路，避免只做 trace 伪实现。
+
+### 2026-05-30：weather-rain-splashes 下沉到地面 splash sprite/line
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **44.3%**；用户要求本闭环完成后先做一次总体进度审查，校准 README 百分比。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_render_color_mul_rgb(...)`、`desktop_weather_splash_slope(...)`、`desktop_angle_vector_degrees(...)`；
+    - 新增 `weather_snapshot_rain_splash_render_commands(...)`；
+    - `weather-rain-splashes` custom marker 仍保留，但已额外输出真实 `DrawSprite`/`DrawLine`；
+    - liquid floor：`floor.liquid_drop == rain liquid id` 时输出 `splash-{n}` sprite；
+    - dry floor：`floor.liquid_drop.is_none() && !floor.base.solid` 时输出两条 `Layer::DEBRIS` splash line；
+    - 新增 `desktop_launcher_weather_rain_splashes_lower_to_floor_commands`，覆盖 dry line、liquid sprite 与 headless OpenGL sprite quad。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-core`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_weather_rain_splashes_lower_to_floor_commands --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_materializes_weather_snapshot_into_environment_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步（不要直接继续新模块，先执行用户要求的审查）：
+  1. 统计 Java 参考目录与 Rust 目录的迁移覆盖证据；
+  2. 复核 README 当前 `44.3%` 是否过高/过低；
+  3. 若需要调整 README 百分比，单独提交并推送“校准迁移进度百分比”；
+  4. 审查后再继续 weather particles / Abilities / DrawText。
