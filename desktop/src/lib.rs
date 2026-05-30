@@ -37798,10 +37798,10 @@ mod tests {
             .iter()
             .any(|command| matches!(command, RenderCommand::FillRect { .. })));
         assert!(menu_pass.commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "PLAY")
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Play")
         ));
         assert!(menu_pass.commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "CAMPAIGN")
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Campaign")
         ));
         assert!(
             preview_pass
@@ -41403,7 +41403,7 @@ mod tests {
             .commands
             .iter()
             .any(
-                |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "PLAY")
+                |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Play")
             ));
         assert!(
             graphics_renderer
@@ -42257,7 +42257,7 @@ mod tests {
         assert!(pass.commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, .. } if text == "PLAY"
+                RenderCommand::DrawText { text, .. } if text == "Play"
             )
         }));
         assert!(pass.commands.iter().any(|command| {

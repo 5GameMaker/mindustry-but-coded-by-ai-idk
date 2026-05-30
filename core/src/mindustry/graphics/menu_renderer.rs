@@ -508,22 +508,22 @@ pub enum MenuButtonRole {
 impl MenuButtonRole {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Play => "PLAY",
-            Self::Campaign => "CAMPAIGN",
-            Self::Join => "JOIN",
-            Self::CustomGame => "CUSTOM GAME",
-            Self::LoadGame => "LOAD GAME",
-            Self::Database => "DATABASE",
-            Self::Schematics => "SCHEMATICS",
-            Self::ContentDatabase => "DATABASE",
-            Self::TechTree => "TECH TREE",
-            Self::About => "ABOUT",
-            Self::Editor => "EDITOR",
-            Self::Workshop => "WORKSHOP",
-            Self::Mods => "MODS",
-            Self::Settings => "SETTINGS",
-            Self::Custom(_) => "CUSTOM",
-            Self::Quit => "QUIT",
+            Self::Play => "Play",
+            Self::Campaign => "Campaign",
+            Self::Join => "Join Game",
+            Self::CustomGame => "Custom Game",
+            Self::LoadGame => "Load Game",
+            Self::Database => "Database",
+            Self::Schematics => "Schematics",
+            Self::ContentDatabase => "Database",
+            Self::TechTree => "Tech Tree",
+            Self::About => "About",
+            Self::Editor => "Editor",
+            Self::Workshop => "Workshop",
+            Self::Mods => "Mods",
+            Self::Settings => "Settings",
+            Self::Custom(_) => "Custom",
+            Self::Quit => "Quit",
         }
     }
 
@@ -1982,10 +1982,10 @@ mod tests {
             .iter()
             .any(|command| matches!(command, RenderCommand::FillRect { .. })));
         assert!(borrowed.commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "PLAY")
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Play")
         ));
         assert!(borrowed.commands.iter().any(
-            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "CAMPAIGN")
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "Campaign")
         ));
 
         assert!(borrowed.commands.iter().any(|command| {
@@ -2289,7 +2289,7 @@ mod tests {
 
     #[test]
     fn menu_button_role_workshop_is_desktop_root_without_submenu() {
-        assert_eq!(MenuButtonRole::Workshop.label(), "WORKSHOP");
+        assert_eq!(MenuButtonRole::Workshop.label(), "Workshop");
         assert!(MenuButtonRole::Workshop.is_desktop_root());
         assert!(!MenuButtonRole::Workshop.has_desktop_submenu());
         assert!(!MenuButtonRole::Workshop.is_submenu());
@@ -2394,7 +2394,7 @@ mod tests {
             submenu_alpha: 1.0,
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::Play,
-                label: "PLAY".to_string(),
+                label: "Play".to_string(),
                 rect,
                 selected: true,
                 hovered: false,
@@ -2420,7 +2420,7 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, .. } if text == "PLAY"
+                RenderCommand::DrawText { text, .. } if text == "Play"
             )
         }));
         let play_icon = menu_icon_text("play");
@@ -2437,7 +2437,7 @@ mod tests {
             matches!(
                 command,
                 RenderCommand::DrawText { text, position, style, .. }
-                    if text == "PLAY"
+                    if text == "Play"
                         && (position.x - (rect.x + MENU_DESKTOP_BUTTON_ICON_X + MENU_DESKTOP_BUTTON_LABEL_GAP)).abs() < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Start
             )
@@ -2452,7 +2452,7 @@ mod tests {
             submenu_alpha: 1.0,
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::Mods,
-                label: "MODS".to_string(),
+                label: "Mods".to_string(),
                 rect,
                 selected: false,
                 hovered: false,
@@ -2490,7 +2490,7 @@ mod tests {
             submenu_alpha: 1.0,
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::Settings,
-                label: "SETTINGS".to_string(),
+                label: "Settings".to_string(),
                 rect,
                 selected: false,
                 hovered: true,
@@ -2567,7 +2567,7 @@ mod tests {
             submenu_alpha: 0.0,
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::CustomGame,
-                label: "CUSTOM GAME".to_string(),
+                label: "Custom Game".to_string(),
                 rect,
                 selected: false,
                 hovered: false,
@@ -2602,7 +2602,7 @@ mod tests {
             matches!(
                 command,
                 RenderCommand::DrawText { text, position, style, .. }
-                    if text == "CUSTOM GAME"
+                    if text == "Custom Game"
                         && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_LABEL_OFFSET_Y)).abs() < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Center
             )
@@ -2656,7 +2656,7 @@ mod tests {
             .iter()
             .find(|button| button.role == MenuButtonRole::Mods)
             .expect("desktop menu should still expose mods after workshop");
-        assert_eq!(workshop.label, "WORKSHOP");
+        assert_eq!(workshop.label, "Workshop");
         assert!(workshop.rect.y < mods.rect.y);
     }
 

@@ -19016,7 +19016,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 ## 534. MenuFragment 主菜单壳层继续对齐
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
-- 本轮总体进度更新：约 **55.3%**，仍未达到完整可玩；继续优先前端/UI，目标是减少黑屏/占位感并按 Java `MenuFragment` 还原主菜单外观。
+- 本轮总体进度更新：约 **55.4%**，仍未达到完整可玩；继续优先前端/UI，目标是减少黑屏/占位感并按 Java `MenuFragment` 还原主菜单外观。
 - Java 对照证据：
   - `MenuFragment.buildDesktop()` 的主菜单和 submenu 都是 `Styles.black6` 竖向 table；
   - `MenuFragment.buildMobile()` 使用 `MobileButton extends ImageButton`，背景来自默认 ImageButton skin，而不是 desktop `flatToggleMenut`；
@@ -19029,6 +19029,7 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
     - `DrawDarkness` 不再空实现，输出 fullscreen alpha 黑色 overlay；
     - mobile 菜单按钮背景改走上游 `defaulti` ImageButton skin（`button/buttonDown/buttonOver/buttonDisabled`）；
     - mobile 默认不再把 Campaign 标成 checked，避免把 ImageButton 当 desktop toggle；
+    - 菜单按钮文本从全大写占位改为与上游英文 bundle 对齐的标题式文本（如 `Play`、`Join Game`、`Custom Game`、`Settings`）；
     - 保留已有 `Icon.*` glyph 文本链路，并补充 black6 panel / defaulti background / darkness 回归测试。
   - `desktop/src/lib.rs`
     - mobile gutter 从填充色改为原版 `pane-right.9`、`pane-left.9`、`pane-top.9` sprite；
@@ -19047,6 +19048,6 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
 - 仍未完成：
   - `startup_menu_preview_render_pass()` 仍有明显非原版占位壳，后续应优先移除或仅作为不可达的错误兜底；
   - logo/version 仍使用 `UPSTREAM_BASELINE`，还未完全接 `Version.combined()` 与 build=-1 橙色分支；
-  - desktop/mobile 按钮文字仍是当前 Rust 硬编码英文大写，后续必须接入 bundle/localization；
+  - desktop/mobile 按钮文字仍是 Rust 硬编码英文 bundle 值，后续必须接入真实 bundle/localization 与运行时语言切换；
   - chrome 按钮仍有自绘 fill/stroke 近似，未完全等同 Java Scene2D skin；
   - 未达到完整可玩，不能宣告目标完成。
