@@ -455,7 +455,7 @@ impl DesktopMenuRoute {
             Self::LoadGame => "LoadDialog",
             Self::Schematics => "SchematicsDialog",
             Self::Database => "DatabaseDialog",
-            Self::TechTree => "TechTreeDialog",
+            Self::TechTree => "ResearchDialog",
             Self::About => "AboutDialog",
             Self::Discord => "DiscordDialog",
             Self::Editor => "EditorMapsDialog",
@@ -21313,10 +21313,10 @@ impl DesktopLauncher {
                 }
             }
             DesktopMenuRoute::LoadGame => self.load_game_slot_lines(),
-            DesktopMenuRoute::CustomGame => vec!["maps: pending CustomGameDialog port".into()],
-            DesktopMenuRoute::Schematics => vec!["library: pending SchematicsDialog port".into()],
+            DesktopMenuRoute::CustomGame => self.custom_game_route_lines(),
+            DesktopMenuRoute::Schematics => self.schematics_route_lines(),
             DesktopMenuRoute::Database => self.database_route_lines(),
-            DesktopMenuRoute::TechTree => vec!["research tree: pending TechTreeDialog port".into()],
+            DesktopMenuRoute::TechTree => self.tech_tree_route_lines(),
             DesktopMenuRoute::About => match self.about_route_page {
                 DesktopAboutRoutePage::Links => self.about_route_link_lines(),
                 DesktopAboutRoutePage::Credits => self.about_route_credit_lines(),
@@ -21327,10 +21327,84 @@ impl DesktopLauncher {
                 "button: openlink".into(),
                 "button: copylink".into(),
             ],
-            DesktopMenuRoute::Editor => vec!["maps: pending EditorMapsDialog port".into()],
-            DesktopMenuRoute::Mods => vec!["mods: pending ModsDialog port".into()],
+            DesktopMenuRoute::Editor => self.editor_maps_route_lines(),
+            DesktopMenuRoute::Mods => self.mods_route_lines(),
             DesktopMenuRoute::Settings => self.settings_route_lines(),
         }
+    }
+
+    fn map_list_route_lines(&self, title_key: &str, display_type: bool) -> Vec<String> {
+        let mut lines = vec![
+            format!("dialog: MapListDialog title={title_key}"),
+            "button: @back Icon.left size=210x64".into(),
+            "search: @editor.search Icon.zoom".into(),
+            "filter: @editor.filters Icon.filter".into(),
+            "pane: mapTable ScrollPane no-x-scroll".into(),
+            "maps: @maps.none".into(),
+        ];
+        if display_type {
+            lines.push("type label: @custom / @workshop / @builtin".into());
+        }
+        lines
+    }
+
+    fn custom_game_route_lines(&self) -> Vec<String> {
+        let mut lines = self.map_list_route_lines("@customgame", false);
+        lines.push("map click: MapPlayDialog.show(map)".into());
+        lines
+    }
+
+    fn editor_maps_route_lines(&self) -> Vec<String> {
+        let mut lines = self.map_list_route_lines("@maps", true);
+        lines.splice(
+            1..1,
+            [
+                "button: @editor.newmap Icon.add".to_string(),
+                "button: @editor.importmap Icon.upload".to_string(),
+            ],
+        );
+        lines.push("map click: @editor.mapinfo".into());
+        lines
+    }
+
+    fn schematics_route_lines(&self) -> Vec<String> {
+        vec![
+            "button: @schematic.import Icon.download".into(),
+            "search: @schematic.search Icon.zoom".into(),
+            "tags: @schematic.tags Icon.pencilSmall".into(),
+            "pane: schematic grid Styles.flati/Tex.pane".into(),
+            "card buttons: @info.title / @editor.export / @schematic.edit / @save.delete".into(),
+            "empty: @none".into(),
+        ]
+    }
+
+    fn tech_tree_route_lines(&self) -> Vec<String> {
+        let roots = self.content_loader.catalog().planets.len().max(1);
+        vec![
+            "dialog: ResearchDialog titleTable root node".into(),
+            format!("roots: {roots}"),
+            "select: @techtree.select".into(),
+            "view: TechTreeNode graph".into(),
+            "items: ItemsDisplay visible when !net.client".into(),
+        ]
+    }
+
+    fn mods_route_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            "button: @mods.guide Icon.link".into(),
+            "button: @mod.import Icon.add".into(),
+            "button: @mods.browser Icon.menu".into(),
+        ];
+        if let Some(count) = self.last_mods_directory_merge_count {
+            lines.push(format!("mods scanned: {count}"));
+        }
+        if let Some(error) = self.mods_directory_error.as_ref() {
+            lines.push(format!("mods error: {error}"));
+        } else {
+            lines.push("empty: @mods.none".into());
+        }
+        lines.push("browser search: Icon.zoom + Icon.list".into());
+        lines
     }
 
     fn push_active_menu_route_shell(&self, pass: &mut RenderPass, viewport: RenderViewport) {
@@ -37992,6 +38066,72 @@ mod tests {
                 close_requested: false,
             })
         );
+    }
+
+    #[test]
+    fn desktop_launcher_pending_menu_routes_use_upstream_dialog_structure() {
+        let launcher = DesktopLauncher::new(Vec::new());
+        let expectations: &[(super::DesktopMenuRoute, &[&str])] = &[
+            (
+                super::DesktopMenuRoute::CustomGame,
+                &[
+                    "dialog: MapListDialog title=@customgame",
+                    "search: @editor.search Icon.zoom",
+                    "map click: MapPlayDialog.show(map)",
+                ],
+            ),
+            (
+                super::DesktopMenuRoute::Schematics,
+                &[
+                    "button: @schematic.import Icon.download",
+                    "search: @schematic.search Icon.zoom",
+                    "empty: @none",
+                ],
+            ),
+            (
+                super::DesktopMenuRoute::TechTree,
+                &[
+                    "dialog: ResearchDialog titleTable root node",
+                    "select: @techtree.select",
+                    "view: TechTreeNode graph",
+                ],
+            ),
+            (
+                super::DesktopMenuRoute::Editor,
+                &[
+                    "dialog: MapListDialog title=@maps",
+                    "button: @editor.newmap Icon.add",
+                    "type label: @custom / @workshop / @builtin",
+                ],
+            ),
+            (
+                super::DesktopMenuRoute::Mods,
+                &[
+                    "button: @mods.guide Icon.link",
+                    "button: @mod.import Icon.add",
+                    "empty: @mods.none",
+                ],
+            ),
+        ];
+
+        assert_eq!(
+            super::DesktopMenuRoute::TechTree.upstream_dialog(),
+            "ResearchDialog"
+        );
+
+        for (route, expected_lines) in expectations {
+            let lines = launcher.active_menu_route_shell_lines(*route);
+            assert!(
+                lines.iter().all(|line| !line.contains("pending")),
+                "{route:?} should not expose pending dialog shell text: {lines:?}"
+            );
+            for expected in *expected_lines {
+                assert!(
+                    lines.contains(&expected.to_string()),
+                    "{route:?} should include {expected}; got {lines:?}"
+                );
+            }
+        }
     }
 
     #[test]
