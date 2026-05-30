@@ -128,6 +128,17 @@ fn desktop_resolve_color_symbol(name: &str) -> Option<DecalColor> {
         }
     }
 
+    if let Some((base, scale)) = name.rsplit_once('*') {
+        if let Ok(scale) = scale.parse::<f32>() {
+            let mut color = desktop_resolve_color_symbol(base)?;
+            color.r = (color.r * scale).clamp(0.0, 1.0);
+            color.g = (color.g * scale).clamp(0.0, 1.0);
+            color.b = (color.b * scale).clamp(0.0, 1.0);
+            color.a = (color.a * scale).clamp(0.0, 1.0);
+            return Some(color);
+        }
+    }
+
     let hex = name.strip_prefix('#').unwrap_or(name);
     if hex.len() == 6 || hex.len() == 8 {
         if let Ok(mut rgba) = u32::from_str_radix(hex, 16) {
@@ -457,6 +468,135 @@ fn sap_bullet_snapshot_light_commands(
         tint: LightPrimitive {
             center: (origin.x, origin.y),
             radius: stroke,
+            color,
+            opacity: spec.light_opacity,
+        },
+    }]
+}
+
+fn continuous_laser_bullet_colors(spec: &BulletSpec) -> Vec<String> {
+    if !spec.colors.is_empty() {
+        spec.colors.clone()
+    } else {
+        vec![
+            "ec745855".into(),
+            "ec7458aa".into(),
+            "ff9c5a".into(),
+            "white".into(),
+        ]
+    }
+}
+
+fn continuous_laser_bullet_fout(bullet: &BulletComp, spec: &BulletSpec) -> f32 {
+    let lifetime = if bullet.lifetime > f32::EPSILON {
+        bullet.lifetime
+    } else {
+        spec.lifetime
+    };
+    if lifetime <= f32::EPSILON {
+        return 1.0;
+    }
+    let fade_time = 16.0_f32.min(lifetime);
+    if bullet.time > lifetime - fade_time {
+        (1.0 - (bullet.time - (lifetime - fade_time)) / fade_time).clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+fn continuous_laser_bullet_real_length(bullet: &BulletComp, spec: &BulletSpec, fout: f32) -> f32 {
+    let faded_length = spec.length.max(0.0) * fout;
+    if bullet.fdata > f32::EPSILON {
+        bullet.fdata.min(faded_length)
+    } else {
+        faded_length
+    }
+}
+
+fn continuous_laser_bullet_snapshot_render_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+    layer: f32,
+    render_time: f32,
+) -> Vec<RenderCommand> {
+    if bullet.removed || spec.kind != BulletKind::ContinuousLaser {
+        return Vec::new();
+    }
+
+    let fout = continuous_laser_bullet_fout(bullet, spec);
+    let real_length = continuous_laser_bullet_real_length(bullet, spec, fout);
+    if fout <= f32::EPSILON || real_length <= f32::EPSILON || spec.width <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let colors = continuous_laser_bullet_colors(spec);
+    let color_count = colors.len().max(1) as f32;
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let line_length = (real_length - 35.0).max(0.0);
+    let line_end = desktop_line_angle_points(origin, bullet.rotation(), line_length).1;
+    let absin = desktop_absin(render_time, 0.8, 1.5);
+    let mut commands = Vec::with_capacity(colors.len() * 3);
+
+    for (index, color_name) in colors.iter().enumerate() {
+        let color_fin = if colors.len() > 1 {
+            index as f32 / (colors.len() - 1) as f32
+        } else {
+            0.0
+        };
+        let base_stroke = desktop_lerp(2.0, 0.5, color_fin);
+        let stroke = (spec.width + absin) * fout * base_stroke;
+        let color = desktop_bullet_render_color(color_name, Pal::LIGHT_FLAME);
+        let ellipse_len_scl = desktop_lerp(1.0 - index as f32 / color_count, 1.0, 0.75);
+
+        commands.push(RenderCommand::draw_line(
+            origin, line_end, stroke, color, layer,
+        ));
+        commands.push(RenderCommand::draw_circle(
+            origin,
+            (7.0 * ellipse_len_scl).max(stroke / 2.0),
+            color,
+            true,
+            layer,
+        ));
+        commands.push(RenderCommand::draw_circle(
+            line_end,
+            (35.0 * ellipse_len_scl).max(stroke / 2.0),
+            color,
+            true,
+            layer,
+        ));
+    }
+
+    commands
+}
+
+fn continuous_laser_bullet_snapshot_light_commands(
+    bullet: &BulletComp,
+    spec: &BulletSpec,
+) -> Vec<LightCommand> {
+    if bullet.removed || spec.kind != BulletKind::ContinuousLaser {
+        return Vec::new();
+    }
+
+    let fout = continuous_laser_bullet_fout(bullet, spec);
+    let real_length = continuous_laser_bullet_real_length(bullet, spec, fout);
+    if real_length <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let origin = RenderPoint::new(bullet.x, bullet.y);
+    let (_, light_end) = desktop_line_angle_points(origin, bullet.rotation(), real_length * 1.1);
+    let color = desktop_resolve_color_symbol(&spec.light_color).unwrap_or(Pal::LIGHT_FLAME);
+
+    vec![LightCommand::Line {
+        x: origin.x,
+        y: origin.y,
+        x2: light_end.x,
+        y2: light_end.y,
+        stroke: 40.0,
+        tint: LightPrimitive {
+            center: (origin.x, origin.y),
+            radius: 40.0,
             color,
             opacity: spec.light_opacity,
         },
@@ -12344,6 +12484,15 @@ impl DesktopLauncher {
                         ));
                     }
                 }
+                BulletKind::ContinuousLaser => {
+                    pass.commands
+                        .extend(continuous_laser_bullet_snapshot_render_commands(
+                            bullet,
+                            &content.spec,
+                            desktop_bullet_layer(&content.spec),
+                            self.render_time,
+                        ));
+                }
                 _ => pass
                     .commands
                     .extend(self.basic_bullet_snapshot_render_commands(bullet, &content.spec)),
@@ -12391,6 +12540,12 @@ impl DesktopLauncher {
                             data_position,
                         ));
                     }
+                }
+                BulletKind::ContinuousLaser => {
+                    commands.extend(continuous_laser_bullet_snapshot_light_commands(
+                        bullet,
+                        &content.spec,
+                    ));
                 }
                 _ => {}
             }
@@ -17310,6 +17465,148 @@ mod tests {
                 assert_eq!(*layer, LIGHT_RENDER_LAYER);
             }
             other => panic!("expected sap lighting DrawLine, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_routes_continuous_laser_snapshot_primitives_and_light_pass() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let bullet_content = launcher
+            .content_loader
+            .bullet_by_name("vela_continuous_laser")
+            .expect("base content should include vela continuous laser bullet");
+        assert_eq!(bullet_content.spec.kind, super::BulletKind::ContinuousLaser);
+
+        let mut bullet = BulletComp::new(
+            bullet_content.id(),
+            TeamId(1),
+            type_io::EntityRef::null(),
+            32.0,
+            48.0,
+        );
+        bullet.lifetime = 160.0;
+        bullet.time = 80.0;
+        bullet.rotation = 0.0;
+        launcher
+            .runtime
+            .client_bullet_snapshot_entities
+            .insert(7108, bullet);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 256.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(128.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(128.0, 64.0, 256.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            27,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(true),
+        );
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(177.0, 48.0))
+                    })
+            })
+            .expect("continuous laser snapshot should emit overlay line commands");
+
+        let lines = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawLine {
+                    from,
+                    to,
+                    stroke,
+                    color,
+                    layer,
+                } => Some((*from, *to, *stroke, *color, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let circles = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawCircle {
+                    center,
+                    radius,
+                    color,
+                    filled,
+                    layer,
+                } => Some((*center, *radius, *color, *filled, *layer)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines.len(), 4);
+        assert_eq!(circles.len(), 8);
+        assert_eq!(lines[0].0, RenderPoint::new(32.0, 48.0));
+        assert_eq!(lines[0].1, RenderPoint::new(177.0, 48.0));
+        assert_eq!(lines[0].2, 18.0);
+        assert_eq!(
+            lines[0].3,
+            super::desktop_bullet_render_color("heal@0.2", Pal::LIGHT_FLAME)
+        );
+        assert_eq!(lines[0].4, Layer::BULLET);
+        assert_eq!(lines[3].2, 4.5);
+        assert_eq!(
+            lines[3].3,
+            super::desktop_bullet_render_color("white", Pal::LIGHT_FLAME)
+        );
+
+        assert_eq!(circles[0].0, RenderPoint::new(32.0, 48.0));
+        assert_eq!(circles[0].1, 9.0);
+        assert!(circles[0].3);
+        assert_eq!(circles[1].0, RenderPoint::new(177.0, 48.0));
+        assert_eq!(circles[1].1, 35.0);
+        assert_eq!(circles[1].4, Layer::BULLET);
+
+        let lighting = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Lighting
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawLine { from, to, .. }
+                            if *from == RenderPoint::new(32.0, 48.0)
+                                && *to == RenderPoint::new(230.0, 48.0))
+                    })
+            })
+            .expect("continuous laser snapshot should emit Java Drawf.light equivalent");
+        match lighting
+            .commands
+            .iter()
+            .find(|command| {
+                matches!(command, RenderCommand::DrawLine { from, to, .. }
+                    if *from == RenderPoint::new(32.0, 48.0)
+                        && *to == RenderPoint::new(230.0, 48.0))
+            })
+            .expect("continuous laser lighting line should be present")
+        {
+            RenderCommand::DrawLine {
+                stroke,
+                color,
+                layer,
+                ..
+            } => {
+                assert_eq!(*stroke, 40.0);
+                assert_eq!(
+                    *color,
+                    super::desktop_effect_render_color(
+                        super::desktop_resolve_color_symbol("orange"),
+                        0.7
+                    )
+                );
+                assert_eq!(*layer, LIGHT_RENDER_LAYER);
+            }
+            other => panic!("expected continuous laser lighting DrawLine, got {other:?}"),
         }
     }
 

@@ -13126,3 +13126,37 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   3. Sap data 的 Building/其他 Position 解析还不完整；
   4. Unit trail 仍需先补 runtime trail points；
   5. Weapon parts 仍需先结构化 `parts` 和 `sideMultiplier`。
+
+### 2026-05-30：ContinuousLaser layered beam 与 light pass 接入客户端 bullet 渲染链
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **42.4%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `desktop_resolve_color_symbol(...)` 支持 `name*scale`，能解析 `heal*1.2`；
+    - 新增 ContinuousLaser colors/fout/real_length helper；
+    - 新增 `continuous_laser_bullet_snapshot_render_commands(...)`，输出分层 `DrawLine` 与 origin/front cap `DrawCircle`；
+    - 新增 `continuous_laser_bullet_snapshot_light_commands(...)`，输出 Java `Drawf.light(...)` 对应 lighting line；
+    - `bullet_snapshot_render_pass()` / `bullet_snapshot_light_render_pass()` 已接入 `BulletKind::ContinuousLaser`；
+    - 新增测试 `desktop_launcher_routes_continuous_laser_snapshot_primitives_and_light_pass`，覆盖 `vela_continuous_laser`。
+- Java 对照：
+  - `ContinuousLaserBulletType.draw(Bullet b)`：fadeTime → `Damage.findLength` → 分层 line + back/front `Drawf.flameFront` → `Drawf.light(...)`；`drawLight()` 为空。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_sap_snapshot_line_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_continuous_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. Bullet 渲染主链可继续补 PointLaser/Rail/ContinuousFlame 等剩余特化；
+  2. ContinuousLaser 仍需把 circle cap 近似升级成更接近 `Drawf.flameFront(...)` 的 polygon/mesh；
+  3. Laser/Sap/Shrapnel/ContinuousLaser 的 collision-derived length / init side-effects 仍需更精确接入 runtime；
+  4. Unit trail 仍需先补 runtime trail points；
+  5. Weapon parts 仍需先结构化 `parts` 和 `sideMultiplier`。

@@ -15988,3 +15988,42 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - ContinuousLaser 的客户端 bullet render pass 仍未接入；
   - Bullet 渲染仍临时复用 Overlay，后续需要统一 Java layer sorting / world entity pass；
   - Unit engine trail、weapon parts/continuous beam/hard shadow/legs/payload/item 仍未完成。
+
+## 436. 最新闭环记录：ContinuousLaser layered beam 与 light pass 接入客户端 bullet 渲染链
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **42.4%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/entities/bullet/ContinuousLaserBulletType.java#draw(Bullet b)`
+  - `fout = clamp(time > lifetime - fadeTime ? 1 - (...) / fadeTime : 1)`
+  - `realLength = Damage.findLength(b, length * fout, laserAbsorb, pierceCap)`
+  - 每层颜色绘制 `Lines.lineAngle(...)`、back `Drawf.flameFront(...)`、front `Drawf.flameFront(...)`
+  - 末尾 `Drawf.light(..., lightStroke, lightColor, lightOpacity)`；`drawLight()` 本身为空。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_resolve_color_symbol(...)` 支持 `name*scale` 形式，覆盖 `heal*1.2` 等 ContinuousLaser content 色名；
+    - 新增 `continuous_laser_bullet_colors(...)`，在 content 未设置 colors 时使用 Java 默认 `ec745855/ec7458aa/ff9c5a/white`；
+    - 新增 `continuous_laser_bullet_fout(...)` 和 `continuous_laser_bullet_real_length(...)`，用 Java fadeTime 语义近似 currentLength，并优先尊重 `BulletComp.fdata`；
+    - 新增 `continuous_laser_bullet_snapshot_render_commands(...)`，将 `BulletKind::ContinuousLaser` 映射为分层 `DrawLine` 与 origin/front cap `DrawCircle` primitives；
+    - 新增 `continuous_laser_bullet_snapshot_light_commands(...)`，将 Java `Drawf.light(...)` 映射进现有 `LightRendererPlan` / `RenderPassKind::Lighting`；
+    - `bullet_snapshot_render_pass()` 与 `bullet_snapshot_light_render_pass()` 增加 `BulletKind::ContinuousLaser` 分支；
+    - 新增 `desktop_launcher_routes_continuous_laser_snapshot_primitives_and_light_pass`，覆盖 `vela_continuous_laser` 的分层线段、端点 cap、颜色、stroke 与 lighting line。
+- 迁移意义：
+  - ContinuousLaser 不再在客户端 snapshot 中静默不可见；当前 Basic/LaserBolt/Laser/Shrapnel/Sap/ContinuousLaser 已全部进入同一 bullet render 主链；
+  - 该闭环继续走 `client_bullet_snapshot_entities` → content `BulletSpec` → desktop overlay/light pass → `RenderFramePlan`；
+  - `*scale` 色名解析为后续 heal beam/continuous flame 颜色复用打基础。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_shrapnel_snapshot_triangles_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_sap_snapshot_line_and_light_pass --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_routes_continuous_laser_snapshot_primitives_and_light_pass --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - ContinuousLaser 当前用 line/circle primitives 近似 Java `Drawf.flameFront(...)`，后续应接入更精确的 flameFront polygon/mesh plan；
+  - `Damage.findLength(...)` 目前只能用 `BulletComp.fdata` 或 `length * fout` 近似，仍需 world collision 精确长度；
+  - ContinuousFlame、PointLaser、Rail 等其他 bullet 特化渲染仍需继续；
+  - Bullet 渲染仍临时复用 Overlay，后续需要统一 Java layer sorting / world entity pass；
+  - Unit engine trail、weapon parts/continuous beam/hard shadow/legs/payload/item 仍未完成。
