@@ -18471,3 +18471,55 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - disabled/keyboard focus/tooltip 仍未迁移；
   - SettingsMenuDialog、LoadDialog 仍未达到原版完整 UI；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 516. UI icon fontgen glyph 全量表补齐
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.2%**，仍未达到完整可玩；继续把上游 `core/assets-raw/fontgen/config.json` 中的 UI 字体图标完整镜像到 Rust glyph registry，避免后续 Settings/Load/About/Menu UI 继续缺少高频 `Icon.*` 图标。
+- 本轮主改动：
+  - `core/src/mindustry/ui/fonts.rs`
+    - `UPSTREAM_UI_ICON_GLYPHS` 从部分表扩展为覆盖上游 fontgen config 的 **109** 个 glyph；
+    - 保持 `upstream_ui_icon_glyph()` / `upstream_ui_icon_glyph_char()` / `upstream_ui_icon_glyph_string()` 公开 API 不变；
+    - 测试新增对 `cancel/downOpen/ok/left/upOpen/trash/zoom/copy/pencil/edit/upload/save/warning/export/units/filter/lock/file/pause` 等高频缺失项的可查断言；
+    - 同时锁定 `down-open/up-open/reddit-alien/file-text/file-image` 等 CSS alias 查询。
+- 迁移意义：
+  - Rust UI 图标表不再只覆盖 About/Menu 少数图标；
+  - SettingsMenuDialog、LoadDialog、数据管理、文件导入导出、确认/取消等界面后续可以直接使用原版图标名；
+  - 继续向真实 font atlas/glyph quad 渲染收口。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core ui::fonts --lib`
+- 仍未完成：
+  - 真实字体 atlas / `DrawText` 仍是 placeholder；
+  - 图标虽然已可查，但大量 UI 控件还没把文本占位替换成 glyph 控件；
+  - 未达到完整可玩，不能宣告目标完成。
+
+## 517. SettingsMenuDialog 结构化路由壳接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **53.3%**，仍未达到完整可玩；继续把 `DesktopMenuRoute::Settings` 从 `pending SettingsMenuDialog port` 占位推进为可验证的结构化 SettingsMenuDialog 页面模型。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSettingsMenuEntry` / `DesktopSettingsPrefGroup` / `DesktopSettingsDataAction`；
+    - 新增 `DesktopSettingsPage`、`DesktopSettingsDialogState`、`DesktopSettingsAction`，为后续页签切换、Reset、Data 操作接真实动作链预留状态；
+    - `Settings` route 打开时初始化 `settings_dialog_state`；
+    - `active_menu_route_shell_lines(Settings)` 改为输出原版主分类、偏好表分组、Data 子页动作，而不再返回 pending 文本；
+    - `Settings` 使用比普通 shell 更大的面板，为原版设置页的多项内容预留空间。
+  - 覆盖的上游结构：
+    - 主分类：`@settings.game / graphics / sound / language / controls / data`；
+    - 偏好组：`game / graphics / sound`；
+    - Data 动作：清数据、清星球数据、清存档、清研究、清战役存档、导出/导入数据、打开数据目录、导出崩溃日志。
+  - 测试：
+    - 新增 `desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell`，验证 Settings route 初始化、无 pending 文本、主分类/图标/目标、Data 动作、专用面板与渲染文本。
+- 迁移意义：
+  - Settings 不再只是能打开的空壳路由；
+  - 后续可在同一状态模型上继续补页签 hit-test、Reset、Data 操作确认框、真实 settings 存取；
+  - 这条线仍接在现有 menu route shell/render/input 主链路上，不是独立 demo。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+- 仍未完成：
+  - Settings 页签点击、Back/Reset/Data 真实动作分发尚未接完；
+  - `SettingsTable` 的 `checkPref/sliderPref/textPref` 真实控件和 settings 存取还未实现；
+  - Language/Controls 子对话框仍是后续工作；
+  - 未达到完整可玩，不能宣告目标完成。

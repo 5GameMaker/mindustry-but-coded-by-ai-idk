@@ -157,6 +157,77 @@ pub enum DesktopAboutRoutePage {
     Credits,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopSettingsMenuEntry {
+    pub label: &'static str,
+    pub icon: &'static str,
+    pub target: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopSettingsPrefGroup {
+    pub table: &'static str,
+    pub entries: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopSettingsDataAction {
+    pub label: &'static str,
+    pub icon: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSettingsPage {
+    Main,
+    Game,
+    Graphics,
+    Sound,
+    Data,
+}
+
+impl DesktopSettingsPage {
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::Game => "game",
+            Self::Graphics => "graphics",
+            Self::Sound => "sound",
+            Self::Data => "data",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopSettingsDialogState {
+    pub page: DesktopSettingsPage,
+    pub selected_planet: String,
+}
+
+impl Default for DesktopSettingsDialogState {
+    fn default() -> Self {
+        Self {
+            page: DesktopSettingsPage::Main,
+            selected_planet: "serpulo".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSettingsAction {
+    OpenPage(DesktopSettingsPage),
+    BackToMain,
+    ResetCurrentPage,
+    ClearAllData,
+    ClearPlanetData,
+    ClearSaves,
+    ClearResearch,
+    ClearCampaignSaves,
+    ExportData,
+    ImportData,
+    OpenDataFolder,
+    ExportCrashLogs,
+}
+
 impl DesktopMenuRoute {
     pub const fn from_menu_button(role: MenuButtonRole) -> Option<Self> {
         match role {
@@ -274,6 +345,145 @@ fn desktop_ui_icon_glyph_or_label(icon_name: &str, fallback: &str) -> String {
 }
 
 const ABOUT_BANNED_LINK_NAMES: &[&str] = &["google-play", "itch.io", "dev-builds", "f-droid"];
+
+const SETTINGS_MENU_ENTRIES: &[DesktopSettingsMenuEntry] = &[
+    DesktopSettingsMenuEntry {
+        label: "@settings.game",
+        icon: "settings",
+        target: "game",
+    },
+    DesktopSettingsMenuEntry {
+        label: "@settings.graphics",
+        icon: "image",
+        target: "graphics",
+    },
+    DesktopSettingsMenuEntry {
+        label: "@settings.sound",
+        icon: "filters",
+        target: "sound",
+    },
+    DesktopSettingsMenuEntry {
+        label: "@settings.language",
+        icon: "chat",
+        target: "language-dialog",
+    },
+    DesktopSettingsMenuEntry {
+        label: "@settings.controls",
+        icon: "move",
+        target: "controls-dialog",
+    },
+    DesktopSettingsMenuEntry {
+        label: "@settings.data",
+        icon: "save",
+        target: "data-dialog",
+    },
+];
+
+const SETTINGS_PREF_GROUPS: &[DesktopSettingsPrefGroup] = &[
+    DesktopSettingsPrefGroup {
+        table: "game",
+        entries: &[
+            "saveinterval",
+            "communityservers",
+            "savecreate",
+            "blockreplace",
+            "conveyorpathfinding",
+            "hints",
+            "backgroundpause",
+            "buildautopause",
+            "distinctcontrolgroups",
+            "doubletapmine",
+            "commandmodehold",
+            "modcrashdisable",
+            "console",
+        ],
+    },
+    DesktopSettingsPrefGroup {
+        table: "graphics",
+        entries: &[
+            "uiEdgePadding",
+            "uiscale",
+            "screenshake",
+            "bloomintensity",
+            "bloomblur",
+            "fpscap",
+            "chatopacity",
+            "lasersopacity",
+            "unitlaseropacity",
+            "bridgeopacity",
+            "vsync",
+            "fullscreen",
+            "effects",
+            "atmosphere",
+            "drawlight",
+            "destroyedblocks",
+            "blockstatus",
+            "playerchat",
+            "coreitems",
+            "minimap",
+            "smoothcamera",
+            "detach-camera",
+            "position",
+            "mouseposition",
+            "fps",
+            "playerindicators",
+            "showpings",
+            "showotherbuildplans",
+            "indicators",
+            "showweather",
+            "animatedwater",
+            "animatedshields",
+            "bloom",
+            "pixelate",
+            "linear",
+            "skipcoreanimation",
+            "hidedisplays",
+        ],
+    },
+    DesktopSettingsPrefGroup {
+        table: "sound",
+        entries: &["alwaysmusic", "musicvol", "sfxvol", "ambientvol"],
+    },
+];
+
+const SETTINGS_DATA_ACTIONS: &[DesktopSettingsDataAction] = &[
+    DesktopSettingsDataAction {
+        label: "@settings.cleardata",
+        icon: "trash",
+    },
+    DesktopSettingsDataAction {
+        label: "@settings.clearplanetdata",
+        icon: "trash",
+    },
+    DesktopSettingsDataAction {
+        label: "@settings.clearsaves",
+        icon: "trash",
+    },
+    DesktopSettingsDataAction {
+        label: "@settings.clearresearch",
+        icon: "trash",
+    },
+    DesktopSettingsDataAction {
+        label: "@settings.clearcampaignsaves",
+        icon: "trash",
+    },
+    DesktopSettingsDataAction {
+        label: "@data.export",
+        icon: "upload",
+    },
+    DesktopSettingsDataAction {
+        label: "@data.import",
+        icon: "download",
+    },
+    DesktopSettingsDataAction {
+        label: "@data.openfolder",
+        icon: "folder",
+    },
+    DesktopSettingsDataAction {
+        label: "@crash.export",
+        icon: "upload",
+    },
+];
 
 const ABOUT_LINKS: &[AboutLinkEntry] = &[
     AboutLinkEntry {
@@ -13425,6 +13635,8 @@ pub struct DesktopLauncher {
     pub menu_mobile_terminal_open: bool,
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
+    pub settings_dialog_state: DesktopSettingsDialogState,
+    pub last_settings_action: Option<DesktopSettingsAction>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
     pub last_discord_clipboard_text: Option<String>,
@@ -14122,6 +14334,8 @@ impl DesktopLauncher {
             menu_mobile_terminal_open: false,
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
+            settings_dialog_state: DesktopSettingsDialogState::default(),
+            last_settings_action: None,
             last_about_link_action: None,
             last_about_linkfail_message: None,
             last_discord_clipboard_text: None,
@@ -17933,6 +18147,9 @@ impl DesktopLauncher {
                 self.about_route_page = DesktopAboutRoutePage::Links;
             } else if route == DesktopMenuRoute::LoadGame {
                 self.refresh_load_game_slots();
+            } else if route == DesktopMenuRoute::Settings {
+                self.settings_dialog_state = DesktopSettingsDialogState::default();
+                self.last_settings_action = None;
             }
         }
         let close_requested = role == MenuButtonRole::Quit;
@@ -18054,6 +18271,74 @@ impl DesktopLauncher {
         lines
     }
 
+    fn settings_pref_group(table: &str) -> Option<&'static DesktopSettingsPrefGroup> {
+        SETTINGS_PREF_GROUPS
+            .iter()
+            .find(|group| group.table == table)
+    }
+
+    fn settings_icon_line(icon: &str) -> String {
+        let glyph = desktop_ui_icon_glyph_or_label(icon, icon);
+        format!("icon:{icon} glyph:{glyph}")
+    }
+
+    fn settings_route_lines(&self) -> Vec<String> {
+        let state = &self.settings_dialog_state;
+        let mut lines = vec![
+            format!("settings page: {}", state.page.key()),
+            "style: Tex.button / Styles.flatt".into(),
+        ];
+
+        match state.page {
+            DesktopSettingsPage::Main => {
+                lines.push(format!("categories: {}", SETTINGS_MENU_ENTRIES.len()));
+                for entry in SETTINGS_MENU_ENTRIES {
+                    lines.push(format!(
+                        "category: {} {} target:{}",
+                        entry.label,
+                        Self::settings_icon_line(entry.icon),
+                        entry.target
+                    ));
+                }
+                lines.push(format!(
+                    "pref tables: {}",
+                    SETTINGS_PREF_GROUPS
+                        .iter()
+                        .map(|group| format!("{}({})", group.table, group.entries.len()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                lines.push(format!("data actions: {}", SETTINGS_DATA_ACTIONS.len()));
+            }
+            DesktopSettingsPage::Game
+            | DesktopSettingsPage::Graphics
+            | DesktopSettingsPage::Sound => {
+                let table = state.page.key();
+                if let Some(group) = Self::settings_pref_group(table) {
+                    lines.push(format!("table: {table} settings: {}", group.entries.len()));
+                    for chunk in group.entries.chunks(6).take(3) {
+                        lines.push(format!("prefs: {}", chunk.join(", ")));
+                    }
+                }
+                lines.push("button: reset-to-defaults".into());
+                lines.push("button: back".into());
+            }
+            DesktopSettingsPage::Data => {
+                lines.push(format!("planet: {}", state.selected_planet));
+                for action in SETTINGS_DATA_ACTIONS {
+                    lines.push(format!(
+                        "data action: {} {}",
+                        action.label,
+                        Self::settings_icon_line(action.icon)
+                    ));
+                }
+                lines.push("button: back".into());
+            }
+        }
+
+        lines
+    }
+
     fn load_game_slot_line_rect_for_viewport(
         viewport: RenderViewport,
         slot_index: usize,
@@ -18116,17 +18401,27 @@ impl DesktopLauncher {
         viewport: RenderViewport,
         route: DesktopMenuRoute,
     ) -> RenderRect {
-        if route != DesktopMenuRoute::About {
-            return Self::active_menu_route_shell_panel_for_viewport(viewport);
+        if route == DesktopMenuRoute::About {
+            let panel_width = (viewport.width * 0.72).clamp(360.0, 720.0);
+            let panel_height = (viewport.height - 120.0).clamp(360.0, 700.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
         }
-        let panel_width = (viewport.width * 0.72).clamp(360.0, 720.0);
-        let panel_height = (viewport.height - 120.0).clamp(360.0, 700.0);
-        RenderRect::new(
-            viewport.x + viewport.width - panel_width - 48.0,
-            viewport.y + (viewport.height - panel_height) * 0.5,
-            panel_width,
-            panel_height,
-        )
+        if route == DesktopMenuRoute::Settings {
+            let panel_width = (viewport.width * 0.62).clamp(340.0, 680.0);
+            let panel_height = (viewport.height - 150.0).clamp(300.0, 560.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
+        Self::active_menu_route_shell_panel_for_viewport(viewport)
     }
 
     fn about_link_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
@@ -18797,7 +19092,7 @@ impl DesktopLauncher {
             ],
             DesktopMenuRoute::Editor => vec!["maps: pending EditorMapsDialog port".into()],
             DesktopMenuRoute::Mods => vec!["mods: pending ModsDialog port".into()],
-            DesktopMenuRoute::Settings => vec!["settings: pending SettingsMenuDialog port".into()],
+            DesktopMenuRoute::Settings => self.settings_route_lines(),
         }
     }
 
@@ -20355,6 +20650,8 @@ impl DesktopLauncher {
         self.menu_mobile_terminal_open = false;
         self.about_route_page = DesktopAboutRoutePage::Links;
         self.about_filter_banned_links = false;
+        self.settings_dialog_state = DesktopSettingsDialogState::default();
+        self.last_settings_action = None;
         self.last_about_link_action = None;
         self.last_about_linkfail_message = None;
         self.last_discord_clipboard_text = None;
@@ -36655,6 +36952,83 @@ mod tests {
         assert_eq!(action.status, "selected-for-load");
 
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dispatch = launcher.dispatch_menu_action(MenuButtonRole::Settings);
+
+        assert_eq!(dispatch.route, Some(super::DesktopMenuRoute::Settings));
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Settings)
+        );
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Main
+        );
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Settings);
+        assert!(!lines
+            .iter()
+            .any(|line| line.contains("pending SettingsMenuDialog port")));
+        assert!(lines.contains(&"settings page: main".to_string()));
+        assert!(lines.contains(&"style: Tex.button / Styles.flatt".to_string()));
+        assert!(lines.contains(&format!(
+            "categories: {}",
+            super::SETTINGS_MENU_ENTRIES.len()
+        )));
+        for entry in super::SETTINGS_MENU_ENTRIES {
+            assert!(
+                lines.iter().any(|line| line.contains(entry.label)
+                    && line.contains(entry.icon)
+                    && line.contains(entry.target)),
+                "settings main page should include {} with {}",
+                entry.label,
+                entry.icon
+            );
+        }
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("game(") && line.contains("graphics(")));
+        assert!(lines.iter().any(|line| line == "data actions: 9"));
+
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Data;
+        let data_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Settings);
+        assert!(data_lines.contains(&"settings page: data".to_string()));
+        assert!(data_lines.iter().any(|line| {
+            line.contains("data action: @data.export") && line.contains("icon:upload")
+        }));
+        assert!(data_lines.iter().any(|line| {
+            line.contains("data action: @settings.clearresearch") && line.contains("icon:trash")
+        }));
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let settings_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let default_panel = DesktopLauncher::active_menu_route_shell_panel_for_viewport(viewport);
+        assert!(settings_panel.width > default_panel.width);
+        assert!(settings_panel.height > default_panel.height);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"upstream: SettingsMenuDialog"));
+        assert!(texts.contains(&"settings page: data"));
     }
 
     #[test]
