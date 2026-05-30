@@ -15818,3 +15818,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - weapon parts、continuous beam、shoot effects 与更精确 client-side recoil/reload/heat 动画仍需继续；
   - Unit engine trail 仍需先补 runtime trail points；hard shadow、legs、payload/item 仍未接入；
   - 当前 unit pass 仍临时复用 Overlay，后续必须统一 Java layer sorting / entity world pass。
+
+## 431. 最新闭环记录：Unit weapon flipSprite 的 sprite 级镜像接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **41.9%**，仍未达到完整可玩。
+- Java 对照：
+  - `core/src/mindustry/type/Weapon.java#drawOutline(...)` 中 `Draw.xscl = -Mathf.sign(flipSprite)`；
+  - `core/src/mindustry/type/Weapon.java#draw(...)` 中 `Draw.xscl *= -Mathf.sign(flipSprite)` 覆盖 region/cell/heat；
+  - `DrawPart.params.sideMultiplier = flipSprite ? -1 : 1` 仍属于后续 parts 迁移范围。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `unit_snapshot_weapon_sprite_render_command(...)` 在 `mount.weapon.flip_sprite` 为真时输出负宽度 `RenderRect`；
+    - body、outline、cell、heat 共享该 sprite 级镜像路径；
+    - shadow 保持不受 `flipSprite` 影响，仍与 Java 中 shadow 先于 `Draw.xscl` 状态切换的顺序一致；
+    - 新增 `desktop_launcher_emits_flipped_unit_weapon_sprite_for_flip_sprite`，验证 `large-weapon-outline` 与 `large-weapon` 的中心不变、宽度为 `-1`、高度/旋转/layer 保持原值。
+- 迁移意义：
+  - `flipSprite` 不再只是 content/runtime 字段，而是能进入 `RenderCommand::DrawSprite` 的可观测几何表达；
+  - 采用 signed rect 是当前 backend-neutral sprite quad 已支持的最小路径，避免引入全局 `Draw.xscl` 状态孤岛。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_flipped_unit_weapon_sprite_for_flip_sprite --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 这只是 sprite 级镜像，不是完整 Java 全局 `Draw.xscl` 状态栈；
+  - weapon parts 的 `sideMultiplier`、continuous beam、shoot effects 与更精确 client-side recoil/reload/heat 动画仍需继续；
+  - Unit engine trail 仍需先补 runtime trail points；hard shadow、legs、payload/item 仍未接入；
+  - 当前 unit pass 仍临时复用 Overlay，后续必须统一 Java layer sorting / entity world pass。

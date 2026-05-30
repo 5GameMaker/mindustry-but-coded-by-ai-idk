@@ -12008,7 +12008,10 @@ impl DesktopLauncher {
         }
 
         let region = self.texture_atlas.lookup(&symbol).ok()?;
-        let width = region.region.width.max(1) as f32;
+        let mut width = region.region.width.max(1) as f32;
+        if mount.weapon.flip_sprite {
+            width = -width;
+        }
         let height = region.region.height.max(1) as f32;
         let (center, rotation) = desktop_unit_weapon_pose(unit, mount);
         let rect = RenderRect::from_center(center, width, height);
@@ -16800,6 +16803,69 @@ mod tests {
                 assert!((color[3] - 0.6).abs() < 0.0001);
             }
             other => panic!("expected unit light DrawCircle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_emits_flipped_unit_weapon_sprite_for_flip_sprite() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dagger = launcher
+            .content_loader
+            .unit_by_name("dagger")
+            .expect("base content should include dagger")
+            .clone();
+
+        let mut unit = UnitComp::new(7401, dagger, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(180.0);
+        unit.weapons.mounts[0].weapon.flip_sprite = true;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7401, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            22,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass.commands.iter().any(|command| {
+                        matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == "large-weapon")
+                    })
+            })
+            .expect("flipped weapon should still emit weapon sprites");
+
+        for symbol_name in ["large-weapon-outline", "large-weapon"] {
+            match overlay.commands.iter().find(|command| {
+                matches!(command, RenderCommand::DrawSprite { symbol, .. } if symbol == symbol_name)
+            }) {
+                Some(RenderCommand::DrawSprite {
+                    rect,
+                    rotation,
+                    layer,
+                    ..
+                }) => {
+                    assert_eq!(rect.center(), RenderPoint::new(38.0, 60.0));
+                    assert_eq!(rect.width, -1.0);
+                    assert_eq!(rect.height, 1.0);
+                    assert_eq!(*rotation, 90.0);
+                    assert_eq!(*layer, Layer::GROUND_UNIT);
+                }
+                other => panic!("expected flipped unit weapon DrawSprite for {symbol_name}, got {other:?}"),
+            }
         }
     }
 

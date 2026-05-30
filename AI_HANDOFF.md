@@ -12960,3 +12960,33 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   2. 继续 weapon parts / continuous beam；
   3. 按子代理建议设计 Unit transient trail runtime points，再挂同一 Unit render aggregation；
   4. block/building 渲染继续沿现有 `BlockRendererPlan` 主链推进。
+
+### 2026-05-30：Unit weapon flipSprite 的 sprite 级镜像接入
+
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考为 `v158.1`）。
+  - Rust 工作区：`D:\MDT\rust-mindustry`。
+  - 禁止使用废案：`D:\MDT\mindustry-rust`。
+  - 遇到乱码优先 UTF-8。
+- 当前整体完成度：约 **41.9%**。
+- 本轮实际闭环：
+  - `desktop/src/lib.rs`
+    - `unit_snapshot_weapon_sprite_render_command(...)` 在 `mount.weapon.flip_sprite` 为真时将 sprite rect 宽度取负；
+    - 这条路径覆盖 weapon outline/body/cell/heat，因为它们都走同一个 sprite helper；
+    - shadow 没有跟随 flip，因为 Java shadow 在 `Draw.xscl` 切换前绘制；
+    - 新增 `desktop_launcher_emits_flipped_unit_weapon_sprite_for_flip_sprite`，验证 flipped weapon 的 center 仍为 `(38, 60)`，`rect.width == -1`，rotation/layer 不变。
+- Java 对照：
+  - `Weapon.drawOutline(...)` / `Weapon.draw(...)` 使用 `Draw.xscl = -Mathf.sign(flipSprite)` 或乘法切换；
+  - `DrawPart.params.sideMultiplier` 还未迁移，不能把本轮说成完整 `Draw.xscl` 语义。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_flipped_unit_weapon_sprite_for_flip_sprite --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_launcher_emits_unit_body_draw_sprite_for_visible_snapshot --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步：
+  1. weapon parts / `DrawPart.params.sideMultiplier` 是 flipSprite 的下一段真实 Java 语义；
+  2. continuous beam、shoot effects、client-side recoil/reload/heat 动画仍需继续；
+  3. Unit engine trail 应复用 `core/src/mindustry/graphics/trail.rs`，先补 transient trail point runtime，再进渲染；
+  4. Bullet/Effect 下一步优先把已有 draw plan/primitive 接成 `RenderCommand` / `RenderPass`，不要先大改复杂 trail mesh。
