@@ -18868,3 +18868,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `prefs.margin(14f)`、reset/back 按钮尺寸、tooltip description、TextSetting/AreaTextSetting、Data 页真实 side effects 仍待迁移；
   - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 530. SettingsMenuDialog Reset/Back 原版尺寸按钮
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **54.6%**，仍未达到完整可玩；继续把 Settings 子页底部动作从文本行推进为真实按钮。
+- Java 对照证据：
+  - `SettingsMenuDialog.addCloseButton()`：`buttons.button("@back", Icon.left, ...).size(210f, 64f)`；
+  - `SettingsTable.rebuild()`：reset 按钮 `button(bundle.get("settings.reset", "Reset to Defaults"), ...).margin(14).width(240f).pad(6)`；
+  - back 在子页返回 Settings Main，在 Main 页关闭 dialog。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 reset/back 按钮常量：reset `240x44`，back `210x64`；
+    - 新增 `settings_reset_button_rect_for_panel()` 与 `settings_back_button_rect_for_panel()`；
+    - 新增 `push_settings_text_button()` 与 `push_settings_route_buttons()`，使用 `defaultt`/`button.9` 风格绘制 `@settings.reset` 与 `@back`；
+    - `settings_route_shell_action_at_surface_point()` 对 Game/Graphics/Sound 子页命中 reset/back 按钮，对 Data 页命中 back 按钮；
+    - Settings 子页渲染时跳过旧的 `button:` 文本摘要行，改用真实按钮；
+    - 调整 SettingsTable 控件 clip 底部保留区，避免设置项行与 reset/back 按钮重叠。
+  - 测试：
+    - 新增 `desktop_launcher_settings_child_pages_render_reset_and_back_buttons`，验证 reset/back 尺寸、命中 action、渲染 label 与 `button.9` rect，并确认旧 `button:` 文本不再出现在 render frame；
+    - 更新 Settings 路由测试使用真实 reset/back button rect 触发动作；
+    - 现有 Settings 控件、滚轮、拖拽、布局测试全部保持通过。
+- 迁移意义：
+  - Settings 子页从“文本按钮壳”进一步变为可见可点、尺寸接近 Java 的 dialog 按钮结构；
+  - reset/back 行为继续走 `DesktopLauncher.apply_menu_input_events()` 主输入链；
+  - 为后续迁移 `prefs.margin(14f)`、Data 页子对话框和完整 BaseDialog buttons overlay 打基础。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Reset 按钮尚未作为 ScrollPane 内容末尾 actor 完全参与 Java `SettingsTable.rebuild()` 的 Table 布局；
+  - Back 按钮尚未接完整 BaseDialog buttons overlay/escape/back key 层级；
+  - Tooltip description、TextSetting/AreaTextSetting、动态 category、Data 页真实 side effects 仍待迁移；
+  - 主页面完整 UI 还必须继续推进 Join/Load/About/CustomGame/Schematics/Database/TechTree/Editor/Mods 等路由；
+  - 未达到完整可玩，不能宣告目标完成。

@@ -127,6 +127,10 @@ const SETTINGS_MENU_BUTTON_HEIGHT: f32 = 60.0;
 const SETTINGS_MENU_BUTTON_MARGIN_LEFT: f32 = 8.0;
 const SETTINGS_MENU_BUTTON_ICON_SIZE: f32 = 24.0;
 const SETTINGS_MENU_BUTTON_LABEL_GAP: f32 = 18.0;
+const SETTINGS_RESET_BUTTON_WIDTH: f32 = 240.0;
+const SETTINGS_RESET_BUTTON_HEIGHT: f32 = 44.0;
+const SETTINGS_BACK_BUTTON_WIDTH: f32 = 210.0;
+const SETTINGS_BACK_BUTTON_HEIGHT: f32 = 64.0;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -19105,10 +19109,12 @@ impl DesktopLauncher {
     }
 
     fn settings_pref_widget_clip_rect_for_panel(panel: RenderRect) -> RenderRect {
-        let height = (panel.height - 360.0).clamp(140.0, 240.0);
+        let bottom_reserved =
+            SETTINGS_BACK_BUTTON_HEIGHT + SETTINGS_RESET_BUTTON_HEIGHT + 30.0 + 16.0;
+        let height = (panel.height - bottom_reserved - 150.0).clamp(140.0, 240.0);
         RenderRect::new(
             panel.x + 36.0,
-            panel.y + 44.0,
+            panel.y + bottom_reserved,
             (panel.width - 84.0).max(160.0),
             height,
         )
@@ -19323,6 +19329,104 @@ impl DesktopLauncher {
                     .with_outline(true),
                 Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
             ));
+        }
+    }
+
+    fn push_settings_text_button(
+        &self,
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        label: &'static str,
+        icon: Option<&'static str>,
+        layer: f32,
+    ) {
+        let hovered = self
+            .last_menu_cursor
+            .map(|point| rect.contains_point(point))
+            .unwrap_or(false);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("defaultt", hovered, false),
+            rect,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            layer,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            rect,
+            if hovered {
+                [0.62, 0.82, 1.0, 0.96]
+            } else {
+                [0.38, 0.52, 0.64, 0.86]
+            },
+            1.0,
+            layer + 0.001,
+        ));
+        let label_x = if let Some(icon) = icon {
+            let icon_point = RenderPoint::new(rect.x + 34.0, rect.center().y);
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label(icon, icon),
+                icon_point,
+                [0.88, 0.94, 1.0, 1.0],
+                16.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.004,
+            ));
+            icon_point.x + 24.0
+        } else {
+            rect.center().x
+        };
+        pass.push(RenderCommand::draw_text_styled(
+            label,
+            RenderPoint::new(label_x, rect.center().y),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(if icon.is_some() {
+                RenderTextAlign::Start
+            } else {
+                RenderTextAlign::Center
+            })
+            .with_vertical_align(RenderTextVerticalAlign::Center)
+            .with_integer_position(true)
+            .with_outline(true),
+            layer + 0.005,
+        ));
+    }
+
+    fn push_settings_route_buttons(&self, pass: &mut RenderPass, panel: RenderRect) {
+        match self.settings_dialog_state.page {
+            DesktopSettingsPage::Game
+            | DesktopSettingsPage::Graphics
+            | DesktopSettingsPage::Sound => {
+                self.push_settings_text_button(
+                    pass,
+                    Self::settings_reset_button_rect_for_panel(panel),
+                    "@settings.reset",
+                    None,
+                    Layer::END_PIXELED + 0.072,
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::settings_back_button_rect_for_panel(panel),
+                    "@back",
+                    Some("left"),
+                    Layer::END_PIXELED + 0.082,
+                );
+            }
+            DesktopSettingsPage::Data => {
+                self.push_settings_text_button(
+                    pass,
+                    Self::settings_back_button_rect_for_panel(panel),
+                    "@back",
+                    Some("left"),
+                    Layer::END_PIXELED + 0.082,
+                );
+            }
+            DesktopSettingsPage::Main => {}
         }
     }
 
@@ -19801,6 +19905,24 @@ impl DesktopLauncher {
             .map(|(index, _)| index)
     }
 
+    fn settings_reset_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + (panel.width - SETTINGS_RESET_BUTTON_WIDTH) * 0.5,
+            panel.y + SETTINGS_BACK_BUTTON_HEIGHT + 30.0,
+            SETTINGS_RESET_BUTTON_WIDTH,
+            SETTINGS_RESET_BUTTON_HEIGHT,
+        )
+    }
+
+    fn settings_back_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + (panel.width - SETTINGS_BACK_BUTTON_WIDTH) * 0.5,
+            panel.y + 18.0,
+            SETTINGS_BACK_BUTTON_WIDTH,
+            SETTINGS_BACK_BUTTON_HEIGHT,
+        )
+    }
+
     fn settings_action_for_main_entry(index: usize) -> Option<DesktopSettingsAction> {
         match index {
             0 => Some(DesktopSettingsAction::OpenPage(DesktopSettingsPage::Game)),
@@ -19866,6 +19988,22 @@ impl DesktopLauncher {
                 return Self::settings_action_for_main_entry(index)
                     .map(DesktopMenuRouteShellAction::Settings);
             }
+        }
+        if matches!(
+            self.settings_dialog_state.page,
+            DesktopSettingsPage::Game | DesktopSettingsPage::Graphics | DesktopSettingsPage::Sound
+        ) && Self::settings_reset_button_rect_for_panel(panel).contains_point(point)
+        {
+            return Some(DesktopMenuRouteShellAction::Settings(
+                DesktopSettingsAction::ResetCurrentPage,
+            ));
+        }
+        if self.settings_dialog_state.page != DesktopSettingsPage::Main
+            && Self::settings_back_button_rect_for_panel(panel).contains_point(point)
+        {
+            return Some(DesktopMenuRouteShellAction::Settings(
+                DesktopSettingsAction::BackToMain,
+            ));
         }
         if let Some(action) = self.settings_route_control_action_at_point(panel, point) {
             return Some(DesktopMenuRouteShellAction::Settings(action));
@@ -20768,6 +20906,9 @@ impl DesktopLauncher {
             self.push_settings_main_menu_buttons(pass, panel);
         } else {
             for (index, line) in self.active_menu_route_shell_lines(route).iter().enumerate() {
+                if route == DesktopMenuRoute::Settings && line.starts_with("button:") {
+                    continue;
+                }
                 pass.push(RenderCommand::draw_text_styled(
                     line.clone(),
                     RenderPoint::new(
@@ -20785,6 +20926,7 @@ impl DesktopLauncher {
             }
             if route == DesktopMenuRoute::Settings {
                 self.push_settings_route_controls(pass, panel);
+                self.push_settings_route_buttons(pass, panel);
             }
         }
         if let Some(primary_rect) =
@@ -38721,9 +38863,9 @@ mod tests {
             .iter()
             .position(|line| line == "button: reset-to-defaults")
             .expect("Game settings page should expose reset");
+        assert!(reset_index > 0);
         let reset_center =
-            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, reset_index)
-                .center();
+            DesktopLauncher::settings_reset_button_rect_for_panel(settings_panel).center();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -38751,9 +38893,9 @@ mod tests {
             .iter()
             .position(|line| line == "button: back")
             .expect("Game settings page should expose back");
+        assert!(back_index > reset_index);
         let back_center =
-            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, back_index)
-                .center();
+            DesktopLauncher::settings_back_button_rect_for_panel(settings_panel).center();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -38939,6 +39081,90 @@ mod tests {
                 .contains(&super::desktop_ui_icon_glyph_or_label(entry.icon, entry.icon).as_str()));
         }
         assert!(!labels.contains(&"settings page: main"));
+    }
+
+    #[test]
+    fn desktop_launcher_settings_child_pages_render_reset_and_back_buttons() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let reset = DesktopLauncher::settings_reset_button_rect_for_panel(panel);
+        let back = DesktopLauncher::settings_back_button_rect_for_panel(panel);
+        assert_eq!(reset.width, super::SETTINGS_RESET_BUTTON_WIDTH);
+        assert_eq!(back.width, super::SETTINGS_BACK_BUTTON_WIDTH);
+        assert_eq!(back.height, super::SETTINGS_BACK_BUTTON_HEIGHT);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                reset.center().x,
+                reset.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::ResetCurrentPage
+            ))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                back.center().x,
+                back.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::BackToMain
+            ))
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("settings child page should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let labels = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"@settings.reset"));
+        assert!(labels.contains(&"@back"));
+        assert!(!labels.contains(&"button: reset-to-defaults"));
+        assert!(!labels.contains(&"button: back"));
+        let button_rects = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } if symbol == "button.9" => {
+                    Some(*rect)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(button_rects.contains(&reset));
+        assert!(button_rects.contains(&back));
+
+        launcher.settings_dialog_state.page = super::DesktopSettingsPage::Data;
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                back.center().x,
+                back.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::BackToMain
+            ))
+        );
     }
 
     #[test]
