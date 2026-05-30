@@ -16845,3 +16845,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 菜单当前仍不是完整 Java Scene/UI，只是 menu world/cache/shadow/flyer 渲染进一步真实化；
   - 真实 font atlas、完整按钮/fragment、菜单交互与最终可玩主界面仍需继续推进；
   - 下一批 Unit Ability 建议优先 `ShieldArcAbility` 与 `EnergyFieldAbility`，随后 `ArmorPlateAbility`、`MoveLightningAbility`、`UnitSpawnAbility`。
+
+## 463. ShieldArcAbility 下沉到客户端弧盾线段渲染
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **47.6%**，仍未达到完整可玩；继续优先推进前端/客户端/渲染。
+- Java 对照：
+  - `D:\MDT\mindustry-upstream-v157.4\core\src\mindustry\entities\abilities\ShieldArcAbility.java:204-229`：`draw(Unit)` 在 `Layer.shields` 上按 `x/y`、`unit.rotation + angleOffset - angle/2`、`width * widthScale` 调用 `Lines.arc(...)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_unit_shield_arc_center(...)` 与 `desktop_arc_point(...)`；
+    - `unit_snapshot_ability_render_commands(...)` 增加 `ShieldArcAbility` descriptor 识别；
+    - 新增 `unit_snapshot_shield_arc_render_commands(...)`，把 `Lines.arc(...)` 近似为每段不超过 `8°` 的 `RenderCommand::DrawLine`；
+    - 弧盾使用 `AbilityWire.data` 判断 shield 存活，使用 `unit.weapons.is_shooting` 处理 `whenShooting`，并接入 `Layer::SHIELDS` 与 primitive/OpenGL line quad 主链。
+- 迁移意义：
+  - `ShieldArcAbility` 不再只存在 update/data 层，已经接到 `client unit snapshot -> UnitDrawStage::Abilities -> DrawLine arc segments -> primitive/OpenGL`；
+  - 继续沿用现有 render frame/backend，而不是新增孤立 ability helper。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_shield_arc_ability_to_line_segments_before_unit_shield --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_force_field_ability_to_polygon_before_unit_shield --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_lowers_suppression_field_ability_to_visible_circles --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Java 的 `widthScale` 与 `alpha` 是 ShieldArcAbility 客户端瞬时状态，当前网络 snapshot 只同步 `AbilityWire.data`，所以暂按 active 满宽渲染；
+  - `region`、`offsetRegion`、`color override`、`animateShields=false` 低 alpha 行为尚未补齐；
+  - 后续建议继续接 `EnergyFieldAbility` 连续视觉，或回到真实 font atlas / 菜单 Scene UI。

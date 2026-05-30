@@ -1299,6 +1299,7 @@ const DESKTOP_SUPPRESSION_FIELD_PARTICLE_SIZE: f32 = 4.0;
 const DESKTOP_SUPPRESSION_FIELD_PARTICLE_LEN: f32 = 7.0;
 const DESKTOP_SUPPRESSION_FIELD_ROTATE_SCL: f32 = 3.0;
 const DESKTOP_SUPPRESSION_FIELD_PARTICLE_LIFE: f32 = 110.0;
+const DESKTOP_SHIELD_ARC_MAX_SEGMENT_DEGREES: f32 = 8.0;
 
 fn desktop_unit_payload_symbol(kind: PayloadKind) -> &'static str {
     match kind {
@@ -1374,6 +1375,16 @@ fn desktop_unit_suppression_field_center(
 ) -> RenderPoint {
     let (offset_x, offset_y) = desktop_rotate_offset(unit.rotation() - 90.0, ability.x, ability.y);
     RenderPoint::new(unit.x() + offset_x, unit.y() + offset_y)
+}
+
+fn desktop_unit_shield_arc_center(unit: &UnitComp, ability: &ShieldArcAbility) -> RenderPoint {
+    let (x, y) = ability.shield_position(unit.x(), unit.y(), unit.rotation());
+    RenderPoint::new(x, y)
+}
+
+fn desktop_arc_point(center: RenderPoint, radius: f32, angle: f32) -> RenderPoint {
+    let (offset_x, offset_y) = desktop_rotate_offset(angle, radius, 0.0);
+    RenderPoint::new(center.x + offset_x, center.y + offset_y)
 }
 
 fn desktop_unit_soft_shadow_sprite(unit: &UnitComp) -> &'static str {
@@ -14365,6 +14376,14 @@ impl DesktopLauncher {
                 }
             }
 
+            if let Some(ability) = ShieldArcAbility::from_descriptor(descriptor) {
+                if ability.base.visible {
+                    commands.extend(
+                        self.unit_snapshot_shield_arc_render_commands(unit, &ability, index),
+                    );
+                }
+            }
+
             if let Some(ability) = SuppressionFieldAbility::from_descriptor(descriptor) {
                 if ability.base.visible && ability.active {
                     commands.extend(
@@ -14374,6 +14393,58 @@ impl DesktopLauncher {
             }
         }
 
+        commands
+    }
+
+    fn unit_snapshot_shield_arc_render_commands(
+        &self,
+        unit: &UnitComp,
+        ability: &ShieldArcAbility,
+        ability_index: usize,
+    ) -> Vec<RenderCommand> {
+        if !ability.draw_arc {
+            return Vec::new();
+        }
+
+        let data = unit
+            .abilities
+            .get(ability_index)
+            .map_or(ability.max, |wire| wire.data);
+        if data <= 0.0 || ability.radius <= f32::EPSILON || ability.angle <= f32::EPSILON {
+            return Vec::new();
+        }
+
+        let active = !ability.when_shooting || unit.weapons.is_shooting;
+        if !active {
+            return Vec::new();
+        }
+
+        // Java keeps ShieldArcAbility.widthScale as client-side transient state.
+        // UnitSyncWire currently only transports the shield `data`, so snapshot
+        // rendering uses the fully-active width once the synchronized shield is
+        // alive and active; this keeps the visual on the real ability render
+        // stage until widthScale/alpha are serialized.
+        let stroke = ability.width.max(0.0);
+        if stroke <= f32::EPSILON {
+            return Vec::new();
+        }
+
+        let center = desktop_unit_shield_arc_center(unit, ability);
+        let angle_span = ability.angle.clamp(0.0, 360.0);
+        let segments =
+            ((angle_span / DESKTOP_SHIELD_ARC_MAX_SEGMENT_DEGREES).ceil() as usize).clamp(1, 128);
+        let start_angle = unit.rotation() + ability.angle_offset - angle_span * 0.5;
+        let color = desktop_unit_force_field_color(unit);
+        let layer = Layer::SHIELDS + 0.0005;
+
+        let mut commands = Vec::with_capacity(segments);
+        for segment in 0..segments {
+            let t0 = segment as f32 / segments as f32;
+            let t1 = (segment + 1) as f32 / segments as f32;
+            let from = desktop_arc_point(center, ability.radius, start_angle + angle_span * t0);
+            let to = desktop_arc_point(center, ability.radius, start_angle + angle_span * t1);
+            commands.push(RenderCommand::draw_line(from, to, stroke, color, layer));
+        }
         commands
     }
 
@@ -21654,6 +21725,121 @@ mod tests {
             .sprite_quads
             .iter()
             .any(|quad| quad.symbol == "primitive:DrawPolygon"));
+    }
+
+    #[test]
+    fn desktop_launcher_lowers_shield_arc_ability_to_line_segments_before_unit_shield() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut unit_type = UnitType::new(7409, "shield-arc-test");
+        unit_type.draw_shields = true;
+        unit_type.hit_size = 10.0;
+        unit_type.abilities = vec!["ShieldArcAbility:32:0.75:200:480:90:10:4:-2:false:6:1".into()];
+
+        let mut unit = UnitComp::new(7409, unit_type, TeamId(1));
+        unit.add();
+        unit.set_pos(40.0, 56.0);
+        unit.set_rotation(90.0);
+        unit.shield.shield_alpha = 0.2;
+        unit.abilities[0] = type_io::AbilityWire { data: 125.0 };
+        let hit_size = unit.hitbox.hit_size;
+        launcher
+            .runtime
+            .client_unit_snapshot_entities
+            .insert(7409, unit);
+
+        let viewport = RenderViewport::new(0.0, 0.0, 128.0, 128.0);
+        let camera = RenderCamera::new(RenderPoint::new(64.0, 64.0), viewport);
+        let minimap_camera = MinimapCamera::new(64.0, 64.0, 128.0, 128.0);
+        let frame = launcher.graphics_frame_for_render(
+            30,
+            camera,
+            viewport,
+            minimap_camera,
+            sample_minimap_overlay_input(false),
+        );
+
+        let render_frame = frame.bundle.render_frame.as_ref().unwrap();
+        let overlay = render_frame
+            .passes
+            .iter()
+            .find(|pass| {
+                pass.kind == RenderPassKind::Overlay
+                    && pass
+                        .commands
+                        .iter()
+                        .any(|command| matches!(command, RenderCommand::DrawLine { .. }))
+            })
+            .expect("ShieldArcAbility.draw should emit overlay line segment geometry");
+
+        let center = RenderPoint::new(44.0, 54.0);
+        let start_angle = 90.0 + 10.0 - 90.0 * 0.5;
+        let (first_x, first_y) = super::desktop_rotate_offset(start_angle, 32.0, 0.0);
+        let expected_first = RenderPoint::new(center.x + first_x, center.y + first_y);
+        let arc_lines = overlay
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawLine {
+                    from,
+                    to,
+                    stroke,
+                    color,
+                    layer,
+                } if (*layer - (Layer::SHIELDS + 0.0005)).abs() < 0.0001 => {
+                    Some((*from, *to, *stroke, *color, *layer))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            arc_lines.len(),
+            (90.0f32 / super::DESKTOP_SHIELD_ARC_MAX_SEGMENT_DEGREES).ceil() as usize,
+            "shield arc should approximate Java Lines.arc with bounded line segments"
+        );
+        assert!((arc_lines[0].0.x - expected_first.x).abs() < 0.0001);
+        assert!((arc_lines[0].0.y - expected_first.y).abs() < 0.0001);
+        assert_eq!(arc_lines[0].2, 6.0);
+        assert_eq!(
+            arc_lines[0].3,
+            super::desktop_unit_force_field_color(
+                launcher
+                    .runtime
+                    .client_unit_snapshot_entities
+                    .get(&7409)
+                    .expect("unit should remain in snapshot store")
+            )
+        );
+
+        let arc_index = overlay
+            .commands
+            .iter()
+            .position(|command| matches!(command, RenderCommand::DrawLine { .. }))
+            .expect("shield arc lines should be present");
+        let unit_shield_index = overlay
+            .commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawCircle { center, radius, layer, .. }
+                        if *center == RenderPoint::new(40.0, 56.0)
+                            && (*radius - hit_size * 1.3).abs() < 0.0001
+                            && (*layer - Layer::GROUND_UNIT).abs() < 0.0001
+                )
+            })
+            .expect("generic unit shield stage should still render after shield arc ability");
+        assert!(arc_index < unit_shield_index);
+
+        let mut headless = HeadlessDesktopGraphicsRenderer::default();
+        headless.render_graphics_frame(&frame);
+        assert!(
+            headless
+                .last_opengl_backend_executor_state
+                .sprite_quads
+                .iter()
+                .any(|quad| quad.symbol == "primitive:DrawLine"),
+            "shield arc line segments should continue into primitive OpenGL quads"
+        );
     }
 
     #[test]
