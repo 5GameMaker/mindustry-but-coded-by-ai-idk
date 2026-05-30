@@ -43,8 +43,9 @@ pub use light_renderer::{
 };
 pub use load_renderer::*;
 pub use menu_renderer::{
-    MenuBlockKind, MenuFrameInput, MenuFramePlan, MenuRenderCommand, MenuRendererConfig,
-    MenuRendererState, MenuTile, MenuWorldPlan, MENU_DARKNESS, MENU_TILE_SIZE,
+    MenuBlockKind, MenuButtonPlan, MenuButtonRole, MenuFrameInput, MenuFramePlan,
+    MenuRenderCommand, MenuRendererConfig, MenuRendererState, MenuTile, MenuUiPlan, MenuWorldPlan,
+    MENU_DARKNESS, MENU_TILE_SIZE,
 };
 pub use minimap_renderer::*;
 pub use minimap_world_adapter::*;

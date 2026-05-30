@@ -218,6 +218,19 @@ pub struct MenuUiPlan {
 }
 
 impl MenuUiPlan {
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<MenuButtonRole> {
+        self.buttons
+            .iter()
+            .rev()
+            .find(|button| {
+                x >= button.rect.x
+                    && x <= button.rect.x + button.rect.width
+                    && y >= button.rect.y
+                    && y <= button.rect.y + button.rect.height
+            })
+            .map(|button| button.role)
+    }
+
     pub fn to_render_commands(&self) -> Vec<RenderCommand> {
         let mut commands = Vec::with_capacity(self.buttons.len() * 2);
         for button in &self.buttons {
@@ -575,6 +588,14 @@ impl MenuRendererState {
                 }
             })
             .collect()
+    }
+
+    pub fn ui_plan(&self, input: MenuFrameInput) -> MenuUiPlan {
+        menu_ui_plan(input, self.config.mobile)
+    }
+
+    pub fn hit_test_ui(&self, input: MenuFrameInput, x: f32, y: f32) -> Option<MenuButtonRole> {
+        self.ui_plan(input).hit_test(x, y)
     }
 }
 
@@ -1088,6 +1109,17 @@ mod tests {
         );
         assert!(plan.ui.buttons[0].selected);
         assert!(plan.ui.buttons[6].submenu);
+        let play_center = plan.ui.buttons[0].rect.center();
+        let campaign_center = plan.ui.buttons[6].rect.center();
+        assert_eq!(
+            plan.ui.hit_test(play_center.x, play_center.y),
+            Some(MenuButtonRole::Play)
+        );
+        assert_eq!(
+            plan.ui.hit_test(campaign_center.x, campaign_center.y),
+            Some(MenuButtonRole::Campaign)
+        );
+        assert_eq!(plan.ui.hit_test(0.0, 0.0), None);
     }
 
     #[test]
@@ -1209,5 +1241,19 @@ mod tests {
         assert!(plan.ui.to_render_commands().iter().any(
             |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "TECH TREE")
         ));
+        let quit_center = plan.ui.buttons.last().unwrap().rect.center();
+        assert_eq!(
+            state.hit_test_ui(
+                MenuFrameInput {
+                    graphics_width: 720.0,
+                    graphics_height: 1280.0,
+                    scl4: 4.0,
+                    delta: 1.0 / 60.0,
+                },
+                quit_center.x,
+                quit_center.y,
+            ),
+            Some(MenuButtonRole::Quit)
+        );
     }
 }

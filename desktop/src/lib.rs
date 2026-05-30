@@ -48,20 +48,20 @@ use mindustry_core::mindustry::graphics::{
     FloorRendererState, FogColor, FogFrameInput, FogFramePlan, FogRendererState, FogViewport,
     GraphicsFrameBundle, GraphicsFrameStats, Layer, LightCommand, LightPrimitive,
     LightRendererPlan, LightRendererState, LoadFrameInput, LoadFramePlan, LoadRendererState,
-    MenuFrameInput, MenuFramePlan, MenuRendererConfig, MenuRendererState, MinimapCamera,
-    MinimapFogLayer, MinimapOverlayCommand, MinimapOverlayInput, MinimapOverlayPlan, MinimapRect,
-    MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize, OverlayRendererPlan,
-    OverlayRendererState, PageType, Pal, PixelatorCamera, PixelatorFramePlan, PixelatorInput,
-    PixelatorState, PngRgba8888DecodeError, RenderBackendFlushBoundary, RenderBlendFactor,
-    RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderEngineState, RenderFontId,
-    RenderFramePlan, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
-    RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle,
-    RenderTextVerticalAlign, RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect,
-    RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCamera,
-    ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters,
-    ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
-    TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
-    Viewport as FloorViewport,
+    MenuButtonRole, MenuFrameInput, MenuFramePlan, MenuRendererConfig, MenuRendererState,
+    MinimapCamera, MinimapFogLayer, MinimapOverlayCommand, MinimapOverlayInput, MinimapOverlayPlan,
+    MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
+    OverlayRendererPlan, OverlayRendererState, PageType, Pal, PixelatorCamera, PixelatorFramePlan,
+    PixelatorInput, PixelatorState, PngRgba8888DecodeError, RenderBackendFlushBoundary,
+    RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera, RenderCommand,
+    RenderEngineState, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind, RenderPoint,
+    RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget, RenderTextAlign,
+    RenderTextStyle, RenderTextVerticalAlign, RenderTextureSampleFlip, RenderTextureSamplePlan,
+    RenderUvRect, RenderViewport, ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan,
+    ShaderCamera, ShaderCatalog, ShaderDispatchFrame, ShaderId, ShaderLoadPlan, ShaderLoadTask,
+    ShaderParameters, ShaderReloadAction, ShaderReloadPlan, ShaderTextureRegion, ShaderViewport,
+    TextureAtlasPlan, TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord,
+    UniformValue, Viewport as FloorViewport,
 };
 use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
@@ -11297,6 +11297,22 @@ pub fn desktop_frame_loop_events_from_winit_window_event(
             DesktopSurfaceSize::new(size.width, size.height),
         )],
         winit::event::WindowEvent::RedrawRequested => vec![DesktopFrameLoopEvent::Tick],
+        winit::event::WindowEvent::CursorMoved { position, .. } => {
+            vec![DesktopFrameLoopEvent::Input(
+                DesktopInputTickEvent::CursorMoved {
+                    x: position.x as f32,
+                    y: position.y as f32,
+                },
+            )]
+        }
+        winit::event::WindowEvent::MouseInput { state, button, .. } => {
+            vec![DesktopFrameLoopEvent::Input(
+                DesktopInputTickEvent::MouseButton {
+                    button: format!("{button:?}"),
+                    pressed: state.is_pressed(),
+                },
+            )]
+        }
         _ => Vec::new(),
     }
 }
@@ -11654,6 +11670,9 @@ pub struct DesktopLauncher {
     pub fog_renderer_state: FogRendererState,
     pub minimap_renderer_state: MinimapRendererState,
     pub menu_renderer_state: MenuRendererState,
+    pub last_menu_cursor: Option<RenderPoint>,
+    pub last_menu_hovered_button: Option<MenuButtonRole>,
+    pub last_menu_action: Option<MenuButtonRole>,
     pub load_renderer_state: LoadRendererState,
     pub ui_status_bar: Bar,
     pub pixelator_state: PixelatorState,
@@ -12322,6 +12341,9 @@ impl DesktopLauncher {
             fog_renderer_state: FogRendererState::default(),
             minimap_renderer_state: MinimapRendererState::new(MinimapWorldSize::new(0, 0)),
             menu_renderer_state: MenuRendererState::new(MenuRendererConfig::new(false, 7)),
+            last_menu_cursor: None,
+            last_menu_hovered_button: None,
+            last_menu_action: None,
             load_renderer_state: LoadRendererState::default(),
             ui_status_bar,
             pixelator_state: PixelatorState::default(),
@@ -15681,6 +15703,54 @@ impl DesktopLauncher {
         }
     }
 
+    fn menu_button_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        y: f32,
+    ) -> Option<MenuButtonRole> {
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let input = Self::default_menu_frame_input_for_viewport(viewport);
+        self.menu_renderer_state.hit_test_ui(input, x, y)
+    }
+
+    fn is_primary_menu_mouse_button(button: &str) -> bool {
+        matches!(
+            button,
+            "left" | "Left" | "primary" | "Primary" | "MouseLeft" | "mouse-left" | "0"
+        )
+    }
+
+    fn apply_menu_input_events(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        input_events: &[DesktopInputTickEvent],
+    ) {
+        if self.has_renderable_world_for_default_frame() {
+            return;
+        }
+
+        for input in input_events {
+            match input {
+                DesktopInputTickEvent::CursorMoved { x, y } => {
+                    let point = RenderPoint::new(*x, *y);
+                    self.last_menu_cursor = Some(point);
+                    self.last_menu_hovered_button =
+                        self.menu_button_at_surface_point(surface_size, point.x, point.y);
+                }
+                DesktopInputTickEvent::MouseButton { button, pressed }
+                    if *pressed && Self::is_primary_menu_mouse_button(button) =>
+                {
+                    if let Some(cursor) = self.last_menu_cursor {
+                        self.last_menu_action =
+                            self.menu_button_at_surface_point(surface_size, cursor.x, cursor.y);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn menu_graphics_frame_for_surface(
         &mut self,
         frame_index: u64,
@@ -16037,6 +16107,7 @@ impl DesktopLauncher {
             };
         }
 
+        self.apply_menu_input_events(loop_state.surface.size, &input_events);
         self.update();
         let graphics_stats = self.render_default_graphics_frame_for_surface_with(
             frame_index,
@@ -17620,14 +17691,15 @@ mod tests {
     use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
     use mindustry_core::mindustry::graphics::{
         BlockDrawStage, BlockRendererBlockParticlePlan, BlockRendererPlan, CacheLayer,
-        Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuFrameInput,
-        MinimapCamera, MinimapEntitySnapshot, MinimapFullUpdatePlan, MinimapIndicatorSnapshot,
-        MinimapMarkerSnapshot, MinimapOverlayInput, MinimapPlayerSnapshot, MinimapSpawnSnapshot,
-        MinimapTextureFramePlan, MinimapTexturePixelUpdate, MinimapTextureSize, MinimapTilePos,
-        PageType, Pal, ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor,
-        RenderBlendMode, RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan,
-        RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind,
-        RenderSize, RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
+        Env as GraphicsEnv, Layer, LightPrimitive, LoadFrameInput, LoadStage, MenuButtonRole,
+        MenuFrameInput, MinimapCamera, MinimapEntitySnapshot, MinimapFullUpdatePlan,
+        MinimapIndicatorSnapshot, MinimapMarkerSnapshot, MinimapOverlayInput,
+        MinimapPlayerSnapshot, MinimapSpawnSnapshot, MinimapTextureFramePlan,
+        MinimapTexturePixelUpdate, MinimapTextureSize, MinimapTilePos, PageType, Pal,
+        ParticleRendererState, RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode,
+        RenderBridge, RenderCamera, RenderCommand, RenderFontId, RenderFramePlan, RenderPass,
+        RenderPassKind, RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize,
+        RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
         RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect, RenderViewport,
         ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCatalog,
         ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureBinding, TileCoord, UniformBinding,
@@ -31313,6 +31385,43 @@ mod tests {
             .sprite_quads
             .iter()
             .any(|quad| quad.symbol == "primitive:DrawText"));
+    }
+
+    #[test]
+    fn desktop_launcher_records_no_world_menu_hover_and_primary_action() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let ui = launcher.menu_renderer_state.ui_plan(input);
+        let play_center = ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Play)
+            .expect("menu ui should include PLAY")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: play_center.x,
+                    y: play_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(launcher.last_menu_cursor, Some(play_center));
+        assert_eq!(
+            launcher.last_menu_hovered_button,
+            Some(MenuButtonRole::Play)
+        );
+        assert_eq!(launcher.last_menu_action, Some(MenuButtonRole::Play));
     }
 
     #[test]

@@ -16987,3 +16987,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 还没有菜单输入 hit-test、submenu 展开/收起状态、fade 动画和真实 action dispatch；
   - `Workshop` 条件、custom buttons、完整 mobile/desktop Scene layout 仍需继续迁移；
   - 字体仍是 placeholder glyph，真实 font atlas 仍需预烘焙资产或新增字体栅格化依赖。
+
+## 468. 菜单按钮 hit-test 与 no-world hover/action 状态
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **48.1%**，仍未达到完整可玩；继续推进菜单从静态渲染走向可交互前端。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuUiPlan::hit_test(x, y)` 基于按钮 rect 返回 `MenuButtonRole`；
+    - `MenuRendererState::ui_plan(input)` / `hit_test_ui(input, x, y)` 提供不改变 `time/flyer` 动画状态的 UI 查询入口；
+    - core 菜单测试覆盖 desktop Play/Campaign 和 mobile Quit 命中。
+  - `core/src/mindustry/graphics/mod.rs`
+    - re-export `MenuButtonRole` / `MenuButtonPlan` / `MenuUiPlan`。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 记录 `last_menu_cursor`、`last_menu_hovered_button`、`last_menu_action`；
+    - no-world 默认菜单下处理 `CursorMoved` 与 primary `MouseButton`，将点击映射到具体 `MenuButtonRole`；
+    - `desktop_frame_loop_events_from_winit_window_event(...)` 开始把 winit cursor/mouse 事件桥接成 `DesktopFrameLoopEvent::Input`；
+    - 新增 `desktop_launcher_records_no_world_menu_hover_and_primary_action`，避免按钮树只停留在静态绘制。
+- 迁移意义：
+  - 正式 menu pass 的按钮开始具备 hit-test 和 action role，后续可以接入 submenu 切换、页面打开、join/campaign/settings 等真实动作；
+  - 该路径接入 `DesktopLauncher`/frame loop 输入事件，不是独立 UI mock。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_records_no_world_menu_hover_and_primary_action --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `last_menu_action` 尚未分发到真实菜单页面/网络连接/退出流程；
+  - winit 鼠标坐标与 render 坐标系仍需在真实窗口输入中统一；
+  - hover 样式、submenu 展开状态、点击音效、返回键和移动端触控仍需继续补齐。

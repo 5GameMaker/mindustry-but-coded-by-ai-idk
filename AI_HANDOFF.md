@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **48.0%**。
+- 当前总体迁移完成度：约 **48.1%**。
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
@@ -14118,3 +14118,32 @@ git -C 'D:/MDT/rust-mindustry' push origin main
   1. 按钮目前是渲染模型，还没有输入命中、submenu 状态切换、fade 动画和真实 action dispatch；
   2. 尚未完整迁移 Java `MenuFragment` 的 custom buttons、workshop 条件、mobile/desktop 全布局细节；
   3. 字体仍是 placeholder glyph，真实 font atlas 待后续处理。
+
+### 2026-05-30：菜单按钮 hit-test 与 hover/action 状态
+- 固定路径：
+  - Java 参考：`D:\MDT\mindustry-upstream-v157.4`
+  - Rust 工作区：`D:\MDT\rust-mindustry`
+  - 禁止使用废案：`D:\MDT\mindustry-rust`
+  - 遇到文字乱码优先 UTF-8。
+- 当前整体完成度：约 **48.1%**。
+- 本轮实际闭环：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuUiPlan::hit_test(x, y)` 可根据按钮 rect 返回 `MenuButtonRole`；
+    - `MenuRendererState::ui_plan(...)` / `hit_test_ui(...)` 提供不推进动画时间的 UI 查询入口。
+  - `core/src/mindustry/graphics/mod.rs`
+    - re-export `MenuButtonRole/MenuButtonPlan/MenuUiPlan`，供 desktop 主链使用。
+  - `desktop/src/lib.rs`
+    - `DesktopLauncher` 新增 `last_menu_cursor`、`last_menu_hovered_button`、`last_menu_action`；
+    - no-world 状态下处理 `CursorMoved` 和 primary `MouseButton`，记录 hover/action；
+    - `desktop_frame_loop_events_from_winit_window_event(...)` 开始桥接 winit cursor/mouse input 到 `DesktopFrameLoopEvent::Input`；
+    - 新增 `desktop_launcher_records_no_world_menu_hover_and_primary_action`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-core menu --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_records_no_world_menu_hover_and_primary_action --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  1. `last_menu_action` 目前只是 action role 记录，尚未 dispatch 到 campaign/join/settings 等真实页面或网络流程；
+  2. winit cursor y 坐标仍按当前 render 坐标直接传递，后续真实窗口输入需统一坐标系；
+  3. submenu 状态切换、hover 样式、点击音效、返回/退出逻辑仍需继续迁移。
