@@ -17376,3 +17376,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `discord/terminal/info/becheck` 当前已可见但尚未接入真实点击动作、consolefrag/discord/about/update check 状态；
   - `customButtons` 当前完成了数据与布局可见闭环，尚未迁移 Java 的 runnable/submenu 回调派发；
   - desktop `workshop` 条件项、submenu fade、`checkPlay()` mod error guard、真实 route dialogs 和真字体 atlas 仍待继续。
+
+## 481. MenuFragment chrome 点击命中与动作记录接入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **49.6%**，仍未达到完整可玩；继续优先推进前端/客户端菜单主链和渲染可见性。
+- Java 对照：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:52-93`
+    - `discord`、mobile `terminal/info`、desktop `becheck` 都是挂在 `build()` 顶层的可点击 UI；
+    - mobile `terminal` 调 `ui.consolefrag.toggleMobile()`，`info` 打开 `ui.about`，desktop `becheck` 调更新检查。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuChromeAction` 和 `DesktopMenuChromeLayout`；
+    - 渲染和 hit-test 共用 `menu_chrome_layout_for_viewport(...)`，避免 chrome rect 复制后漂移；
+    - `apply_menu_input_events(...)` 在 route-shell action 之后、主菜单按钮之前处理 chrome 点击；
+    - 新增 `last_menu_chrome_action` 和 `menu_mobile_terminal_open`，作为 `discord/becheck/terminal/info` 的可测试动作状态；
+    - mobile `info` 直接进入 `DesktopMenuRoute::About`，继续走现有 `active_menu_route -> push_active_menu_route_shell -> menu_pass` 主链；
+    - terminal toggle、discord、becheck 均记录到 `last_menu_chrome_action`，为后续接真实 `consolefrag/discord/update-check` 留出主链入口。
+- 迁移意义：
+  - 菜单 chrome 不再只是可见叠层，已经进入 `DesktopLauncher` 输入事件链；
+  - mobile `info` 与已有 About route 打通，后续可继续把 About shell 从 pending 文案升级为真实 `AboutDialog` 内容。
+- 已验证：
+  - `cargo fmt --all --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_ --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_ --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `discord` 仍只是动作记录，尚未接 `ui.discord::show` 等价页面/链接；
+  - `becheck` 仍只是动作记录，尚未接真实 update check / loadfrag / info 反馈；
+  - `terminal` 只保留 toggle 状态，尚未接真实 consolefrag；
+  - `About` route 仍是 shell，尚未读取 upstream `AboutDialog/Links/contributors/bundle` 的真实内容。
