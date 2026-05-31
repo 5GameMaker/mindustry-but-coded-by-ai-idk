@@ -24434,8 +24434,18 @@ impl DesktopLauncher {
             DesktopLoadGameActionKind::Load => "play",
             DesktopLoadGameActionKind::ToggleAutosave => "save",
             DesktopLoadGameActionKind::Delete => "trash",
-            DesktopLoadGameActionKind::Rename => "pencilSmall",
+            DesktopLoadGameActionKind::Rename => "pencil",
             DesktopLoadGameActionKind::Export => "export",
+        }
+    }
+
+    fn load_game_mode_filter_icon(mode: Gamemode) -> &'static str {
+        match mode {
+            Gamemode::Survival => "modeSurvival",
+            Gamemode::Sandbox => "terrain",
+            Gamemode::Attack => "modeAttack",
+            Gamemode::Pvp => "modePvp",
+            Gamemode::Editor => "terrain",
         }
     }
 
@@ -33174,18 +33184,23 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.029 + index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                format!("@mode.{}.name", mode.wire_name()),
+                desktop_ui_icon_glyph_or_label(
+                    Self::load_game_mode_filter_icon(mode),
+                    mode.wire_name(),
+                ),
                 RenderPoint::new(rect.center().x, rect.center().y),
                 if hidden {
                     [0.36, 0.44, 0.50, 0.92]
                 } else {
                     [0.74, 0.88, 0.96, 1.0]
                 },
-                6.5,
+                17.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
+                    .with_integer_position(true)
+                    .with_outline(true),
                 Layer::END_PIXELED + 0.030 + index as f32 * 0.0001,
             ));
         }
@@ -59110,10 +59125,34 @@ version: "2.0.0"
             .any(|text| text.contains("@save.wave: 9")
                 && text.contains("@save.date: 1970-01-01 00:00")));
         assert!(texts.contains(&"@save.autosave: @on"));
-        assert!(texts.contains(&"@mode.survival.name"));
-        assert!(texts.contains(&"@mode.sandbox.name"));
-        assert!(texts.contains(&"@mode.attack.name"));
-        assert!(texts.contains(&"@mode.pvp.name"));
+        let route_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::LoadGame,
+        );
+        let search_rect = DesktopLauncher::load_game_search_rect_for_panel(route_panel);
+        for (index, mode) in [
+            Gamemode::Survival,
+            Gamemode::Sandbox,
+            Gamemode::Attack,
+            Gamemode::Pvp,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rect = DesktopLauncher::load_game_mode_filter_button_rect(search_rect, index);
+            let icon = DesktopLauncher::load_game_mode_filter_icon(mode);
+            let glyph = super::desktop_ui_icon_glyph_or_label(icon, mode.wire_name());
+            assert!(
+                commands.iter().any(|command| matches!(
+                    command,
+                    RenderCommand::DrawText { text, position, style, .. }
+                        if text == &glyph
+                            && *position == rect.center()
+                            && style.font == RenderFontId::Icon
+                )),
+                "Java LoadDialog mode filter should render {icon} as an icon toggle"
+            );
+        }
         assert!(!texts.iter().any(|text| text.starts_with("#0 New Map")));
         let symbols = commands
             .iter()
@@ -59156,6 +59195,15 @@ version: "2.0.0"
                     if text == &save_glyph && style.font == RenderFontId::Icon
             )),
             "LoadDialog action glyphs must render with the upstream icon font"
+        );
+        let rename_glyph = super::desktop_ui_icon_glyph_or_label("pencil", "pencil");
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, style, .. }
+                    if text == &rename_glyph && style.font == RenderFontId::Icon
+            )),
+            "Java LoadDialog uses Icon.pencil for the rename slot action"
         );
         for frame_index in 1..=u64::from(super::LOAD_GAME_LOADING_DELAY_FRAMES) {
             launcher.menu_graphics_frame_for_surface(frame_index, viewport);

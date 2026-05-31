@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 602. LoadDialog 模式筛选与重命名图标对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.2%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 LoadDialog 搜索栏右侧模式筛选从小号文字标签改成原版图标 toggle，并修正 slot 重命名图标。
+- Java 对照依据：
+  - `LoadDialog` 搜索栏遍历 `Gamemode.all`，对可用模式使用 `Vars.ui.getIcon("mode" + capitalize(mode.name()))`，sandbox 使用 `Icon.terrain`，按钮样式为 `Styles.emptyTogglei`；
+  - 存档卡片重命名按钮使用 `Icon.pencil`，不是 `pencilSmall` 文本 fallback。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_game_mode_filter_icon(...)`，把 survival/sandbox/attack/pvp 映射为 `modeSurvival/terrain/modeAttack/modePvp`；
+    - LoadDialog 模式筛选按钮改为 Icon 字体绘制，字号从旧的 6.5 文字标签提升到 17，隐藏/选中状态沿用原按钮 tint；
+    - `DesktopLoadGameActionKind::Rename` 的 slot action icon 改为 `pencil`；
+    - 扩展 LoadDialog 回归测试，验证四个模式筛选按钮实际在 filter rect 中用 `RenderFontId::Icon` 绘制，并锁定 rename 使用 `Icon.pencil`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 模式筛选按钮背景仍使用当前 Rust `grayt` 过渡按钮，后续应继续对齐 Java `Styles.emptyTogglei` 的透明/checked/hover 行为和 tooltip；
+  - `@save.import` / `@save.new` 的底部按钮条位置仍未完全对齐 Java `LoadDialog.addSetup()`；
+  - 真实 `slot.load()`、完整 save snapshot 恢复与 Java 互通仍需继续迁移。
+
 ## 601. Native OpenGL 首帧 redraw 不再抢跑 renderer
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
