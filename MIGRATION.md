@@ -19690,6 +19690,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java `Scl.scl(1f)` 与 Scene2D actor 坐标还需要后续进一步复核；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 567. Settings Controls reset all 底部布局闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.9%**，仍未达到完整可玩；继续优先前端/UI，把 `KeybindDialog` 的 `@settings.reset` 从小右侧按钮推进到更接近 Java 底部填充按钮的布局。
+- Java 对照依据：
+  - `KeybindDialog.rebuildBinds()` 末尾使用 `table.button("@settings.reset", Icon.refresh, tstyle, KeyBind::resetAll).minWidth(200f).colspan(4).padTop(4).margin(10f).height(50f).fill()`；
+  - reset all 是列表收尾处的宽按钮，不应表现为右下角小按钮。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `settings_keybind_reset_all_rect(...)` 改为沿底部按钮行填充 `@back` 右侧剩余宽度，最小宽度 200；
+    - Controls 子弹窗测试断言 reset all 与 back 同底部行、同高，且宽度显著大于旧小按钮；
+    - Settings 路由测试固定 locale override 为 `en`，避免 `LANG` 环境影响语言弹窗断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings_controls --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - reset all 仍未完全实现 Java ScrollPane 列表收尾语义；
+  - Controls 搜索框和 rebind modal 视觉仍需继续贴近原版；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

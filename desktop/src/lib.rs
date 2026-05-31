@@ -21860,11 +21860,13 @@ impl DesktopLauncher {
     }
 
     fn settings_keybind_reset_all_rect(dialog: RenderRect) -> RenderRect {
+        let back = Self::schematic_info_button_rect(dialog, 0);
+        let x = back.right() + 10.0;
         RenderRect::new(
-            dialog.x + dialog.width - 170.0,
-            dialog.y + 18.0,
-            150.0,
-            46.0,
+            x,
+            back.y,
+            (dialog.right() - x - 18.0).max(200.0),
+            back.height,
         )
     }
 
@@ -46824,6 +46826,11 @@ mod tests {
             Some(super::DesktopSettingsAction::BackToMain)
         );
 
+        launcher
+            .settings_overrides
+            .insert("locale".into(), "en".into());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
         let language_center =
             DesktopLauncher::settings_main_menu_button_rect_for_panel(settings_panel, 3).center();
         launcher.apply_menu_input_events(
@@ -46888,9 +46895,14 @@ mod tests {
         assert!(!language_texts
             .contains(&"LanguageDialog placeholder: locale list and bundle reload later"));
         assert!(language_texts.contains(&"@back"));
-        assert!(launcher
-            .settings_route_lines()
-            .contains(&"child dialog: LanguageDialog locales:36 selected:en".to_string()));
+        let route_lines = launcher.settings_route_lines();
+        assert!(
+            route_lines.contains(&format!(
+                "child dialog: LanguageDialog locales:36 selected:{}",
+                launcher.settings_locale
+            )),
+            "{route_lines:?}"
+        );
 
         let child_dialog = DesktopLauncher::settings_child_dialog_rect_for_panel(settings_panel);
         launcher.apply_menu_input_events(
@@ -47082,6 +47094,15 @@ mod tests {
         assert!(controls_texts.contains(&"@settings.resetKey"));
         assert!(
             !controls_texts.contains(&"ControlsDialog placeholder: keybind rows and reset later")
+        );
+        let back_rect = DesktopLauncher::schematic_info_button_rect(child_dialog, 0);
+        let reset_all_rect = DesktopLauncher::settings_keybind_reset_all_rect(child_dialog);
+        assert_eq!(reset_all_rect.y, back_rect.y);
+        assert_eq!(reset_all_rect.height, back_rect.height);
+        assert!(reset_all_rect.x > back_rect.right());
+        assert!(
+            reset_all_rect.width > 300.0,
+            "Java KeybindDialog reset all button fills the bottom row instead of being a small right-corner button"
         );
         let total_keybinds = super::SETTINGS_KEYBIND_SPECS.len();
         assert!(launcher.settings_route_lines().contains(&format!(
