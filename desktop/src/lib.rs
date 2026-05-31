@@ -535,6 +535,12 @@ impl DesktopSchematicCardAction {
 pub enum DesktopMapCardActionKind {
     OpenPlay,
     OpenEditorInfo,
+    SelectPlayMode(Gamemode),
+    PlaySelected,
+    Customize,
+    OpenInEditor,
+    Delete,
+    ViewWorkshop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15463,6 +15469,7 @@ pub struct DesktopLauncher {
     pub map_list_filter_prioritize_modded: bool,
     pub map_play_dialog_index: Option<usize>,
     pub editor_map_info_dialog_index: Option<usize>,
+    pub map_play_selected_mode: Gamemode,
     pub last_map_card_action: Option<DesktopMapCardAction>,
     pub editor_new_map_dialog_open: bool,
     pub editor_import_map_dialog_open: bool,
@@ -16244,6 +16251,7 @@ impl DesktopLauncher {
             map_list_filter_prioritize_modded: false,
             map_play_dialog_index: None,
             editor_map_info_dialog_index: None,
+            map_play_selected_mode: Gamemode::Survival,
             last_map_card_action: None,
             editor_new_map_dialog_open: false,
             editor_import_map_dialog_open: false,
@@ -23610,11 +23618,24 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_play_customize_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.center().x - 115.0, dialog.y + 72.0, 230.0, 44.0)
+    }
+
+    fn map_play_dialog_modes() -> [Gamemode; 4] {
+        [
+            Gamemode::Survival,
+            Gamemode::Attack,
+            Gamemode::Sandbox,
+            Gamemode::Pvp,
+        ]
+    }
+
     fn map_editor_action_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
         let width = (dialog.width - 56.0) * 0.5;
         RenderRect::new(
             dialog.x + 24.0 + index as f32 * (width + 8.0),
-            dialog.y + 20.0,
+            dialog.y + 72.0,
             width,
             44.0,
         )
@@ -24492,6 +24513,51 @@ impl DesktopLauncher {
             if Self::map_card_dialog_close_rect(dialog).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseMapCardDialog);
             }
+            if let Some(index) = self.map_play_dialog_index {
+                for (mode_index, mode) in Self::map_play_dialog_modes().into_iter().enumerate() {
+                    if Self::map_play_mode_button_rect(dialog, mode_index).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::MapCard(
+                            DesktopMapCardAction::new(
+                                index,
+                                DesktopMapCardActionKind::SelectPlayMode(mode),
+                            ),
+                        ));
+                    }
+                }
+                if Self::map_play_primary_button_rect(dialog).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapCard(
+                        DesktopMapCardAction::new(index, DesktopMapCardActionKind::PlaySelected),
+                    ));
+                }
+                if Self::map_play_customize_button_rect(dialog).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapCard(
+                        DesktopMapCardAction::new(index, DesktopMapCardActionKind::Customize),
+                    ));
+                }
+            }
+            if let Some(index) = self.editor_map_info_dialog_index {
+                if Self::map_editor_action_button_rect(dialog, 0).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapCard(
+                        DesktopMapCardAction::new(index, DesktopMapCardActionKind::OpenInEditor),
+                    ));
+                }
+                if Self::map_editor_action_button_rect(dialog, 1).contains_point(point) {
+                    let kind = self
+                        .map_list_cards
+                        .get(index)
+                        .map(|map| {
+                            if map.workshop {
+                                DesktopMapCardActionKind::ViewWorkshop
+                            } else {
+                                DesktopMapCardActionKind::Delete
+                            }
+                        })
+                        .unwrap_or(DesktopMapCardActionKind::Delete);
+                    return Some(DesktopMenuRouteShellAction::MapCard(
+                        DesktopMapCardAction::new(index, kind),
+                    ));
+                }
+            }
             return None;
         }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
@@ -25101,12 +25167,63 @@ impl DesktopLauncher {
                     self.last_map_card_action = Some(action);
                     match action.kind {
                         DesktopMapCardActionKind::OpenPlay => {
+                            if !self
+                                .map_list_cards
+                                .get(action.index)
+                                .map(|map| self.map_play_selected_mode.valid(map))
+                                .unwrap_or(false)
+                            {
+                                self.map_play_selected_mode = Gamemode::Sandbox;
+                            }
                             self.map_play_dialog_index = Some(action.index);
                             self.editor_map_info_dialog_index = None;
                         }
                         DesktopMapCardActionKind::OpenEditorInfo => {
                             self.editor_map_info_dialog_index = Some(action.index);
                             self.map_play_dialog_index = None;
+                        }
+                        DesktopMapCardActionKind::SelectPlayMode(mode) => {
+                            if self
+                                .map_list_cards
+                                .get(action.index)
+                                .map(|map| mode.valid(map))
+                                .unwrap_or(false)
+                            {
+                                self.map_play_selected_mode = mode;
+                            }
+                        }
+                        DesktopMapCardActionKind::PlaySelected => {
+                            let report =
+                                self.runtime.seed_playable_smoke_world(&self.content_loader);
+                            self.runtime
+                                .set_network_context(GameRuntimeNetworkContext::offline());
+                            self.runtime.state.rules.mode_name =
+                                Some(self.map_play_selected_mode.wire_name().to_string());
+                            self.game_state = self.runtime.state.clone();
+                            self.player.team = TeamId(self.game_state.rules.default_team as u8);
+                            self.active_menu_route = None;
+                            self.map_play_dialog_index = None;
+                            self.editor_map_info_dialog_index = None;
+                            self.last_campaign_launch_report = Some(report);
+                        }
+                        DesktopMapCardActionKind::Customize => {}
+                        DesktopMapCardActionKind::OpenInEditor => {
+                            self.active_menu_route = Some(DesktopMenuRoute::Editor);
+                            self.editor_map_info_dialog_index = Some(action.index);
+                            self.map_play_dialog_index = None;
+                        }
+                        DesktopMapCardActionKind::Delete => {
+                            self.map_list_cards.remove(action.index);
+                            self.map_play_dialog_index = None;
+                            self.editor_map_info_dialog_index = None;
+                            self.map_list_scroll_offset = self
+                                .map_list_scroll_offset
+                                .min(self.map_list_cards.len().saturating_sub(1));
+                        }
+                        DesktopMapCardActionKind::ViewWorkshop => {
+                            self.dispatch_menu_platform_action(
+                                DesktopMenuPlatformAction::OpenWorkshop,
+                            );
                         }
                     }
                 }
@@ -27325,15 +27442,13 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.062,
         ));
-        for (index, label) in ["survival", "attack", "sandbox", "pvp"]
-            .into_iter()
-            .enumerate()
-        {
-            self.push_settings_text_button(
+        for (index, mode) in Self::map_play_dialog_modes().into_iter().enumerate() {
+            self.push_map_list_filter_toggle(
                 pass,
                 Self::map_play_mode_button_rect(dialog, index),
-                label,
-                None,
+                mode.wire_name(),
+                self.map_play_selected_mode == mode,
+                mode.valid(map),
                 Layer::END_PIXELED + 0.063 + index as f32 * 0.001,
             );
         }
@@ -27387,7 +27502,7 @@ impl DesktopLauncher {
         );
         self.push_settings_text_button(
             pass,
-            RenderRect::new(dialog.center().x - 115.0, dialog.y + 72.0, 230.0, 44.0),
+            Self::map_play_customize_button_rect(dialog),
             "@customize",
             Some("settings"),
             Layer::END_PIXELED + 0.073,
@@ -47191,6 +47306,147 @@ version: "2.0.0"
             assert_eq!(launcher.map_play_dialog_index, None);
             assert_eq!(launcher.editor_map_info_dialog_index, None);
         }
+    }
+
+    #[test]
+    fn desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions() {
+        fn map_card(name: &str, spawns: i32, teams: &[i32], workshop: bool) -> MapDescriptor {
+            let mut tags = BTreeMap::new();
+            tags.insert("name".to_string(), name.to_string());
+            tags.insert("author".to_string(), "Mapper".to_string());
+            let mut map = MapDescriptor::new(
+                format!("maps/custom/{name}.msav"),
+                180,
+                180,
+                tags,
+                true,
+                1,
+                157,
+            );
+            map.spawns = spawns;
+            map.teams = teams.to_vec();
+            map.workshop = workshop;
+            map
+        }
+
+        let viewport = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![map_card("Battle", 1, &[1, 2], false)];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlay),
+        ));
+
+        let render_viewport = launcher.default_render_viewport_for_surface(viewport);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            render_viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+        let attack_center = DesktopLauncher::map_play_mode_button_rect(dialog, 1).center();
+        let select_attack =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::SelectPlayMode(Gamemode::Attack),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                attack_center.x,
+                attack_center.y
+            ),
+            Some(select_attack)
+        );
+        launcher.dispatch_menu_route_shell_action(select_attack);
+        assert_eq!(launcher.map_play_selected_mode, Gamemode::Attack);
+
+        let play_center = DesktopLauncher::map_play_primary_button_rect(dialog).center();
+        let play = super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+            0,
+            super::DesktopMapCardActionKind::PlaySelected,
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                play_center.x,
+                play_center.y
+            ),
+            Some(play)
+        );
+        launcher.dispatch_menu_route_shell_action(play);
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(launcher.map_play_dialog_index, None);
+        assert_eq!(
+            launcher.game_state.rules.mode_name.as_deref(),
+            Some(Gamemode::Attack.wire_name())
+        );
+        assert!(launcher.last_campaign_launch_report.is_some());
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![
+            map_card("Delete Me", 1, &[], false),
+            map_card("Workshop Arena", 1, &[], true),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Editor);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenEditorInfo),
+        ));
+        let render_viewport = launcher.default_render_viewport_for_surface(viewport);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            render_viewport,
+            super::DesktopMenuRoute::Editor,
+        );
+        let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+        let open_in_center = DesktopLauncher::map_editor_action_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                open_in_center.x,
+                open_in_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenInEditor)
+            ))
+        );
+
+        let delete_center = DesktopLauncher::map_editor_action_button_rect(dialog, 1).center();
+        let delete = super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+            0,
+            super::DesktopMapCardActionKind::Delete,
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                delete_center.x,
+                delete_center.y
+            ),
+            Some(delete)
+        );
+        launcher.dispatch_menu_route_shell_action(delete);
+        assert_eq!(launcher.map_list_cards.len(), 1);
+        assert_eq!(launcher.map_list_cards[0].plain_name(), "Workshop Arena");
+        assert_eq!(launcher.editor_map_info_dialog_index, None);
+
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenEditorInfo),
+        ));
+        let workshop = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::ViewWorkshop),
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                delete_center.x,
+                delete_center.y
+            ),
+            Some(workshop)
+        );
+        launcher.dispatch_menu_route_shell_action(workshop);
+        assert_eq!(
+            launcher.last_menu_platform_action,
+            Some(super::DesktopMenuPlatformAction::OpenWorkshop)
+        );
+        assert_eq!(launcher.map_list_cards.len(), 1);
     }
 
     #[test]
