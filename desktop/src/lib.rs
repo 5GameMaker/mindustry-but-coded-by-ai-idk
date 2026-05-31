@@ -38,6 +38,7 @@ use mindustry_core::mindustry::entities::{
     SuppressionFieldAbility, TextureRegionRef, UnitDrawPartKind, WeaponMount, WorldLabelAlign,
     WorldLabelComp, PLAYER_CLASS_ID,
 };
+use mindustry_core::mindustry::game::{TechNodeId, TechTree};
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 #[cfg(test)]
@@ -189,6 +190,9 @@ const DATABASE_CONTENT_CELL_SIZE: f32 = 32.0;
 const DATABASE_CONTENT_CELL_GAP: f32 = 7.0;
 const DATABASE_VISIBLE_CATEGORIES: usize = 4;
 const DATABASE_VISIBLE_ITEMS_PER_CATEGORY: usize = 8;
+const TECH_TREE_NODE_WIDTH: f32 = 112.0;
+const TECH_TREE_NODE_HEIGHT: f32 = 38.0;
+const TECH_TREE_VISIBLE_NODES: usize = 11;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -22820,6 +22824,16 @@ impl DesktopLauncher {
                 panel_height,
             );
         }
+        if route == DesktopMenuRoute::TechTree {
+            let panel_width = (viewport.width * 0.70).clamp(420.0, 780.0);
+            let panel_height = (viewport.height - 110.0).clamp(360.0, 650.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
         if matches!(
             route,
             DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
@@ -23797,6 +23811,37 @@ impl DesktopLauncher {
         )
     }
 
+    fn tech_tree_graph_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + 86.0,
+            panel.width - 56.0,
+            (panel.height - 236.0).max(160.0),
+        )
+    }
+
+    fn tech_tree_items_display_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(panel.x + 28.0, panel.y + 24.0, panel.width - 56.0, 44.0)
+    }
+
+    fn tech_tree_select_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + panel.width - 238.0,
+            panel.y + panel.height - 128.0,
+            210.0,
+            44.0,
+        )
+    }
+
+    fn tech_tree_root_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 28.0,
+            panel.y + panel.height - 128.0,
+            (panel.width - 294.0).max(180.0),
+            44.0,
+        )
+    }
+
     fn active_menu_route_shell_action_at_surface_point(
         &self,
         surface_size: DesktopSurfaceSize,
@@ -23856,6 +23901,13 @@ impl DesktopLauncher {
                 self.schematics_route_shell_action_at_surface_point(viewport, x, y)
             {
                 return Some(action);
+            }
+        }
+        if route == DesktopMenuRoute::TechTree {
+            let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
+            if Self::route_back_button_rect_for_panel(panel).contains_point(RenderPoint::new(x, y))
+            {
+                return Some(DesktopMenuRouteShellAction::CloseRoute);
             }
         }
         if let Some(rect) = Self::discord_route_shell_copy_rect_for_viewport(viewport, route) {
@@ -25662,6 +25714,154 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_tech_tree_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        self.push_settings_text_button(
+            pass,
+            Self::route_back_button_rect_for_panel(panel),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.024,
+        );
+
+        let Some((root_name, tree, root)) = self.tech_tree_route_root() else {
+            pass.push(RenderCommand::draw_text_styled(
+                "@none",
+                RenderPoint::new(panel.center().x, panel.center().y),
+                [0.70, 0.78, 0.84, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.026,
+            ));
+            return;
+        };
+
+        let root_button = Self::tech_tree_root_button_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("flatTogglet", false, true),
+            root_button,
+            [1.0, 1.0, 1.0, 0.94],
+            0.0,
+            Layer::END_PIXELED + 0.025,
+        ));
+        let root_label = tree
+            .node(root)
+            .and_then(|node| node.name.as_deref())
+            .unwrap_or(root_name);
+        pass.push(RenderCommand::draw_text_styled(
+            format!("{root_name}: {root_label}"),
+            root_button.center(),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.027,
+        ));
+
+        self.push_settings_text_button(
+            pass,
+            Self::tech_tree_select_rect_for_panel(panel),
+            "@techtree.select",
+            Some("downOpen"),
+            Layer::END_PIXELED + 0.025,
+        );
+
+        let graph = Self::tech_tree_graph_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            graph,
+            [1.0, 1.0, 1.0, 0.78],
+            0.0,
+            Layer::END_PIXELED + 0.026,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            graph,
+            [0.26, 0.38, 0.48, 0.92],
+            1.0,
+            Layer::END_PIXELED + 0.027,
+        ));
+
+        let rects = self.tech_tree_route_visible_node_rects(graph);
+        let rect_by_id = rects.iter().copied().collect::<BTreeMap<_, _>>();
+        for (id, rect) in &rects {
+            let Some(node) = tree.node(*id) else {
+                continue;
+            };
+            if let Some(parent) = node.parent.and_then(|parent| rect_by_id.get(&parent)) {
+                pass.push(RenderCommand::draw_line(
+                    parent.center(),
+                    rect.center(),
+                    2.0,
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.58],
+                    Layer::END_PIXELED + 0.028,
+                ));
+            }
+        }
+
+        for (index, (id, rect)) in rects.iter().enumerate() {
+            let Some(node) = tree.node(*id) else {
+                continue;
+            };
+            let is_root = *id == root;
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("flatTogglet", false, is_root),
+                *rect,
+                [1.0, 1.0, 1.0, if is_root { 0.95 } else { 0.84 }],
+                0.0,
+                Layer::END_PIXELED + 0.030 + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                node.content.name.clone(),
+                rect.center(),
+                if is_root {
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                } else {
+                    [0.82, 0.90, 0.96, 1.0]
+                },
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(is_root),
+                Layer::END_PIXELED + 0.031 + index as f32 * 0.001,
+            ));
+        }
+
+        let items = Self::tech_tree_items_display_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            items,
+            [1.0, 1.0, 1.0, 0.82],
+            0.0,
+            Layer::END_PIXELED + 0.044,
+        ));
+        let item_summary = self
+            .content_loader
+            .items()
+            .iter()
+            .take(6)
+            .map(|item| item.base.mappable.name.as_str())
+            .collect::<Vec<_>>()
+            .join("  ");
+        pass.push(RenderCommand::draw_text_styled(
+            format!("ItemsDisplay: {item_summary}"),
+            RenderPoint::new(items.x + 18.0, items.center().y),
+            [0.76, 0.86, 0.94, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.045,
+        ));
+    }
+
     fn push_map_list_route_page(
         &self,
         pass: &mut RenderPass,
@@ -26776,7 +26976,11 @@ impl DesktopLauncher {
     }
 
     fn tech_tree_route_lines(&self) -> Vec<String> {
-        let roots = self.content_loader.catalog().planets.len().max(1);
+        let roots = self
+            .tech_tree_route_root()
+            .map(|(_, tree, _)| tree.roots().len())
+            .unwrap_or(0)
+            .max(1);
         vec![
             "dialog: ResearchDialog titleTable root node".into(),
             format!("roots: {roots}"),
@@ -26784,6 +26988,74 @@ impl DesktopLauncher {
             "view: TechTreeNode graph".into(),
             "items: ItemsDisplay visible when !net.client".into(),
         ]
+    }
+
+    fn tech_tree_route_root(&self) -> Option<(&'static str, &TechTree, TechNodeId)> {
+        let catalog = self.content_loader.catalog();
+        catalog
+            .serpulo_tech_tree
+            .roots()
+            .first()
+            .copied()
+            .map(|root| ("serpulo", &catalog.serpulo_tech_tree, root))
+            .or_else(|| {
+                catalog
+                    .erekir_tech_tree
+                    .roots()
+                    .first()
+                    .copied()
+                    .map(|root| ("erekir", &catalog.erekir_tech_tree, root))
+            })
+    }
+
+    fn tech_tree_route_visible_node_rects(
+        &self,
+        graph: RenderRect,
+    ) -> Vec<(TechNodeId, RenderRect)> {
+        let Some((_, tree, root)) = self.tech_tree_route_root() else {
+            return Vec::new();
+        };
+        let ids = tree
+            .each_from(root)
+            .into_iter()
+            .filter(|id| tree.node(*id).is_some())
+            .take(TECH_TREE_VISIBLE_NODES)
+            .collect::<Vec<_>>();
+        let mut depth_counts: BTreeMap<usize, usize> = BTreeMap::new();
+        for id in &ids {
+            if let Some(node) = tree.node(*id) {
+                *depth_counts.entry(node.depth).or_default() += 1;
+            }
+        }
+        let mut depth_seen: BTreeMap<usize, usize> = BTreeMap::new();
+        let max_depth = ids
+            .iter()
+            .filter_map(|id| tree.node(*id).map(|node| node.depth))
+            .max()
+            .unwrap_or(0)
+            .max(1);
+        ids.into_iter()
+            .filter_map(|id| {
+                let node = tree.node(id)?;
+                let count = depth_counts.get(&node.depth).copied().unwrap_or(1).max(1);
+                let slot = depth_seen.entry(node.depth).or_default();
+                let x_step = graph.width / (count as f32 + 1.0);
+                let y_step =
+                    (graph.height - TECH_TREE_NODE_HEIGHT) / (max_depth as f32 + 1.0).max(1.0);
+                let center_x = graph.x + x_step * (*slot as f32 + 1.0);
+                let center_y = graph.y + graph.height - y_step * (node.depth as f32 + 1.0);
+                *slot += 1;
+                Some((
+                    id,
+                    RenderRect::new(
+                        center_x - TECH_TREE_NODE_WIDTH * 0.5,
+                        center_y - TECH_TREE_NODE_HEIGHT * 0.5,
+                        TECH_TREE_NODE_WIDTH,
+                        TECH_TREE_NODE_HEIGHT,
+                    ),
+                ))
+            })
+            .collect()
     }
 
     fn mods_route_lines(&self) -> Vec<String> {
@@ -27358,6 +27630,8 @@ impl DesktopLauncher {
             self.push_load_game_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Database {
             self.push_database_route_page(pass, panel);
+        } else if route == DesktopMenuRoute::TechTree {
+            self.push_tech_tree_route_page(pass, panel);
         } else if matches!(
             route,
             DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
@@ -44611,6 +44885,64 @@ version: "2.0.0"
                 );
             }
         }
+    }
+
+    #[test]
+    fn desktop_launcher_techtree_route_renders_research_dialog_shell_and_graph() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let dispatch = launcher.dispatch_menu_action(MenuButtonRole::TechTree);
+        assert_eq!(dispatch.route, Some(super::DesktopMenuRoute::TechTree));
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::TechTree)
+        );
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::TechTree,
+        );
+        assert!(panel.height > 220.0);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("tech tree route should produce a render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@back"));
+        assert!(texts.contains(&"@techtree.select"));
+        assert!(texts.contains(&"serpulo: serpulo"));
+        assert!(texts.contains(&"core-shard"));
+        assert!(texts.contains(&"conveyor"));
+        assert!(texts.iter().any(|text| text.starts_with("ItemsDisplay:")));
+        assert!(commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawLine { .. })));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, .. } if symbol == "pane.9"
+            )
+        }));
+
+        let back = DesktopLauncher::route_back_button_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, back.x, back.y),
+            Some(super::DesktopMenuRouteShellAction::CloseRoute)
+        );
     }
 
     #[test]

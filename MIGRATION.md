@@ -20030,6 +20030,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 移动端 terminal overlay 仍不是完整 `consolefrag`；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 580. ResearchDialog 首屏科技树画布闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **63.2%**，仍未达到完整可玩；继续优先前端/UI，把 `TechTree` 路由从摘要文本推进到可见的 `ResearchDialog` 首屏结构。
+- Java 对照依据：
+  - 上游 `ResearchDialog` 首屏包含 `titleTable` root 按钮、`@techtree.select`、可拖拽/缩放的 `View` 科技树画布与 `ItemsDisplay`；
+  - Rust 之前只显示 `dialog/select/view/items` 摘要行，没有真实节点/连线可视化；
+  - 科技树是 Database 子菜单下首屏高可见入口，不能长期停留在调试文本壳。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `TechTree` 路由使用更大的 `ResearchDialog` 面板；
+    - 新增 `tech_tree_route_root(...)`，优先从 base content 的 Serpulo tech tree 取 root；
+    - 新增科技树 graph/root/select/items display 几何 helper；
+    - 新增 `push_tech_tree_route_page(...)`，渲染 `@back`、root 按钮、`@techtree.select`、pane 画布、节点、父子连线和底部 `ItemsDisplay`；
+    - `TechTree` 路由 back 按钮接入 `CloseRoute` hit-test；
+    - 新增测试覆盖 `serpulo/core-shard/conveyor` 节点、连线、ItemsDisplay 和 back action。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_techtree_route_renders_research_dialog_shell_and_graph --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_menu_routes_use_upstream_dialog_structure --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前科技树画布仍是静态首屏布局，尚未接 Java `View` 的拖拽、缩放、惯性与点击节点详情/解锁；
+  - `@techtree.select` 还未打开真实 root/planet 选择弹窗；
+  - `ItemsDisplay` 还只是可视承载条，未接 campaign sector item state；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
