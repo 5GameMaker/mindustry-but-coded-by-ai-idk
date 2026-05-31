@@ -20766,6 +20766,11 @@ impl DesktopLauncher {
                 .len()
                 .saturating_sub(SETTINGS_LANGUAGE_VISIBLE_ROWS),
         );
+        let list_clip = Self::settings_language_list_clip_rect(dialog);
+        let scrollpane = Self::settings_language_scrollpane_rect(dialog);
+        let scroll_track_symbol = Self::settings_scroll_track_symbol();
+        let scroll_knob_symbol = Self::settings_scroll_knob_symbol();
+        pass.push(RenderCommand::set_clip(list_clip));
         for (index, option) in SETTINGS_LANGUAGE_OPTIONS
             .iter()
             .skip(offset)
@@ -20808,35 +20813,15 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.122 + index as f32 * 0.0001,
             ));
         }
-        if SETTINGS_LANGUAGE_OPTIONS.len() > SETTINGS_LANGUAGE_VISIBLE_ROWS {
-            let top = offset + 1;
-            let bottom =
-                (offset + SETTINGS_LANGUAGE_VISIBLE_ROWS).min(SETTINGS_LANGUAGE_OPTIONS.len());
-            pass.push(RenderCommand::draw_text_styled(
-                format!("{top}-{bottom}/{}", SETTINGS_LANGUAGE_OPTIONS.len()),
-                RenderPoint::new(dialog.center().x, dialog.y + 112.0),
-                [0.44, 0.54, 0.62, 0.95],
-                9.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.120,
-            ));
-        }
-        if let Some(message) = self.last_settings_language_restart_message.as_deref() {
-            pass.push(RenderCommand::draw_text_styled(
-                message,
-                RenderPoint::new(dialog.center().x, dialog.y + 80.0),
-                [0.56, 0.68, 0.76, 1.0],
-                10.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.121,
-            ));
-        }
+        pass.push(RenderCommand::clear_clip());
+        Self::push_settings_scrollbar(
+            pass,
+            scrollpane,
+            SETTINGS_LANGUAGE_OPTIONS.len(),
+            offset as f32 * SETTINGS_LANGUAGE_ROW_HEIGHT,
+            scroll_track_symbol,
+            scroll_knob_symbol,
+        );
     }
 
     fn push_settings_controls_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
@@ -21770,16 +21755,36 @@ impl DesktopLauncher {
     }
 
     fn settings_language_row_rect(dialog: RenderRect, index: usize) -> RenderRect {
-        let width = SETTINGS_LANGUAGE_LIST_WIDTH.min(dialog.width - 48.0);
-        let x = dialog.x + (dialog.width - width) * 0.5;
-        let top = dialog.y + dialog.height
-            - 72.0
+        let clip = Self::settings_language_list_clip_rect(dialog);
+        let top = clip.y + clip.height
             - index as f32 * (SETTINGS_LANGUAGE_ROW_HEIGHT + SETTINGS_LANGUAGE_ROW_GAP);
         RenderRect::new(
-            x,
+            clip.x,
             top - SETTINGS_LANGUAGE_ROW_HEIGHT,
-            width,
+            clip.width,
             SETTINGS_LANGUAGE_ROW_HEIGHT,
+        )
+    }
+
+    fn settings_language_scrollpane_rect(dialog: RenderRect) -> RenderRect {
+        let width = (SETTINGS_LANGUAGE_LIST_WIDTH + 18.0).min(dialog.width - 48.0);
+        let height = (SETTINGS_LANGUAGE_VISIBLE_ROWS as f32 * SETTINGS_LANGUAGE_ROW_HEIGHT)
+            .min((dialog.height - 158.0).max(SETTINGS_LANGUAGE_ROW_HEIGHT));
+        RenderRect::new(
+            dialog.x + (dialog.width - width) * 0.5,
+            dialog.y + dialog.height - 72.0 - height,
+            width,
+            height,
+        )
+    }
+
+    fn settings_language_list_clip_rect(dialog: RenderRect) -> RenderRect {
+        let scrollpane = Self::settings_language_scrollpane_rect(dialog);
+        RenderRect::new(
+            scrollpane.x,
+            scrollpane.y,
+            (scrollpane.width - 18.0).max(0.0),
+            scrollpane.height,
         )
     }
 
@@ -46859,11 +46864,35 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let language_sprites = language_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("language child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, .. } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert!(language_texts.contains(&"@settings.language"));
         assert!(language_texts.contains(&"English"));
         assert!(!language_texts.contains(&"简体中文"));
-        assert!(language_texts.contains(&"1-7/36"));
+        assert!(
+            !language_texts.contains(&"1-7/36"),
+            "Java LanguageDialog relies on ScrollPane chrome instead of an inline page counter"
+        );
         assert!(!language_texts.contains(&"@language.restart"));
+        let language_scroll_track = DesktopLauncher::settings_scroll_track_symbol();
+        let language_scroll_knob = DesktopLauncher::settings_scroll_knob_symbol();
+        assert!(language_sprites
+            .iter()
+            .any(|symbol| *symbol == language_scroll_track.as_str()));
+        assert!(language_sprites
+            .iter()
+            .any(|symbol| *symbol == language_scroll_knob.as_str()));
         assert!(!language_texts
             .contains(&"LanguageDialog placeholder: locale list and bundle reload later"));
         assert!(language_texts.contains(&"@back"));
@@ -46965,7 +46994,10 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(language_restart_texts.contains(&"@language.restart"));
+        assert!(
+            !language_restart_texts.contains(&"@language.restart"),
+            "Java LanguageDialog sends restart notice through ui.showInfo instead of drawing it inside the language list"
+        );
         assert_eq!(
             launcher.take_settings_language_restart_message().as_deref(),
             Some("@language.restart")

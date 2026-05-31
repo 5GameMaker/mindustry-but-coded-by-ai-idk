@@ -19760,6 +19760,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Controls ScrollPane / 真实焦点 / TextField 选择区仍需继续追原版；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 570. Settings LanguageDialog ScrollPane 视觉闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.2%**，仍未达到完整可玩；继续优先前端/UI，把 `LanguageDialog` 从页码式列表和内联 restart 文本推进到更接近 Java `ScrollPane` 的单列语言列表。
+- Java 对照依据：
+  - `LanguageDialog` 使用单列按钮列表，每项 `size(400f, 50f)`；
+  - 列表放在 `ScrollPane` 内，滚动反馈来自 scrollbar，而不是 `1-7/36` 这类内联页码；
+  - 语言选择后调用 `ui.showInfo("@language.restart")`，不是把 restart 文本常驻画在语言列表内部。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_language_scrollpane_rect(...)` / `settings_language_list_clip_rect(...)`，把语言列表几何拆成 list clip 与 scroll pane chrome；
+    - `push_settings_language_dialog_content(...)` 对语言项使用 `SetClip/ClearClip`，并复用 upstream `defaultPane` scroll/knob drawable 绘制滚动条；
+    - 删除语言列表底部 `1-7/36` 页码文本；
+    - 删除 `@language.restart` 的 LanguageDialog 内联绘制，保留一次性 restart message 状态供外层 info 提示消费；
+    - 测试断言语言弹窗出现 scroll track/knob sprite，并确认页码和 restart 文本不再常驻列表中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Rust 仍未实现完整 Arc `ScrollPane` widget 语义，当前是手绘 clip + scrollbar 等价层；
+  - restart info 仍待接入真正的 `ui.showInfo`/toast/Dialog 消费链；
+  - LanguageDialog 语言列表仍是静态表，后续应继续向 Java `locales` 文件动态读取和排序收敛；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
