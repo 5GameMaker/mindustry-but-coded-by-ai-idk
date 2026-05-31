@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 603. MapListDialog 地图卡片模式 badge 改用原版图标
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.3%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是避免地图卡片上的 gamemode badge 退化成 `modeSurvivalSmall` 等不可用文本 fallback。
+- Java 对照依据：
+  - 上游 UI 中模式信息优先走 `Icon.modeSurvival/modeAttack/modePvp` 或 sandbox 的 `Icon.terrain`；
+  - Rust 旧 `mode*Small` 名称不在当前 icon font 映射里，会影响 MapListDialog 卡片可读性与原版观感。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `map_list_card_mode_badge_text(...)` 复用已对齐的 gamemode 图标映射；
+    - 地图卡片 badge 改用 `RenderFontId::Icon`、居中绘制并放大到 14 号；
+    - MapListDialog seeded-card 测试补充 survival/sandbox badge 的 Icon 字体断言，并把测试地图补上 spawn，确保 survival badge 真实可见。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_custom_and_editor_routes_render_map_list_cards_when_seeded --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Map play dialog 中模式选择仍是文字 toggle，后续可继续改为图标/文字混合并对齐 Java 交互；
+  - MapListDialog 卡片预览仍是过渡 whiteui/元数据卡片，真实地图缩略图、workshop 标识和更完整排序仍需继续迁移；
+  - 完整可玩和联机互通目标仍未完成。
+
 ## 602. LoadDialog 模式筛选与重命名图标对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

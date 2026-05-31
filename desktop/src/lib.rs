@@ -26284,14 +26284,7 @@ impl DesktopLauncher {
     }
 
     fn map_list_card_mode_badge_text(mode: Gamemode) -> String {
-        let icon_name = match mode {
-            Gamemode::Survival => "modeSurvivalSmall",
-            Gamemode::Sandbox => "modeSandboxSmall",
-            Gamemode::Attack => "modeAttackSmall",
-            Gamemode::Pvp => "modePvpSmall",
-            _ => return format!("@mode.{}.name", mode.wire_name()),
-        };
-        desktop_ui_icon_glyph_or_label(icon_name, mode.wire_name())
+        desktop_ui_icon_glyph_or_label(Self::load_game_mode_filter_icon(mode), mode.wire_name())
     }
 
     fn map_list_has_active_filters(&self) -> bool {
@@ -32102,13 +32095,15 @@ impl DesktopLauncher {
                     let badge_x = card.x + 12.0 + badge_index as f32 * 30.0;
                     pass.push(RenderCommand::draw_text_styled(
                         Self::map_list_card_mode_badge_text(mode),
-                        RenderPoint::new(badge_x, card.y + card.height - 18.0),
+                        RenderPoint::new(badge_x + 9.0, card.y + card.height - 18.0),
                         [0.92, 0.97, 1.0, 1.0],
-                        9.0,
+                        14.0,
                         0.0,
-                        RenderTextStyle::new(RenderTextAlign::Start)
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
-                            .with_integer_position(true),
+                            .with_integer_position(true)
+                            .with_outline(true),
                         Layer::END_PIXELED
                             + 0.0385
                             + visible_index as f32 * 0.001
@@ -55258,7 +55253,7 @@ version: "2.0.0"
             "description".to_string(),
             "Official vanilla editor map".to_string(),
         );
-        let builtin = MapDescriptor::new(
+        let mut builtin = MapDescriptor::new(
             "maps/default/archipelago.msav",
             300,
             300,
@@ -55267,6 +55262,7 @@ version: "2.0.0"
             1,
             157,
         );
+        builtin.spawns = 1;
 
         let mut custom_tags = BTreeMap::new();
         custom_tags.insert("name".to_string(), "Workshop Arena".to_string());
@@ -55346,6 +55342,18 @@ version: "2.0.0"
 
             let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(viewport, route);
             let pane = DesktopLauncher::map_list_pane_rect_for_panel(panel, route);
+            for mode in [Gamemode::Survival, Gamemode::Sandbox] {
+                let glyph = DesktopLauncher::map_list_card_mode_badge_text(mode);
+                assert!(
+                    commands.iter().any(|command| matches!(
+                        command,
+                        RenderCommand::DrawText { text, style, .. }
+                            if text == &glyph
+                                && style.font == RenderFontId::Icon
+                    )),
+                    "MapListDialog card mode badge should reuse Java mode icon glyphs"
+                );
+            }
             let card_center = DesktopLauncher::map_list_card_rect_for_pane(pane, 0).center();
             let expected_kind = match route {
                 super::DesktopMenuRoute::CustomGame => super::DesktopMapCardActionKind::OpenPlay,
