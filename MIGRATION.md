@@ -19389,6 +19389,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 真实冲突检测、平台差异键名、完整鼠标/手柄输入名映射仍需继续迁移；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 556. Settings KeybindDialog 全量 Binding 表覆盖
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **60.8%**，仍未达到完整可玩；继续优先前端/UI，把 Controls 子弹窗的 keybind 列表从局部 18 项扩展到 Java `Binding.java` 的 88 项完整名称表。
+- Java 对照依据：
+  - `core/src/mindustry/input/Binding.java` 当前共有 88 个 `KeyBind.add(...)`；
+  - Controls UI 应按 `KeyBind.all` 展示所有 general / command / blocks / view / multiplayer 绑定；
+  - `rotate / zoom / chat_scroll` 等 Axis 绑定需要保留 axis 标记，后续 rebind/persistence/冲突检测才能继续复用。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `SETTINGS_KEYBIND_SPECS` 扩展到完整 88 项；
+    - 补齐 `pickupCargo / dropCargo / schematic_* / unit_stance_* / unit_command_* / block_select_* / fullscreen / pause / minimap / chat_history_* / debug_hitboxes` 等 Java 绑定名；
+    - `settings_keybind_bundle_label(...)` 改为按 `@keybind.{name}.name` 动态生成，避免后续新增绑定时漏写映射；
+    - Settings 路由测试不再硬编码 18 项，改为跟随 `SETTINGS_KEYBIND_SPECS.len()`；
+    - 新增覆盖测试，锁定 88 项 Java `Binding.java` 名称、唯一性和关键分类/Axis 元数据。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - keybind override 仍是内存状态，尚未持久化到 settings 文件并在启动恢复；
+  - 真实冲突检测、平台差异键名、完整鼠标/手柄输入名映射仍需继续迁移；
+  - `KeybindDialog` 视觉还没有完全达到 Java `Dialog + ScrollPane + Styles` 的像素级/布局级还原；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

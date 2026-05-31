@@ -1020,6 +1020,90 @@ const SETTINGS_KEYBIND_SPECS: &[DesktopKeybindSpec] = &[
         axis: false,
     },
     DesktopKeybindSpec {
+        name: "pickupCargo",
+        category: None,
+        default_value: "[",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "dropCargo",
+        category: None,
+        default_value: "]",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "clear_building",
+        category: None,
+        default_value: "Q",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "pause_building",
+        category: None,
+        default_value: "E",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "rotate",
+        category: None,
+        default_value: "Scroll",
+        axis: true,
+    },
+    DesktopKeybindSpec {
+        name: "rotateplaced",
+        category: None,
+        default_value: "R",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "diagonal_placement",
+        category: None,
+        default_value: "Ctrl Left",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "pick",
+        category: None,
+        default_value: "Mouse Middle",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "ping",
+        category: None,
+        default_value: "P",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "rebuild_select",
+        category: None,
+        default_value: "B",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "schematic_select",
+        category: None,
+        default_value: "F",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "schematic_flip_x",
+        category: None,
+        default_value: "Z",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "schematic_flip_y",
+        category: None,
+        default_value: "X",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "schematic_menu",
+        category: None,
+        default_value: "T",
+        axis: false,
+    },
+    DesktopKeybindSpec {
         name: "command_mode",
         category: Some("command"),
         default_value: "Shift Left",
@@ -1029,6 +1113,150 @@ const SETTINGS_KEYBIND_SPECS: &[DesktopKeybindSpec] = &[
         name: "command_queue",
         category: None,
         default_value: "Mouse Middle",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "create_control_group",
+        category: None,
+        default_value: "Ctrl Left",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "select_all_units",
+        category: None,
+        default_value: "G",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "select_all_unit_factories",
+        category: None,
+        default_value: "H",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "select_all_unit_transport",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "select_across_screen",
+        category: None,
+        default_value: "Alt Left",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "cancel_orders",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_stance_shoot",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_stance_hold_fire",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_stance_pursue_target",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_stance_patrol",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_stance_ram",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_stance_boost",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_stance_hold_position",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_move",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_repair",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_rebuild",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_assist",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_mine",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_boost",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_enter_payload",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_load_units",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_load_blocks",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_unload_payload",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "unit_command_loop_payload",
+        category: None,
+        default_value: "Unset",
         axis: false,
     },
     DesktopKeybindSpec {
@@ -1044,15 +1272,171 @@ const SETTINGS_KEYBIND_SPECS: &[DesktopKeybindSpec] = &[
         axis: false,
     },
     DesktopKeybindSpec {
+        name: "block_select_left",
+        category: None,
+        default_value: "Left",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_right",
+        category: None,
+        default_value: "Right",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_up",
+        category: None,
+        default_value: "Up",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_down",
+        category: None,
+        default_value: "Down",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_01",
+        category: None,
+        default_value: "1",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_02",
+        category: None,
+        default_value: "2",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_03",
+        category: None,
+        default_value: "3",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_04",
+        category: None,
+        default_value: "4",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_05",
+        category: None,
+        default_value: "5",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_06",
+        category: None,
+        default_value: "6",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_07",
+        category: None,
+        default_value: "7",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_08",
+        category: None,
+        default_value: "8",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_09",
+        category: None,
+        default_value: "9",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_select_10",
+        category: None,
+        default_value: "0",
+        axis: false,
+    },
+    DesktopKeybindSpec {
         name: "zoom",
         category: Some("view"),
         default_value: "Scroll",
         axis: true,
     },
     DesktopKeybindSpec {
+        name: "detach_camera",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
         name: "menu",
         category: None,
         default_value: "Escape",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "fullscreen",
+        category: None,
+        default_value: "F11",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "pause",
+        category: None,
+        default_value: "Space",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "skip_wave",
+        category: None,
+        default_value: "Unset",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "minimap",
+        category: None,
+        default_value: "M",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "research",
+        category: None,
+        default_value: "J",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "planet_map",
+        category: None,
+        default_value: "N",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "block_info",
+        category: None,
+        default_value: "F1",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "toggle_menus",
+        category: None,
+        default_value: "C",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "screenshot",
+        category: None,
+        default_value: "F12",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "toggle_power_lines",
+        category: None,
+        default_value: "F5",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "toggle_block_status",
+        category: None,
+        default_value: "F6",
         axis: false,
     },
     DesktopKeybindSpec {
@@ -1065,6 +1449,42 @@ const SETTINGS_KEYBIND_SPECS: &[DesktopKeybindSpec] = &[
         name: "chat",
         category: None,
         default_value: "Enter",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "chat_history_prev",
+        category: None,
+        default_value: "Up",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "chat_history_next",
+        category: None,
+        default_value: "Down",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "chat_scroll",
+        category: None,
+        default_value: "Scroll",
+        axis: true,
+    },
+    DesktopKeybindSpec {
+        name: "chat_mode",
+        category: None,
+        default_value: "Tab",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "console",
+        category: None,
+        default_value: "F8",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "debug_hitboxes",
+        category: None,
+        default_value: "Unset",
         axis: false,
     },
 ];
@@ -21190,28 +21610,8 @@ impl DesktopLauncher {
         }
     }
 
-    fn settings_keybind_bundle_label(name: &'static str) -> &'static str {
-        match name {
-            "move_x" => "@keybind.move_x.name",
-            "move_y" => "@keybind.move_y.name",
-            "mouse_move" => "@keybind.mouse_move.name",
-            "pan" => "@keybind.pan.name",
-            "boost" => "@keybind.boost.name",
-            "respawn" => "@keybind.respawn.name",
-            "control" => "@keybind.control.name",
-            "select" => "@keybind.select.name",
-            "deselect" => "@keybind.deselect.name",
-            "break_block" => "@keybind.break_block.name",
-            "command_mode" => "@keybind.command_mode.name",
-            "command_queue" => "@keybind.command_queue.name",
-            "category_prev" => "@keybind.category_prev.name",
-            "category_next" => "@keybind.category_next.name",
-            "zoom" => "@keybind.zoom.name",
-            "menu" => "@keybind.menu.name",
-            "player_list" => "@keybind.player_list.name",
-            "chat" => "@keybind.chat.name",
-            _ => name,
-        }
+    fn settings_keybind_bundle_label(name: &'static str) -> String {
+        format!("@keybind.{name}.name")
     }
 
     fn settings_keybind_effective_value<'a>(&'a self, spec: &'a DesktopKeybindSpec) -> &'a str {
@@ -45647,9 +46047,10 @@ mod tests {
         assert!(
             !controls_texts.contains(&"ControlsDialog placeholder: keybind rows and reset later")
         );
-        assert!(launcher.settings_route_lines().contains(
-            &"child dialog: KeybindDialog binds:18 filtered:18 offset:0 search:".to_string()
-        ));
+        let total_keybinds = super::SETTINGS_KEYBIND_SPECS.len();
+        assert!(launcher.settings_route_lines().contains(&format!(
+            "child dialog: KeybindDialog binds:{total_keybinds} filtered:{total_keybinds} offset:0 search:"
+        )));
 
         let rebind_center =
             DesktopLauncher::settings_keybind_rebind_button_rect(child_dialog, 0).center();
@@ -45863,10 +46264,13 @@ mod tests {
             ],
         );
         assert!(launcher.settings_keybind_scroll_offset > 0);
-        assert!(launcher.settings_route_lines().iter().any(|line| {
-            line.starts_with("child dialog: KeybindDialog binds:18 filtered:18 offset:")
-                && !line.contains("offset:0 ")
-        }));
+        let scrolled_summary = format!(
+            "child dialog: KeybindDialog binds:{total_keybinds} filtered:{total_keybinds} offset:"
+        );
+        assert!(launcher
+            .settings_route_lines()
+            .iter()
+            .any(|line| { line.starts_with(&scrolled_summary) && !line.contains("offset:0 ") }));
         let scrolled_controls_frame = launcher.menu_graphics_frame_for_surface(3, viewport);
         let scrolled_controls_texts = scrolled_controls_frame
             .bundle
@@ -45881,7 +46285,13 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(scrolled_controls_texts.contains(&"@keybind.command_mode.name"));
+        let first_scrolled_keybind = format!(
+            "@keybind.{}.name",
+            super::SETTINGS_KEYBIND_SPECS[launcher.settings_keybind_scroll_offset].name
+        );
+        assert!(scrolled_controls_texts
+            .iter()
+            .any(|text| *text == first_scrolled_keybind));
 
         let search_center = DesktopLauncher::settings_keybind_search_rect(child_dialog).center();
         assert_eq!(
@@ -45910,9 +46320,13 @@ mod tests {
         );
         assert_eq!(launcher.settings_keybind_search, "chat");
         assert_eq!(launcher.settings_keybind_scroll_offset, 0);
-        assert!(launcher.settings_route_lines().contains(
-            &"child dialog: KeybindDialog binds:18 filtered:1 offset:0 search:chat".to_string()
-        ));
+        let chat_keybinds = super::SETTINGS_KEYBIND_SPECS
+            .iter()
+            .filter(|spec| spec.name.contains("chat"))
+            .count();
+        assert!(launcher.settings_route_lines().contains(&format!(
+            "child dialog: KeybindDialog binds:{total_keybinds} filtered:{chat_keybinds} offset:0 search:chat"
+        )));
         let filtered_controls_frame = launcher.menu_graphics_frame_for_surface(4, viewport);
         let filtered_controls_texts = filtered_controls_frame
             .bundle
@@ -46020,6 +46434,156 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.contains(&"upstream: SettingsMenuDialog"));
         assert!(texts.contains(&"settings page: data"));
+    }
+
+    #[test]
+    fn desktop_launcher_settings_keybind_specs_cover_upstream_binding_java_names() {
+        let expected = [
+            "move_x",
+            "move_y",
+            "mouse_move",
+            "pan",
+            "boost",
+            "respawn",
+            "control",
+            "select",
+            "deselect",
+            "break_block",
+            "pickupCargo",
+            "dropCargo",
+            "clear_building",
+            "pause_building",
+            "rotate",
+            "rotateplaced",
+            "diagonal_placement",
+            "pick",
+            "ping",
+            "rebuild_select",
+            "schematic_select",
+            "schematic_flip_x",
+            "schematic_flip_y",
+            "schematic_menu",
+            "command_mode",
+            "command_queue",
+            "create_control_group",
+            "select_all_units",
+            "select_all_unit_factories",
+            "select_all_unit_transport",
+            "select_across_screen",
+            "cancel_orders",
+            "unit_stance_shoot",
+            "unit_stance_hold_fire",
+            "unit_stance_pursue_target",
+            "unit_stance_patrol",
+            "unit_stance_ram",
+            "unit_stance_boost",
+            "unit_stance_hold_position",
+            "unit_command_move",
+            "unit_command_repair",
+            "unit_command_rebuild",
+            "unit_command_assist",
+            "unit_command_mine",
+            "unit_command_boost",
+            "unit_command_enter_payload",
+            "unit_command_load_units",
+            "unit_command_load_blocks",
+            "unit_command_unload_payload",
+            "unit_command_loop_payload",
+            "category_prev",
+            "category_next",
+            "block_select_left",
+            "block_select_right",
+            "block_select_up",
+            "block_select_down",
+            "block_select_01",
+            "block_select_02",
+            "block_select_03",
+            "block_select_04",
+            "block_select_05",
+            "block_select_06",
+            "block_select_07",
+            "block_select_08",
+            "block_select_09",
+            "block_select_10",
+            "zoom",
+            "detach_camera",
+            "menu",
+            "fullscreen",
+            "pause",
+            "skip_wave",
+            "minimap",
+            "research",
+            "planet_map",
+            "block_info",
+            "toggle_menus",
+            "screenshot",
+            "toggle_power_lines",
+            "toggle_block_status",
+            "player_list",
+            "chat",
+            "chat_history_prev",
+            "chat_history_next",
+            "chat_scroll",
+            "chat_mode",
+            "console",
+            "debug_hitboxes",
+        ];
+        assert_eq!(expected.len(), 88);
+        assert_eq!(super::SETTINGS_KEYBIND_SPECS.len(), expected.len());
+
+        let actual = super::SETTINGS_KEYBIND_SPECS
+            .iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>();
+        let unique = actual
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(unique.len(), actual.len(), "keybind names must stay unique");
+
+        for name in expected {
+            assert!(
+                actual.contains(&name),
+                "Settings Controls should include upstream Binding.java keybind {name}"
+            );
+        }
+
+        for name in ["move_x", "move_y", "rotate", "zoom", "chat_scroll"] {
+            let spec = super::SETTINGS_KEYBIND_SPECS
+                .iter()
+                .find(|spec| spec.name == name)
+                .expect("axis keybind should exist");
+            assert!(spec.axis, "{name} should remain an axis binding");
+        }
+
+        assert_eq!(
+            super::SETTINGS_KEYBIND_SPECS
+                .iter()
+                .find(|spec| spec.name == "command_mode")
+                .and_then(|spec| spec.category),
+            Some("command")
+        );
+        assert_eq!(
+            super::SETTINGS_KEYBIND_SPECS
+                .iter()
+                .find(|spec| spec.name == "category_prev")
+                .and_then(|spec| spec.category),
+            Some("blocks")
+        );
+        assert_eq!(
+            super::SETTINGS_KEYBIND_SPECS
+                .iter()
+                .find(|spec| spec.name == "zoom")
+                .and_then(|spec| spec.category),
+            Some("view")
+        );
+        assert_eq!(
+            super::SETTINGS_KEYBIND_SPECS
+                .iter()
+                .find(|spec| spec.name == "player_list")
+                .and_then(|spec| spec.category),
+            Some("multiplayer")
+        );
     }
 
     #[test]
