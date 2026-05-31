@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 589. 移动端 MenuFragment terminal/info 行布局对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **69.9%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是修正移动端主菜单底部左侧 chrome 的最明显排布差异。
+- Java 对照依据：
+  - `MenuFragment` 移动端 `parent.fill(c -> { c.bottom().left(); c.button(Icon.terminal...).pad(4f).size(60f).left().row(); c.button(\"\", infoBanner...).size(84,45) })`；
+  - terminal 与 info 是上下两行，不是左右并排。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuChromeLayout` 中 mobile `info_rect` 从 terminal 右侧改到 terminal 下一行同 x 坐标；
+    - 保持 hit-test 使用同一 layout，避免渲染和交互坐标分叉；
+    - 更新移动端 chrome 渲染与 hit-test 回归测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_mobile_terminal_info_and_gutter_chrome --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_hit_test_and_actions_share_layout --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `MobileButton` 文本换行/本地化宽度仍是简化版；
+  - 真实字体光栅化、SaveDialog 独立布局和更多 Dialog Table 层级仍需继续推进；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 588. MenuFragment chrome 按钮进一步贴近 Java Scene2D
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
