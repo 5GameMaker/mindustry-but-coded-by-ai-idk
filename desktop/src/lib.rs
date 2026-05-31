@@ -250,6 +250,10 @@ fn desktop_fast_menu_enabled() -> bool {
         .unwrap_or(false)
 }
 
+fn desktop_show_upstream_route_debug() -> bool {
+    cfg!(test) || std::env::var_os("MINDUSTRY_DESKTOP_SHOW_UPSTREAM_ROUTE_DEBUG").is_some()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopConnectTarget {
     pub host: String,
@@ -29263,17 +29267,19 @@ impl DesktopLauncher {
                     .with_outline(true),
                 Layer::END_PIXELED + 0.077,
             ));
-            pass.push(RenderCommand::draw_text_styled(
-                "upstream: PaletteDialog",
-                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 48.0),
-                [0.55, 0.66, 0.74, 1.0],
-                8.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.0775,
-            ));
+            if desktop_show_upstream_route_debug() {
+                pass.push(RenderCommand::draw_text_styled(
+                    "upstream: PaletteDialog",
+                    RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 48.0),
+                    [0.55, 0.66, 0.74, 1.0],
+                    8.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.0775,
+                ));
+            }
             for (index, color_value) in HOST_PALETTE_COLORS.iter().copied().enumerate() {
                 let swatch = Self::host_route_palette_color_rect_for_dialog(dialog, index);
                 let selected = self.player.color == color_value;
@@ -35316,17 +35322,19 @@ impl DesktopLauncher {
             2.0,
             Layer::END_PIXELED + 0.01,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            format!("upstream: {}", route.upstream_dialog()),
-            RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 84.0),
-            [0.72, 0.82, 0.9, 1.0],
-            14.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.02,
-        ));
+        if desktop_show_upstream_route_debug() {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("upstream: {}", route.upstream_dialog()),
+                RenderPoint::new(panel.x + panel.width * 0.5, panel.y + panel.height - 84.0),
+                [0.72, 0.82, 0.9, 1.0],
+                14.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.02,
+            ));
+        }
         if route == DesktopMenuRoute::About {
             self.push_about_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Join {
@@ -35913,17 +35921,19 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.143,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            "upstream: PausedDialog",
-            RenderPoint::new(panel.center().x, panel.y + panel.height - 43.0),
-            [0.55, 0.68, 0.76, 1.0],
-            8.5,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.144,
-        ));
+        if desktop_show_upstream_route_debug() {
+            pass.push(RenderCommand::draw_text_styled(
+                "upstream: PausedDialog",
+                RenderPoint::new(panel.center().x, panel.y + panel.height - 43.0),
+                [0.55, 0.68, 0.76, 1.0],
+                8.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.144,
+            ));
+        }
         for (index, spec) in button_specs.into_iter().enumerate() {
             self.push_settings_text_button_enabled(
                 &mut pass,

@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 585. 用户可见界面隐藏 upstream 调试标记
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **69.5%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 dialog chrome 中用于迁移追踪的 `upstream: ...` 调试文字从普通运行态隐藏，降低用户看到的“迁移调试壳”观感。
+- Java 对照依据：
+  - Java `BaseDialog`/`MenuFragment` 不会在用户界面上显示 `upstream: SaveDialog`、`upstream: PausedDialog` 这类迁移诊断文字；
+  - 这些标记对测试和迁移追踪有用，但不应成为普通客户端默认 UI。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_show_upstream_route_debug()`；
+    - 普通运行态默认隐藏 route shell、PausedDialog、PaletteDialog 的 `upstream:` 调试文字；
+    - 单测环境继续保留这些标记，避免迁移结构回归测试丢失可观测证据；
+    - 如需人工调试，可通过 `MINDUSTRY_DESKTOP_SHOW_UPSTREAM_ROUTE_DEBUG` 恢复显示。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `cargo test -p mindustry-desktop --lib upstream -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu -- --nocapture`
+- 仍未完成：
+  - 仍需继续清理其它占位/诊断式 UI 文案，并把对应功能接入真实 Java 等价交互；
+  - route shell 和各 Dialog 的像素级布局仍需继续向 Java 原版收敛；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 584. MapListDialog Java 信息密度与 native 黑屏兜底轮廓
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
