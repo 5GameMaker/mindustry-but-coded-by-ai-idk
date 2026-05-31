@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 599. LoadDialog autosave toggle 接入设置持久化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.9%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 LoadDialog slot 上的 `Icon.save` autosave 按钮从“只记录 action/视觉 checked”补成对齐 Java `SaveSlot.setAutosave(...)` 的真实设置持久化。
+- Java 对照依据：
+  - `Saves.SaveSlot.isAutosave()` 读取 `Core.settings.getBool("save-" + index() + "-autosave", true)`；
+  - `Saves.SaveSlot.setAutosave(boolean)` 写入同名 settings key；
+  - `LoadDialog.modifyButton(...)` 点击 `Icon.save` 后立即 `slot.setAutosave(!slot.isAutosave())`，按钮 checked 与 `@save.autosave` 文案随设置变化。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `load_game_slot_is_autosave(...)` 改为优先读取 `settings_overrides["save-<index>-autosave"]`，兼容旧 meta `autosave` tag，最终默认 `true`；
+    - `ToggleAutosave` action 写入 `SaveSlotRecord::autosave_setting_key()`，再刷新 slot 列表，避免只停留在 telemetry；
+    - autosave 文案与按钮 checked 状态改为走同一个实例方法，确保点击后同帧/重建后都能反映 `@on/@off`；
+    - 扩展 LoadDialog 回归测试，验证点击 autosave 按钮后 action 为 `ToggleAutosave`、设置 key 写入 `false`、渲染文案切为 `@save.autosave: @off`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 真实读取存档卡片仍只记录 `selected-for-load`，尚未完整进入 Java `slot.cautiousLoad(...)` / loading overlay / playing state；
+  - autosave settings 目前落在 Rust `settings_overrides` 内存镜像，后续还需接入完整设置文件持久化；
+  - 删除确认与 autosave 文案后续都应接入完整本地化 bundle format 和 wrap。
+
 ## 598. LoadDialog 删除前确认弹窗
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

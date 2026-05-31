@@ -21441,18 +21441,25 @@ impl DesktopLauncher {
         )
     }
 
-    fn load_game_slot_is_autosave(slot: &SaveSlotRecord) -> bool {
+    fn load_game_autosave_value_from_text(value: &str) -> bool {
+        matches!(value, "true" | "1" | "yes" | "on")
+    }
+
+    fn load_game_slot_is_autosave(&self, slot: &SaveSlotRecord) -> bool {
+        if let Some(value) = self.settings_overrides.get(&slot.autosave_setting_key()) {
+            return Self::load_game_autosave_value_from_text(value);
+        }
         slot.meta
             .as_ref()
             .and_then(|meta| meta.tags.get("autosave"))
-            .map(|value| matches!(value.as_str(), "true" | "1" | "yes"))
-            .unwrap_or(false)
+            .map(|value| Self::load_game_autosave_value_from_text(value))
+            .unwrap_or(true)
     }
 
-    fn load_game_slot_autosave_line(slot: &SaveSlotRecord) -> String {
+    fn load_game_slot_autosave_line(&self, slot: &SaveSlotRecord) -> String {
         format!(
             "@save.autosave: {}",
-            if Self::load_game_slot_is_autosave(slot) {
+            if self.load_game_slot_is_autosave(slot) {
                 "@on"
             } else {
                 "@off"
@@ -24747,7 +24754,12 @@ impl DesktopLauncher {
             kind,
             status: status.into(),
         };
-        if kind == DesktopLoadGameActionKind::Delete {
+        if kind == DesktopLoadGameActionKind::ToggleAutosave {
+            let enabled = !self.load_game_slot_is_autosave(&slot);
+            self.settings_overrides
+                .insert(slot.autosave_setting_key(), enabled.to_string());
+            self.refresh_load_game_slots();
+        } else if kind == DesktopLoadGameActionKind::Delete {
             let mut delete_error = None;
             for target in slot.delete_targets() {
                 match std::fs::remove_file(&target) {
@@ -33245,7 +33257,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                Self::load_game_slot_autosave_line(slot),
+                self.load_game_slot_autosave_line(slot),
                 RenderPoint::new(text_x, rect.y + 18.0),
                 [0.48, 0.60, 0.68, 1.0],
                 8.0,
@@ -33261,7 +33273,7 @@ impl DesktopLauncher {
                 };
                 let button = Self::load_game_slot_action_button_rect(rect, action_index);
                 let checked_autosave = kind == DesktopLoadGameActionKind::ToggleAutosave
-                    && Self::load_game_slot_is_autosave(slot);
+                    && self.load_game_slot_is_autosave(slot);
                 pass.push(RenderCommand::draw_sprite(
                     Self::settings_text_button_symbol("grayt", false, checked_autosave),
                     button,
@@ -58966,6 +58978,55 @@ version: "2.0.0"
             )),
             "LoadDialog action glyphs must render with the upstream icon font"
         );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: autosave_button.center().x,
+                    y: autosave_button.center().y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        let autosave_action = launcher
+            .last_load_game_action
+            .as_ref()
+            .expect("autosave button should record a toggle action");
+        assert_eq!(
+            autosave_action.kind,
+            super::DesktopLoadGameActionKind::ToggleAutosave
+        );
+        assert_eq!(autosave_action.status, "toggle-autosave");
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(&launcher.load_game_slots[0].autosave_setting_key())
+                .map(String::as_str),
+            Some("false"),
+            "Java SaveSlot.setAutosave writes save-<index>-autosave into settings"
+        );
+        assert!(!launcher.load_game_slot_is_autosave(&launcher.load_game_slots[0]));
+        let toggled_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let toggled_commands = toggled_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("toggled autosave frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let toggled_texts = toggled_commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(toggled_texts.contains(&"@save.autosave: @off"));
         let card_rects = commands
             .iter()
             .filter_map(|command| match command {
