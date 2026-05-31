@@ -19446,6 +19446,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `KeybindDialog` 视觉还没有完全达到 Java `Dialog + ScrollPane + Styles` 级还原；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 558. Settings LanguageDialog locale 持久化与 restart 提示闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.0%**，仍未达到完整可玩；继续优先前端/UI，把 LanguageDialog 的语言选择从纯内存 selected 状态推进到 Java `Core.settings.put("locale", ...)` / `player.locale` 等价链路。
+- Java 对照依据：
+  - `LanguageDialog.clicked(...)` 写入 `Core.settings.put("locale", loc.toString())`；
+  - 同步设置 `player.locale = loc.toString()`；
+  - 选择变化后调用 `ui.showInfo("@language.restart")`；
+  - `getLocale()` 会从 settings 读取 `locale`，并对 `default` 做 closest locale fallback。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `player_locale` 状态，模拟 Java `player.locale` 的同步结果；
+    - 新增 `load_settings_locale_from_settings()`，从 `settings_overrides["locale"]` 回填当前 selected/player locale；
+    - 新增 closest locale 逻辑：支持 `default` / `LANG` / `in_ID -> id_ID` / exact / language-only fallback，最终回退 `en`；
+    - `SelectLanguage(code)` 现在写入 `settings_overrides["locale"]`、更新 `settings_locale/player_locale`，并记录 `@language.restart`；
+    - LanguageDialog 不再常驻渲染说明占位文本，只在确实发生语言切换后渲染/暴露 restart 提示；
+    - 新增 `take_settings_language_restart_message()`，为后续 toast/info 消费留出口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - locale/settings 仍在 `settings_overrides` 运行时表中，后续还要接真实磁盘 settings load/save；
+  - bundle reload / `Core.bundle` 替换仍未完成，目前仍只记录需要重启提示；
+  - LanguageDialog 视觉布局仍未完全改成 Java `ScrollPane + 400x50 flatTogglet` 单列结构；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

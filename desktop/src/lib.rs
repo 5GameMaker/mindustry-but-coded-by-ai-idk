@@ -15313,6 +15313,7 @@ pub struct DesktopLauncher {
     pub settings_dialog_state: DesktopSettingsDialogState,
     pub settings_child_dialog: Option<DesktopSettingsChildDialog>,
     pub settings_locale: String,
+    pub player_locale: String,
     pub last_settings_language_restart_message: Option<String>,
     pub settings_keybind_overrides: BTreeMap<&'static str, String>,
     pub last_settings_rebind_key: Option<&'static str>,
@@ -16057,6 +16058,7 @@ impl DesktopLauncher {
             settings_dialog_state: DesktopSettingsDialogState::default(),
             settings_child_dialog: None,
             settings_locale: "en".into(),
+            player_locale: "en".into(),
             last_settings_language_restart_message: None,
             settings_keybind_overrides: BTreeMap::new(),
             last_settings_rebind_key: None,
@@ -19962,6 +19964,70 @@ impl DesktopLauncher {
             .or_else(|| settings_pref_spec(table, key).map(|spec| spec.default_value.text()))
     }
 
+    fn settings_locale_exists(code: &str) -> bool {
+        SETTINGS_LANGUAGE_OPTIONS
+            .iter()
+            .any(|option| option.code == code)
+    }
+
+    fn settings_normalize_locale_code(code: &str) -> String {
+        code.trim()
+            .replace('-', "_")
+            .split(['.', '@'])
+            .next()
+            .unwrap_or("en")
+            .replace("in_ID", "id_ID")
+    }
+
+    fn settings_closest_locale_code(raw: &str) -> String {
+        let raw = raw.trim();
+        let normalized = if raw.is_empty() || raw == "default" {
+            std::env::var("LANG")
+                .ok()
+                .map(|lang| Self::settings_normalize_locale_code(&lang))
+                .unwrap_or_else(|| "en".into())
+        } else {
+            Self::settings_normalize_locale_code(raw)
+        };
+        if Self::settings_locale_exists(&normalized) {
+            return normalized;
+        }
+        let language = normalized.split('_').next().unwrap_or("en");
+        SETTINGS_LANGUAGE_OPTIONS
+            .iter()
+            .find(|option| option.code.split('_').next().unwrap_or(option.code) == language)
+            .map(|option| option.code.to_string())
+            .unwrap_or_else(|| "en".into())
+    }
+
+    pub fn load_settings_locale_from_settings(&mut self) -> String {
+        let locale = self
+            .settings_overrides
+            .get("locale")
+            .map(String::as_str)
+            .unwrap_or("default");
+        let locale = Self::settings_closest_locale_code(locale);
+        self.settings_locale = locale.clone();
+        self.player_locale = locale.clone();
+        locale
+    }
+
+    fn set_settings_locale(&mut self, code: &'static str) -> bool {
+        let locale = Self::settings_closest_locale_code(code);
+        if self.settings_locale == locale {
+            return false;
+        }
+        self.settings_locale = locale.clone();
+        self.player_locale = locale.clone();
+        self.settings_overrides.insert("locale".into(), locale);
+        self.last_settings_language_restart_message = Some("@language.restart".into());
+        true
+    }
+
+    pub fn take_settings_language_restart_message(&mut self) -> Option<String> {
+        self.last_settings_language_restart_message.take()
+    }
+
     pub fn schematic_tags_persisted_json(&self) -> Option<&str> {
         self.settings_overrides
             .get(SCHEMATIC_TAGS_SETTINGS_KEY)
@@ -20551,17 +20617,19 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.122 + index as f32 * 0.0001,
             ));
         }
-        pass.push(RenderCommand::draw_text_styled(
-            "LanguageDialog locales: Core.settings.locale + @language.restart",
-            RenderPoint::new(dialog.center().x, dialog.y + 80.0),
-            [0.56, 0.68, 0.76, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.121,
-        ));
+        if let Some(message) = self.last_settings_language_restart_message.as_deref() {
+            pass.push(RenderCommand::draw_text_styled(
+                message,
+                RenderPoint::new(dialog.center().x, dialog.y + 80.0),
+                [0.56, 0.68, 0.76, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.121,
+            ));
+        }
     }
 
     fn push_settings_controls_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
@@ -23227,6 +23295,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::OpenLanguageDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Language);
+                self.load_settings_locale_from_settings();
             }
             DesktopSettingsAction::OpenControlsDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Controls);
@@ -23242,10 +23311,7 @@ impl DesktopLauncher {
                 self.settings_keybind_pending_axis_min = None;
             }
             DesktopSettingsAction::SelectLanguage(code) => {
-                if self.settings_locale != code {
-                    self.settings_locale = code.to_string();
-                    self.last_settings_language_restart_message = Some("@language.restart".into());
-                }
+                self.set_settings_locale(code);
             }
             DesktopSettingsAction::StartKeyRebind(name) => {
                 self.last_settings_rebind_key = Some(name);
@@ -46212,8 +46278,7 @@ mod tests {
         assert!(language_texts.contains(&"@settings.language"));
         assert!(language_texts.contains(&"English"));
         assert!(language_texts.contains(&"简体中文"));
-        assert!(language_texts
-            .contains(&"LanguageDialog locales: Core.settings.locale + @language.restart"));
+        assert!(!language_texts.contains(&"@language.restart"));
         assert!(!language_texts
             .contains(&"LanguageDialog placeholder: locale list and bundle reload later"));
         assert!(language_texts.contains(&"@back"));
@@ -46252,9 +46317,58 @@ mod tests {
             ],
         );
         assert_eq!(launcher.settings_locale, "zh_CN");
+        assert_eq!(launcher.player_locale, "zh_CN");
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get("locale")
+                .map(String::as_str),
+            Some("zh_CN")
+        );
         assert_eq!(
             launcher.last_settings_language_restart_message.as_deref(),
             Some("@language.restart")
+        );
+        let language_restart_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let language_restart_texts = language_restart_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("language restart frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(language_restart_texts.contains(&"@language.restart"));
+        assert_eq!(
+            launcher.take_settings_language_restart_message().as_deref(),
+            Some("@language.restart")
+        );
+        assert!(launcher
+            .last_settings_language_restart_message
+            .as_deref()
+            .is_none());
+
+        let mut reloaded_locale = DesktopLauncher::new(Vec::new());
+        reloaded_locale
+            .settings_overrides
+            .insert("locale".into(), "zh_CN".into());
+        assert_eq!(
+            reloaded_locale.load_settings_locale_from_settings(),
+            "zh_CN"
+        );
+        assert_eq!(reloaded_locale.settings_locale, "zh_CN");
+        assert_eq!(reloaded_locale.player_locale, "zh_CN");
+        reloaded_locale
+            .settings_overrides
+            .insert("locale".into(), "in_ID".into());
+        assert_eq!(
+            reloaded_locale.load_settings_locale_from_settings(),
+            "id_ID"
         );
 
         let close_child_center =
