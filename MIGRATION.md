@@ -15,6 +15,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 617. ContentInfoDialog 统计行改为左右两列
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.7%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是降低 `ContentInfoDialog` stats 区的“调试文本行”观感。
+- Java 对照依据：
+  - `ContentInfoDialog` 的 stats 是 `StatValue.display(table)` 形式的表格行，而不是简单拼接 `"stat: value"` 文本；
+  - Rust 尚未完成 per-content `Stats` 数据入口，本轮先把已有摘要 stats 改成左右 label/value 两列渲染，为后续真实 `Stats` 分类显示留接口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_database_content_info_dialog(...)` 渲染 stats 时把 `@stat.xxx: value` 拆成左侧 label 与右侧 value；
+    - value 使用 `RenderTextAlign::End` 靠右对齐，label 使用 muted 色靠左；
+    - 扩展 Database 内容详情测试，断言 `@stat.id` 与其 value 被拆成独立文本命令。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前仍是摘要 stats，不是 Java `Stats` / `StatCat` / `StatValue` 的完整数据驱动渲染；
+  - 后续应把 content 真实 stats 接入 Rust content model，再替换当前摘要适配层。
+
 ## 616. ContentInfoDialog 补 patched 提示
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

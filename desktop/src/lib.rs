@@ -30647,10 +30647,14 @@ impl DesktopLauncher {
             ));
             y -= 24.0;
             for (index, stat) in stats.iter().take(10).enumerate() {
+                let (label, value) = stat
+                    .split_once(':')
+                    .map(|(label, value)| (label.trim(), value.trim()))
+                    .unwrap_or((stat.as_str(), ""));
                 pass.push(RenderCommand::draw_text_styled(
-                    stat.clone(),
+                    label.to_string(),
                     RenderPoint::new(clip.x + 22.0, y - index as f32 * 20.0),
-                    [0.78, 0.86, 0.92, 1.0],
+                    [0.70, 0.78, 0.84, 1.0],
                     10.5,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Start)
@@ -30658,6 +30662,19 @@ impl DesktopLauncher {
                         .with_integer_position(true),
                     Layer::END_PIXELED + 0.093 + index as f32 * 0.0001,
                 ));
+                if !value.is_empty() {
+                    pass.push(RenderCommand::draw_text_styled(
+                        value.to_string(),
+                        RenderPoint::new(clip.x + clip.width - 22.0, y - index as f32 * 20.0),
+                        [0.86, 0.94, 1.0, 1.0],
+                        10.5,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::End)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.0935 + index as f32 * 0.0001,
+                    ));
+                }
             }
             y -= stats.len().min(10) as f32 * 20.0 + 12.0;
         }
@@ -59043,6 +59060,8 @@ version: "2.0.0"
         assert!(detail_texts.contains(&"[accent]copper"));
         assert!(detail_texts.contains(&"content: item / copper"));
         assert!(detail_texts.contains(&"@database.patched"));
+        assert!(detail_texts.contains(&"@stat.id"));
+        assert!(detail_texts.contains(&"0"));
         assert!(detail_commands
             .iter()
             .any(|command| matches!(command, RenderCommand::SetClip { .. })));
