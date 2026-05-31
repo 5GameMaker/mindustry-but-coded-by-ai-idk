@@ -23757,8 +23757,7 @@ impl DesktopLauncher {
                 );
             }
         } else if kind == DesktopLoadGameActionKind::Export {
-            let title = format!("save-{}", Self::load_game_slot_title(&slot));
-            let request = platform.show_file_chooser(false, &title, "msav");
+            let request = platform.show_file_chooser(false, "@save", "msav");
             self.last_load_game_export_request = Some(request);
         }
         self.last_load_game_action = Some(action.clone());
@@ -54122,7 +54121,7 @@ version: "2.0.0"
         assert_eq!(export_action.status, "export");
         assert_eq!(
             launcher.last_load_game_export_request,
-            Some(FileChooserRequest::new(false, "save-Imported Map", "msav"))
+            Some(FileChooserRequest::new(false, "@save", "msav"))
         );
         let export_target = root.join("exported-save");
         let exported = launcher

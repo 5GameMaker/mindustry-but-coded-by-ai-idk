@@ -15,6 +15,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 568. LoadDialog export chooser 标题对齐 Java Platform.export
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.0%**，仍未达到完整可玩；继续收敛前端/UI 行为细节。
+- Java 对照依据：
+  - `core/src/mindustry/core/Platform.java` 的非 iOS `export(...)` 实际调用 `showFileChooser(false, extension, ...)`；
+  - `showFileChooser(false, extension, ...)` 默认标题是 `@save`，并不是 `save-<slot name>`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopLoadGameActionKind::Export` 的 save chooser 标题从 `save-<slot title>` 改为 `@save`；
+    - 更新存档导出测试断言，保留 `.msav` 保存模式与真实复制流程不变。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - Java iOS/Android share-file 分支、真实桌面 chooser 回调事件流、rename 与 SaveDialog/覆盖确认仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 567. LoadDialog 导出存档 FileChooser 与文件复制
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
@@ -25,7 +44,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 本轮主改动：
   - `desktop/src/lib.rs`
     - 新增 `DesktopLoadGameExportResult` 与 `last_load_game_export_request/result`；
-    - `dispatch_load_game_slot_action_kind_with_platform(..., Export)` 现在会创建保存模式 `.msav` `FileChooserRequest`，标题形如 `save-<slot name>`；
+    - `dispatch_load_game_slot_action_kind_with_platform(..., Export)` 现在会创建保存模式 `.msav` `FileChooserRequest`；
     - 新增 `export_load_game_save_file_to(...)`，将 slot primary `.msav` 复制到选中目标，并自动补 `.msav` 后缀；
     - 扩展存档路由测试，验证 export request、真实文件复制、result 记录与导出内容一致。
 - 已验证：
