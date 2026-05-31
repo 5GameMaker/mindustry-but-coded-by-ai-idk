@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 631. DatabaseDialog 列表接入滚轮 ScrollPane 偏移
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.2%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 DatabaseDialog 主列表不再永久停在前 4 个 tag row，而是具备 Java `cont.pane(all).scrollX(false)` 的最小纵向滚动语义。
+- Java 对照依据：
+  - `DatabaseDialog.rebuild()` 最后把 `all` 放入 `cont.pane(all).scrollX(false)`，主体内容通过纵向 ScrollPane 展示完整列表；
+  - 内容区是 `category -> tag -> icon grid`，所有 category/tag 都在同一个滚动 pane 中；
+  - 搜索与切 tab 会重建内容，滚动位置应回到顶部。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_scroll_offset` 状态、列表可视区域、可视 row 容量与最大滚动偏移 helper；
+    - 新增 `apply_database_scroll_delta(...)`，鼠标滚轮在 Database 列表区域内时推进/回退 row 偏移；
+    - `push_database_route_page(...)`、hover tooltip、content cell hit-test 统一按 `database_scroll_offset` 跳过前置 row；
+    - Database 页面在有溢出时绘制简化滚动轨/knob 与页码，避免用户看不到后续 category/tag；
+    - 搜索输入、删除搜索内容、切换 tab、重新进入 Database 路由时重置滚动偏移；
+    - 扩展 DatabaseDialog 测试，确认滚轮能改变 `database_scroll_offset`、route summary 跟随滚动行序、搜索会重置偏移。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 当前只是 row 级滚动窗口，tag 下 records 仍未按 Java `cols` 自动换行成多行 grid；
+  - category 维度仍主要来自 `ContentType`，还未完全升级到 Java `databaseCategory` 字符串语义；
+  - 滚动条暂未支持拖动，后续可复用 Settings 的 scrollbar drag 模型；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 630. DatabaseDialog 初步接入多 tag row 渲染
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

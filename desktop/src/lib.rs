@@ -16307,6 +16307,7 @@ pub struct DesktopLauncher {
     pub database_search: String,
     pub database_search_focused: bool,
     pub database_selected_tab: usize,
+    pub database_scroll_offset: usize,
     pub last_database_content_opened: Option<(ContentType, String)>,
     pub last_database_fields_action: Option<DesktopDatabaseFieldsAction>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
@@ -17167,6 +17168,7 @@ impl DesktopLauncher {
             database_search: String::new(),
             database_search_focused: false,
             database_selected_tab: 0,
+            database_scroll_offset: 0,
             last_database_content_opened: None,
             last_database_fields_action: None,
             last_about_link_action: None,
@@ -21285,6 +21287,7 @@ impl DesktopLauncher {
                 self.database_search.clear();
                 self.database_search_focused = false;
                 self.database_selected_tab = 0;
+                self.database_scroll_offset = 0;
                 self.last_database_content_opened = None;
             } else if route == DesktopMenuRoute::Schematics {
                 self.load_schematic_tags_from_settings();
@@ -22330,10 +22333,13 @@ impl DesktopLauncher {
             .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
             as usize;
 
+        let row_capacity = Self::database_visible_row_capacity_for_panel(panel);
+        let scroll_offset = self.clamped_database_scroll_offset_for_panel(panel);
         for (row_index, row) in self
             .database_visible_group_rows()
             .into_iter()
-            .take(DATABASE_VISIBLE_CATEGORIES)
+            .skip(scroll_offset)
+            .take(row_capacity)
             .enumerate()
         {
             let header = Self::database_category_header_rect_for_panel(panel, row_index);
@@ -22498,6 +22504,7 @@ impl DesktopLauncher {
 
     fn database_route_lines(&self) -> Vec<String> {
         let content_types = self.database_route_content_types();
+        let rows = self.database_visible_group_rows();
         let total = content_types
             .iter()
             .map(|content_type| self.content_loader.get_by(*content_type).len())
@@ -22515,24 +22522,35 @@ impl DesktopLauncher {
             format!("content total: {total}"),
         ];
 
-        for content_type in content_types.iter().take(DATABASE_VISIBLE_CATEGORIES) {
-            let sample = self
-                .content_loader
-                .get_by(*content_type)
+        if self.database_scroll_offset > 0 {
+            lines.push(format!("scroll: {}", self.database_scroll_offset));
+        }
+
+        let scroll_offset = self
+            .database_scroll_offset
+            .min(rows.len().saturating_sub(1));
+        for row in rows
+            .iter()
+            .skip(scroll_offset)
+            .take(DATABASE_VISIBLE_CATEGORIES)
+        {
+            let sample = row
+                .records
                 .iter()
-                .filter_map(|record| record.name())
+                .map(|(_, name)| name.as_str())
                 .take(4)
                 .collect::<Vec<_>>()
                 .join(", ");
             lines.push(format!(
-                "category: {} count {} sample {}",
-                Self::database_category_label(*content_type),
-                self.content_loader.get_by(*content_type).len(),
+                "category: {} tag {} count {} sample {}",
+                Self::database_category_label(row.content_type),
+                row.tag.as_deref().unwrap_or("default"),
+                row.records.len(),
                 sample
             ));
         }
 
-        if content_types.is_empty() {
+        if rows.is_empty() {
             lines.push("@none.found".into());
         }
 
@@ -29077,12 +29095,87 @@ impl DesktopLauncher {
         )
     }
 
+    fn database_row_height() -> f32 {
+        DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP + 46.0
+    }
+
+    fn database_content_list_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let first_header = Self::database_category_header_rect_for_panel(panel, 0);
+        let bottom = panel.y + 42.0;
+        RenderRect::new(
+            panel.x + 24.0,
+            bottom,
+            panel.width - 48.0,
+            (first_header.y + first_header.height + 6.0 - bottom).max(44.0),
+        )
+    }
+
+    fn database_visible_row_capacity_for_panel(panel: RenderRect) -> usize {
+        let first_header = Self::database_category_header_rect_for_panel(panel, 0);
+        let bottom = panel.y + 42.0;
+        if first_header.y < bottom {
+            return 0;
+        }
+        (((first_header.y - bottom) / Self::database_row_height()).floor() as usize + 1)
+            .max(1)
+            .min(DATABASE_VISIBLE_CATEGORIES)
+    }
+
+    fn max_database_scroll_offset_for_rows(row_count: usize, panel: RenderRect) -> usize {
+        row_count.saturating_sub(Self::database_visible_row_capacity_for_panel(panel).max(1))
+    }
+
+    fn max_database_scroll_offset(&self, panel: RenderRect) -> usize {
+        Self::max_database_scroll_offset_for_rows(self.database_visible_group_rows().len(), panel)
+    }
+
+    fn clamped_database_scroll_offset_for_panel(&self, panel: RenderRect) -> usize {
+        self.database_scroll_offset
+            .min(self.max_database_scroll_offset(panel))
+    }
+
+    fn apply_database_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.active_menu_route != Some(DesktopMenuRoute::Database)
+            || self.last_database_content_opened.is_some()
+        {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Database);
+        if !Self::database_content_list_rect_for_panel(panel).contains_point(cursor) {
+            return false;
+        }
+        let max = self.max_database_scroll_offset(panel);
+        if max == 0 {
+            return false;
+        }
+        let current = self.database_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.database_scroll_offset = next;
+        next != current
+    }
+
     fn database_category_header_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let first_y = Self::database_tab_rect_for_panel(panel, 0).y - 38.0;
-        let row_height = DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP + 46.0;
         RenderRect::new(
             panel.x + 28.0,
-            first_y - index as f32 * row_height,
+            first_y - index as f32 * Self::database_row_height(),
             panel.width - 56.0,
             22.0,
         )
@@ -29221,10 +29314,13 @@ impl DesktopLauncher {
             .floor()
             .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
             as usize;
+        let row_capacity = Self::database_visible_row_capacity_for_panel(panel);
+        let scroll_offset = self.clamped_database_scroll_offset_for_panel(panel);
         for (row_index, row) in self
             .database_visible_group_rows()
             .into_iter()
-            .take(DATABASE_VISIBLE_CATEGORIES)
+            .skip(scroll_offset)
+            .take(row_capacity)
             .enumerate()
         {
             let header = Self::database_category_header_rect_for_panel(panel, row_index);
@@ -30637,6 +30733,7 @@ impl DesktopLauncher {
                 if index < self.database_tab_count() {
                     self.database_selected_tab = index;
                 }
+                self.database_scroll_offset = 0;
                 self.database_search_focused = false;
             }
             DesktopMenuRouteShellAction::OpenDatabaseContent(content_type, record_index) => {
@@ -30971,7 +31068,15 @@ impl DesktopLauncher {
             .floor()
             .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
             as usize;
-        for (row_index, row) in rows.iter().take(DATABASE_VISIBLE_CATEGORIES).enumerate() {
+        let row_capacity = Self::database_visible_row_capacity_for_panel(panel);
+        let max_scroll = Self::max_database_scroll_offset_for_rows(rows.len(), panel);
+        let scroll_offset = self.database_scroll_offset.min(max_scroll);
+        for (row_index, row) in rows
+            .iter()
+            .skip(scroll_offset)
+            .take(row_capacity)
+            .enumerate()
+        {
             let header = Self::database_category_header_rect_for_panel(panel, row_index);
             if header.y < panel.y + 42.0 {
                 break;
@@ -31095,6 +31200,37 @@ impl DesktopLauncher {
                     ));
                 }
             }
+        }
+        if max_scroll > 0 {
+            let list = Self::database_content_list_rect_for_panel(panel);
+            let track = RenderRect::new(list.right() - 8.0, list.y + 6.0, 4.0, list.height - 12.0);
+            let knob_height = (track.height
+                * (row_capacity.max(1) as f32 / rows.len().max(1) as f32))
+                .clamp(24.0, track.height);
+            let travel = (track.height - knob_height).max(0.0);
+            let knob_y = track.y
+                + travel * (scroll_offset as f32 / max_scroll.max(1) as f32).clamp(0.0, 1.0);
+            pass.push(RenderCommand::fill_rect(
+                track,
+                [0.10, 0.15, 0.18, 0.55],
+                Layer::END_PIXELED + 0.044,
+            ));
+            pass.push(RenderCommand::fill_rect(
+                RenderRect::new(track.x, knob_y, track.width, knob_height),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
+                Layer::END_PIXELED + 0.045,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{}/{}", scroll_offset + 1, max_scroll + 1),
+                RenderPoint::new(list.right() - 28.0, list.y + 16.0),
+                [0.54, 0.64, 0.72, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.046,
+            ));
         }
         self.push_database_tab_hover_tooltip(pass, panel);
         self.push_database_content_hover_tooltip(pass, panel);
@@ -36095,6 +36231,7 @@ impl DesktopLauncher {
                     } else {
                         self.database_search.clear();
                     }
+                    self.database_scroll_offset = 0;
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
@@ -36436,6 +36573,9 @@ impl DesktopLauncher {
                     if self.apply_load_game_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
+                    if self.apply_database_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                     if self.apply_map_list_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -36541,6 +36681,7 @@ impl DesktopLauncher {
                     {
                         self.database_search
                             .extend(text.chars().filter(|ch| !ch.is_control()));
+                        self.database_scroll_offset = 0;
                     } else if self.active_menu_route == Some(DesktopMenuRoute::Mods)
                         && self.mods_browser_dialog_open
                     {
@@ -59700,6 +59841,51 @@ version: "2.0.0"
                     && row.records.iter().any(|(_, name)| name == "conveyor")),
             "Block.databaseTag rows should keep distribution blocks such as conveyor together"
         );
+        let max_database_scroll = launcher.max_database_scroll_offset(panel);
+        assert!(
+            max_database_scroll > 0,
+            "Java DatabaseDialog content is hosted inside a vertical ScrollPane, so Rust should expose more rows than the first visible window"
+        );
+        let database_list = DesktopLauncher::database_content_list_rect_for_panel(panel);
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: database_list.center().x,
+                    y: database_list.center().y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert!(
+            launcher.database_scroll_offset > 0,
+            "mouse wheel over DatabaseDialog list should move the database scroll offset"
+        );
+        let scrolled_first_row = launcher
+            .database_visible_group_rows()
+            .get(launcher.database_scroll_offset)
+            .cloned()
+            .expect("scroll offset should reference an existing DatabaseDialog row");
+        let scrolled_lines =
+            launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Database);
+        assert!(scrolled_lines
+            .iter()
+            .any(|line| line == &format!("scroll: {}", launcher.database_scroll_offset)));
+        assert!(
+            scrolled_lines.iter().any(|line| {
+                line.contains(&format!(
+                    "tag {}",
+                    scrolled_first_row.tag.as_deref().unwrap_or("default")
+                )) && scrolled_first_row
+                    .records
+                    .first()
+                    .is_some_and(|(_, name)| line.contains(name))
+            }),
+            "DatabaseDialog route summary should follow the same scrolled row order as render and hit-test"
+        );
 
         let search = DesktopLauncher::database_search_rect_for_panel(panel).center();
         assert_eq!(
@@ -59712,6 +59898,10 @@ version: "2.0.0"
         launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("copper".into())]);
         assert_eq!(launcher.database_search, "copper");
         assert!(launcher.database_search_focused);
+        assert_eq!(
+            launcher.database_scroll_offset, 0,
+            "DatabaseDialog search rebuild should reset the ScrollPane row offset"
+        );
         assert!(launcher
             .active_menu_route_shell_lines(super::DesktopMenuRoute::Database)
             .contains(&"search: copper".to_string()));
