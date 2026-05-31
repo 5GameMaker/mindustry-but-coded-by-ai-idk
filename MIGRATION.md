@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 559. LoadRenderer 接入 LoadingFragment 遮罩结构
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.1%**，仍未达到完整可玩；继续优先前端/UI，避免加载态只剩简化进度条或黑屏观感。
+- Java 对照依据：
+  - `core/src/mindustry/ui/fragments/LoadingFragment.java` 使用 `Styles.black8` 全屏遮罩、上下 `WarningBar`、`Styles.techLabel` 的 `@loading` 标签、可选 `@cancel` 按钮；
+  - `core/src/mindustry/ui/WarningBar.java` 使用 accent 色斜条与上下边线。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/load_renderer.rs`
+    - `LoadFrameInput` 新增 `cancelable`，默认关闭，后续可由真实加载/联网取消逻辑接入；
+    - `LoadRendererState::build_plan(...)` 新增 `LoadingFragment` 命令，生成黑色遮罩、上下 WarningBar、`@loading` 标签和可选 `@cancel`；
+    - 复用已迁移的 `core::ui::WarningBar` 数据计划，把斜条/边线转成当前 render backend 能下沉的 line/circle primitive；
+    - 进度条位置改为由 LoadingFragment 布局派生，更接近 Java 顶部 spacer + warning bars + label + bar 的层次。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core load_renderer --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop load_frame_for_render --features opengl-backend --lib -- --test-threads=1`
+- 仍未完成：
+  - `LoadRenderer.java` 的 mesh/stencil/bloom/诊断性能条、资产列表、GL/内存信息仍未完整迁移；
+  - LoadingFragment 的 back/escape 取消仍只在 plan 层有 `cancelable` UI 入口，真实输入取消动作还需接入 desktop/frame loop；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 558. ModsDialog browser repo 卡片动作区首个闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

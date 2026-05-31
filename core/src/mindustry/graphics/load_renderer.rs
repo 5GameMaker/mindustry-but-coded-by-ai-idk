@@ -9,6 +9,7 @@ use super::{
     RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderProperty, RenderRect,
     RenderTextAlign,
 };
+use crate::mindustry::ui::{WarningBar, WarningBarDrawCommand, WarningBarLayout};
 
 const LOAD_PASS_KIND: &str = "load";
 const LOAD_GLOW_LAYER: f32 = 1.0;
@@ -22,6 +23,19 @@ const LOAD_PROMPT_TEXT_LAYER: f32 = 21.0;
 const LOAD_BANNER_BACKGROUND_LAYER: f32 = 30.0;
 const LOAD_BANNER_MESSAGE_LAYER: f32 = 31.0;
 const LOAD_BANNER_DETAILS_LAYER: f32 = 32.0;
+const LOAD_FRAGMENT_OVERLAY_LAYER: f32 = 4.0;
+const LOAD_FRAGMENT_WARNING_LAYER: f32 = 13.0;
+const LOAD_FRAGMENT_LABEL_LAYER: f32 = 14.0;
+const LOAD_FRAGMENT_BUTTON_LAYER: f32 = 15.0;
+const LOAD_FRAGMENT_EDGE_LAYER: f32 = 15.5;
+const LOAD_FRAGMENT_TOP_SPACER: f32 = 133.0;
+const LOAD_FRAGMENT_WARNING_HEIGHT: f32 = 24.0;
+const LOAD_FRAGMENT_LABEL_GAP: f32 = 10.0;
+const LOAD_FRAGMENT_LABEL_HEIGHT: f32 = 32.0;
+const LOAD_FRAGMENT_BAR_TOP_PAD: f32 = 6.0;
+const LOAD_FRAGMENT_CANCEL_WIDTH: f32 = 250.0;
+const LOAD_FRAGMENT_CANCEL_HEIGHT: f32 = 70.0;
+const LOAD_FRAGMENT_CANCEL_PAD: f32 = 20.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoadStage {
@@ -158,10 +172,11 @@ impl LoadRendererState {
         let planet_radius = (min_side * 0.14).max(18.0 * scale);
         let logo_y = height * 0.24;
         let planet_y = height * 0.40;
-        let bar_width = (width * 0.54).clamp(220.0 * scale, 640.0 * scale);
+        let fragment_layout = loading_fragment_layout(width, height, scale, input.cancelable);
+        let bar_width = fragment_layout.progress_bar.width;
         let bar_height = (18.0 * scale).max(10.0);
-        let bar_x = (width - bar_width) / 2.0;
-        let bar_y = height * 0.66;
+        let bar_x = fragment_layout.progress_bar.x;
+        let bar_y = fragment_layout.progress_bar.y;
         let prompt_y = (bar_y + bar_height + 26.0 * scale).min(height - 20.0 * scale);
         let status_y = (height - 28.0 * scale).max(prompt_y + 18.0 * scale);
         let panel_height = (54.0 * scale).max(32.0);
@@ -228,6 +243,19 @@ impl LoadRendererState {
             });
         }
 
+        commands.push(LoadRenderCommand::LoadingFragment {
+            overlay: LoadRect::new(0.0, 0.0, width, height),
+            top_warning: fragment_layout.top_warning,
+            bottom_warning: fragment_layout.bottom_warning,
+            label: "@loading".to_string(),
+            label_center: (
+                center_x,
+                fragment_layout.label.y + fragment_layout.label.height * 0.5,
+            ),
+            cancel_button: fragment_layout.cancel_button,
+            overlay_color: [0.0, 0.0, 0.0, 0.80],
+        });
+
         commands.push(LoadRenderCommand::ProgressBar {
             rect: LoadRect::new(bar_x, bar_y, bar_width, bar_height),
             progress,
@@ -286,6 +314,7 @@ pub struct LoadFrameInput {
     pub prompt: Option<String>,
     pub error: Option<String>,
     pub completion: Option<String>,
+    pub cancelable: bool,
 }
 
 impl LoadFrameInput {
@@ -307,6 +336,7 @@ impl LoadFrameInput {
             prompt: None,
             error: None,
             completion: None,
+            cancelable: false,
         }
     }
 }
@@ -386,6 +416,15 @@ pub enum LoadRenderCommand {
         text: String,
         center: (f32, f32),
         color: [f32; 4],
+    },
+    LoadingFragment {
+        overlay: LoadRect,
+        top_warning: LoadRect,
+        bottom_warning: LoadRect,
+        label: String,
+        label_center: (f32, f32),
+        cancel_button: Option<LoadRect>,
+        overlay_color: [f32; 4],
     },
     ErrorBanner {
         message: String,
@@ -543,6 +582,60 @@ impl LoadRenderCommand {
                     LOAD_PROMPT_TEXT_LAYER,
                 ));
             }
+            Self::LoadingFragment {
+                overlay,
+                top_warning,
+                bottom_warning,
+                label,
+                label_center,
+                cancel_button,
+                overlay_color,
+            } => {
+                commands.push(RenderCommand::fill_rect(
+                    RenderRect::new(overlay.x, overlay.y, overlay.width, overlay.height),
+                    overlay_color,
+                    LOAD_FRAGMENT_OVERLAY_LAYER,
+                ));
+                push_warning_bar_render_commands(&mut commands, top_warning);
+                push_warning_bar_render_commands(&mut commands, bottom_warning);
+                commands.push(RenderCommand::draw_text(
+                    label,
+                    RenderPoint::new(label_center.0, label_center.1),
+                    [0.98, 0.98, 0.98, 1.0],
+                    22.0,
+                    0.0,
+                    RenderTextAlign::Center,
+                    LOAD_FRAGMENT_LABEL_LAYER,
+                ));
+                if let Some(cancel_button) = cancel_button {
+                    let rect = RenderRect::new(
+                        cancel_button.x,
+                        cancel_button.y,
+                        cancel_button.width,
+                        cancel_button.height,
+                    );
+                    commands.push(RenderCommand::fill_rect(
+                        rect,
+                        [0.06, 0.08, 0.10, 0.92],
+                        LOAD_FRAGMENT_BUTTON_LAYER,
+                    ));
+                    commands.push(RenderCommand::stroke_rect(
+                        rect,
+                        [0.36, 0.58, 0.70, 0.95],
+                        2.0,
+                        LOAD_FRAGMENT_EDGE_LAYER,
+                    ));
+                    commands.push(RenderCommand::draw_text(
+                        "@cancel",
+                        rect.center(),
+                        [0.90, 0.96, 1.0, 1.0],
+                        18.0,
+                        0.0,
+                        RenderTextAlign::Center,
+                        LOAD_FRAGMENT_EDGE_LAYER + 0.1,
+                    ));
+                }
+            }
             Self::ErrorBanner {
                 message,
                 details,
@@ -614,6 +707,117 @@ impl LoadRenderCommand {
 
         commands
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LoadingFragmentLayout {
+    top_warning: LoadRect,
+    label: LoadRect,
+    bottom_warning: LoadRect,
+    progress_bar: LoadRect,
+    cancel_button: Option<LoadRect>,
+}
+
+fn loading_fragment_layout(
+    width: f32,
+    height: f32,
+    scale: f32,
+    cancelable: bool,
+) -> LoadingFragmentLayout {
+    let scale = scale.max(0.1);
+    let top_spacer = LOAD_FRAGMENT_TOP_SPACER * scale;
+    let warning_height = (LOAD_FRAGMENT_WARNING_HEIGHT * scale).max(12.0);
+    let label_gap = LOAD_FRAGMENT_LABEL_GAP * scale;
+    let label_height = (LOAD_FRAGMENT_LABEL_HEIGHT * scale).max(20.0);
+    let progress_width = (width * 0.54).clamp(220.0 * scale, 640.0 * scale);
+    let progress_height = (18.0 * scale).max(10.0);
+    let progress_top_pad = LOAD_FRAGMENT_BAR_TOP_PAD * scale;
+    let cancel_width = (LOAD_FRAGMENT_CANCEL_WIDTH * scale).min((width - 40.0 * scale).max(1.0));
+    let cancel_height = (LOAD_FRAGMENT_CANCEL_HEIGHT * scale).max(40.0);
+    let cancel_pad = LOAD_FRAGMENT_CANCEL_PAD * scale;
+
+    let top_warning_y = (height - top_spacer - warning_height).max(height * 0.56);
+    let label_y = top_warning_y - label_gap - label_height;
+    let bottom_warning_y = label_y - label_gap - warning_height;
+    let progress_y = bottom_warning_y - progress_top_pad - progress_height;
+    let cancel_button = cancelable.then_some(LoadRect::new(
+        (width - cancel_width) * 0.5,
+        (progress_y - cancel_pad - cancel_height).max(12.0 * scale),
+        cancel_width,
+        cancel_height,
+    ));
+
+    LoadingFragmentLayout {
+        top_warning: LoadRect::new(0.0, top_warning_y, width, warning_height),
+        label: LoadRect::new(0.0, label_y, width, label_height),
+        bottom_warning: LoadRect::new(0.0, bottom_warning_y, width, warning_height),
+        progress_bar: LoadRect::new(
+            (width - progress_width) * 0.5,
+            progress_y,
+            progress_width,
+            progress_height,
+        ),
+        cancel_button,
+    }
+}
+
+fn push_warning_bar_render_commands(commands: &mut Vec<RenderCommand>, rect: LoadRect) {
+    let warning = WarningBar::new();
+    let plan = warning.draw_plan(WarningBarLayout::new(
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+    ));
+    for command in plan.commands {
+        match command {
+            WarningBarDrawCommand::Stripe(stripe) => {
+                let center = RenderPoint::new(
+                    (stripe.quad.x1 + stripe.quad.x3) * 0.5,
+                    (stripe.quad.y1 + stripe.quad.y3) * 0.5,
+                );
+                let from = RenderPoint::new(
+                    (stripe.quad.x1 + stripe.quad.x4) * 0.5,
+                    (stripe.quad.y1 + stripe.quad.y4) * 0.5,
+                );
+                let to = RenderPoint::new(
+                    (stripe.quad.x2 + stripe.quad.x3) * 0.5,
+                    (stripe.quad.y2 + stripe.quad.y3) * 0.5,
+                );
+                let color = load_rgba_u32_to_f32(stripe.color_rgba, stripe.alpha);
+                commands.push(RenderCommand::draw_line(
+                    from,
+                    to,
+                    warning.bar_width,
+                    color,
+                    LOAD_FRAGMENT_WARNING_LAYER,
+                ));
+                commands.push(RenderCommand::draw_circle(
+                    center,
+                    (warning.bar_width * 0.18).max(1.0),
+                    color,
+                    true,
+                    LOAD_FRAGMENT_WARNING_LAYER + 0.01,
+                ));
+            }
+            WarningBarDrawCommand::Line(line) => commands.push(RenderCommand::draw_line(
+                RenderPoint::new(line.line.from_x, line.line.from_y),
+                RenderPoint::new(line.line.to_x, line.line.to_y),
+                line.line.stroke,
+                load_rgba_u32_to_f32(line.color_rgba, line.alpha),
+                LOAD_FRAGMENT_EDGE_LAYER,
+            )),
+        }
+    }
+}
+
+fn load_rgba_u32_to_f32(rgba: u32, alpha_scale: f32) -> [f32; 4] {
+    [
+        ((rgba >> 24) & 0xff) as f32 / 255.0,
+        ((rgba >> 16) & 0xff) as f32 / 255.0,
+        ((rgba >> 8) & 0xff) as f32 / 255.0,
+        ((rgba & 0xff) as f32 / 255.0) * alpha_scale.clamp(0.0, 1.0),
+    ]
 }
 
 fn stage_color(stage: LoadStage, theme: &LoadTheme) -> [f32; 4] {
@@ -695,13 +899,14 @@ mod tests {
             prompt: None,
             error: None,
             completion: None,
+            cancelable: false,
         });
 
         assert_eq!(plan.stage, LoadStage::LoadingContent);
         assert_eq!(plan.progress, 0.42);
         assert_eq!(plan.stage_text, "content  42%");
         assert_eq!(plan.prompt_text, "loading content");
-        assert_eq!(plan.commands.len(), 8);
+        assert_eq!(plan.commands.len(), 9);
 
         assert!(matches!(plan.commands[0], LoadRenderCommand::Clear { .. }));
         assert!(matches!(
@@ -716,17 +921,82 @@ mod tests {
         assert!(matches!(plan.commands[4], LoadRenderCommand::Logo { .. }));
         assert!(matches!(
             plan.commands[5],
-            LoadRenderCommand::ProgressBar { .. }
+            LoadRenderCommand::LoadingFragment {
+                cancel_button: None,
+                ..
+            }
         ));
         assert!(matches!(
             plan.commands[6],
-            LoadRenderCommand::StageLabel { .. }
+            LoadRenderCommand::ProgressBar { .. }
         ));
         assert!(matches!(
             plan.commands[7],
+            LoadRenderCommand::StageLabel { .. }
+        ));
+        assert!(matches!(
+            plan.commands[8],
             LoadRenderCommand::PromptText { .. }
         ));
         assert_eq!(state.planet_rotation_deg, 54.0);
+    }
+
+    #[test]
+    fn loading_plan_includes_loading_fragment_overlay_warning_bars_and_cancel() {
+        let mut state = LoadRendererState::default();
+        let mut input = LoadFrameInput::new(1280.0, 720.0, 1.0, 0.0, LoadStage::LoadingAssets, 0.2);
+        input.cancelable = true;
+        let plan = state.build_plan(input);
+
+        match &plan.commands[5] {
+            LoadRenderCommand::LoadingFragment {
+                overlay,
+                top_warning,
+                bottom_warning,
+                label,
+                cancel_button,
+                overlay_color,
+                ..
+            } => {
+                assert_eq!(*overlay, LoadRect::new(0.0, 0.0, 1280.0, 720.0));
+                assert_eq!(label, "@loading");
+                assert_eq!(*overlay_color, [0.0, 0.0, 0.0, 0.80]);
+                assert_eq!(top_warning.width, 1280.0);
+                assert_eq!(bottom_warning.width, 1280.0);
+                assert!(cancel_button.is_some());
+            }
+            other => panic!("expected LoadingFragment command, got {other:?}"),
+        }
+
+        let pass = plan
+            .to_render_pass()
+            .expect("load plan with LoadingFragment should render");
+        let texts = pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@loading"));
+        assert!(texts.contains(&"@cancel"));
+        assert!(pass.commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::FillRect { color, layer, .. }
+                    if *color == [0.0, 0.0, 0.0, 0.80]
+                        && (*layer - LOAD_FRAGMENT_OVERLAY_LAYER).abs() < f32::EPSILON
+            )
+        }));
+        assert!(
+            pass.commands
+                .iter()
+                .filter(|command| matches!(command, RenderCommand::DrawLine { .. }))
+                .count()
+                >= 4,
+            "LoadingFragment should render the two WarningBar stripe/edge groups"
+        );
     }
 
     #[test]
@@ -785,7 +1055,7 @@ mod tests {
         let plan = state.build_plan(input);
 
         assert_eq!(plan.prompt_text, "warming shaders");
-        assert_eq!(plan.commands.len(), 5);
+        assert_eq!(plan.commands.len(), 6);
         assert!(matches!(plan.commands[0], LoadRenderCommand::Clear { .. }));
         assert!(matches!(
             plan.commands[1],
@@ -793,14 +1063,18 @@ mod tests {
         ));
         assert!(matches!(
             plan.commands[2],
-            LoadRenderCommand::ProgressBar { .. }
+            LoadRenderCommand::LoadingFragment { .. }
         ));
         assert!(matches!(
             plan.commands[3],
-            LoadRenderCommand::StageLabel { .. }
+            LoadRenderCommand::ProgressBar { .. }
         ));
         assert!(matches!(
             plan.commands[4],
+            LoadRenderCommand::StageLabel { .. }
+        ));
+        assert!(matches!(
+            plan.commands[5],
             LoadRenderCommand::PromptText { .. }
         ));
     }
