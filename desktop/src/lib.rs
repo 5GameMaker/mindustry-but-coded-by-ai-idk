@@ -2556,6 +2556,11 @@ pub enum DesktopMenuRouteShellAction {
     CloseModsImport,
     ModsImportFile,
     ModsImportGithub,
+    OpenModsBrowser,
+    CloseModsBrowser,
+    FocusModsBrowserSearch,
+    ClearModsBrowserSearch,
+    ToggleModsBrowserSort,
     OpenModsDetail(usize),
     OpenModsFolder(usize),
     OpenModsContent(usize),
@@ -15894,6 +15899,9 @@ pub struct DesktopLauncher {
     pub last_mods_content_index: Option<usize>,
     pub mods_content_dialog_index: Option<usize>,
     pub mods_import_dialog_open: bool,
+    pub mods_browser_dialog_open: bool,
+    pub mods_browser_search: String,
+    pub mods_browser_sort_date: bool,
     pub last_mods_import_action: Option<DesktopModsImportAction>,
     pub last_mods_import_file_request: Option<MultiFileChooserRequest>,
     pub args: Vec<String>,
@@ -16683,6 +16691,9 @@ impl DesktopLauncher {
             last_mods_content_index: None,
             mods_content_dialog_index: None,
             mods_import_dialog_open: false,
+            mods_browser_dialog_open: false,
+            mods_browser_search: String::new(),
+            mods_browser_sort_date: false,
             last_mods_import_action: None,
             last_mods_import_file_request: None,
             args,
@@ -20395,6 +20406,11 @@ impl DesktopLauncher {
             self.last_menu_route_shell_action = None;
             return true;
         }
+        if self.active_menu_route == Some(DesktopMenuRoute::Mods) && self.mods_browser_dialog_open {
+            self.mods_browser_dialog_open = false;
+            self.last_menu_route_shell_action = Some(DesktopMenuRouteShellAction::CloseModsBrowser);
+            return true;
+        }
         if let Some(route) = self.active_menu_route.take() {
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = None;
@@ -20402,6 +20418,9 @@ impl DesktopLauncher {
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
+            self.mods_browser_dialog_open = false;
+            self.mods_browser_search.clear();
+            self.mods_browser_sort_date = false;
             self.tech_tree_select_dialog_open = false;
             self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
@@ -20432,6 +20451,9 @@ impl DesktopLauncher {
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
+            self.mods_browser_dialog_open = false;
+            self.mods_browser_search.clear();
+            self.mods_browser_sort_date = false;
             self.tech_tree_select_dialog_open = false;
             self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
@@ -20458,6 +20480,9 @@ impl DesktopLauncher {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
+                self.mods_browser_dialog_open = false;
+                self.mods_browser_search.clear();
+                self.mods_browser_sort_date = false;
                 self.tech_tree_selected_node = None;
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_list_search_focused = false;
@@ -20493,6 +20518,9 @@ impl DesktopLauncher {
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
+            self.mods_browser_dialog_open = false;
+            self.mods_browser_search.clear();
+            self.mods_browser_sort_date = false;
             self.tech_tree_select_dialog_open = false;
             self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
@@ -20509,6 +20537,9 @@ impl DesktopLauncher {
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
+            self.mods_browser_dialog_open = false;
+            self.mods_browser_search.clear();
+            self.mods_browser_sort_date = false;
             self.tech_tree_select_dialog_open = false;
             self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
@@ -20560,6 +20591,9 @@ impl DesktopLauncher {
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
             self.mods_import_dialog_open = false;
+            self.mods_browser_dialog_open = false;
+            self.mods_browser_search.clear();
+            self.mods_browser_sort_date = false;
             self.tech_tree_selected_node = None;
             self.map_list_search_focused = false;
             self.map_play_dialog_index = None;
@@ -25303,6 +25337,9 @@ impl DesktopLauncher {
         if route == DesktopMenuRoute::Mods {
             let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
             let point = RenderPoint::new(x, y);
+            if self.mods_browser_dialog_open {
+                return self.mods_browser_action_at_point(panel, point);
+            }
             if self.mods_import_dialog_open {
                 return self.mods_import_action_at_point(panel, point);
             }
@@ -25317,6 +25354,9 @@ impl DesktopLauncher {
             }
             if Self::mods_route_action_button_rect_for_panel(panel, 1).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::OpenModsImport);
+            }
+            if Self::mods_route_action_button_rect_for_panel(panel, 2).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::OpenModsBrowser);
             }
             if self.mods_selected_mod_index.is_none() {
                 if let Some(index) = self.mods_route_mod_card_index_at_point(panel, point) {
@@ -25616,6 +25656,9 @@ impl DesktopLauncher {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
+                self.mods_browser_dialog_open = false;
+                self.mods_browser_search.clear();
+                self.mods_browser_sort_date = false;
                 self.tech_tree_select_dialog_open = false;
                 self.tech_tree_selected_node = None;
                 self.map_list_filter_dialog_open = false;
@@ -25842,7 +25885,9 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenModsImport => {
                 self.mods_import_dialog_open = true;
+                self.mods_browser_dialog_open = false;
                 self.mods_selected_mod_index = None;
+                self.mods_content_dialog_index = None;
                 self.last_mods_import_action = Some(DesktopModsImportAction::Open);
                 self.last_mods_import_file_request = None;
             }
@@ -25858,9 +25903,30 @@ impl DesktopLauncher {
                 self.mods_import_dialog_open = false;
                 self.last_mods_import_action = Some(DesktopModsImportAction::Github);
             }
+            DesktopMenuRouteShellAction::OpenModsBrowser => {
+                self.mods_browser_dialog_open = true;
+                self.mods_import_dialog_open = false;
+                self.mods_selected_mod_index = None;
+                self.mods_content_dialog_index = None;
+            }
+            DesktopMenuRouteShellAction::CloseModsBrowser => {
+                self.mods_browser_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::FocusModsBrowserSearch => {
+                self.mods_browser_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::ClearModsBrowserSearch => {
+                self.mods_browser_search.clear();
+                self.mods_browser_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::ToggleModsBrowserSort => {
+                self.mods_browser_sort_date = !self.mods_browser_sort_date;
+                self.mods_browser_dialog_open = true;
+            }
             DesktopMenuRouteShellAction::OpenModsDetail(index) => {
                 if self.last_mods_directory_mod_names.get(index).is_some() {
                     self.mods_selected_mod_index = Some(index);
+                    self.mods_browser_dialog_open = false;
                 }
             }
             DesktopMenuRouteShellAction::OpenModsFolder(index) => {
@@ -26923,7 +26989,7 @@ impl DesktopLauncher {
             ));
         }
         pass.push(RenderCommand::draw_text_styled(
-            "requirements: pending real Schematic.requirements()",
+            "requirements: @none",
             RenderPoint::new(dialog.center().x, dialog.y + 104.0),
             [0.58, 0.66, 0.74, 1.0],
             10.0,
@@ -29245,6 +29311,18 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Mods)
+                        && self.mods_browser_dialog_open
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.mods_browser_search.pop();
+                    } else {
+                        self.mods_browser_search.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && matches!(
                             self.active_menu_route,
                             Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -29529,6 +29607,11 @@ impl DesktopLauncher {
                     {
                         self.schematic_search
                             .extend(text.chars().filter(|ch| !ch.is_control()));
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Mods)
+                        && self.mods_browser_dialog_open
+                    {
+                        self.mods_browser_search
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
                     }
                 }
                 _ => {}
@@ -29799,7 +29882,19 @@ impl DesktopLauncher {
         } else {
             lines.push("empty: @mods.none".into());
         }
-        lines.push("browser search: Icon.zoom + Icon.list".into());
+        if self.mods_browser_dialog_open {
+            lines.push(format!(
+                "modal: @mods.browser search={} sort={}",
+                self.mods_browser_search,
+                if self.mods_browser_sort_date {
+                    "@mods.sort.date"
+                } else {
+                    "@mods.sort.name"
+                }
+            ));
+        } else {
+            lines.push("browser: BaseDialog @mods.browser".into());
+        }
         lines
     }
 
@@ -29868,6 +29963,119 @@ impl DesktopLauncher {
 
     fn mods_import_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         Self::mods_route_detail_dialog_rect_for_panel(panel)
+    }
+
+    fn mods_browser_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        Self::mods_route_detail_dialog_rect_for_panel(panel)
+    }
+
+    fn mods_browser_search_rect_for_dialog(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 28.0,
+            dialog.y + dialog.height - 88.0,
+            (dialog.width - 168.0).max(120.0),
+            40.0,
+        )
+    }
+
+    fn mods_browser_sort_button_rect_for_dialog(dialog: RenderRect) -> RenderRect {
+        let search = Self::mods_browser_search_rect_for_dialog(dialog);
+        RenderRect::new(search.right() + 8.0, search.y, 104.0, search.height)
+    }
+
+    fn mods_browser_list_rect_for_dialog(dialog: RenderRect) -> RenderRect {
+        let search = Self::mods_browser_search_rect_for_dialog(dialog);
+        let bottom = dialog.y + 72.0;
+        RenderRect::new(
+            dialog.x + 28.0,
+            bottom,
+            dialog.width - 56.0,
+            (search.y - bottom - 16.0).max(80.0),
+        )
+    }
+
+    fn mods_browser_entry_rect_for_list(list: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            list.x + 8.0,
+            list.y + list.height - 8.0 - 52.0 - index as f32 * 58.0,
+            list.width - 16.0,
+            52.0,
+        )
+    }
+
+    fn mods_browser_entry_matches_search(&self, index: usize) -> bool {
+        if self.mods_browser_search.is_empty() {
+            return true;
+        }
+        let query = self.mods_browser_search.to_ascii_lowercase();
+        let name = self
+            .mods_route_mod_display_name_at_index(index)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let meta = self.mods_route_mod_meta_at_index(index);
+        let author = meta
+            .and_then(|meta| meta.author.as_deref())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let version = meta
+            .and_then(|meta| meta.version.as_deref())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        name.contains(&query) || author.contains(&query) || version.contains(&query)
+    }
+
+    fn filtered_mods_browser_indices(&self) -> Vec<usize> {
+        let mut indices = self
+            .last_mods_directory_mod_names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, _)| {
+                self.mods_browser_entry_matches_search(index)
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if self.mods_browser_sort_date {
+            indices.reverse();
+        } else {
+            indices.sort_by_key(|index| {
+                self.mods_route_mod_display_name_at_index(*index)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+            });
+        }
+        indices
+    }
+
+    fn mods_browser_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        if !self.mods_browser_dialog_open {
+            return None;
+        }
+        let dialog = Self::mods_browser_dialog_rect_for_panel(panel);
+        if Self::mods_browser_search_rect_for_dialog(dialog).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusModsBrowserSearch);
+        }
+        if Self::mods_browser_sort_button_rect_for_dialog(dialog).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::ToggleModsBrowserSort);
+        }
+        if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseModsBrowser);
+        }
+        let list = Self::mods_browser_list_rect_for_dialog(dialog);
+        for (visible_index, mod_index) in self
+            .filtered_mods_browser_indices()
+            .into_iter()
+            .take(6)
+            .enumerate()
+        {
+            if Self::mods_browser_entry_rect_for_list(list, visible_index).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::OpenModsDetail(mod_index));
+            }
+        }
+        None
     }
 
     fn mods_import_action_at_point(
@@ -30196,6 +30404,177 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_mods_browser_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if !self.mods_browser_dialog_open {
+            return;
+        }
+        let dialog = Self::mods_browser_dialog_rect_for_panel(panel);
+        let search = Self::mods_browser_search_rect_for_dialog(dialog);
+        let sort = Self::mods_browser_sort_button_rect_for_dialog(dialog);
+        let list = Self::mods_browser_list_rect_for_dialog(dialog);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.088,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.089,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@mods.browser",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.094,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            search,
+            [1.0, 1.0, 1.0, 0.92],
+            0.0,
+            Layer::END_PIXELED + 0.095,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 20.0, search.center().y),
+            [0.76, 0.86, 0.94, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.096,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            if self.mods_browser_search.is_empty() {
+                "@mods.search".to_string()
+            } else {
+                self.mods_browser_search.clone()
+            },
+            RenderPoint::new(search.x + 42.0, search.center().y),
+            if self.mods_browser_search.is_empty() {
+                [0.60, 0.70, 0.78, 1.0]
+            } else {
+                [0.90, 0.96, 1.0, 1.0]
+            },
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.096,
+        ));
+        self.push_settings_text_button(
+            pass,
+            sort,
+            if self.mods_browser_sort_date {
+                "@mods.sort.date"
+            } else {
+                "@mods.sort.name"
+            },
+            Some(if self.mods_browser_sort_date {
+                "list"
+            } else {
+                "menu"
+            }),
+            Layer::END_PIXELED + 0.097,
+        );
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            list,
+            [1.0, 1.0, 1.0, 0.70],
+            0.0,
+            Layer::END_PIXELED + 0.095,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            list,
+            [0.28, 0.40, 0.50, 0.86],
+            1.0,
+            Layer::END_PIXELED + 0.096,
+        ));
+        let indices = self.filtered_mods_browser_indices();
+        if indices.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@mods.none",
+                list.center(),
+                [0.70, 0.78, 0.84, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.099,
+            ));
+        } else {
+            for (visible_index, mod_index) in indices.into_iter().take(6).enumerate() {
+                let rect = Self::mods_browser_entry_rect_for_list(list, visible_index);
+                let display_name = self
+                    .mods_route_mod_display_name_at_index(mod_index)
+                    .unwrap_or("@mods.unknown");
+                let meta = self.mods_route_mod_meta_at_index(mod_index);
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("button"),
+                    rect,
+                    [1.0, 1.0, 1.0, 0.82],
+                    0.0,
+                    Layer::END_PIXELED + 0.098 + visible_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    display_name.to_string(),
+                    RenderPoint::new(rect.x + 18.0, rect.y + rect.height - 17.0),
+                    [0.94, 0.98, 1.0, 1.0],
+                    11.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.099 + visible_index as f32 * 0.001,
+                ));
+                let author = meta
+                    .and_then(|meta| meta.author.as_deref())
+                    .unwrap_or("@unknown");
+                let version = meta
+                    .and_then(|meta| meta.version.as_deref())
+                    .unwrap_or("@unknown");
+                pass.push(RenderCommand::draw_text_styled(
+                    format!("@editor.author: {author}  @mod.version: {version}"),
+                    RenderPoint::new(rect.x + 18.0, rect.y + 18.0),
+                    [0.66, 0.76, 0.84, 1.0],
+                    8.5,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.100 + visible_index as f32 * 0.001,
+                ));
+            }
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.108,
+        );
+    }
+
     fn push_mods_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         self.push_settings_text_button(
             pass,
@@ -30302,21 +30681,10 @@ impl DesktopLauncher {
             }
         }
 
-        pass.push(RenderCommand::draw_text_styled(
-            "browser search: Icon.zoom + Icon.list",
-            RenderPoint::new(panel.center().x, panel.y + 58.0),
-            [0.64, 0.74, 0.82, 1.0],
-            11.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.029,
-        ));
-
         self.push_mods_detail_dialog(pass, panel);
         self.push_mods_content_dialog(pass, panel);
         self.push_mods_import_dialog(pass, panel);
+        self.push_mods_browser_dialog(pass, panel);
     }
 
     fn push_active_menu_route_shell(&self, pass: &mut RenderPass, viewport: RenderViewport) {
@@ -45253,7 +45621,9 @@ version: "2.0.0"
         assert!(texts.contains(&"loaded"));
         assert!(texts.contains(&"@back"));
         assert!(texts.contains(&"@mod.import"));
-        assert!(texts.contains(&"browser search: Icon.zoom + Icon.list"));
+        assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
+        assert!(lines.contains(&"browser: BaseDialog @mods.browser".to_string()));
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(panel).center();
         assert_eq!(
@@ -45262,6 +45632,123 @@ version: "2.0.0"
         );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);
+    }
+
+    #[test]
+    fn desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.last_mods_directory_mod_names =
+            vec!["alpha".into(), "beta".into(), "gamma".into()];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "alpha",
+                Some("mod.hjson"),
+                r#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "beta",
+                Some("mod.hjson"),
+                r#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+version: "2.0.0"
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "gamma",
+                Some("mod.hjson"),
+                r#"
+name: gamma
+displayName: "Gamma Tools"
+author: "Gamma Author"
+version: "3.0.0"
+"#,
+            ),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let browser_button =
+            DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                browser_button.x,
+                browser_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsBrowser)
+        );
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsBrowser);
+        assert!(launcher.mods_browser_dialog_open);
+
+        let dialog = DesktopLauncher::mods_browser_dialog_rect_for_panel(panel);
+        let search = DesktopLauncher::mods_browser_search_rect_for_dialog(dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, search.x, search.y),
+            Some(super::DesktopMenuRouteShellAction::FocusModsBrowserSearch)
+        );
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("beta".into())]);
+        assert_eq!(launcher.mods_browser_search, "beta");
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@mods.browser"));
+        assert!(texts.contains(&"beta"));
+        assert!(texts.contains(&"@mods.sort.name"));
+        assert!(texts.contains(&"Beta Override"));
+        assert!(texts.iter().any(|text| text.contains("Beta Author")));
+        assert_eq!(launcher.filtered_mods_browser_indices(), vec![1]);
+        assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
+
+        let sort = DesktopLauncher::mods_browser_sort_button_rect_for_dialog(dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, sort.x, sort.y),
+            Some(super::DesktopMenuRouteShellAction::ToggleModsBrowserSort)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleModsBrowserSort,
+        );
+        assert!(launcher.mods_browser_sort_date);
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Mods);
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("modal: @mods.browser") && line.contains("@mods.sort.date")));
+
+        let list = DesktopLauncher::mods_browser_list_rect_for_dialog(dialog);
+        let entry = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, entry.x, entry.y),
+            Some(super::DesktopMenuRouteShellAction::OpenModsDetail(1))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsDetail(1),
+        );
+        assert_eq!(launcher.mods_selected_mod_index, Some(1));
+        assert!(!launcher.mods_browser_dialog_open);
     }
 
     #[test]
@@ -49413,7 +49900,10 @@ version: "2.0.0"
         assert!(texts.contains(&"power"));
         assert!(texts.contains(&"+logic"));
         assert!(texts.contains(&"description: basic launch schematic"));
-        assert!(texts.contains(&"requirements: pending real Schematic.requirements()"));
+        assert!(texts.contains(&"requirements: @none"));
+        assert!(!texts
+            .iter()
+            .any(|text| text.contains("pending real Schematic.requirements()")));
         assert!(texts.contains(&"@schematic.addtag"));
         assert!(texts.contains(&"@schematic.texttag"));
         assert!(texts.contains(&"@schematic.icontag"));

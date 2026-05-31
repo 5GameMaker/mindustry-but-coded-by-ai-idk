@@ -15,6 +15,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 551. ModsDialog 浏览器弹层首个闭环与 Schematics 占位文案清理
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **65.2%**，仍未达到完整可玩；继续优先前端/UI，避免主菜单进入后的 Dialog 页仍呈现明显占位壳。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java` 中 `browser = new BaseDialog("@mods.browser")`、搜索框、排序按钮和 `browserTable`；
+  - `core/src/mindustry/ui/dialogs/SchematicsDialog.java` 的 schematic info 弹层会展示稳定的 schematic 信息，不应泄露 `pending real ...` 文案。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_browser_dialog_open/mods_browser_search/mods_browser_sort_date` 状态；
+    - 新增 `OpenModsBrowser/CloseModsBrowser/FocusModsBrowserSearch/ClearModsBrowserSearch/ToggleModsBrowserSort` route action；
+    - `@mods.browser` 按钮现在打开真实 modal dialog：标题、搜索框、排序按钮、列表 pane、按搜索过滤的 mod 条目、back 按钮与条目点击进入 detail；
+    - browser modal 打开时优先处理 hit test，阻断下层 import/detail/card 点击；
+    - 删除旧的 `browser search: Icon.zoom + Icon.list` 可见占位文案；
+    - Schematics info 弹层移除 `pending real Schematic.requirements()`，改为稳定 `requirements: @none` fallback，并补反断言防回归。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods_browser --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop mods_route --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics_info_dialog_renders_and_dispatches_buttons --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_menu_routes_use_upstream_dialog_structure --lib -- --test-threads=1`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Mods browser 目前使用本地已扫描 mod metadata 作为可见列表，尚未接入 Java `modJsonURLs`/GitHub releases 的在线数据源、图标缓存、reinstall/download/release detail；
+  - Schematics requirements 只是去掉泄露占位的稳定 fallback，尚未把真实 `Schematic.requirements()` 物品需求接入卡片数据模型；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 550. MenuFragment 背景 ore 符号与 chrome 按钮态闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
