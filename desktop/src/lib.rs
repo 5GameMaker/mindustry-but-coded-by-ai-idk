@@ -1740,6 +1740,8 @@ pub enum DesktopMenuRouteShellAction {
     OpenMapListFilters,
     NewEditorMap,
     ImportEditorMap,
+    OpenModsDetail(usize),
+    CloseModsDetail,
     FocusSchematicSearch,
     ClearSchematicSearch,
     ToggleSchematicTag(usize),
@@ -14605,6 +14607,7 @@ pub struct DesktopLauncher {
     pub mods_directory_error: Option<String>,
     pub last_mods_directory_merge_count: Option<usize>,
     pub last_mods_directory_mod_names: Vec<String>,
+    pub mods_selected_mod_index: Option<usize>,
     pub args: Vec<String>,
     pub texture_atlas: TextureAtlasPlan<bool>,
     pub font_asset_sources: Vec<DesktopFontAssetSourceTrace>,
@@ -15334,6 +15337,7 @@ impl DesktopLauncher {
             mods_directory_error: None,
             last_mods_directory_merge_count: None,
             last_mods_directory_mod_names: Vec::new(),
+            mods_selected_mod_index: None,
             args,
             texture_atlas,
             font_asset_sources,
@@ -15404,6 +15408,7 @@ impl DesktopLauncher {
         let mod_name = mod_name.into();
         let plan = ModResourcePlan::from_directory(mod_name.clone(), headless, root)?;
         self.last_mods_directory_mod_names = vec![mod_name];
+        self.mods_selected_mod_index = None;
         Ok(self.merge_mod_resource_plan_into_texture_atlas(&plan))
     }
 
@@ -15425,6 +15430,7 @@ impl DesktopLauncher {
             .iter()
             .map(|mod_dir| mod_dir.mod_name.clone())
             .collect();
+        self.mods_selected_mod_index = None;
         container
             .mods
             .iter()
@@ -15437,6 +15443,7 @@ impl DesktopLauncher {
             self.last_mods_directory_merge_count = Some(0);
             self.mods_directory_error = None;
             self.last_mods_directory_mod_names.clear();
+            self.mods_selected_mod_index = None;
             return Ok(0);
         };
 
@@ -15444,12 +15451,14 @@ impl DesktopLauncher {
             Ok(count) => {
                 self.last_mods_directory_merge_count = Some(count);
                 self.mods_directory_error = None;
+                self.mods_selected_mod_index = None;
                 Ok(count)
             }
             Err(error) => {
                 self.last_mods_directory_merge_count = None;
                 self.mods_directory_error = Some(error.to_string());
                 self.last_mods_directory_mod_names.clear();
+                self.mods_selected_mod_index = None;
                 Err(error)
             }
         }
@@ -18903,6 +18912,7 @@ impl DesktopLauncher {
         if role == MenuButtonRole::Workshop {
             self.dispatch_menu_platform_action(DesktopMenuPlatformAction::OpenWorkshop);
             self.active_menu_route = None;
+            self.mods_selected_mod_index = None;
             let dispatch = DesktopMenuActionDispatch {
                 role,
                 submenu_changed,
@@ -18924,12 +18934,14 @@ impl DesktopLauncher {
         }
         let route = if submenu_changed {
             self.active_menu_route = None;
+            self.mods_selected_mod_index = None;
             None
         } else {
             DesktopMenuRoute::from_menu_button(role)
         };
         if let Some(route) = route {
             self.active_menu_route = Some(route);
+            self.mods_selected_mod_index = None;
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
                     &self.content_loader,
@@ -18962,6 +18974,7 @@ impl DesktopLauncher {
         let close_requested = role == MenuButtonRole::Quit;
         if close_requested {
             self.active_menu_route = None;
+            self.mods_selected_mod_index = None;
         }
         let dispatch = DesktopMenuActionDispatch {
             role,
@@ -20394,6 +20407,16 @@ impl DesktopLauncher {
                 panel_height,
             );
         }
+        if route == DesktopMenuRoute::Mods {
+            let panel_width = (viewport.width * 0.68).clamp(380.0, 760.0);
+            let panel_height = (viewport.height - 120.0).clamp(360.0, 640.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
         Self::active_menu_route_shell_panel_for_viewport(viewport)
     }
 
@@ -21356,8 +21379,16 @@ impl DesktopLauncher {
         if route == DesktopMenuRoute::Mods {
             let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
             let point = RenderPoint::new(x, y);
+            if let Some(action) = self.mods_route_detail_action_at_point(panel, point) {
+                return Some(action);
+            }
             if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseRoute);
+            }
+            if self.mods_selected_mod_index.is_none() {
+                if let Some(index) = self.mods_route_mod_card_index_at_point(panel, point) {
+                    return Some(DesktopMenuRouteShellAction::OpenModsDetail(index));
+                }
             }
         }
         if route == DesktopMenuRoute::Join {
@@ -21525,6 +21556,7 @@ impl DesktopLauncher {
         match action {
             DesktopMenuRouteShellAction::CloseRoute => {
                 self.active_menu_route = None;
+                self.mods_selected_mod_index = None;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -21554,6 +21586,14 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ImportEditorMap => {
                 self.editor_import_map_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::OpenModsDetail(index) => {
+                if self.last_mods_directory_mod_names.get(index).is_some() {
+                    self.mods_selected_mod_index = Some(index);
+                }
+            }
+            DesktopMenuRouteShellAction::CloseModsDetail => {
+                self.mods_selected_mod_index = None;
             }
             DesktopMenuRouteShellAction::FocusSchematicSearch => {
                 self.schematic_search_focused = true;
@@ -24116,6 +24156,113 @@ impl DesktopLauncher {
         )
     }
 
+    fn mods_route_mod_card_index_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<usize> {
+        self.last_mods_directory_mod_names
+            .iter()
+            .take(6)
+            .enumerate()
+            .find_map(|(index, _)| {
+                Self::mods_route_mod_card_rect_for_panel(panel, index)
+                    .contains_point(point)
+                    .then_some(index)
+            })
+    }
+
+    fn mods_route_detail_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        if self.mods_selected_mod_index.is_none() {
+            return None;
+        }
+        let dialog = Self::mods_route_detail_dialog_rect_for_panel(panel);
+        if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseModsDetail);
+        }
+        None
+    }
+
+    fn mods_route_detail_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        Self::schematic_info_dialog_rect_for_panel(panel)
+    }
+
+    fn push_mods_detail_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(index) = self.mods_selected_mod_index else {
+            return;
+        };
+        let Some(mod_name) = self.last_mods_directory_mod_names.get(index) else {
+            return;
+        };
+        let dialog = Self::mods_route_detail_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.42],
+            Layer::END_PIXELED + 0.070,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.071,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.072,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("[mods] {mod_name}"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.076,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "mods scanned: {}",
+                self.last_mods_directory_merge_count.unwrap_or(0)
+            ),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 54.0),
+            [0.72, 0.80, 0.86, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.076,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "mod detail placeholder: browser/import/delete later",
+            RenderPoint::new(dialog.center().x, dialog.y + 104.0),
+            [0.58, 0.66, 0.74, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.077,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.083,
+        );
+    }
+
     fn push_mods_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         self.push_settings_text_button(
             pass,
@@ -24213,6 +24360,8 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.029,
         ));
+
+        self.push_mods_detail_dialog(pass, panel);
     }
 
     fn push_active_menu_route_shell(&self, pass: &mut RenderPass, viewport: RenderViewport) {
@@ -38932,6 +39081,68 @@ mod tests {
         );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);
+    }
+
+    #[test]
+    fn desktop_launcher_mods_route_opens_and_closes_detail_dialog() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.last_mods_directory_mod_names =
+            vec!["alpha".into(), "beta".into(), "gamma".into()];
+        launcher.last_mods_directory_merge_count = Some(3);
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, card.x, card.y),
+            Some(super::DesktopMenuRouteShellAction::OpenModsDetail(0))
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsDetail(0),
+        );
+        assert_eq!(launcher.mods_selected_mod_index, Some(0));
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods detail should render a frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"[mods] alpha"));
+        assert!(texts.contains(&"mods scanned: 3"));
+        assert!(texts.contains(&"mod detail placeholder: browser/import/delete later"));
+
+        let dialog = DesktopLauncher::mods_route_detail_dialog_rect_for_panel(panel);
+        let detail_back = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                detail_back.x,
+                detail_back.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::CloseModsDetail)
+        );
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseModsDetail);
+        assert_eq!(launcher.mods_selected_mod_index, None);
+
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(launcher.mods_selected_mod_index, None);
     }
 
     #[test]

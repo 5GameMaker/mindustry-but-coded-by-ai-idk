@@ -19360,6 +19360,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 547. ModsDialog 路由卡片详情闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **59.0%**，仍未达到完整可玩；继续优先前端/UI，把 Mods 路由从“卡片列表”推进到“卡片可点开详情、详情可关闭”的可交互闭环。
+- Java 对照依据：
+  - `ModsDialog` 原本就是可打开的对话框，不是纯文本壳；
+  - 已安装 mod 卡片点击后会打开详情页；
+  - 详情页至少要有可关闭按钮，并保持主列表仍可回到路由。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_selected_mod_index` 状态与 `OpenModsDetail / CloseModsDetail` 路由动作；
+    - `Mods` 路由卡片命中后可打开详情弹窗，详情弹窗上的 `@back` 可关闭；
+    - 进入/退出 Mods 路由、刷新 mod 列表、打开别的菜单路由时会清理旧选择；
+    - 为避免路由返回按钮和卡片命中区重叠，给 `DesktopMenuRoute::Mods` 单独放大了面板尺寸；
+    - 增加 Mods 详情弹窗渲染骨架，显示当前 mod 名称、扫描数量与占位说明。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods_route --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 详情页仍只是占位骨架，没有 Java `ModsDialog.showMod(...)` 那种完整作者/版本/描述/GitHub/open folder/view content；
+  - `@mods.guide` / `@mod.import` / `@mods.browser` 还没完全接到完整浏览与导入流；
+  - 当前 mod 浏览器仍依赖扫描到的目录名集合，尚未接入真实安装 mod 元数据；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 546. ModsDialog 路由从文本壳推进到 mod 卡片列表
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
