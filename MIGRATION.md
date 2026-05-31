@@ -19474,6 +19474,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - LanguageDialog 视觉布局仍未完全改成 Java `ScrollPane + 400x50 flatTogglet` 单列结构；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 559. Settings LanguageDialog 单列 ScrollPane 风格布局
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.1%**，仍未达到完整可玩；继续优先前端/UI，把 LanguageDialog 从旧的三列小格子改为更接近 Java `ScrollPane(langs)` 的单列 400x50 `Styles.flatTogglet` 列表。
+- Java 对照依据：
+  - `LanguageDialog.setup()` 创建 `Table langs`，左右 margin 24；
+  - `ScrollPane pane = new ScrollPane(langs)`，垂直滚动；
+  - 每个语言按钮 `Styles.flatTogglet`，`size(400f, 50f).row()` 单列排列；
+  - 选中态通过 `ButtonGroup` / `setChecked(loc.equals(getLocale()))` 更新。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `SETTINGS_LANGUAGE_ROW_HEIGHT` 改为 `50.0`；
+    - 新增 `SETTINGS_LANGUAGE_LIST_WIDTH = 400.0` 与 `SETTINGS_LANGUAGE_VISIBLE_ROWS`；
+    - 新增 `settings_language_scroll_offset` 状态和滚轮处理；
+    - LanguageDialog 渲染从全量三列改为按 offset 显示单列可见窗口；
+    - hit-test 只命中当前可见行，避免 offscreen 语言被误点；
+    - 打开/关闭语言子弹窗时重置 language scroll；
+    - 测试覆盖滚轮改变 language offset、滚动后才能显示并点击 `zh_CN`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 目前是自绘 ScrollPane 风格，还没有真实滚动条/knob 与 Java `ScrollPane` 完全同构；
+  - LanguageDialog 的列表裁剪仍是逻辑窗口，后续需要接渲染 clip/scissor；
+  - bundle reload / `Core.bundle` 替换仍未完成；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

@@ -136,9 +136,10 @@ const SETTINGS_RESET_BUTTON_WIDTH: f32 = 240.0;
 const SETTINGS_RESET_BUTTON_HEIGHT: f32 = 44.0;
 const SETTINGS_BACK_BUTTON_WIDTH: f32 = 210.0;
 const SETTINGS_BACK_BUTTON_HEIGHT: f32 = 64.0;
-const SETTINGS_LANGUAGE_ROW_HEIGHT: f32 = 26.0;
-const SETTINGS_LANGUAGE_ROW_GAP: f32 = 3.0;
-const SETTINGS_LANGUAGE_COLUMNS: usize = 3;
+const SETTINGS_LANGUAGE_ROW_HEIGHT: f32 = 50.0;
+const SETTINGS_LANGUAGE_ROW_GAP: f32 = 0.0;
+const SETTINGS_LANGUAGE_VISIBLE_ROWS: usize = 7;
+const SETTINGS_LANGUAGE_LIST_WIDTH: f32 = 400.0;
 const SETTINGS_KEYBIND_ROW_HEIGHT: f32 = 34.0;
 const SETTINGS_KEYBIND_ROW_GAP: f32 = 4.0;
 const SETTINGS_KEYBIND_REBIND_WIDTH: f32 = 126.0;
@@ -15314,6 +15315,7 @@ pub struct DesktopLauncher {
     pub settings_child_dialog: Option<DesktopSettingsChildDialog>,
     pub settings_locale: String,
     pub player_locale: String,
+    pub settings_language_scroll_offset: usize,
     pub last_settings_language_restart_message: Option<String>,
     pub settings_keybind_overrides: BTreeMap<&'static str, String>,
     pub last_settings_rebind_key: Option<&'static str>,
@@ -16059,6 +16061,7 @@ impl DesktopLauncher {
             settings_child_dialog: None,
             settings_locale: "en".into(),
             player_locale: "en".into(),
+            settings_language_scroll_offset: 0,
             last_settings_language_restart_message: None,
             settings_keybind_overrides: BTreeMap::new(),
             last_settings_rebind_key: None,
@@ -20580,7 +20583,17 @@ impl DesktopLauncher {
     }
 
     fn push_settings_language_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
-        for (index, option) in SETTINGS_LANGUAGE_OPTIONS.iter().enumerate() {
+        let offset = self.settings_language_scroll_offset.min(
+            SETTINGS_LANGUAGE_OPTIONS
+                .len()
+                .saturating_sub(SETTINGS_LANGUAGE_VISIBLE_ROWS),
+        );
+        for (index, option) in SETTINGS_LANGUAGE_OPTIONS
+            .iter()
+            .skip(offset)
+            .take(SETTINGS_LANGUAGE_VISIBLE_ROWS)
+            .enumerate()
+        {
             let rect = Self::settings_language_row_rect(dialog, index);
             let selected = self.settings_locale == option.code;
             let hovered = self
@@ -20615,6 +20628,22 @@ impl DesktopLauncher {
                     .with_integer_position(true)
                     .with_outline(true),
                 Layer::END_PIXELED + 0.122 + index as f32 * 0.0001,
+            ));
+        }
+        if SETTINGS_LANGUAGE_OPTIONS.len() > SETTINGS_LANGUAGE_VISIBLE_ROWS {
+            let top = offset + 1;
+            let bottom =
+                (offset + SETTINGS_LANGUAGE_VISIBLE_ROWS).min(SETTINGS_LANGUAGE_OPTIONS.len());
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{top}-{bottom}/{}", SETTINGS_LANGUAGE_OPTIONS.len()),
+                RenderPoint::new(dialog.center().x, dialog.y + 112.0),
+                [0.44, 0.54, 0.62, 0.95],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.120,
             ));
         }
         if let Some(message) = self.last_settings_language_restart_message.as_deref() {
@@ -21185,6 +21214,20 @@ impl DesktopLauncher {
         delta_y: f32,
     ) -> bool {
         if self.active_menu_route == Some(DesktopMenuRoute::Settings)
+            && self.settings_child_dialog == Some(DesktopSettingsChildDialog::Language)
+        {
+            let Some(cursor) = self.last_menu_cursor else {
+                return false;
+            };
+            let viewport = self.default_render_viewport_for_surface(surface_size);
+            let panel =
+                Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
+            let dialog = Self::settings_child_dialog_rect_for_panel(panel);
+            if dialog.contains_point(cursor) {
+                return self.apply_settings_language_scroll_delta(delta_y);
+            }
+        }
+        if self.active_menu_route == Some(DesktopMenuRoute::Settings)
             && self.settings_child_dialog == Some(DesktopSettingsChildDialog::Controls)
         {
             let Some(cursor) = self.last_menu_cursor else {
@@ -21507,7 +21550,17 @@ impl DesktopLauncher {
         }
         match self.settings_child_dialog {
             Some(DesktopSettingsChildDialog::Language) => {
-                for (index, option) in SETTINGS_LANGUAGE_OPTIONS.iter().enumerate() {
+                let offset = self.settings_language_scroll_offset.min(
+                    SETTINGS_LANGUAGE_OPTIONS
+                        .len()
+                        .saturating_sub(SETTINGS_LANGUAGE_VISIBLE_ROWS),
+                );
+                for (index, option) in SETTINGS_LANGUAGE_OPTIONS
+                    .iter()
+                    .skip(offset)
+                    .take(SETTINGS_LANGUAGE_VISIBLE_ROWS)
+                    .enumerate()
+                {
                     if Self::settings_language_row_rect(dialog, index).contains_point(point) {
                         return Some(DesktopMenuRouteShellAction::Settings(
                             DesktopSettingsAction::SelectLanguage(option.code),
@@ -21559,20 +21612,38 @@ impl DesktopLauncher {
     }
 
     fn settings_language_row_rect(dialog: RenderRect, index: usize) -> RenderRect {
-        let col = index % SETTINGS_LANGUAGE_COLUMNS;
-        let row = index / SETTINGS_LANGUAGE_COLUMNS;
-        let gap = 6.0;
-        let width = (dialog.width - 36.0 - gap * (SETTINGS_LANGUAGE_COLUMNS as f32 - 1.0))
-            / SETTINGS_LANGUAGE_COLUMNS as f32;
+        let width = SETTINGS_LANGUAGE_LIST_WIDTH.min(dialog.width - 48.0);
+        let x = dialog.x + (dialog.width - width) * 0.5;
         let top = dialog.y + dialog.height
             - 72.0
-            - row as f32 * (SETTINGS_LANGUAGE_ROW_HEIGHT + SETTINGS_LANGUAGE_ROW_GAP);
+            - index as f32 * (SETTINGS_LANGUAGE_ROW_HEIGHT + SETTINGS_LANGUAGE_ROW_GAP);
         RenderRect::new(
-            dialog.x + 18.0 + col as f32 * (width + gap),
+            x,
             top - SETTINGS_LANGUAGE_ROW_HEIGHT,
             width,
             SETTINGS_LANGUAGE_ROW_HEIGHT,
         )
+    }
+
+    fn apply_settings_language_scroll_delta(&mut self, delta_y: f32) -> bool {
+        let max = SETTINGS_LANGUAGE_OPTIONS
+            .len()
+            .saturating_sub(SETTINGS_LANGUAGE_VISIBLE_ROWS);
+        if max == 0 {
+            return false;
+        }
+        let current = self.settings_language_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.settings_language_scroll_offset = next;
+        next != current
     }
 
     fn settings_keybind_search_rect(dialog: RenderRect) -> RenderRect {
@@ -23259,6 +23330,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::BackToMain => {
                 self.settings_child_dialog = None;
+                self.settings_language_scroll_offset = 0;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
                 self.settings_keybind_pending_axis_min = None;
@@ -23296,6 +23368,7 @@ impl DesktopLauncher {
             DesktopSettingsAction::OpenLanguageDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Language);
                 self.load_settings_locale_from_settings();
+                self.settings_language_scroll_offset = 0;
             }
             DesktopSettingsAction::OpenControlsDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Controls);
@@ -23306,6 +23379,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::CloseChildDialog => {
                 self.settings_child_dialog = None;
+                self.settings_language_scroll_offset = 0;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
                 self.settings_keybind_pending_axis_min = None;
@@ -46277,7 +46351,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(language_texts.contains(&"@settings.language"));
         assert!(language_texts.contains(&"English"));
-        assert!(language_texts.contains(&"简体中文"));
+        assert!(!language_texts.contains(&"简体中文"));
+        assert!(language_texts.contains(&"1-7/36"));
         assert!(!language_texts.contains(&"@language.restart"));
         assert!(!language_texts
             .contains(&"LanguageDialog placeholder: locale list and bundle reload later"));
@@ -46287,12 +46362,44 @@ mod tests {
             .contains(&"child dialog: LanguageDialog locales:36 selected:en".to_string()));
 
         let child_dialog = DesktopLauncher::settings_child_dialog_rect_for_panel(settings_panel);
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: child_dialog.center().x,
+                    y: child_dialog.center().y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -3.0,
+                },
+            ],
+        );
+        assert_eq!(launcher.settings_language_scroll_offset, 3);
         let zh_index = super::SETTINGS_LANGUAGE_OPTIONS
             .iter()
             .position(|option| option.code == "zh_CN")
             .expect("LanguageDialog should include Simplified Chinese");
+        launcher.settings_language_scroll_offset =
+            zh_index.saturating_sub(super::SETTINGS_LANGUAGE_VISIBLE_ROWS - 1);
+        let zh_visible_index = zh_index - launcher.settings_language_scroll_offset;
+        let scrolled_language_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let scrolled_language_texts = scrolled_language_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("scrolled language child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(scrolled_language_texts.contains(&"简体中文"));
         let zh_center =
-            DesktopLauncher::settings_language_row_rect(child_dialog, zh_index).center();
+            DesktopLauncher::settings_language_row_rect(child_dialog, zh_visible_index).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
