@@ -30826,24 +30826,10 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.076,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            format!(
-                "mods scanned: {}",
-                self.last_mods_directory_merge_count.unwrap_or(0)
-            ),
-            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 54.0),
-            [0.72, 0.80, 0.86, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.076,
-        ));
         if let Some(root) = self.mods_route_mod_root_at_index(index) {
             pass.push(RenderCommand::draw_text_styled(
                 format!("mod path: {root}"),
-                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 80.0),
+                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 58.0),
                 [0.62, 0.72, 0.8, 1.0],
                 10.0,
                 0.0,
@@ -30859,22 +30845,29 @@ impl DesktopLauncher {
         let author = meta
             .map(ModMetadata::author_or_unknown)
             .unwrap_or("@unknown");
-        let content_count = 0;
         let mut details = vec![
-            format!("@mod.version: {version}"),
+            format!("@editor.name: {mod_name}"),
             format!("@editor.author: {author}"),
+            format!("@mod.version: {version}"),
         ];
         if let Some(description) = meta
             .and_then(|meta| meta.description.as_deref())
             .filter(|description| !description.trim().is_empty())
         {
-            details.push(description.to_string());
+            details.push(format!("@editor.description: {description}"));
         }
-        details.extend([
-            format!("@mods.viewcontent: {}", "0"),
-            format!("state: {}", "loaded"),
-            format!("content: {content_count}"),
-        ]);
+        if let Some(repo) = meta
+            .and_then(|meta| meta.repo.as_deref())
+            .filter(|repo| !repo.trim().is_empty())
+        {
+            details.push(format!("repo: {repo}"));
+        }
+        if let Some(source_path) = meta
+            .and_then(|meta| meta.source_path.as_deref())
+            .filter(|source_path| !source_path.trim().is_empty())
+        {
+            details.push(format!("metadata: {source_path}"));
+        }
         for (row, detail) in details.iter().enumerate() {
             pass.push(RenderCommand::draw_text_styled(
                 detail,
@@ -30955,8 +30948,8 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.089,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@none",
-            RenderPoint::new(dialog.center().x, dialog.center().y + 10.0),
+            "@mods.contents.none",
+            RenderPoint::new(dialog.center().x, dialog.center().y + 24.0),
             [0.70, 0.78, 0.84, 1.0],
             12.0,
             0.0,
@@ -30965,17 +30958,39 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.090,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            "content source: LoadedMod.minfo",
-            RenderPoint::new(dialog.center().x, dialog.center().y - 18.0),
-            [0.52, 0.62, 0.70, 1.0],
-            9.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.091,
-        ));
+        let meta = self.mods_route_mod_meta_at_index(index);
+        for (row, detail) in [
+            format!("@editor.name: {mod_name}"),
+            format!(
+                "@editor.author: {}",
+                meta.map(ModMetadata::author_or_unknown)
+                    .unwrap_or("@unknown")
+            ),
+            format!(
+                "@mod.version: {}",
+                meta.map(ModMetadata::version_or_unknown)
+                    .unwrap_or("@unknown")
+            ),
+            "content entries: 0".to_string(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            pass.push(RenderCommand::draw_text_styled(
+                detail,
+                RenderPoint::new(
+                    dialog.x + 34.0,
+                    dialog.center().y - 10.0 - row as f32 * 22.0,
+                ),
+                [0.64, 0.74, 0.82, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.091 + row as f32 * 0.0001,
+            ));
+        }
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
@@ -46542,16 +46557,18 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"[mods] Alpha Pack"));
-        assert!(texts.contains(&"mods scanned: 3"));
         assert!(texts.contains(&"mod path: C:/mods/alpha pack"));
         assert!(texts.contains(&"@mods.openfolder"));
+        assert!(texts.contains(&"@editor.name: Alpha Pack"));
         assert!(texts.contains(&"@mod.version: 1.0.0"));
         assert!(texts.contains(&"@editor.author: Alpha Author"));
-        assert!(texts.contains(&"Alpha fixture mod."));
-        assert!(texts.contains(&"@mods.viewcontent: 0"));
-        assert!(texts.contains(&"state: loaded"));
-        assert!(texts.contains(&"content: 0"));
+        assert!(texts.contains(&"@editor.description: Alpha fixture mod."));
+        assert!(texts.contains(&"metadata: mod.hjson"));
         assert!(texts.contains(&"@mods.viewcontent"));
+        assert!(!texts.iter().any(|text| text.starts_with("mods scanned:")));
+        assert!(!texts.contains(&"@mods.viewcontent: 0"));
+        assert!(!texts.contains(&"state: loaded"));
+        assert!(!texts.contains(&"content: 0"));
         assert!(!texts.contains(&"mod detail placeholder: browser/import/delete later"));
 
         let dialog = DesktopLauncher::mods_route_detail_dialog_rect_for_panel(panel);
@@ -46608,8 +46625,13 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(content_texts.contains(&"@mods.viewcontent: Alpha Pack"));
-        assert!(content_texts.contains(&"@none"));
-        assert!(content_texts.contains(&"content source: LoadedMod.minfo"));
+        assert!(content_texts.contains(&"@mods.contents.none"));
+        assert!(content_texts.contains(&"@editor.name: Alpha Pack"));
+        assert!(content_texts.contains(&"@editor.author: Alpha Author"));
+        assert!(content_texts.contains(&"@mod.version: 1.0.0"));
+        assert!(content_texts.contains(&"content entries: 0"));
+        assert!(!content_texts.contains(&"@none"));
+        assert!(!content_texts.contains(&"content source: LoadedMod.minfo"));
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,

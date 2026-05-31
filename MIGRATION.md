@@ -15,6 +15,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 557. ModsDialog detail/content 占位文案清理
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **65.9%**，仍未达到完整可玩；继续优先前端/UI，减少 ModsDialog 的调试壳味。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java` 的 detail 弹层展示 name/author/version/description/repo/open folder/view content 等字段；
+  - content 弹层应展示真实内容或明确空态，不应输出假的 `LoadedMod.minfo` 来源。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_mods_detail_dialog(...)` 移除 `mods scanned: ...`、`@mods.viewcontent: 0`、`state: loaded`、`content: 0` 等调试文案；
+    - detail 弹层改为 `@editor.name`、`@editor.author`、`@mod.version`、`@editor.description`、repo、metadata 等真实 metadata 字段；
+    - `push_mods_content_dialog(...)` 移除 `@none` 与 `content source: LoadedMod.minfo`，改为 `@mods.contents.none`、metadata 字段与 `content entries: 0` 空态摘要；
+    - 更新 mods route 测试，增加反断言防止旧占位文案回归。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop mods_route --features opengl-backend`
+- 仍未完成：
+  - 真实 mod content registry、content 分类/图标网格、browser 远程仓库卡片、reinstall/download/releases 仍需继续接入；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 556. JoinDialog 三分区与服务器卡片字段首个闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
