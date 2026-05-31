@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 572. SaveDialog 新建存档与覆盖确认前端闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.4%**，仍未达到完整可玩；继续优先前端/UI，后续把暂停菜单保存入口与真实世界序列化接入。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/SaveDialog.java` 继承 `LoadDialog`，底部 `@save.new` 打开 `ui.showTextInput("@save", "@save.newslot", 30, "", ...)`；
+  - 点击已有 slot 主体会先 `ui.showConfirm("@overwrite", "@save.overwrite", ...)`，确认后执行保存；
+  - `UI.showTextInput/showConfirm` 的按钮顺序是 `@cancel` / `@ok`，空输入禁用 OK。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRoute::SaveGame` / `SaveDialog` 路由，复用 LoadDialog 的存档槽扫描、搜索、滚动与槽位工具按钮；
+    - SaveGame 底部按钮渲染为 `@save.new`，点击后显示 `@save` / `@save.newslot` 输入弹层，最大长度 30，空输入禁用 OK；
+    - 新增覆盖确认弹层：`@overwrite` / `@save.overwrite` / `@cancel` / `@ok`；
+    - 新增 `DesktopSaveGameResult`、新建/覆盖保存结果记录，并写出最小 Java-compatible deflated save meta 前缀，避免只是 UI 壳；
+    - SaveGame route 的鼠标命中、键盘 Enter/Backspace/Delete、Esc/Back 关闭语义已接入；
+    - 新增测试覆盖 SaveDialog UI contract、新建 `.msav`、覆盖保存结果与 slot 刷新。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_save_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_frame_draws_visible_asset_diagnostics_when_assets_are_missing --lib`
+- 仍未完成：
+  - 暂停菜单入口尚未从真实 gameplay pause UI 打开 SaveDialog；
+  - 当前写出的是最小 meta snapshot，尚未接入完整 world/entity/content save 序列化；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 571. 菜单黑屏 fallback 可见诊断与 shader root trace
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

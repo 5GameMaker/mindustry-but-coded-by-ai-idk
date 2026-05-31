@@ -81,8 +81,9 @@ use mindustry_core::mindustry::io::{
     backup_file_for_path, collect_valid_save_slot_records, read_bullet_sync, read_decal_sync,
     read_deflated_map_info, read_deflated_save_meta, read_deflated_save_meta_with_backup,
     read_effect_state_sync, read_fire_sync, read_puddle_sync, read_unit_sync,
-    read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot, LegacyTeamBlocks,
-    SaveSlotRecord, TeamId, TypeValue, Vec2,
+    read_weather_state_sync, read_world_label_sync, write_deflated_save_meta_prefix,
+    ContentHeaderSnapshot, LegacyTeamBlocks, SaveSlotRecord, TeamId, TypeValue, Vec2,
+    LATEST_SAVE_VERSION,
 };
 use mindustry_core::mindustry::maps::MapDescriptor;
 use mindustry_core::mindustry::modsys::{
@@ -171,6 +172,7 @@ const LOAD_SLOT_CARD_HEIGHT: f32 = 82.0;
 const LOAD_SLOT_CARD_GAP: f32 = 8.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
+const SAVE_NEW_TEXT_MAX_LENGTH: usize = 30;
 const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
 const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
@@ -236,6 +238,7 @@ pub enum DesktopMenuRoute {
     Campaign,
     Join,
     CustomGame,
+    SaveGame,
     LoadGame,
     Schematics,
     Database,
@@ -667,6 +670,7 @@ impl DesktopMenuRoute {
             Self::Campaign => "CAMPAIGN",
             Self::Join => "JOIN GAME",
             Self::CustomGame => "CUSTOM GAME",
+            Self::SaveGame => "@savegame",
             Self::LoadGame => "LOAD GAME",
             Self::Schematics => "SCHEMATICS",
             Self::Database => "DATABASE",
@@ -684,6 +688,7 @@ impl DesktopMenuRoute {
             Self::Campaign => "PlanetDialog",
             Self::Join => "JoinDialog",
             Self::CustomGame => "CustomGameDialog",
+            Self::SaveGame => "SaveDialog",
             Self::LoadGame => "LoadDialog",
             Self::Schematics => "SchematicsDialog",
             Self::Database => "DatabaseDialog",
@@ -2568,6 +2573,12 @@ pub enum DesktopMenuRouteShellAction {
     LoadGameSlot(usize, DesktopLoadGameActionKind),
     LoadGameRenameOk,
     LoadGameRenameCancel,
+    SaveGameNew,
+    SaveGameNewOk,
+    SaveGameNewCancel,
+    SaveGameOverwrite(usize),
+    SaveGameOverwriteOk,
+    SaveGameOverwriteCancel,
     MapCard(DesktopMapCardAction),
     CloseMapCardDialog,
     CloseMapPlayHelp,
@@ -2721,6 +2732,15 @@ pub struct DesktopLoadGameRenameResult {
     pub setting_key: String,
     pub previous_name: String,
     pub new_name: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopSaveGameResult {
+    pub slot: String,
+    pub file: String,
+    pub name: String,
+    pub timestamp: i64,
     pub status: String,
 }
 
@@ -15971,6 +15991,10 @@ pub struct DesktopLauncher {
     pub load_game_search: String,
     pub load_game_search_focused: bool,
     pub load_game_scroll_offset: usize,
+    pub save_game_new_dialog_open: bool,
+    pub save_game_new_text: String,
+    pub save_game_overwrite_dialog_slot: Option<usize>,
+    pub last_save_game_result: Option<DesktopSaveGameResult>,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
     pub load_renderer_state: LoadRendererState,
@@ -16800,6 +16824,10 @@ impl DesktopLauncher {
             load_game_search: String::new(),
             load_game_search_focused: false,
             load_game_scroll_offset: 0,
+            save_game_new_dialog_open: false,
+            save_game_new_text: String::new(),
+            save_game_overwrite_dialog_slot: None,
+            last_save_game_result: None,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
             load_renderer_state: LoadRendererState::default(),
@@ -20555,6 +20583,23 @@ impl DesktopLauncher {
                 Some(DesktopMenuRouteShellAction::LoadGameRenameCancel);
             return true;
         }
+        if self.active_menu_route == Some(DesktopMenuRoute::SaveGame)
+            && self.save_game_new_dialog_open
+        {
+            self.save_game_new_dialog_open = false;
+            self.save_game_new_text.clear();
+            self.last_menu_route_shell_action =
+                Some(DesktopMenuRouteShellAction::SaveGameNewCancel);
+            return true;
+        }
+        if self.active_menu_route == Some(DesktopMenuRoute::SaveGame)
+            && self.save_game_overwrite_dialog_slot.is_some()
+        {
+            self.save_game_overwrite_dialog_slot = None;
+            self.last_menu_route_shell_action =
+                Some(DesktopMenuRouteShellAction::SaveGameOverwriteCancel);
+            return true;
+        }
         if let Some(route) = self.active_menu_route.take() {
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = None;
@@ -20571,6 +20616,11 @@ impl DesktopLauncher {
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.load_game_search_focused = false;
+            self.load_game_rename_dialog_slot = None;
+            self.load_game_rename_text.clear();
+            self.save_game_new_dialog_open = false;
+            self.save_game_new_text.clear();
+            self.save_game_overwrite_dialog_slot = None;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
             self.last_menu_dispatch = None;
@@ -20703,13 +20753,19 @@ impl DesktopLauncher {
                 ));
             } else if route == DesktopMenuRoute::About {
                 self.about_route_page = DesktopAboutRoutePage::Links;
-            } else if route == DesktopMenuRoute::LoadGame {
+            } else if matches!(
+                route,
+                DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame
+            ) {
                 self.refresh_load_game_slots();
                 self.load_game_search.clear();
                 self.load_game_search_focused = true;
                 self.load_game_scroll_offset = 0;
                 self.load_game_rename_dialog_slot = None;
                 self.load_game_rename_text.clear();
+                self.save_game_new_dialog_open = false;
+                self.save_game_new_text.clear();
+                self.save_game_overwrite_dialog_slot = None;
             } else if route == DesktopMenuRoute::Settings {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
                 self.settings_child_dialog = None;
@@ -23699,12 +23755,17 @@ impl DesktopLauncher {
         x: f32,
         y: f32,
     ) -> Option<usize> {
-        if self.active_menu_route != Some(DesktopMenuRoute::LoadGame) {
+        if !matches!(
+            self.active_menu_route,
+            Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
+        ) {
             return None;
         }
         let viewport = self.default_render_viewport_for_surface(surface_size);
-        let panel =
-            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::LoadGame);
+        let panel = Self::active_menu_route_shell_panel_for_route(
+            viewport,
+            self.active_menu_route.unwrap(),
+        );
         let list = Self::load_game_list_rect_for_panel(panel);
         let point = RenderPoint::new(x, y);
         let start = self.load_game_scroll_offset;
@@ -23745,6 +23806,72 @@ impl DesktopLauncher {
         }
         if Self::load_game_import_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::LoadGameImport);
+        }
+        if Self::load_game_search_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
+        }
+        let list = Self::load_game_list_rect_for_panel(panel);
+        let start = self
+            .load_game_scroll_offset
+            .min(self.max_load_game_scroll_offset(list));
+        for (visible_index, slot_index) in self
+            .filtered_load_game_slot_indices()
+            .into_iter()
+            .skip(start)
+            .enumerate()
+        {
+            let card = Self::load_game_slot_card_rect_for_panel(panel, visible_index);
+            if !Self::load_game_slot_card_visible_in_list(list, card) {
+                continue;
+            }
+            for action_index in 0..4 {
+                if Self::load_game_slot_action_button_rect(card, action_index).contains_point(point)
+                {
+                    if let Some(kind) = Self::load_game_slot_action_kind_for_index(action_index) {
+                        return Some(DesktopMenuRouteShellAction::LoadGameSlot(slot_index, kind));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn save_game_route_shell_action_at_surface_point(
+        &self,
+        viewport: RenderViewport,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::SaveGame);
+        let point = RenderPoint::new(x, y);
+        if self.save_game_new_dialog_open {
+            let dialog = Self::load_game_rename_dialog_rect_for_panel(panel);
+            if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::SaveGameNewCancel);
+            }
+            if !self.save_game_new_text.is_empty()
+                && Self::load_game_rename_button_rect(dialog, 1).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::SaveGameNewOk);
+            }
+            return None;
+        }
+        if self.save_game_overwrite_dialog_slot.is_some() {
+            let dialog = Self::save_game_overwrite_dialog_rect_for_panel(panel);
+            if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::SaveGameOverwriteCancel);
+            }
+            if Self::load_game_rename_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::SaveGameOverwriteOk);
+            }
+            return None;
+        }
+        if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseRoute);
+        }
+        if Self::load_game_import_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::SaveGameNew);
         }
         if Self::load_game_search_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
@@ -24005,6 +24132,75 @@ impl DesktopLauncher {
         Ok(result)
     }
 
+    fn write_save_game_slot_snapshot(
+        &mut self,
+        destination: impl AsRef<Path>,
+        name: impl Into<String>,
+        status: &'static str,
+    ) -> Result<DesktopSaveGameResult, String> {
+        let destination = destination.as_ref();
+        let name = name.into();
+        if name.is_empty() {
+            let message = "@save.newslot".to_string();
+            self.load_game_error = Some(message.clone());
+            return Err(message);
+        }
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("failed to create save dir {}: {error}", parent.display())
+            })?;
+        }
+        let timestamp = current_millis();
+        let mut tags = BTreeMap::new();
+        tags.insert("version".into(), LATEST_SAVE_VERSION.to_string());
+        tags.insert("build".into(), UPSTREAM_BASELINE.to_string());
+        tags.insert("saved".into(), timestamp.to_string());
+        tags.insert("playtime".into(), "0".into());
+        tags.insert("mapname".into(), name.clone());
+        tags.insert("wave".into(), "0".into());
+        tags.insert("rules".into(), "{}".into());
+        tags.insert("mods".into(), "[]".into());
+        let mut bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut bytes, LATEST_SAVE_VERSION, &tags)
+            .map_err(|error| format!("failed to encode save meta: {error}"))?;
+        std::fs::write(destination, bytes)
+            .map_err(|error| format!("failed to write save {}: {error}", destination.display()))?;
+        let slot = SaveSlotRecord::new(destination.to_path_buf());
+        self.load_game_slot_names
+            .insert(slot.name_setting_key(), name.clone());
+        self.refresh_load_game_slots();
+        let result = DesktopSaveGameResult {
+            slot: slot.index(),
+            file: destination.display().to_string(),
+            name,
+            timestamp,
+            status: status.into(),
+        };
+        self.last_save_game_result = Some(result.clone());
+        Ok(result)
+    }
+
+    fn add_save_game_slot(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<DesktopSaveGameResult, String> {
+        let destination = self.next_load_game_slot_file();
+        self.write_save_game_slot_snapshot(destination, name, "created")
+    }
+
+    fn overwrite_save_game_slot(
+        &mut self,
+        slot_index: usize,
+    ) -> Result<DesktopSaveGameResult, String> {
+        let slot = self
+            .load_game_slots
+            .get(slot_index)
+            .cloned()
+            .ok_or_else(|| format!("missing save slot {slot_index}"))?;
+        let name = self.load_game_slot_display_title(&slot);
+        self.write_save_game_slot_snapshot(slot.file, name, "saved")
+    }
+
     fn max_load_game_scroll_offset_for_counts(total_slots: usize, visible_slots: usize) -> usize {
         total_slots.saturating_sub(visible_slots.max(1))
     }
@@ -24021,15 +24217,20 @@ impl DesktopLauncher {
         surface_size: DesktopSurfaceSize,
         delta_y: f32,
     ) -> bool {
-        if self.active_menu_route != Some(DesktopMenuRoute::LoadGame) {
+        if !matches!(
+            self.active_menu_route,
+            Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
+        ) {
             return false;
         }
         let Some(cursor) = self.last_menu_cursor else {
             return false;
         };
         let viewport = self.default_render_viewport_for_surface(surface_size);
-        let panel =
-            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::LoadGame);
+        let panel = Self::active_menu_route_shell_panel_for_route(
+            viewport,
+            self.active_menu_route.unwrap(),
+        );
         let list = Self::load_game_list_rect_for_panel(panel);
         if !list.contains_point(cursor) {
             return false;
@@ -24107,7 +24308,10 @@ impl DesktopLauncher {
                 panel_height,
             );
         }
-        if route == DesktopMenuRoute::LoadGame {
+        if matches!(
+            route,
+            DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame
+        ) {
             let panel_width = (viewport.width * 0.62).clamp(380.0, 720.0);
             let panel_height = (viewport.height - 130.0).clamp(340.0, 620.0);
             return RenderRect::new(
@@ -26046,6 +26250,12 @@ impl DesktopLauncher {
                 return Some(action);
             }
         }
+        if route == DesktopMenuRoute::SaveGame {
+            if let Some(action) = self.save_game_route_shell_action_at_surface_point(viewport, x, y)
+            {
+                return Some(action);
+            }
+        }
         if matches!(
             route,
             DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
@@ -26392,6 +26602,12 @@ impl DesktopLauncher {
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
+                self.load_game_search_focused = false;
+                self.load_game_rename_dialog_slot = None;
+                self.load_game_rename_text.clear();
+                self.save_game_new_dialog_open = false;
+                self.save_game_new_text.clear();
+                self.save_game_overwrite_dialog_slot = None;
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
@@ -26478,6 +26694,42 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::LoadGameRenameCancel => {
                 self.load_game_rename_dialog_slot = None;
                 self.load_game_rename_text.clear();
+            }
+            DesktopMenuRouteShellAction::SaveGameNew => {
+                self.save_game_new_dialog_open = true;
+                self.save_game_new_text.clear();
+                self.save_game_overwrite_dialog_slot = None;
+            }
+            DesktopMenuRouteShellAction::SaveGameNewOk => {
+                if self.save_game_new_dialog_open && !self.save_game_new_text.is_empty() {
+                    if self
+                        .add_save_game_slot(self.save_game_new_text.clone())
+                        .is_ok()
+                    {
+                        self.save_game_new_dialog_open = false;
+                        self.save_game_new_text.clear();
+                    }
+                }
+            }
+            DesktopMenuRouteShellAction::SaveGameNewCancel => {
+                self.save_game_new_dialog_open = false;
+                self.save_game_new_text.clear();
+            }
+            DesktopMenuRouteShellAction::SaveGameOverwrite(index) => {
+                if self.load_game_slots.get(index).is_some() {
+                    self.save_game_overwrite_dialog_slot = Some(index);
+                    self.save_game_new_dialog_open = false;
+                }
+            }
+            DesktopMenuRouteShellAction::SaveGameOverwriteOk => {
+                if let Some(index) = self.save_game_overwrite_dialog_slot {
+                    if self.overwrite_save_game_slot(index).is_ok() {
+                        self.save_game_overwrite_dialog_slot = None;
+                    }
+                }
+            }
+            DesktopMenuRouteShellAction::SaveGameOverwriteCancel => {
+                self.save_game_overwrite_dialog_slot = None;
             }
             DesktopMenuRouteShellAction::MapCard(action) => {
                 if self.map_list_cards.get(action.index).is_some() {
@@ -30237,6 +30489,7 @@ impl DesktopLauncher {
     }
 
     fn push_load_game_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let save_mode = self.active_menu_route == Some(DesktopMenuRoute::SaveGame);
         let search = Self::load_game_search_rect_for_panel(panel);
         let list = Self::load_game_list_rect_for_panel(panel);
         self.push_settings_text_button(
@@ -30249,7 +30502,11 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::load_game_import_button_rect_for_panel(panel),
-            "@save.import",
+            if save_mode {
+                "@save.new"
+            } else {
+                "@save.import"
+            },
             Some("add"),
             Layer::END_PIXELED + 0.024,
         );
@@ -30304,6 +30561,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.03,
             ));
+            self.push_save_slot_route_modal_dialogs(pass, panel);
             return;
         }
 
@@ -30350,6 +30608,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.03,
             ));
+            self.push_save_slot_route_modal_dialogs(pass, panel);
             return;
         }
 
@@ -30365,6 +30624,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.032,
             ));
+            self.push_save_slot_route_modal_dialogs(pass, panel);
             return;
         }
 
@@ -30486,7 +30746,16 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.045,
             ));
         }
-        self.push_load_game_rename_dialog(pass, panel);
+        self.push_save_slot_route_modal_dialogs(pass, panel);
+    }
+
+    fn push_save_slot_route_modal_dialogs(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if self.active_menu_route == Some(DesktopMenuRoute::SaveGame) {
+            self.push_save_game_new_dialog(pass, panel);
+            self.push_save_game_overwrite_dialog(pass, panel);
+        } else {
+            self.push_load_game_rename_dialog(pass, panel);
+        }
     }
 
     fn push_load_game_rename_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -30568,6 +30837,166 @@ impl DesktopLauncher {
             None,
             Layer::END_PIXELED + 0.076,
             !self.load_game_rename_text.is_empty(),
+        );
+    }
+
+    fn save_game_overwrite_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 96.0).clamp(360.0, 520.0);
+        let height = 154.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn push_save_game_new_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if !self.save_game_new_dialog_open {
+            return;
+        }
+        let dialog = Self::load_game_rename_dialog_rect_for_panel(panel);
+        let field = Self::load_game_rename_field_rect(dialog);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.44],
+            Layer::END_PIXELED + 0.070,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.071,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.072,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@save",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.073,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@save.newslot",
+            RenderPoint::new(field.x - 12.0, field.center().y),
+            [0.82, 0.90, 0.96, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::End)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.073,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, true),
+            field,
+            [1.0, 1.0, 1.0, 0.90],
+            0.0,
+            Layer::END_PIXELED + 0.074,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.save_game_new_text.clone(),
+            RenderPoint::new(field.x + 12.0, field.center().y),
+            [0.90, 0.96, 1.0, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.075,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 0),
+            "@cancel",
+            None,
+            Layer::END_PIXELED + 0.076,
+        );
+        self.push_settings_text_button_enabled(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 1),
+            "@ok",
+            None,
+            Layer::END_PIXELED + 0.076,
+            !self.save_game_new_text.is_empty(),
+        );
+    }
+
+    fn push_save_game_overwrite_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(slot_index) = self.save_game_overwrite_dialog_slot else {
+            return;
+        };
+        let dialog = Self::save_game_overwrite_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.44],
+            Layer::END_PIXELED + 0.080,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.081,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.72, 0.54, 0.36, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.082,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@overwrite",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [1.0, 0.92, 0.82, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.083,
+        ));
+        let slot_name = self
+            .load_game_slots
+            .get(slot_index)
+            .map(|slot| self.load_game_slot_display_title(slot))
+            .unwrap_or_else(|| "?".into());
+        pass.push(RenderCommand::draw_text_styled(
+            format!("@save.overwrite | {slot_name}"),
+            RenderPoint::new(dialog.center().x, dialog.center().y + 10.0),
+            [0.88, 0.90, 0.92, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.083,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 0),
+            "@cancel",
+            None,
+            Layer::END_PIXELED + 0.086,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 1),
+            "@ok",
+            None,
+            Layer::END_PIXELED + 0.086,
         );
     }
 
@@ -30895,7 +31324,42 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
-                        && self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+                        && self.active_menu_route == Some(DesktopMenuRoute::SaveGame)
+                        && self.save_game_new_dialog_open
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::SaveGameNewOk,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::SaveGame)
+                        && self.save_game_overwrite_dialog_slot.is_some()
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::SaveGameOverwriteOk,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::SaveGame)
+                        && self.save_game_new_dialog_open
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.save_game_new_text.pop();
+                    } else {
+                        self.save_game_new_text.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && matches!(
+                            self.active_menu_route,
+                            Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
+                        )
                         && self.load_game_search_focused
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
                 {
@@ -31047,11 +31511,14 @@ impl DesktopLauncher {
                                 continue;
                             }
                         }
-                        if self.active_menu_route == Some(DesktopMenuRoute::LoadGame) {
+                        if matches!(
+                            self.active_menu_route,
+                            Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
+                        ) {
                             let viewport = self.default_render_viewport_for_surface(surface_size);
                             let panel = Self::active_menu_route_shell_panel_for_route(
                                 viewport,
-                                DesktopMenuRoute::LoadGame,
+                                self.active_menu_route.unwrap(),
                             );
                             if Self::load_game_search_rect_for_panel(panel).contains_point(cursor) {
                                 self.dispatch_menu_route_shell_action(
@@ -31122,10 +31589,28 @@ impl DesktopLauncher {
                                 continue;
                             }
                         }
+                        if self.active_menu_route == Some(DesktopMenuRoute::SaveGame) {
+                            let viewport = self.default_render_viewport_for_surface(surface_size);
+                            if let Some(action) = self
+                                .save_game_route_shell_action_at_surface_point(
+                                    viewport, cursor.x, cursor.y,
+                                )
+                            {
+                                self.dispatch_menu_route_shell_action(action);
+                                self.last_menu_action = None;
+                                continue;
+                            }
+                        }
                         if let Some(slot_index) =
                             self.load_game_slot_at_surface_point(surface_size, cursor.x, cursor.y)
                         {
-                            self.dispatch_load_game_slot_action(slot_index);
+                            if self.active_menu_route == Some(DesktopMenuRoute::SaveGame) {
+                                self.dispatch_menu_route_shell_action(
+                                    DesktopMenuRouteShellAction::SaveGameOverwrite(slot_index),
+                                );
+                            } else {
+                                self.dispatch_load_game_slot_action(slot_index);
+                            }
                             self.last_menu_action = None;
                             continue;
                         }
@@ -31230,8 +31715,19 @@ impl DesktopLauncher {
                             }
                             self.load_game_rename_text.push(ch);
                         }
-                    } else if self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
-                        && self.load_game_search_focused
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::SaveGame)
+                        && self.save_game_new_dialog_open
+                    {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.save_game_new_text.len() >= SAVE_NEW_TEXT_MAX_LENGTH {
+                                break;
+                            }
+                            self.save_game_new_text.push(ch);
+                        }
+                    } else if matches!(
+                        self.active_menu_route,
+                        Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
+                    ) && self.load_game_search_focused
                     {
                         self.load_game_search
                             .extend(text.chars().filter(|ch| !ch.is_control()));
@@ -31310,6 +31806,11 @@ impl DesktopLauncher {
                 }
             }
             DesktopMenuRoute::LoadGame => self.load_game_slot_lines(),
+            DesktopMenuRoute::SaveGame => {
+                let mut lines = self.load_game_slot_lines();
+                lines.insert(0, "button: @save.new Icon.add".into());
+                lines
+            }
             DesktopMenuRoute::CustomGame => self.custom_game_route_lines(),
             DesktopMenuRoute::Schematics => self.schematics_route_lines(),
             DesktopMenuRoute::Database => self.database_route_lines(),
@@ -32575,7 +33076,10 @@ impl DesktopLauncher {
             self.push_about_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Join {
             self.push_join_route_page(pass, panel);
-        } else if route == DesktopMenuRoute::LoadGame {
+        } else if matches!(
+            route,
+            DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame
+        ) {
             self.push_load_game_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Database {
             self.push_database_route_page(pass, panel);
@@ -54685,6 +55189,152 @@ version: "2.0.0"
             std::fs::read(save_dir.join("0.msav")).expect("imported save should exist"),
             std::fs::read(root.join("exported-save.msav")).expect("exported save should exist")
         );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_save_dialog_new_save_input_contract_matches_upstream_savegame() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::SaveGame);
+        launcher.save_game_new_dialog_open = true;
+        launcher.save_game_new_text.clear();
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::SaveGame,
+        );
+        let dialog = DesktopLauncher::load_game_rename_dialog_rect_for_panel(panel);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("save dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            texts.contains(&"@savegame"),
+            "upstream SaveDialog should title the route @savegame"
+        );
+        assert!(
+            texts.contains(&"@save.new"),
+            "upstream SaveDialog should expose the new-save button"
+        );
+        assert!(
+            texts.contains(&"@save.newslot"),
+            "upstream SaveDialog should label the new-save text input with @save.newslot"
+        );
+        assert!(texts.contains(&"@cancel"));
+        assert!(texts.contains(&"@ok"));
+
+        let cancel = DesktopLauncher::load_game_rename_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, cancel.x, cancel.y),
+            Some(super::DesktopMenuRouteShellAction::SaveGameNewCancel)
+        );
+
+        let ok = DesktopLauncher::load_game_rename_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
+            None,
+            "empty save-name input should keep OK disabled"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_save_dialog_creates_and_overwrites_save_slots() {
+        let root = temp_desktop_path("save-game-route-create-overwrite");
+        let save_dir = root.join("saves");
+        std::fs::create_dir_all(&save_dir).expect("save fixture dir should be writable");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.save_dir = save_dir.display().to_string();
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::SaveGame);
+        launcher.refresh_load_game_slots();
+
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::SaveGameNew);
+        assert!(launcher.save_game_new_dialog_open);
+        launcher.apply_menu_input_events(
+            DesktopSurfaceSize::new(1280, 720),
+            &[DesktopInputTickEvent::Text("Alpha Save".into())],
+        );
+        assert_eq!(launcher.save_game_new_text, "Alpha Save");
+        launcher
+            .active_menu_route_shell_action_at_surface_point(
+                DesktopSurfaceSize::new(1280, 720),
+                DesktopLauncher::load_game_rename_button_rect(
+                    DesktopLauncher::load_game_rename_dialog_rect_for_panel(
+                        DesktopLauncher::active_menu_route_shell_panel_for_route(
+                            launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(
+                                1280, 720,
+                            )),
+                            super::DesktopMenuRoute::SaveGame,
+                        ),
+                    ),
+                    1,
+                )
+                .center()
+                .x,
+                DesktopLauncher::load_game_rename_button_rect(
+                    DesktopLauncher::load_game_rename_dialog_rect_for_panel(
+                        DesktopLauncher::active_menu_route_shell_panel_for_route(
+                            launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(
+                                1280, 720,
+                            )),
+                            super::DesktopMenuRoute::SaveGame,
+                        ),
+                    ),
+                    1,
+                )
+                .center()
+                .y,
+            )
+            .expect("non-empty new-save OK should be clickable");
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::SaveGameNewOk);
+
+        let created = launcher
+            .last_save_game_result
+            .clone()
+            .expect("new save should create a result");
+        assert_eq!(created.status, "created");
+        assert_eq!(created.name, "Alpha Save");
+        assert!(save_dir.join("0.msav").exists());
+        assert_eq!(launcher.load_game_slots.len(), 1);
+        assert_eq!(
+            launcher.load_game_slots[0]
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.map_name.as_deref()),
+            Some("Alpha Save")
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SaveGameOverwrite(0),
+        );
+        assert_eq!(launcher.save_game_overwrite_dialog_slot, Some(0));
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SaveGameOverwriteOk,
+        );
+        let saved = launcher
+            .last_save_game_result
+            .clone()
+            .expect("overwrite should write a result");
+        assert_eq!(saved.status, "saved");
+        assert_eq!(saved.slot, "0");
+        assert_eq!(saved.name, "Alpha Save");
+        assert_eq!(launcher.save_game_overwrite_dialog_slot, None);
 
         std::fs::remove_dir_all(root).ok();
     }
