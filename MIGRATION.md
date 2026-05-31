@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 576. PausedDialog 状态分支与禁用态推进
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.8%**，仍未达到完整可玩；继续优先前端/UI，目标是让暂停菜单从固定按钮壳推进到状态感知 `PausedDialog`。
+- Java 对照依据：
+  - `PausedDialog.java` 桌面分支会按 campaign/editor/net 状态切换按钮可见性与 disabled；
+  - campaign sector 显示 `@objective`/`@abandon`，且不显示 Save/Load；
+  - editor 下 host 文案使用 `@hostserver.mobile`，并显示 `@editor.worldprocessors`；
+  - `@loadgame` 在 `net.active()` 时 disabled，host 在已联网且非 steam-server 情况 disabled。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增暂停菜单按钮 spec 列表，渲染、命中和禁用态共用同一份 `DesktopPausedOverlayButtonSpec`；
+    - 普通世界仍显示 `@back/@settings/@savegame/@loadgame/@hostserver/@quit`；
+    - net connected/connecting 时 `@loadgame` 与 `@hostserver` 保持可见但不可点击；
+    - campaign sector 可显示 `@objective/@abandon`，并隐藏 `@savegame/@loadgame`；
+    - editor 下显示 `@hostserver.mobile` 与 `@editor.worldprocessors`，并隐藏 Save/Load；
+    - host/worldprocessors/objective/abandon 暂以 guard message 记录动作，避免把 host 错误跳到 JoinDialog。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib paused_world_overlay -- --nocapture`
+- 仍未完成：
+  - `@objective/@abandon/@editor.worldprocessors` 仍未接真实 FullTextDialog、Planet abandon confirm 与 MapProcessorsDialog；
+  - host 仍需迁移真正 HostDialog/InviteFriends 入口；
+  - quit 仍需接 Java `showQuitConfirm()`/`runExitSave()` 保存与 editor/playtest 返回语义；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 575. LoadDialog 搜索上限与 autosave checked 视觉
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -2641,10 +2641,21 @@ pub enum DesktopMenuRouteShellAction {
 enum DesktopPausedOverlayAction {
     Back,
     Settings,
+    Objective,
+    Abandon,
     SaveGame,
     LoadGame,
     HostServer,
+    WorldProcessors,
     Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DesktopPausedOverlayButtonSpec {
+    action: DesktopPausedOverlayAction,
+    label: &'static str,
+    icon: Option<&'static str>,
+    enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24568,38 +24579,101 @@ impl DesktopLauncher {
         )
     }
 
-    fn pause_overlay_button_for_index(index: usize) -> Option<DesktopPausedOverlayAction> {
-        match index {
-            0 => Some(DesktopPausedOverlayAction::Back),
-            1 => Some(DesktopPausedOverlayAction::Settings),
-            2 => Some(DesktopPausedOverlayAction::SaveGame),
-            3 => Some(DesktopPausedOverlayAction::LoadGame),
-            4 => Some(DesktopPausedOverlayAction::HostServer),
-            5 => Some(DesktopPausedOverlayAction::Quit),
-            _ => None,
-        }
+    fn pause_overlay_net_active(&self) -> bool {
+        self.net_client
+            .state()
+            .lock()
+            .map(|state| state.connected || state.connecting)
+            .unwrap_or(false)
     }
 
-    fn pause_overlay_button_label(action: DesktopPausedOverlayAction) -> &'static str {
-        match action {
-            DesktopPausedOverlayAction::Back => "@back",
-            DesktopPausedOverlayAction::Settings => "@settings",
-            DesktopPausedOverlayAction::SaveGame => "@savegame",
-            DesktopPausedOverlayAction::LoadGame => "@loadgame",
-            DesktopPausedOverlayAction::HostServer => "@hostserver",
-            DesktopPausedOverlayAction::Quit => "@quit",
-        }
+    fn pause_overlay_has_objective(&self) -> bool {
+        self.game_state
+            .get_sector()
+            .and_then(|sector| sector.preset.as_ref())
+            .and_then(|preset| preset.description.as_ref())
+            .is_some_and(|description| !description.trim().is_empty())
     }
 
-    fn pause_overlay_button_icon(action: DesktopPausedOverlayAction) -> Option<&'static str> {
-        match action {
-            DesktopPausedOverlayAction::Back => Some("left"),
-            DesktopPausedOverlayAction::Settings => Some("settings"),
-            DesktopPausedOverlayAction::SaveGame => Some("save"),
-            DesktopPausedOverlayAction::LoadGame => Some("load"),
-            DesktopPausedOverlayAction::HostServer => Some("host"),
-            DesktopPausedOverlayAction::Quit => Some("exit"),
+    fn pause_overlay_button_specs(&self) -> Vec<DesktopPausedOverlayButtonSpec> {
+        let net_active = self.pause_overlay_net_active();
+        let is_campaign = self.game_state.is_campaign();
+        let is_editor = self.game_state.is_editor();
+        let mut specs = Vec::new();
+
+        if is_campaign {
+            if self.pause_overlay_has_objective() {
+                specs.push(DesktopPausedOverlayButtonSpec {
+                    action: DesktopPausedOverlayAction::Objective,
+                    label: "@objective",
+                    icon: Some("info"),
+                    enabled: true,
+                });
+            }
+            specs.push(DesktopPausedOverlayButtonSpec {
+                action: DesktopPausedOverlayAction::Abandon,
+                label: "@abandon",
+                icon: Some("cancel"),
+                enabled: !net_active && !self.game_state.game_over,
+            });
         }
+
+        specs.push(DesktopPausedOverlayButtonSpec {
+            action: DesktopPausedOverlayAction::Back,
+            label: "@back",
+            icon: Some("left"),
+            enabled: true,
+        });
+        specs.push(DesktopPausedOverlayButtonSpec {
+            action: DesktopPausedOverlayAction::Settings,
+            label: "@settings",
+            icon: Some("settings"),
+            enabled: true,
+        });
+
+        if !is_campaign && !is_editor {
+            specs.push(DesktopPausedOverlayButtonSpec {
+                action: DesktopPausedOverlayAction::SaveGame,
+                label: "@savegame",
+                icon: Some("save"),
+                enabled: true,
+            });
+            specs.push(DesktopPausedOverlayButtonSpec {
+                action: DesktopPausedOverlayAction::LoadGame,
+                label: "@loadgame",
+                icon: Some("load"),
+                enabled: !net_active,
+            });
+        }
+
+        specs.push(DesktopPausedOverlayButtonSpec {
+            action: DesktopPausedOverlayAction::HostServer,
+            label: if is_editor {
+                "@hostserver.mobile"
+            } else {
+                "@hostserver"
+            },
+            icon: Some("host"),
+            enabled: !net_active,
+        });
+
+        if is_editor {
+            specs.push(DesktopPausedOverlayButtonSpec {
+                action: DesktopPausedOverlayAction::WorldProcessors,
+                label: "@editor.worldprocessors",
+                icon: Some("logic"),
+                enabled: true,
+            });
+        }
+
+        specs.push(DesktopPausedOverlayButtonSpec {
+            action: DesktopPausedOverlayAction::Quit,
+            label: "@quit",
+            icon: Some("exit"),
+            enabled: true,
+        });
+
+        specs
     }
 
     fn pause_overlay_action_at_surface_point(
@@ -24614,12 +24688,9 @@ impl DesktopLauncher {
         let viewport = self.default_render_viewport_for_surface(surface_size);
         let panel = Self::pause_overlay_panel_for_viewport(viewport);
         let point = RenderPoint::new(x, y);
-        for index in 0..6 {
-            let Some(action) = Self::pause_overlay_button_for_index(index) else {
-                continue;
-            };
+        for (index, spec) in self.pause_overlay_button_specs().into_iter().enumerate() {
             if Self::pause_overlay_button_rect_for_panel(panel, index).contains_point(point) {
-                return Some(action);
+                return spec.enabled.then_some(spec.action);
             }
         }
         None
@@ -27601,6 +27672,12 @@ impl DesktopLauncher {
             DesktopPausedOverlayAction::Settings => {
                 self.open_pause_overlay_route(DesktopMenuRoute::Settings);
             }
+            DesktopPausedOverlayAction::Objective => {
+                self.last_menu_guard_message = Some("@objective".into());
+            }
+            DesktopPausedOverlayAction::Abandon => {
+                self.last_menu_guard_message = Some("@abandon".into());
+            }
             DesktopPausedOverlayAction::SaveGame => {
                 self.open_pause_overlay_route(DesktopMenuRoute::SaveGame);
             }
@@ -27608,7 +27685,10 @@ impl DesktopLauncher {
                 self.open_pause_overlay_route(DesktopMenuRoute::LoadGame);
             }
             DesktopPausedOverlayAction::HostServer => {
-                self.open_pause_overlay_route(DesktopMenuRoute::Join);
+                self.last_menu_guard_message = Some("@hostserver".into());
+            }
+            DesktopPausedOverlayAction::WorldProcessors => {
+                self.last_menu_guard_message = Some("@editor.worldprocessors".into());
             }
             DesktopPausedOverlayAction::Quit => {
                 self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
@@ -33974,16 +34054,14 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.144,
         ));
-        for index in 0..6 {
-            let Some(action) = Self::pause_overlay_button_for_index(index) else {
-                continue;
-            };
-            self.push_settings_text_button(
+        for (index, spec) in self.pause_overlay_button_specs().into_iter().enumerate() {
+            self.push_settings_text_button_enabled(
                 &mut pass,
                 Self::pause_overlay_button_rect_for_panel(panel, index),
-                Self::pause_overlay_button_label(action),
-                Self::pause_overlay_button_icon(action),
+                spec.label,
+                spec.icon,
                 Layer::END_PIXELED + 0.145 + index as f32 * 0.0001,
+                spec.enabled,
             );
         }
         Some(pass)
@@ -51158,6 +51236,118 @@ version: "2.0.0"
         assert!(route_texts.contains(&"@savegame"));
         assert!(route_texts.contains(&"@save.new"));
         assert!(route_texts.contains(&"upstream: SaveDialog"));
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_respects_net_and_editor_branches() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        launcher.net_client.state().lock().unwrap().connected = true;
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::pause_overlay_panel_for_viewport(viewport);
+        let load_center = DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 3).center();
+        let host_center = DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 4).center();
+
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, load_center.x, load_center.y),
+            None,
+            "Java PausedDialog disables LoadDialog while net.active()"
+        );
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(surface, host_center.x, host_center.y),
+            None,
+            "Java PausedDialog disables host while already connected as client"
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let net_texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(net_texts.contains(&"@loadgame"));
+        assert!(net_texts.contains(&"@hostserver"));
+
+        launcher.net_client.state().lock().unwrap().connected = false;
+        launcher.game_state.rules.editor = true;
+        launcher.render_default_graphics_frame_for_surface_with(1, surface, 1, &mut renderer);
+        let editor_texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(editor_texts.contains(&"@hostserver.mobile"));
+        assert!(editor_texts.contains(&"@editor.worldprocessors"));
+        assert!(!editor_texts.contains(&"@savegame"));
+        assert!(!editor_texts.contains(&"@loadgame"));
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_renders_campaign_objective_branch() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        let mut sector = Sector::new(173);
+        let mut preset = mindustry_core::mindustry::r#type::SectorPreset::new("ground-zero");
+        preset.description = Some("Campaign objective text".into());
+        sector.preset = Some(preset);
+        launcher.game_state.set_sector(Some(sector));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::pause_overlay_panel_for_viewport(viewport);
+        let objective_center =
+            DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 0).center();
+        let abandon_center =
+            DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 1).center();
+
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                objective_center.x,
+                objective_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::Objective)
+        );
+        assert_eq!(
+            launcher.pause_overlay_action_at_surface_point(
+                surface,
+                abandon_center.x,
+                abandon_center.y
+            ),
+            Some(super::DesktopPausedOverlayAction::Abandon)
+        );
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@objective"));
+        assert!(texts.contains(&"@abandon"));
+        assert!(!texts.contains(&"@savegame"));
+        assert!(!texts.contains(&"@loadgame"));
     }
 
     #[test]
