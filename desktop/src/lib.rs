@@ -2770,6 +2770,9 @@ pub enum DesktopMenuRouteShellAction {
     CancelDeleteJoinServerCard,
     ConnectJoinLocalHost(usize),
     ConnectJoinServerCard(usize),
+    ToggleJoinCommunityFavorite(usize),
+    ToggleJoinCommunityHidden(usize),
+    ConnectJoinCommunityGroup(usize),
     OpenMapListFilters,
     CloseMapListFilters,
     OpenMapListPlanetFilters,
@@ -27039,6 +27042,32 @@ impl DesktopLauncher {
         RenderRect::new(search.right() + 10.0, search.y, 150.0, search.height)
     }
 
+    fn join_route_community_group_row_rect_for_panel(
+        panel: RenderRect,
+        visible_index: usize,
+    ) -> RenderRect {
+        let search = Self::join_route_search_rect_for_panel(panel);
+        RenderRect::new(
+            panel.x + 36.0,
+            search.y - 40.0 - visible_index as f32 * 32.0,
+            panel.width - 72.0,
+            28.0,
+        )
+    }
+
+    fn join_route_community_group_action_button_rect(
+        row: RenderRect,
+        button_index: usize,
+    ) -> RenderRect {
+        let width = 86.0;
+        RenderRect::new(
+            row.right() - width * (3 - button_index.min(2)) as f32,
+            row.y,
+            width - 4.0,
+            row.height,
+        )
+    }
+
     fn join_route_server_snapshot_for_target(
         &self,
         target: &DesktopConnectTarget,
@@ -27209,6 +27238,21 @@ impl DesktopLauncher {
             .filter(|(_, group)| self.join_show_hidden || !self.join_community_group_hidden(group))
             .filter(|(_, group)| group.matches_query(&self.join_search))
             .collect()
+    }
+
+    fn join_community_group_connect_target(
+        group: &DesktopJoinCommunityGroup,
+    ) -> Option<DesktopConnectTarget> {
+        if let Some(host) = group.hosts.first() {
+            return Some(DesktopConnectTarget {
+                host: host.address.clone(),
+                port: u16::try_from(host.port).ok()?,
+            });
+        }
+        group
+            .addresses
+            .first()
+            .and_then(|address| parse_host_port(address))
     }
 
     fn delete_join_saved_server_at(&mut self, index: usize) -> bool {
@@ -29213,6 +29257,28 @@ impl DesktopLauncher {
         if Self::join_route_show_hidden_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::ToggleJoinShowHidden);
         }
+        for (visible_index, (group_index, _)) in self
+            .visible_join_community_groups()
+            .into_iter()
+            .take(3)
+            .enumerate()
+        {
+            let row = Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
+            if !row.contains_point(point) {
+                continue;
+            }
+            for button_index in 0..3 {
+                if Self::join_route_community_group_action_button_rect(row, button_index)
+                    .contains_point(point)
+                {
+                    return Some(match button_index {
+                        0 => DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(group_index),
+                        1 => DesktopMenuRouteShellAction::ToggleJoinCommunityHidden(group_index),
+                        _ => DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(group_index),
+                    });
+                }
+            }
+        }
         for local_index in 0..self.join_route_visible_local_host_count() {
             let rect = Self::join_route_server_card_rect_for_panel(panel, local_index);
             if rect.contains_point(point) {
@@ -30707,6 +30773,32 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::ConnectJoinServerCard(index) => {
                 let Some(target) = self.join_saved_servers.get(index).cloned() else {
                     self.connect_error = Some("missing connect target".into());
+                    return;
+                };
+                self.connect_target = Some(target.clone());
+                let _ = self.connect_to_target(target);
+            }
+            DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(index) => {
+                if let Some(group) = self.join_community_groups.get(index) {
+                    let favorite = !self.join_community_group_favorite(group);
+                    let _ = self.set_join_community_group_favorite(index, favorite);
+                    self.connect_error = None;
+                }
+            }
+            DesktopMenuRouteShellAction::ToggleJoinCommunityHidden(index) => {
+                if let Some(group) = self.join_community_groups.get(index) {
+                    let hidden = !self.join_community_group_hidden(group);
+                    let _ = self.set_join_community_group_hidden(index, hidden);
+                    self.connect_error = None;
+                }
+            }
+            DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(index) => {
+                let Some(group) = self.join_community_groups.get(index) else {
+                    self.connect_error = Some("missing community group".into());
+                    return;
+                };
+                let Some(target) = Self::join_community_group_connect_target(group) else {
+                    self.connect_error = Some("missing community host".into());
                     return;
                 };
                 self.connect_target = Some(target.clone());
@@ -33117,6 +33209,7 @@ impl DesktopLauncher {
             {
                 let favorite = self.join_community_group_favorite(group);
                 let hidden = self.join_community_group_hidden(group);
+                let row = Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
                 pass.push(RenderCommand::draw_text_styled(
                     format!(
                         "community[{group_index}]: {} hosts:{} favorite:{} hidden:{}",
@@ -33125,10 +33218,7 @@ impl DesktopLauncher {
                         if favorite { "on" } else { "off" },
                         if hidden { "on" } else { "off" }
                     ),
-                    RenderPoint::new(
-                        panel.x + 36.0,
-                        search.y - 22.0 - visible_index as f32 * 18.0,
-                    ),
+                    RenderPoint::new(row.x, row.center().y),
                     [0.66, 0.78, 0.86, 1.0],
                     10.0,
                     0.0,
@@ -33137,6 +33227,27 @@ impl DesktopLauncher {
                         .with_integer_position(true),
                     Layer::END_PIXELED + 0.037 + visible_index as f32 * 0.0001,
                 ));
+                self.push_settings_text_button(
+                    pass,
+                    Self::join_route_community_group_action_button_rect(row, 0),
+                    if favorite { "★" } else { "☆" },
+                    None,
+                    Layer::END_PIXELED + 0.038 + visible_index as f32 * 0.0001,
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::join_route_community_group_action_button_rect(row, 1),
+                    if hidden { "@show" } else { "@hide" },
+                    Some(if hidden { "eyeSmall" } else { "eyeOffSmall" }),
+                    Layer::END_PIXELED + 0.0385 + visible_index as f32 * 0.0001,
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::join_route_community_group_action_button_rect(row, 2),
+                    "@connect",
+                    Some("play"),
+                    Layer::END_PIXELED + 0.039 + visible_index as f32 * 0.0001,
+                );
             }
         }
         self.push_join_add_server_dialog(pass, panel);
@@ -68061,6 +68172,69 @@ version: "2.0.0"
             .any(|text| text.contains("community[0]: Official")
                 && text.contains("favorite:on")
                 && text.contains("hidden:on")));
+        assert!(texts.contains(&"★"));
+        assert!(texts.contains(&"@show"));
+        assert!(texts.contains(&"@connect"));
+
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let row = DesktopLauncher::join_route_community_group_row_rect_for_panel(panel, 0);
+        let favorite_button =
+            DesktopLauncher::join_route_community_group_action_button_rect(row, 0).center();
+        let hidden_button =
+            DesktopLauncher::join_route_community_group_action_button_rect(row, 1).center();
+        let connect_button =
+            DesktopLauncher::join_route_community_group_action_button_rect(row, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                favorite_button.x,
+                favorite_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                hidden_button.x,
+                hidden_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ToggleJoinCommunityHidden(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                connect_button.x,
+                connect_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(0))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(0),
+        );
+        assert_eq!(
+            launcher.settings_overrides.get("server-Official-favorite"),
+            Some(&"false".to_string())
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleJoinCommunityHidden(0),
+        );
+        assert_eq!(
+            launcher.settings_overrides.get("server-Official-hidden"),
+            Some(&"false".to_string())
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(0),
+        );
+        assert_eq!(
+            launcher.connect_target,
+            Some(super::DesktopConnectTarget {
+                host: "community.example".into(),
+                port: 6567,
+            })
+        );
     }
 
     #[test]

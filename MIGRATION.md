@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 645. JoinDialog community favorite/hidden/connect 按钮闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.7%**，仍未达到完整可玩；继续优先前端/UI 与联机入口，当前闭环目标是在 community ServerGroup 载体上补齐可点击的 favorite/hidden/connect 基础交互。
+- Java 对照依据：
+  - `ServerGroup.favorite()/hidden()` 使用 `server-<key>-favorite` 与 `server-<key>-hidden`；
+  - `addHeader(...)`/community group UI 提供收藏与隐藏切换，`showHidden` 关闭时隐藏组不显示；
+  - community host 点击最终进入 `safeConnect(...)`，后续仍需补 disclaimer/版本门禁。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `ToggleJoinCommunityFavorite(usize)`、`ToggleJoinCommunityHidden(usize)`、`ConnectJoinCommunityGroup(usize)` route shell action；
+    - community 摘要行右侧渲染 `★/☆`、`@hide/@show` 与 `@connect` 按钮；
+    - 新增 `join_route_community_group_row_rect_for_panel(...)` 与 action button rect，hit-test 能稳定命中 favorite/hidden/connect；
+    - dispatch favorite/hidden 会写回 `settings_overrides["server-<key>-favorite/hidden"]`，connect 优先使用 group 首个 Host，否则解析首个地址；
+    - 回归测试覆盖按钮渲染、hit-test、settings 写回与 connect_target 设置。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - community group 远端 JSON fetch/parse 尚未接入；
+  - community connect 尚未弹 `@servers.disclaimer`，也未执行 Java `safeConnect(..., version)` 的版本门禁；
+  - community host 仍是 group 级摘要连接，尚未按 host 逐条卡片化；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 644. JoinDialog community ServerGroup 数据载体接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
