@@ -493,6 +493,13 @@ pub enum DesktopSchematicModalButton {
     ExportFile,
     EditOk,
     EditCancel,
+    TagMoveUp(usize),
+    TagMoveDown(usize),
+    TagSelect(usize),
+    TagRename(usize),
+    TagDelete(usize),
+    TagNewText,
+    TagNewIcon,
 }
 
 impl DesktopMenuRoute {
@@ -14478,6 +14485,8 @@ pub struct DesktopLauncher {
     pub schematic_modal: Option<DesktopSchematicModal>,
     pub schematic_edit_name: String,
     pub schematic_edit_description: String,
+    pub schematic_tag_order: Vec<String>,
+    pub schematic_tag_editor_text: String,
     pub last_schematic_modal_button: Option<DesktopSchematicModalButton>,
     pub schematic_cards: Vec<DesktopSchematicCardEntry>,
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
@@ -15203,6 +15212,8 @@ impl DesktopLauncher {
             schematic_modal: None,
             schematic_edit_name: String::new(),
             schematic_edit_description: String::new(),
+            schematic_tag_order: Vec::new(),
+            schematic_tag_editor_text: String::new(),
             last_schematic_modal_button: None,
             schematic_cards: Vec::new(),
             last_schematic_card_action: None,
@@ -20477,7 +20488,7 @@ impl DesktopLauncher {
     }
 
     fn schematics_tag_names(&self) -> Vec<String> {
-        let mut tags = Vec::new();
+        let mut tags = self.schematic_tag_order.clone();
         for entry in &self.schematic_cards {
             for tag in &entry.labels {
                 if !tags.iter().any(|known| known == tag) {
@@ -20485,8 +20496,15 @@ impl DesktopLauncher {
                 }
             }
         }
-        tags.sort();
+        if self.schematic_tag_order.is_empty() {
+            tags.sort();
+        }
         tags
+    }
+
+    fn sync_schematic_tag_order(&mut self) {
+        let tags = self.schematics_tag_names();
+        self.schematic_tag_order = tags;
     }
 
     fn schematics_tag_chip_rects_for_panel(panel: RenderRect, tags: &[String]) -> Vec<RenderRect> {
@@ -20690,6 +20708,47 @@ impl DesktopLauncher {
         )
     }
 
+    fn schematic_tag_editor_row_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 24.0,
+            dialog.y + dialog.height - 104.0 - index as f32 * 48.0,
+            dialog.width - 48.0,
+            40.0,
+        )
+    }
+
+    fn schematic_tag_editor_move_up_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.x + 4.0, row.y + 4.0, 30.0, 32.0)
+    }
+
+    fn schematic_tag_editor_move_down_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.x + 38.0, row.y + 4.0, 30.0, 32.0)
+    }
+
+    fn schematic_tag_editor_select_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.x + 76.0, row.y + 4.0, row.width - 190.0, 32.0)
+    }
+
+    fn schematic_tag_editor_rename_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.right() - 74.0, row.y + 4.0, 30.0, 32.0)
+    }
+
+    fn schematic_tag_editor_delete_rect(row: RenderRect) -> RenderRect {
+        RenderRect::new(row.right() - 38.0, row.y + 4.0, 30.0, 32.0)
+    }
+
+    fn schematic_tag_editor_text_field_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 28.0, dialog.y + 84.0, dialog.width - 56.0, 36.0)
+    }
+
+    fn schematic_tag_editor_new_text_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 28.0, dialog.y + 28.0, 210.0, 44.0)
+    }
+
+    fn schematic_tag_editor_new_icon_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 248.0, dialog.y + 28.0, 210.0, 44.0)
+    }
+
     fn schematic_modal_action_at_point(
         &self,
         panel: RenderRect,
@@ -20721,6 +20780,45 @@ impl DesktopLauncher {
                 None
             }
             DesktopSchematicModal::Tags => {
+                let tags = self.schematics_tag_names();
+                for (index, _) in tags.iter().enumerate() {
+                    let row = Self::schematic_tag_editor_row_rect(dialog, index);
+                    if Self::schematic_tag_editor_move_up_rect(row).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                            DesktopSchematicModalButton::TagMoveUp(index),
+                        ));
+                    }
+                    if Self::schematic_tag_editor_move_down_rect(row).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                            DesktopSchematicModalButton::TagMoveDown(index),
+                        ));
+                    }
+                    if Self::schematic_tag_editor_select_rect(row).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                            DesktopSchematicModalButton::TagSelect(index),
+                        ));
+                    }
+                    if Self::schematic_tag_editor_rename_rect(row).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                            DesktopSchematicModalButton::TagRename(index),
+                        ));
+                    }
+                    if Self::schematic_tag_editor_delete_rect(row).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                            DesktopSchematicModalButton::TagDelete(index),
+                        ));
+                    }
+                }
+                if Self::schematic_tag_editor_new_text_rect(dialog).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                        DesktopSchematicModalButton::TagNewText,
+                    ));
+                }
+                if Self::schematic_tag_editor_new_icon_rect(dialog).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                        DesktopSchematicModalButton::TagNewIcon,
+                    ));
+                }
                 if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
                     return Some(DesktopMenuRouteShellAction::SchematicModalButton(
                         DesktopSchematicModalButton::Back,
@@ -21089,6 +21187,10 @@ impl DesktopLauncher {
     }
 
     fn open_schematic_modal(&mut self, modal: DesktopSchematicModal) {
+        if matches!(modal, DesktopSchematicModal::Tags) {
+            self.sync_schematic_tag_order();
+            self.schematic_tag_editor_text.clear();
+        }
         self.schematic_modal = Some(modal);
         self.schematic_info_dialog = match modal {
             DesktopSchematicModal::Info { index } => Some(index),
@@ -21212,6 +21314,80 @@ impl DesktopLauncher {
                                 self.close_schematic_modal();
                             }
                         }
+                    }
+                    DesktopSchematicModalButton::TagMoveUp(index) => {
+                        self.sync_schematic_tag_order();
+                        if index > 0 && index < self.schematic_tag_order.len() {
+                            self.schematic_tag_order.swap(index, index - 1);
+                        }
+                    }
+                    DesktopSchematicModalButton::TagMoveDown(index) => {
+                        self.sync_schematic_tag_order();
+                        if index + 1 < self.schematic_tag_order.len() {
+                            self.schematic_tag_order.swap(index, index + 1);
+                        }
+                    }
+                    DesktopSchematicModalButton::TagSelect(index) => {
+                        self.sync_schematic_tag_order();
+                        if let Some(tag) = self.schematic_tag_order.get(index).cloned() {
+                            self.schematic_selected_tags.clear();
+                            self.schematic_selected_tags.push(tag.clone());
+                            self.last_schematic_tag_toggled = Some(tag);
+                            self.close_schematic_modal();
+                        }
+                    }
+                    DesktopSchematicModalButton::TagRename(index) => {
+                        self.sync_schematic_tag_order();
+                        let name = self.schematic_tag_editor_text.trim().to_string();
+                        if !name.is_empty()
+                            && !self.schematic_tag_order.iter().any(|tag| tag == &name)
+                        {
+                            if let Some(old) = self.schematic_tag_order.get(index).cloned() {
+                                self.schematic_tag_order[index] = name.clone();
+                                for entry in &mut self.schematic_cards {
+                                    for label in &mut entry.labels {
+                                        if label == &old {
+                                            *label = name.clone();
+                                        }
+                                    }
+                                }
+                                for selected in &mut self.schematic_selected_tags {
+                                    if selected == &old {
+                                        *selected = name.clone();
+                                    }
+                                }
+                                self.schematic_tag_editor_text.clear();
+                            }
+                        }
+                    }
+                    DesktopSchematicModalButton::TagDelete(index) => {
+                        self.sync_schematic_tag_order();
+                        if index < self.schematic_tag_order.len() {
+                            let removed = self.schematic_tag_order.remove(index);
+                            self.schematic_selected_tags
+                                .retain(|selected| selected != &removed);
+                            for entry in &mut self.schematic_cards {
+                                entry.labels.retain(|label| label != &removed);
+                            }
+                        }
+                    }
+                    DesktopSchematicModalButton::TagNewText => {
+                        self.sync_schematic_tag_order();
+                        let name = self.schematic_tag_editor_text.trim().to_string();
+                        if !name.is_empty()
+                            && !self.schematic_tag_order.iter().any(|tag| tag == &name)
+                        {
+                            self.schematic_tag_order.push(name);
+                            self.schematic_tag_editor_text.clear();
+                        }
+                    }
+                    DesktopSchematicModalButton::TagNewIcon => {
+                        self.sync_schematic_tag_order();
+                        let mut icon = "★".to_string();
+                        if self.schematic_tag_order.iter().any(|tag| tag == &icon) {
+                            icon = format!("★{}", self.schematic_tag_order.len() + 1);
+                        }
+                        self.schematic_tag_order.push(icon);
                     }
                     DesktopSchematicModalButton::ImportClipboard
                     | DesktopSchematicModalButton::ImportFile
@@ -21986,28 +22162,129 @@ impl DesktopLauncher {
             }
             DesktopSchematicModal::Tags => {
                 let dialog = self.push_schematic_modal_base(pass, panel, "@schematic.edittags");
-                pass.push(RenderCommand::draw_text_styled(
-                    format!("tags: {}", self.schematics_tag_names().join(", ")),
-                    RenderPoint::new(dialog.center().x, dialog.center().y + 34.0),
-                    [0.72, 0.80, 0.86, 1.0],
-                    12.0,
+                let tags = self.schematics_tag_names();
+                for (index, tag) in tags.iter().take(6).enumerate() {
+                    let row = Self::schematic_tag_editor_row_rect(dialog, index);
+                    pass.push(RenderCommand::draw_sprite(
+                        Self::settings_drawable_symbol("button"),
+                        row,
+                        [1.0, 1.0, 1.0, 0.82],
+                        0.0,
+                        Layer::END_PIXELED + 0.076 + index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label("upOpen", "up"),
+                        Self::schematic_tag_editor_move_up_rect(row).center(),
+                        [0.78, 0.88, 0.96, 1.0],
+                        12.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.079 + index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label("downOpen", "down"),
+                        Self::schematic_tag_editor_move_down_rect(row).center(),
+                        [0.78, 0.88, 0.96, 1.0],
+                        12.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.079 + index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        format!(
+                            "{} | {}",
+                            tag,
+                            self.schematic_cards
+                                .iter()
+                                .filter(|entry| entry.labels.iter().any(|label| label == tag))
+                                .count()
+                        ),
+                        Self::schematic_tag_editor_select_rect(row).center(),
+                        if self
+                            .schematic_selected_tags
+                            .iter()
+                            .any(|selected| selected == tag)
+                        {
+                            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                        } else {
+                            [0.78, 0.86, 0.92, 1.0]
+                        },
+                        11.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        Layer::END_PIXELED + 0.080 + index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label("pencil", "edit"),
+                        Self::schematic_tag_editor_rename_rect(row).center(),
+                        [0.82, 0.92, 1.0, 1.0],
+                        12.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.081 + index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label("trash", "trash"),
+                        Self::schematic_tag_editor_delete_rect(row).center(),
+                        [1.0, 0.56, 0.54, 1.0],
+                        12.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.081 + index as f32 * 0.001,
+                    ));
+                }
+                let field = Self::schematic_tag_editor_text_field_rect(dialog);
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_text_button_symbol("grayt", false, false),
+                    field,
+                    [1.0, 1.0, 1.0, 0.90],
                     0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.077,
+                    Layer::END_PIXELED + 0.083,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
-                    "tag editor pending showAllTags/buildTags/showNewTag",
-                    RenderPoint::new(dialog.center().x, dialog.center().y),
-                    [0.58, 0.66, 0.74, 1.0],
-                    10.0,
+                    if self.schematic_tag_editor_text.is_empty() {
+                        "@schematic.addtag".to_string()
+                    } else {
+                        self.schematic_tag_editor_text.clone()
+                    },
+                    RenderPoint::new(field.x + 12.0, field.center().y),
+                    if self.schematic_tag_editor_text.is_empty() {
+                        [0.60, 0.70, 0.78, 1.0]
+                    } else {
+                        [0.88, 0.94, 1.0, 1.0]
+                    },
+                    11.0,
                     0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
+                    RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true),
-                    Layer::END_PIXELED + 0.077,
+                    Layer::END_PIXELED + 0.084,
                 ));
+                self.push_settings_text_button(
+                    pass,
+                    Self::schematic_tag_editor_new_text_rect(dialog),
+                    "@schematic.texttag",
+                    Some("add"),
+                    Layer::END_PIXELED + 0.085,
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::schematic_tag_editor_new_icon_rect(dialog),
+                    "@schematic.icontag",
+                    Some("add"),
+                    Layer::END_PIXELED + 0.086,
+                );
                 self.push_settings_text_button(
                     pass,
                     Self::schematic_info_button_rect(dialog, 0),
@@ -22879,6 +23156,18 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Schematics)
+                        && self.schematic_modal == Some(DesktopSchematicModal::Tags)
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.schematic_tag_editor_text.pop();
+                    } else {
+                        self.schematic_tag_editor_text.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Schematics)
                         && self.schematic_search_focused
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
                 {
@@ -23003,6 +23292,11 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Text(text) => {
                     if self.active_menu_route == Some(DesktopMenuRoute::Schematics)
+                        && self.schematic_modal == Some(DesktopSchematicModal::Tags)
+                    {
+                        self.schematic_tag_editor_text
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Schematics)
                         && self.schematic_search_focused
                     {
                         self.schematic_search
@@ -40694,6 +40988,135 @@ mod tests {
         );
         assert_eq!(launcher.schematic_cards[0].name, "Renamed Core");
         assert_eq!(launcher.schematic_modal, None);
+    }
+
+    #[test]
+    fn desktop_launcher_schematics_tags_modal_edits_canonical_tag_list() {
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.schematic_cards = vec![
+            super::DesktopSchematicCardEntry {
+                name: "Core Starter".into(),
+                description: String::new(),
+                width: 12,
+                height: 8,
+                tile_count: 42,
+                labels: vec!["core".into(), "power".into()],
+                has_steam_id: false,
+                mod_name: None,
+            },
+            super::DesktopSchematicCardEntry {
+                name: "Drill".into(),
+                description: String::new(),
+                width: 8,
+                height: 8,
+                tile_count: 18,
+                labels: vec!["drill".into()],
+                has_steam_id: false,
+                mod_name: None,
+            },
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::Schematics);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenSchematicTags,
+        );
+        assert_eq!(
+            launcher.schematic_modal,
+            Some(super::DesktopSchematicModal::Tags)
+        );
+
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Schematics,
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("tags modal should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@schematic.edittags"));
+        assert!(texts.contains(&"core | 1"));
+        assert!(texts.contains(&"power | 1"));
+        assert!(texts.contains(&"@schematic.texttag"));
+        assert!(texts.contains(&"@schematic.icontag"));
+        assert!(!texts.contains(&"tag editor pending showAllTags/buildTags/showNewTag"));
+
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("logic".into())]);
+        assert_eq!(launcher.schematic_tag_editor_text, "logic");
+        let dialog = DesktopLauncher::schematic_info_dialog_rect_for_panel(panel);
+        let new_text = DesktopLauncher::schematic_tag_editor_new_text_rect(dialog).center();
+        assert_eq!(
+            launcher
+                .active_menu_route_shell_action_at_surface_point(surface, new_text.x, new_text.y),
+            Some(super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::TagNewText
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::TagNewText,
+            ),
+        );
+        assert!(launcher
+            .schematics_tag_names()
+            .contains(&"logic".to_string()));
+
+        let power_index = launcher
+            .schematics_tag_names()
+            .iter()
+            .position(|tag| tag == "power")
+            .expect("power tag should exist");
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::TagSelect(power_index),
+            ),
+        );
+        assert_eq!(launcher.schematic_selected_tags, vec!["power".to_string()]);
+        assert_eq!(launcher.schematic_modal, None);
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenSchematicTags,
+        );
+        launcher.schematic_tag_editor_text = "energy".into();
+        let power_index = launcher
+            .schematics_tag_names()
+            .iter()
+            .position(|tag| tag == "power")
+            .expect("power tag should exist before rename");
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::TagRename(power_index),
+            ),
+        );
+        assert!(launcher.schematic_cards[0]
+            .labels
+            .contains(&"energy".to_string()));
+        assert_eq!(launcher.schematic_selected_tags, vec!["energy".to_string()]);
+
+        let energy_index = launcher
+            .schematics_tag_names()
+            .iter()
+            .position(|tag| tag == "energy")
+            .expect("energy tag should exist before delete");
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::TagDelete(energy_index),
+            ),
+        );
+        assert!(!launcher.schematic_cards[0]
+            .labels
+            .contains(&"energy".to_string()));
+        assert!(launcher.schematic_selected_tags.is_empty());
     }
 
     #[test]

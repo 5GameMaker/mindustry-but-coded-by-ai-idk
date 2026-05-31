@@ -19213,3 +19213,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - edit 仍未接真实 schematic tags map、`save()`、`rebuildPane.run()` 和完整 TextField/area 输入；
   - tags modal 仍只是 showAllTags 占位，未迁移 tag 排序、重命名、删除、新建文本/icon tag 与 settings 持久化；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 540. SchematicsDialog 标签管理模态最小可编辑闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **57.4%**，仍未达到完整可玩；继续优先前端/UI，目标是让 `SchematicsDialog.showAllTags()` 不再是占位文本，而是可见、可点、会影响筛选/卡片标签的编辑层。
+- Java 对照证据：
+  - `checkTags()` 从所有 schematic labels 补齐全局 `tags`；
+  - `tagsChanged()` 刷新 tag 区和筛选 pane，并写入 `Core.settings.putJson("schematic-tags", ...)`；
+  - `showAllTags()` 列出全局标签，支持上移/下移、选中筛选、重命名、删除，并提供 `@schematic.texttag` / `@schematic.icontag` 新建入口；
+  - `buildTags()` 对单个 schematic 的标签做 chip 展示和增删。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 canonical `schematic_tag_order`，`schematics_tag_names()` 优先保留该顺序，再从现有卡片 labels 补齐未知标签，作为 Rust 版 `checkTags()` 基础；
+    - `DesktopSchematicModal::Tags` 从占位文本升级为 tag rows：显示 tag 名称、被几个卡片使用、上移/下移、选择筛选、重命名、删除入口；
+    - 新增 `schematic_tag_editor_text` 输入缓冲，Tags modal 下 `Text/Backspace/Delete` 写入该缓冲；
+    - `TagNewText` 会把缓冲文本加入 canonical tag 列表，`TagNewIcon` 先以星形占位 icon tag 加入；
+    - `TagRename` 会把 tag 名称同步替换到所有 `schematic_cards.labels` 和 `schematic_selected_tags`；
+    - `TagDelete` 会从 canonical 列表、所有卡片 labels、选中筛选里移除该 tag；
+    - `TagSelect` 会按 Java `showAllTags()` 的行为把筛选设置为单个 tag 并关闭 modal。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `schematic_tag_order` 还没有写入真实 settings / config 文件，仍需接 Java `schematic-tags` 持久化等价层；
+  - `showNewIconTag()` 目前只是星形占位，没有迁移 IconSelectDialog、accessibleIcons 和 content icon 选择；
+  - `buildTags(schem, ...)` 的单 schematic tag 添加/移除弹窗仍未完整接入 edit/info 内部；
+  - 未达到完整可玩，不能宣告目标完成。
