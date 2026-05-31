@@ -32735,6 +32735,155 @@ impl DesktopLauncher {
         ));
     }
 
+    fn menu_boot_diagnostic_lines(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        let font_report = self.font_asset_validation_report();
+        if !font_report.all_resolved() {
+            lines.push(format!(
+                "asset warning: fonts {}/{}",
+                font_report.resolved_count, font_report.total_count
+            ));
+            if let Some(source) = font_report.missing_source_paths.first() {
+                lines.push(format!("missing font: {source}"));
+            }
+        }
+
+        let icon_report = self.content_icon_glyph_registry_report();
+        if !icon_report.loaded() {
+            lines.push(format!("asset warning: icons {}", icon_report.source_path));
+            if let Some(error) = icon_report.load_error.as_deref() {
+                lines.push(format!("icon load: {error}"));
+            } else if icon_report.file_path.is_none() {
+                lines.push("icon file unresolved".into());
+            } else if icon_report.icon_count == 0 {
+                lines.push("icon file contains no glyphs".into());
+            }
+        }
+
+        let font_atlas = self.font_atlas_plan();
+        if !font_atlas.ready_for_real_upload() {
+            if let Some(symbol) = font_atlas.missing_icon_atlas_symbols.first() {
+                lines.push(format!("missing icon atlas: {symbol}"));
+            }
+            if let Some(error) = font_atlas.content_icon_load_error.as_deref() {
+                if !lines
+                    .iter()
+                    .any(|line| line == &format!("icon load: {error}"))
+                {
+                    lines.push(format!("icon load: {error}"));
+                }
+            }
+        }
+
+        lines.truncate(5);
+        lines
+    }
+
+    fn push_menu_boot_diagnostics(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+        if std::env::var_os("MINDUSTRY_DESKTOP_HIDE_BOOT_DIAGNOSTICS").is_some() {
+            return;
+        }
+        let lines = self.menu_boot_diagnostic_lines();
+        if lines.is_empty() {
+            return;
+        }
+        let panel_width = (viewport.width - 32.0).clamp(280.0, 560.0);
+        let panel_height = 28.0 + lines.len() as f32 * 16.0;
+        let panel = RenderRect::new(
+            viewport.x + 16.0,
+            viewport.y + viewport.height - panel_height - 16.0,
+            panel_width,
+            panel_height,
+        );
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.20, 0.04, 0.03, 0.90],
+            Layer::END_PIXELED + 0.110,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            panel,
+            [1.0, 0.34, 0.18, 0.98],
+            2.0,
+            Layer::END_PIXELED + 0.111,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "render asset diagnostics",
+            RenderPoint::new(panel.x + 12.0, panel.y + panel.height - 14.0),
+            [1.0, 0.72, 0.58, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.112,
+        ));
+        for (index, line) in lines.iter().enumerate() {
+            pass.push(RenderCommand::draw_text_styled(
+                line.clone(),
+                RenderPoint::new(
+                    panel.x + 12.0,
+                    panel.y + panel.height - 32.0 - index as f32 * 16.0,
+                ),
+                [0.98, 0.90, 0.82, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.113 + index as f32 * 0.0001,
+            ));
+        }
+    }
+
+    fn push_menu_empty_plan_fallback(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+        pass.push(RenderCommand::fill_rect(
+            viewport.as_rect(),
+            [0.06, 0.09, 0.13, 1.0],
+            Layer::END_PIXELED + 0.001,
+        ));
+        let panel = RenderRect::new(
+            viewport.x + (viewport.width - 420.0).max(0.0) * 0.5,
+            viewport.y + (viewport.height - 120.0).max(0.0) * 0.5,
+            viewport.width.min(420.0),
+            120.0,
+        );
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.12, 0.20, 0.28, 0.94],
+            Layer::END_PIXELED + 0.010,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            panel,
+            [0.55, 0.82, 1.0, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.011,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "menu render plan empty",
+            RenderPoint::new(panel.center().x, panel.center().y + 16.0),
+            [0.94, 0.98, 1.0, 1.0],
+            16.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.012,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "check MINDUSTRY_ASSET_ROOT and stderr trace",
+            RenderPoint::new(panel.center().x, panel.center().y - 14.0),
+            [0.72, 0.84, 0.92, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.013,
+        ));
+    }
+
     fn push_mobile_terminal_overlay(&self, pass: &mut RenderPass, viewport: RenderViewport) {
         if !self.menu_mobile_terminal_open {
             return;
@@ -32846,6 +32995,7 @@ impl DesktopLauncher {
                     .with_viewport(viewport)
                     .with_camera(camera);
                 pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
+                self.push_menu_empty_plan_fallback(&mut pass, viewport);
                 pass
             })
         };
@@ -32853,6 +33003,7 @@ impl DesktopLauncher {
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
         self.push_active_menu_route_shell(&mut menu_pass, frame_viewport);
         self.push_menu_guard_message(&mut menu_pass, frame_viewport);
+        self.push_menu_boot_diagnostics(&mut menu_pass, frame_viewport);
         self.push_mobile_terminal_overlay(&mut menu_pass, frame_viewport);
         self.push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
         let camera = menu_pass
@@ -34824,12 +34975,12 @@ fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
 #[cfg(test)]
 mod tests {
     use super::{
-        run, DesktopCameraShakeFrame, DesktopEffectRenderStats, DesktopFrameKind,
-        DesktopFrameLoopEvent, DesktopFrameLoopExitReason, DesktopFrameLoopState,
-        DesktopFramePacing, DesktopFramePayload, DesktopFrameSkipReason,
-        DesktopGraphicsBlockParticleDrawCallKind, DesktopGraphicsCommandExecutionTrace,
-        DesktopGraphicsExecutionStepTrace, DesktopGraphicsExecutionSummary,
-        DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
+        run, DesktopCameraShakeFrame, DesktopContentIconGlyphRegistry, DesktopEffectRenderStats,
+        DesktopFontAssetSourceTrace, DesktopFrameKind, DesktopFrameLoopEvent,
+        DesktopFrameLoopExitReason, DesktopFrameLoopState, DesktopFramePacing, DesktopFramePayload,
+        DesktopFrameSkipReason, DesktopGraphicsBlockParticleDrawCallKind,
+        DesktopGraphicsCommandExecutionTrace, DesktopGraphicsExecutionStepTrace,
+        DesktopGraphicsExecutionSummary, DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
         DesktopGraphicsLiveBackendDrawSpriteSink, DesktopGraphicsLiveBackendDrawSpriteTrace,
         DesktopGraphicsLiveBackendRenderCommandSink, DesktopGraphicsLiveBackendRenderCommandSource,
         DesktopGraphicsLiveBackendRenderCommandTrace,
@@ -49612,6 +49763,59 @@ version: "2.0.0"
             .sprite_quads
             .iter()
             .any(|quad| quad.symbol == "primitive:DrawText"));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_frame_draws_visible_asset_diagnostics_when_assets_are_missing() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.font_asset_sources = vec![DesktopFontAssetSourceTrace {
+            source_path: "fonts/font.woff".into(),
+            file_path: None,
+        }];
+        launcher.content_icon_glyph_registry = DesktopContentIconGlyphRegistry::new(
+            "icons/icons.properties",
+            None,
+            Vec::new(),
+            Some("missing fixture".into()),
+        );
+        let viewport = RenderViewport::new(0.0, 0.0, 800.0, 600.0);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should be available")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::FillRect { color, .. } if *color == [0.20, 0.04, 0.03, 0.90]
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "render asset diagnostics"
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "asset warning: fonts 0/1"
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. }
+                    if text == "asset warning: icons icons/icons.properties"
+            )
+        }));
     }
 
     #[test]

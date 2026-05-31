@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 571. 菜单黑屏 fallback 可见诊断与 shader root trace
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.3%**，仍未达到完整可玩；继续优先前端/UI，后续推进 SaveDialog 新建/覆盖与更完整主菜单还原。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 菜单 render plan 为空时不再只 `clear` 成纯黑，改为追加高对比 fallback 面板与诊断文本；
+    - 新增启动资源诊断 overlay：字体、icons、font atlas 关键资源缺失时，主菜单左上角显示可见告警，避免用户只看到黑屏；
+    - 新增测试覆盖缺失资源时菜单帧包含可见诊断色块与文本。
+  - `desktop/src/main.rs`
+    - native OpenGL shader asset root 解析改为带来源/状态的 resolution helper；
+    - trace 中输出最终 shader root、来源与 `shaders` 目录是否存在；
+    - shader 加载失败信息携带 root/source/目录状态，便于定位黑屏资源路径问题；
+    - 新增测试覆盖 repository 优先级与 reference fallback 选择结果。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_frame_draws_visible_asset_diagnostics_when_assets_are_missing --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl_shader_asset_root -- --nocapture`
+- 仍未完成：
+  - 真实 native 窗口端 shader/texture/native_errors 尚未全部上屏，当前先覆盖菜单空 pass 与关键 asset 资源诊断；
+  - SaveDialog 新建存档/覆盖确认与前端完整还原仍需继续推进；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 570. LoadDialog rename text input 弹层对齐 Java showTextInput
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -77,6 +77,46 @@ fn desktop_native_trace_summary(message: impl AsRef<str>) {
     }
 }
 
+#[cfg(feature = "opengl-native-runtime")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DesktopNativeOpenGlShaderAssetRootResolution {
+    path: std::path::PathBuf,
+    source: &'static str,
+    shaders_dir_exists: bool,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_shader_asset_root_resolution_from_candidates(
+    candidates: Vec<(std::path::PathBuf, &'static str)>,
+    fallback: std::path::PathBuf,
+) -> DesktopNativeOpenGlShaderAssetRootResolution {
+    for (candidate, source) in candidates {
+        let shaders_dir_exists = candidate.join("shaders").is_dir();
+        desktop_native_trace(format!(
+            "shader_asset_root: candidate source={source} path={} shaders_dir_exists={shaders_dir_exists}",
+            candidate.display()
+        ));
+        if shaders_dir_exists {
+            return DesktopNativeOpenGlShaderAssetRootResolution {
+                path: candidate,
+                source,
+                shaders_dir_exists,
+            };
+        }
+    }
+
+    let shaders_dir_exists = fallback.join("shaders").is_dir();
+    desktop_native_trace(format!(
+        "shader_asset_root: fallback source=fallback path={} shaders_dir_exists={shaders_dir_exists}",
+        fallback.display()
+    ));
+    DesktopNativeOpenGlShaderAssetRootResolution {
+        path: fallback,
+        source: "fallback",
+        shaders_dir_exists,
+    }
+}
+
 #[cfg(not(feature = "opengl-backend"))]
 fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
     let mut effect_renderer = mindustry_desktop::HeadlessDesktopEffectRenderer::default();
@@ -157,27 +197,49 @@ struct DesktopNativeOpenGlRuntime {
     framebuffer_handle_cache: mindustry_desktop::DesktopGraphicsOpenGlBackendHandleCache,
     framebuffer_handle_allocator: mindustry_desktop::DesktopGraphicsOpenGlBackendHandleAllocator,
     shader_asset_root: std::path::PathBuf,
+    shader_asset_root_source: &'static str,
+    shader_asset_root_shaders_dir_exists: bool,
     current_program: Option<u32>,
     current_vertex_array: Option<u32>,
     native_errors: Vec<String>,
 }
 
 #[cfg(feature = "opengl-native-runtime")]
-fn desktop_native_opengl_shader_asset_root() -> std::path::PathBuf {
+fn desktop_native_opengl_shader_asset_root_resolution(
+) -> DesktopNativeOpenGlShaderAssetRootResolution {
     if let Some(path) = std::env::var_os("MINDUSTRY_ASSET_ROOT") {
-        return std::path::PathBuf::from(path);
+        let path = std::path::PathBuf::from(path);
+        let shaders_dir_exists = path.join("shaders").is_dir();
+        desktop_native_trace(format!(
+            "shader_asset_root: environment override path={} shaders_dir_exists={shaders_dir_exists}",
+            path.display()
+        ));
+        return DesktopNativeOpenGlShaderAssetRootResolution {
+            path,
+            source: "environment override",
+            shaders_dir_exists,
+        };
     }
-    if let Ok(current_dir) = std::env::current_dir() {
-        let local_assets = current_dir.join("core").join("assets");
-        if local_assets.join("shaders").is_dir() {
-            return local_assets;
-        }
-    }
+
+    let repo_assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+        .join("core")
+        .join("assets");
     let reference_assets = std::path::PathBuf::from("D:/MDT/mindustry-upstream-v157.4/core/assets");
-    if reference_assets.join("shaders").is_dir() {
-        return reference_assets;
+    let current_dir_assets = std::env::current_dir()
+        .ok()
+        .map(|current_dir| current_dir.join("core").join("assets"));
+
+    let mut candidates = vec![(repo_assets, "repository"), (reference_assets, "reference")];
+    if let Some(current_dir_assets) = current_dir_assets {
+        candidates.push((current_dir_assets, "current-dir"));
     }
-    std::path::PathBuf::from("core/assets")
+
+    desktop_native_opengl_shader_asset_root_resolution_from_candidates(
+        candidates,
+        std::path::PathBuf::from("core/assets"),
+    )
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -368,6 +430,14 @@ impl DesktopNativeOpenGlRuntime {
             ));
         }
 
+        let shader_asset_root_resolution = desktop_native_opengl_shader_asset_root_resolution();
+        desktop_native_trace_summary(format!(
+            "runtime.new: shader_asset_root path={} source={} shaders_dir_exists={}",
+            shader_asset_root_resolution.path.display(),
+            shader_asset_root_resolution.source,
+            shader_asset_root_resolution.shaders_dir_exists
+        ));
+
         let mut runtime = Self {
             window,
             surface,
@@ -388,7 +458,9 @@ impl DesktopNativeOpenGlRuntime {
                 mindustry_desktop::DesktopGraphicsOpenGlBackendHandleCache::default(),
             framebuffer_handle_allocator:
                 mindustry_desktop::DesktopGraphicsOpenGlBackendHandleAllocator::default(),
-            shader_asset_root: desktop_native_opengl_shader_asset_root(),
+            shader_asset_root: shader_asset_root_resolution.path,
+            shader_asset_root_source: shader_asset_root_resolution.source,
+            shader_asset_root_shaders_dir_exists: shader_asset_root_resolution.shaders_dir_exists,
             current_program: None,
             current_vertex_array: None,
             native_errors: Vec::new(),
@@ -478,6 +550,8 @@ struct DesktopNativeOpenGlDriver<'a> {
         &'a mut mindustry_desktop::DesktopGraphicsOpenGlBackendHandleAllocator,
     surface_size: mindustry_desktop::DesktopSurfaceSize,
     shader_asset_root: &'a std::path::Path,
+    shader_asset_root_source: &'static str,
+    shader_asset_root_shaders_dir_exists: bool,
     current_program: &'a mut Option<u32>,
     current_vertex_array: &'a mut Option<u32>,
     bound_render_target: Option<mindustry_core::mindustry::graphics::RenderTarget>,
@@ -997,6 +1071,13 @@ impl DesktopNativeOpenGlDriver<'_> {
             return Some(source.to_string());
         }
 
+        desktop_native_trace(format!(
+            "shader.load: root={} source={} shaders_dir_exists={} shader={shader:?} stage={stage:?} source_path={source_path}",
+            self.shader_asset_root.display(),
+            self.shader_asset_root_source,
+            self.shader_asset_root_shaders_dir_exists
+        ));
+
         let loader = mindustry_desktop::DesktopGraphicsOpenGlBackendShaderSourceLoader::new(
             self.shader_asset_root,
         );
@@ -1005,7 +1086,10 @@ impl DesktopNativeOpenGlDriver<'_> {
             Ok(source) => source,
             Err(error) => {
                 self.native_errors.push(format!(
-                    "failed to load native OpenGL shader source {source_path}: {error:?}"
+                    "failed to load native OpenGL shader source {source_path} from {} (source={}, shaders_dir_exists={}): {error:?}",
+                    self.shader_asset_root.display(),
+                    self.shader_asset_root_source,
+                    self.shader_asset_root_shaders_dir_exists
                 ));
                 return None;
             }
@@ -2037,6 +2121,8 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             framebuffer_handle_allocator: &mut self.framebuffer_handle_allocator,
             surface_size,
             shader_asset_root: &self.shader_asset_root,
+            shader_asset_root_source: self.shader_asset_root_source,
+            shader_asset_root_shaders_dir_exists: self.shader_asset_root_shaders_dir_exists,
             current_program: &mut self.current_program,
             current_vertex_array: &mut self.current_vertex_array,
             bound_render_target: None,
@@ -2234,6 +2320,20 @@ mod tests {
         DisableScissorTest,
     }
 
+    fn unique_temp_shader_asset_root(label: &str) -> std::path::PathBuf {
+        let unique = format!(
+            "mindustry-desktop-shader-root-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after UNIX_EPOCH")
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(root.join("shaders")).expect("should create temporary shader root");
+        root
+    }
+
     #[test]
     fn native_opengl_app_initializes_frame_loop_from_native_surface_config() {
         let mut launcher = mindustry_desktop::DesktopLauncher::new(Vec::new());
@@ -2339,5 +2439,48 @@ mod tests {
             desktop_native_opengl_pixel_projection_matrix(0, -1),
             [2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0,]
         );
+    }
+
+    #[test]
+    fn native_opengl_shader_asset_root_prefers_repository_over_reference() {
+        let repo_assets = unique_temp_shader_asset_root("repo-order-repo");
+        let reference_assets = unique_temp_shader_asset_root("repo-order-reference");
+
+        let resolution = desktop_native_opengl_shader_asset_root_resolution_from_candidates(
+            vec![
+                (repo_assets.clone(), "repository"),
+                (reference_assets, "reference"),
+            ],
+            unique_temp_shader_asset_root("repo-order-fallback"),
+        );
+
+        assert_eq!(resolution.path, repo_assets);
+        assert_eq!(resolution.source, "repository");
+        assert!(resolution.shaders_dir_exists);
+    }
+
+    #[test]
+    fn native_opengl_shader_asset_root_exposes_chosen_reference_path() {
+        let reference_assets = unique_temp_shader_asset_root("reference-order-reference");
+        let missing_repo_assets = std::env::temp_dir().join(format!(
+            "mindustry-desktop-shader-root-reference-order-missing-repo-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after UNIX_EPOCH")
+                .as_nanos()
+        ));
+
+        let resolution = desktop_native_opengl_shader_asset_root_resolution_from_candidates(
+            vec![
+                (missing_repo_assets, "repository"),
+                (reference_assets.clone(), "reference"),
+            ],
+            std::env::temp_dir().join("mindustry-desktop-shader-root-reference-fallback"),
+        );
+
+        assert_eq!(resolution.path, reference_assets);
+        assert_eq!(resolution.source, "reference");
+        assert!(resolution.shaders_dir_exists);
     }
 }
