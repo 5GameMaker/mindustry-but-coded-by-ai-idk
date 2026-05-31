@@ -19360,6 +19360,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 555. Settings KeybindDialog Axis 二段绑定闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **60.6%**，仍未达到完整可玩；继续优先前端/UI，把 Controls 的 Axis rebind 从单次“双向同键”推进到更接近 Java `rebindMin/minKey` 的二段输入。
+- Java 对照依据：
+  - `KeybindDialog.java` 对 Axis 使用 `rebindAxis / rebindMin / minKey`；
+  - 普通键第一次录入 min 后继续等待 max；
+  - 第二次普通键写成 `Axis(minKey, newKey)`；
+  - 滚轮轴输入会直接写成单轴绑定。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_keybind_pending_axis_min`；
+    - Axis rebind 第一次普通键只记录 min，不立即结束；
+    - rebind 模态提示会显示 `min: ... / press max axis key`；
+    - 第二次普通键写回 `min / max`；
+    - `Scroll` 作为 axis 输入时直接写回 `Scroll`；
+    - cancel、reset、resetAll、关闭子弹窗/路由会清理 pending axis 状态；
+    - 测试覆盖 `K -> L` 二段 Axis 写回与 Scroll 直接写回。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - keybind override 仍是内存状态，尚未持久化到 settings 文件并在启动恢复；
+  - ControlsDialog 仍未覆盖完整 `Binding.java` 全量 keybind 表；
+  - 真实冲突检测、平台差异键名、完整鼠标/手柄输入名映射仍需继续迁移；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

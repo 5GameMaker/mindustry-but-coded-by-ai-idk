@@ -14896,6 +14896,7 @@ pub struct DesktopLauncher {
     pub last_settings_language_restart_message: Option<String>,
     pub settings_keybind_overrides: BTreeMap<&'static str, String>,
     pub last_settings_rebind_key: Option<&'static str>,
+    pub settings_keybind_pending_axis_min: Option<String>,
     pub settings_keybind_scroll_offset: usize,
     pub settings_keybind_search: String,
     pub settings_keybind_search_focused: bool,
@@ -15639,6 +15640,7 @@ impl DesktopLauncher {
             last_settings_language_restart_message: None,
             settings_keybind_overrides: BTreeMap::new(),
             last_settings_rebind_key: None,
+            settings_keybind_pending_axis_min: None,
             settings_keybind_scroll_offset: 0,
             settings_keybind_search: String::new(),
             settings_keybind_search_focused: false,
@@ -20325,7 +20327,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.157,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "press keyboard/mouse input to bind",
+            self.settings_keybind_rebind_hint(axis),
             RenderPoint::new(dialog.center().x, dialog.center().y - 16.0),
             [0.64, 0.72, 0.78, 1.0],
             10.5,
@@ -20769,17 +20771,28 @@ impl DesktopLauncher {
             return false;
         };
         let display = Self::settings_key_code_display(key_code);
-        let value = if Self::settings_keybind_spec_by_name(name)
+        let axis = Self::settings_keybind_spec_by_name(name)
             .map(|spec| spec.axis)
-            .unwrap_or(false)
-        {
-            format!("{display} / {display}")
-        } else {
-            display
-        };
+            .unwrap_or(false);
+        if axis && !Self::settings_key_code_is_axis(key_code) {
+            if let Some(min) = self.settings_keybind_pending_axis_min.take() {
+                self.settings_keybind_overrides
+                    .insert(name, format!("{min} / {display}"));
+                self.last_settings_rebind_key = None;
+            } else {
+                self.settings_keybind_pending_axis_min = Some(display);
+            }
+            return true;
+        }
+        let value = if axis { display } else { display };
         self.settings_keybind_overrides.insert(name, value);
         self.last_settings_rebind_key = None;
+        self.settings_keybind_pending_axis_min = None;
         true
+    }
+
+    fn settings_key_code_is_axis(key_code: &str) -> bool {
+        matches!(key_code, "Scroll" | "scroll")
     }
 
     fn settings_key_code_display(key_code: &str) -> String {
@@ -21153,6 +21166,17 @@ impl DesktopLauncher {
 
     fn settings_keybind_spec_by_name(name: &'static str) -> Option<&'static DesktopKeybindSpec> {
         SETTINGS_KEYBIND_SPECS.iter().find(|spec| spec.name == name)
+    }
+
+    fn settings_keybind_rebind_hint(&self, axis: bool) -> String {
+        if !axis {
+            return "press keyboard/mouse input to bind".into();
+        }
+        if let Some(min) = self.settings_keybind_pending_axis_min.as_deref() {
+            format!("min: {min} / press max axis key")
+        } else {
+            "press min axis key; Scroll binds axis directly".into()
+        }
     }
 
     fn settings_keybind_category_label(category: &'static str) -> &'static str {
@@ -22485,6 +22509,8 @@ impl DesktopLauncher {
             DesktopSettingsAction::BackToMain => {
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
+                self.last_settings_rebind_key = None;
+                self.settings_keybind_pending_axis_min = None;
                 if self.settings_dialog_state.page == DesktopSettingsPage::Main {
                     self.active_menu_route = None;
                 } else {
@@ -22528,6 +22554,8 @@ impl DesktopLauncher {
             DesktopSettingsAction::CloseChildDialog => {
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
+                self.last_settings_rebind_key = None;
+                self.settings_keybind_pending_axis_min = None;
             }
             DesktopSettingsAction::SelectLanguage(code) => {
                 if self.settings_locale != code {
@@ -22537,17 +22565,20 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::StartKeyRebind(name) => {
                 self.last_settings_rebind_key = Some(name);
+                self.settings_keybind_pending_axis_min = None;
                 self.settings_keybind_search_focused = false;
             }
             DesktopSettingsAction::ResetKey(name) => {
                 self.settings_keybind_overrides.remove(name);
                 if self.last_settings_rebind_key == Some(name) {
                     self.last_settings_rebind_key = None;
+                    self.settings_keybind_pending_axis_min = None;
                 }
             }
             DesktopSettingsAction::ResetAllKeys => {
                 self.settings_keybind_overrides.clear();
                 self.last_settings_rebind_key = None;
+                self.settings_keybind_pending_axis_min = None;
             }
             DesktopSettingsAction::FocusKeybindSearch => {
                 self.settings_keybind_search_focused = true;
@@ -22555,6 +22586,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::CancelKeyRebind => {
                 self.last_settings_rebind_key = None;
+                self.settings_keybind_pending_axis_min = None;
             }
             DesktopSettingsAction::ClearAllData
             | DesktopSettingsAction::ClearPlanetData
@@ -22652,6 +22684,8 @@ impl DesktopLauncher {
                 self.mods_import_dialog_open = false;
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
+                self.last_settings_rebind_key = None;
+                self.settings_keybind_pending_axis_min = None;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -45660,6 +45694,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(rebind_texts.contains(&"keybind.press.axis"));
         assert!(rebind_texts.contains(&"@keybind.move_x.name"));
+        assert!(rebind_texts.contains(&"press min axis key; Scroll binds axis directly"));
         let reset_center =
             DesktopLauncher::settings_keybind_reset_button_rect(child_dialog, 0).center();
         assert_eq!(
@@ -45678,13 +45713,42 @@ mod tests {
                 pressed: true,
             }],
         );
+        assert_eq!(launcher.last_settings_rebind_key, Some("move_x"));
+        assert_eq!(
+            launcher.settings_keybind_pending_axis_min.as_deref(),
+            Some("K")
+        );
+        assert!(!launcher.settings_keybind_overrides.contains_key("move_x"));
+        let rebind_second_frame = launcher.menu_graphics_frame_for_surface(4, viewport);
+        let rebind_second_texts = rebind_second_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("second axis rebind dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(rebind_second_texts.contains(&"min: K / press max axis key"));
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "L".into(),
+                pressed: true,
+            }],
+        );
         assert_eq!(launcher.last_settings_rebind_key, None);
+        assert_eq!(launcher.settings_keybind_pending_axis_min, None);
         assert_eq!(
             launcher
                 .settings_keybind_overrides
                 .get("move_x")
                 .map(String::as_str),
-            Some("K / K")
+            Some("K / L")
         );
 
         launcher.apply_menu_input_events(
@@ -45768,7 +45832,7 @@ mod tests {
                 .settings_keybind_overrides
                 .get("move_x")
                 .map(String::as_str),
-            Some("Scroll / Scroll")
+            Some("Scroll")
         );
         launcher.apply_menu_input_events(
             surface,
