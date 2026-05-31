@@ -38,7 +38,7 @@ use mindustry_core::mindustry::entities::{
     SuppressionFieldAbility, TextureRegionRef, UnitDrawPartKind, WeaponMount, WorldLabelAlign,
     WorldLabelComp, PLAYER_CLASS_ID,
 };
-use mindustry_core::mindustry::game::{Gamemode, TechNodeId, TechTree};
+use mindustry_core::mindustry::game::{Gamemode, TechNode, TechNodeId, TechTree};
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 #[cfg(test)]
@@ -201,6 +201,9 @@ const DATABASE_VISIBLE_ITEMS_PER_CATEGORY: usize = 8;
 const TECH_TREE_NODE_WIDTH: f32 = 112.0;
 const TECH_TREE_NODE_HEIGHT: f32 = 38.0;
 const TECH_TREE_VISIBLE_NODES: usize = 11;
+const TECH_TREE_NODE_INFO_WIDTH: f32 = 292.0;
+const TECH_TREE_NODE_INFO_MIN_HEIGHT: f32 = 118.0;
+const TECH_TREE_NODE_INFO_ROW_HEIGHT: f32 = 18.0;
 
 fn desktop_runtime_trace_enabled() -> bool {
     std::env::var_os("MINDUSTRY_DESKTOP_TRACE").is_some()
@@ -2538,6 +2541,8 @@ pub enum DesktopMenuRouteShellAction {
     OpenTechTreeSelect,
     CloseTechTreeSelect,
     SelectTechTreeRoot(usize),
+    OpenTechTreeNode(TechNodeId),
+    CloseTechTreeNode,
     OpenModsImport,
     CloseModsImport,
     ModsImportFile,
@@ -15463,6 +15468,7 @@ pub struct DesktopLauncher {
     pub editor_import_map_dialog_open: bool,
     pub tech_tree_selected_root: Option<String>,
     pub tech_tree_select_dialog_open: bool,
+    pub tech_tree_selected_node: Option<TechNodeId>,
     pub schematic_import_dialog_open: bool,
     pub schematic_tags_dialog_open: bool,
     pub schematic_search: String,
@@ -16243,6 +16249,7 @@ impl DesktopLauncher {
             editor_import_map_dialog_open: false,
             tech_tree_selected_root: None,
             tech_tree_select_dialog_open: false,
+            tech_tree_selected_node: None,
             schematic_import_dialog_open: false,
             schematic_tags_dialog_open: false,
             schematic_search: String::new(),
@@ -19954,6 +19961,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
+            self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
@@ -19983,6 +19991,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
+            self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
@@ -20007,6 +20016,7 @@ impl DesktopLauncher {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
+                self.tech_tree_selected_node = None;
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_list_search_focused = false;
                 self.map_play_dialog_index = None;
@@ -20042,6 +20052,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
+            self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
@@ -20057,6 +20068,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
+            self.tech_tree_selected_node = None;
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
@@ -20106,6 +20118,7 @@ impl DesktopLauncher {
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
             self.mods_import_dialog_open = false;
+            self.tech_tree_selected_node = None;
             self.map_list_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -24567,6 +24580,12 @@ impl DesktopLauncher {
         if Self::tech_tree_select_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::OpenTechTreeSelect);
         }
+        let graph = Self::tech_tree_graph_rect_for_panel(panel);
+        for (id, rect) in self.tech_tree_route_visible_node_rects(graph) {
+            if rect.contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::OpenTechTreeNode(id));
+            }
+        }
         None
     }
 
@@ -24663,6 +24682,27 @@ impl DesktopLauncher {
             dialog.width - 68.0,
             44.0,
         )
+    }
+
+    fn tech_tree_node_info_rect_for_node(
+        node: RenderRect,
+        graph: RenderRect,
+        rows: usize,
+    ) -> RenderRect {
+        let height = (TECH_TREE_NODE_INFO_MIN_HEIGHT
+            + rows as f32 * TECH_TREE_NODE_INFO_ROW_HEIGHT)
+            .clamp(TECH_TREE_NODE_INFO_MIN_HEIGHT, graph.height - 18.0);
+        let mut x = node.x + node.width + 10.0;
+        if x + TECH_TREE_NODE_INFO_WIDTH > graph.x + graph.width - 8.0 {
+            x = node.x - TECH_TREE_NODE_INFO_WIDTH - 10.0;
+        }
+        x = x.clamp(
+            graph.x + 8.0,
+            graph.x + graph.width - TECH_TREE_NODE_INFO_WIDTH - 8.0,
+        );
+        let mut y = node.y + node.height - height;
+        y = y.clamp(graph.y + 8.0, graph.y + graph.height - height - 8.0);
+        RenderRect::new(x, y, TECH_TREE_NODE_INFO_WIDTH, height)
     }
 
     fn active_menu_route_shell_action_at_surface_point(
@@ -24997,6 +25037,7 @@ impl DesktopLauncher {
                 self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
                 self.tech_tree_select_dialog_open = false;
+                self.tech_tree_selected_node = None;
                 self.map_list_filter_dialog_open = false;
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_play_dialog_index = None;
@@ -25092,7 +25133,21 @@ impl DesktopLauncher {
                 {
                     self.tech_tree_selected_root = Some(root_name.to_string());
                     self.tech_tree_select_dialog_open = false;
+                    self.tech_tree_selected_node = None;
                 }
+            }
+            DesktopMenuRouteShellAction::OpenTechTreeNode(id) => {
+                if self
+                    .tech_tree_route_root()
+                    .and_then(|(_, tree, _)| tree.node(id))
+                    .is_some()
+                {
+                    self.tech_tree_select_dialog_open = false;
+                    self.tech_tree_selected_node = Some(id);
+                }
+            }
+            DesktopMenuRouteShellAction::CloseTechTreeNode => {
+                self.tech_tree_selected_node = None;
             }
             DesktopMenuRouteShellAction::OpenModsImport => {
                 self.mods_import_dialog_open = true;
@@ -26669,6 +26724,150 @@ impl DesktopLauncher {
         );
     }
 
+    fn tech_tree_node_locked(node: &TechNode) -> bool {
+        !node.content.unlocked_host
+    }
+
+    fn tech_tree_node_selectable(node: &TechNode) -> bool {
+        node.content.unlocked_host || node.objectives.iter().all(|objective| objective.complete())
+    }
+
+    fn tech_tree_node_progress_percent(node: &TechNode) -> Option<i32> {
+        if node.requirements.is_empty() {
+            return None;
+        }
+        let total = node
+            .requirements
+            .iter()
+            .map(|stack| stack.amount.max(0))
+            .sum::<i32>();
+        if total <= 0 {
+            return None;
+        }
+        let finished = node
+            .finished_requirements
+            .iter()
+            .map(|stack| stack.amount.max(0))
+            .sum::<i32>();
+        Some(((finished as f32 / total as f32) * 100.0).floor() as i32)
+    }
+
+    fn tech_tree_node_detail_row_count(node: &TechNode) -> usize {
+        4 + node.requirements.len().max(1)
+            + node
+                .objectives
+                .iter()
+                .filter(|objective| !objective.complete())
+                .count()
+                .max(usize::from(node.objectives.is_empty()))
+    }
+
+    fn push_tech_tree_node_detail_panel(
+        &self,
+        pass: &mut RenderPass,
+        graph: RenderRect,
+        node_rect: RenderRect,
+        node: &TechNode,
+    ) {
+        let rows = Self::tech_tree_node_detail_row_count(node);
+        let info = Self::tech_tree_node_info_rect_for_node(node_rect, graph, rows);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            info,
+            [1.0, 1.0, 1.0, 0.94],
+            0.0,
+            Layer::END_PIXELED + 0.060,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            info,
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
+            1.0,
+            Layer::END_PIXELED + 0.061,
+        ));
+
+        let selectable = Self::tech_tree_node_selectable(node);
+        let locked = Self::tech_tree_node_locked(node);
+        let title = if selectable {
+            node.content.localized_name.as_str()
+        } else {
+            "[accent]???"
+        };
+        let mut lines = vec![
+            "ResearchInfoTable".to_string(),
+            title.to_string(),
+            format!(
+                "content: {:?}/{}",
+                node.content.content_type, node.content.name
+            ),
+        ];
+        if locked {
+            lines.push("@locked".into());
+        } else {
+            lines.push("@completed".into());
+        }
+        if let Some(progress) = Self::tech_tree_node_progress_percent(node) {
+            lines.push(format!("research.progress: {progress}%"));
+        }
+
+        if node.requirements.is_empty() {
+            lines.push("requirements: @none".into());
+        } else {
+            for (index, requirement) in node.requirements.iter().enumerate() {
+                let finished = node
+                    .finished_requirements
+                    .get(index)
+                    .map(|stack| stack.amount)
+                    .unwrap_or(0);
+                lines.push(format!(
+                    "{}: {} / {}",
+                    requirement.item, finished, requirement.amount
+                ));
+            }
+        }
+
+        let incomplete = node
+            .objectives
+            .iter()
+            .filter(|objective| !objective.complete())
+            .collect::<Vec<_>>();
+        if incomplete.is_empty() {
+            lines.push("objectives: @none".into());
+        } else {
+            lines.push("@complete".into());
+            lines.extend(
+                incomplete
+                    .into_iter()
+                    .map(|objective| format!("> {}", objective.display_token())),
+            );
+        }
+
+        for (index, line) in lines.into_iter().enumerate() {
+            let y = info.y + info.height - 18.0 - index as f32 * TECH_TREE_NODE_INFO_ROW_HEIGHT;
+            if y < info.y + 12.0 {
+                break;
+            }
+            let color = if index == 1 {
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+            } else if line == "@locked" || line.contains(" / ") {
+                [0.94, 0.70, 0.70, 1.0]
+            } else {
+                [0.82, 0.90, 0.96, 1.0]
+            };
+            pass.push(RenderCommand::draw_text_styled(
+                line,
+                RenderPoint::new(info.x + 12.0, y),
+                color,
+                if index == 1 { 11.5 } else { 9.5 },
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(index <= 1),
+                Layer::END_PIXELED + 0.063 + index as f32 * 0.0001,
+            ));
+        }
+    }
+
     fn push_tech_tree_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         self.push_settings_text_button(
             pass,
@@ -26763,18 +26962,31 @@ impl DesktopLauncher {
                 continue;
             };
             let is_root = *id == root;
+            let selected = self.tech_tree_selected_node == Some(*id);
+            let locked = Self::tech_tree_node_locked(node);
+            let selectable = Self::tech_tree_node_selectable(node);
             pass.push(RenderCommand::draw_sprite(
-                Self::settings_text_button_symbol("flatTogglet", false, is_root),
+                Self::settings_text_button_symbol("flatTogglet", false, selected || is_root),
                 *rect,
-                [1.0, 1.0, 1.0, if is_root { 0.95 } else { 0.84 }],
+                [1.0, 1.0, 1.0, if selected || is_root { 0.95 } else { 0.84 }],
                 0.0,
                 Layer::END_PIXELED + 0.030 + index as f32 * 0.001,
             ));
+            if locked && !selectable {
+                pass.push(RenderCommand::stroke_rect(
+                    *rect,
+                    [0.82, 0.22, 0.20, 0.82],
+                    1.0,
+                    Layer::END_PIXELED + 0.0305 + index as f32 * 0.001,
+                ));
+            }
             pass.push(RenderCommand::draw_text_styled(
                 node.content.name.clone(),
                 rect.center(),
-                if is_root {
+                if selected || is_root {
                     [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                } else if locked {
+                    [0.66, 0.70, 0.74, 1.0]
                 } else {
                     [0.82, 0.90, 0.96, 1.0]
                 },
@@ -26783,9 +26995,16 @@ impl DesktopLauncher {
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
-                    .with_outline(is_root),
+                    .with_outline(selected || is_root),
                 Layer::END_PIXELED + 0.031 + index as f32 * 0.001,
             ));
+        }
+
+        if let Some(selected_id) = self.tech_tree_selected_node {
+            if let (Some(node), Some(rect)) = (tree.node(selected_id), rect_by_id.get(&selected_id))
+            {
+                self.push_tech_tree_node_detail_panel(pass, graph, *rect, node);
+            }
         }
 
         let items = Self::tech_tree_items_display_rect_for_panel(panel);
@@ -28638,6 +28857,7 @@ impl DesktopLauncher {
             format!("roots: {roots}"),
             "select: @techtree.select".into(),
             "view: TechTreeNode graph".into(),
+            "infoTable: node detail requirements objectives".into(),
             "items: ItemsDisplay visible when !net.client".into(),
         ]
     }
@@ -46693,6 +46913,71 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(erekir_texts.contains(&"erekir: erekir"));
+    }
+
+    #[test]
+    fn desktop_launcher_techtree_route_opens_node_detail_panel_on_node_click() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::TechTree);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::TechTree,
+        );
+        let graph = DesktopLauncher::tech_tree_graph_rect_for_panel(panel);
+        let (_, tree, root) = launcher
+            .tech_tree_route_root()
+            .expect("base content should provide a tech tree root");
+        let target_id = tree
+            .each_from(root)
+            .into_iter()
+            .find(|id| {
+                tree.node(*id)
+                    .map(|node| node.content.name == "conveyor")
+                    .unwrap_or(false)
+            })
+            .expect("serpulo tech tree should expose conveyor near the root");
+        let target_rect = launcher
+            .tech_tree_route_visible_node_rects(graph)
+            .into_iter()
+            .find(|(id, _)| *id == target_id)
+            .expect("visible tech tree rects should include conveyor")
+            .1;
+        let target = target_rect.center();
+
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, target.x, target.y),
+            Some(super::DesktopMenuRouteShellAction::OpenTechTreeNode(
+                target_id
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenTechTreeNode(target_id),
+        );
+        assert_eq!(launcher.tech_tree_selected_node, Some(target_id));
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("selected tech node should render detail panel")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&"ResearchInfoTable"));
+        assert!(texts.contains(&"conveyor"));
+        assert!(texts.contains(&"@locked"));
+        assert!(texts.contains(&"requirements: @none"));
+        assert!(texts.contains(&"objectives: @none"));
     }
 
     #[test]

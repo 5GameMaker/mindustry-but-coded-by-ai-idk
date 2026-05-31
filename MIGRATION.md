@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 548. ResearchDialog 节点详情面板首个闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **64.0%**，仍未达到完整可玩；继续优先前端/UI，目标是让 `ResearchDialog` 不再只有节点图壳，而是具备节点命中、选中态与详情面板。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ResearchDialog.java` 的 `View.rebuildAll()` 会给每个 `TechTreeNode` 绑定 hover/click；
+  - `View.rebuild(...)` 会构造 `infoTable`，展示节点名称、`@locked` / `@completed`、`research.progress`、requirements 与 objectives；
+  - Rust 侧必须接入 `DesktopLauncher -> active_menu_route -> RenderPass` 主链，不能做独立 demo。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `tech_tree_selected_node: Option<TechNodeId>` 与 `OpenTechTreeNode / CloseTechTreeNode` 路由动作；
+    - `tech_tree_route_action_at_point(...)` 增加节点 rect 命中，点击可打开节点详情；
+    - `push_tech_tree_route_page(...)` 增加选中节点高亮、locked/selectable 视觉差异与 `ResearchInfoTable` 风格详情面板；
+    - 详情面板渲染 content type/name、`@locked`/`@completed`、requirements、objectives，保留后续接入真实 research spend / hover / pan-zoom 的扩展点；
+    - 切换 route、关闭 route、切换 tech root 时清理旧选中节点，避免 stale 详情跨路由残留。
+- 已验证：
+  - `cargo fmt -p mindustry-desktop`
+  - `cargo test -p mindustry-desktop desktop_launcher_techtree_route --lib`
+- 仍未完成：
+  - 当前仍是点击固定详情，尚未完全复刻 Java 桌面端 hover infoTable 与移动端 click 语义；
+  - `ItemsDisplay` 仍是文本摘要，尚未升级为真实 Java `ItemsDisplay` 组件；
+  - requirements 的真实消费、解锁、`ResearchEvent`、pan/zoom 与 unlock 后 rebuild 仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 0. 固定路径速记（上下文压缩后优先看）
 
 - Rust 工作仓库：`D:\MDT\rust-mindustry`（命令中可写作 `D:/MDT/rust-mindustry`）
