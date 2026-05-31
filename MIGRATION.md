@@ -19360,6 +19360,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 553. Settings KeybindDialog 搜索过滤闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **60.2%**，仍未达到完整可玩；继续优先前端/UI，把 Controls 子弹窗的 KeybindDialog 搜索栏从静态文本推进到可输入、可过滤、可清空。
+- Java 对照依据：
+  - `KeybindDialog.java` 顶部 `field(searchText, res -> { searchText = res; rebuildBinds(); })` 会实时过滤 `KeyBind.all`；
+  - `shown(...)` 会清空搜索并重建列表；
+  - 搜索文本匹配 `keybind.<name>.name`，只显示命中的 keybind 行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_keybind_search` 与 `settings_keybind_search_focused`；
+    - 打开 Controls 子弹窗时清空搜索并自动聚焦；
+    - 点击搜索栏分发 `FocusKeybindSearch`；
+    - `Text` 输入会写入 keybind search，`Backspace/Delete` 可删除或清空；
+    - keybind 渲染、滚动与命中测试都基于过滤后的列表；
+    - `settings_route_lines()` 记录 binds/filtered/offset/search，便于后续审查。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 搜索匹配目前基于 keybind name/category/bundle key 字符串，尚未接完整 bundle 本地化文本；
+  - 真实按键捕获弹窗、轴向绑定二段输入、冲突处理和持久化仍需继续迁移；
+  - ControlsDialog 还需要更完整的滚动条视觉和全量 `Binding.java` keybind 覆盖；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 552. Settings KeybindDialog 滚动浏览闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

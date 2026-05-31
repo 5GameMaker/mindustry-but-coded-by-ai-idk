@@ -431,6 +431,7 @@ pub enum DesktopSettingsAction {
     StartKeyRebind(&'static str),
     ResetKey(&'static str),
     ResetAllKeys,
+    FocusKeybindSearch,
     BackToMain,
     ResetCurrentPage,
     ToggleSetting(&'static str, &'static str),
@@ -14895,6 +14896,8 @@ pub struct DesktopLauncher {
     pub settings_keybind_overrides: BTreeMap<&'static str, String>,
     pub last_settings_rebind_key: Option<&'static str>,
     pub settings_keybind_scroll_offset: usize,
+    pub settings_keybind_search: String,
+    pub settings_keybind_search_focused: bool,
     pub last_settings_action: Option<DesktopSettingsAction>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
@@ -15636,6 +15639,8 @@ impl DesktopLauncher {
             settings_keybind_overrides: BTreeMap::new(),
             last_settings_rebind_key: None,
             settings_keybind_scroll_offset: 0,
+            settings_keybind_search: String::new(),
+            settings_keybind_search_focused: false,
             last_settings_action: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
@@ -20157,9 +20162,17 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.105,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "keybind search",
+            if self.settings_keybind_search.is_empty() {
+                "keybind search"
+            } else {
+                self.settings_keybind_search.as_str()
+            },
             RenderPoint::new(search.x + 48.0, search.center().y),
-            [0.62, 0.72, 0.8, 1.0],
+            if self.settings_keybind_search_focused {
+                [0.92, 0.96, 1.0, 1.0]
+            } else {
+                [0.62, 0.72, 0.8, 1.0]
+            },
             11.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Start)
@@ -20168,12 +20181,17 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.106,
         ));
 
-        let offset = self.settings_keybind_scroll_offset;
-        let mut last_category = SETTINGS_KEYBIND_SPECS[..offset]
+        let filtered_specs = self.settings_keybind_filtered_specs();
+        let offset = self.settings_keybind_scroll_offset.min(
+            filtered_specs
+                .len()
+                .saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS),
+        );
+        let mut last_category = filtered_specs[..offset]
             .iter()
             .rev()
             .find_map(|spec| spec.category);
-        for (index, spec) in SETTINGS_KEYBIND_SPECS
+        for (index, spec) in filtered_specs
             .iter()
             .skip(offset)
             .take(SETTINGS_KEYBIND_VISIBLE_ROWS)
@@ -20651,9 +20669,8 @@ impl DesktopLauncher {
     }
 
     fn apply_settings_keybind_scroll_delta(&mut self, delta_y: f32) -> bool {
-        let max = SETTINGS_KEYBIND_SPECS
-            .len()
-            .saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS);
+        let filtered_len = self.settings_keybind_filtered_specs().len();
+        let max = filtered_len.saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS);
         if max == 0 {
             return false;
         }
@@ -20739,9 +20756,11 @@ impl DesktopLauncher {
                 }
                 DesktopSettingsChildDialog::Controls => {
                     lines.push(format!(
-                        "child dialog: KeybindDialog binds:{} offset:{}",
+                        "child dialog: KeybindDialog binds:{} filtered:{} offset:{} search:{}",
                         SETTINGS_KEYBIND_SPECS.len(),
-                        self.settings_keybind_scroll_offset
+                        self.settings_keybind_filtered_specs().len(),
+                        self.settings_keybind_scroll_offset,
+                        self.settings_keybind_search
                     ));
                 }
             }
@@ -20878,9 +20897,20 @@ impl DesktopLauncher {
                 }
             }
             Some(DesktopSettingsChildDialog::Controls) => {
-                for (index, spec) in SETTINGS_KEYBIND_SPECS
+                if Self::settings_keybind_search_rect(dialog).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::Settings(
+                        DesktopSettingsAction::FocusKeybindSearch,
+                    ));
+                }
+                let filtered_specs = self.settings_keybind_filtered_specs();
+                let offset = self.settings_keybind_scroll_offset.min(
+                    filtered_specs
+                        .len()
+                        .saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS),
+                );
+                for (index, spec) in filtered_specs
                     .iter()
-                    .skip(self.settings_keybind_scroll_offset)
+                    .skip(offset)
                     .take(SETTINGS_KEYBIND_VISIBLE_ROWS)
                     .enumerate()
                 {
@@ -21022,6 +21052,26 @@ impl DesktopLauncher {
             .get(spec.name)
             .map(String::as_str)
             .unwrap_or(spec.default_value)
+    }
+
+    fn settings_keybind_filtered_specs(&self) -> Vec<&'static DesktopKeybindSpec> {
+        let query = self.settings_keybind_search.trim().to_lowercase();
+        if query.is_empty() {
+            return SETTINGS_KEYBIND_SPECS.iter().collect();
+        }
+        SETTINGS_KEYBIND_SPECS
+            .iter()
+            .filter(|spec| {
+                spec.name.to_lowercase().contains(&query)
+                    || Self::settings_keybind_bundle_label(spec.name)
+                        .to_lowercase()
+                        .contains(&query)
+                    || spec
+                        .category
+                        .map(|category| category.to_lowercase().contains(&query))
+                        .unwrap_or(false)
+            })
+            .collect()
     }
 
     fn settings_route_shell_action_at_surface_point(
@@ -22291,6 +22341,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::BackToMain => {
                 self.settings_child_dialog = None;
+                self.settings_keybind_search_focused = false;
                 if self.settings_dialog_state.page == DesktopSettingsPage::Main {
                     self.active_menu_route = None;
                 } else {
@@ -22328,9 +22379,12 @@ impl DesktopLauncher {
             DesktopSettingsAction::OpenControlsDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Controls);
                 self.settings_keybind_scroll_offset = 0;
+                self.settings_keybind_search.clear();
+                self.settings_keybind_search_focused = true;
             }
             DesktopSettingsAction::CloseChildDialog => {
                 self.settings_child_dialog = None;
+                self.settings_keybind_search_focused = false;
             }
             DesktopSettingsAction::SelectLanguage(code) => {
                 if self.settings_locale != code {
@@ -22352,6 +22406,10 @@ impl DesktopLauncher {
             DesktopSettingsAction::ResetAllKeys => {
                 self.settings_keybind_overrides.clear();
                 self.last_settings_rebind_key = None;
+            }
+            DesktopSettingsAction::FocusKeybindSearch => {
+                self.settings_keybind_search_focused = true;
+                self.settings_keybind_scroll_offset = 0;
             }
             DesktopSettingsAction::ClearAllData
             | DesktopSettingsAction::ClearPlanetData
@@ -22448,6 +22506,7 @@ impl DesktopLauncher {
                 self.mods_selected_mod_index = None;
                 self.mods_import_dialog_open = false;
                 self.settings_child_dialog = None;
+                self.settings_keybind_search_focused = false;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -24695,6 +24754,21 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Settings)
+                        && self.settings_child_dialog
+                            == Some(DesktopSettingsChildDialog::Controls)
+                        && self.settings_keybind_search_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.settings_keybind_search.pop();
+                    } else {
+                        self.settings_keybind_search.clear();
+                    }
+                    self.settings_keybind_scroll_offset = 0;
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Schematics)
                         && self.schematic_modal == Some(DesktopSchematicModal::Tags)
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
@@ -24847,7 +24921,14 @@ impl DesktopLauncher {
                     }
                 }
                 DesktopInputTickEvent::Text(text) => {
-                    if self.active_menu_route == Some(DesktopMenuRoute::Schematics)
+                    if self.active_menu_route == Some(DesktopMenuRoute::Settings)
+                        && self.settings_child_dialog == Some(DesktopSettingsChildDialog::Controls)
+                        && self.settings_keybind_search_focused
+                    {
+                        self.settings_keybind_search
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
+                        self.settings_keybind_scroll_offset = 0;
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Schematics)
                         && self.schematic_modal == Some(DesktopSchematicModal::Tags)
                     {
                         self.schematic_tag_editor_text
@@ -45358,9 +45439,9 @@ mod tests {
         assert!(
             !controls_texts.contains(&"ControlsDialog placeholder: keybind rows and reset later")
         );
-        assert!(launcher
-            .settings_route_lines()
-            .contains(&"child dialog: KeybindDialog binds:18 offset:0".to_string()));
+        assert!(launcher.settings_route_lines().contains(
+            &"child dialog: KeybindDialog binds:18 filtered:18 offset:0 search:".to_string()
+        ));
 
         let rebind_center =
             DesktopLauncher::settings_keybind_rebind_button_rect(child_dialog, 0).center();
@@ -45429,8 +45510,8 @@ mod tests {
         );
         assert!(launcher.settings_keybind_scroll_offset > 0);
         assert!(launcher.settings_route_lines().iter().any(|line| {
-            line.starts_with("child dialog: KeybindDialog binds:18 offset:")
-                && !line.ends_with("offset:0")
+            line.starts_with("child dialog: KeybindDialog binds:18 filtered:18 offset:")
+                && !line.contains("offset:0 ")
         }));
         let scrolled_controls_frame = launcher.menu_graphics_frame_for_surface(3, viewport);
         let scrolled_controls_texts = scrolled_controls_frame
@@ -45447,6 +45528,63 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(scrolled_controls_texts.contains(&"@keybind.command_mode.name"));
+
+        let search_center = DesktopLauncher::settings_keybind_search_rect(child_dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                search_center.x,
+                search_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::FocusKeybindSearch
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: search_center.x,
+                    y: search_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Text("chat".into()),
+            ],
+        );
+        assert_eq!(launcher.settings_keybind_search, "chat");
+        assert_eq!(launcher.settings_keybind_scroll_offset, 0);
+        assert!(launcher.settings_route_lines().contains(
+            &"child dialog: KeybindDialog binds:18 filtered:1 offset:0 search:chat".to_string()
+        ));
+        let filtered_controls_frame = launcher.menu_graphics_frame_for_surface(4, viewport);
+        let filtered_controls_texts = filtered_controls_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("filtered controls child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(filtered_controls_texts.contains(&"chat"));
+        assert!(filtered_controls_texts.contains(&"@keybind.chat.name"));
+        assert!(!filtered_controls_texts.contains(&"@keybind.move_x.name"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Delete".into(),
+                pressed: true,
+            }],
+        );
+        assert!(launcher.settings_keybind_search.is_empty());
         launcher.apply_menu_input_events(
             surface,
             &[
