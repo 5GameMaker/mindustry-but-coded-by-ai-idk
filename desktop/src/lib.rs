@@ -22763,7 +22763,6 @@ impl DesktopLauncher {
             return;
         };
         let table = self.settings_dialog_state.page.key();
-        let pane_symbol = Self::settings_drawable_symbol("pane");
         let track_symbol = Self::settings_slider_track_symbol();
         let scroll_track_symbol = Self::settings_scroll_track_symbol();
         let scroll_knob_symbol = Self::settings_scroll_knob_symbol();
@@ -22795,25 +22794,17 @@ impl DesktopLauncher {
                 index,
                 scroll_offset,
             );
-            pass.push(RenderCommand::draw_sprite(
-                pane_symbol.clone(),
-                row,
-                if pressed {
-                    [0.88, 0.94, 1.0, 0.95]
-                } else if hovered {
-                    [1.0, 1.0, 1.0, 0.92]
-                } else {
-                    [1.0, 1.0, 1.0, 0.82]
-                },
-                0.0,
-                Layer::END_PIXELED + 0.025,
-            ));
-            pass.push(RenderCommand::stroke_rect(
-                row,
-                [0.25, 0.42, 0.52, 0.72],
-                1.0,
-                Layer::END_PIXELED + 0.026,
-            ));
+            if hovered || pressed {
+                pass.push(RenderCommand::fill_rect(
+                    row,
+                    if pressed {
+                        [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.18]
+                    } else {
+                        [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.10]
+                    },
+                    Layer::END_PIXELED + 0.025,
+                ));
+            }
             match spec.kind {
                 DesktopSettingsPrefKind::Check => {
                     let checked = self.setting_bool_effective_value(spec);
@@ -60979,10 +60970,20 @@ version: "2.0.0"
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
         launcher.set_setting_override("game", "communityservers", "false");
 
-        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
         let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
             super::DesktopMenuRoute::Settings,
+        );
+        let clip = DesktopLauncher::settings_pref_widget_clip_rect_for_panel(panel);
+        let specs = DesktopLauncher::settings_pref_widget_specs("game");
+        let save_index = specs
+            .iter()
+            .position(|spec| spec.key == "saveinterval")
+            .expect("game settings should include saveinterval");
+        let save_row = DesktopLauncher::settings_pref_widget_row_rect_for_clip_with_scroll(
+            clip, save_index, 0.0,
         );
         let table_container = DesktopLauncher::settings_pref_table_container_rect_for_panel(panel);
         let table_container_symbol = DesktopLauncher::settings_drawable_symbol("button");
@@ -61003,7 +61004,6 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(sprites.contains(&"pane.9"));
         assert!(sprites.contains(&"slider-back.9"));
         assert!(sprites.contains(&"slider-knob"));
         assert!(sprites.contains(&"scroll.9"));
@@ -61017,6 +61017,59 @@ version: "2.0.0"
                     if symbol == &table_container_symbol && *rect == table_container
             )
         }));
+        let row_pane_symbol = DesktopLauncher::settings_drawable_symbol("pane");
+        assert!(
+            !commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == &row_pane_symbol && *rect == save_row
+            )),
+            "Java SettingsTable stacks Slider directly into the pref table; normal rows should not be individual pane cards"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, RenderCommand::StrokeRect { rect, .. } if *rect == save_row)),
+            "Java SettingsTable rows should not have a per-row card stroke"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, RenderCommand::FillRect { rect, .. } if *rect == save_row)),
+            "non-hovered SettingsTable rows should rely on the control chrome, not a filled row card"
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: save_row.center().x,
+                y: save_row.center().y,
+            }],
+        );
+        let hover_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let hover_commands = hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("hovered settings frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(
+            hover_commands
+                .iter()
+                .any(|command| matches!(command, RenderCommand::FillRect { rect, .. } if *rect == save_row)),
+            "hover feedback should be a light Scene2D-style tint, not a permanent row card"
+        );
+        assert!(
+            !hover_commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == &row_pane_symbol && *rect == save_row
+            )),
+            "hovered SettingsTable rows still should not become pane cards"
+        );
 
         let texts = commands
             .iter()

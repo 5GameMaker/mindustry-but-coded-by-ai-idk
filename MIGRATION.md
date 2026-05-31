@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 591. SettingsTable 子页行 chrome 收敛到 Java 表格感
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.1%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是减少 `SettingsMenuDialog` 的 Game/Graphics/Sound 子页“每行卡片感”。
+- Java 对照依据：
+  - `SettingsMenuDialog.SettingsTable.CheckSetting.add(...)` 是 `table.add(box).left().padTop(3f)` 后 `table.row()`；
+  - `SettingsMenuDialog.SettingsTable.SliderSetting.add(...)` 是 `table.stack(slider, content).width(min(width/1.2, 460)).left().padTop(4f)` 后 `table.row()`；
+  - Java `SettingsTable` 主要依赖外层 `pane(prefs)` 和控件自身 chrome，并不会给每个 setting row 额外画 `pane` 背景和卡片描边。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_route_controls(...)` 移除普通设置行的 per-row `pane.9` sprite 与 `StrokeRect`；
+    - 普通行默认不再填充背景，hover/pressed 仅绘制轻量 accent tint，保留 slider/check 自身样式；
+    - 更新 `desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets`，锁定普通行不是独立 pane 卡、hover 只给轻量填充反馈。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_slider_layout_uses_upstream_stack_margins --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_checkbox_layout_uses_upstream_left_check_box --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Settings Data 页仍需要从普通页面继续收敛到 Java `dataDialog` / `planetDataDialog` 独立 `BaseDialog` 语义；
+  - Settings 主页面图标仍是 glyph 路径，后续需要继续接近 Java `TextButton + Image.fit`；
+  - 真实字体光栅化、更多 Dialog Table 层级和完整可玩闭环仍未完成。
+
 ## 590. SaveDialog 保存态与上游 loadfrag 流程对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
