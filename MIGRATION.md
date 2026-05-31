@@ -19712,6 +19712,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Controls 搜索框和 rebind modal 视觉仍需继续贴近原版；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 568. Settings Controls 搜索框 TextField 视觉闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.0%**，仍未达到完整可玩；继续优先前端/UI，把 Controls 搜索框从普通 pane 占位推进到更像 Java `table.field(...)` 的 TextField 视觉。
+- Java 对照依据：
+  - `KeybindDialog` 顶部使用 `table.image(Icon.zoom)` + `table.field(searchText, ...)`；
+  - `Styles.defaultField` 背景为 `underline`，selection 为 `Tex.selection`，cursor 为 `Tex.cursor`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 引入 `upstream_text_field_style_skin("defaultField")`；
+    - 新增 `settings_text_field_background_symbol()` / `settings_text_field_cursor_symbol()`；
+    - Controls 搜索框背景从 `pane` 改为 upstream `underline.9`；
+    - 搜索框聚焦时提升 alpha 并绘制 `cursor` sprite；
+    - 测试断言 Controls 子弹窗使用 default TextField 背景与 cursor，而不是纯 pane 占位。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings_controls --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - TextField 仍未实现完整选择区域、真实光标位置测量、IME/键盘焦点；
+  - rebind modal 仍需要继续向 Java 裸捕获 Dialog 收敛；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

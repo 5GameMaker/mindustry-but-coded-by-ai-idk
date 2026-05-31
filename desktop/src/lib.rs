@@ -97,9 +97,9 @@ use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
     parse_upstream_icon_properties, upstream_check_box_style_skin, upstream_font_assets,
     upstream_font_source_paths, upstream_image_button_style_skin, upstream_scroll_pane_style_skin,
-    upstream_slider_style_skin, upstream_text_button_style_skin, upstream_ui_drawable_alias,
-    upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw,
-    UpstreamContentIcon, UpstreamFontRole, UpstreamUiIconGlyph,
+    upstream_slider_style_skin, upstream_text_button_style_skin, upstream_text_field_style_skin,
+    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan,
+    BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole, UpstreamUiIconGlyph,
     UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_UI_ICON_GLYPHS,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
@@ -20340,6 +20340,18 @@ impl DesktopLauncher {
             .unwrap_or_else(|| Self::settings_drawable_symbol("clear"))
     }
 
+    fn settings_text_field_background_symbol() -> String {
+        let style = upstream_text_field_style_skin("defaultField")
+            .expect("defaultField should be present in upstream style registry");
+        Self::settings_drawable_symbol(style.background)
+    }
+
+    fn settings_text_field_cursor_symbol() -> String {
+        let style = upstream_text_field_style_skin("defaultField")
+            .expect("defaultField should be present in upstream style registry");
+        Self::settings_drawable_symbol(style.cursor)
+    }
+
     fn settings_pref_label(key: &str) -> String {
         format!("@setting.{key}.name")
     }
@@ -20830,9 +20842,13 @@ impl DesktopLauncher {
     fn push_settings_controls_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
         let search = Self::settings_keybind_search_rect(dialog);
         pass.push(RenderCommand::draw_sprite(
-            Self::settings_drawable_symbol("pane"),
+            Self::settings_text_field_background_symbol(),
             search,
-            [1.0, 1.0, 1.0, 0.72],
+            if self.settings_keybind_search_focused {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [1.0, 1.0, 1.0, 0.72]
+            },
             0.0,
             Layer::END_PIXELED + 0.098,
         ));
@@ -20867,6 +20883,18 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.106,
         ));
+        if self.settings_keybind_search_focused {
+            let cursor_x =
+                (search.x + 48.0 + self.settings_keybind_search.chars().count() as f32 * 7.0)
+                    .min(search.right() - 10.0);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_field_cursor_symbol(),
+                RenderRect::new(cursor_x, search.y + 6.0, 2.0, search.height - 12.0),
+                [1.0, 1.0, 1.0, 0.95],
+                0.0,
+                Layer::END_PIXELED + 0.1065,
+            ));
+        }
 
         let filtered_specs = self.settings_keybind_filtered_specs();
         let offset = self.settings_keybind_scroll_offset.min(
@@ -47085,6 +47113,28 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let controls_sprites = controls_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("controls child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } => Some((symbol.as_str(), *rect)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let search_rect = DesktopLauncher::settings_keybind_search_rect(child_dialog);
+        let text_field_background = DesktopLauncher::settings_text_field_background_symbol();
+        let text_field_cursor = DesktopLauncher::settings_text_field_cursor_symbol();
+        assert!(controls_sprites.iter().any(|(symbol, rect)| {
+            *symbol == text_field_background.as_str() && *rect == search_rect
+        }));
+        assert!(controls_sprites
+            .iter()
+            .any(|(symbol, _)| *symbol == text_field_cursor.as_str()));
         assert!(controls_texts.contains(&"@settings.controls"));
         assert!(controls_texts.contains(&"keybind search"));
         assert!(controls_texts.contains(&"@category.general.name"));
