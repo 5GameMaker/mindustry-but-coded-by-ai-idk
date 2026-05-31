@@ -16265,6 +16265,7 @@ pub struct DesktopLauncher {
     pub menu_scene_margin_bottom: f32,
     pub menu_macnotch_enabled: bool,
     pub menu_ui_scale: f32,
+    pub menu_frame_delta_seconds: f32,
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
     pub map_list_filter_dialog_open: bool,
@@ -17131,7 +17132,7 @@ impl DesktopLauncher {
             menu_mobile_terminal_open: false,
             menu_console_setting_enabled: true,
             menu_shift_pressed: false,
-            menu_becheck_active: true,
+            menu_becheck_active: false,
             menu_becheck_update_available: false,
             menu_scene_margin_top: 0.0,
             menu_scene_margin_left: 14.0,
@@ -17139,6 +17140,7 @@ impl DesktopLauncher {
             menu_scene_margin_bottom: 12.0,
             menu_macnotch_enabled: false,
             menu_ui_scale: 1.0,
+            menu_frame_delta_seconds: 1.0 / 60.0,
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
             map_list_filter_dialog_open: false,
@@ -20965,8 +20967,8 @@ impl DesktopLauncher {
             graphics_height: viewport.height.max(1.0),
             scene_margin_top: self.menu_scene_margin_top,
             scene_margin_bottom: self.menu_scene_margin_bottom,
-            scl4: 4.0,
-            delta: 1.0 / 60.0,
+            scl4: 4.0 * self.menu_ui_scale.max(0.01),
+            delta: self.menu_frame_delta_seconds.clamp(1.0 / 240.0, 0.25),
         }
     }
 
@@ -40050,6 +40052,12 @@ impl DesktopLauncher {
                 effect_stats: None,
             };
         }
+        self.menu_frame_delta_seconds = if loop_state.pacing.is_paced() {
+            loop_state.pacing.target_frame_time.as_secs_f32()
+        } else {
+            1.0 / 60.0
+        }
+        .clamp(1.0 / 240.0, 0.25);
         desktop_runtime_trace("frame.step: update begin");
         self.update();
         desktop_runtime_trace("frame.step: update done");
@@ -41000,7 +41008,7 @@ impl DesktopLauncher {
         self.last_menu_info_message = None;
         self.menu_mobile_terminal_open = false;
         self.menu_console_setting_enabled = true;
-        self.menu_becheck_active = true;
+        self.menu_becheck_active = false;
         self.menu_becheck_update_available = false;
         self.menu_scene_margin_top = 0.0;
         self.menu_scene_margin_left = 14.0;
@@ -41008,6 +41016,7 @@ impl DesktopLauncher {
         self.menu_scene_margin_bottom = 12.0;
         self.menu_macnotch_enabled = false;
         self.menu_ui_scale = 1.0;
+        self.menu_frame_delta_seconds = 1.0 / 60.0;
         self.about_route_page = DesktopAboutRoutePage::Links;
         self.about_filter_banned_links = false;
         self.settings_dialog_state = DesktopSettingsDialogState::default();
@@ -61381,7 +61390,18 @@ version: "2.0.0"
         assert!(launcher.texture_atlas.lookup("whiteui").is_ok());
 
         let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        assert!(launcher
+            .menu_renderer_state
+            .select_desktop_root(MenuButtonRole::Play));
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let render_frame = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame");
+        assert_eq!(render_frame.passes.len(), 1);
+        let menu_pass = &render_frame.passes[0];
+        assert!(!menu_pass.commands.is_empty());
         let commands = frame
             .bundle
             .render_frame
@@ -61392,6 +61412,26 @@ version: "2.0.0"
             .flat_map(|pass| pass.commands.iter())
             .collect::<Vec<_>>();
 
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::FillRect { color, layer, .. }
+                    if *color == [0.0, 0.0, 0.0, super::MENU_DARKNESS]
+                        && (*layer - super::MENU_DARKNESS_LAYER).abs() < f32::EPSILON
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "Play"
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. } if text == "Campaign"
+            )
+        }));
         let logo = commands
             .iter()
             .find_map(|command| match command {
@@ -61770,6 +61810,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_becheck_active = true;
 
         let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
@@ -61859,6 +61900,32 @@ version: "2.0.0"
         assert!(!commands.iter().any(|command| {
             matches!(command, RenderCommand::FillRect { rect, .. } if rect.width == 14.0 && rect.height == 720.0)
         }));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_frame_input_uses_runtime_ui_scale_and_frame_delta_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_ui_scale = 1.5;
+        launcher.menu_frame_delta_seconds = 1.0 / 30.0;
+        launcher.menu_scene_margin_top = 8.0;
+        launcher.menu_scene_margin_bottom = 6.0;
+
+        let input =
+            launcher.menu_frame_input_for_viewport(RenderViewport::new(0.0, 0.0, 1280.0, 720.0));
+
+        assert_eq!(input.graphics_width, 1280.0);
+        assert_eq!(input.graphics_height, 720.0);
+        assert_eq!(input.scene_margin_top, 8.0);
+        assert_eq!(input.scene_margin_bottom, 6.0);
+        assert_eq!(
+            input.scl4, 6.0,
+            "Java MenuRenderer uses Scl.scl(4f), so Rust must include current UI scale"
+        );
+        assert_eq!(
+            input.delta,
+            1.0 / 30.0,
+            "submenu fade and menu animation should consume frame-loop delta instead of a hard-coded step"
+        );
     }
 
     #[test]

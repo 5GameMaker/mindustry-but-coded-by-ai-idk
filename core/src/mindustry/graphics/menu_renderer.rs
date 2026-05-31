@@ -2512,6 +2512,7 @@ mod tests {
         );
         assert!(plan.ui.buttons[0].selected);
         assert!(plan.ui.buttons[6].submenu);
+        assert!(plan.ui.submenu_alpha > f32::EPSILON);
         let play_center = plan.ui.buttons[0].rect.center();
         let campaign_center = plan.ui.buttons[6].rect.center();
         assert_eq!(

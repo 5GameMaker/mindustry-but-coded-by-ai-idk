@@ -15,6 +15,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 641. 主菜单首屏 runtime 输入与 BE check 可见性对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.3%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少主菜单首屏“看起来不像原版”的运行态差异，而不是做孤立亮屏壳。
+- Java 对照依据：
+  - `MenuRenderer.render()` 使用实时 `Scl.scl(4f)` 与帧步进推动背景、flyer 和 submenu 过渡；
+  - `MenuFragment.build()` 的 BE check 按钮只在 `becontrol.active()` 时显示，不应作为桌面首屏默认常驻按钮；
+  - 首屏必须稳定包含菜单背景 darkness、主按钮、submenu、logo 与 version chrome。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `menu_frame_delta_seconds`，frame loop 每帧按 pacing 写入，`menu_frame_input_for_viewport()` 不再硬编码 `delta = 1/60`；
+    - `menu_frame_input_for_viewport()` 的 `scl4` 改为 `4.0 * menu_ui_scale`，对齐 Java `Scl.scl(4f)` 的运行态缩放语义；
+    - `menu_becheck_active` 默认改为 `false`，测试中显式开启 BE check 后再断言按钮渲染，避免默认首屏出现 Java 不一定显示的额外 chrome；
+    - 补充主菜单首屏 render frame 非空、darkness、`Play`、`Campaign`、logo/version 等回归断言。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 补强菜单 render plan 测试，确保 Play submenu 可见态参与 cache/shadow/wall/flyer/darkness 顺序验证。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_frame_input_uses_runtime_ui_scale_and_frame_delta_like_java --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo test -p mindustry-core render_plan_keeps_java_cache_shadow_wall_flyers_darkness_order --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 背景世界生成仍未完全复刻 Java `Mathf.random/Simplex/Ridged/Structs.random` 随机链；
+  - flyer 类型/数量/轨迹仍以 Rust seed 近似，未完全贴合 Java 运行时随机；
+  - JoinDialog 本地 host 独立卡片 hit-test、community group/favorite/hidden/disclaimer 仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 640. JoinDialog 本地服务器发现状态接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
