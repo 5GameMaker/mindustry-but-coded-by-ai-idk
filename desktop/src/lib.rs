@@ -170,6 +170,7 @@ const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const LOAD_SLOT_CARD_HEIGHT: f32 = 82.0;
 const LOAD_SLOT_CARD_GAP: f32 = 8.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
+const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
 const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
 const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
@@ -2565,6 +2566,8 @@ pub enum DesktopMenuRouteShellAction {
     ClearLoadGameSearch,
     LoadGameImport,
     LoadGameSlot(usize, DesktopLoadGameActionKind),
+    LoadGameRenameOk,
+    LoadGameRenameCancel,
     MapCard(DesktopMapCardAction),
     CloseMapCardDialog,
     CloseMapPlayHelp,
@@ -15963,6 +15966,8 @@ pub struct DesktopLauncher {
     pub last_load_game_export_result: Option<DesktopLoadGameExportResult>,
     pub last_load_game_rename_result: Option<DesktopLoadGameRenameResult>,
     pub load_game_slot_names: BTreeMap<String, String>,
+    pub load_game_rename_dialog_slot: Option<usize>,
+    pub load_game_rename_text: String,
     pub load_game_search: String,
     pub load_game_search_focused: bool,
     pub load_game_scroll_offset: usize,
@@ -16790,6 +16795,8 @@ impl DesktopLauncher {
             last_load_game_export_result: None,
             last_load_game_rename_result: None,
             load_game_slot_names: BTreeMap::new(),
+            load_game_rename_dialog_slot: None,
+            load_game_rename_text: String::new(),
             load_game_search: String::new(),
             load_game_search_focused: false,
             load_game_scroll_offset: 0,
@@ -20539,6 +20546,15 @@ impl DesktopLauncher {
             self.last_menu_route_shell_action = Some(DesktopMenuRouteShellAction::CloseModsBrowser);
             return true;
         }
+        if self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+            && self.load_game_rename_dialog_slot.is_some()
+        {
+            self.load_game_rename_dialog_slot = None;
+            self.load_game_rename_text.clear();
+            self.last_menu_route_shell_action =
+                Some(DesktopMenuRouteShellAction::LoadGameRenameCancel);
+            return true;
+        }
         if let Some(route) = self.active_menu_route.take() {
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = None;
@@ -20692,6 +20708,8 @@ impl DesktopLauncher {
                 self.load_game_search.clear();
                 self.load_game_search_focused = true;
                 self.load_game_scroll_offset = 0;
+                self.load_game_rename_dialog_slot = None;
+                self.load_game_rename_text.clear();
             } else if route == DesktopMenuRoute::Settings {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
                 self.settings_child_dialog = None;
@@ -23565,6 +23583,38 @@ impl DesktopLauncher {
         )
     }
 
+    fn load_game_rename_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 96.0).clamp(430.0, 560.0);
+        let height = 178.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn load_game_rename_field_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 132.0,
+            dialog.center().y - 20.0,
+            dialog.width - 166.0,
+            50.0,
+        )
+    }
+
+    fn load_game_rename_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = 120.0;
+        let gap = 8.0;
+        let total = width * 2.0 + gap;
+        RenderRect::new(
+            dialog.center().x - total * 0.5 + index as f32 * (width + gap),
+            dialog.y + 18.0,
+            width,
+            54.0,
+        )
+    }
+
     fn load_game_slot_card_rect_for_panel(panel: RenderRect, slot_index: usize) -> RenderRect {
         let list = Self::load_game_list_rect_for_panel(panel);
         let top =
@@ -23678,6 +23728,18 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::LoadGame);
         let point = RenderPoint::new(x, y);
+        if self.load_game_rename_dialog_slot.is_some() {
+            let dialog = Self::load_game_rename_dialog_rect_for_panel(panel);
+            if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::LoadGameRenameCancel);
+            }
+            if !self.load_game_rename_text.is_empty()
+                && Self::load_game_rename_button_rect(dialog, 1).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::LoadGameRenameOk);
+            }
+            return None;
+        }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
         }
@@ -23779,6 +23841,9 @@ impl DesktopLauncher {
         } else if kind == DesktopLoadGameActionKind::Export {
             let request = platform.show_file_chooser(false, "@save", "msav");
             self.last_load_game_export_request = Some(request);
+        } else if kind == DesktopLoadGameActionKind::Rename {
+            self.load_game_rename_dialog_slot = Some(slot_index);
+            self.load_game_rename_text = self.load_game_slot_display_title(&slot);
         }
         self.last_load_game_action = Some(action.clone());
         Some(action)
@@ -23920,21 +23985,20 @@ impl DesktopLauncher {
             .cloned()
             .ok_or_else(|| format!("missing save slot {slot_index}"))?;
         let new_name = new_name.into();
-        let trimmed = new_name.trim();
-        if trimmed.is_empty() {
-            let message = "@save.rename.empty".to_string();
+        if new_name.is_empty() {
+            let message = "@save.rename.text".to_string();
             self.load_game_error = Some(message.clone());
             return Err(message);
         }
         let previous_name = self.load_game_slot_display_title(&slot);
         let setting_key = slot.name_setting_key();
         self.load_game_slot_names
-            .insert(setting_key.clone(), trimmed.to_string());
+            .insert(setting_key.clone(), new_name.clone());
         let result = DesktopLoadGameRenameResult {
             slot: slot.index(),
             setting_key,
             previous_name,
-            new_name: trimmed.to_string(),
+            new_name,
             status: "renamed".into(),
         };
         self.last_load_game_rename_result = Some(result.clone());
@@ -26397,6 +26461,23 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::LoadGameSlot(index, kind) => {
                 self.dispatch_load_game_slot_action_kind(index, kind);
+            }
+            DesktopMenuRouteShellAction::LoadGameRenameOk => {
+                if let Some(slot_index) = self.load_game_rename_dialog_slot {
+                    if !self.load_game_rename_text.is_empty() {
+                        if self
+                            .rename_load_game_slot(slot_index, self.load_game_rename_text.clone())
+                            .is_ok()
+                        {
+                            self.load_game_rename_dialog_slot = None;
+                            self.load_game_rename_text.clear();
+                        }
+                    }
+                }
+            }
+            DesktopMenuRouteShellAction::LoadGameRenameCancel => {
+                self.load_game_rename_dialog_slot = None;
+                self.load_game_rename_text.clear();
             }
             DesktopMenuRouteShellAction::MapCard(action) => {
                 if self.map_list_cards.get(action.index).is_some() {
@@ -30405,6 +30486,89 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.045,
             ));
         }
+        self.push_load_game_rename_dialog(pass, panel);
+    }
+
+    fn push_load_game_rename_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if self.load_game_rename_dialog_slot.is_none() {
+            return;
+        }
+        let dialog = Self::load_game_rename_dialog_rect_for_panel(panel);
+        let field = Self::load_game_rename_field_rect(dialog);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.44],
+            Layer::END_PIXELED + 0.070,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.071,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.072,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@save.rename",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.073,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@save.rename.text",
+            RenderPoint::new(field.x - 12.0, field.center().y),
+            [0.82, 0.90, 0.96, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::End)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.073,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, true),
+            field,
+            [1.0, 1.0, 1.0, 0.90],
+            0.0,
+            Layer::END_PIXELED + 0.074,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.load_game_rename_text.clone(),
+            RenderPoint::new(field.x + 12.0, field.center().y),
+            [0.90, 0.96, 1.0, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.075,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 0),
+            "@cancel",
+            None,
+            Layer::END_PIXELED + 0.076,
+        );
+        self.push_settings_text_button_enabled(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 1),
+            "@ok",
+            None,
+            Layer::END_PIXELED + 0.076,
+            !self.load_game_rename_text.is_empty(),
+        );
     }
 
     fn about_links_line(&self) -> String {
@@ -30710,6 +30874,28 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+                        && self.load_game_rename_dialog_slot.is_some()
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::LoadGameRenameOk,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+                        && self.load_game_rename_dialog_slot.is_some()
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.load_game_rename_text.pop();
+                    } else {
+                        self.load_game_rename_text.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
                         && self.load_game_search_focused
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
                 {
@@ -30926,8 +31112,8 @@ impl DesktopLauncher {
                         }
                         if self.active_menu_route == Some(DesktopMenuRoute::LoadGame) {
                             let viewport = self.default_render_viewport_for_surface(surface_size);
-                            if let Some(action @ DesktopMenuRouteShellAction::LoadGameSlot(_, _)) =
-                                self.load_game_route_shell_action_at_surface_point(
+                            if let Some(action) = self
+                                .load_game_route_shell_action_at_surface_point(
                                     viewport, cursor.x, cursor.y,
                                 )
                             {
@@ -31035,6 +31221,15 @@ impl DesktopLauncher {
                     {
                         self.schematic_search
                             .extend(text.chars().filter(|ch| !ch.is_control()));
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+                        && self.load_game_rename_dialog_slot.is_some()
+                    {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.load_game_rename_text.len() >= LOAD_RENAME_TEXT_MAX_LENGTH {
+                                break;
+                            }
+                            self.load_game_rename_text.push(ch);
+                        }
                     } else if self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
                         && self.load_game_search_focused
                     {
@@ -54171,13 +54366,84 @@ version: "2.0.0"
             .iter()
             .any(|slot| launcher.load_game_slot_display_title(slot) == "incoming"));
 
+        let rename_action = launcher
+            .dispatch_load_game_slot_action_kind_with_platform(
+                0,
+                super::DesktopLoadGameActionKind::Rename,
+                &mut platform,
+            )
+            .expect("rename button should open text input mirror");
+        assert_eq!(rename_action.kind, super::DesktopLoadGameActionKind::Rename);
+        assert_eq!(launcher.load_game_rename_dialog_slot, Some(0));
+        assert_eq!(launcher.load_game_rename_text, "incoming");
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::Key {
+                    key_code: "Delete".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Text("Renamed Save".into()),
+            ],
+        );
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::LoadGame,
+        );
+        let rename_dialog = DesktopLauncher::load_game_rename_dialog_rect_for_panel(panel);
+        let ok = DesktopLauncher::load_game_rename_button_rect(rename_dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
+            Some(super::DesktopMenuRouteShellAction::LoadGameRenameOk)
+        );
+        let cancel = DesktopLauncher::load_game_rename_button_rect(rename_dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, cancel.x, cancel.y),
+            Some(super::DesktopMenuRouteShellAction::LoadGameRenameCancel)
+        );
+        let rename_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let rename_texts = rename_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("rename dialog should render a frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(rename_texts.contains(&"@save.rename"));
+        assert!(rename_texts.contains(&"@ok"));
+        assert!(rename_texts.contains(&"@cancel"));
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::LoadGameRenameOk);
         let rename = launcher
-            .rename_load_game_slot(0, "Renamed Save")
-            .expect("imported save should rename through settings mirror");
+            .last_load_game_rename_result
+            .clone()
+            .expect("rename confirmation should write result");
         assert_eq!(rename.previous_name, "incoming");
         assert_eq!(rename.new_name, "Renamed Save");
         assert_eq!(rename.status, "renamed");
         assert_eq!(launcher.last_load_game_rename_result, Some(rename));
+        assert_eq!(launcher.load_game_rename_dialog_slot, None);
+        let closed_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let closed_texts = closed_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("load game route should still render after closing rename dialog")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!closed_texts.contains(&"@save.rename"));
         assert_eq!(
             launcher.load_game_slot_display_title(&launcher.load_game_slots[0]),
             "Renamed Save"

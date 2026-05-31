@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 570. LoadDialog rename text input 弹层对齐 Java showTextInput
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.2%**，仍未达到完整可玩；继续优先前端/UI，下一步处理黑屏可见错误态与 SaveDialog/覆盖确认。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 的 rename 按钮调用 `ui.showTextInput("@save.rename", "@save.rename.text", slot.getName(), ...)`；
+  - `core/src/mindustry/core/UI.java` 桌面 `showTextInput(...)` 使用 `@cancel` / `@ok`，默认文本长度 32，输入为空时禁用 OK，Enter 可提交。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - LoadGame rename 从直接写 settings mirror 推进为页内 modal text input；
+    - 弹层标题/说明/按钮对齐 `@save.rename`、`@save.rename.text`、`@cancel`、`@ok`；
+    - Enter 提交、Esc/Back 取消、Backspace/Delete 编辑、输入长度限制 32；
+    - OK 空输入禁用，鼠标点击 rename 弹层按钮不再穿透触发底层存档卡片；
+    - 扩展 LoadDialog 测试覆盖弹层可见文本、按钮命中、确认后关闭。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+- 仍未完成：
+  - SaveDialog 新建存档/覆盖确认、真实 settings 持久化后端、黑屏时上屏错误提示仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 569. LoadDialog rename 保存名 settings mirror
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
