@@ -22116,6 +22116,7 @@ impl DesktopLauncher {
                 17.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
                     .with_outline(true),
@@ -22203,6 +22204,7 @@ impl DesktopLauncher {
                 16.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
                     .with_outline(true),
@@ -22589,6 +22591,7 @@ impl DesktopLauncher {
             13.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -29244,6 +29247,7 @@ impl DesktopLauncher {
             14.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -29897,6 +29901,7 @@ impl DesktopLauncher {
                         13.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true)
                             .with_outline(true),
@@ -30136,6 +30141,7 @@ impl DesktopLauncher {
                 16.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
                     .with_outline(true),
@@ -30501,6 +30507,7 @@ impl DesktopLauncher {
                 10.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.082 + tag_index as f32 * 0.001,
@@ -30698,6 +30705,7 @@ impl DesktopLauncher {
                         12.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true),
                         Layer::END_PIXELED + 0.079 + index as f32 * 0.001,
@@ -30709,6 +30717,7 @@ impl DesktopLauncher {
                         12.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true),
                         Layer::END_PIXELED + 0.079 + index as f32 * 0.001,
@@ -30747,6 +30756,7 @@ impl DesktopLauncher {
                         12.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true),
                         Layer::END_PIXELED + 0.081 + index as f32 * 0.001,
@@ -30758,6 +30768,7 @@ impl DesktopLauncher {
                         12.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true),
                         Layer::END_PIXELED + 0.081 + index as f32 * 0.001,
@@ -30904,6 +30915,7 @@ impl DesktopLauncher {
                             10.0,
                             0.0,
                             RenderTextStyle::new(RenderTextAlign::Center)
+                                .with_font(RenderFontId::Icon)
                                 .with_vertical_align(RenderTextVerticalAlign::Center)
                                 .with_integer_position(true),
                             Layer::END_PIXELED + 0.082 + tag_index as f32 * 0.001,
@@ -31020,6 +31032,7 @@ impl DesktopLauncher {
                         14.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true),
                         Layer::END_PIXELED + 0.079 + index as f32 * 0.001,
@@ -31219,6 +31232,7 @@ impl DesktopLauncher {
             14.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -31750,6 +31764,7 @@ impl DesktopLauncher {
             14.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -31790,6 +31805,7 @@ impl DesktopLauncher {
             18.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -32671,6 +32687,7 @@ impl DesktopLauncher {
             14.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -32779,6 +32796,7 @@ impl DesktopLauncher {
             16.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -32880,6 +32898,7 @@ impl DesktopLauncher {
             14.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -33168,6 +33187,7 @@ impl DesktopLauncher {
                     12.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_font(RenderFontId::Icon)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true)
                         .with_outline(true),
@@ -33639,6 +33659,7 @@ impl DesktopLauncher {
             18.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -33662,6 +33683,7 @@ impl DesktopLauncher {
             14.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true),
             base_layer + 0.007,
@@ -35431,6 +35453,7 @@ impl DesktopLauncher {
             13.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -36228,6 +36251,7 @@ impl DesktopLauncher {
                 18.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
                     .with_outline(true),
@@ -58748,6 +58772,15 @@ version: "2.0.0"
             texts.contains(&super::desktop_ui_icon_glyph_or_label("save", "save").as_str()),
             "Java LoadDialog uses Icon.save for the autosave toggle"
         );
+        let save_glyph = super::desktop_ui_icon_glyph_or_label("save", "save");
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, style, .. }
+                    if text == &save_glyph && style.font == RenderFontId::Icon
+            )),
+            "LoadDialog action glyphs must render with the upstream icon font"
+        );
         let card_rects = commands
             .iter()
             .filter_map(|command| match command {
@@ -60971,8 +61004,16 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         for entry in super::SETTINGS_MENU_ENTRIES {
             assert!(labels.contains(&entry.label));
-            assert!(labels
-                .contains(&super::desktop_ui_icon_glyph_or_label(entry.icon, entry.icon).as_str()));
+            let glyph = super::desktop_ui_icon_glyph_or_label(entry.icon, entry.icon);
+            assert!(labels.contains(&glyph.as_str()));
+            assert!(
+                commands.iter().any(|command| matches!(
+                    command,
+                    RenderCommand::DrawText { text, style, .. }
+                        if text == &glyph && style.font == RenderFontId::Icon
+                )),
+                "SettingsMenuDialog main menu icons should use the icon font like Icon.* images"
+            );
         }
         assert!(!labels.contains(&"settings page: main"));
     }

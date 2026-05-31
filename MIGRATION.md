@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 596. 前端 UI glyph 使用 Icon 字体
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.6%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是修正已映射 `Icon.*` glyph 但仍按普通字体绘制的问题，提升 Settings/LoadDialog/Map/Mods/Schematics/About 等高可见页面的原版 UI 还原度。
+- Java 对照依据：
+  - Java Scene2D 中 `Icon.*` 由图标字体/图标 drawable 呈现，不应退化为普通文本或 placeholder；
+  - `SettingsMenuDialog`、`LoadDialog`、地图/蓝图/Mods 搜索栏等页面大量使用图标按钮，字体错误会直接造成 UI 观感不像原版。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 给设置主菜单左侧图标、通用设置图标按钮、设置 controls 搜索图标补 `RenderFontId::Icon`；
+    - 给 Database/Join/Schematics/MapList/LoadGame/Mods/Mobile terminal/About link 等直接绘制 `desktop_ui_icon_glyph_or_label(...)` 的按钮/搜索/动作 glyph 补 `RenderFontId::Icon`；
+    - 保持普通标题、说明、slot 文本、map 名称等仍使用默认字体，避免把非图标文本误渲染成图标字体；
+    - 扩展 Settings 主页面与 LoadDialog 存档槽动作测试，锁定关键图标 glyph 的 `style.font == RenderFontId::Icon`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - LoadDialog 删除前确认、autosave 持久化切换、真实加载进入 playing 仍需继续补齐；
+  - Settings 主页面底部 `@back`、Data/PlanetData `flatt` 按钮风格、planet select 文案与确认文案仍需继续对齐；
+  - `menu_ui_scale` 仍需从真实 UI scale/DPI 来源接入，避免高 DPI 下 logo/version/chrome 尺寸与 Java `Scl.scl(...)` 偏移。
+
 ## 595. LoadDialog 多列滚动改为行偏移
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
