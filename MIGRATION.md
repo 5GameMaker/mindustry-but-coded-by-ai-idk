@@ -15,6 +15,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 637. JoinDialog saved server 最小列表状态
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.9%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 JoinDialog 从单个 `connect_target` 快照推进到最小 saved server 列表，让 add/edit/delete/connect 卡片动作有真实列表落点。
+- Java 对照依据：
+  - `JoinDialog` 使用 saved server 序列，而不是只有一个连接目标；
+  - add/edit/delete/整卡连接都应作用在 saved server 列表上，当前连接目标只是“即将连接/已选择”的派生状态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_saved_servers` 与 `join_add_server_edit_index`；
+    - 启动参数 `--connect` 会初始化 saved server 列表；
+    - add server OK 会解析地址并追加到列表，重复地址不重复加入；
+    - edit server card 会预填对应列表项并在 OK 后原位更新；
+    - delete server card 会移除列表项，若删除的是当前连接目标则回退到列表首项或空；
+    - connect server card 会先选中对应 saved server，再走连接 helper；
+    - Join route 文本行改为 `server[index]...`，渲染最多展示两张 saved card，并把搜索区下移，避免多卡片与搜索/社区标题重叠。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - saved server 列表尚未接 settings 持久化或 Java legacy `server-list` 读取；
+  - 多于两张 saved server 还没有真实 ScrollPane/滚动条；
+  - card 上下移动、community server group、show hidden group 与真实 ping/refresh community 仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 636. JoinDialog saved server 卡片按钮命中
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

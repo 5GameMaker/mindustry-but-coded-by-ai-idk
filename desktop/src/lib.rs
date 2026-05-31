@@ -168,6 +168,7 @@ const SETTINGS_KEYBIND_RESET_WIDTH: f32 = 126.0;
 const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 9;
 const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
+const JOIN_SAVED_SERVER_VISIBLE_CARDS: usize = 2;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
@@ -16379,6 +16380,8 @@ pub struct DesktopLauncher {
     pub join_add_dialog_open: bool,
     pub join_add_server_text: String,
     pub join_add_server_focused: bool,
+    pub join_add_server_edit_index: Option<usize>,
+    pub join_saved_servers: Vec<DesktopConnectTarget>,
     pub join_refresh_requests: u32,
     pub join_search: String,
     pub join_search_focused: bool,
@@ -17054,6 +17057,7 @@ fn block_renderer_tile_snapshot_from_world(
 impl DesktopLauncher {
     pub fn new(args: Vec<String>) -> Self {
         let connect_target = parse_connect_target(&args);
+        let join_saved_servers = connect_target.iter().cloned().collect::<Vec<_>>();
         let mods_directory_arg = parse_mods_directory_arg(&args);
         let block_renderer_state = BlockRendererState::default();
         let content_loader = ContentLoader::create_base_content_or_panic();
@@ -17244,6 +17248,8 @@ impl DesktopLauncher {
             join_add_dialog_open: false,
             join_add_server_text: String::new(),
             join_add_server_focused: false,
+            join_add_server_edit_index: None,
+            join_saved_servers,
             join_refresh_requests: 0,
             join_search: String::new(),
             join_search_focused: false,
@@ -26883,7 +26889,10 @@ impl DesktopLauncher {
     }
 
     fn join_route_search_rect_for_panel(panel: RenderRect) -> RenderRect {
-        let card = Self::join_route_server_card_rect_for_panel(panel, 0);
+        let card = Self::join_route_server_card_rect_for_panel(
+            panel,
+            JOIN_SAVED_SERVER_VISIBLE_CARDS.saturating_sub(1),
+        );
         let global_y = card.y - 30.0;
         let search_y = global_y - 42.0;
         RenderRect::new(panel.x + 36.0, search_y, panel.width - 232.0, 32.0)
@@ -26894,8 +26903,10 @@ impl DesktopLauncher {
         RenderRect::new(search.right() + 10.0, search.y, 150.0, search.height)
     }
 
-    fn join_route_server_snapshot(&self) -> Option<DesktopJoinRouteServerSnapshot> {
-        let target = self.connect_target.as_ref()?;
+    fn join_route_server_snapshot_for_target(
+        &self,
+        target: &DesktopConnectTarget,
+    ) -> DesktopJoinRouteServerSnapshot {
         let state = self.net_client.state();
         let state = state.lock().unwrap();
         let world = state.last_loaded_world_data.as_ref();
@@ -26956,7 +26967,7 @@ impl DesktopLauncher {
         ]
         .join(" ")
         .to_lowercase();
-        Some(DesktopJoinRouteServerSnapshot {
+        DesktopJoinRouteServerSnapshot {
             address,
             source,
             status,
@@ -26967,7 +26978,14 @@ impl DesktopLauncher {
             mode,
             ping,
             search_terms,
-        })
+        }
+    }
+
+    fn join_saved_server_snapshots(&self) -> Vec<DesktopJoinRouteServerSnapshot> {
+        self.join_saved_servers
+            .iter()
+            .map(|target| self.join_route_server_snapshot_for_target(target))
+            .collect()
     }
 
     fn join_add_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -27032,12 +27050,15 @@ impl DesktopLauncher {
         panel: RenderRect,
         point: RenderPoint,
     ) -> Option<usize> {
-        let snapshot = self.join_route_server_snapshot()?;
-        if !snapshot.matches_query(&self.join_search) {
-            return None;
-        }
-        let rect = Self::join_route_server_card_rect_for_panel(panel, 0);
-        rect.contains_point(point).then_some(0)
+        self.join_saved_server_snapshots()
+            .into_iter()
+            .enumerate()
+            .take(JOIN_SAVED_SERVER_VISIBLE_CARDS)
+            .filter(|(_, snapshot)| snapshot.matches_query(&self.join_search))
+            .find_map(|(index, _)| {
+                let rect = Self::join_route_server_card_rect_for_panel(panel, index);
+                rect.contains_point(point).then_some(index)
+            })
     }
 
     fn route_back_button_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -30082,6 +30103,7 @@ impl DesktopLauncher {
                 self.host_error = None;
                 self.join_add_dialog_open = false;
                 self.join_add_server_focused = false;
+                self.join_add_server_edit_index = None;
                 self.join_search_focused = false;
                 self.database_search_focused = false;
                 self.last_database_content_opened = None;
@@ -30184,6 +30206,7 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenJoinAddServer => {
                 self.join_add_dialog_open = true;
+                self.join_add_server_edit_index = None;
                 self.join_add_server_text = self
                     .connect_target
                     .as_ref()
@@ -30196,6 +30219,7 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CloseJoinAddServer => {
                 self.join_add_dialog_open = false;
                 self.join_add_server_focused = false;
+                self.join_add_server_edit_index = None;
             }
             DesktopMenuRouteShellAction::FocusJoinAddServerText => {
                 if self.join_add_dialog_open {
@@ -30205,10 +30229,20 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ConfirmJoinAddServer => {
                 if let Some(target) = parse_host_port(&self.join_add_server_text) {
+                    if let Some(index) = self.join_add_server_edit_index {
+                        if let Some(saved) = self.join_saved_servers.get_mut(index) {
+                            *saved = target.clone();
+                        } else if !self.join_saved_servers.contains(&target) {
+                            self.join_saved_servers.push(target.clone());
+                        }
+                    } else if !self.join_saved_servers.contains(&target) {
+                        self.join_saved_servers.push(target.clone());
+                    }
                     self.connect_target = Some(target);
                     self.connect_error = None;
                     self.join_add_dialog_open = false;
                     self.join_add_server_focused = false;
+                    self.join_add_server_edit_index = None;
                     self.join_search.clear();
                 } else {
                     self.connect_error = Some("@server.invalidaddress".into());
@@ -30219,39 +30253,39 @@ impl DesktopLauncher {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
             }
             DesktopMenuRouteShellAction::RefreshJoinServerCard(index) => {
-                if index == 0 && self.connect_target.is_some() {
+                if self.join_saved_servers.get(index).is_some() {
                     self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
                 }
             }
             DesktopMenuRouteShellAction::EditJoinServerCard(index) => {
-                if index == 0 && self.connect_target.is_some() {
+                if let Some(target) = self.join_saved_servers.get(index) {
                     self.join_add_dialog_open = true;
-                    self.join_add_server_text = self
-                        .connect_target
-                        .as_ref()
-                        .map(|target| format!("{}:{}", target.host, target.port))
-                        .unwrap_or_default();
+                    self.join_add_server_edit_index = Some(index);
+                    self.join_add_server_text = format!("{}:{}", target.host, target.port);
                     self.join_add_server_focused = true;
                     self.join_search_focused = false;
                     self.connect_error = None;
                 }
             }
             DesktopMenuRouteShellAction::DeleteJoinServerCard(index) => {
-                if index == 0 {
-                    self.connect_target = None;
+                if index < self.join_saved_servers.len() {
+                    let removed = self.join_saved_servers.remove(index);
+                    if self.connect_target.as_ref() == Some(&removed) {
+                        self.connect_target = self.join_saved_servers.first().cloned();
+                    }
                     self.connect_error = None;
                     self.join_add_dialog_open = false;
                     self.join_add_server_focused = false;
+                    self.join_add_server_edit_index = None;
                 }
             }
             DesktopMenuRouteShellAction::ConnectJoinServerCard(index) => {
-                if index == 0 {
-                    let Some(target) = self.connect_target.clone() else {
-                        self.connect_error = Some("missing connect target".into());
-                        return;
-                    };
-                    let _ = self.connect_to_target(target);
-                }
+                let Some(target) = self.join_saved_servers.get(index).cloned() else {
+                    self.connect_error = Some("missing connect target".into());
+                    return;
+                };
+                self.connect_target = Some(target.clone());
+                let _ = self.connect_to_target(target);
             }
             DesktopMenuRouteShellAction::OpenMapListFilters => {
                 self.map_list_filter_dialog_open = true;
@@ -32157,27 +32191,80 @@ impl DesktopLauncher {
 
         let search_rect = Self::join_route_search_rect_for_panel(panel);
         let show_hidden_rect = Self::join_route_show_hidden_button_rect_for_panel(panel);
-        let card = Self::join_route_server_card_rect_for_panel(panel, 0);
-        pass.push(RenderCommand::draw_sprite(
-            Self::settings_drawable_symbol("pane"),
-            card,
-            [1.0, 1.0, 1.0, 0.90],
-            0.0,
-            Layer::END_PIXELED + 0.031,
-        ));
-        pass.push(RenderCommand::stroke_rect(
-            card,
-            [0.30, 0.45, 0.56, 0.86],
-            1.0,
-            Layer::END_PIXELED + 0.032,
-        ));
-        if let Some(snapshot) = self.join_route_server_snapshot() {
-            if snapshot.matches_query(&self.join_search) {
+        let saved_snapshots = self.join_saved_server_snapshots();
+        let visible_saved = saved_snapshots
+            .iter()
+            .enumerate()
+            .filter(|(_, snapshot)| snapshot.matches_query(&self.join_search))
+            .take(JOIN_SAVED_SERVER_VISIBLE_CARDS)
+            .collect::<Vec<_>>();
+        if visible_saved.is_empty() && !saved_snapshots.is_empty() {
+            let card = Self::join_route_server_card_rect_for_panel(panel, 0);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("pane"),
+                card,
+                [1.0, 1.0, 1.0, 0.90],
+                0.0,
+                Layer::END_PIXELED + 0.031,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                card,
+                [0.30, 0.45, 0.56, 0.86],
+                1.0,
+                Layer::END_PIXELED + 0.032,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "@none.found",
+                RenderPoint::new(card.center().x, card.center().y + 10.0),
+                [0.86, 0.74, 0.72, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.034,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!(
+                    "search: {}",
+                    if self.join_search.is_empty() {
+                        "@search"
+                    } else {
+                        self.join_search.as_str()
+                    }
+                ),
+                RenderPoint::new(card.center().x, card.center().y - 14.0),
+                [0.62, 0.72, 0.82, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.034,
+            ));
+        } else if !visible_saved.is_empty() {
+            for (visible_index, (_, snapshot)) in visible_saved.into_iter().enumerate() {
+                let card = Self::join_route_server_card_rect_for_panel(panel, visible_index);
+                let layer = Layer::END_PIXELED + 0.031 + visible_index as f32 * 0.006;
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("pane"),
+                    card,
+                    [1.0, 1.0, 1.0, 0.90],
+                    0.0,
+                    layer,
+                ));
+                pass.push(RenderCommand::stroke_rect(
+                    card,
+                    [0.30, 0.45, 0.56, 0.86],
+                    1.0,
+                    layer + 0.001,
+                ));
                 let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
                 pass.push(RenderCommand::fill_rect(
                     header,
                     [0.30, 0.36, 0.42, 0.44],
-                    Layer::END_PIXELED + 0.033,
+                    layer + 0.002,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
                     format!(
@@ -32192,7 +32279,7 @@ impl DesktopLauncher {
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true)
                         .with_outline(true),
-                    Layer::END_PIXELED + 0.034,
+                    layer + 0.003,
                 ));
                 for (button_index, icon) in ["refresh", "pencil", "trash", "rightOpen"]
                     .iter()
@@ -32211,7 +32298,7 @@ impl DesktopLauncher {
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true)
                             .with_outline(true),
-                        Layer::END_PIXELED + 0.035 + button_index as f32 * 0.0001,
+                        layer + 0.004 + button_index as f32 * 0.0001,
                     ));
                 }
                 pass.push(RenderCommand::draw_text_styled(
@@ -32223,7 +32310,7 @@ impl DesktopLauncher {
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true),
-                    Layer::END_PIXELED + 0.034,
+                    layer + 0.003,
                 ));
                 for (index, line) in [
                     format!("status: {}", snapshot.status),
@@ -32246,42 +32333,25 @@ impl DesktopLauncher {
                         RenderTextStyle::new(RenderTextAlign::Start)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true),
-                        Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+                        layer + 0.003 + index as f32 * 0.0001,
                     ));
                 }
-            } else {
-                pass.push(RenderCommand::draw_text_styled(
-                    "@none.found",
-                    RenderPoint::new(card.center().x, card.center().y + 10.0),
-                    [0.86, 0.74, 0.72, 1.0],
-                    13.0,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true)
-                        .with_outline(true),
-                    Layer::END_PIXELED + 0.034,
-                ));
-                pass.push(RenderCommand::draw_text_styled(
-                    format!(
-                        "search: {}",
-                        if self.join_search.is_empty() {
-                            "@search"
-                        } else {
-                            self.join_search.as_str()
-                        }
-                    ),
-                    RenderPoint::new(card.center().x, card.center().y - 14.0),
-                    [0.62, 0.72, 0.82, 1.0],
-                    11.0,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.034,
-                ));
             }
         } else {
+            let card = Self::join_route_server_card_rect_for_panel(panel, 0);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("pane"),
+                card,
+                [1.0, 1.0, 1.0, 0.90],
+                0.0,
+                Layer::END_PIXELED + 0.031,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                card,
+                [0.30, 0.45, 0.56, 0.86],
+                1.0,
+                Layer::END_PIXELED + 0.032,
+            ));
             pass.push(RenderCommand::draw_text_styled(
                 "@host.invalid",
                 RenderPoint::new(card.x + 14.0, card.y + card.height - 28.0),
@@ -32307,7 +32377,11 @@ impl DesktopLauncher {
             ));
         }
 
-        let global_y = card.y - 30.0;
+        let global_card = Self::join_route_server_card_rect_for_panel(
+            panel,
+            JOIN_SAVED_SERVER_VISIBLE_CARDS.saturating_sub(1),
+        );
+        let global_y = global_card.y - 30.0;
         pass.push(RenderCommand::draw_text_styled(
             "@servers.global",
             RenderPoint::new(panel.x + 36.0, global_y),
@@ -37030,7 +37104,7 @@ impl DesktopLauncher {
                     "section: @servers.local hosts: 0".into(),
                     format!(
                         "section: @servers.remote favorites: {}",
-                        if self.connect_target.is_some() { 1 } else { 0 }
+                        self.join_saved_servers.len()
                     ),
                     "section: @servers.global groups: 0".into(),
                     format!(
@@ -37056,25 +37130,8 @@ impl DesktopLauncher {
                         "button: @ok".into(),
                     ]);
                 }
-                if let Some(snapshot) = self.join_route_server_snapshot() {
-                    lines.extend([
-                        format!("server: {} source:{}", snapshot.address, snapshot.source),
-                        format!("server status: {}", snapshot.status),
-                        format!("server version: {}", snapshot.version),
-                        format!("server description: {}", snapshot.description),
-                        format!("server players: {}", snapshot.players),
-                        format!("server map: {}", snapshot.map),
-                        format!("server mode: {}", snapshot.mode),
-                        format!("server ping: {}", snapshot.ping),
-                        "server fields: name version description players map mode ping".into(),
-                        "server actions: refresh edit delete open".into(),
-                    ]);
-                    if !snapshot.matches_query(&self.join_search)
-                        && !self.join_search.trim().is_empty()
-                    {
-                        lines.push("server filter: @none.found".into());
-                    }
-                } else {
+                let snapshots = self.join_saved_server_snapshots();
+                if snapshots.is_empty() {
                     lines.extend([
                         "server: not selected".into(),
                         "server status: missing".into(),
@@ -37085,6 +37142,31 @@ impl DesktopLauncher {
                         "server mode: --".into(),
                         "server ping: --ms".into(),
                     ]);
+                } else {
+                    for (index, snapshot) in snapshots.into_iter().enumerate() {
+                        lines.extend([
+                            format!(
+                                "server[{index}]: {} source:{}",
+                                snapshot.address, snapshot.source
+                            ),
+                            format!("server[{index}] status: {}", snapshot.status),
+                            format!("server[{index}] version: {}", snapshot.version),
+                            format!("server[{index}] description: {}", snapshot.description),
+                            format!("server[{index}] players: {}", snapshot.players),
+                            format!("server[{index}] map: {}", snapshot.map),
+                            format!("server[{index}] mode: {}", snapshot.mode),
+                            format!("server[{index}] ping: {}", snapshot.ping),
+                            format!(
+                                "server[{index}] fields: name version description players map mode ping"
+                            ),
+                            format!("server[{index}] actions: refresh edit delete open"),
+                        ]);
+                        if !snapshot.matches_query(&self.join_search)
+                            && !self.join_search.trim().is_empty()
+                        {
+                            lines.push(format!("server[{index}] filter: @none.found"));
+                        }
+                    }
                 }
                 lines
             }
@@ -66330,20 +66412,26 @@ version: "2.0.0"
         assert!(
             lines.contains(&"section: @servers.community search:@search hidden:off".to_string())
         );
-        assert!(lines.contains(&"server: 127.0.0.1:6567 source:saved".to_string()));
-        assert!(lines.iter().any(|line| line.starts_with("server status:")));
-        assert!(lines.iter().any(|line| line.starts_with("server version:")));
+        assert!(lines.contains(&"server[0]: 127.0.0.1:6567 source:saved".to_string()));
         assert!(lines
             .iter()
-            .any(|line| line.starts_with("server description:")));
-        assert!(lines.iter().any(|line| line.starts_with("server players:")));
-        assert!(lines.iter().any(|line| line.starts_with("server map:")));
-        assert!(lines.iter().any(|line| line.starts_with("server mode:")));
-        assert!(lines.iter().any(|line| line.starts_with("server ping:")));
+            .any(|line| line.starts_with("server[0] status:")));
+        assert!(lines
+            .iter()
+            .any(|line| line.starts_with("server[0] version:")));
+        assert!(lines
+            .iter()
+            .any(|line| line.starts_with("server[0] description:")));
+        assert!(lines
+            .iter()
+            .any(|line| line.starts_with("server[0] players:")));
+        assert!(lines.iter().any(|line| line.starts_with("server[0] map:")));
+        assert!(lines.iter().any(|line| line.starts_with("server[0] mode:")));
+        assert!(lines.iter().any(|line| line.starts_with("server[0] ping:")));
         assert!(lines.contains(
-            &"server fields: name version description players map mode ping".to_string()
+            &"server[0] fields: name version description players map mode ping".to_string()
         ));
-        assert!(lines.contains(&"server actions: refresh edit delete open".to_string()));
+        assert!(lines.contains(&"server[0] actions: refresh edit delete open".to_string()));
         assert!(lines.contains(&"button: @server.add".to_string()));
         assert!(lines.contains(&"button: @refresh".to_string()));
 
@@ -66525,6 +66613,7 @@ version: "2.0.0"
                 port: 6567,
             })
         );
+        assert_eq!(launcher.join_saved_servers.len(), 2);
 
         launcher
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::FocusJoinSearch);
@@ -66600,7 +66689,7 @@ version: "2.0.0"
         );
         assert!(!launcher.join_add_dialog_open);
         launcher.dispatch_menu_route_shell_action(
-            super::DesktopMenuRouteShellAction::EditJoinServerCard(0),
+            super::DesktopMenuRouteShellAction::EditJoinServerCard(1),
         );
         assert!(launcher.join_add_dialog_open);
         assert_eq!(launcher.join_add_server_text, "example.org:6567");
@@ -66608,9 +66697,16 @@ version: "2.0.0"
             super::DesktopMenuRouteShellAction::CloseJoinAddServer,
         );
         launcher.dispatch_menu_route_shell_action(
-            super::DesktopMenuRouteShellAction::DeleteJoinServerCard(0),
+            super::DesktopMenuRouteShellAction::DeleteJoinServerCard(1),
         );
-        assert_eq!(launcher.connect_target, None);
+        assert_eq!(launcher.join_saved_servers.len(), 1);
+        assert_eq!(
+            launcher.connect_target,
+            Some(super::DesktopConnectTarget {
+                host: "127.0.0.1".into(),
+                port: 6567,
+            })
+        );
     }
 
     #[test]
