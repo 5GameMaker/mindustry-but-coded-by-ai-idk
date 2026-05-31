@@ -503,6 +503,7 @@ pub enum DesktopSchematicModalButton {
     TagNewIcon,
     CardTagRemove { card_index: usize, tag_index: usize },
     CardTagAdd { card_index: usize, tag_index: usize },
+    CardTagNewText { card_index: usize },
 }
 
 impl DesktopMenuRoute {
@@ -14552,6 +14553,7 @@ pub struct DesktopLauncher {
     pub schematic_edit_description: String,
     pub schematic_tag_order: Vec<String>,
     pub schematic_tag_editor_text: String,
+    pub schematic_label_add_text: String,
     pub last_schematic_modal_button: Option<DesktopSchematicModalButton>,
     pub schematic_cards: Vec<DesktopSchematicCardEntry>,
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
@@ -15279,6 +15281,7 @@ impl DesktopLauncher {
             schematic_edit_description: String::new(),
             schematic_tag_order: Vec::new(),
             schematic_tag_editor_text: String::new(),
+            schematic_label_add_text: String::new(),
             last_schematic_modal_button: None,
             schematic_cards: Vec::new(),
             last_schematic_card_action: None,
@@ -20811,6 +20814,11 @@ impl DesktopLauncher {
                     ));
                 }
             }
+            if Self::schematic_label_add_button_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                    DesktopSchematicModalButton::CardTagNewText { card_index: index },
+                ));
+            }
         }
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseSchematicInfo);
@@ -20893,6 +20901,24 @@ impl DesktopLauncher {
             dialog.y + dialog.height - 150.0,
             88.0,
             26.0,
+        )
+    }
+
+    fn schematic_label_add_text_field_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 150.0,
+            dialog.y + dialog.height - 184.0,
+            220.0,
+            28.0,
+        )
+    }
+
+    fn schematic_label_add_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 380.0,
+            dialog.y + dialog.height - 184.0,
+            118.0,
+            28.0,
         )
     }
 
@@ -21030,6 +21056,11 @@ impl DesktopLauncher {
                                 },
                             ));
                         }
+                    }
+                    if Self::schematic_label_add_button_rect(dialog).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                            DesktopSchematicModalButton::CardTagNewText { card_index: index },
+                        ));
                     }
                 }
                 if Self::schematic_info_button_rect(dialog, 1).contains_point(point) {
@@ -21364,6 +21395,7 @@ impl DesktopLauncher {
     }
 
     fn open_schematic_modal(&mut self, modal: DesktopSchematicModal) {
+        self.schematic_label_add_text.clear();
         if matches!(modal, DesktopSchematicModal::Tags) {
             self.sync_schematic_tag_order();
             self.schematic_tag_editor_text.clear();
@@ -21605,6 +21637,22 @@ impl DesktopLauncher {
                                 entry.labels.push(tag);
                                 self.persist_schematic_tags();
                             }
+                        }
+                    }
+                    DesktopSchematicModalButton::CardTagNewText { card_index } => {
+                        let tag = self.schematic_label_add_text.trim().to_string();
+                        if !tag.is_empty() {
+                            self.sync_schematic_tag_order();
+                            if !self.schematic_tag_order.iter().any(|known| known == &tag) {
+                                self.schematic_tag_order.push(tag.clone());
+                            }
+                            if let Some(entry) = self.schematic_cards.get_mut(card_index) {
+                                if !entry.labels.iter().any(|label| label == &tag) {
+                                    entry.labels.push(tag);
+                                }
+                            }
+                            self.schematic_label_add_text.clear();
+                            self.persist_schematic_tags();
                         }
                     }
                     DesktopSchematicModalButton::ImportClipboard
@@ -22205,6 +22253,48 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_schematic_label_add_controls(
+        &self,
+        pass: &mut RenderPass,
+        dialog: RenderRect,
+        layer_offset: f32,
+    ) {
+        let add_field = Self::schematic_label_add_text_field_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            add_field,
+            [1.0, 1.0, 1.0, 0.86],
+            0.0,
+            Layer::END_PIXELED + layer_offset,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            if self.schematic_label_add_text.is_empty() {
+                "@schematic.addtag".to_string()
+            } else {
+                self.schematic_label_add_text.clone()
+            },
+            RenderPoint::new(add_field.x + 8.0, add_field.center().y),
+            if self.schematic_label_add_text.is_empty() {
+                [0.58, 0.68, 0.76, 1.0]
+            } else {
+                [0.88, 0.94, 1.0, 1.0]
+            },
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + layer_offset + 0.001,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_label_add_button_rect(dialog),
+            "@schematic.texttag",
+            Some("add"),
+            Layer::END_PIXELED + layer_offset + 0.002,
+        );
+    }
+
     fn push_schematic_info_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         let Some(index) = self.schematic_info_dialog else {
             return;
@@ -22327,6 +22417,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.080 + tag_index as f32 * 0.001,
             ));
         }
+        self.push_schematic_label_add_controls(pass, dialog, 0.083);
 
         let preview = Self::schematic_info_preview_rect(dialog);
         pass.push(RenderCommand::draw_sprite(
@@ -22692,18 +22783,19 @@ impl DesktopLauncher {
                         ));
                     }
                 }
+                self.push_schematic_label_add_controls(pass, dialog, 0.083);
                 for (row, (label, value, height)) in [
-                    ("@name", self.schematic_edit_name.as_str(), 46.0),
+                    ("@name", self.schematic_edit_name.as_str(), 42.0),
                     (
                         "@editor.description",
                         self.schematic_edit_description.as_str(),
-                        104.0,
+                        86.0,
                     ),
                 ]
                 .into_iter()
                 .enumerate()
                 {
-                    let y = dialog.y + dialog.height - 194.0 - row as f32 * 78.0;
+                    let y = dialog.y + dialog.height - 234.0 - row as f32 * 92.0;
                     pass.push(RenderCommand::draw_text_styled(
                         label,
                         RenderPoint::new(dialog.x + 42.0, y + height * 0.5),
@@ -23486,6 +23578,22 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Schematics)
+                        && matches!(
+                            self.schematic_modal,
+                            Some(DesktopSchematicModal::Info { .. })
+                                | Some(DesktopSchematicModal::Edit { .. })
+                        )
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.schematic_label_add_text.pop();
+                    } else {
+                        self.schematic_label_add_text.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Schematics)
                         && self.schematic_search_focused
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
                 {
@@ -23613,6 +23721,15 @@ impl DesktopLauncher {
                         && self.schematic_modal == Some(DesktopSchematicModal::Tags)
                     {
                         self.schematic_tag_editor_text
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Schematics)
+                        && matches!(
+                            self.schematic_modal,
+                            Some(DesktopSchematicModal::Info { .. })
+                                | Some(DesktopSchematicModal::Edit { .. })
+                        )
+                    {
+                        self.schematic_label_add_text
                             .extend(text.chars().filter(|ch| !ch.is_control()));
                     } else if self.active_menu_route == Some(DesktopMenuRoute::Schematics)
                         && self.schematic_search_focused
@@ -41599,6 +41716,8 @@ mod tests {
         assert!(texts.contains(&"power"));
         assert!(texts.contains(&"+core"));
         assert!(texts.contains(&"+logic"));
+        assert!(texts.contains(&"@schematic.addtag"));
+        assert!(texts.contains(&"@schematic.texttag"));
 
         let dialog = DesktopLauncher::schematic_info_dialog_rect_for_panel(panel);
         let chip = DesktopLauncher::schematic_edit_owned_tag_chip_rect(dialog, 0);
@@ -41653,6 +41772,47 @@ mod tests {
             .schematic_tags_persisted_json()
             .expect("card tag edits should persist global tag order")
             .contains("\"core\""));
+
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("starter".into())]);
+        assert_eq!(launcher.schematic_label_add_text, "starter");
+        let add_new = DesktopLauncher::schematic_label_add_button_rect(dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, add_new.x, add_new.y),
+            Some(super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagNewText { card_index: 0 }
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagNewText { card_index: 0 },
+            ),
+        );
+        assert!(launcher.schematic_cards[0]
+            .labels
+            .contains(&"starter".to_string()));
+        assert!(launcher
+            .schematic_tag_order
+            .contains(&"starter".to_string()));
+        assert!(launcher.schematic_label_add_text.is_empty());
+        assert!(launcher
+            .schematic_tags_persisted_json()
+            .expect("new text tags should persist")
+            .contains("\"starter\""));
+
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("starter".into())]);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagNewText { card_index: 0 },
+            ),
+        );
+        assert_eq!(
+            launcher.schematic_cards[0]
+                .labels
+                .iter()
+                .filter(|label| *label == "starter")
+                .count(),
+            1
+        );
     }
 
     #[test]

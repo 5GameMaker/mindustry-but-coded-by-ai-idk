@@ -19292,11 +19292,41 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `cargo fmt --all`
   - `cargo test -p mindustry-desktop desktop_launcher_schematic --lib`
   - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
-  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- `cargo check -p mindustry-desktop --features opengl-native-runtime`
   - `git diff --check`
 - 仍未完成：
   - Info 模态仍有一处 `tags: ...` 文本展示，后续应复用同一套 chip helper；
   - add tag 目前直接显示可用 tag chip，还没做 Java 的子弹窗/新建文本或 icon tag picker；
+  - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
+  - 未达到完整可玩，不能宣告目标完成。
+
+## 544. SchematicsDialog 单蓝图新文本标签输入
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **58.2%**，仍未达到完整可玩；继续优先前端/UI，目标是让 `SchematicsDialog.showEdit()` 与 `showInfo()` 都能接收“新文本 tag”输入并把新增 tag 持久化到当前 schematic 标签顺序里。
+- Java 对照证据：
+  - `showEdit(...)` / `showInfo(...)` 都依赖 `buildTags(...)` 的标签 chip 与添加入口；
+  - 新建文本 tag 应该能从输入框或子弹窗进入当前 schematic，并同步加入全局 tag 顺序。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 给 `Info` / `Edit` 模态补了新文本 tag 输入框与 `@schematic.texttag` 添加按钮；
+    - `Edit` 模态新增 `CardTagNewText`，支持把输入内容写入当前 schematic、补进全局 tag order，并调用 `persist_schematic_tags()`；
+    - `Backspace/Delete` 与 `Text` 输入已接入 `schematic_label_add_text`；
+    - `Edit` 模态的标签与文本字段布局向上游结构再对齐了一步，避免和新增输入控件完全重叠。
+  - 测试：
+    - `desktop_launcher_schematics_import_export_edit_modals_render_and_handle_buttons`
+      - 验证 `@schematic.addtag` / `@schematic.texttag` 渲染；
+      - 验证输入 `starter` 后点击添加按钮会把新标签写入当前 schematic；
+      - 验证全局 tag 顺序与持久化 JSON 同步更新；
+      - 验证重复添加不会生成重复标签。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 还没有做 Java 原版那种独立的 add tag 子弹窗；
+  - add icon tag 仍未补齐；
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
