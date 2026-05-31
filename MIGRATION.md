@@ -15,10 +15,10 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
-## 576. PausedDialog 状态分支与禁用态推进
+## 576. PausedDialog 状态分支、子弹层与退出确认推进
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
-- 本轮总体进度更新：约 **67.8%**，仍未达到完整可玩；继续优先前端/UI，目标是让暂停菜单从固定按钮壳推进到状态感知 `PausedDialog`。
+- 本轮总体进度更新：约 **68.0%**，仍未达到完整可玩；继续优先前端/UI，目标是让暂停菜单从固定按钮壳推进到状态感知 `PausedDialog` 与可关闭子弹层。
 - Java 对照依据：
   - `PausedDialog.java` 桌面分支会按 campaign/editor/net 状态切换按钮可见性与 disabled；
   - campaign sector 显示 `@objective`/`@abandon`，且不显示 Save/Load；
@@ -31,13 +31,18 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
     - net connected/connecting 时 `@loadgame` 与 `@hostserver` 保持可见但不可点击；
     - campaign sector 可显示 `@objective/@abandon`，并隐藏 `@savegame/@loadgame`；
     - editor 下显示 `@hostserver.mobile` 与 `@editor.worldprocessors`，并隐藏 Save/Load；
-    - host/worldprocessors/objective/abandon 暂以 guard message 记录动作，避免把 host 错误跳到 JoinDialog。
+    - `@objective` 打开 `FullTextDialog` 风格子弹层并展示 sector preset description；
+    - `@editor.worldprocessors` 打开 `MapProcessorsDialog` 过渡子弹层；
+    - `@hostserver` 打开 `HostDialog` 过渡子弹层，不再错误跳到 `JoinDialog`；
+    - `@quit` 改为先显示 `@confirm/@quit.confirm`，`@cancel` 关闭弹层，`@ok` 才执行既有退出到菜单逻辑；
+    - 新增 `last_pause_quit_result`，让 quit confirm 的 shown/cancelled/confirmed 状态可测试。
 - 已验证：
   - `cargo test -p mindustry-desktop --lib paused_world_overlay -- --nocapture`
 - 仍未完成：
-  - `@objective/@abandon/@editor.worldprocessors` 仍未接真实 FullTextDialog、Planet abandon confirm 与 MapProcessorsDialog；
+  - `@abandon` 仍未接真实 Planet abandon confirm；
+  - `@editor.worldprocessors` 仍未接真实可编辑 MapProcessorsDialog 列表；
   - host 仍需迁移真正 HostDialog/InviteFriends 入口；
-  - quit 仍需接 Java `showQuitConfirm()`/`runExitSave()` 保存与 editor/playtest 返回语义；
+  - quit confirm 已接前端弹层，但仍需接 Java `runExitSave()` 的 autosave、editor/playtest 返回和 net client 断开语义；
   - 未达到完整可玩，不能宣告目标完成。
 
 ## 575. LoadDialog 搜索上限与 autosave checked 视觉

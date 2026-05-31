@@ -2648,6 +2648,8 @@ enum DesktopPausedOverlayAction {
     HostServer,
     WorldProcessors,
     Quit,
+    CloseModal,
+    ConfirmQuit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2656,6 +2658,22 @@ struct DesktopPausedOverlayButtonSpec {
     label: &'static str,
     icon: Option<&'static str>,
     enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesktopPausedOverlayModal {
+    Objective,
+    Abandon,
+    Host,
+    WorldProcessors,
+    QuitConfirm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesktopPauseQuitResult {
+    Shown,
+    Cancelled,
+    Confirmed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15921,6 +15939,8 @@ pub struct DesktopLauncher {
     pub last_menu_visual_pressed_frames: u8,
     pub last_menu_action: Option<MenuButtonRole>,
     pub active_menu_route: Option<DesktopMenuRoute>,
+    pause_overlay_modal: Option<DesktopPausedOverlayModal>,
+    last_pause_quit_result: Option<DesktopPauseQuitResult>,
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
     pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
     pub last_menu_chrome_action: Option<DesktopMenuChromeAction>,
@@ -16755,6 +16775,8 @@ impl DesktopLauncher {
             last_menu_visual_pressed_frames: 0,
             last_menu_action: None,
             active_menu_route: None,
+            pause_overlay_modal: None,
+            last_pause_quit_result: None,
             last_menu_dispatch: None,
             last_menu_route_shell_action: None,
             last_menu_chrome_action: None,
@@ -24676,6 +24698,54 @@ impl DesktopLauncher {
         specs
     }
 
+    fn pause_overlay_modal_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width + 170.0).clamp(360.0, 560.0);
+        let height = 172.0;
+        RenderRect::new(
+            panel.right() + 18.0,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn pause_overlay_modal_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.center().x - 70.0,
+            dialog.y + 18.0,
+            140.0,
+            PAUSE_OVERLAY_BUTTON_HEIGHT,
+        )
+    }
+
+    fn pause_overlay_modal_ok_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.center().x + 8.0,
+            dialog.y + 18.0,
+            132.0,
+            PAUSE_OVERLAY_BUTTON_HEIGHT,
+        )
+    }
+
+    fn pause_overlay_modal_cancel_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.center().x - 140.0,
+            dialog.y + 18.0,
+            132.0,
+            PAUSE_OVERLAY_BUTTON_HEIGHT,
+        )
+    }
+
+    fn pause_overlay_objective_text(&self) -> String {
+        self.game_state
+            .get_sector()
+            .and_then(|sector| sector.preset.as_ref())
+            .and_then(|preset| preset.description.as_ref())
+            .filter(|description| !description.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| "@none".into())
+    }
+
     fn pause_overlay_action_at_surface_point(
         &self,
         surface_size: DesktopSurfaceSize,
@@ -24688,6 +24758,24 @@ impl DesktopLauncher {
         let viewport = self.default_render_viewport_for_surface(surface_size);
         let panel = Self::pause_overlay_panel_for_viewport(viewport);
         let point = RenderPoint::new(x, y);
+        if self.pause_overlay_modal.is_some() {
+            let dialog = Self::pause_overlay_modal_rect_for_panel(panel);
+            if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::QuitConfirm)
+                && Self::pause_overlay_modal_ok_rect(dialog).contains_point(point)
+            {
+                return Some(DesktopPausedOverlayAction::ConfirmQuit);
+            }
+            let close_rect =
+                if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::QuitConfirm) {
+                    Self::pause_overlay_modal_cancel_rect(dialog)
+                } else {
+                    Self::pause_overlay_modal_close_rect(dialog)
+                };
+            if close_rect.contains_point(point) {
+                return Some(DesktopPausedOverlayAction::CloseModal);
+            }
+            return None;
+        }
         for (index, spec) in self.pause_overlay_button_specs().into_iter().enumerate() {
             if Self::pause_overlay_button_rect_for_panel(panel, index).contains_point(point) {
                 return spec.enabled.then_some(spec.action);
@@ -24699,6 +24787,7 @@ impl DesktopLauncher {
     fn open_pause_overlay_route(&mut self, route: DesktopMenuRoute) {
         self.game_state.set(GameStateState::Paused);
         self.active_menu_route = Some(route);
+        self.pause_overlay_modal = None;
         self.last_menu_guard_message = None;
         self.last_menu_route_shell_action = None;
         match route {
@@ -27657,10 +27746,37 @@ impl DesktopLauncher {
         }
     }
 
+    fn close_pause_overlay_modal(&mut self) {
+        if self.pause_overlay_modal == Some(DesktopPausedOverlayModal::QuitConfirm) {
+            self.last_pause_quit_result = Some(DesktopPauseQuitResult::Cancelled);
+        }
+        self.pause_overlay_modal = None;
+    }
+
+    fn execute_pause_overlay_quit(&mut self) {
+        self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
+        self.game_state.set(GameStateState::Menu);
+        self.menu_renderer_state.reset_desktop_root();
+        self.menu_mobile_terminal_open = false;
+        self.pause_overlay_modal = None;
+        self.last_menu_route_shell_action = None;
+        self.last_menu_guard_message = None;
+    }
+
     fn dispatch_pause_overlay_action(&mut self, action: DesktopPausedOverlayAction) {
         match action {
+            DesktopPausedOverlayAction::CloseModal => {
+                self.close_pause_overlay_modal();
+            }
+            DesktopPausedOverlayAction::ConfirmQuit => {
+                self.last_pause_quit_result = Some(DesktopPauseQuitResult::Confirmed);
+                self.execute_pause_overlay_quit();
+            }
             DesktopPausedOverlayAction::Back => {
-                if self.active_menu_route.is_some() {
+                if self.pause_overlay_modal.is_some() {
+                    self.close_pause_overlay_modal();
+                    return;
+                } else if self.active_menu_route.is_some() {
                     self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
                 } else {
                     self.game_state.set(GameStateState::Playing);
@@ -27673,10 +27789,12 @@ impl DesktopLauncher {
                 self.open_pause_overlay_route(DesktopMenuRoute::Settings);
             }
             DesktopPausedOverlayAction::Objective => {
-                self.last_menu_guard_message = Some("@objective".into());
+                self.pause_overlay_modal = Some(DesktopPausedOverlayModal::Objective);
+                self.last_menu_guard_message = None;
             }
             DesktopPausedOverlayAction::Abandon => {
-                self.last_menu_guard_message = Some("@abandon".into());
+                self.pause_overlay_modal = Some(DesktopPausedOverlayModal::Abandon);
+                self.last_menu_guard_message = None;
             }
             DesktopPausedOverlayAction::SaveGame => {
                 self.open_pause_overlay_route(DesktopMenuRoute::SaveGame);
@@ -27685,18 +27803,16 @@ impl DesktopLauncher {
                 self.open_pause_overlay_route(DesktopMenuRoute::LoadGame);
             }
             DesktopPausedOverlayAction::HostServer => {
-                self.last_menu_guard_message = Some("@hostserver".into());
+                self.pause_overlay_modal = Some(DesktopPausedOverlayModal::Host);
+                self.last_menu_guard_message = None;
             }
             DesktopPausedOverlayAction::WorldProcessors => {
-                self.last_menu_guard_message = Some("@editor.worldprocessors".into());
+                self.pause_overlay_modal = Some(DesktopPausedOverlayModal::WorldProcessors);
+                self.last_menu_guard_message = None;
             }
             DesktopPausedOverlayAction::Quit => {
-                self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
-                self.game_state.set(GameStateState::Menu);
-                self.menu_renderer_state.reset_desktop_root();
-                self.menu_mobile_terminal_open = false;
-                self.last_menu_route_shell_action = None;
-                self.last_menu_guard_message = None;
+                self.pause_overlay_modal = Some(DesktopPausedOverlayModal::QuitConfirm);
+                self.last_pause_quit_result = Some(DesktopPauseQuitResult::Shown);
             }
         }
     }
@@ -33995,6 +34111,117 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_pause_overlay_modal(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(modal) = self.pause_overlay_modal else {
+            return;
+        };
+        let dialog = Self::pause_overlay_modal_rect_for_panel(panel);
+        let (title, subtitle, body): (&str, &str, String) = match modal {
+            DesktopPausedOverlayModal::Objective => (
+                "@objective",
+                "FullTextDialog",
+                self.pause_overlay_objective_text(),
+            ),
+            DesktopPausedOverlayModal::Abandon => (
+                "@abandon",
+                "PlanetDialog.abandonSectorConfirm",
+                "@abandon.confirm".into(),
+            ),
+            DesktopPausedOverlayModal::Host => (
+                "@hostserver",
+                "HostDialog",
+                "@server.visibility / @public / @private / @host".into(),
+            ),
+            DesktopPausedOverlayModal::WorldProcessors => (
+                "@editor.worldprocessors",
+                "MapProcessorsDialog",
+                "processors: 0 | button: @add / @edit / @delete".into(),
+            ),
+            DesktopPausedOverlayModal::QuitConfirm => (
+                "@confirm",
+                "PausedDialog.showQuitConfirm",
+                "@quit.confirm".into(),
+            ),
+        };
+
+        pass.push(RenderCommand::fill_rect(
+            dialog,
+            [0.04, 0.06, 0.08, 0.94],
+            Layer::END_PIXELED + 0.160,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.161,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.50, 0.70, 0.84, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.162,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            title,
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.163,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            subtitle,
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 50.0),
+            [0.56, 0.68, 0.78, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.164,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            body,
+            RenderPoint::new(dialog.center().x, dialog.center().y + 4.0),
+            [0.78, 0.86, 0.92, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.165,
+        ));
+        if modal == DesktopPausedOverlayModal::QuitConfirm {
+            self.push_settings_text_button(
+                pass,
+                Self::pause_overlay_modal_cancel_rect(dialog),
+                "@cancel",
+                None,
+                Layer::END_PIXELED + 0.166,
+            );
+            self.push_settings_text_button(
+                pass,
+                Self::pause_overlay_modal_ok_rect(dialog),
+                "@ok",
+                None,
+                Layer::END_PIXELED + 0.166,
+            );
+        } else {
+            self.push_settings_text_button(
+                pass,
+                Self::pause_overlay_modal_close_rect(dialog),
+                "@back",
+                Some("left"),
+                Layer::END_PIXELED + 0.166,
+            );
+        }
+    }
+
     fn pause_overlay_render_pass(&self, viewport: RenderViewport) -> Option<RenderPass> {
         if !self.has_renderable_world_for_default_frame()
             || (!self.game_state.is_paused() && self.active_menu_route.is_none())
@@ -34064,6 +34291,7 @@ impl DesktopLauncher {
                 spec.enabled,
             );
         }
+        self.push_pause_overlay_modal(&mut pass, panel);
         Some(pass)
     }
 
@@ -51294,6 +51522,41 @@ version: "2.0.0"
         assert!(editor_texts.contains(&"@editor.worldprocessors"));
         assert!(!editor_texts.contains(&"@savegame"));
         assert!(!editor_texts.contains(&"@loadgame"));
+
+        let world_processors_center =
+            DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 3).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: world_processors_center.x,
+                    y: world_processors_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.pause_overlay_modal,
+            Some(super::DesktopPausedOverlayModal::WorldProcessors)
+        );
+        launcher.render_default_graphics_frame_for_surface_with(2, surface, 1, &mut renderer);
+        let processor_texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(processor_texts.contains(&"MapProcessorsDialog"));
+        assert!(processor_texts
+            .iter()
+            .any(|text| text.contains("processors: 0")));
     }
 
     #[test]
@@ -51348,6 +51611,148 @@ version: "2.0.0"
         assert!(texts.contains(&"@abandon"));
         assert!(!texts.contains(&"@savegame"));
         assert!(!texts.contains(&"@loadgame"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: objective_center.x,
+                    y: objective_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.pause_overlay_modal,
+            Some(super::DesktopPausedOverlayModal::Objective)
+        );
+        launcher.render_default_graphics_frame_for_surface_with(1, surface, 1, &mut renderer);
+        let modal_texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(modal_texts.contains(&"FullTextDialog"));
+        assert!(modal_texts.contains(&"Campaign objective text"));
+
+        let modal = DesktopLauncher::pause_overlay_modal_rect_for_panel(panel);
+        let close = DesktopLauncher::pause_overlay_modal_close_rect(modal).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: close.x,
+                    y: close.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.pause_overlay_modal, None);
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_quit_requires_confirmation() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::pause_overlay_panel_for_viewport(viewport);
+        let quit_center = DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 5).center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: quit_center.x,
+                    y: quit_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.pause_overlay_modal,
+            Some(super::DesktopPausedOverlayModal::QuitConfirm)
+        );
+        assert_eq!(
+            launcher.last_pause_quit_result,
+            Some(super::DesktopPauseQuitResult::Shown)
+        );
+        assert!(launcher.game_state.is_paused());
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let confirm_texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(confirm_texts.contains(&"@confirm"));
+        assert!(confirm_texts.contains(&"PausedDialog.showQuitConfirm"));
+        assert!(confirm_texts.contains(&"@quit.confirm"));
+        assert!(confirm_texts.contains(&"@cancel"));
+        assert!(confirm_texts.contains(&"@ok"));
+
+        let dialog = DesktopLauncher::pause_overlay_modal_rect_for_panel(panel);
+        let cancel = DesktopLauncher::pause_overlay_modal_cancel_rect(dialog).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: cancel.x,
+                    y: cancel.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.pause_overlay_modal, None);
+        assert_eq!(
+            launcher.last_pause_quit_result,
+            Some(super::DesktopPauseQuitResult::Cancelled)
+        );
+        assert!(launcher.game_state.is_paused());
+
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::Quit);
+        let ok = DesktopLauncher::pause_overlay_modal_ok_rect(dialog).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved { x: ok.x, y: ok.y },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.pause_overlay_modal, None);
+        assert_eq!(
+            launcher.last_pause_quit_result,
+            Some(super::DesktopPauseQuitResult::Confirmed)
+        );
+        assert!(launcher.game_state.is_menu());
     }
 
     #[test]
