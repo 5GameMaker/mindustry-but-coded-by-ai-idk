@@ -169,6 +169,8 @@ const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
 const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
 const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
+const MENU_LOGO_UPSTREAM_WIDTH: f32 = 768.0;
+const MENU_LOGO_UPSTREAM_HEIGHT: f32 = 107.0;
 const SCHEMATICS_IMPORT_BUTTON_WIDTH: f32 = 210.0;
 const SCHEMATICS_IMPORT_BUTTON_HEIGHT: f32 = 54.0;
 const SCHEMATICS_SEARCH_BAR_HEIGHT: f32 = 34.0;
@@ -19588,10 +19590,12 @@ impl DesktopLauncher {
             }
         }
 
-        let logo_width = 768.0_f32.min((width - 20.0).max(1.0));
-        let logo_height = (logo_width / 4.0).max(1.0);
-        let logo_x = viewport.x + ((width - logo_width) * 0.5).floor();
         let ui_scale = options.ui_scale.max(0.01);
+        let logo_width =
+            (MENU_LOGO_UPSTREAM_WIDTH * ui_scale).min((width - 20.0 * ui_scale).max(1.0));
+        let logo_height =
+            (logo_width * MENU_LOGO_UPSTREAM_HEIGHT / MENU_LOGO_UPSTREAM_WIDTH).max(1.0);
+        let logo_x = viewport.x + ((width.floor() * 0.5) - logo_width * 0.5).floor();
         let portrait_logo_offset = if height > width { 30.0 * ui_scale } else { 0.0 };
         let macnotch_offset = if options.macnotch_enabled {
             32.0 * ui_scale
@@ -19600,9 +19604,10 @@ impl DesktopLauncher {
         };
         let effective_height = (height - options.scene_margin_top.max(0.0)).max(1.0);
         let logo_y = viewport.y
-            + (effective_height - 6.0 - logo_height - portrait_logo_offset - macnotch_offset)
-                .max(0.0)
-                .floor();
+            + ((effective_height - 6.0 - logo_height).floor()
+                - portrait_logo_offset
+                - macnotch_offset)
+                .max(0.0);
 
         pass.push(RenderCommand::draw_sprite(
             "logo",
@@ -19613,7 +19618,10 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::draw_text_styled(
             upstream_menu_version_text(),
-            RenderPoint::new(viewport.x + width * 0.5, (logo_y - 8.0).max(viewport.y)),
+            RenderPoint::new(
+                viewport.x + width.floor() * 0.5,
+                (logo_y - 2.0 * ui_scale).max(viewport.y),
+            ),
             upstream_menu_version_color(),
             12.0,
             0.0,
@@ -46035,15 +46043,16 @@ version: "2.0.0"
         assert_eq!(
             logo,
             (
-                RenderRect::new(256.0, 522.0, 768.0, 192.0),
+                RenderRect::new(256.0, 607.0, 768.0, 107.0),
                 Layer::END_PIXELED + 0.08
             )
         );
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, color, layer, .. }
+                RenderCommand::DrawText { text, position, color, layer, .. }
                     if text == &upstream_menu_version_text()
+                        && *position == RenderPoint::new(640.0, 605.0)
                         && *color == upstream_menu_version_color()
                         && (*layer - (Layer::END_PIXELED + 0.09)).abs() < f32::EPSILON
             )
@@ -46075,7 +46084,7 @@ version: "2.0.0"
 
         assert_eq!(
             logo_rect,
-            RenderRect::new(256.0, 470.0, 768.0, 192.0),
+            RenderRect::new(256.0, 555.0, 768.0, 107.0),
             "Java MenuFragment subtracts Core.scene.marginTop and macNotchHeight before placing logo"
         );
     }

@@ -20004,6 +20004,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 移动端 terminal overlay 仍不是完整 `consolefrag`；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 579. MenuFragment logo/version 原始比例与 Scl 公式闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **63.1%**，仍未达到完整可玩；继续优先前端/UI，把主菜单 logo 与版本文字从近似 4:1 绘制改为 Java `MenuFragment.build()` 的原始宽高比与 `Scl.scl(...)` 风格公式。
+- Java 对照依据：
+  - 上游 `sprites/ui/logo.png` 尺寸为 `768x107`，Java 使用 `logoh = logow * logo.height / logo.width`；
+  - Java 版本文字位置是 `fy - logoh/2 - Scl.scl(2f)`，不是固定 `logo_y - 8`；
+  - scene margin、portrait 偏移与 macnotch 都按 UI scale 参与计算。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MENU_LOGO_UPSTREAM_WIDTH/HEIGHT = 768/107`；
+    - `push_menu_logo_and_version_chrome(...)` 按真实 logo 比例计算高度；
+    - logo 最大宽度改为 `Core.graphics.getWidth() - Scl.scl(20)` 等价；
+    - portrait/macnotch 与版本文字偏移改为按 `menu_ui_scale` 计算；
+    - 更新 logo/version 测试，断言 1280x720 下 logo 为 `768x107`、version 贴近 Java 的 `Scl.scl(2f)` 偏移。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_logo_respects_scene_margin_top_and_macnotch --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - logo `TextureRegion.scale` 若后续 atlas 暴露真实 scale，还需要继续接入而不是默认 `1.0`；
+  - chrome/button 样式仍需继续完全依赖 upstream drawable/state；
+  - 移动端 terminal overlay 仍不是完整 `consolefrag`；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
