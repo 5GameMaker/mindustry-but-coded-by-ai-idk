@@ -19299,3 +19299,29 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - add tag 目前直接显示可用 tag chip，还没做 Java 的子弹窗/新建文本或 icon tag picker；
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 543. SchematicInfoDialog 复用单蓝图标签 chip
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **58.0%**，仍未达到完整可玩；继续优先前端/UI，目标是让 `SchematicInfoDialog.show()` 与 `showEdit()` 一样使用可交互的 `buildTags(...)` 标签 chip，而不是纯文本。
+- Java 对照证据：
+  - `SchematicInfoDialog.show()` 内部调用 `buildTags(schem, tags)`；
+  - `showEdit()` 内部调用 `buildTags(s, tags, false)`；
+  - 两者应共用当前 schematic labels 的 chip 展示、单项删除和添加入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Info 模态的标签区从 `tags: a, b` 纯文本改为 `@schematic.tags` + label chip；
+    - Info 模态复用 Edit 模态已有的 chip 几何：当前标签 chip、删除按钮、可添加标签 chip；
+    - `schematic_info_action_at_point(...)` 优先命中 tag chip 删除/添加，再命中 `@back/@editor.export/@edit`；
+    - 补充测试覆盖 Info 内删除/添加 tag，并确认 route shell action 正确分发到 `CardTagRemove/CardTagAdd`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - tag chip 逻辑仍有重复渲染代码，后续应抽出真正共享 helper；
+  - add tag 仍是直接显示可用 chip，未做 Java 的 add tag 子弹窗和新建文本/icon tag 入口；
+  - 当前 tag 修改还未接真实 schematic `save()`；
+  - 未达到完整可玩，不能宣告目标完成。
