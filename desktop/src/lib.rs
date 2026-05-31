@@ -20546,6 +20546,20 @@ impl DesktopLauncher {
     }
 
     fn push_settings_main_menu_buttons(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let container = Self::settings_main_menu_container_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            container,
+            [1.0, 1.0, 1.0, 0.74],
+            0.0,
+            Layer::END_PIXELED + 0.021,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            container,
+            [0.22, 0.34, 0.42, 0.70],
+            1.0,
+            Layer::END_PIXELED + 0.022,
+        ));
         let hovered_index = self
             .last_menu_cursor
             .and_then(|point| Self::settings_main_menu_entry_index_at_point(panel, point));
@@ -21584,6 +21598,19 @@ impl DesktopLauncher {
             top - SETTINGS_MENU_BUTTON_HEIGHT,
             SETTINGS_MENU_BUTTON_WIDTH,
             SETTINGS_MENU_BUTTON_HEIGHT,
+        )
+    }
+
+    fn settings_main_menu_container_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let first = Self::settings_main_menu_button_rect_for_panel(panel, 0);
+        let last =
+            Self::settings_main_menu_button_rect_for_panel(panel, SETTINGS_MENU_ENTRIES.len() - 1);
+        let pad = 14.0;
+        RenderRect::new(
+            first.x - pad,
+            last.y - pad,
+            SETTINGS_MENU_BUTTON_WIDTH + pad * 2.0,
+            first.bottom() - last.y + pad * 2.0,
         )
     }
 
@@ -47818,11 +47845,17 @@ mod tests {
             super::DesktopMenuRoute::Settings,
         );
         let game_button = DesktopLauncher::settings_main_menu_button_rect_for_panel(panel, 0);
+        let menu_container = DesktopLauncher::settings_main_menu_container_rect_for_panel(panel);
         assert_eq!(game_button.width, super::SETTINGS_MENU_BUTTON_WIDTH);
         assert_eq!(game_button.height, super::SETTINGS_MENU_BUTTON_HEIGHT);
         assert!(
             (game_button.x - (panel.x + 36.0 + super::SETTINGS_MENU_BUTTON_MARGIN_LEFT)).abs()
                 < 0.01
+        );
+        assert!(menu_container.contains_point(game_button.center()));
+        assert_eq!(
+            menu_container.width,
+            super::SETTINGS_MENU_BUTTON_WIDTH + 28.0
         );
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
@@ -47862,6 +47895,14 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(button_rects.contains(&game_button));
+        let container_symbol = DesktopLauncher::settings_drawable_symbol("button");
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == &container_symbol && *rect == menu_container
+            )
+        }));
         let labels = commands
             .iter()
             .filter_map(|command| match command {

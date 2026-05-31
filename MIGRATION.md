@@ -19786,6 +19786,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - LanguageDialog 语言列表仍是静态表，后续应继续向 Java `locales` 文件动态读取和排序收敛；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 571. SettingsMenuDialog 主菜单内层容器闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.3%**，仍未达到完整可玩；继续优先前端/UI，把 Settings 主页面按钮区从直接绘制在 route shell 上，推进到更像 Java `menu = new Table(Tex.button)` 的内层 menu 容器。
+- Java 对照依据：
+  - `SettingsMenuDialog` 使用 `menu = new Table(Tex.button)` 作为主页菜单块背景；
+  - `prefs.margin(14f)` 给内容区提供内边距；
+  - `rebuildMenu()` 中主页按钮保持 `size(300f, 60f)` 并按列排列。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_main_menu_container_rect_for_panel(...)`，用 14px padding 包住 6 个 `300x60` Settings 主页按钮；
+    - `push_settings_main_menu_buttons(...)` 先绘制 upstream `button` drawable 作为内层 menu 容器，再绘制各个 `flatt` 按钮；
+    - 保持 `settings_main_menu_button_rect_for_panel(...)` 与命中测试不变，避免容器层影响点击行为；
+    - 测试断言容器包含 Game 按钮、宽度为 `300 + 28`，并真实输出 `button` drawable。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Rust Settings 主页面仍未完全拥有 Java Scene2D `Table` 树，只是手绘等价层继续收敛；
+  - `prefs.margin(14f)` 还需继续扩展到 Game/Graphics/Sound/Data 子页容器；
+  - Settings 数据管理子对话框与完整 `SettingsTable` 仍需继续迁移；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
