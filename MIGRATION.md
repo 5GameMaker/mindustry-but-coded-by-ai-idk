@@ -19894,6 +19894,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Data 导入/导出/open folder/crash export 仍需继续接真实桌面能力；
   - UI 与 Settings 数据管理仍在长线迁移中，未达到完整可玩，不能宣布目标完成。
 
+## 575. ModsDialog 详情页 placeholder 消除闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.7%**，仍未达到完整可玩；继续优先前端/UI，把 `ModsDialog.showMod(...)` 对应的详情弹窗从 placeholder 文本推进到更接近 Java 的元信息行与 `@mods.viewcontent` 入口。
+- Java 对照依据：
+  - `ModsDialog.showMod(LoadedMod mod)` 会显示 mod 名称、作者、版本、描述、状态；
+  - 有 `@mods.openfolder`；
+  - 对有内容的 mod 提供 `@mods.viewcontent` 入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 删除 `mod detail placeholder: browser/import/delete later` 渲染；
+    - 详情页新增 `@mod.version`、`@editor.author`、`@mods.viewcontent` 元信息行；
+    - 新增 `OpenModsContent(index)` route action 与 `last_mods_content_index` 状态；
+    - 详情弹窗底部新增 `@mods.viewcontent` 按钮，并打通 hit-test / dispatch；
+    - 测试覆盖 placeholder 不再出现、view content 入口可命中并记录 index。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog --lib`
+  - `cargo test -p mindustry-desktop mods_route --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - mod 作者/版本/描述仍是未知占位，后续需接真实 `mod.json` / `LoadedMod.meta`；
+  - `@mods.viewcontent` 目前只记录 action index，尚未打开完整内容列表子弹窗；
+  - `@mods.github.open` / reinstall / remove / enabled toggle 等 Java 详情动作仍需继续迁移；
+  - UI 与 Mods 管理仍在长线迁移中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

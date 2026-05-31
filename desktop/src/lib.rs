@@ -2485,6 +2485,7 @@ pub enum DesktopMenuRouteShellAction {
     ModsImportGithub,
     OpenModsDetail(usize),
     OpenModsFolder(usize),
+    OpenModsContent(usize),
     CloseModsDetail,
     FocusSchematicSearch,
     ClearSchematicSearch,
@@ -15445,6 +15446,7 @@ pub struct DesktopLauncher {
     pub last_mods_directory_mod_roots: Vec<String>,
     pub mods_selected_mod_index: Option<usize>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
+    pub last_mods_content_index: Option<usize>,
     pub mods_import_dialog_open: bool,
     pub last_mods_import_action: Option<DesktopModsImportAction>,
     pub last_mods_import_file_request: Option<MultiFileChooserRequest>,
@@ -16202,6 +16204,7 @@ impl DesktopLauncher {
             last_mods_directory_mod_roots: Vec::new(),
             mods_selected_mod_index: None,
             last_mods_folder_action: None,
+            last_mods_content_index: None,
             mods_import_dialog_open: false,
             last_mods_import_action: None,
             last_mods_import_file_request: None,
@@ -24144,6 +24147,11 @@ impl DesktopLauncher {
                 let mut platform = DefaultPlatform;
                 let _ = self.dispatch_mods_folder_action_with_platform(index, &mut platform);
             }
+            DesktopMenuRouteShellAction::OpenModsContent(index) => {
+                if self.last_mods_directory_mod_names.get(index).is_some() {
+                    self.last_mods_content_index = Some(index);
+                }
+            }
             DesktopMenuRouteShellAction::CloseModsDetail => {
                 self.mods_selected_mod_index = None;
             }
@@ -26843,6 +26851,9 @@ impl DesktopLauncher {
         {
             return Some(DesktopMenuRouteShellAction::OpenModsFolder(index));
         }
+        if Self::schematic_info_button_rect(dialog, 2).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::OpenModsContent(index));
+        }
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseModsDetail);
         }
@@ -26918,17 +26929,27 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.076,
             ));
         }
-        pass.push(RenderCommand::draw_text_styled(
-            "mod detail placeholder: browser/import/delete later",
-            RenderPoint::new(dialog.center().x, dialog.y + 104.0),
-            [0.58, 0.66, 0.74, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.077,
-        ));
+        let details = [
+            format!("@mod.version: {}", "@unknown"),
+            format!("@editor.author: {}", "@unknown"),
+            format!("@mods.viewcontent: {}", "0"),
+        ];
+        for (row, detail) in details.iter().enumerate() {
+            pass.push(RenderCommand::draw_text_styled(
+                detail,
+                RenderPoint::new(
+                    dialog.x + 34.0,
+                    dialog.y + dialog.height - 116.0 - row as f32 * 24.0,
+                ),
+                [0.72, 0.80, 0.86, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.077 + row as f32 * 0.0001,
+            ));
+        }
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
@@ -26945,6 +26966,13 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.083,
             );
         }
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 2),
+            "@mods.viewcontent",
+            Some("book"),
+            Layer::END_PIXELED + 0.083,
+        );
     }
 
     fn push_mods_import_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -42011,7 +42039,11 @@ mod tests {
         assert!(texts.contains(&"mods scanned: 3"));
         assert!(texts.contains(&"mod path: C:/mods/alpha pack"));
         assert!(texts.contains(&"@mods.openfolder"));
-        assert!(texts.contains(&"mod detail placeholder: browser/import/delete later"));
+        assert!(texts.contains(&"@mod.version: @unknown"));
+        assert!(texts.contains(&"@editor.author: @unknown"));
+        assert!(texts.contains(&"@mods.viewcontent: 0"));
+        assert!(texts.contains(&"@mods.viewcontent"));
+        assert!(!texts.contains(&"mod detail placeholder: browser/import/delete later"));
 
         let dialog = DesktopLauncher::mods_route_detail_dialog_rect_for_panel(panel);
         let open_folder = DesktopLauncher::schematic_info_button_rect(dialog, 1).center();
@@ -42037,6 +42069,20 @@ mod tests {
             platform.opened_uris,
             vec!["file:///C:/mods/alpha%20pack".to_string()]
         );
+
+        let view_content = DesktopLauncher::schematic_info_button_rect(dialog, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                view_content.x,
+                view_content.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsContent(0))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenModsContent(0),
+        );
+        assert_eq!(launcher.last_mods_content_index, Some(0));
 
         let detail_back = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
         assert_eq!(
