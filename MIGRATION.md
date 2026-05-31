@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 549. MenuFragment 主菜单图标可见渲染兜底
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **64.6%**，仍未达到完整可玩；继续优先前端/UI，目标是让主菜单可见面先持续接近 Java `MenuFragment`，避免用户看到黑屏或 `?` 图标占位。
+- Java 对照依据：
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:196-231` 的 desktop 菜单通过 `t.button(b.text, b.icon, Styles.flatToggleMenut, ...)` 绘制文本按钮与图标；
+  - `core/src/mindustry/ui/fragments/MenuFragment.java:134-193` 的 mobile 菜单通过 `MobileButton(Icon.*, ...)` 绘制图标在上、文字在下的按钮。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 主菜单按钮 icon 分支不再把 upstream icon 私有区 glyph 直接作为默认字体 `DrawText` 输出，避免当前 placeholder text backend 把 `Icon.*` 渲染成 `?`；
+    - 新增 `menu_push_icon_render_commands(...)`，对 `play/add/settings/info/exit/download/terrain/menu/book/paste/tree/steam/rightOpenOut/host` 等菜单实际使用图标输出可由当前 OpenGL primitive path 绘制的线、圆、多边形、三角形、矩形组合；
+    - 未覆盖的自定义 icon 使用 ASCII 首字母 fallback，避免继续退化成不可读问号；
+    - 保持 label 文本位置与 Java `marginLeft(11f)` / desktop icon-label gap、mobile icon-above-label 布局不变，确保不是独立图标模块。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan_selected_buttons_emit_java_flat_down_drawable -- --nocapture`
+  - `cargo test -p mindustry-core menu_mobile_buttons_render_icon_above_label_like_mobile_button -- --nocapture`
+  - `cargo test -p mindustry-core menu_renderer -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_fast_menu_path_reuses_real_menu_plan_without_placeholder_panel -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+  - 启动 `target/debug/mindustry-desktop.exe` 截图验证：菜单图标不再显示为 `?`，且未回归黑屏。
+- 仍未完成：
+  - 这只是 native placeholder text/backend 期间的可见兜底；最终仍需接入真实 `Fonts.icon` / `Icon` drawable / Scene2D skin 渲染，使图标形态、描边、缩放完全对齐 Java；
+  - 主菜单按钮 hover/pressed 细节、真实九宫格皮肤、字体 rasterization 与完整 Dialog/Scene UI 仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 548. ResearchDialog 节点详情面板首个闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

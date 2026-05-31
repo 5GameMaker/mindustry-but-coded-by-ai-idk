@@ -10,7 +10,7 @@ use super::{
 };
 use crate::mindustry::ui::{
     upstream_bundle_en_value, upstream_image_button_style_skin, upstream_text_button_style_skin,
-    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
+    upstream_ui_drawable_alias, UiDrawableAlias, UiDrawableTint,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
@@ -783,7 +783,6 @@ impl MenuUiPlan {
                 .as_deref()
                 .or_else(|| button.role.icon_name(self.mobile));
             if let Some(icon_name) = icon_name {
-                let icon = menu_icon_text(icon_name);
                 let icon_point = if self.mobile {
                     RenderPoint::new(
                         button.rect.center().x,
@@ -797,22 +796,18 @@ impl MenuUiPlan {
                         button.rect.center().y,
                     )
                 };
-                commands.push(RenderCommand::draw_text_styled(
-                    icon,
+                menu_push_icon_render_commands(
+                    &mut commands,
+                    icon_name,
                     icon_point,
-                    menu_color_with_alpha(style.text_color, alpha),
                     if self.mobile {
                         MENU_MOBILE_BUTTON_ICON_TEXT_SIZE
                     } else {
                         MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE
                     },
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true)
-                        .with_outline(true),
+                    menu_color_with_alpha(style.text_color, alpha),
                     style.text_layer,
-                ));
+                );
             }
             let (label_point, label_style) = if self.mobile {
                 (
@@ -853,8 +848,276 @@ impl MenuUiPlan {
     }
 }
 
+fn menu_push_icon_render_commands(
+    commands: &mut Vec<RenderCommand>,
+    icon_name: &str,
+    center: RenderPoint,
+    size: f32,
+    color: [f32; 4],
+    layer: f32,
+) {
+    let size = size.max(1.0);
+    let stroke = (size / 9.0).max(1.0);
+    match icon_name {
+        "play" | "rightOpenOut" => {
+            commands.push(RenderCommand::draw_triangle(
+                center,
+                size * 0.70,
+                size * 0.92,
+                0.0,
+                color,
+                layer,
+            ));
+        }
+        "add" | "host" => {
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x - size * 0.38, center.y),
+                RenderPoint::new(center.x + size * 0.38, center.y),
+                stroke,
+                color,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x, center.y - size * 0.38),
+                RenderPoint::new(center.x, center.y + size * 0.38),
+                stroke,
+                color,
+                layer,
+            ));
+        }
+        "settings" => {
+            commands.push(RenderCommand::draw_polygon(
+                center,
+                size * 0.46,
+                8,
+                22.5,
+                color,
+                false,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_circle(
+                center,
+                size * 0.18,
+                color,
+                false,
+                layer,
+            ));
+        }
+        "info" => {
+            commands.push(RenderCommand::draw_circle(
+                center,
+                size * 0.44,
+                color,
+                false,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x, center.y - size * 0.10),
+                RenderPoint::new(center.x, center.y + size * 0.28),
+                stroke,
+                color,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_circle(
+                RenderPoint::new(center.x, center.y - size * 0.28),
+                stroke,
+                color,
+                true,
+                layer,
+            ));
+        }
+        "exit" => {
+            commands.push(RenderCommand::stroke_rect(
+                RenderRect::new(
+                    center.x - size * 0.42,
+                    center.y - size * 0.34,
+                    size * 0.46,
+                    size * 0.68,
+                ),
+                color,
+                stroke,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x - size * 0.02, center.y),
+                RenderPoint::new(center.x + size * 0.42, center.y),
+                stroke,
+                color,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_triangle(
+                RenderPoint::new(center.x + size * 0.42, center.y),
+                size * 0.35,
+                size * 0.30,
+                0.0,
+                color,
+                layer,
+            ));
+        }
+        "download" => {
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x, center.y + size * 0.36),
+                RenderPoint::new(center.x, center.y - size * 0.10),
+                stroke,
+                color,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_triangle(
+                RenderPoint::new(center.x, center.y - size * 0.22),
+                size * 0.42,
+                size * 0.34,
+                180.0,
+                color,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x - size * 0.38, center.y - size * 0.38),
+                RenderPoint::new(center.x + size * 0.38, center.y - size * 0.38),
+                stroke,
+                color,
+                layer,
+            ));
+        }
+        "terrain" => {
+            commands.push(RenderCommand::draw_triangle(
+                RenderPoint::new(center.x - size * 0.18, center.y - size * 0.05),
+                size * 0.72,
+                size * 0.64,
+                0.0,
+                color,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_triangle(
+                RenderPoint::new(center.x + size * 0.22, center.y - size * 0.12),
+                size * 0.56,
+                size * 0.50,
+                0.0,
+                color,
+                layer,
+            ));
+        }
+        "menu" => {
+            for offset in [-0.26_f32, 0.0, 0.26] {
+                commands.push(RenderCommand::draw_line(
+                    RenderPoint::new(center.x - size * 0.38, center.y + size * offset),
+                    RenderPoint::new(center.x + size * 0.38, center.y + size * offset),
+                    stroke,
+                    color,
+                    layer,
+                ));
+            }
+        }
+        "book" => {
+            commands.push(RenderCommand::stroke_rect(
+                RenderRect::new(
+                    center.x - size * 0.42,
+                    center.y - size * 0.36,
+                    size * 0.84,
+                    size * 0.72,
+                ),
+                color,
+                stroke,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x, center.y - size * 0.34),
+                RenderPoint::new(center.x, center.y + size * 0.34),
+                stroke,
+                color,
+                layer,
+            ));
+        }
+        "paste" => {
+            commands.push(RenderCommand::stroke_rect(
+                RenderRect::new(
+                    center.x - size * 0.34,
+                    center.y - size * 0.40,
+                    size * 0.68,
+                    size * 0.76,
+                ),
+                color,
+                stroke,
+                layer,
+            ));
+            commands.push(RenderCommand::stroke_rect(
+                RenderRect::new(
+                    center.x - size * 0.18,
+                    center.y + size * 0.18,
+                    size * 0.36,
+                    size * 0.20,
+                ),
+                color,
+                stroke,
+                layer,
+            ));
+        }
+        "tree" => {
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x, center.y - size * 0.36),
+                RenderPoint::new(center.x, center.y + size * 0.24),
+                stroke,
+                color,
+                layer,
+            ));
+            for (dx, dy) in [(-0.28_f32, 0.28_f32), (0.28, 0.28), (0.0, -0.30)] {
+                let node = RenderPoint::new(center.x + size * dx, center.y + size * dy);
+                commands.push(RenderCommand::draw_line(center, node, stroke, color, layer));
+                commands.push(RenderCommand::draw_circle(
+                    node,
+                    size * 0.13,
+                    color,
+                    false,
+                    layer,
+                ));
+            }
+        }
+        "steam" => {
+            commands.push(RenderCommand::draw_circle(
+                center,
+                size * 0.42,
+                color,
+                false,
+                layer,
+            ));
+            let small = RenderPoint::new(center.x + size * 0.22, center.y + size * 0.15);
+            commands.push(RenderCommand::draw_circle(
+                small,
+                size * 0.15,
+                color,
+                false,
+                layer,
+            ));
+            commands.push(RenderCommand::draw_line(
+                RenderPoint::new(center.x - size * 0.22, center.y - size * 0.18),
+                small,
+                stroke,
+                color,
+                layer,
+            ));
+        }
+        _ => {
+            commands.push(RenderCommand::draw_text_styled(
+                menu_icon_text(icon_name),
+                center,
+                color,
+                size,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer,
+            ));
+        }
+    }
+}
+
 fn menu_icon_text(icon_name: &str) -> String {
-    upstream_ui_icon_glyph_string(icon_name).unwrap_or_else(|| icon_name.to_string())
+    icon_name
+        .chars()
+        .find(|character| character.is_ascii_alphanumeric())
+        .map(|character| character.to_ascii_uppercase().to_string())
+        .unwrap_or_else(|| "!".to_string())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2068,6 +2331,7 @@ fn menu_ui_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::ui::upstream_ui_icon_glyph_string;
 
     #[test]
     fn menu_dimensions_match_upstream_mobile_branch() {
@@ -2847,21 +3111,31 @@ mod tests {
                 RenderCommand::DrawText { text, .. } if text == "Play"
             )
         }));
-        let play_icon = menu_icon_text("play");
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, position, style, .. }
-                    if text == &play_icon
-                        && (position.x
+                RenderCommand::DrawTriangle { center, layer, .. }
+                    if (center.x
                             - (rect.x
                                 + MENU_DESKTOP_BUTTON_MARGIN_LEFT
                                 + MENU_DESKTOP_BUTTON_ICON_X))
                             .abs()
                             < f32::EPSILON
-                        && style.horizontal_align == RenderTextAlign::Center
+                        && (center.y - rect.center().y).abs() < f32::EPSILON
+                        && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
             )
         }));
+        assert!(!commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, position, .. }
+                if text == "?"
+                    && (position.x
+                        - (rect.x
+                            + MENU_DESKTOP_BUTTON_MARGIN_LEFT
+                            + MENU_DESKTOP_BUTTON_ICON_X))
+                        .abs()
+                        < f32::EPSILON
+        )));
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
@@ -3012,6 +3286,47 @@ mod tests {
     }
 
     #[test]
+    fn menu_icon_render_commands_cover_upstream_menu_fragment_icons_without_question_text() {
+        for icon in [
+            "play",
+            "menu",
+            "add",
+            "terrain",
+            "rightOpenOut",
+            "download",
+            "paste",
+            "book",
+            "tree",
+            "info",
+            "steam",
+            "settings",
+            "exit",
+            "host",
+        ] {
+            let mut commands = Vec::new();
+            menu_push_icon_render_commands(
+                &mut commands,
+                icon,
+                RenderPoint::new(32.0, 48.0),
+                MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE,
+                [1.0, 1.0, 1.0, 1.0],
+                MENU_FLAT_TOGGLE_MENU_STYLE.text_layer,
+            );
+            assert!(
+                !commands.is_empty(),
+                "icon {icon} should emit visible commands"
+            );
+            assert!(
+                !commands.iter().any(|command| matches!(
+                    command,
+                    RenderCommand::DrawText { text, .. } if text == "?"
+                )),
+                "icon {icon} must not regress to the placeholder question mark"
+            );
+        }
+    }
+
+    #[test]
     fn menu_mobile_buttons_render_icon_above_label_like_mobile_button() {
         let rect = RenderRect::new(30.0, 40.0, 120.0, 120.0);
         let plan = MenuUiPlan {
@@ -3040,17 +3355,23 @@ mod tests {
                 } if symbol == "button.9" && *sprite_rect == rect
             )
         }));
-        let custom_icon = menu_icon_text("rightOpenOut");
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, position, style, .. }
-                    if text == &custom_icon
-                        && (position.x - rect.center().x).abs() < f32::EPSILON
-                        && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y)).abs() < f32::EPSILON
-                        && style.horizontal_align == RenderTextAlign::Center
+                RenderCommand::DrawTriangle { center, layer, .. }
+                    if (center.x - rect.center().x).abs() < f32::EPSILON
+                        && (center.y - (rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y)).abs() < f32::EPSILON
+                        && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
             )
         }));
+        assert!(!commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, position, .. }
+                if text == "?"
+                    && (position.x - rect.center().x).abs() < f32::EPSILON
+                    && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y)).abs()
+                        < f32::EPSILON
+        )));
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
@@ -3182,28 +3503,33 @@ mod tests {
             state.hit_test_ui(input, custom.rect.center().x, custom.rect.center().y),
             Some(MenuButtonRole::Custom(0))
         );
-        assert!(plan.ui.to_render_commands().iter().any(|command| {
-            matches!(
-                command,
-                RenderCommand::DrawText { text, .. }
-                    if text == &menu_icon_text("add")
-            )
-        }));
         let render_commands = plan.ui.to_render_commands();
         assert!(render_commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, position, style, .. }
-                    if text == &menu_icon_text("add")
-                        && (position.x
+                RenderCommand::DrawLine { from, to, layer, .. }
+                    if (from.y - to.y).abs() < f32::EPSILON
+                        && ((from.x + to.x) / 2.0
                             - (custom.rect.x
                                 + MENU_DESKTOP_BUTTON_MARGIN_LEFT
                                 + MENU_DESKTOP_BUTTON_ICON_X))
                             .abs()
                             < f32::EPSILON
-                        && style.horizontal_align == RenderTextAlign::Center
+                        && (from.y - custom.rect.center().y).abs() < f32::EPSILON
+                        && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
             )
         }));
+        assert!(!render_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, position, .. }
+                if text == "?"
+                    && (position.x
+                        - (custom.rect.x
+                            + MENU_DESKTOP_BUTTON_MARGIN_LEFT
+                            + MENU_DESKTOP_BUTTON_ICON_X))
+                        .abs()
+                        < f32::EPSILON
+        )));
         assert!(render_commands.iter().any(|command| {
             matches!(
                 command,
