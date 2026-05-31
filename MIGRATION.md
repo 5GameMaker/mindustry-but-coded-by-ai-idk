@@ -19360,6 +19360,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 554. Settings KeybindDialog rebind 输入捕获闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **60.4%**，仍未达到完整可玩；继续优先前端/UI，把 Controls 子弹窗的 `@settings.rebind` 从单纯状态记录推进到可显示模态、可捕获键盘/鼠标/滚轮输入、可取消、可写回 override。
+- Java 对照依据：
+  - `KeybindDialog.java` 的 `openDialog(...)` 会打开 `keybind.press` / `keybind.press.axis` 模态；
+  - `keyDown(...)` 会把输入传给 `rebind(...)`；
+  - `touchDown(...)` 支持鼠标输入；
+  - `scrolled(...)` 在 Axis rebind 时支持滚轮轴输入。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 rebind 模态渲染，显示 `keybind.press` / `keybind.press.axis`、当前 keybind 名称和 `@back` 取消；
+    - `StartKeyRebind(name)` 不再写入假占位值，而是进入真实等待输入状态；
+    - 新增 `CancelKeyRebind`，可通过 rebind 模态的 `@back` 取消；
+    - 键盘输入进入 `commit_settings_keybind_rebind(...)`，普通键写回对应绑定，Axis 绑定写成双向显示值；
+    - 鼠标主键可作为绑定输入；
+    - Axis rebind 时滚轮输入写回 `Scroll / Scroll`；
+    - rebind 模态打开时会阻断底层 reset/search/列表命中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Axis 目前是最小“双向同键”写回，还未实现 Java 的 `rebindMin/minKey` 二段 min/max 输入；
+  - keybind override 仍是内存状态，尚未持久化到 settings 文件并在启动恢复；
+  - ControlsDialog 仍未覆盖完整 `Binding.java` 全量 keybind 表；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 553. Settings KeybindDialog 搜索过滤闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

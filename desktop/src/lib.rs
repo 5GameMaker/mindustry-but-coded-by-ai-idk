@@ -432,6 +432,7 @@ pub enum DesktopSettingsAction {
     ResetKey(&'static str),
     ResetAllKeys,
     FocusKeybindSearch,
+    CancelKeyRebind,
     BackToMain,
     ResetCurrentPage,
     ToggleSetting(&'static str, &'static str),
@@ -20087,6 +20088,7 @@ impl DesktopLauncher {
             Some("left"),
             Layer::END_PIXELED + 0.103,
         );
+        self.push_settings_keybind_rebind_dialog(pass, dialog);
     }
 
     fn push_settings_language_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
@@ -20265,6 +20267,80 @@ impl DesktopLauncher {
             "@settings.reset",
             Some("refresh"),
             Layer::END_PIXELED + 0.129,
+        );
+    }
+
+    fn push_settings_keybind_rebind_dialog(&self, pass: &mut RenderPass, parent: RenderRect) {
+        let Some(key_name) = self.last_settings_rebind_key else {
+            return;
+        };
+        let dialog = Self::settings_keybind_rebind_dialog_rect(parent);
+        let axis = Self::settings_keybind_spec_by_name(key_name)
+            .map(|spec| spec.axis)
+            .unwrap_or(false);
+        pass.push(RenderCommand::fill_rect(
+            parent,
+            [0.0, 0.0, 0.0, 0.52],
+            Layer::END_PIXELED + 0.150,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.151,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.72, 0.86, 1.0, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.152,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            if axis {
+                "keybind.press.axis"
+            } else {
+                "keybind.press"
+            },
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 42.0),
+            [0.96, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.156,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            Self::settings_keybind_bundle_label(key_name),
+            RenderPoint::new(dialog.center().x, dialog.center().y + 12.0),
+            [0.48, 0.74, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.157,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "press keyboard/mouse input to bind",
+            RenderPoint::new(dialog.center().x, dialog.center().y - 16.0),
+            [0.64, 0.72, 0.78, 1.0],
+            10.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.158,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::settings_keybind_rebind_cancel_rect(dialog),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.160,
         );
     }
 
@@ -20688,6 +20764,40 @@ impl DesktopLauncher {
         next != current
     }
 
+    fn commit_settings_keybind_rebind(&mut self, key_code: &str) -> bool {
+        let Some(name) = self.last_settings_rebind_key else {
+            return false;
+        };
+        let display = Self::settings_key_code_display(key_code);
+        let value = if Self::settings_keybind_spec_by_name(name)
+            .map(|spec| spec.axis)
+            .unwrap_or(false)
+        {
+            format!("{display} / {display}")
+        } else {
+            display
+        };
+        self.settings_keybind_overrides.insert(name, value);
+        self.last_settings_rebind_key = None;
+        true
+    }
+
+    fn settings_key_code_display(key_code: &str) -> String {
+        match key_code {
+            "controlLeft" | "ControlLeft" => "Ctrl Left".into(),
+            "shiftLeft" | "ShiftLeft" => "Shift Left".into(),
+            "escape" | "Escape" => "Escape".into(),
+            "space" | "Space" => "Space".into(),
+            "tab" | "Tab" => "Tab".into(),
+            "enter" | "Enter" => "Enter".into(),
+            "primary" => "Mouse Left".into(),
+            "secondary" => "Mouse Right".into(),
+            "middle" => "Mouse Middle".into(),
+            "Scroll" | "scroll" => "Scroll".into(),
+            other => other.to_string(),
+        }
+    }
+
     fn settings_route_lines(&self) -> Vec<String> {
         let state = &self.settings_dialog_state;
         let mut lines = vec![
@@ -20881,6 +20991,15 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         self.settings_child_dialog?;
         let dialog = Self::settings_child_dialog_rect_for_panel(panel);
+        if self.last_settings_rebind_key.is_some() {
+            let rebind_dialog = Self::settings_keybind_rebind_dialog_rect(dialog);
+            if Self::settings_keybind_rebind_cancel_rect(rebind_dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::Settings(
+                    DesktopSettingsAction::CancelKeyRebind,
+                ));
+            }
+            return None;
+        }
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::Settings(
                 DesktopSettingsAction::CloseChildDialog,
@@ -21010,6 +21129,30 @@ impl DesktopLauncher {
             150.0,
             46.0,
         )
+    }
+
+    fn settings_keybind_rebind_dialog_rect(parent: RenderRect) -> RenderRect {
+        let width = (parent.width - 96.0).clamp(320.0, 420.0);
+        let height = 210.0;
+        RenderRect::new(
+            parent.x + (parent.width - width) * 0.5,
+            parent.y + (parent.height - height) * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn settings_keybind_rebind_cancel_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + (dialog.width - SETTINGS_BACK_BUTTON_WIDTH) * 0.5,
+            dialog.y + 18.0,
+            SETTINGS_BACK_BUTTON_WIDTH,
+            46.0,
+        )
+    }
+
+    fn settings_keybind_spec_by_name(name: &'static str) -> Option<&'static DesktopKeybindSpec> {
+        SETTINGS_KEYBIND_SPECS.iter().find(|spec| spec.name == name)
     }
 
     fn settings_keybind_category_label(category: &'static str) -> &'static str {
@@ -22394,8 +22537,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::StartKeyRebind(name) => {
                 self.last_settings_rebind_key = Some(name);
-                self.settings_keybind_overrides
-                    .insert(name, "waiting for key...".into());
+                self.settings_keybind_search_focused = false;
             }
             DesktopSettingsAction::ResetKey(name) => {
                 self.settings_keybind_overrides.remove(name);
@@ -22410,6 +22552,9 @@ impl DesktopLauncher {
             DesktopSettingsAction::FocusKeybindSearch => {
                 self.settings_keybind_search_focused = true;
                 self.settings_keybind_scroll_offset = 0;
+            }
+            DesktopSettingsAction::CancelKeyRebind => {
+                self.last_settings_rebind_key = None;
             }
             DesktopSettingsAction::ClearAllData
             | DesktopSettingsAction::ClearPlanetData
@@ -24748,6 +24893,11 @@ impl DesktopLauncher {
         for input in input_events {
             match input {
                 DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed && self.last_settings_rebind_key.is_some() =>
+                {
+                    self.commit_settings_keybind_rebind(key_code);
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed && Self::is_menu_back_key(key_code) =>
                 {
                     self.apply_menu_back_key();
@@ -24859,6 +25009,21 @@ impl DesktopLauncher {
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
                 {
                     if let Some(cursor) = self.last_menu_cursor {
+                        if self.last_settings_rebind_key.is_some() {
+                            if let Some(action) = self
+                                .active_menu_route_shell_action_at_surface_point(
+                                    surface_size,
+                                    cursor.x,
+                                    cursor.y,
+                                )
+                            {
+                                self.dispatch_menu_route_shell_action(action);
+                            } else {
+                                self.commit_settings_keybind_rebind(button);
+                            }
+                            self.last_menu_action = None;
+                            continue;
+                        }
                         self.last_menu_pressed_button =
                             self.menu_button_at_surface_point(surface_size, cursor.x, cursor.y);
                         self.last_settings_pressed_control = self.last_settings_hovered_control;
@@ -24916,6 +25081,15 @@ impl DesktopLauncher {
                     }
                 }
                 DesktopInputTickEvent::Scroll { delta_y, .. } => {
+                    if let Some(name) = self.last_settings_rebind_key {
+                        if Self::settings_keybind_spec_by_name(name)
+                            .map(|spec| spec.axis)
+                            .unwrap_or(false)
+                        {
+                            self.commit_settings_keybind_rebind("Scroll");
+                            continue;
+                        }
+                    }
                     if self.apply_settings_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -45469,16 +45643,50 @@ mod tests {
             ],
         );
         assert_eq!(launcher.last_settings_rebind_key, Some("move_x"));
+        assert!(!launcher.settings_keybind_overrides.contains_key("move_x"));
+        let rebind_frame = launcher.menu_graphics_frame_for_surface(3, viewport);
+        let rebind_texts = rebind_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("rebind dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(rebind_texts.contains(&"keybind.press.axis"));
+        assert!(rebind_texts.contains(&"@keybind.move_x.name"));
+        let reset_center =
+            DesktopLauncher::settings_keybind_reset_button_rect(child_dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                reset_center.x,
+                reset_center.y
+            ),
+            None,
+            "active rebind modal should block row reset behind it"
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "K".into(),
+                pressed: true,
+            }],
+        );
+        assert_eq!(launcher.last_settings_rebind_key, None);
         assert_eq!(
             launcher
                 .settings_keybind_overrides
                 .get("move_x")
                 .map(String::as_str),
-            Some("waiting for key...")
+            Some("K / K")
         );
 
-        let reset_center =
-            DesktopLauncher::settings_keybind_reset_button_rect(child_dialog, 0).center();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -45493,6 +45701,88 @@ mod tests {
             ],
         );
         assert_eq!(launcher.last_settings_rebind_key, None);
+        assert!(!launcher.settings_keybind_overrides.contains_key("move_x"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: rebind_center.x,
+                    y: rebind_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.last_settings_rebind_key, Some("move_x"));
+        let rebind_dialog = DesktopLauncher::settings_keybind_rebind_dialog_rect(child_dialog);
+        let cancel_rebind_center =
+            DesktopLauncher::settings_keybind_rebind_cancel_rect(rebind_dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                cancel_rebind_center.x,
+                cancel_rebind_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::CancelKeyRebind
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: cancel_rebind_center.x,
+                    y: cancel_rebind_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.last_settings_rebind_key, None);
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: rebind_center.x,
+                    y: rebind_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert_eq!(launcher.last_settings_rebind_key, None);
+        assert_eq!(
+            launcher
+                .settings_keybind_overrides
+                .get("move_x")
+                .map(String::as_str),
+            Some("Scroll / Scroll")
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: reset_center.x,
+                    y: reset_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
         assert!(!launcher.settings_keybind_overrides.contains_key("move_x"));
 
         launcher.apply_menu_input_events(
