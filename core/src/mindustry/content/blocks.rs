@@ -4846,6 +4846,43 @@ impl BlockDef {
         }
     }
 
+    pub fn base_mut(&mut self) -> &mut Block {
+        match self {
+            Self::Plain(block) => block,
+            Self::Floor(floor) => &mut floor.base,
+            Self::StaticWall(wall) => &mut wall.base,
+            Self::StaticTree(tree) => &mut tree.wall.base,
+            Self::TreeBlock(tree) => &mut tree.base,
+            Self::TallBlock(tall) => &mut tall.base,
+            Self::Prop(prop) => &mut prop.base,
+            Self::Ore(ore) => &mut ore.floor.base,
+            Self::Production(production) => &mut production.base,
+            Self::Storage(storage) => &mut storage.base,
+            Self::Turret(turret) => &mut turret.base,
+            Self::Crafting(crafting) => &mut crafting.base,
+            Self::DefenseWall(wall) => &mut wall.base,
+            Self::Effect(effect) => &mut effect.base,
+            Self::Distribution(distribution) => &mut distribution.base,
+            Self::Liquid(liquid) => &mut liquid.base,
+            Self::Power(power) => &mut power.base,
+            Self::UnitFactory(factory) => &mut factory.base,
+            Self::UnitReconstructor(reconstructor) => &mut reconstructor.base,
+            Self::UnitAssembler(assembler) => &mut assembler.base,
+            Self::UnitAssemblerModule(module) => &mut module.base,
+            Self::UnitRepairTower(tower) => &mut tower.base,
+            Self::Payload(payload) => &mut payload.base,
+            Self::PayloadMassDriver(driver) => &mut driver.base,
+            Self::PayloadDeconstructor(deconstructor) => &mut deconstructor.base,
+            Self::PayloadConstructor(constructor) => &mut constructor.base,
+            Self::PayloadLoader(loader) => &mut loader.base,
+            Self::Sandbox(sandbox) => &mut sandbox.base,
+            Self::Light(light) => &mut light.base,
+            Self::Legacy(legacy) => &mut legacy.base,
+            Self::Campaign(campaign) => &mut campaign.base,
+            Self::Logic(logic) => &mut logic.base,
+        }
+    }
+
     pub fn minimap_color_rgba_with<F>(
         &self,
         tile: Option<&Tile>,
@@ -12556,6 +12593,7 @@ fn register_crafting_blocks(registry: &mut BlockRegistry, items: &[Item], liquid
         craft.warmup_rate = 1000.0;
         craft.always_unlocked = true;
         craft.all_database_tabs = true;
+        craft.base.all_database_tabs = true;
         craft.ambient_sound = "none".into();
         craft.drawer = "DrawMulti(DrawDefault, DrawHeatOutput)".into();
     });
@@ -19480,6 +19518,7 @@ mod tests {
         assert_eq!(source.warmup_rate, 1000.0);
         assert!(source.always_unlocked);
         assert!(source.all_database_tabs);
+        assert!(source.base.all_database_tabs);
     }
 
     #[test]

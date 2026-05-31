@@ -15,6 +15,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 627. Block 接入 DatabaseDialog 页签投影与筛选
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.8%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 Java `Block extends UnlockableContent` 的 `databaseTabs/allDatabaseTabs` 语义不再只覆盖 item/unit 等非 block 内容。
+- Java 对照依据：
+  - `UnlockableContent.databaseTabs/allDatabaseTabs` 对所有 unlockable content 生效，`Block` 也是 `UnlockableContent`；
+  - `Planet.init()` 的 `techTree.addDatabaseTab(this)` 会把 planet tab 投影到整棵 tech tree，包括 blocks；
+  - `DatabaseDialog.rebuild()` 过滤时直接检查 `u.allDatabaseTabs || u.databaseTabs.contains(tab)`。
+- 本轮主改动：
+  - `core/src/mindustry/world/block.rs`
+    - `Block` 新增 `all_database_tabs` 与 `database_tabs`；
+    - 新增 `add_database_tab(...)` 与 `visible_on_database_tab(...)`，保持与 `UnlockableContentBase` 同步的基础语义。
+  - `core/src/mindustry/content/blocks.rs`
+    - `BlockDef` 新增 `base_mut()`，让内容注册/投影阶段可以统一写回所有 block 变体的 base；
+    - `heat-source` 的 sandbox/all-tab 语义同步到 `craft.base.all_database_tabs`，并补测试断言。
+  - `core/src/mindustry/content/mod.rs`
+    - `ContentCatalog::add_database_tab(...)` 的 `ContentType::Block` 分支写回 `BlockDef::base_mut().add_database_tab(...)`；
+    - 扩展 tech tree 页签投影测试，确认 `router -> serpulo`、`duct -> erekir`。
+  - `desktop/src/lib.rs`
+    - `database_content_database_tabs(...)` 开始消费 block base 的 `database_tabs`；
+    - `database_content_all_database_tabs(...)` 对 block 同时检查 `Block.base` 与旧 `CraftingBlockData` 过渡字段；
+    - DatabaseDialog 测试确认 `router` 可在 `serpulo` 页签中可见。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core catalog_projects_tech_tree_database_tabs_onto_content --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Block 的 `databaseCategory/databaseTag/hideDatabase/details/description/credit` 尚未完整统一到 `UnlockableContentBase`；
+  - `CraftingBlockData.all_database_tabs` 仍作为过渡字段保留，后续应继续收敛到 `Block.base`；
+  - DatabaseDialog 仍未完全按 Java `category -> tag -> records` 多层布局重排；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 626. DatabaseDialog 分类标题去除 Rust 调试计数
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

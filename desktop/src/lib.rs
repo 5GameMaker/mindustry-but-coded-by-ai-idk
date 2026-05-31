@@ -22024,6 +22024,10 @@ impl DesktopLauncher {
 
     fn database_content_database_tabs(&self, content_type: ContentType, name: &str) -> Vec<String> {
         match content_type {
+            ContentType::Block => self
+                .content_loader
+                .block_by_name(name)
+                .map(|block| block.base().database_tabs.clone()),
             ContentType::Item => self
                 .content_loader
                 .item_by_name(name)
@@ -22054,9 +22058,12 @@ impl DesktopLauncher {
             ContentType::Block => self
                 .content_loader
                 .block_by_name(name)
-                .is_some_and(|block| match block {
-                    BlockDef::Crafting(crafting) => crafting.all_database_tabs,
-                    _ => false,
+                .is_some_and(|block| {
+                    block.base().all_database_tabs
+                        || match block {
+                            BlockDef::Crafting(crafting) => crafting.all_database_tabs,
+                            _ => false,
+                        }
                 }),
             ContentType::Item => self
                 .content_loader
@@ -59544,6 +59551,14 @@ version: "2.0.0"
                 .all(|text| !text.contains(" | ")),
             "Java DatabaseDialog category headers are plain @database-category.* labels without Rust-side debug counts"
         );
+        assert!(
+            launcher
+                .database_content_database_tabs(ContentType::Block, "router")
+                .iter()
+                .any(|tab| tab == "serpulo"),
+            "Java Planet.init/addDatabaseTab projects tech-tree planets onto block databaseTabs"
+        );
+        assert!(launcher.database_content_visible_on_tab(ContentType::Block, "router", "serpulo"));
 
         let search = DesktopLauncher::database_search_rect_for_panel(panel).center();
         assert_eq!(

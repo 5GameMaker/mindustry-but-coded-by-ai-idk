@@ -30,6 +30,8 @@ pub struct Block {
     pub id: BlockId,
     pub name: String,
     pub localized_name: Option<String>,
+    pub all_database_tabs: bool,
+    pub database_tabs: Vec<String>,
 
     pub has_items: bool,
     pub has_liquids: bool,
@@ -131,6 +133,8 @@ impl Block {
             id,
             name: name.into(),
             localized_name: None,
+            all_database_tabs: false,
+            database_tabs: Vec::new(),
             has_items: false,
             has_liquids: false,
             has_power: false,
@@ -252,6 +256,19 @@ impl Block {
 
     pub fn display_name(&self) -> &str {
         self.localized_name.as_deref().unwrap_or(&self.name)
+    }
+
+    pub fn add_database_tab(&mut self, tab: impl Into<String>) {
+        let tab = tab.into();
+        if !self.database_tabs.iter().any(|existing| existing == &tab) {
+            self.database_tabs.push(tab);
+        }
+    }
+
+    pub fn visible_on_database_tab(&self, tab: &str) -> bool {
+        tab == "sun"
+            || self.all_database_tabs
+            || self.database_tabs.iter().any(|entry| entry == tab)
     }
 
     pub fn can_replace(&self, other: &Block) -> bool {

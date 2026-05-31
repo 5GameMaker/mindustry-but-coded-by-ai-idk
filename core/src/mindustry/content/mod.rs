@@ -123,6 +123,13 @@ impl ContentCatalog {
 
     fn add_database_tab(&mut self, content_type: ContentType, name: &str, tab: &str) {
         match content_type {
+            ContentType::Block => {
+                if let Some(id) = self.blocks.id_by_name(name) {
+                    if let Some(block) = self.blocks.get_mut(id) {
+                        block.base_mut().add_database_tab(tab);
+                    }
+                }
+            }
             ContentType::Item => {
                 if let Some(item) = self.item_by_name_mut(name) {
                     item.base.add_database_tab(tab);
@@ -597,8 +604,22 @@ mod tests {
     fn catalog_projects_tech_tree_database_tabs_onto_content() {
         let catalog = ContentCatalog::load_base_content();
         let graphite_tabs = &catalog.item_by_name("graphite").unwrap().base.database_tabs;
+        let router_tabs = &catalog
+            .blocks
+            .get_by_name("router")
+            .unwrap()
+            .base()
+            .database_tabs;
+        let duct_tabs = &catalog
+            .blocks
+            .get_by_name("duct")
+            .unwrap()
+            .base()
+            .database_tabs;
 
         assert!(graphite_tabs.iter().any(|tab| tab == "serpulo"));
         assert!(graphite_tabs.iter().any(|tab| tab == "erekir"));
+        assert!(router_tabs.iter().any(|tab| tab == "serpulo"));
+        assert!(duct_tabs.iter().any(|tab| tab == "erekir"));
     }
 }
