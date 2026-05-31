@@ -21929,6 +21929,15 @@ impl DesktopLauncher {
         }
     }
 
+    fn database_content_is_banned(&self, content_type: ContentType, name: &str) -> bool {
+        self.game_state.is_game()
+            && match content_type {
+                ContentType::Block => self.game_state.rules.is_block_banned(name),
+                ContentType::Unit => self.game_state.rules.is_unit_banned(name),
+                _ => false,
+            }
+    }
+
     fn database_content_visible_in_dialog(&self, content_type: ContentType, name: &str) -> bool {
         !self.database_content_is_hidden(content_type, name)
             && !self.database_content_hide_database(content_type, name)
@@ -22054,6 +22063,115 @@ impl DesktopLauncher {
                         .contains(&search)
             })
             .collect()
+    }
+
+    fn database_hovered_content_cell_for_panel(
+        &self,
+        panel: RenderRect,
+    ) -> Option<(ContentType, usize, String, RenderRect)> {
+        if self.last_database_content_opened.is_some() {
+            return None;
+        }
+        let point = self.last_menu_cursor?;
+        let visible_columns = ((panel.width - 56.0 + DATABASE_CONTENT_CELL_GAP)
+            / (DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP))
+            .floor()
+            .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
+            as usize;
+
+        for (category_index, content_type) in self
+            .database_route_content_types()
+            .into_iter()
+            .take(DATABASE_VISIBLE_CATEGORIES)
+            .enumerate()
+        {
+            let header = Self::database_category_header_rect_for_panel(panel, category_index);
+            if header.y < panel.y + 42.0 {
+                break;
+            }
+            for (item_index, (record_index, name)) in self
+                .database_visible_records_for_type(content_type)
+                .into_iter()
+                .take(visible_columns)
+                .enumerate()
+            {
+                let cell =
+                    Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
+                if cell.contains_point(point) && self.database_content_unlocked(content_type, name)
+                {
+                    return Some((content_type, record_index, name.to_string(), cell));
+                }
+            }
+        }
+        None
+    }
+
+    fn push_database_content_hover_tooltip(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some((content_type, _, name, cell)) =
+            self.database_hovered_content_cell_for_panel(panel)
+        else {
+            return;
+        };
+        let Some(cursor) = self.last_menu_cursor else {
+            return;
+        };
+        let display_name = self.database_content_display_name(content_type, &name);
+        let raw_name_visible = self.menu_console_setting_enabled && display_name != name;
+        let text_width = display_name.len().max(name.len()) as f32 * 7.0;
+        let tooltip_width = (text_width + 28.0).clamp(110.0, 300.0);
+        let tooltip_height = if raw_name_visible { 48.0 } else { 32.0 };
+        let tooltip_x = (cursor.x + 14.0)
+            .min(panel.right() - tooltip_width - 4.0)
+            .max(panel.x + 4.0);
+        let tooltip_y = (cursor.y + 14.0)
+            .min(panel.y + panel.height - tooltip_height - 4.0)
+            .max(panel.y + 4.0);
+        let tooltip = RenderRect::new(tooltip_x, tooltip_y, tooltip_width, tooltip_height);
+
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            tooltip,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            Layer::END_PIXELED + 0.078,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tooltip,
+            [0.42, 0.58, 0.70, 0.94],
+            1.0,
+            Layer::END_PIXELED + 0.079,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            cell,
+            [0.86, 0.94, 1.0, 0.98],
+            2.0,
+            Layer::END_PIXELED + 0.079,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            display_name,
+            RenderPoint::new(tooltip.x + 12.0, tooltip.y + tooltip.height - 15.0),
+            [0.94, 0.98, 1.0, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.080,
+        ));
+        if raw_name_visible {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("[gray]{name}"),
+                RenderPoint::new(tooltip.x + 12.0, tooltip.y + 14.0),
+                [0.58, 0.66, 0.74, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.080,
+            ));
+        }
     }
 
     fn database_route_lines(&self) -> Vec<String> {
@@ -30454,20 +30572,36 @@ impl DesktopLauncher {
                 let cell =
                     Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
                 let icon_symbol = self.database_content_icon_symbol(content_type, name);
-                pass.push(RenderCommand::draw_sprite(
-                    icon_symbol,
-                    cell,
-                    [0.80, 0.84, 0.88, 0.96],
-                    0.0,
-                    Layer::END_PIXELED + 0.035 + category_index as f32 * 0.001,
-                ));
+                let unlocked = self.database_content_unlocked(content_type, name);
+                let banned = self.database_content_is_banned(content_type, name);
+                let hovered = unlocked
+                    && self
+                        .last_menu_cursor
+                        .is_some_and(|cursor| cell.contains_point(cursor));
+                if unlocked {
+                    pass.push(RenderCommand::draw_sprite(
+                        icon_symbol,
+                        cell,
+                        if hovered {
+                            [1.0, 1.0, 1.0, 1.0]
+                        } else {
+                            [0.80, 0.84, 0.88, 0.96]
+                        },
+                        0.0,
+                        Layer::END_PIXELED + 0.035 + category_index as f32 * 0.001,
+                    ));
+                }
                 pass.push(RenderCommand::stroke_rect(
                     cell,
-                    [0.34, 0.48, 0.58, 0.82],
-                    1.0,
+                    if hovered {
+                        [0.86, 0.94, 1.0, 0.96]
+                    } else {
+                        [0.34, 0.48, 0.58, 0.82]
+                    },
+                    if hovered { 2.0 } else { 1.0 },
                     Layer::END_PIXELED + 0.036 + category_index as f32 * 0.001,
                 ));
-                if !self.database_content_unlocked(content_type, name) {
+                if !unlocked {
                     pass.push(RenderCommand::draw_text_styled(
                         desktop_ui_icon_glyph_or_label("lock", "lock"),
                         cell.center(),
@@ -30481,9 +30615,38 @@ impl DesktopLauncher {
                             .with_outline(true),
                         Layer::END_PIXELED + 0.037 + category_index as f32 * 0.001,
                     ));
+                } else if banned {
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label("cancel", "cancel"),
+                        cell.center(),
+                        [0.96, 0.20, 0.16, 0.98],
+                        20.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        Layer::END_PIXELED + 0.038 + category_index as f32 * 0.001,
+                    ));
+                } else if self.game_state.patcher.is_patched() {
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label("fileSmall", "fileSmall"),
+                        RenderPoint::new(cell.right() - 7.0, cell.y + 7.0),
+                        [1.0, 1.0, 1.0, 0.55],
+                        12.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        Layer::END_PIXELED + 0.038 + category_index as f32 * 0.001,
+                    ));
                 }
             }
         }
+        self.push_database_content_hover_tooltip(pass, panel);
         self.push_database_content_info_dialog(pass, panel);
     }
 
@@ -59054,6 +59217,96 @@ version: "2.0.0"
         );
         assert!(launcher.database_search.is_empty());
         let item_cell = DesktopLauncher::database_content_cell_rect_for_panel(panel, 0, 0).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: item_cell.x,
+                y: item_cell.y,
+            }],
+        );
+        let hover_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let hover_commands = hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("database hover frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let hover_texts = hover_commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            hover_texts.iter().any(|text| text.eq_ignore_ascii_case("copper")),
+            "Java DatabaseDialog shows a tooltip with the localized content name while hovering an unlocked icon"
+        );
+        assert!(hover_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::StrokeRect { rect, thickness, .. }
+                if *rect == first_cell && (*thickness - 2.0).abs() < f32::EPSILON
+        )));
+
+        launcher
+            .game_state
+            .patcher
+            .patches
+            .push("test-patch".into());
+        let patched_grid_frame = launcher.menu_graphics_frame_for_surface(2, viewport);
+        let patched_grid_texts = patched_grid_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("patched database grid frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let patched_icon = super::desktop_ui_icon_glyph_or_label("fileSmall", "fileSmall");
+        assert!(
+            patched_grid_texts.contains(&patched_icon.as_str()),
+            "Java DatabaseDialog overlays Icon.fileSmall on patched content cells"
+        );
+
+        let first_block_name = launcher
+            .database_visible_records_for_type(ContentType::Block)
+            .first()
+            .map(|(_, name)| (*name).to_string())
+            .expect("base content should expose at least one block in DatabaseDialog");
+        launcher.game_state.set(GameStateState::Playing);
+        launcher
+            .game_state
+            .rules
+            .banned_blocks
+            .insert(first_block_name);
+        let banned_frame = launcher.menu_graphics_frame_for_surface(3, viewport);
+        let banned_texts = banned_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("banned database grid frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let cancel_icon = super::desktop_ui_icon_glyph_or_label("cancel", "cancel");
+        assert!(
+            banned_texts.contains(&cancel_icon.as_str()),
+            "Java DatabaseDialog stacks Icon.cancel over banned block/unit content while in-game"
+        );
+        launcher.game_state.set(GameStateState::Menu);
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -59078,11 +59331,6 @@ version: "2.0.0"
         assert!(detail_lines.contains(&"@info.title".to_string()));
         assert!(detail_lines.contains(&"content: item / copper".to_string()));
 
-        launcher
-            .game_state
-            .patcher
-            .patches
-            .push("test-patch".into());
         let detail_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
         let detail_commands = detail_frame
             .bundle

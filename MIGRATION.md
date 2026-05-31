@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 621. DatabaseDialog 补 hover tooltip、patched 文件角标与 banned 红叉
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.1%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是提升 DatabaseDialog 内容格子的原版交互质感。
+- Java 对照依据：
+  - `DatabaseDialog.rebuild()` 中已解锁内容在非移动端 hover 时从 `Color.lightGray` 渐近 `Color.white`，并带 Tooltip；
+  - 游戏内 banned 内容通过 `Icon.cancel` scarlet 红叉叠在原图/锁图上；
+  - patched 内容通过右下角 `Icon.fileSmall` 半透明角标提示。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_content_is_banned(...)`，先覆盖 Java 已有规则中的 block/unit ban；
+    - 新增 `database_hovered_content_cell_for_panel(...)` 与 `push_database_content_hover_tooltip(...)`；
+    - Database 内容格现在对 unlocked hover 使用白色 tint 与加粗边框，并显示 localized name tooltip，console 开关启用时附 raw name；
+    - locked 内容改为只显示锁图标，不再把内容图标垫在锁下面，更接近 Java `new Image(Icon.lock, Pal.gray)`；
+    - 游戏内 banned block/unit 显示 `Icon.cancel` 红叉；
+    - 当前全局 patcher 有 patch 时，内容格右下显示 `Icon.fileSmall` 角标，后续仍需细化到 Java `isPatched(content)`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+- 仍未完成：
+  - `DataPatcherState` 仍是全局 patch 状态，不是 Java 的逐 content patch 判定；
+  - Shift-click 复制 unicode、完整 hand cursor 行为、`databaseCategory/databaseTag` 正式分组与 tab 来源仍待迁移。
+
 ## 620. 主菜单信息提示拆出 showInfo-like 弹层
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
