@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 593. LoadDialog/SaveDialog 存档卡片预览放大
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.3%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 Load/Save 存档列表从压缩小行继续推向 Java `LoadDialog` 的大 preview 卡片密度。
+- Java 对照依据：
+  - `LoadDialog.rebuild()` 中每个 `TextButton(Styles.grayt)` 先放 160f 的 `BorderImage(previewTexture/nomap)`，右侧再放 map/mode/wave/autosave/playtime/date；
+  - 当前 Rust 旧卡片高度 82、preview 约 62，观感更像压缩列表，不像 Java 存档卡。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `LOAD_SLOT_CARD_HEIGHT` 从 82 提升到 112，卡片 gap 同步放大；
+    - 新增 `load_game_slot_preview_rect(...)`，统一渲染与测试的 preview rect；
+    - preview 改为随卡片高度放大，文本起点改为 `preview.right() + 12`，避免放大后文字压到缩略图；
+    - 更新 LoadDialog 搜索/滚动测试，锁定 preview 不退回旧 62px 压缩尺寸。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_creates_and_overwrites_save_slots --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_new_save_input_contract_matches_upstream_savegame --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Java `LoadDialog` 在宽屏下按 `Core.graphics.getWidth()/470` 多列排布，Rust 仍是单列窗口；
+  - 预览图还没有完整的 `BorderImage` 四边框/Scaling.fit 行为；
+  - slot 卡片内部 meta 文本仍是简化排版，后续需要继续对齐 Java Table 行。
+
 ## 592. Settings Data 页动作区改为内层 dataDialog 风格
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

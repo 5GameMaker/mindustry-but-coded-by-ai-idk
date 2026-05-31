@@ -170,8 +170,8 @@ const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
-const LOAD_SLOT_CARD_HEIGHT: f32 = 82.0;
-const LOAD_SLOT_CARD_GAP: f32 = 8.0;
+const LOAD_SLOT_CARD_HEIGHT: f32 = 112.0;
+const LOAD_SLOT_CARD_GAP: f32 = 10.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const LOAD_SEARCH_TEXT_MAX_LENGTH: usize = 50;
 const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
@@ -24295,6 +24295,11 @@ impl DesktopLauncher {
         card.y >= list.y + 4.0 && card.right() <= list.right() + f32::EPSILON
     }
 
+    fn load_game_slot_preview_rect(card: RenderRect) -> RenderRect {
+        let size = (card.height - 20.0).clamp(62.0, 160.0);
+        RenderRect::new(card.x + 10.0, card.y + 10.0, size, size)
+    }
+
     fn load_game_slot_action_button_rect(card: RenderRect, action_index: usize) -> RenderRect {
         RenderRect::new(
             card.right() - 38.0 - action_index as f32 * 36.0,
@@ -32999,7 +33004,7 @@ impl DesktopLauncher {
                 1.0,
                 Layer::END_PIXELED + 0.031 + visible_index as f32 * 0.0001,
             ));
-            let preview = RenderRect::new(rect.x + 10.0, rect.y + 10.0, 62.0, rect.height - 20.0);
+            let preview = Self::load_game_slot_preview_rect(rect);
             if let Some(preview_symbol) = self.load_game_slot_preview_symbol_if_loaded(slot) {
                 pass.push(RenderCommand::draw_sprite(
                     "whiteui",
@@ -33041,10 +33046,11 @@ impl DesktopLauncher {
                 1.0,
                 Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.0001,
             ));
+            let text_x = preview.right() + 12.0;
             let title = self.load_game_slot_display_title(slot);
             pass.push(RenderCommand::draw_text_styled(
                 format!("[accent]{title}"),
-                RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 20.0),
+                RenderPoint::new(text_x, rect.y + rect.height - 22.0),
                 [0.90, 0.96, 1.0, 1.0],
                 13.0,
                 0.0,
@@ -33056,7 +33062,7 @@ impl DesktopLauncher {
             ));
             pass.push(RenderCommand::draw_text_styled(
                 Self::load_game_slot_map_line(slot),
-                RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 42.0),
+                RenderPoint::new(text_x, rect.y + rect.height - 46.0),
                 [0.66, 0.76, 0.84, 1.0],
                 11.0,
                 0.0,
@@ -33072,7 +33078,7 @@ impl DesktopLauncher {
                     Self::load_game_slot_playtime_line(slot),
                     Self::load_game_slot_date_line(slot)
                 ),
-                RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 60.0),
+                RenderPoint::new(text_x, rect.y + rect.height - 68.0),
                 [0.54, 0.64, 0.72, 1.0],
                 9.0,
                 0.0,
@@ -33083,7 +33089,7 @@ impl DesktopLauncher {
             ));
             pass.push(RenderCommand::draw_text_styled(
                 Self::load_game_slot_autosave_line(slot),
-                RenderPoint::new(rect.x + 84.0, rect.y + 14.0),
+                RenderPoint::new(text_x, rect.y + 18.0),
                 [0.48, 0.60, 0.68, 1.0],
                 8.0,
                 0.0,
@@ -59380,11 +59386,10 @@ version: "2.0.0"
         );
         let preview_slot = &launcher.load_game_slots[filtered[0]];
         let visible_card = DesktopLauncher::load_game_slot_card_rect_for_panel(panel, 0);
-        let preview_rect = RenderRect::new(
-            visible_card.x + 10.0,
-            visible_card.y + 10.0,
-            62.0,
-            visible_card.height - 20.0,
+        let preview_rect = DesktopLauncher::load_game_slot_preview_rect(visible_card);
+        assert!(
+            preview_rect.width > 62.0 && visible_card.height > 82.0,
+            "LoadDialog save cards should stay closer to Java's large preview-card density instead of the old compressed list"
         );
         let preview_symbol = DesktopLauncher::settings_drawable_symbol("nomap");
         let preview_label = DesktopLauncher::load_game_slot_preview_symbol(preview_slot);
