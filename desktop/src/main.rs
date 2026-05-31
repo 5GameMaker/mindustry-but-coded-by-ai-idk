@@ -194,7 +194,11 @@ struct DesktopNativeVisibleFallbackRect {
 fn desktop_native_opengl_submit_needs_visible_fallback(
     driver_state: &mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState,
     invalid_draw_commands: usize,
+    native_errors: &[String],
 ) -> bool {
+    if !native_errors.is_empty() {
+        return true;
+    }
     if driver_state.draw_commands == 0 && driver_state.resolve_draw_commands == 0 {
         return true;
     }
@@ -2588,8 +2592,11 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
                 }
             }
         }
-        if desktop_native_opengl_submit_needs_visible_fallback(&driver_state, invalid_draw_commands)
-        {
+        if desktop_native_opengl_submit_needs_visible_fallback(
+            &driver_state,
+            invalid_draw_commands,
+            frame_native_errors,
+        ) {
             desktop_native_trace_summary("runtime.submit: drawing native visible fallback overlay");
             self.draw_visible_fallback_overlay();
         }
@@ -2946,7 +2953,9 @@ mod tests {
     fn native_opengl_visible_fallback_covers_empty_or_invalid_draw_frames() {
         let empty = mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState::default();
         assert!(desktop_native_opengl_submit_needs_visible_fallback(
-            &empty, 0
+            &empty,
+            0,
+            &[]
         ));
 
         let invalid = mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
@@ -2954,10 +2963,19 @@ mod tests {
             ..Default::default()
         };
         assert!(desktop_native_opengl_submit_needs_visible_fallback(
-            &invalid, 3
+            &invalid,
+            3,
+            &[]
         ));
         assert!(!desktop_native_opengl_submit_needs_visible_fallback(
-            &invalid, 1
+            &invalid,
+            1,
+            &[]
+        ));
+        assert!(desktop_native_opengl_submit_needs_visible_fallback(
+            &invalid,
+            1,
+            &["shader program link failed".into()]
         ));
 
         let rects = desktop_native_visible_fallback_rects(

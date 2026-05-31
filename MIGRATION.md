@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 642. 原生渲染黑屏兜底与菜单随机种子推进
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.4%**，仍未达到完整可玩；继续优先前端/UI 与黑屏风险收敛，当前闭环目标是让原生 OpenGL 首帧出现 shader/texture/program 等 native 错误时强制画可见兜底，同时让主菜单背景不再固定为单一 seed。
+- Java 对照依据：
+  - 上游 `MenuRenderer.generate()` 每次构造菜单世界时使用运行时随机链，首屏背景/飞行单位不应永远固定；
+  - 上游桌面启动有多级 OpenGL/Shader 容错，Rust 当前 native runtime 若已有部分 draw command 但 native shader/program/texture 报错，容易只剩黑屏且不触发可见兜底。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `desktop_native_opengl_submit_needs_visible_fallback(...)` 增加 `native_errors` 输入；
+    - 只要本帧出现 native OpenGL 错误，即使仍记录到部分 draw command，也强制绘制 `draw_visible_fallback_overlay()`，避免“窗口打开但全黑且没有提示”；
+    - 回归测试覆盖“部分 draw 有效但 shader 错误时仍需要 fallback overlay”。
+  - `desktop/src/lib.rs`
+    - 新增 `desktop_default_menu_seed()`，优先读取 `MINDUSTRY_MENU_SEED`（支持十进制与 `0x` 十六进制）用于可复现测试/排查；
+    - 未指定 seed 时从 `SystemTime` 与进程 id 派生菜单 seed，减少主菜单背景/飞行单位固定不变导致的“非原版味道”。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl_visible_fallback_covers_empty_or_invalid_draw_frames`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_logo_and_version_overlay --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 原生 OpenGL 上下文版本矩阵仍未完全复刻 Java `DesktopLauncher` 的多版本/Intel fallback；
+  - 菜单背景生成算法仍未完全对齐 Java `Mathf.random/Simplex/Ridged/Structs.random`，当前只是先去掉固定 seed 的明显差异；
+  - 资源根/atlas 像素上传失败时还需要更精细的窗口标题诊断；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 641. 主菜单首屏 runtime 输入与 BE check 可见性对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

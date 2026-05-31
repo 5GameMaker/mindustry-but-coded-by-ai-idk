@@ -16980,6 +16980,29 @@ fn default_desktop_texture_atlas(
     )
 }
 
+fn desktop_default_menu_seed() -> u64 {
+    if let Ok(seed) = std::env::var("MINDUSTRY_MENU_SEED") {
+        let seed = seed.trim();
+        if let Ok(value) = seed.parse::<u64>() {
+            return value;
+        }
+        if let Some(hex) = seed.strip_prefix("0x").or_else(|| seed.strip_prefix("0X")) {
+            if let Ok(value) = u64::from_str_radix(hex, 16) {
+                return value;
+            }
+        }
+    }
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| {
+            duration.as_secs().rotate_left(32)
+                ^ duration.subsec_nanos() as u64
+                ^ std::process::id() as u64
+        })
+        .unwrap_or(7)
+}
+
 fn content_icon_candidate_virtual_source_paths(content_loader: &ContentLoader) -> Vec<String> {
     let mut paths = Vec::new();
 
@@ -17109,7 +17132,10 @@ impl DesktopLauncher {
             floor_renderer_state: FloorRendererState::default(),
             fog_renderer_state: FogRendererState::default(),
             minimap_renderer_state: MinimapRendererState::new(MinimapWorldSize::new(0, 0)),
-            menu_renderer_state: MenuRendererState::new(MenuRendererConfig::new(false, 7)),
+            menu_renderer_state: MenuRendererState::new(MenuRendererConfig::new(
+                false,
+                desktop_default_menu_seed(),
+            )),
             last_menu_cursor: None,
             last_menu_hovered_button: None,
             last_menu_pressed_button: None,
@@ -40989,7 +41015,8 @@ impl DesktopLauncher {
         self.floor_renderer_state = FloorRendererState::default();
         self.fog_renderer_state = FogRendererState::default();
         self.minimap_renderer_state = MinimapRendererState::new(MinimapWorldSize::new(0, 0));
-        self.menu_renderer_state = MenuRendererState::new(MenuRendererConfig::new(false, 7));
+        self.menu_renderer_state =
+            MenuRendererState::new(MenuRendererConfig::new(false, desktop_default_menu_seed()));
         self.last_menu_cursor = None;
         self.last_menu_hovered_button = None;
         self.last_menu_pressed_button = None;
