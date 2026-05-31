@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 567. LoadDialog 导出存档 FileChooser 与文件复制
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.9%**，仍未达到完整可玩；继续把 LoadDialog 槽位按钮接入真实 save I/O。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 的 export 子按钮调用 `platform.export("save-" + slot.getName(), saveExtension, slot::exportFile)`；
+  - `core/src/mindustry/game/Saves.java` 的 `SaveSlot.exportFile(Fi to)` 将 slot 文件复制到目标。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGameExportResult` 与 `last_load_game_export_request/result`；
+    - `dispatch_load_game_slot_action_kind_with_platform(..., Export)` 现在会创建保存模式 `.msav` `FileChooserRequest`，标题形如 `save-<slot name>`；
+    - 新增 `export_load_game_save_file_to(...)`，将 slot primary `.msav` 复制到选中目标，并自动补 `.msav` 后缀；
+    - 扩展存档路由测试，验证 export request、真实文件复制、result 记录与导出内容一致。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - Java 的平台 export 回调/文件保存对话框完成事件还需接入真实桌面事件流；
+  - rename、SaveDialog/覆盖确认仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 566. LoadDialog 导入存档选中文件后的真实导入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

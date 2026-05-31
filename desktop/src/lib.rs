@@ -2702,6 +2702,16 @@ pub struct DesktopLoadGameImportResult {
     pub status: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopLoadGameExportResult {
+    pub slot: String,
+    pub source: String,
+    pub destination: String,
+    pub map_name: Option<String>,
+    pub timestamp: i64,
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DesktopMenuChromeLayoutOptions {
     console_shown: bool,
@@ -15940,6 +15950,8 @@ pub struct DesktopLauncher {
     pub load_game_error: Option<String>,
     pub last_load_game_import_request: Option<FileChooserRequest>,
     pub last_load_game_import_result: Option<DesktopLoadGameImportResult>,
+    pub last_load_game_export_request: Option<FileChooserRequest>,
+    pub last_load_game_export_result: Option<DesktopLoadGameExportResult>,
     pub load_game_search: String,
     pub load_game_search_focused: bool,
     pub load_game_scroll_offset: usize,
@@ -16763,6 +16775,8 @@ impl DesktopLauncher {
             load_game_error: None,
             last_load_game_import_request: None,
             last_load_game_import_result: None,
+            last_load_game_export_request: None,
+            last_load_game_export_result: None,
             load_game_search: String::new(),
             load_game_search_focused: false,
             load_game_scroll_offset: 0,
@@ -23691,6 +23705,16 @@ impl DesktopLauncher {
         slot_index: usize,
         kind: DesktopLoadGameActionKind,
     ) -> Option<DesktopLoadGameAction> {
+        let mut platform = DefaultPlatform;
+        self.dispatch_load_game_slot_action_kind_with_platform(slot_index, kind, &mut platform)
+    }
+
+    fn dispatch_load_game_slot_action_kind_with_platform<P: Platform>(
+        &mut self,
+        slot_index: usize,
+        kind: DesktopLoadGameActionKind,
+        platform: &mut P,
+    ) -> Option<DesktopLoadGameAction> {
         let slot = self.load_game_slots.get(slot_index)?.clone();
         let status = match kind {
             DesktopLoadGameActionKind::Load => "selected-for-load",
@@ -23732,6 +23756,10 @@ impl DesktopLauncher {
                         .saturating_sub(1),
                 );
             }
+        } else if kind == DesktopLoadGameActionKind::Export {
+            let title = format!("save-{}", Self::load_game_slot_title(&slot));
+            let request = platform.show_file_chooser(false, &title, "msav");
+            self.last_load_game_export_request = Some(request);
         }
         self.last_load_game_action = Some(action.clone());
         Some(action)
@@ -23797,6 +23825,58 @@ impl DesktopLauncher {
             status: "imported".into(),
         };
         self.last_load_game_import_result = Some(result.clone());
+        Ok(result)
+    }
+
+    fn normalize_load_game_export_destination(destination: impl AsRef<Path>) -> PathBuf {
+        let destination = destination.as_ref();
+        if destination
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("msav"))
+        {
+            destination.to_path_buf()
+        } else {
+            let mut normalized = destination.to_path_buf();
+            normalized.set_extension("msav");
+            normalized
+        }
+    }
+
+    fn export_load_game_save_file_to(
+        &mut self,
+        slot_index: usize,
+        destination: impl AsRef<Path>,
+    ) -> Result<DesktopLoadGameExportResult, String> {
+        let slot = self
+            .load_game_slots
+            .get(slot_index)
+            .cloned()
+            .ok_or_else(|| format!("missing save slot {slot_index}"))?;
+        let destination = Self::normalize_load_game_export_destination(destination);
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("failed to create export dir {}: {error}", parent.display())
+            })?;
+        }
+        std::fs::copy(&slot.file, &destination).map_err(|error| {
+            let message = format!(
+                "failed to export save {} -> {}: {error}",
+                slot.file.display(),
+                destination.display()
+            );
+            self.load_game_error = Some(message.clone());
+            message
+        })?;
+        let result = DesktopLoadGameExportResult {
+            slot: slot.index(),
+            source: slot.file.display().to_string(),
+            destination: destination.display().to_string(),
+            map_name: slot.meta.as_ref().and_then(|meta| meta.map_name.clone()),
+            timestamp: slot.timestamp(),
+            status: "exported".into(),
+        };
+        self.last_load_game_export_result = Some(result.clone());
         Ok(result)
     }
 
@@ -34524,7 +34604,8 @@ mod tests {
         ClientUnitItemMirror, ClientUnitPayloadMirror,
     };
     use mindustry_core::mindustry::core::{
-        GameRuntime, GameRuntimeNetworkContext, GameStateState, Platform, WorldLoadEventKind,
+        FileChooserRequest, GameRuntime, GameRuntimeNetworkContext, GameStateState, Platform,
+        WorldLoadEventKind,
     };
     use mindustry_core::mindustry::ctype::ContentType;
     use mindustry_core::mindustry::ctype::{Content, ContentId};
@@ -54028,6 +54109,36 @@ version: "2.0.0"
             .load_game_slots
             .iter()
             .any(|slot| DesktopLauncher::load_game_slot_title(slot) == "Imported Map"));
+
+        let mut platform = RecordingPlatform::default();
+        let export_action = launcher
+            .dispatch_load_game_slot_action_kind_with_platform(
+                0,
+                super::DesktopLoadGameActionKind::Export,
+                &mut platform,
+            )
+            .expect("imported save should request export");
+        assert_eq!(export_action.kind, super::DesktopLoadGameActionKind::Export);
+        assert_eq!(export_action.status, "export");
+        assert_eq!(
+            launcher.last_load_game_export_request,
+            Some(FileChooserRequest::new(false, "save-Imported Map", "msav"))
+        );
+        let export_target = root.join("exported-save");
+        let exported = launcher
+            .export_load_game_save_file_to(0, &export_target)
+            .expect("export should copy save file");
+        assert!(exported.destination.ends_with("exported-save.msav"));
+        assert_eq!(exported.map_name.as_deref(), Some("Imported Map"));
+        assert_eq!(exported.status, "exported");
+        assert_eq!(
+            launcher.last_load_game_export_result,
+            Some(exported.clone())
+        );
+        assert_eq!(
+            std::fs::read(save_dir.join("0.msav")).expect("imported save should exist"),
+            std::fs::read(root.join("exported-save.msav")).expect("exported save should exist")
+        );
 
         std::fs::remove_dir_all(root).ok();
     }
