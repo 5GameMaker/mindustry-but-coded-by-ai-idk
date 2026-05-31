@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 562. LoadDialog 搜索与完整槽位滚动窗口
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.4%**，仍未达到完整可玩；继续优先前端/UI，让 LoadDialog 从“前 4 个静态卡片”推进到可搜索、可滚动的真实列表窗口。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 打开时重置搜索并聚焦搜索框；
+  - `LoadDialog` 使用搜索过滤、`ScrollPane` 纵向滚动、按时间倒序列出全部存档，而不是隐藏后续槽位。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_game_search`、`load_game_search_focused`、`load_game_scroll_offset`，进入 `LoadGame` 路由时刷新存档并重置搜索/滚动；
+    - 新增 `FocusLoadGameSearch` / `ClearLoadGameSearch` 路由动作，并接入文本输入、Backspace/Delete、右键清空搜索；
+    - `filtered_load_game_slot_indices()` 按标题、slot index 与文件名过滤存档；
+    - LoadGame 面板改为更接近原版的较大列表对话框，新增 list pane、结果数、`@back`、搜索文本显示、空搜索结果；
+    - `load_game_slot_at_surface_point(...)` 现在使用过滤结果和滚动偏移，滚轮在列表区域内推进窗口；
+    - 新增回归测试覆盖搜索、滚动、过滤后 hit-test 与渲染文本。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - 每个存档槽位的 autosave/delete/rename/export 子按钮还未接入；
+  - `@save.import`、真实删除/重命名/导出/覆盖确认与 SaveDialog 仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 561. ModsBrowser 按钮命中与平台动作闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

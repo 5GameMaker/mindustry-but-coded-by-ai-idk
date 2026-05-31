@@ -2561,6 +2561,8 @@ pub enum DesktopMenuRouteShellAction {
     MapListFilter(DesktopMapListFilterAction),
     FocusMapListSearch,
     ClearMapListSearch,
+    FocusLoadGameSearch,
+    ClearLoadGameSearch,
     MapCard(DesktopMapCardAction),
     CloseMapCardDialog,
     CloseMapPlayHelp,
@@ -15915,6 +15917,9 @@ pub struct DesktopLauncher {
     pub load_game_slots: Vec<SaveSlotRecord>,
     pub last_load_game_action: Option<DesktopLoadGameAction>,
     pub load_game_error: Option<String>,
+    pub load_game_search: String,
+    pub load_game_search_focused: bool,
+    pub load_game_scroll_offset: usize,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
     pub load_renderer_state: LoadRendererState,
@@ -16733,6 +16738,9 @@ impl DesktopLauncher {
             load_game_slots: Vec::new(),
             last_load_game_action: None,
             load_game_error: None,
+            load_game_search: String::new(),
+            load_game_search_focused: false,
+            load_game_scroll_offset: 0,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
             load_renderer_state: LoadRendererState::default(),
@@ -20494,6 +20502,7 @@ impl DesktopLauncher {
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
+            self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
             self.last_menu_dispatch = None;
@@ -20527,6 +20536,7 @@ impl DesktopLauncher {
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
+            self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
             let dispatch = DesktopMenuActionDispatch {
@@ -20554,6 +20564,7 @@ impl DesktopLauncher {
                 self.tech_tree_selected_node = None;
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_list_search_focused = false;
+                self.load_game_search_focused = false;
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
                 self.last_custom_menu_action = Some(DesktopCustomMenuAction {
@@ -20594,6 +20605,7 @@ impl DesktopLauncher {
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
+            self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
             None
@@ -20625,6 +20637,9 @@ impl DesktopLauncher {
                 self.about_route_page = DesktopAboutRoutePage::Links;
             } else if route == DesktopMenuRoute::LoadGame {
                 self.refresh_load_game_slots();
+                self.load_game_search.clear();
+                self.load_game_search_focused = true;
+                self.load_game_scroll_offset = 0;
             } else if route == DesktopMenuRoute::Settings {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
                 self.settings_child_dialog = None;
@@ -20664,6 +20679,7 @@ impl DesktopLauncher {
             self.mods_browser_sort_date = false;
             self.tech_tree_selected_node = None;
             self.map_list_search_focused = false;
+            self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
         }
@@ -20760,24 +20776,47 @@ impl DesktopLauncher {
         if let Some(error) = self.load_game_error.as_ref() {
             return vec![format!("save slots: error"), error.clone()];
         }
+        let filtered_indices = self.filtered_load_game_slot_indices();
         let mut lines = vec![format!("save slots: {}", self.load_game_slots.len())];
+        if !self.load_game_search.is_empty() {
+            lines.push(format!(
+                "search: {} matches {}",
+                self.load_game_search,
+                filtered_indices.len()
+            ));
+        }
         if self.load_game_slots.is_empty() {
             lines.push("empty: no valid .msav files found".into());
             lines.push(format!("dir: {}", self.client.context.paths.save_dir));
             return lines;
         }
-        for (index, slot) in self.load_game_slots.iter().take(4).enumerate() {
+        if filtered_indices.is_empty() {
+            lines.push("empty: @none.found".into());
+            return lines;
+        }
+        for (visible_index, slot_index) in filtered_indices
+            .iter()
+            .skip(self.load_game_scroll_offset)
+            .take(4)
+            .enumerate()
+        {
+            let Some(slot) = self.load_game_slots.get(*slot_index) else {
+                continue;
+            };
             let title = Self::load_game_slot_title(slot);
             let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
             lines.push(format!(
-                "#{index} {} | wave {} | saved {}",
+                "#{visible_index} {} | wave {} | saved {}",
                 title,
                 wave,
                 slot.timestamp()
             ));
         }
-        if self.load_game_slots.len() > 4 {
-            lines.push(format!("more: {} hidden", self.load_game_slots.len() - 4));
+        if self.load_game_scroll_offset > 0 {
+            lines.push(format!("scroll: {}", self.load_game_scroll_offset));
+        }
+        if filtered_indices.len() > 4 {
+            lines.push(format!("more: {} hidden", filtered_indices.len() - 4));
         }
         lines
     }
@@ -23446,16 +23485,61 @@ impl DesktopLauncher {
         )
     }
 
-    fn load_game_slot_card_rect_for_panel(panel: RenderRect, slot_index: usize) -> RenderRect {
+    fn load_game_list_rect_for_panel(panel: RenderRect) -> RenderRect {
         let search = Self::load_game_search_rect_for_panel(panel);
-        let top =
-            search.y - 16.0 - slot_index as f32 * (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP);
         RenderRect::new(
             panel.x + 28.0,
-            top - LOAD_SLOT_CARD_HEIGHT,
+            panel.y + 28.0,
             panel.width - 56.0,
+            (search.y - panel.y - 48.0).max(LOAD_SLOT_CARD_HEIGHT),
+        )
+    }
+
+    fn load_game_slot_card_rect_for_panel(panel: RenderRect, slot_index: usize) -> RenderRect {
+        let list = Self::load_game_list_rect_for_panel(panel);
+        let top =
+            list.y + list.height - slot_index as f32 * (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP);
+        RenderRect::new(
+            list.x,
+            top - LOAD_SLOT_CARD_HEIGHT,
+            list.width,
             LOAD_SLOT_CARD_HEIGHT,
         )
+    }
+
+    fn load_game_slot_card_visible_in_list(list: RenderRect, card: RenderRect) -> bool {
+        card.y >= list.y + 4.0 && card.right() <= list.right() + f32::EPSILON
+    }
+
+    fn load_game_visible_slot_capacity_for_list(list: RenderRect) -> usize {
+        ((list.height + LOAD_SLOT_CARD_GAP) / (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP))
+            .floor()
+            .max(1.0) as usize
+    }
+
+    fn filtered_load_game_slot_indices(&self) -> Vec<usize> {
+        let query = schematic_search_normalize(&self.load_game_search);
+        self.load_game_slots
+            .iter()
+            .enumerate()
+            .filter_map(|(index, slot)| {
+                if query.is_empty()
+                    || schematic_search_normalize(&Self::load_game_slot_title(slot))
+                        .contains(&query)
+                    || schematic_search_normalize(&slot.index()).contains(&query)
+                    || slot
+                        .file
+                        .file_name()
+                        .and_then(|file| file.to_str())
+                        .map(schematic_search_normalize)
+                        .is_some_and(|file| file.contains(&query))
+                {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     fn load_game_slot_at_surface_point(
@@ -23468,15 +23552,20 @@ impl DesktopLauncher {
             return None;
         }
         let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::LoadGame);
+        let list = Self::load_game_list_rect_for_panel(panel);
         let point = RenderPoint::new(x, y);
-        self.load_game_slots
-            .iter()
-            .take(4)
+        let start = self.load_game_scroll_offset;
+        self.filtered_load_game_slot_indices()
+            .into_iter()
+            .skip(start)
             .enumerate()
-            .find(|(index, _)| {
-                Self::load_game_slot_line_rect_for_viewport(viewport, *index).contains_point(point)
+            .find(|(visible_index, _)| {
+                let card = Self::load_game_slot_card_rect_for_panel(panel, *visible_index);
+                Self::load_game_slot_card_visible_in_list(list, card) && card.contains_point(point)
             })
-            .map(|(index, _)| index)
+            .map(|(_, slot_index)| slot_index)
     }
 
     fn dispatch_load_game_slot_action(
@@ -23493,6 +23582,53 @@ impl DesktopLauncher {
         };
         self.last_load_game_action = Some(action.clone());
         Some(action)
+    }
+
+    fn max_load_game_scroll_offset_for_counts(total_slots: usize, visible_slots: usize) -> usize {
+        total_slots.saturating_sub(visible_slots.max(1))
+    }
+
+    fn max_load_game_scroll_offset(&self, list: RenderRect) -> usize {
+        Self::max_load_game_scroll_offset_for_counts(
+            self.filtered_load_game_slot_indices().len(),
+            Self::load_game_visible_slot_capacity_for_list(list),
+        )
+    }
+
+    fn apply_load_game_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        if self.active_menu_route != Some(DesktopMenuRoute::LoadGame) {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::LoadGame);
+        let list = Self::load_game_list_rect_for_panel(panel);
+        if !list.contains_point(cursor) {
+            return false;
+        }
+        let max = self.max_load_game_scroll_offset(list);
+        if max == 0 {
+            return false;
+        }
+        let current = self.load_game_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.load_game_scroll_offset = next;
+        next != current
     }
 
     fn active_menu_route_shell_panel_for_viewport(viewport: RenderViewport) -> RenderRect {
@@ -23543,6 +23679,16 @@ impl DesktopLauncher {
         if route == DesktopMenuRoute::TechTree {
             let panel_width = (viewport.width * 0.70).clamp(420.0, 780.0);
             let panel_height = (viewport.height - 110.0).clamp(360.0, 650.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
+        if route == DesktopMenuRoute::LoadGame {
+            let panel_width = (viewport.width * 0.62).clamp(380.0, 720.0);
+            let panel_height = (viewport.height - 130.0).clamp(340.0, 620.0);
             return RenderRect::new(
                 viewport.x + viewport.width - panel_width - 48.0,
                 viewport.y + (viewport.height - panel_height) * 0.5,
@@ -25473,6 +25619,16 @@ impl DesktopLauncher {
                 return Some(action);
             }
         }
+        if route == DesktopMenuRoute::LoadGame {
+            let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
+            let point = RenderPoint::new(x, y);
+            if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseRoute);
+            }
+            if Self::load_game_search_rect_for_panel(panel).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
+            }
+        }
         if matches!(
             route,
             DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
@@ -25873,6 +26029,14 @@ impl DesktopLauncher {
                 self.map_list_search.clear();
                 self.map_list_scroll_offset = 0;
                 self.map_list_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::FocusLoadGameSearch => {
+                self.load_game_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::ClearLoadGameSearch => {
+                self.load_game_search.clear();
+                self.load_game_scroll_offset = 0;
+                self.load_game_search_focused = true;
             }
             DesktopMenuRouteShellAction::MapCard(action) => {
                 if self.map_list_cards.get(action.index).is_some() {
@@ -29633,6 +29797,14 @@ impl DesktopLauncher {
 
     fn push_load_game_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         let search = Self::load_game_search_rect_for_panel(panel);
+        let list = Self::load_game_list_rect_for_panel(panel);
+        self.push_settings_text_button(
+            pass,
+            Self::route_back_button_rect_for_panel(panel),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.024,
+        );
         pass.push(RenderCommand::draw_sprite(
             Self::settings_text_button_symbol("grayt", false, false),
             search,
@@ -29653,9 +29825,17 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.03,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@save.search",
+            if self.load_game_search.is_empty() {
+                "@save.search".to_string()
+            } else {
+                self.load_game_search.clone()
+            },
             RenderPoint::new(search.x + 44.0, search.center().y),
-            [0.60, 0.70, 0.78, 1.0],
+            if self.load_game_search.is_empty() {
+                [0.60, 0.70, 0.78, 1.0]
+            } else {
+                [0.90, 0.96, 1.0, 1.0]
+            },
             12.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Start)
@@ -29679,10 +29859,41 @@ impl DesktopLauncher {
             return;
         }
 
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            list,
+            [1.0, 1.0, 1.0, 0.58],
+            0.0,
+            Layer::END_PIXELED + 0.026,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            list,
+            [0.30, 0.42, 0.50, 0.82],
+            1.0,
+            Layer::END_PIXELED + 0.027,
+        ));
+
+        let filtered_indices = self.filtered_load_game_slot_indices();
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "{} / {}",
+                filtered_indices.len(),
+                self.load_game_slots.len()
+            ),
+            RenderPoint::new(search.right() - 8.0, search.center().y),
+            [0.56, 0.68, 0.78, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::End)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.031,
+        ));
+
         if self.load_game_slots.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
                 "@save.none",
-                RenderPoint::new(panel.x + panel.width * 0.5, search.y - 42.0),
+                list.center(),
                 [0.70, 0.78, 0.84, 1.0],
                 13.0,
                 0.0,
@@ -29694,20 +29905,44 @@ impl DesktopLauncher {
             return;
         }
 
-        for (index, slot) in self.load_game_slots.iter().take(4).enumerate() {
-            let rect = Self::load_game_slot_card_rect_for_panel(panel, index);
+        if filtered_indices.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@none.found",
+                list.center(),
+                [0.70, 0.78, 0.84, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.032,
+            ));
+            return;
+        }
+
+        let start = self
+            .load_game_scroll_offset
+            .min(self.max_load_game_scroll_offset(list));
+        for (visible_index, slot_index) in filtered_indices.into_iter().skip(start).enumerate() {
+            let Some(slot) = self.load_game_slots.get(slot_index) else {
+                continue;
+            };
+            let rect = Self::load_game_slot_card_rect_for_panel(panel, visible_index);
+            if !Self::load_game_slot_card_visible_in_list(list, rect) {
+                continue;
+            }
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_text_button_symbol("grayt", false, false),
                 rect,
                 [1.0, 1.0, 1.0, 0.92],
                 0.0,
-                Layer::END_PIXELED + 0.03 + index as f32 * 0.0001,
+                Layer::END_PIXELED + 0.03 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::stroke_rect(
                 rect,
                 [0.34, 0.48, 0.58, 0.86],
                 1.0,
-                Layer::END_PIXELED + 0.031 + index as f32 * 0.0001,
+                Layer::END_PIXELED + 0.031 + visible_index as f32 * 0.0001,
             ));
             let preview = RenderRect::new(rect.x + 10.0, rect.y + 10.0, 62.0, rect.height - 20.0);
             pass.push(RenderCommand::draw_sprite(
@@ -29715,13 +29950,13 @@ impl DesktopLauncher {
                 preview,
                 [0.12, 0.16, 0.20, 0.94],
                 0.0,
-                Layer::END_PIXELED + 0.032 + index as f32 * 0.0001,
+                Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::stroke_rect(
                 preview,
                 [0.52, 0.62, 0.70, 0.78],
                 1.0,
-                Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
+                Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.0001,
             ));
             let title = Self::load_game_slot_title(slot);
             let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
@@ -29735,7 +29970,7 @@ impl DesktopLauncher {
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
                     .with_outline(true),
-                Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+                Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 format!("slot {} | @save.wave {wave}", slot.index()),
@@ -29746,7 +29981,7 @@ impl DesktopLauncher {
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
-                Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+                Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 format!("saved {}", slot.timestamp()),
@@ -29757,7 +29992,21 @@ impl DesktopLauncher {
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
-                Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+                Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
+            ));
+        }
+        let max_scroll = self.max_load_game_scroll_offset(list);
+        if max_scroll > 0 {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{}/{}", start + 1, max_scroll + 1),
+                RenderPoint::new(list.right() - 26.0, list.y + 16.0),
+                [0.54, 0.64, 0.72, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.045,
             ));
         }
     }
@@ -30064,6 +30313,19 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+                        && self.load_game_search_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.load_game_search.pop();
+                    } else {
+                        self.load_game_search.clear();
+                    }
+                    self.load_game_scroll_offset = 0;
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && matches!(
                             self.active_menu_route,
                             Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -30203,6 +30465,20 @@ impl DesktopLauncher {
                                 continue;
                             }
                         }
+                        if self.active_menu_route == Some(DesktopMenuRoute::LoadGame) {
+                            let viewport = self.default_render_viewport_for_surface(surface_size);
+                            let panel = Self::active_menu_route_shell_panel_for_route(
+                                viewport,
+                                DesktopMenuRoute::LoadGame,
+                            );
+                            if Self::load_game_search_rect_for_panel(panel).contains_point(cursor) {
+                                self.dispatch_menu_route_shell_action(
+                                    DesktopMenuRouteShellAction::ClearLoadGameSearch,
+                                );
+                                self.last_menu_action = None;
+                                continue;
+                            }
+                        }
                     }
                 }
                 DesktopInputTickEvent::MouseButton { button, pressed }
@@ -30309,6 +30585,9 @@ impl DesktopLauncher {
                     if self.apply_settings_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
+                    if self.apply_load_game_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                     if self.apply_map_list_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
@@ -30348,6 +30627,12 @@ impl DesktopLauncher {
                     {
                         self.schematic_search
                             .extend(text.chars().filter(|ch| !ch.is_control()));
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::LoadGame)
+                        && self.load_game_search_focused
+                    {
+                        self.load_game_search
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
+                        self.load_game_scroll_offset = 0;
                     } else if self.active_menu_route == Some(DesktopMenuRoute::Mods)
                         && self.mods_browser_dialog_open
                     {
@@ -53432,6 +53717,127 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(card_rects.contains(&slot_card));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_load_game_route_supports_search_and_scroll_window() {
+        fn write_save_fixture(
+            save_dir: &std::path::Path,
+            index: usize,
+            map_name: &str,
+            saved: i64,
+            wave: i32,
+        ) {
+            let mut tags = BTreeMap::new();
+            tags.insert("mapname".into(), map_name.to_string());
+            tags.insert("saved".into(), saved.to_string());
+            tags.insert("wave".into(), wave.to_string());
+            let mut bytes = Vec::new();
+            write_deflated_save_meta_prefix(&mut bytes, LATEST_SAVE_VERSION, &tags)
+                .expect("save meta should encode");
+            std::fs::write(save_dir.join(format!("{index}.msav")), bytes)
+                .expect("save should write");
+        }
+
+        let root = temp_desktop_path("load-game-search-scroll");
+        let save_dir = root.join("saves");
+        std::fs::create_dir_all(&save_dir).expect("save fixture dir should be writable");
+        for index in 1..=7 {
+            write_save_fixture(
+                &save_dir,
+                index,
+                &format!("Map {index}"),
+                100 + index as i64,
+                index as i32,
+            );
+        }
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.save_dir = save_dir.display().to_string();
+        launcher.dispatch_menu_action(MenuButtonRole::LoadGame);
+        assert_eq!(launcher.load_game_slots.len(), 7);
+        assert_eq!(launcher.filtered_load_game_slot_indices().len(), 7);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::LoadGame,
+        );
+        let list = DesktopLauncher::load_game_list_rect_for_panel(panel);
+        assert!(
+            DesktopLauncher::load_game_visible_slot_capacity_for_list(list)
+                < launcher.load_game_slots.len(),
+            "fixture should require vertical scrolling"
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: list.center().x,
+                    y: list.center().y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert_eq!(launcher.load_game_scroll_offset, 1);
+        let top_slot = DesktopLauncher::load_game_slot_line_rect_for_viewport(viewport, 0).center();
+        assert_eq!(
+            launcher.load_game_slot_at_surface_point(surface, top_slot.x, top_slot.y),
+            Some(1),
+            "scroll offset should shift card hit-test to the second filtered save"
+        );
+
+        let search = DesktopLauncher::load_game_search_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, search.x, search.y),
+            Some(super::DesktopMenuRouteShellAction::FocusLoadGameSearch)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::FocusLoadGameSearch,
+        );
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("Map 2".into())]);
+        assert_eq!(launcher.load_game_search, "Map 2");
+        assert_eq!(launcher.load_game_scroll_offset, 0);
+        let filtered = launcher.filtered_load_game_slot_indices();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(
+            launcher.load_game_slots[filtered[0]]
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.map_name.as_deref()),
+            Some("Map 2")
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("load game frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"Map 2"));
+        assert!(texts.contains(&"[accent]Map 2"));
+        assert!(!texts.contains(&"[accent]Map 7"));
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ClearLoadGameSearch,
+        );
+        assert!(launcher.load_game_search.is_empty());
+        assert_eq!(launcher.filtered_load_game_slot_indices().len(), 7);
 
         std::fs::remove_dir_all(root).ok();
     }
