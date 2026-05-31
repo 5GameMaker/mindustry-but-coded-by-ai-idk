@@ -19614,6 +19614,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - custom submenu 的 Scene2D Table/Style 细节仍需继续向 Java 对齐；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 564. MenuFragment 桌面按钮 marginLeft(11f) 闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.6%**，仍未达到完整可玩；继续优先前端/UI，把桌面主菜单按钮内容的内部左边距对齐 Java `MenuFragment.buttons(...)`。
+- Java 对照依据：
+  - `MenuFragment.buttons(...)` 创建桌面按钮后调用 `.marginLeft(11f)`；
+  - 该 margin 影响图标和文字在 `Styles.flatToggleMenut` 按钮内的起点，不改变按钮 hitbox。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MENU_DESKTOP_BUTTON_MARGIN_LEFT = 11.0`；
+    - 桌面按钮 icon/label 的绘制 x 坐标统一加上该 margin；
+    - built-in 与 custom desktop button 共用同一偏移，保持主菜单和 custom submenu 视觉一致；
+    - 测试更新为断言 icon/label 实际绘制位置包含 Java `marginLeft(11f)`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - submenu 锚点还未接 `Core.scene.marginTop/marginBottom`；
+  - logo/macnotch/scene margin 与移动端 gutter 仍需继续精确对齐；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

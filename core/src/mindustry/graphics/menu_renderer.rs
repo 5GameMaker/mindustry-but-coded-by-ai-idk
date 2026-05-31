@@ -20,6 +20,7 @@ pub const MENU_SUBMENU_FADE_IN_SECONDS: f32 = 0.15;
 pub const MENU_SUBMENU_FADE_OUT_SECONDS: f32 = 0.2;
 pub const MENU_DESKTOP_BUTTON_WIDTH: f32 = 230.0;
 pub const MENU_DESKTOP_BUTTON_HEIGHT: f32 = 70.0;
+pub const MENU_DESKTOP_BUTTON_MARGIN_LEFT: f32 = 11.0;
 pub const MENU_DESKTOP_BUTTON_ICON_X: f32 = 30.0;
 pub const MENU_DESKTOP_BUTTON_LABEL_GAP: f32 = 23.0;
 pub const MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE: f32 = 14.0;
@@ -762,7 +763,9 @@ impl MenuUiPlan {
                     )
                 } else {
                     RenderPoint::new(
-                        button.rect.x + MENU_DESKTOP_BUTTON_ICON_X,
+                        button.rect.x
+                            + MENU_DESKTOP_BUTTON_MARGIN_LEFT
+                            + MENU_DESKTOP_BUTTON_ICON_X,
                         button.rect.center().y,
                     )
                 };
@@ -794,7 +797,10 @@ impl MenuUiPlan {
             } else if icon_name.is_some() {
                 (
                     RenderPoint::new(
-                        button.rect.x + MENU_DESKTOP_BUTTON_ICON_X + MENU_DESKTOP_BUTTON_LABEL_GAP,
+                        button.rect.x
+                            + MENU_DESKTOP_BUTTON_MARGIN_LEFT
+                            + MENU_DESKTOP_BUTTON_ICON_X
+                            + MENU_DESKTOP_BUTTON_LABEL_GAP,
                         button.rect.center().y,
                     ),
                     RenderTextStyle::new(RenderTextAlign::Start)
@@ -2724,7 +2730,12 @@ mod tests {
                 command,
                 RenderCommand::DrawText { text, position, style, .. }
                     if text == &play_icon
-                        && (position.x - (rect.x + MENU_DESKTOP_BUTTON_ICON_X)).abs() < f32::EPSILON
+                        && (position.x
+                            - (rect.x
+                                + MENU_DESKTOP_BUTTON_MARGIN_LEFT
+                                + MENU_DESKTOP_BUTTON_ICON_X))
+                            .abs()
+                            < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Center
             )
         }));
@@ -2733,7 +2744,13 @@ mod tests {
                 command,
                 RenderCommand::DrawText { text, position, style, .. }
                     if text == "Play"
-                        && (position.x - (rect.x + MENU_DESKTOP_BUTTON_ICON_X + MENU_DESKTOP_BUTTON_LABEL_GAP)).abs() < f32::EPSILON
+                        && (position.x
+                            - (rect.x
+                                + MENU_DESKTOP_BUTTON_MARGIN_LEFT
+                                + MENU_DESKTOP_BUTTON_ICON_X
+                                + MENU_DESKTOP_BUTTON_LABEL_GAP))
+                            .abs()
+                            < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Start
             )
         }));
@@ -3043,6 +3060,36 @@ mod tests {
                 command,
                 RenderCommand::DrawText { text, .. }
                     if text == &menu_icon_text("add")
+            )
+        }));
+        let render_commands = plan.ui.to_render_commands();
+        assert!(render_commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, position, style, .. }
+                    if text == &menu_icon_text("add")
+                        && (position.x
+                            - (custom.rect.x
+                                + MENU_DESKTOP_BUTTON_MARGIN_LEFT
+                                + MENU_DESKTOP_BUTTON_ICON_X))
+                            .abs()
+                            < f32::EPSILON
+                        && style.horizontal_align == RenderTextAlign::Center
+            )
+        }));
+        assert!(render_commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, position, style, .. }
+                    if text == "SERVER BROWSER"
+                        && (position.x
+                            - (custom.rect.x
+                                + MENU_DESKTOP_BUTTON_MARGIN_LEFT
+                                + MENU_DESKTOP_BUTTON_ICON_X
+                                + MENU_DESKTOP_BUTTON_LABEL_GAP))
+                            .abs()
+                            < f32::EPSILON
+                        && style.horizontal_align == RenderTextAlign::Start
             )
         }));
     }
