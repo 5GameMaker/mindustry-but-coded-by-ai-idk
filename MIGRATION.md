@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 577. HostDialog 路由、PaletteDialog 色块与暂停 UI 视口修正
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **68.2%**，仍未达到完整可玩；继续优先前端/UI，目标是把暂停菜单 `@hostserver` 从占位弹层推进为可交互 `HostDialog` 路由，并修正暂停/route overlay 使用世界小视口导致 UI 命中与显示偏移的问题。
+- Java 对照依据：
+  - `HostDialog.java` 的标题为 `@hostserver`，包含 `@name`、颜色按钮/`PaletteDialog`、端口 `@server.port`、非 Steam `?/@host.info`、Steam `@steam.friendsonly` 和 `@host`；
+  - 名称最大 40 字符，端口最大 5 位且必须落在 Java 端口有效范围内；
+  - 非 Steam 首次打开会提示 `@host.info`，Steam 分支才显示 `@steam.friendsonly`；
+  - 暂停菜单里打开子 dialog 时 UI 应按窗口/scene 尺寸布局，而不是被 16x16 world render viewport 压缩到角落。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRoute::Host`、Host 路由状态、Host 输入焦点、错误状态、info seen、颜色选择弹层状态；
+    - `@hostserver` 从暂停菜单打开 `HostDialog` route shell，不再停留在旧的 modal 占位；
+    - Host 路由渲染 `@name`、玩家颜色色块、`@server.port`、非 Steam `?`、Steam-only `@steam.friendsonly`、`@host`；
+    - 色块点击打开简化 `PaletteDialog` 网格，可选择颜色并写入 `player.color` 与 `color-0` settings mirror；
+    - 名称/端口输入分别限制 40/5，端口只接受数字，`@host` 在端口无效时使用 disabled 视觉并不响应鼠标点击；
+    - HostRun 写回 `name`、`port`、`game.steampublichost` 过渡 settings mirror，并设置本地 player admin；真实 `net.host(...)` 后续继续接；
+    - `default_render_viewport_for_surface(...)` 在 paused 或 active route overlay 时改用 surface viewport，避免 world viewport 太小时暂停 UI/HostDialog 坐标重叠、离屏或误命中。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib paused_world_overlay -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_menu_frame_for_render_uses_menu_payload_without_world_bundle -- --nocapture`
+- 仍未完成：
+  - `HostRun` 仍未接真实 `net.host(port)`、`HostEvent`、SteamAdmin、public lobby 更新与异常映射；
+  - `PaletteDialog` 仍是简化色块网格，未完全复刻 Java palette 样式/持久化后端；
+  - UI 视口修正先覆盖暂停/route overlay，完整世界 HUD、minimap、renderer surface/world viewport 分离仍需继续审查；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 576. PausedDialog 状态分支、子弹层与退出确认推进
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

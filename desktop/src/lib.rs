@@ -174,6 +174,18 @@ const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const LOAD_SEARCH_TEXT_MAX_LENGTH: usize = 50;
 const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
 const SAVE_NEW_TEXT_MAX_LENGTH: usize = 30;
+const HOST_NAME_TEXT_MAX_LENGTH: usize = 40;
+const HOST_PORT_TEXT_MAX_LENGTH: usize = 5;
+const HOST_PALETTE_COLORS: [u32; 8] = [
+    0xffd3_7fff,
+    0xff8f_4fff,
+    0xff55_55ff,
+    0xffd3_55ff,
+    0xfff3_6fff,
+    0xf4d3_5eff,
+    0x9cff_57ff,
+    0x55c8_ffff,
+];
 const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
 const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
@@ -247,6 +259,7 @@ pub struct DesktopConnectTarget {
 pub enum DesktopMenuRoute {
     Campaign,
     Join,
+    Host,
     CustomGame,
     SaveGame,
     LoadGame,
@@ -679,6 +692,7 @@ impl DesktopMenuRoute {
         match self {
             Self::Campaign => "CAMPAIGN",
             Self::Join => "JOIN GAME",
+            Self::Host => "@hostserver",
             Self::CustomGame => "CUSTOM GAME",
             Self::SaveGame => "@savegame",
             Self::LoadGame => "@loadgame",
@@ -697,6 +711,7 @@ impl DesktopMenuRoute {
         match self {
             Self::Campaign => "PlanetDialog",
             Self::Join => "JoinDialog",
+            Self::Host => "HostDialog",
             Self::CustomGame => "CustomGameDialog",
             Self::SaveGame => "SaveDialog",
             Self::LoadGame => "LoadDialog",
@@ -2567,6 +2582,15 @@ pub enum DesktopMenuRouteShellAction {
     CloseRoute,
     LaunchCampaign,
     ConnectJoin,
+    FocusHostName,
+    FocusHostPort,
+    ToggleHostFriendsOnly,
+    OpenHostColorPicker,
+    CloseHostColorPicker,
+    SelectHostColor(usize),
+    OpenHostInfo,
+    CloseHostInfo,
+    HostRun,
     OpenJoinAddServer,
     CloseJoinAddServer,
     RefreshJoinServers,
@@ -2664,7 +2688,6 @@ struct DesktopPausedOverlayButtonSpec {
 enum DesktopPausedOverlayModal {
     Objective,
     Abandon,
-    Host,
     WorldProcessors,
     QuitConfirm,
 }
@@ -16060,6 +16083,15 @@ pub struct DesktopLauncher {
     pub launch_animation_state: LaunchAnimationState,
     pub connect_target: Option<DesktopConnectTarget>,
     pub connect_error: Option<String>,
+    pub host_name_text: String,
+    pub host_port_text: String,
+    pub host_friends_only: bool,
+    pub host_name_focused: bool,
+    pub host_port_focused: bool,
+    pub host_info_dialog_open: bool,
+    pub host_info_seen: bool,
+    pub host_color_picker_open: bool,
+    pub host_error: Option<String>,
     pub join_add_dialog_open: bool,
     pub join_refresh_requests: u32,
     pub mods_directory_arg: Option<String>,
@@ -16896,6 +16928,15 @@ impl DesktopLauncher {
             launch_animation_state: LaunchAnimationState::default(),
             connect_target,
             connect_error: None,
+            host_name_text: String::new(),
+            host_port_text: DEFAULT_MINDUSTRY_PORT.to_string(),
+            host_friends_only: false,
+            host_name_focused: false,
+            host_port_focused: false,
+            host_info_dialog_open: false,
+            host_info_seen: false,
+            host_color_picker_open: false,
+            host_error: None,
             join_add_dialog_open: false,
             join_refresh_requests: 0,
             mods_directory_arg,
@@ -17547,7 +17588,10 @@ impl DesktopLauncher {
         surface_size: DesktopSurfaceSize,
     ) -> RenderViewport {
         let viewport = self.default_render_viewport();
-        if self.has_renderable_world_for_default_frame() {
+        if self.has_renderable_world_for_default_frame()
+            && !self.game_state.is_paused()
+            && self.active_menu_route.is_none()
+        {
             return viewport;
         }
 
@@ -24486,6 +24530,16 @@ impl DesktopLauncher {
                 panel_height,
             );
         }
+        if route == DesktopMenuRoute::Host {
+            let panel_width = (viewport.width * 0.58).clamp(360.0, 640.0);
+            let panel_height = (viewport.height - 160.0).clamp(300.0, 520.0);
+            return RenderRect::new(
+                viewport.x + viewport.width - panel_width - 48.0,
+                viewport.y + (viewport.height - panel_height) * 0.5,
+                panel_width,
+                panel_height,
+            );
+        }
         if route == DesktopMenuRoute::Database {
             let panel_width = (viewport.width * 0.68).clamp(380.0, 760.0);
             let panel_height = (viewport.height - 130.0).clamp(330.0, 620.0);
@@ -24812,6 +24866,17 @@ impl DesktopLauncher {
                 self.settings_scroll_drag_state = None;
                 self.settings_scroll_offsets.clear();
             }
+            DesktopMenuRoute::Host => {
+                self.host_name_text = self.host_name_setting_or_player_name();
+                self.host_port_text = self.host_port_setting_or_default();
+                self.host_friends_only = !self.host_steam_public_host();
+                self.host_name_focused = true;
+                self.host_port_focused = false;
+                self.host_color_picker_open = false;
+                self.host_info_dialog_open = !self.host_steam_enabled() && !self.host_info_seen;
+                self.host_info_seen |= self.host_info_dialog_open;
+                self.host_error = None;
+            }
             DesktopMenuRoute::Join => {}
             _ => {}
         }
@@ -24958,6 +25023,106 @@ impl DesktopLauncher {
             panel.y + 18.0,
             ROUTE_BACK_BUTTON_WIDTH.min((panel.width - 56.0).max(1.0)),
             ROUTE_BACK_BUTTON_HEIGHT,
+        )
+    }
+
+    fn host_steam_enabled(&self) -> bool {
+        self.setting_override_value("platform", "steam")
+            .is_some_and(|value| matches!(value, "true" | "1" | "steam"))
+    }
+
+    fn host_steam_public_host(&self) -> bool {
+        self.setting_effective_value("game", "steampublichost")
+            .is_some_and(|value| matches!(value.as_str(), "true" | "1"))
+    }
+
+    fn host_port_text_is_valid(text: &str) -> bool {
+        text.trim()
+            .parse::<u16>()
+            .is_ok_and(|port| (1..=u16::MAX).contains(&port))
+    }
+
+    fn host_port_is_valid(&self) -> bool {
+        Self::host_port_text_is_valid(&self.host_port_text)
+    }
+
+    fn host_name_setting_or_player_name(&self) -> String {
+        self.settings_overrides
+            .get("name")
+            .filter(|name| !name.trim().is_empty())
+            .cloned()
+            .or_else(|| (!self.player.name.trim().is_empty()).then(|| self.player.name.clone()))
+            .unwrap_or_else(|| "Player".into())
+    }
+
+    fn host_port_setting_or_default(&self) -> String {
+        self.settings_overrides
+            .get("port")
+            .filter(|port| Self::host_port_text_is_valid(port))
+            .cloned()
+            .unwrap_or_else(|| DEFAULT_MINDUSTRY_PORT.to_string())
+    }
+
+    fn host_route_name_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.x + 48.0,
+            panel.y + panel.height - 136.0,
+            panel.width - 96.0,
+            40.0,
+        )
+    }
+
+    fn host_route_color_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let name = Self::host_route_name_rect_for_panel(panel);
+        RenderRect::new(name.right() - 44.0, name.y + 4.0, 32.0, 32.0)
+    }
+
+    fn host_route_friends_only_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let name = Self::host_route_name_rect_for_panel(panel);
+        RenderRect::new(name.x, name.y - 52.0, 220.0, 38.0)
+    }
+
+    fn host_route_port_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let friends = Self::host_route_friends_only_rect_for_panel(panel);
+        RenderRect::new(friends.x, friends.y - 54.0, 220.0, 40.0)
+    }
+
+    fn host_route_info_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let port = Self::host_route_port_rect_for_panel(panel);
+        RenderRect::new(port.right() + 12.0, port.y + 2.0, 36.0, 36.0)
+    }
+
+    fn host_route_host_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let port = Self::host_route_port_rect_for_panel(panel);
+        RenderRect::new(panel.x + panel.width - 48.0 - 180.0, port.y, 180.0, 42.0)
+    }
+
+    fn host_route_palette_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        RenderRect::new(
+            panel.center().x - 190.0,
+            panel.center().y - 118.0,
+            380.0,
+            236.0,
+        )
+    }
+
+    fn host_route_palette_color_rect_for_dialog(dialog: RenderRect, index: usize) -> RenderRect {
+        let col = index % 4;
+        let row = index / 4;
+        RenderRect::new(
+            dialog.x + 54.0 + col as f32 * 70.0,
+            dialog.y + 76.0 + row as f32 * 58.0,
+            48.0,
+            40.0,
+        )
+    }
+
+    fn host_route_palette_close_rect_for_dialog(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.center().x - 72.0,
+            dialog.bottom() - 54.0,
+            144.0,
+            38.0,
         )
     }
 
@@ -26287,6 +26452,77 @@ impl DesktopLauncher {
         None
     }
 
+    fn host_route_shell_action_at_surface_point(
+        &self,
+        viewport: RenderViewport,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Host);
+        let point = RenderPoint::new(x, y);
+        if self.host_info_dialog_open {
+            let dialog = RenderRect::new(
+                panel.center().x - 210.0,
+                panel.center().y - 76.0,
+                420.0,
+                152.0,
+            );
+            if Self::route_back_button_rect_for_panel(panel).contains_point(point)
+                || Self::host_route_info_button_rect_for_panel(panel).contains_point(point)
+                || Self::host_route_palette_close_rect_for_dialog(dialog).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::CloseHostInfo);
+            }
+            return None;
+        }
+        if self.host_color_picker_open {
+            let dialog = Self::host_route_palette_dialog_rect_for_panel(panel);
+            for index in 0..HOST_PALETTE_COLORS.len() {
+                if Self::host_route_palette_color_rect_for_dialog(dialog, index)
+                    .contains_point(point)
+                {
+                    return Some(DesktopMenuRouteShellAction::SelectHostColor(index));
+                }
+            }
+            if Self::route_back_button_rect_for_panel(panel).contains_point(point)
+                || Self::host_route_palette_close_rect_for_dialog(dialog).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::CloseHostColorPicker);
+            }
+            return None;
+        }
+        if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseRoute);
+        }
+        if Self::host_route_color_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::OpenHostColorPicker);
+        }
+        if Self::host_route_name_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusHostName);
+        }
+        if Self::host_route_friends_only_rect_for_panel(panel).contains_point(point) {
+            if self.host_steam_enabled() {
+                return Some(DesktopMenuRouteShellAction::ToggleHostFriendsOnly);
+            }
+            return None;
+        }
+        if Self::host_route_port_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusHostPort);
+        }
+        if Self::host_route_info_button_rect_for_panel(panel).contains_point(point) {
+            if !self.host_steam_enabled() {
+                return Some(DesktopMenuRouteShellAction::OpenHostInfo);
+            }
+            return None;
+        }
+        if self.host_port_is_valid()
+            && Self::host_route_host_button_rect_for_panel(panel).contains_point(point)
+        {
+            return Some(DesktopMenuRouteShellAction::HostRun);
+        }
+        None
+    }
+
     fn map_list_route_shell_action_at_surface_point(
         &self,
         viewport: RenderViewport,
@@ -26704,6 +26940,11 @@ impl DesktopLauncher {
                 return Some(action);
             }
         }
+        if route == DesktopMenuRoute::Host {
+            if let Some(action) = self.host_route_shell_action_at_surface_point(viewport, x, y) {
+                return Some(action);
+            }
+        }
         if route == DesktopMenuRoute::LoadGame {
             if let Some(action) = self.load_game_route_shell_action_at_surface_point(viewport, x, y)
             {
@@ -27072,6 +27313,11 @@ impl DesktopLauncher {
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
                 self.settings_keybind_pending_axis_min = None;
+                self.host_name_focused = false;
+                self.host_port_focused = false;
+                self.host_info_dialog_open = false;
+                self.host_color_picker_open = false;
+                self.host_error = None;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -27086,6 +27332,78 @@ impl DesktopLauncher {
                     return;
                 };
                 let _ = self.connect_to_target(target);
+            }
+            DesktopMenuRouteShellAction::FocusHostName => {
+                self.host_name_focused = true;
+                self.host_port_focused = false;
+            }
+            DesktopMenuRouteShellAction::FocusHostPort => {
+                self.host_name_focused = false;
+                self.host_port_focused = true;
+            }
+            DesktopMenuRouteShellAction::ToggleHostFriendsOnly => {
+                self.host_friends_only = !self.host_friends_only;
+                self.set_setting_override(
+                    "game",
+                    "steampublichost",
+                    (!self.host_friends_only).to_string(),
+                );
+            }
+            DesktopMenuRouteShellAction::OpenHostColorPicker => {
+                self.host_color_picker_open = true;
+                self.host_info_dialog_open = false;
+                self.host_error = None;
+            }
+            DesktopMenuRouteShellAction::CloseHostColorPicker => {
+                self.host_color_picker_open = false;
+            }
+            DesktopMenuRouteShellAction::SelectHostColor(index) => {
+                if let Some(color) = HOST_PALETTE_COLORS.get(index).copied() {
+                    self.player.color = color;
+                    self.settings_overrides
+                        .insert("color-0".into(), color.to_string());
+                    self.host_color_picker_open = false;
+                    self.host_error = None;
+                }
+            }
+            DesktopMenuRouteShellAction::OpenHostInfo => {
+                self.host_info_dialog_open = true;
+                self.host_color_picker_open = false;
+            }
+            DesktopMenuRouteShellAction::CloseHostInfo => {
+                self.host_info_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::HostRun => {
+                let name = self.host_name_text.trim();
+                let port = self.host_port_text.trim().parse::<u16>();
+                if name.is_empty() {
+                    self.host_error = Some("@noname".into());
+                } else if port.is_err() || port.ok() == Some(0) {
+                    self.host_error = Some("@server.invalidport".into());
+                } else {
+                    self.player.name = name.to_string();
+                    self.player.admin = true;
+                    self.settings_overrides
+                        .insert("name".into(), self.player.name.clone());
+                    self.settings_overrides
+                        .insert("port".into(), self.host_port_text.trim().to_string());
+                    self.set_setting_override(
+                        "game",
+                        "steampublichost",
+                        (!self.host_friends_only).to_string(),
+                    );
+                    self.host_error = None;
+                    self.host_name_focused = false;
+                    self.host_port_focused = false;
+                    self.host_color_picker_open = false;
+                    self.active_menu_route = None;
+                    self.last_menu_guard_message = Some(format!(
+                        "HostDialog.runHost {}:{} friendsOnly={}",
+                        self.player.name,
+                        self.host_port_text.trim(),
+                        self.host_friends_only
+                    ));
+                }
             }
             DesktopMenuRouteShellAction::OpenJoinAddServer => {
                 self.join_add_dialog_open = true;
@@ -27803,8 +28121,7 @@ impl DesktopLauncher {
                 self.open_pause_overlay_route(DesktopMenuRoute::LoadGame);
             }
             DesktopPausedOverlayAction::HostServer => {
-                self.pause_overlay_modal = Some(DesktopPausedOverlayModal::Host);
-                self.last_menu_guard_message = None;
+                self.open_pause_overlay_route(DesktopMenuRoute::Host);
             }
             DesktopPausedOverlayAction::WorldProcessors => {
                 self.pause_overlay_modal = Some(DesktopPausedOverlayModal::WorldProcessors);
@@ -28159,6 +28476,266 @@ impl DesktopLauncher {
             Some("ok"),
             Layer::END_PIXELED + 0.087,
         );
+    }
+
+    fn push_host_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        self.push_settings_text_button(
+            pass,
+            Self::route_back_button_rect_for_panel(panel),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.024,
+        );
+
+        let name = Self::host_route_name_rect_for_panel(panel);
+        let color = Self::host_route_color_button_rect_for_panel(panel);
+        let friends = Self::host_route_friends_only_rect_for_panel(panel);
+        let port = Self::host_route_port_rect_for_panel(panel);
+        let info = Self::host_route_info_button_rect_for_panel(panel);
+        let host = Self::host_route_host_button_rect_for_panel(panel);
+
+        for (rect, focused) in [
+            (name, self.host_name_focused),
+            (port, self.host_port_focused),
+        ] {
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("grayt", focused, false),
+                rect,
+                if focused {
+                    [1.0, 1.0, 1.0, 0.96]
+                } else {
+                    [1.0, 1.0, 1.0, 0.82]
+                },
+                0.0,
+                Layer::END_PIXELED + 0.028,
+            ));
+        }
+        pass.push(RenderCommand::draw_text_styled(
+            "@name",
+            RenderPoint::new(name.x + 14.0, name.center().y),
+            [0.72, 0.82, 0.90, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.030,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.host_name_text.clone(),
+            RenderPoint::new(name.x + 76.0, name.center().y),
+            [0.92, 0.98, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.031,
+        ));
+        pass.push(RenderCommand::fill_rect(
+            color,
+            [
+                ((self.player.color >> 24) & 0xff) as f32 / 255.0,
+                ((self.player.color >> 16) & 0xff) as f32 / 255.0,
+                ((self.player.color >> 8) & 0xff) as f32 / 255.0,
+                1.0,
+            ],
+            Layer::END_PIXELED + 0.032,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            color,
+            [0.86, 0.94, 1.0, 0.95],
+            1.0,
+            Layer::END_PIXELED + 0.033,
+        ));
+
+        if self.host_steam_enabled() {
+            self.push_settings_text_button_enabled(
+                pass,
+                friends,
+                "@steam.friendsonly",
+                Some(if self.host_friends_only {
+                    "ok"
+                } else {
+                    "cancel"
+                }),
+                Layer::END_PIXELED + 0.034,
+                true,
+            );
+            pass.push(RenderCommand::draw_text_styled(
+                "@steam.friendsonly.tooltip",
+                RenderPoint::new(friends.right() + 12.0, friends.center().y),
+                [0.56, 0.66, 0.74, 1.0],
+                8.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0345,
+            ));
+        }
+        pass.push(RenderCommand::draw_text_styled(
+            "@server.port",
+            RenderPoint::new(port.x + 14.0, port.center().y),
+            [0.72, 0.82, 0.90, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.035,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.host_port_text.clone(),
+            RenderPoint::new(port.x + 116.0, port.center().y),
+            [0.92, 0.98, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.036,
+        ));
+        if !self.host_steam_enabled() {
+            self.push_settings_text_button(pass, info, "?", None, Layer::END_PIXELED + 0.037);
+        }
+        self.push_settings_text_button_enabled(
+            pass,
+            host,
+            "@host",
+            Some("host"),
+            Layer::END_PIXELED + 0.038,
+            self.host_port_is_valid(),
+        );
+
+        if let Some(error) = self.host_error.as_ref() {
+            pass.push(RenderCommand::draw_text_styled(
+                error.clone(),
+                RenderPoint::new(panel.center().x, host.y - 24.0),
+                [1.0, 0.62, 0.56, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.039,
+            ));
+        }
+        if self.host_color_picker_open {
+            let dialog = Self::host_route_palette_dialog_rect_for_panel(panel);
+            pass.push(RenderCommand::fill_rect(
+                panel,
+                [0.0, 0.0, 0.0, 0.42],
+                Layer::END_PIXELED + 0.074,
+            ));
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("pane"),
+                dialog,
+                [1.0, 1.0, 1.0, 0.98],
+                0.0,
+                Layer::END_PIXELED + 0.075,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                dialog,
+                [0.52, 0.68, 0.82, 0.95],
+                2.0,
+                Layer::END_PIXELED + 0.076,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "PaletteDialog",
+                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+                [0.94, 0.98, 1.0, 1.0],
+                14.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.077,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "upstream: PaletteDialog",
+                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 48.0),
+                [0.55, 0.66, 0.74, 1.0],
+                8.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0775,
+            ));
+            for (index, color_value) in HOST_PALETTE_COLORS.iter().copied().enumerate() {
+                let swatch = Self::host_route_palette_color_rect_for_dialog(dialog, index);
+                let selected = self.player.color == color_value;
+                pass.push(RenderCommand::fill_rect(
+                    swatch,
+                    [
+                        ((color_value >> 24) & 0xff) as f32 / 255.0,
+                        ((color_value >> 16) & 0xff) as f32 / 255.0,
+                        ((color_value >> 8) & 0xff) as f32 / 255.0,
+                        1.0,
+                    ],
+                    Layer::END_PIXELED + 0.078 + index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::stroke_rect(
+                    swatch,
+                    if selected {
+                        [1.0, 1.0, 1.0, 1.0]
+                    } else {
+                        [0.30, 0.42, 0.52, 0.92]
+                    },
+                    if selected { 3.0 } else { 1.0 },
+                    Layer::END_PIXELED + 0.079 + index as f32 * 0.001,
+                ));
+            }
+            self.push_settings_text_button(
+                pass,
+                Self::host_route_palette_close_rect_for_dialog(dialog),
+                "@back",
+                Some("left"),
+                Layer::END_PIXELED + 0.089,
+            );
+        }
+        if self.host_info_dialog_open {
+            let dialog = RenderRect::new(
+                panel.center().x - 210.0,
+                panel.center().y - 76.0,
+                420.0,
+                152.0,
+            );
+            pass.push(RenderCommand::fill_rect(
+                dialog,
+                [0.04, 0.06, 0.08, 0.96],
+                Layer::END_PIXELED + 0.080,
+            ));
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("pane"),
+                dialog,
+                [1.0, 1.0, 1.0, 0.98],
+                0.0,
+                Layer::END_PIXELED + 0.081,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "@host.info",
+                dialog.center(),
+                [0.86, 0.94, 1.0, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.082,
+            ));
+            self.push_settings_text_button(
+                pass,
+                Self::host_route_palette_close_rect_for_dialog(dialog),
+                "@ok",
+                Some("ok"),
+                Layer::END_PIXELED + 0.083,
+            );
+        }
     }
 
     fn push_join_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -31961,6 +32538,34 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Host)
+                        && !self.host_info_dialog_open
+                        && !self.host_color_picker_open
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::HostRun);
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Host)
+                        && !self.host_info_dialog_open
+                        && !self.host_color_picker_open
+                        && (self.host_name_focused || self.host_port_focused)
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    let target = if self.host_name_focused {
+                        &mut self.host_name_text
+                    } else {
+                        &mut self.host_port_text
+                    };
+                    if key_code == "Backspace" {
+                        target.pop();
+                    } else {
+                        target.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && matches!(
                             self.active_menu_route,
                             Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
@@ -32301,7 +32906,29 @@ impl DesktopLauncher {
                     }
                 }
                 DesktopInputTickEvent::Text(text) => {
-                    if matches!(
+                    if self.active_menu_route == Some(DesktopMenuRoute::Host)
+                        && self.host_name_focused
+                        && !self.host_info_dialog_open
+                        && !self.host_color_picker_open
+                    {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.host_name_text.len() >= HOST_NAME_TEXT_MAX_LENGTH {
+                                break;
+                            }
+                            self.host_name_text.push(ch);
+                        }
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Host)
+                        && self.host_port_focused
+                        && !self.host_info_dialog_open
+                        && !self.host_color_picker_open
+                    {
+                        for ch in text.chars().filter(|ch| ch.is_ascii_digit()) {
+                            if self.host_port_text.len() >= HOST_PORT_TEXT_MAX_LENGTH {
+                                break;
+                            }
+                            self.host_port_text.push(ch);
+                        }
+                    } else if matches!(
                         self.active_menu_route,
                         Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
                     ) && self.map_list_search_focused
@@ -32438,6 +33065,18 @@ impl DesktopLauncher {
                     ]
                 }
             }
+            DesktopMenuRoute::Host => vec![
+                "dialog: HostDialog title=@hostserver".into(),
+                format!("field: @name value={}", self.host_name_text),
+                format!("button: PaletteDialog color={:08x}", self.player.color),
+                if self.host_steam_enabled() {
+                    format!("check: @steam.friendsonly {}", self.host_friends_only)
+                } else {
+                    "button: ? / @host.info".into()
+                },
+                format!("field: @server.port value={}", self.host_port_text),
+                format!("button: @host enabled={}", self.host_port_is_valid()),
+            ],
             DesktopMenuRoute::LoadGame => self.load_game_slot_lines(),
             DesktopMenuRoute::SaveGame => {
                 let mut lines = self.load_game_slot_lines();
@@ -33709,6 +34348,8 @@ impl DesktopLauncher {
             self.push_about_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Join {
             self.push_join_route_page(pass, panel);
+        } else if route == DesktopMenuRoute::Host {
+            self.push_host_route_page(pass, panel);
         } else if matches!(
             route,
             DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame
@@ -34126,11 +34767,6 @@ impl DesktopLauncher {
                 "@abandon",
                 "PlanetDialog.abandonSectorConfirm",
                 "@abandon.confirm".into(),
-            ),
-            DesktopPausedOverlayModal::Host => (
-                "@hostserver",
-                "HostDialog",
-                "@server.visibility / @public / @private / @host".into(),
             ),
             DesktopPausedOverlayModal::WorldProcessors => (
                 "@editor.worldprocessors",
@@ -51753,6 +52389,161 @@ version: "2.0.0"
             Some(super::DesktopPauseQuitResult::Confirmed)
         );
         assert!(launcher.game_state.is_menu());
+    }
+
+    #[test]
+    fn desktop_launcher_paused_world_overlay_opens_host_dialog_route() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        let initial_player_name = launcher.player.name.clone();
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let pause_panel = DesktopLauncher::pause_overlay_panel_for_viewport(viewport);
+        let host_center =
+            DesktopLauncher::pause_overlay_button_rect_for_panel(pause_panel, 4).center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: host_center.x,
+                    y: host_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Host)
+        );
+        assert_eq!(launcher.host_name_text, initial_player_name);
+        assert_eq!(
+            launcher.host_port_text,
+            super::DEFAULT_MINDUSTRY_PORT.to_string()
+        );
+        assert!(launcher.host_info_dialog_open);
+
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@hostserver"));
+        assert!(texts.contains(&"upstream: HostDialog"));
+        assert!(texts.contains(&"@name"));
+        assert!(texts.contains(&"@server.port"));
+        assert!(!texts.contains(&"@steam.friendsonly"));
+        assert!(texts.contains(&"?"));
+        assert!(texts.contains(&"@host.info"));
+        assert!(texts.contains(&"@host"));
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseHostInfo);
+        assert!(!launcher.host_info_dialog_open);
+
+        let host_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Host,
+        );
+        let name = DesktopLauncher::host_route_name_rect_for_panel(host_panel).center();
+        let port = DesktopLauncher::host_route_port_rect_for_panel(host_panel).center();
+        let color = DesktopLauncher::host_route_color_button_rect_for_panel(host_panel).center();
+        let info = DesktopLauncher::host_route_info_button_rect_for_panel(host_panel).center();
+        let run = DesktopLauncher::host_route_host_button_rect_for_panel(host_panel).center();
+
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, name.x, name.y),
+            Some(super::DesktopMenuRouteShellAction::FocusHostName)
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, port.x, port.y),
+            Some(super::DesktopMenuRouteShellAction::FocusHostPort)
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, color.x, color.y),
+            Some(super::DesktopMenuRouteShellAction::OpenHostColorPicker)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenHostColorPicker,
+        );
+        assert!(launcher.host_color_picker_open);
+        let palette = DesktopLauncher::host_route_palette_dialog_rect_for_panel(host_panel);
+        let swatch = DesktopLauncher::host_route_palette_color_rect_for_dialog(palette, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, swatch.x, swatch.y),
+            Some(super::DesktopMenuRouteShellAction::SelectHostColor(2))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SelectHostColor(2),
+        );
+        assert_eq!(launcher.player.color, super::HOST_PALETTE_COLORS[2]);
+        let expected_color_setting = super::HOST_PALETTE_COLORS[2].to_string();
+        assert_eq!(
+            launcher.settings_overrides.get("color-0"),
+            Some(&expected_color_setting)
+        );
+        assert!(!launcher.host_color_picker_open);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::FocusHostName);
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::Key {
+                    key_code: "Delete".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Text("Alice".into()),
+            ],
+        );
+        assert_eq!(launcher.host_name_text, "Alice");
+
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::FocusHostPort);
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::Key {
+                    key_code: "Delete".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Text("7777abc".into()),
+            ],
+        );
+        assert_eq!(launcher.host_port_text, "7777");
+
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, info.x, info.y),
+            Some(super::DesktopMenuRouteShellAction::OpenHostInfo)
+        );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenHostInfo);
+        assert!(launcher.host_info_dialog_open);
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseHostInfo);
+        assert!(!launcher.host_info_dialog_open);
+
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, run.x, run.y),
+            Some(super::DesktopMenuRouteShellAction::HostRun)
+        );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::HostRun);
+        assert_eq!(launcher.player.name, "Alice");
+        assert!(launcher.player.admin);
+        assert_eq!(launcher.active_menu_route, None);
+        assert!(launcher
+            .last_menu_guard_message
+            .as_deref()
+            .is_some_and(|message| message.contains("HostDialog.runHost Alice:7777")));
     }
 
     #[test]
