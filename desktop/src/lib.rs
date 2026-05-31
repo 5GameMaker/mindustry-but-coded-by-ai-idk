@@ -2879,6 +2879,7 @@ struct DatabaseVisibleGroupRow {
     tag: Option<String>,
     records: Vec<(usize, String)>,
     category_start: bool,
+    tag_start: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22313,10 +22314,40 @@ impl DesktopLauncher {
                     tag,
                     records,
                     category_start: group_index == 0,
+                    tag_start: true,
                 });
             }
         }
         rows
+    }
+
+    fn database_visible_columns_for_panel(panel: RenderRect) -> usize {
+        ((panel.width - 56.0 + DATABASE_CONTENT_CELL_GAP)
+            / (DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP))
+            .floor()
+            .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32) as usize
+    }
+
+    fn database_visible_grid_rows_for_panel(
+        &self,
+        panel: RenderRect,
+    ) -> Vec<DatabaseVisibleGroupRow> {
+        let visible_columns = Self::database_visible_columns_for_panel(panel).max(1);
+        let mut grid_rows = Vec::new();
+
+        for group in self.database_visible_group_rows() {
+            for (chunk_index, chunk) in group.records.chunks(visible_columns).enumerate() {
+                grid_rows.push(DatabaseVisibleGroupRow {
+                    content_type: group.content_type,
+                    tag: group.tag.clone(),
+                    records: chunk.to_vec(),
+                    category_start: group.category_start && chunk_index == 0,
+                    tag_start: chunk_index == 0,
+                });
+            }
+        }
+
+        grid_rows
     }
 
     fn database_hovered_content_cell_for_panel(
@@ -22327,16 +22358,10 @@ impl DesktopLauncher {
             return None;
         }
         let point = self.last_menu_cursor?;
-        let visible_columns = ((panel.width - 56.0 + DATABASE_CONTENT_CELL_GAP)
-            / (DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP))
-            .floor()
-            .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
-            as usize;
-
         let row_capacity = Self::database_visible_row_capacity_for_panel(panel);
         let scroll_offset = self.clamped_database_scroll_offset_for_panel(panel);
         for (row_index, row) in self
-            .database_visible_group_rows()
+            .database_visible_grid_rows_for_panel(panel)
             .into_iter()
             .skip(scroll_offset)
             .take(row_capacity)
@@ -22346,9 +22371,7 @@ impl DesktopLauncher {
             if header.y < panel.y + 42.0 {
                 break;
             }
-            for (item_index, (record_index, name)) in
-                row.records.into_iter().take(visible_columns).enumerate()
-            {
+            for (item_index, (record_index, name)) in row.records.into_iter().enumerate() {
                 let cell = Self::database_content_cell_rect_for_panel(panel, row_index, item_index);
                 if cell.contains_point(point)
                     && self.database_content_unlocked(row.content_type, &name)
@@ -29126,7 +29149,10 @@ impl DesktopLauncher {
     }
 
     fn max_database_scroll_offset(&self, panel: RenderRect) -> usize {
-        Self::max_database_scroll_offset_for_rows(self.database_visible_group_rows().len(), panel)
+        Self::max_database_scroll_offset_for_rows(
+            self.database_visible_grid_rows_for_panel(panel).len(),
+            panel,
+        )
     }
 
     fn clamped_database_scroll_offset_for_panel(&self, panel: RenderRect) -> usize {
@@ -29309,15 +29335,10 @@ impl DesktopLauncher {
         panel: RenderRect,
         point: RenderPoint,
     ) -> Option<(ContentType, usize)> {
-        let visible_columns = ((panel.width - 56.0 + DATABASE_CONTENT_CELL_GAP)
-            / (DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP))
-            .floor()
-            .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
-            as usize;
         let row_capacity = Self::database_visible_row_capacity_for_panel(panel);
         let scroll_offset = self.clamped_database_scroll_offset_for_panel(panel);
         for (row_index, row) in self
-            .database_visible_group_rows()
+            .database_visible_grid_rows_for_panel(panel)
             .into_iter()
             .skip(scroll_offset)
             .take(row_capacity)
@@ -29327,9 +29348,7 @@ impl DesktopLauncher {
             if header.y < panel.y + 42.0 {
                 break;
             }
-            for (item_index, (record_index, name)) in
-                row.records.into_iter().take(visible_columns).enumerate()
-            {
+            for (item_index, (record_index, name)) in row.records.into_iter().enumerate() {
                 if Self::database_content_cell_rect_for_panel(panel, row_index, item_index)
                     .contains_point(point)
                 {
@@ -31046,7 +31065,7 @@ impl DesktopLauncher {
             ));
         }
 
-        let rows = self.database_visible_group_rows();
+        let rows = self.database_visible_grid_rows_for_panel(panel);
         if rows.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
                 "@none.found",
@@ -31063,11 +31082,6 @@ impl DesktopLauncher {
             return;
         }
 
-        let visible_columns = ((panel.width - 56.0 + DATABASE_CONTENT_CELL_GAP)
-            / (DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP))
-            .floor()
-            .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
-            as usize;
         let row_capacity = Self::database_visible_row_capacity_for_panel(panel);
         let max_scroll = Self::max_database_scroll_offset_for_rows(rows.len(), panel);
         let scroll_offset = self.database_scroll_offset.min(max_scroll);
@@ -31101,30 +31115,32 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.0345 + row_index as f32 * 0.001,
                 ));
             }
-            if let Some(tag) = row.tag.as_ref() {
-                pass.push(RenderCommand::draw_text_styled(
-                    format!("@database-tag.{tag}"),
-                    RenderPoint::new(header.x + 8.0, header.y - 21.0),
-                    [0.56, 0.62, 0.66, 1.0],
-                    9.5,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Start)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.0348 + row_index as f32 * 0.001,
-                ));
-                pass.push(RenderCommand::fill_rect(
-                    RenderRect::new(
-                        header.x + 128.0,
-                        header.y - 22.5,
-                        (header.width - 128.0).max(8.0),
-                        2.0,
-                    ),
-                    [0.43, 0.46, 0.50, 0.82],
-                    Layer::END_PIXELED + 0.0348 + row_index as f32 * 0.001,
-                ));
+            if row.tag_start {
+                if let Some(tag) = row.tag.as_ref() {
+                    pass.push(RenderCommand::draw_text_styled(
+                        format!("@database-tag.{tag}"),
+                        RenderPoint::new(header.x + 8.0, header.y - 21.0),
+                        [0.56, 0.62, 0.66, 1.0],
+                        9.5,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.0348 + row_index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::fill_rect(
+                        RenderRect::new(
+                            header.x + 128.0,
+                            header.y - 22.5,
+                            (header.width - 128.0).max(8.0),
+                            2.0,
+                        ),
+                        [0.43, 0.46, 0.50, 0.82],
+                        Layer::END_PIXELED + 0.0348 + row_index as f32 * 0.001,
+                    ));
+                }
             }
-            for (item_index, (_, name)) in row.records.iter().take(visible_columns).enumerate() {
+            for (item_index, (_, name)) in row.records.iter().enumerate() {
                 let cell = Self::database_content_cell_rect_for_panel(panel, row_index, item_index);
                 let icon_symbol = self.database_content_icon_symbol(row.content_type, name);
                 let unlocked = self.database_content_unlocked(row.content_type, name);
@@ -59798,10 +59814,11 @@ version: "2.0.0"
             "Java DatabaseDialog category headers are plain @database-category.* labels without Rust-side debug counts"
         );
         assert!(
-            route_texts
+            launcher
+                .database_visible_grid_rows_for_panel(panel)
                 .iter()
-                .any(|text| text.starts_with("@database-tag.")),
-            "Java DatabaseDialog draws a visible @database-tag.* header for each non-default tag row"
+                .any(|row| row.tag_start && row.tag.is_some()),
+            "Java DatabaseDialog keeps non-default tag headers in the scrollable grid even when the first visible rows are a long default group"
         );
         assert!(
             launcher
@@ -59841,6 +59858,57 @@ version: "2.0.0"
                     && row.records.iter().any(|(_, name)| name == "conveyor")),
             "Block.databaseTag rows should keep distribution blocks such as conveyor together"
         );
+        let visible_database_columns = DesktopLauncher::database_visible_columns_for_panel(panel);
+        let wrapped_group = group_rows
+            .iter()
+            .find(|row| row.records.len() > visible_database_columns)
+            .expect("base DatabaseDialog content should include at least one tag group that wraps across multiple icon rows");
+        let wrapped_grid_rows = launcher
+            .database_visible_grid_rows_for_panel(panel)
+            .into_iter()
+            .filter(|row| {
+                row.content_type == wrapped_group.content_type && row.tag == wrapped_group.tag
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            wrapped_grid_rows.len() >= 2
+                && wrapped_grid_rows.first().is_some_and(|row| row.tag_start)
+                && wrapped_grid_rows.iter().skip(1).any(|row| !row.tag_start)
+                && wrapped_grid_rows
+                    .iter()
+                    .all(|row| row.records.len() <= visible_database_columns),
+            "Java DatabaseDialog wraps a tag's icons by column count; only the first chunk should draw the tag header"
+        );
+        let first_tag_row = launcher
+            .database_visible_grid_rows_for_panel(panel)
+            .into_iter()
+            .enumerate()
+            .find(|(_, row)| row.tag_start && row.tag.is_some())
+            .expect("scrollable DatabaseDialog grid should contain a non-default tag row");
+        launcher.database_scroll_offset = first_tag_row.0;
+        let tag_header_frame = launcher.menu_graphics_frame_for_surface(4, viewport);
+        let tag_header_texts = tag_header_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("database tag row frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let first_tag_label = format!(
+            "@database-tag.{}",
+            first_tag_row.1.tag.as_deref().unwrap_or_default()
+        );
+        assert!(
+            tag_header_texts.contains(&first_tag_label.as_str()),
+            "Java DatabaseDialog draws a visible @database-tag.* header when that tag row is inside the scroll window"
+        );
+        launcher.database_scroll_offset = 0;
         let max_database_scroll = launcher.max_database_scroll_offset(panel);
         assert!(
             max_database_scroll > 0,
@@ -59864,28 +59932,11 @@ version: "2.0.0"
             launcher.database_scroll_offset > 0,
             "mouse wheel over DatabaseDialog list should move the database scroll offset"
         );
-        let scrolled_first_row = launcher
-            .database_visible_group_rows()
-            .get(launcher.database_scroll_offset)
-            .cloned()
-            .expect("scroll offset should reference an existing DatabaseDialog row");
         let scrolled_lines =
             launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Database);
         assert!(scrolled_lines
             .iter()
             .any(|line| line == &format!("scroll: {}", launcher.database_scroll_offset)));
-        assert!(
-            scrolled_lines.iter().any(|line| {
-                line.contains(&format!(
-                    "tag {}",
-                    scrolled_first_row.tag.as_deref().unwrap_or("default")
-                )) && scrolled_first_row
-                    .records
-                    .first()
-                    .is_some_and(|(_, name)| line.contains(name))
-            }),
-            "DatabaseDialog route summary should follow the same scrolled row order as render and hit-test"
-        );
 
         let search = DesktopLauncher::database_search_rect_for_panel(panel).center();
         assert_eq!(

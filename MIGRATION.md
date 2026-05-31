@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 632. DatabaseDialog tag 内图标按列换行
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.3%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 DatabaseDialog 的每个 tag 不再只截取第一行 icon，而是按 Java `cols` 语义拆成多行 grid row。
+- Java 对照依据：
+  - `DatabaseDialog.rebuild()` 在每个 tag 的 `list` table 中逐 content 添加 `image(icon).size(8*4).pad(3*4)`；
+  - `if((++count) % cols == 0) list.row();` 使同一 tag 下的图标按列数自动换行；
+  - tag 标题只在该 tag 小节开始处出现，后续 icon 行不重复标题。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DatabaseVisibleGroupRow` 新增 `tag_start`，区分 tag 小节首行和后续 icon 行；
+    - 新增 `database_visible_columns_for_panel(...)` 与 `database_visible_grid_rows_for_panel(...)`，按当前面板宽度把每个 tag 的 records 拆成多行；
+    - 渲染、hover tooltip、content cell hit-test、滚动最大偏移统一切换到 grid rows，避免 tag 内换行后视觉与命中错位；
+    - tag header 只在 `tag_start` 且非默认 tag 的首行绘制，后续行只渲染图标格；
+    - 扩展 DatabaseDialog 测试，确认存在跨多行的 tag group、每行不超过可见列数、非默认 tag 滚入视窗时会绘制 `@database-tag.*`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 仍未把 category 维度完全升级到 Java `databaseCategory` 字符串；
+  - 滚动条暂未支持拖动；
+  - `shift + click` 复制 Unicode 与游戏态 banned 排序还未接入；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 631. DatabaseDialog 列表接入滚轮 ScrollPane 偏移
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
