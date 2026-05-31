@@ -15,6 +15,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 554. ResearchDialog 节点 requirements 行图标化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **65.5%**，仍未达到完整可玩；继续优先前端/UI，避免节点详情面板继续使用调试式纯文本 requirement 行。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ResearchDialog.java` 中 `infoTable` requirement 行使用 `req.item.uiIcon`、物品本地化名称、`UI.formatAmount(available) / UI.formatAmount(reqAmount)`；
+  - 已完成的 requirement 不在普通模式下继续显示。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_tech_tree_node_detail_panel(...)` 改为区分普通文本行与 requirement item row；
+    - requirement row 现在绘制物品颜色兜底、真实 item icon sprite、localized name 和当前队伍 core items 可用/剩余需求数量；
+    - 缺资源时数量显示 scarlet 风格颜色，完成/无剩余需求时不再渲染旧的 `item: finished / total` 调试行；
+    - 增加 `desktop_launcher_techtree_node_detail_renders_requirement_item_rows_like_research_dialog` 回归测试。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop techtree --features opengl-backend`
+- 仍未完成：
+  - ResearchDialog 的 spend/research 按钮、shine 动画、description/info button、hover follow positioning 与移动端布局仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 553. ResearchDialog ItemsDisplay 真实资源条首个闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

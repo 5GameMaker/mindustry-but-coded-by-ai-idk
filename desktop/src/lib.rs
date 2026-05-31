@@ -27795,36 +27795,67 @@ impl DesktopLauncher {
         } else {
             "[accent]???"
         };
+        enum TechTreeInfoLine {
+            Text(String),
+            Requirement {
+                item: String,
+                localized_name: String,
+                color_rgba: u32,
+                available: i32,
+                required: i32,
+                missing: bool,
+            },
+        }
         let mut lines = vec![
-            "ResearchInfoTable".to_string(),
-            title.to_string(),
-            format!(
+            TechTreeInfoLine::Text("ResearchInfoTable".to_string()),
+            TechTreeInfoLine::Text(title.to_string()),
+            TechTreeInfoLine::Text(format!(
                 "content: {:?}/{}",
                 node.content.content_type, node.content.name
-            ),
+            )),
         ];
         if locked {
-            lines.push("@locked".into());
+            lines.push(TechTreeInfoLine::Text("@locked".into()));
         } else {
-            lines.push("@completed".into());
+            lines.push(TechTreeInfoLine::Text("@completed".into()));
         }
         if let Some(progress) = Self::tech_tree_node_progress_percent(node) {
-            lines.push(format!("research.progress: {progress}%"));
+            lines.push(TechTreeInfoLine::Text(format!(
+                "research.progress: {progress}%"
+            )));
         }
 
         if node.requirements.is_empty() {
-            lines.push("requirements: @none".into());
+            lines.push(TechTreeInfoLine::Text("requirements: @none".into()));
         } else {
+            let requirement_line_start = lines.len();
             for (index, requirement) in node.requirements.iter().enumerate() {
                 let finished = node
                     .finished_requirements
                     .get(index)
                     .map(|stack| stack.amount)
                     .unwrap_or(0);
-                lines.push(format!(
-                    "{}: {} / {}",
-                    requirement.item, finished, requirement.amount
-                ));
+                let required = (requirement.amount - finished).max(0);
+                if required <= 0 {
+                    continue;
+                }
+                let item = self.content_loader.item_by_name(&requirement.item);
+                let available = item
+                    .map(|item| self.tech_tree_global_item_amount(item.base.mappable.base.id))
+                    .unwrap_or(0);
+                lines.push(TechTreeInfoLine::Requirement {
+                    item: requirement.item.clone(),
+                    localized_name: item
+                        .map(|item| item.localized_name().to_string())
+                        .unwrap_or_else(|| requirement.item.clone()),
+                    color_rgba: item.map(|item| item.color_rgba).unwrap_or(0x8899aaff),
+                    available: available.min(required),
+                    required,
+                    missing: available < required,
+                });
+            }
+            if lines.len() == requirement_line_start {
+                lines.push(TechTreeInfoLine::Text("requirements: @none".into()));
             }
         }
 
@@ -27834,14 +27865,12 @@ impl DesktopLauncher {
             .filter(|objective| !objective.complete())
             .collect::<Vec<_>>();
         if incomplete.is_empty() {
-            lines.push("objectives: @none".into());
+            lines.push(TechTreeInfoLine::Text("objectives: @none".into()));
         } else {
-            lines.push("@complete".into());
-            lines.extend(
-                incomplete
-                    .into_iter()
-                    .map(|objective| format!("> {}", objective.display_token())),
-            );
+            lines.push(TechTreeInfoLine::Text("@complete".into()));
+            lines.extend(incomplete.into_iter().map(|objective| {
+                TechTreeInfoLine::Text(format!("> {}", objective.display_token()))
+            }));
         }
 
         for (index, line) in lines.into_iter().enumerate() {
@@ -27849,25 +27878,85 @@ impl DesktopLauncher {
             if y < info.y + 12.0 {
                 break;
             }
-            let color = if index == 1 {
-                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
-            } else if line == "@locked" || line.contains(" / ") {
-                [0.94, 0.70, 0.70, 1.0]
-            } else {
-                [0.82, 0.90, 0.96, 1.0]
-            };
-            pass.push(RenderCommand::draw_text_styled(
-                line,
-                RenderPoint::new(info.x + 12.0, y),
-                color,
-                if index == 1 { 11.5 } else { 9.5 },
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(index <= 1),
-                Layer::END_PIXELED + 0.063 + index as f32 * 0.0001,
-            ));
+            match line {
+                TechTreeInfoLine::Text(line) => {
+                    let color = if index == 1 {
+                        [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                    } else if line == "@locked" {
+                        [0.94, 0.70, 0.70, 1.0]
+                    } else {
+                        [0.82, 0.90, 0.96, 1.0]
+                    };
+                    pass.push(RenderCommand::draw_text_styled(
+                        line,
+                        RenderPoint::new(info.x + 12.0, y),
+                        color,
+                        if index == 1 { 11.5 } else { 9.5 },
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(index <= 1),
+                        Layer::END_PIXELED + 0.063 + index as f32 * 0.0001,
+                    ));
+                }
+                TechTreeInfoLine::Requirement {
+                    item,
+                    localized_name,
+                    color_rgba,
+                    available,
+                    required,
+                    missing,
+                } => {
+                    let icon =
+                        RenderRect::from_center(RenderPoint::new(info.x + 23.0, y), 18.0, 18.0);
+                    pass.push(RenderCommand::fill_rect(
+                        icon,
+                        rgba8888_to_render_color(color_rgba, 0.82),
+                        Layer::END_PIXELED + 0.063 + index as f32 * 0.0001,
+                    ));
+                    let icon_symbol = item_full_icon_region_symbol(&item, &self.content_loader)
+                        .filter(|symbol| self.texture_atlas.lookup(symbol).is_ok())
+                        .unwrap_or_else(|| item.clone());
+                    pass.push(RenderCommand::draw_sprite(
+                        icon_symbol,
+                        icon,
+                        [1.0, 1.0, 1.0, 1.0],
+                        0.0,
+                        Layer::END_PIXELED + 0.064 + index as f32 * 0.0001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        localized_name,
+                        RenderPoint::new(info.x + 39.0, y),
+                        [0.78, 0.84, 0.90, 1.0],
+                        9.5,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.065 + index as f32 * 0.0001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        format!(
+                            "{} / {}",
+                            ui_format_amount(available as i64),
+                            ui_format_amount(required as i64)
+                        ),
+                        RenderPoint::new(info.x + info.width - 12.0, y),
+                        if missing {
+                            [0.96, 0.56, 0.54, 1.0]
+                        } else {
+                            [0.86, 0.92, 0.96, 1.0]
+                        },
+                        9.5,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::End)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.066 + index as f32 * 0.0001,
+                    ));
+                }
+            }
         }
     }
 
@@ -48654,6 +48743,79 @@ version: "2.0.0"
         assert!(texts.contains(&"@locked"));
         assert!(texts.contains(&"requirements: @none"));
         assert!(texts.contains(&"objectives: @none"));
+    }
+
+    #[test]
+    fn desktop_launcher_techtree_node_detail_renders_requirement_item_rows_like_research_dialog() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let silicon_id = launcher
+            .content_loader
+            .item_by_name("silicon")
+            .expect("base content should include silicon")
+            .base
+            .mappable
+            .base
+            .id;
+        launcher
+            .game_state
+            .teams
+            .replace_core_items(launcher.player.team.0, BTreeMap::from([(silicon_id, 80)]));
+        let node = mindustry_core::mindustry::game::TechNode {
+            id: 0,
+            depth: 1,
+            icon: None,
+            name: None,
+            requires_unlock: false,
+            parent: None,
+            research_cost_multipliers: BTreeMap::new(),
+            content: mindustry_core::mindustry::game::TechContentRef::unit("crawler")
+                .localized("Crawler"),
+            requirements: vec![
+                ItemStack::new("silicon", 400),
+                ItemStack::new("graphite", 400),
+            ],
+            finished_requirements: vec![
+                ItemStack::new("silicon", 120),
+                ItemStack::new("graphite", 0),
+            ],
+            objectives: Vec::new(),
+            children: Vec::new(),
+            planet: None,
+            database_tabs: Vec::new(),
+            shown_planets: Vec::new(),
+            removed: false,
+        };
+        let mut pass = RenderPass::new(RenderPassKind::Ui);
+        launcher.push_tech_tree_node_detail_panel(
+            &mut pass,
+            RenderRect::new(40.0, 40.0, 520.0, 320.0),
+            RenderRect::new(96.0, 260.0, 112.0, 38.0),
+            &node,
+        );
+
+        let texts = pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"ResearchInfoTable"));
+        assert!(texts.contains(&"Crawler"));
+        assert!(texts.contains(&"silicon"));
+        assert!(texts.contains(&"graphite"));
+        assert!(texts.contains(&"80 / 280"));
+        assert!(texts.contains(&"0 / 400"));
+        assert!(!texts.iter().any(|text| text.contains("silicon:")));
+        assert!(pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol.contains("silicon")
+        )));
+        assert!(pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol.contains("graphite")
+        )));
     }
 
     #[test]
