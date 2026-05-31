@@ -180,6 +180,9 @@ const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
 const SAVE_NEW_TEXT_MAX_LENGTH: usize = 30;
 const LOAD_GAME_LOADING_DELAY_FRAMES: u8 = 5;
 const SAVE_GAME_SAVING_DELAY_FRAMES: u8 = 5;
+const MAP_PLAY_HELP_LABEL_WIDTH: f32 = 400.0;
+const MAP_PLAY_HELP_OK_WIDTH: f32 = 110.0;
+const MAP_PLAY_HELP_OK_HEIGHT: f32 = 50.0;
 const HOST_NAME_TEXT_MAX_LENGTH: usize = 40;
 const HOST_PORT_TEXT_MAX_LENGTH: usize = 5;
 const HOST_PALETTE_COLORS: [u32; 8] = [
@@ -26899,6 +26902,36 @@ impl DesktopLauncher {
         RenderRect::new(child.x + 18.0, child.y + 16.0, 112.0, 40.0)
     }
 
+    fn map_play_help_dialog_ok_rect(child: RenderRect) -> RenderRect {
+        RenderRect::new(
+            child.center().x - MAP_PLAY_HELP_OK_WIDTH * 0.5,
+            child.y + 10.0,
+            MAP_PLAY_HELP_OK_WIDTH,
+            MAP_PLAY_HELP_OK_HEIGHT,
+        )
+    }
+
+    fn map_play_help_scrollpane_rect(child: RenderRect) -> RenderRect {
+        let width = (MAP_PLAY_HELP_LABEL_WIDTH + 20.0).min(child.width - 48.0);
+        let bottom = child.y + MAP_PLAY_HELP_OK_HEIGHT + 30.0;
+        let top = child.y + child.height - 56.0;
+        RenderRect::new(
+            child.center().x - width * 0.5,
+            bottom,
+            width,
+            (top - bottom).max(80.0),
+        )
+    }
+
+    fn map_play_help_scrollpane_clip_rect(scrollpane: RenderRect) -> RenderRect {
+        RenderRect::new(
+            scrollpane.x + 8.0,
+            scrollpane.y + 8.0,
+            (scrollpane.width - 18.0).max(80.0),
+            (scrollpane.height - 16.0).max(40.0),
+        )
+    }
+
     fn map_play_dialog_modes() -> [Gamemode; 4] {
         [
             Gamemode::Survival,
@@ -27982,7 +28015,12 @@ impl DesktopLauncher {
             let dialog = Self::map_card_dialog_rect_for_panel(panel);
             if self.map_play_mode_help_dialog_open || self.map_play_customize_dialog_open {
                 let child = Self::map_play_child_dialog_rect(dialog);
-                if Self::map_play_child_dialog_close_rect(child).contains_point(point) {
+                let close = if self.map_play_mode_help_dialog_open {
+                    Self::map_play_help_dialog_ok_rect(child)
+                } else {
+                    Self::map_play_child_dialog_close_rect(child)
+                };
+                if close.contains_point(point) {
                     return Some(if self.map_play_mode_help_dialog_open {
                         DesktopMenuRouteShellAction::CloseMapPlayHelp
                     } else {
@@ -32644,39 +32682,55 @@ impl DesktopLauncher {
                 .with_outline(true),
             layer + 0.003,
         ));
-        self.push_settings_text_button(
-            pass,
-            Self::map_play_child_dialog_close_rect(child),
-            "@back",
-            Some("left"),
-            layer + 0.004,
-        );
         child
     }
 
     fn push_map_play_mode_help_dialog(&self, pass: &mut RenderPass, dialog: RenderRect) {
         let layer = Layer::END_PIXELED + 0.090;
         let child = self.push_map_play_child_dialog_shell(pass, dialog, "@mode.help.title", layer);
+        let scrollpane = Self::map_play_help_scrollpane_rect(child);
+        let clip = Self::map_play_help_scrollpane_clip_rect(scrollpane);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            scrollpane,
+            [1.0, 1.0, 1.0, 0.82],
+            0.0,
+            layer + 0.005,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            scrollpane,
+            [0.26, 0.38, 0.46, 0.78],
+            1.0,
+            layer + 0.006,
+        ));
+        pass.push(RenderCommand::set_clip(clip));
         for (index, mode) in Self::map_play_dialog_modes().into_iter().enumerate() {
             pass.push(RenderCommand::draw_text_styled(
                 format!(
-                    "@mode.{}.name: @mode.{}.description",
+                    "[accent]@mode.{}.name[]: [lightgray]@mode.{}.description",
                     mode.wire_name(),
                     mode.wire_name()
                 ),
-                RenderPoint::new(
-                    child.x + 32.0,
-                    child.y + child.height - 78.0 - index as f32 * 42.0,
-                ),
+                RenderPoint::new(clip.x, clip.y + clip.height - 4.0 - index as f32 * 54.0),
                 [0.82, 0.91, 0.98, 1.0],
                 11.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Top)
+                    .with_wrap_width(MAP_PLAY_HELP_LABEL_WIDTH.min(clip.width))
+                    .with_markup(true)
                     .with_integer_position(true),
                 layer + 0.010 + index as f32 * 0.001,
             ));
         }
+        pass.push(RenderCommand::clear_clip());
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_help_dialog_ok_rect(child),
+            "@ok",
+            None,
+            layer + 0.020,
+        );
     }
 
     fn push_map_play_customize_dialog(
@@ -32725,6 +32779,13 @@ impl DesktopLauncher {
                 layer + 0.010 + index as f32 * 0.001,
             ));
         }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_child_dialog_close_rect(child),
+            "@back",
+            Some("left"),
+            layer + 0.020,
+        );
     }
 
     fn push_editor_map_info_dialog(
@@ -56171,15 +56232,26 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(help_texts.contains(&"@mode.help.title"));
+        assert!(help_texts.contains(&"@ok"));
         assert!(help_texts
             .iter()
             .any(|text| text.contains("@mode.survival.description")));
         assert!(help_texts
             .iter()
             .any(|text| text.contains("@mode.pvp.description")));
+        let help_has_clip = help_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mode help should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .any(|command| matches!(command, RenderCommand::SetClip { .. }));
+        assert!(help_has_clip, "Java help dialog uses ScrollPane(table)");
 
         let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
-        let child_close = DesktopLauncher::map_play_child_dialog_close_rect(child).center();
+        let child_close = DesktopLauncher::map_play_help_dialog_ok_rect(child).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 viewport,

@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 609. MapPlayDialog 帮助弹窗补 ScrollPane 与 @ok
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.9%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 CustomGame 的 `MapPlayDialog.displayGameModeHelp()` 更接近 Java 原版弹窗。
+- Java 对照依据：
+  - `MapPlayDialog.displayGameModeHelp()` 使用 `BaseDialog("@mode.help.title")`；
+  - 内容是 `ScrollPane(table)`，`pane.setFadeScrollBars(false)`；
+  - 每个模式说明用 `labelWrap("[accent]name[]: [lightgray]description").width(400f)`；
+  - 底部关闭按钮为 `@ok`，尺寸 `110×50`，`pad(10f)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `MAP_PLAY_HELP_LABEL_WIDTH / MAP_PLAY_HELP_OK_WIDTH / MAP_PLAY_HELP_OK_HEIGHT`；
+    - 帮助弹窗从直接绘制 4 行固定文本改为自绘 ScrollPane-like 内容区：`button` 背景、clip、wrapped markup text；
+    - 帮助弹窗关闭按钮从统一 `@back` 改为居中底部 `@ok`，hit-test 同步改用 OK rect；
+    - 子弹窗 shell 不再强行绘制 close button，`CustomRulesDialog` 单独保留 `@back`；
+    - 测试补充 `@ok` 和 `SetClip` 断言，继续覆盖帮助弹窗打开/关闭路径。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_uses_java_mode_order_and_first_valid_fallback --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前 ScrollPane-like 只补 clip/包裹/关闭语义，尚未接入独立滚动状态和真实 scrollbar fade/drag；
+  - `CustomRulesDialog` 仍是结构化信息页，不是 Java 完整规则编辑器；
+  - MapPlayDialog 的实际 `control.playMap(map, rules, playtesting)` 仍需从 smoke world 过渡到完整启动链路。
+
 ## 608. PlanetDataDialog 改为 Java 风格独立星球选择弹窗
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
