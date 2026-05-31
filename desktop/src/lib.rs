@@ -30637,9 +30637,9 @@ impl DesktopLauncher {
     fn mods_browser_entry_rect_for_list(list: RenderRect, index: usize) -> RenderRect {
         RenderRect::new(
             list.x + 8.0,
-            list.y + list.height - 8.0 - 52.0 - index as f32 * 58.0,
+            list.y + list.height - 8.0 - 72.0 - index as f32 * 78.0,
             list.width - 16.0,
-            52.0,
+            72.0,
         )
     }
 
@@ -31177,7 +31177,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.099,
             ));
         } else {
-            for (visible_index, mod_index) in indices.into_iter().take(6).enumerate() {
+            for (visible_index, mod_index) in indices.into_iter().take(4).enumerate() {
                 let rect = Self::mods_browser_entry_rect_for_list(list, visible_index);
                 let display_name = self
                     .mods_route_mod_display_name_at_index(mod_index)
@@ -31210,7 +31210,7 @@ impl DesktopLauncher {
                     .unwrap_or("@unknown");
                 pass.push(RenderCommand::draw_text_styled(
                     format!("@editor.author: {author}  @mod.version: {version}"),
-                    RenderPoint::new(rect.x + 18.0, rect.y + 18.0),
+                    RenderPoint::new(rect.x + 18.0, rect.y + rect.height - 37.0),
                     [0.66, 0.76, 0.84, 1.0],
                     8.5,
                     0.0,
@@ -31219,6 +31219,57 @@ impl DesktopLauncher {
                         .with_integer_position(true),
                     Layer::END_PIXELED + 0.100 + visible_index as f32 * 0.001,
                 ));
+                let repo = meta
+                    .and_then(|meta| meta.repo.as_deref())
+                    .filter(|repo| !repo.trim().is_empty());
+                pass.push(RenderCommand::draw_text_styled(
+                    repo.map(|repo| format!("repo: {repo}"))
+                        .unwrap_or_else(|| "source: local scan".to_string()),
+                    RenderPoint::new(rect.x + 18.0, rect.y + 17.0),
+                    [0.58, 0.68, 0.76, 1.0],
+                    8.5,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.1005 + visible_index as f32 * 0.001,
+                ));
+
+                let actions = if repo.is_some() {
+                    [
+                        Some("@mods.browser.reinstall"),
+                        Some("@mods.github.open"),
+                        Some("@mods.browser.view-releases"),
+                    ]
+                } else {
+                    [Some("@mods.browser.add"), None, None]
+                };
+                for (action_index, action) in actions.into_iter().flatten().enumerate() {
+                    let button = RenderRect::new(
+                        rect.x + rect.width - 140.0 - action_index as f32 * 94.0,
+                        rect.y + 8.0,
+                        86.0,
+                        24.0,
+                    );
+                    pass.push(RenderCommand::draw_sprite(
+                        Self::settings_text_button_symbol("grayt", false, false),
+                        button,
+                        [1.0, 1.0, 1.0, 0.72],
+                        0.0,
+                        Layer::END_PIXELED + 0.101 + visible_index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        action,
+                        button.center(),
+                        [0.78, 0.88, 0.96, 1.0],
+                        7.5,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.102 + visible_index as f32 * 0.001,
+                    ));
+                }
             }
         }
         self.push_settings_text_button(
@@ -46243,6 +46294,7 @@ name: beta
 displayName: "Beta Override"
 author: "Beta Author"
 version: "2.0.0"
+repo: "Beta/Override"
 "#,
             ),
         ];
@@ -46313,6 +46365,7 @@ name: beta
 displayName: "Beta Override"
 author: "Beta Author"
 version: "2.0.0"
+repo: "Beta/Override"
 "#,
             ),
             ModMetadata::from_source_text(
@@ -46376,6 +46429,10 @@ version: "3.0.0"
         assert!(texts.contains(&"@mods.sort.name"));
         assert!(texts.contains(&"Beta Override"));
         assert!(texts.iter().any(|text| text.contains("Beta Author")));
+        assert!(texts.contains(&"repo: Beta/Override"));
+        assert!(texts.contains(&"@mods.browser.reinstall"));
+        assert!(texts.contains(&"@mods.github.open"));
+        assert!(texts.contains(&"@mods.browser.view-releases"));
         assert_eq!(launcher.filtered_mods_browser_indices(), vec![1]);
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
 

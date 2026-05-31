@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 558. ModsDialog browser repo 卡片动作区首个闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.0%**，仍未达到完整可玩；继续优先前端/UI，让 Mods browser 的条目更接近 Java 远程仓库卡片，而不是只有本地列表文本。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java` 的 browser 条目会显示 repo 信息，并提供 `@mods.browser.add` / `@mods.browser.reinstall`、`@mods.github.open`、`@mods.browser.view-releases` 等动作入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `mods_browser_entry_rect_for_list(...)` 扩大为更像卡片的高度；
+    - browser 条目现在显示 repo 或 `source: local scan`；
+    - 有 repo 的条目显示 `@mods.browser.reinstall`、`@mods.github.open`、`@mods.browser.view-releases` 动作区；
+    - 无 repo 的本地扫描条目显示 `@mods.browser.add`；
+    - 更新 `desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries` 覆盖 repo 与动作按钮文案。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop mods_browser --features opengl-backend`
+- 仍未完成：
+  - 当前动作区仍是可见 UI 首闭环，reinstall/download/releases/GitHub open 尚未接入真实网络与平台动作；
+  - 真实 mod content registry 仍需继续接入；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 557. ModsDialog detail/content 占位文案清理
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
