@@ -19271,3 +19271,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 settings 仍是 `DesktopLauncher.settings_overrides` 内的可验证落点，尚未接真实磁盘 settings 文件和完整 Arc/Core settings 生命周期；
   - 真实 schematic 文件保存、导入/导出、preview texture 和 per-schematic tag add/remove 仍需继续迁移；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 542. SchematicsDialog 单蓝图标签 chip 增删闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **57.8%**，仍未达到完整可玩；继续优先前端/UI，目标是把 Java `buildTags(Schematic, Table, boolean)` 的“单个 schematic 标签 chip 增删”从纯文本展示推进为可交互组件。
+- Java 对照证据：
+  - `buildTags(...)` 会按全局 `tags` 顺序对当前 schematic labels 排序显示；
+  - 每个 label chip 右侧有 `Icon.cancelSmall`，点击只从当前 schematic 的 labels 移除该 tag；
+  - 右侧 `Icon.addSmall` 打开 add tag 面板，从全局 tags 中选未使用 tag，或新建 text/icon tag；
+  - `addTag/removeTag` 修改的是当前 schematic，并触发保存与 tagsChanged。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CardTagRemove { card_index, tag_index }` / `CardTagAdd { card_index, tag_index }` 模态按钮；
+    - Edit 模态内的 `@schematic.tags` 从 `labels.join(", ")` 改成 chip 行：已有 tag chip + 删除按钮、可添加 tag chip；
+    - add chip 从 canonical `schematics_tag_names()` 中筛出当前 schematic 尚未拥有的标签；
+    - remove chip 只删除当前 card 的 label，不删除全局 tag order，不误改 `schematic_selected_tags`；
+    - 单 card tag 增删后调用 `persist_schematic_tags()`，保留全局 tag settings 落点。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Info 模态仍有一处 `tags: ...` 文本展示，后续应复用同一套 chip helper；
+  - add tag 目前直接显示可用 tag chip，还没做 Java 的子弹窗/新建文本或 icon tag picker；
+  - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
+  - 未达到完整可玩，不能宣告目标完成。
