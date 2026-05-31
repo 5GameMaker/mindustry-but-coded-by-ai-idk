@@ -20138,6 +20138,35 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `Styles.cleari` 仍需在 skin/style registry 中做正式别名，而不是当前 clear drawable 近似；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 584. MapListDialog filter 真实 toggle 闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **63.8%**，仍未达到完整可玩；继续优先前端/UI，把 `MapListDialog.showMapFilters()` 从可见静态说明推进到可点击、会重建地图列表的真实筛选开关。
+- Java 对照依据：
+  - `MapListDialog.showMapFilters()` 的 gamemode/type/search/priorities 选项点击后都会更新状态并调用 `rebuildMaps()`；
+  - `showCustom=false` 会关闭 `prioritizeCustom`，`showModded=false` 会关闭 `prioritizeModded`；
+  - 搜索默认只搜地图名，author/description/mod name 需要显式勾选；
+  - custom 与 modded 优先排序互斥。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMapListFilterAction` 与 `MapListFilter(...)` route action；
+    - 新增 gamemode、type、search scope、priority 的 filter 状态；
+    - `filtered_map_card_indices()` 接入类型过滤、gamemode validity、搜索范围与 custom/modded 优先排序；
+    - filter 弹窗改为渲染真实 toggle 按钮：`@editor.filters.mode / priorities / type / search`；
+    - hit-test 可直接命中 survival/attack/sandbox/pvp、custom/builtin/modded、author/description/modname、prioritize custom/modded；
+    - custom/modded 关闭时会同步关闭对应 priority，避免无效优先级残留。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - planet filter 仍只是 `@rules.anyenv` 提示，尚未接 Java 的 planet select 子弹窗与可访问 planet 列表；
+  - filter 状态还未接 settings 持久化；
+  - 地图缩略图、`MapPlayDialog` 完整 play/custom rules/high score，以及 `EditorMapsDialog` 的完整 map info/open/delete/workshop 流程仍需继续迁移；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

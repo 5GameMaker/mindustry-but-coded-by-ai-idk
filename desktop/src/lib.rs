@@ -38,7 +38,7 @@ use mindustry_core::mindustry::entities::{
     SuppressionFieldAbility, TextureRegionRef, UnitDrawPartKind, WeaponMount, WorldLabelAlign,
     WorldLabelComp, PLAYER_CLASS_ID,
 };
-use mindustry_core::mindustry::game::{TechNodeId, TechTree};
+use mindustry_core::mindustry::game::{Gamemode, TechNodeId, TechTree};
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 #[cfg(test)]
@@ -544,6 +544,19 @@ impl DesktopMapCardAction {
     pub const fn new(index: usize, kind: DesktopMapCardActionKind) -> Self {
         Self { index, kind }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopMapListFilterAction {
+    ToggleMode(Gamemode),
+    ToggleShowCustom,
+    ToggleShowBuiltin,
+    ToggleShowModded,
+    ToggleSearchAuthor,
+    ToggleSearchDescription,
+    ToggleSearchModName,
+    TogglePrioritizeCustom,
+    TogglePrioritizeModded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2512,6 +2525,7 @@ pub enum DesktopMenuRouteShellAction {
     RefreshJoinServers,
     OpenMapListFilters,
     CloseMapListFilters,
+    MapListFilter(DesktopMapListFilterAction),
     FocusMapListSearch,
     ClearMapListSearch,
     MapCard(DesktopMapCardAction),
@@ -15428,6 +15442,15 @@ pub struct DesktopLauncher {
     pub map_list_search: String,
     pub map_list_search_focused: bool,
     pub map_list_scroll_offset: usize,
+    pub map_list_filter_modes: Vec<Gamemode>,
+    pub map_list_filter_show_builtin: bool,
+    pub map_list_filter_show_custom: bool,
+    pub map_list_filter_show_modded: bool,
+    pub map_list_filter_search_author: bool,
+    pub map_list_filter_search_description: bool,
+    pub map_list_filter_search_mod_name: bool,
+    pub map_list_filter_prioritize_custom: bool,
+    pub map_list_filter_prioritize_modded: bool,
     pub map_play_dialog_index: Option<usize>,
     pub editor_map_info_dialog_index: Option<usize>,
     pub last_map_card_action: Option<DesktopMapCardAction>,
@@ -16197,6 +16220,15 @@ impl DesktopLauncher {
             map_list_search: String::new(),
             map_list_search_focused: false,
             map_list_scroll_offset: 0,
+            map_list_filter_modes: Vec::new(),
+            map_list_filter_show_builtin: true,
+            map_list_filter_show_custom: true,
+            map_list_filter_show_modded: true,
+            map_list_filter_search_author: false,
+            map_list_filter_search_description: false,
+            map_list_filter_search_mod_name: false,
+            map_list_filter_prioritize_custom: false,
+            map_list_filter_prioritize_modded: false,
             map_play_dialog_index: None,
             editor_map_info_dialog_index: None,
             last_map_card_action: None,
@@ -23117,7 +23149,7 @@ impl DesktopLauncher {
 
     fn map_list_filter_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         let width = (panel.width * 0.62).clamp(300.0, 430.0);
-        let height = 292.0;
+        let height = 420.0;
         RenderRect::new(
             panel.center().x - width * 0.5,
             panel.center().y - height * 0.5,
@@ -23126,12 +23158,39 @@ impl DesktopLauncher {
         )
     }
 
-    fn map_list_filter_option_rect(dialog: RenderRect, index: usize) -> RenderRect {
+    fn map_list_filter_mode_rect(dialog: RenderRect, index: usize) -> RenderRect {
         RenderRect::new(
-            dialog.x + 34.0,
-            dialog.y + dialog.height - 92.0 - index as f32 * 38.0,
-            dialog.width - 68.0,
-            30.0,
+            dialog.x + 34.0 + index as f32 * 84.0,
+            dialog.y + dialog.height - 116.0,
+            76.0,
+            38.0,
+        )
+    }
+
+    fn map_list_filter_priority_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 34.0 + index as f32 * 152.0,
+            dialog.y + dialog.height - 182.0,
+            144.0,
+            38.0,
+        )
+    }
+
+    fn map_list_filter_type_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 34.0 + index as f32 * 122.0,
+            dialog.y + dialog.height - 256.0,
+            114.0,
+            42.0,
+        )
+    }
+
+    fn map_list_filter_search_scope_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 34.0 + index as f32 * 122.0,
+            dialog.y + dialog.height - 330.0,
+            114.0,
+            42.0,
         )
     }
 
@@ -23212,23 +23271,148 @@ impl DesktopLauncher {
 
     fn filtered_map_card_indices(&self) -> Vec<usize> {
         let query = schematic_search_normalize(&self.map_list_search);
-        self.map_list_cards
+        let mut indices = self
+            .map_list_cards
             .iter()
             .enumerate()
             .filter_map(|(index, map)| {
+                if !self.map_list_filter_allows_type(map) {
+                    return None;
+                }
+                if !self.map_list_filter_allows_modes(map) {
+                    return None;
+                }
                 if query.is_empty() {
                     return Some(index);
                 }
-                let haystack = schematic_search_normalize(&format!(
-                    "{} {} {} {}",
-                    map.plain_name(),
-                    map.plain_author(),
-                    map.plain_description(),
-                    map.mod_name.as_deref().unwrap_or_default()
-                ));
-                haystack.contains(&query).then_some(index)
+                self.map_list_filter_matches_query(map, &query)
+                    .then_some(index)
             })
-            .collect()
+            .collect::<Vec<_>>();
+        indices.sort_by(|left, right| {
+            let left_map = &self.map_list_cards[*left];
+            let right_map = &self.map_list_cards[*right];
+            self.compare_map_list_cards(left_map, right_map)
+        });
+        indices
+    }
+
+    fn map_list_filter_allows_type(&self, map: &MapDescriptor) -> bool {
+        if map.mod_name.is_some() {
+            return self.map_list_filter_show_modded;
+        }
+        if map.custom || map.workshop {
+            return self.map_list_filter_show_custom;
+        }
+        self.map_list_filter_show_builtin
+    }
+
+    fn map_list_filter_allows_modes(&self, map: &MapDescriptor) -> bool {
+        self.map_list_filter_modes.iter().all(|mode| {
+            if map.spawns == 0 && map.teams.is_empty() {
+                true
+            } else {
+                mode.valid(map)
+            }
+        })
+    }
+
+    fn map_list_filter_matches_query(&self, map: &MapDescriptor, query: &str) -> bool {
+        schematic_search_normalize(&map.plain_name()).contains(query)
+            || (self.map_list_filter_search_author
+                && schematic_search_normalize(&map.plain_author()).contains(query))
+            || (self.map_list_filter_search_description
+                && schematic_search_normalize(&map.plain_description()).contains(query))
+            || (self.map_list_filter_search_mod_name
+                && schematic_search_normalize(map.mod_name.as_deref().unwrap_or_default())
+                    .contains(query))
+    }
+
+    fn compare_map_list_cards(
+        &self,
+        left: &MapDescriptor,
+        right: &MapDescriptor,
+    ) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        if self.map_list_filter_prioritize_modded {
+            let ordering = right.mod_name.is_some().cmp(&left.mod_name.is_some());
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+            let ordering = left
+                .mod_name
+                .as_deref()
+                .unwrap_or_default()
+                .cmp(right.mod_name.as_deref().unwrap_or_default());
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        } else if self.map_list_filter_prioritize_custom {
+            let ordering = right.custom.cmp(&left.custom);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        left.plain_name().cmp(&right.plain_name())
+    }
+
+    fn dispatch_map_list_filter_action(&mut self, action: DesktopMapListFilterAction) {
+        match action {
+            DesktopMapListFilterAction::ToggleMode(mode) => {
+                if let Some(index) = self
+                    .map_list_filter_modes
+                    .iter()
+                    .position(|selected| *selected == mode)
+                {
+                    self.map_list_filter_modes.remove(index);
+                } else {
+                    self.map_list_filter_modes.push(mode);
+                }
+            }
+            DesktopMapListFilterAction::ToggleShowCustom => {
+                self.map_list_filter_show_custom = !self.map_list_filter_show_custom;
+                if !self.map_list_filter_show_custom {
+                    self.map_list_filter_prioritize_custom = false;
+                }
+            }
+            DesktopMapListFilterAction::ToggleShowBuiltin => {
+                self.map_list_filter_show_builtin = !self.map_list_filter_show_builtin;
+            }
+            DesktopMapListFilterAction::ToggleShowModded => {
+                self.map_list_filter_show_modded = !self.map_list_filter_show_modded;
+                if !self.map_list_filter_show_modded {
+                    self.map_list_filter_prioritize_modded = false;
+                }
+            }
+            DesktopMapListFilterAction::ToggleSearchAuthor => {
+                self.map_list_filter_search_author = !self.map_list_filter_search_author;
+            }
+            DesktopMapListFilterAction::ToggleSearchDescription => {
+                self.map_list_filter_search_description = !self.map_list_filter_search_description;
+            }
+            DesktopMapListFilterAction::ToggleSearchModName => {
+                self.map_list_filter_search_mod_name = !self.map_list_filter_search_mod_name;
+            }
+            DesktopMapListFilterAction::TogglePrioritizeCustom => {
+                if self.map_list_filter_show_custom {
+                    self.map_list_filter_prioritize_custom =
+                        !self.map_list_filter_prioritize_custom;
+                    if self.map_list_filter_prioritize_custom {
+                        self.map_list_filter_prioritize_modded = false;
+                    }
+                }
+            }
+            DesktopMapListFilterAction::TogglePrioritizeModded => {
+                if self.map_list_filter_show_modded {
+                    self.map_list_filter_prioritize_modded =
+                        !self.map_list_filter_prioritize_modded;
+                    if self.map_list_filter_prioritize_modded {
+                        self.map_list_filter_prioritize_custom = false;
+                    }
+                }
+            }
+        }
+        self.map_list_scroll_offset = 0;
     }
 
     fn map_list_visible_row_capacity_for_pane(pane: RenderRect) -> usize {
@@ -24141,6 +24325,52 @@ impl DesktopLauncher {
             if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseMapListFilters);
             }
+            for (index, mode) in Gamemode::ALL
+                .into_iter()
+                .filter(|mode| !mode.hidden())
+                .enumerate()
+            {
+                if Self::map_list_filter_mode_rect(dialog, index).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapListFilter(
+                        DesktopMapListFilterAction::ToggleMode(mode),
+                    ));
+                }
+            }
+            for (index, action) in [
+                DesktopMapListFilterAction::TogglePrioritizeCustom,
+                DesktopMapListFilterAction::TogglePrioritizeModded,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if Self::map_list_filter_priority_rect(dialog, index).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapListFilter(action));
+                }
+            }
+            for (index, action) in [
+                DesktopMapListFilterAction::ToggleShowCustom,
+                DesktopMapListFilterAction::ToggleShowBuiltin,
+                DesktopMapListFilterAction::ToggleShowModded,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if Self::map_list_filter_type_rect(dialog, index).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapListFilter(action));
+                }
+            }
+            for (index, action) in [
+                DesktopMapListFilterAction::ToggleSearchAuthor,
+                DesktopMapListFilterAction::ToggleSearchDescription,
+                DesktopMapListFilterAction::ToggleSearchModName,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if Self::map_list_filter_search_scope_rect(dialog, index).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapListFilter(action));
+                }
+            }
             return None;
         }
         if self.map_play_dialog_index.is_some() || self.editor_map_info_dialog_index.is_some() {
@@ -24699,6 +24929,9 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::CloseMapListFilters => {
                 self.map_list_filter_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::MapListFilter(action) => {
+                self.dispatch_map_list_filter_action(action);
             }
             DesktopMenuRouteShellAction::FocusMapListSearch => {
                 self.map_list_search_focused = true;
@@ -26931,6 +27164,46 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_map_list_filter_toggle(
+        &self,
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        label: impl Into<String>,
+        checked: bool,
+        enabled: bool,
+        layer: f32,
+    ) {
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("flatTogglet", false, checked && enabled),
+            rect,
+            if !enabled {
+                [0.28, 0.32, 0.36, 0.54]
+            } else if checked {
+                [0.78, 0.92, 1.0, 0.96]
+            } else {
+                [0.56, 0.64, 0.72, 0.78]
+            },
+            0.0,
+            layer,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            label.into(),
+            rect.center(),
+            if enabled {
+                [0.92, 0.97, 1.0, 1.0]
+            } else {
+                [0.46, 0.52, 0.58, 0.88]
+            },
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(enabled),
+            layer + 0.0001,
+        ));
+    }
+
     fn push_map_list_filter_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         if !self.map_list_filter_dialog_open {
             return;
@@ -26966,41 +27239,160 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.073,
         ));
-        for (index, label) in [
-            "show: @custom / @builtin / @mods",
-            "search: name / author / description / mod",
-            "priority: @custom / @mods",
-            "planet: @all",
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let rect = Self::map_list_filter_option_rect(dialog, index);
+        let group_specs = [
+            (
+                "@editor.filters.mode",
+                RenderRect::new(
+                    dialog.x + 24.0,
+                    dialog.y + dialog.height - 126.0,
+                    dialog.width - 48.0,
+                    54.0,
+                ),
+            ),
+            (
+                "@editor.filters.priorities",
+                RenderRect::new(
+                    dialog.x + 24.0,
+                    dialog.y + dialog.height - 192.0,
+                    dialog.width - 48.0,
+                    54.0,
+                ),
+            ),
+            (
+                "@editor.filters.type",
+                RenderRect::new(
+                    dialog.x + 24.0,
+                    dialog.y + dialog.height - 266.0,
+                    dialog.width - 48.0,
+                    58.0,
+                ),
+            ),
+            (
+                "@editor.filters.search",
+                RenderRect::new(
+                    dialog.x + 24.0,
+                    dialog.y + dialog.height - 340.0,
+                    dialog.width - 48.0,
+                    58.0,
+                ),
+            ),
+        ];
+        for (index, (label, group)) in group_specs.into_iter().enumerate() {
             pass.push(RenderCommand::draw_sprite(
-                Self::settings_text_button_symbol("grayt", false, false),
-                rect,
-                [1.0, 1.0, 1.0, 0.74],
+                Self::settings_drawable_symbol("button"),
+                group,
+                [1.0, 1.0, 1.0, 0.38],
                 0.0,
                 Layer::END_PIXELED + 0.074 + index as f32 * 0.001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 label,
-                RenderPoint::new(rect.x + 14.0, rect.center().y),
+                RenderPoint::new(group.x + 10.0, group.y + group.height + 12.0),
                 [0.78, 0.88, 0.96, 1.0],
-                10.0,
+                10.5,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.075 + index as f32 * 0.001,
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.078 + index as f32 * 0.001,
             ));
         }
+        for (index, mode) in Gamemode::ALL
+            .into_iter()
+            .filter(|mode| !mode.hidden())
+            .enumerate()
+        {
+            self.push_map_list_filter_toggle(
+                pass,
+                Self::map_list_filter_mode_rect(dialog, index),
+                format!("@mode.{}.name", mode.wire_name()),
+                self.map_list_filter_modes.contains(&mode),
+                true,
+                Layer::END_PIXELED + 0.082 + index as f32 * 0.001,
+            );
+        }
+        for (index, (label, checked, enabled)) in [
+            (
+                "@editor.filters.prioritizecustom",
+                self.map_list_filter_show_custom && self.map_list_filter_prioritize_custom,
+                self.map_list_filter_show_custom,
+            ),
+            (
+                "@editor.filters.prioritizemod",
+                self.map_list_filter_show_modded && self.map_list_filter_prioritize_modded,
+                self.map_list_filter_show_modded,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_map_list_filter_toggle(
+                pass,
+                Self::map_list_filter_priority_rect(dialog, index),
+                label,
+                checked,
+                enabled,
+                Layer::END_PIXELED + 0.088 + index as f32 * 0.001,
+            );
+        }
+        for (index, (label, checked)) in [
+            ("@custom", self.map_list_filter_show_custom),
+            ("@builtin", self.map_list_filter_show_builtin),
+            ("@modded", self.map_list_filter_show_modded),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_map_list_filter_toggle(
+                pass,
+                Self::map_list_filter_type_rect(dialog, index),
+                label,
+                checked,
+                true,
+                Layer::END_PIXELED + 0.092 + index as f32 * 0.001,
+            );
+        }
+        for (index, (label, checked)) in [
+            ("@editor.filters.author", self.map_list_filter_search_author),
+            (
+                "@editor.filters.description",
+                self.map_list_filter_search_description,
+            ),
+            (
+                "@editor.filters.modname",
+                self.map_list_filter_search_mod_name,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_map_list_filter_toggle(
+                pass,
+                Self::map_list_filter_search_scope_rect(dialog, index),
+                label,
+                checked,
+                true,
+                Layer::END_PIXELED + 0.096 + index as f32 * 0.001,
+            );
+        }
+        pass.push(RenderCommand::draw_text_styled(
+            "@editor.filters.planetselect: @rules.anyenv",
+            RenderPoint::new(dialog.x + 34.0, dialog.y + 78.0),
+            [0.58, 0.68, 0.76, 0.94],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.100,
+        ));
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
             "@back",
             Some("left"),
-            Layer::END_PIXELED + 0.083,
+            Layer::END_PIXELED + 0.103,
         );
     }
 
@@ -31052,7 +31444,7 @@ mod tests {
             EFFECT_STATE_CLASS_ID, FIRE_CLASS_ID, PLAYER_CLASS_ID, PUDDLE_CLASS_ID,
             WEATHER_STATE_CLASS_ID, WORLD_LABEL_CLASS_ID,
         },
-        game::{BlockPlan, Trigger, TEAM_CRUX, TEAM_SHARDED},
+        game::{BlockPlan, Gamemode, Trigger, TEAM_CRUX, TEAM_SHARDED},
         io::type_io::ControllerWire,
         io::{
             type_io, BuildingRef, LegacyTeamBlockGroup, LegacyTeamBlockPlan, LegacyTeamBlocks,
@@ -46486,10 +46878,21 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(filter_texts.contains(&"@editor.filters"));
-        assert!(filter_texts.contains(&"show: @custom / @builtin / @mods"));
-        assert!(filter_texts.contains(&"search: name / author / description / mod"));
-        assert!(filter_texts.contains(&"priority: @custom / @mods"));
-        assert!(filter_texts.contains(&"planet: @all"));
+        assert!(filter_texts.contains(&"@editor.filters.mode"));
+        assert!(filter_texts.contains(&"@mode.survival.name"));
+        assert!(filter_texts.contains(&"@mode.attack.name"));
+        assert!(filter_texts.contains(&"@editor.filters.priorities"));
+        assert!(filter_texts.contains(&"@editor.filters.prioritizecustom"));
+        assert!(filter_texts.contains(&"@editor.filters.prioritizemod"));
+        assert!(filter_texts.contains(&"@editor.filters.type"));
+        assert!(filter_texts.contains(&"@custom"));
+        assert!(filter_texts.contains(&"@builtin"));
+        assert!(filter_texts.contains(&"@modded"));
+        assert!(filter_texts.contains(&"@editor.filters.search"));
+        assert!(filter_texts.contains(&"@editor.filters.author"));
+        assert!(filter_texts.contains(&"@editor.filters.description"));
+        assert!(filter_texts.contains(&"@editor.filters.modname"));
+        assert!(filter_texts.contains(&"@editor.filters.planetselect: @rules.anyenv"));
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(custom_panel).center();
         assert_eq!(
@@ -46546,6 +46949,127 @@ version: "2.0.0"
         editor
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::ImportEditorMap);
         assert!(editor.editor_import_map_dialog_open);
+    }
+
+    #[test]
+    fn desktop_launcher_map_list_filter_dialog_toggles_type_search_and_priority() {
+        fn map_card(
+            name: &str,
+            author: &str,
+            custom: bool,
+            mod_name: Option<&str>,
+        ) -> MapDescriptor {
+            let mut tags = BTreeMap::new();
+            tags.insert("name".to_string(), name.to_string());
+            tags.insert("author".to_string(), author.to_string());
+            tags.insert("description".to_string(), format!("{name} desc"));
+            let mut map =
+                MapDescriptor::new(format!("maps/{name}.msav"), 128, 128, tags, custom, 1, 158);
+            map.spawns = 1;
+            map.teams = vec![1, 2];
+            map.mod_name = mod_name.map(str::to_string);
+            map
+        }
+
+        fn visible_names(launcher: &DesktopLauncher) -> Vec<String> {
+            launcher
+                .filtered_map_card_indices()
+                .into_iter()
+                .map(|index| launcher.map_list_cards[index].plain_name())
+                .collect()
+        }
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![
+            map_card("Alpha Builtin", "Vanilla", false, None),
+            map_card("Zulu Custom", "Mapper", true, None),
+            map_card("Beta Modded", "Modder", false, Some("Example Mod")),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenMapListFilters,
+        );
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let dialog = DesktopLauncher::map_list_filter_dialog_rect_for_panel(panel);
+
+        let builtin = DesktopLauncher::map_list_filter_type_rect(dialog, 1).center();
+        let action =
+            launcher.active_menu_route_shell_action_at_surface_point(surface, builtin.x, builtin.y);
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleShowBuiltin
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert!(!launcher.map_list_filter_show_builtin);
+        assert_eq!(
+            visible_names(&launcher),
+            vec!["Beta Modded".to_string(), "Zulu Custom".to_string()]
+        );
+
+        launcher.map_list_search = "mapper".into();
+        assert!(
+            visible_names(&launcher).is_empty(),
+            "MapListDialog 默认只按地图名搜索，作者字段应在勾选后才参与"
+        );
+        let author = DesktopLauncher::map_list_filter_search_scope_rect(dialog, 0).center();
+        let action =
+            launcher.active_menu_route_shell_action_at_surface_point(surface, author.x, author.y);
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleSearchAuthor
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert_eq!(visible_names(&launcher), vec!["Zulu Custom".to_string()]);
+
+        launcher.map_list_search.clear();
+        let priority = DesktopLauncher::map_list_filter_priority_rect(dialog, 0).center();
+        let action = launcher
+            .active_menu_route_shell_action_at_surface_point(surface, priority.x, priority.y);
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePrioritizeCustom
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert!(launcher.map_list_filter_prioritize_custom);
+        assert_eq!(
+            visible_names(&launcher),
+            vec!["Zulu Custom".to_string(), "Beta Modded".to_string()]
+        );
+
+        let custom = DesktopLauncher::map_list_filter_type_rect(dialog, 0).center();
+        let action =
+            launcher.active_menu_route_shell_action_at_surface_point(surface, custom.x, custom.y);
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleShowCustom
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert!(!launcher.map_list_filter_show_custom);
+        assert!(!launcher.map_list_filter_prioritize_custom);
+        assert_eq!(visible_names(&launcher), vec!["Beta Modded".to_string()]);
+
+        let survival = DesktopLauncher::map_list_filter_mode_rect(dialog, 0).center();
+        let action = launcher
+            .active_menu_route_shell_action_at_surface_point(surface, survival.x, survival.y);
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleMode(Gamemode::Survival)
+            ))
+        );
     }
 
     #[test]
