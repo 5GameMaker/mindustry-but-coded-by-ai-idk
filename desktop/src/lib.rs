@@ -16204,6 +16204,7 @@ pub struct DesktopLauncher {
     pub last_menu_platform_action: Option<DesktopMenuPlatformAction>,
     pub last_custom_menu_action: Option<DesktopCustomMenuAction>,
     pub last_menu_guard_message: Option<String>,
+    pub last_menu_info_message: Option<String>,
     pub menu_mobile_terminal_open: bool,
     pub menu_console_setting_enabled: bool,
     pub menu_becheck_active: bool,
@@ -17061,6 +17062,7 @@ impl DesktopLauncher {
             last_menu_platform_action: None,
             last_custom_menu_action: None,
             last_menu_guard_message: None,
+            last_menu_info_message: None,
             menu_mobile_terminal_open: false,
             menu_console_setting_enabled: true,
             menu_becheck_active: true,
@@ -21097,6 +21099,7 @@ impl DesktopLauncher {
     fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
         let submenu_changed = self.menu_renderer_state.select_desktop_root(role);
         self.last_menu_guard_message = None;
+        self.last_menu_info_message = None;
         self.last_custom_menu_action = None;
         if role == MenuButtonRole::Workshop {
             self.dispatch_menu_platform_action(DesktopMenuPlatformAction::OpenWorkshop);
@@ -21317,7 +21320,7 @@ impl DesktopLauncher {
                 self.last_menu_chrome_action = Some(DesktopMenuChromeAction::InfoOpenAbout);
             }
             DesktopMenuChromeAction::Becheck => {
-                self.last_menu_guard_message = Some(MENU_BECHECK_NO_UPDATES_MESSAGE.into());
+                self.last_menu_info_message = Some(MENU_BECHECK_NO_UPDATES_MESSAGE.into());
                 self.last_menu_chrome_action = Some(DesktopMenuChromeAction::Becheck);
             }
         }
@@ -37540,6 +37543,44 @@ impl DesktopLauncher {
         ));
     }
 
+    fn push_menu_info_message(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+        let Some(message) = self.last_menu_info_message.as_ref() else {
+            return;
+        };
+        let panel_width = (viewport.width * 0.42).clamp(260.0, 520.0);
+        let panel = RenderRect::new(
+            viewport.x + (viewport.width - panel_width) * 0.5,
+            viewport.y + 56.0,
+            panel_width,
+            52.0,
+        );
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            panel,
+            [0.92, 0.98, 1.0, 0.96],
+            0.0,
+            Layer::END_PIXELED + 0.06,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            panel,
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.07,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            message.clone(),
+            panel.center(),
+            [0.86, 0.94, 1.0, 1.0],
+            16.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.08,
+        ));
+    }
+
     fn menu_boot_diagnostic_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
         let font_report = self.font_asset_validation_report();
@@ -38017,6 +38058,7 @@ impl DesktopLauncher {
 
         let frame_viewport = menu_pass.viewport.unwrap_or(viewport);
         self.push_active_menu_route_shell(&mut menu_pass, frame_viewport);
+        self.push_menu_info_message(&mut menu_pass, frame_viewport);
         self.push_menu_guard_message(&mut menu_pass, frame_viewport);
         self.push_menu_boot_diagnostics(&mut menu_pass, frame_viewport);
         self.push_mobile_terminal_overlay(&mut menu_pass, frame_viewport);
@@ -60451,7 +60493,7 @@ version: "2.0.0"
             Some(super::DesktopMenuChromeAction::Becheck)
         );
         assert_eq!(
-            launcher.last_menu_guard_message.as_deref(),
+            launcher.last_menu_info_message.as_deref(),
             Some(super::MENU_BECHECK_NO_UPDATES_MESSAGE)
         );
         let becheck_frame = launcher.menu_graphics_frame_for_surface(1, viewport);

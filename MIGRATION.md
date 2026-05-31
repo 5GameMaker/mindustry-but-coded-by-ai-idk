@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 620. 主菜单信息提示拆出 showInfo-like 弹层
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.0%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是避免 BE check 的无更新提示继续借用红色错误 guard 样式。
+- Java 对照依据：
+  - `MenuFragment` 的 `becheck` 无更新路径调用 `ui.showInfo("@be.noupdates")`，语义上是信息弹窗，不是 play guard / error；
+  - Rust 之前用 `last_menu_guard_message` 承载 `@be.noupdates`，视觉更像错误。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `last_menu_info_message`；
+    - 新增 `push_menu_info_message(...)`，使用 pane + accent 边框 + 浅色文字渲染信息提示；
+    - `DesktopMenuChromeAction::Becheck` 改为设置 `last_menu_info_message`；
+    - 菜单帧先渲染 info message，再渲染 guard message；
+    - 更新 becheck 测试，断言状态与渲染文本走 info message。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_records_discord_and_becheck_actions --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - showInfo 仍未做成完整可关闭 BaseDialog；
+  - BE update-available 的文字 pulsing 与真实联网检查仍未接入。
+
 ## 619. 主菜单 BE check 点击补可见 no-updates 提示
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
