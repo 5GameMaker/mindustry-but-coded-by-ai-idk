@@ -16,8 +16,8 @@ use mindustry_core::mindustry::core::net_client::{
     ClientUnitItemMirror, ClientUnitPayloadMirror,
 };
 use mindustry_core::mindustry::core::{
-    content_loader::ContentLoader, ClientConnectConfig, DefaultPlatform, GameRuntime,
-    GameRuntimeMapLoadReport, GameRuntimeNetworkContext, GameState, GameStateState,
+    content_loader::ContentLoader, ClientConnectConfig, DefaultPlatform, FileChooserRequest,
+    GameRuntime, GameRuntimeMapLoadReport, GameRuntimeNetworkContext, GameState, GameStateState,
     MultiFileChooserRequest, NetClient, Platform,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
@@ -2563,6 +2563,7 @@ pub enum DesktopMenuRouteShellAction {
     ClearMapListSearch,
     FocusLoadGameSearch,
     ClearLoadGameSearch,
+    LoadGameImport,
     LoadGameSlot(usize, DesktopLoadGameActionKind),
     MapCard(DesktopMapCardAction),
     CloseMapCardDialog,
@@ -15928,6 +15929,7 @@ pub struct DesktopLauncher {
     pub load_game_slots: Vec<SaveSlotRecord>,
     pub last_load_game_action: Option<DesktopLoadGameAction>,
     pub load_game_error: Option<String>,
+    pub last_load_game_import_request: Option<FileChooserRequest>,
     pub load_game_search: String,
     pub load_game_search_focused: bool,
     pub load_game_scroll_offset: usize,
@@ -16749,6 +16751,7 @@ impl DesktopLauncher {
             load_game_slots: Vec::new(),
             last_load_game_action: None,
             load_game_error: None,
+            last_load_game_import_request: None,
             load_game_search: String::new(),
             load_game_search_focused: false,
             load_game_scroll_offset: 0,
@@ -23498,11 +23501,22 @@ impl DesktopLauncher {
 
     fn load_game_list_rect_for_panel(panel: RenderRect) -> RenderRect {
         let search = Self::load_game_search_rect_for_panel(panel);
+        let bottom = Self::route_back_button_rect_for_panel(panel).bottom() + 18.0;
         RenderRect::new(
             panel.x + 28.0,
-            panel.y + 28.0,
+            bottom,
             panel.width - 56.0,
-            (search.y - panel.y - 48.0).max(LOAD_SLOT_CARD_HEIGHT),
+            (search.y - bottom - 16.0).max(LOAD_SLOT_CARD_HEIGHT),
+        )
+    }
+
+    fn load_game_import_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = ROUTE_BACK_BUTTON_WIDTH.min((panel.width - 56.0).max(1.0));
+        RenderRect::new(
+            panel.right() - 28.0 - width,
+            panel.y + 18.0,
+            width,
+            ROUTE_BACK_BUTTON_HEIGHT,
         )
     }
 
@@ -23622,6 +23636,9 @@ impl DesktopLauncher {
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
         }
+        if Self::load_game_import_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::LoadGameImport);
+        }
         if Self::load_game_search_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
         }
@@ -23663,7 +23680,7 @@ impl DesktopLauncher {
         slot_index: usize,
         kind: DesktopLoadGameActionKind,
     ) -> Option<DesktopLoadGameAction> {
-        let slot = self.load_game_slots.get(slot_index)?;
+        let slot = self.load_game_slots.get(slot_index)?.clone();
         let status = match kind {
             DesktopLoadGameActionKind::Load => "selected-for-load",
             DesktopLoadGameActionKind::ToggleAutosave => "toggle-autosave",
@@ -23679,8 +23696,43 @@ impl DesktopLauncher {
             kind,
             status: status.into(),
         };
+        if kind == DesktopLoadGameActionKind::Delete {
+            let mut delete_error = None;
+            for target in slot.delete_targets() {
+                match std::fs::remove_file(&target) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        delete_error = Some(format!(
+                            "failed to delete save {}: {error}",
+                            target.display()
+                        ));
+                        break;
+                    }
+                }
+            }
+            if let Some(error) = delete_error {
+                self.load_game_error = Some(error);
+            } else {
+                self.refresh_load_game_slots();
+                self.load_game_scroll_offset = self.load_game_scroll_offset.min(
+                    self.filtered_load_game_slot_indices()
+                        .len()
+                        .saturating_sub(1),
+                );
+            }
+        }
         self.last_load_game_action = Some(action.clone());
         Some(action)
+    }
+
+    fn dispatch_load_game_import_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> FileChooserRequest {
+        let request = platform.show_file_chooser(true, "@save.import", "msav");
+        self.last_load_game_import_request = Some(request.clone());
+        request
     }
 
     fn max_load_game_scroll_offset_for_counts(total_slots: usize, visible_slots: usize) -> usize {
@@ -26132,6 +26184,10 @@ impl DesktopLauncher {
                 self.load_game_search.clear();
                 self.load_game_scroll_offset = 0;
                 self.load_game_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::LoadGameImport => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_load_game_import_with_platform(&mut platform);
             }
             DesktopMenuRouteShellAction::LoadGameSlot(index, kind) => {
                 self.dispatch_load_game_slot_action_kind(index, kind);
@@ -29901,6 +29957,13 @@ impl DesktopLauncher {
             Self::route_back_button_rect_for_panel(panel),
             "@back",
             Some("left"),
+            Layer::END_PIXELED + 0.024,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_import_button_rect_for_panel(panel),
+            "@save.import",
+            Some("add"),
             Layer::END_PIXELED + 0.024,
         );
         pass.push(RenderCommand::draw_sprite(
@@ -53836,6 +53899,7 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"@save.search"));
+        assert!(texts.contains(&"@save.import"));
         assert!(texts.contains(&"[accent]New Map"));
         assert!(texts.contains(&"slot 2 | @save.wave 9"));
         assert!(texts.contains(&"saved 200"));
@@ -53857,6 +53921,24 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(card_rects.contains(&slot_card));
+
+        let import = DesktopLauncher::load_game_import_button_rect_for_panel(
+            DesktopLauncher::active_menu_route_shell_panel_for_route(
+                viewport,
+                super::DesktopMenuRoute::LoadGame,
+            ),
+        )
+        .center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, import.x, import.y),
+            Some(super::DesktopMenuRouteShellAction::LoadGameImport)
+        );
+        let mut platform = RecordingPlatform::default();
+        let request = launcher.dispatch_load_game_import_with_platform(&mut platform);
+        assert!(request.open);
+        assert_eq!(request.title, "@save.import");
+        assert_eq!(request.extension, "msav");
+        assert_eq!(launcher.last_load_game_import_request, Some(request));
 
         std::fs::remove_dir_all(root).ok();
     }
@@ -53893,6 +53975,8 @@ version: "2.0.0"
                 index as i32,
             );
         }
+        let map2_backup = save_dir.join("2.msav-backup.msav");
+        std::fs::write(&map2_backup, b"backup").expect("backup fixture should write");
 
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.client.context.paths.save_dir = save_dir.display().to_string();
@@ -54002,12 +54086,19 @@ version: "2.0.0"
         assert_eq!(action.kind, super::DesktopLoadGameActionKind::Delete);
         assert_eq!(action.status, "delete");
         assert_eq!(action.map_name.as_deref(), Some("Map 2"));
+        assert!(!save_dir.join("2.msav").exists());
+        assert!(!map2_backup.exists());
+        assert_eq!(launcher.load_game_slots.len(), 6);
+        assert!(!launcher
+            .load_game_slots
+            .iter()
+            .any(|slot| DesktopLauncher::load_game_slot_title(slot) == "Map 2"));
 
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ClearLoadGameSearch,
         );
         assert!(launcher.load_game_search.is_empty());
-        assert_eq!(launcher.filtered_load_game_slot_indices().len(), 7);
+        assert_eq!(launcher.filtered_load_game_slot_indices().len(), 6);
 
         std::fs::remove_dir_all(root).ok();
     }

@@ -15,6 +15,52 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 565. LoadDialog 删除存档真实副作用
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.7%**，仍未达到完整可玩；继续优先前端/UI，同时把已迁移按钮逐步接入真实文件副作用。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 的 delete 子按钮确认后调用 `slot.delete()` 并 `rebuild()`；
+  - Rust core 已有 `SaveSlotRecord::delete_targets()`，与 Java 一样先覆盖 backup 再覆盖 primary 目标。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `dispatch_load_game_slot_action_kind(..., Delete)` 现在会删除 backup 与 primary `.msav` 文件；
+    - 删除成功后调用 `refresh_load_game_slots()`，保留当前搜索并修正滚动偏移；
+    - 删除失败时写入 `load_game_error`，同时仍记录 `last_load_game_action` 供 UI/测试观测；
+    - 扩展 LoadGame 搜索/滚动测试，验证 delete 子按钮不会触发 load，而是实际删除 primary 与 backup 文件并刷新列表。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - Java 的确认弹层 `@save.delete.confirm` 尚未实现，当前测试路径直接执行删除；
+  - rename/export/import 选择后的真实流程与 SaveDialog/覆盖确认仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
+## 564. LoadDialog 导入存档入口接入 FileChooser
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.6%**，仍未达到完整可玩；继续优先前端/UI，让 LoadDialog 底部按钮区更贴近 Java。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 的 `addSetup()` 在按钮区提供 `@save.import`，通过 `platform.showFileChooser(true, saveExtension, ...)` 选择 `.msav`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 引入 `FileChooserRequest`，新增 `last_load_game_import_request`；
+    - 新增 `LoadGameImport` 路由动作与 `dispatch_load_game_import_with_platform(...)`；
+    - LoadGame 页面底部新增 `@save.import` 按钮，命中后创建 open 模式 `.msav` file chooser request；
+    - 调整 LoadGame list pane 底部，避免列表与 `@back` / `@save.import` 按钮重叠；
+    - 扩展存档路由测试覆盖 import 按钮渲染、hit-test 与 request 字段。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - `.msav` 选择后的 SaveIO.isSaveValid/importSave/nocampaign/error 弹层仍需接入真实导入流程；
+  - SaveDialog 与槽位 rename/export 的真实 side effect 仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 563. LoadDialog 槽位操作按钮命中
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
