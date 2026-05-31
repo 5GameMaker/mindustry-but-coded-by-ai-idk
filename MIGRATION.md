@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 646. JoinDialog community 免责声明确认闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.8%**，仍未达到完整可玩；继续优先前端/UI 与联机入口，当前闭环目标是让 community 服务器连接符合 Java 首次免责声明确认语义。
+- Java 对照依据：
+  - `JoinDialog.addCommunityHost(...)` 连接 community host 前检查 `Core.settings.getBool("server-disclaimer", false)`；
+  - 未确认时弹 `@warning / @servers.disclaimer`，确认后写 `server-disclaimer=true` 并继续 `safeConnect(...)`，取消写回 false；
+  - 免责声明 modal 应优先拦截底层 Join route 点击。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_server_disclaimer_accepted` 与 `join_server_disclaimer_pending_target`；
+    - 新增 `ConfirmJoinServerDisclaimer/CancelJoinServerDisclaimer` route shell action；
+    - community connect 未确认时先打开 `@warning @servers.disclaimer` modal，不立即连接；
+    - 确认后写入 `settings_overrides["server-disclaimer"]="true"` 并继续连接；取消会清空 pending target 并写 false；
+    - 新增 disclaimer dialog rect、渲染、hit-test 与 shell lines，modal 打开时优先拦截底层 Join 点击；
+    - 回归测试覆盖 pending target、dialog 文本、OK 命中、settings 写回与确认后 connect_target。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - community connect 仍未做 Java `safeConnect(host.address, host.port, host.version)` 的版本门禁；
+  - `server-disclaimer` 仍只是 settings override，尚未接真实 settings 持久化读取；
+  - community group 远端 JSON fetch/parse 与逐 host 卡片化仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 645. JoinDialog community favorite/hidden/connect 按钮闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

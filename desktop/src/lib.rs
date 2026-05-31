@@ -178,6 +178,7 @@ const JOIN_ADD_SERVER_TEXT_MAX_LENGTH: usize = 96;
 const JOIN_SERVER_CARD_ACTION_BUTTONS: usize = 5;
 const JOIN_SERVERS_SETTINGS_KEY: &str = "servers";
 const JOIN_IP_SETTINGS_KEY: &str = "ip";
+const JOIN_SERVER_DISCLAIMER_SETTINGS_KEY: &str = "server-disclaimer";
 const LOAD_SLOT_CARD_HEIGHT: f32 = 220.0;
 const LOAD_SLOT_CARD_GAP: f32 = 10.0;
 const LOAD_SLOT_CARD_MIN_WIDTH: f32 = 320.0;
@@ -2773,6 +2774,8 @@ pub enum DesktopMenuRouteShellAction {
     ToggleJoinCommunityFavorite(usize),
     ToggleJoinCommunityHidden(usize),
     ConnectJoinCommunityGroup(usize),
+    ConfirmJoinServerDisclaimer,
+    CancelJoinServerDisclaimer,
     OpenMapListFilters,
     CloseMapListFilters,
     OpenMapListPlanetFilters,
@@ -16461,6 +16464,8 @@ pub struct DesktopLauncher {
     pub join_add_server_edit_index: Option<usize>,
     pub join_info_dialog_open: bool,
     pub join_delete_dialog_index: Option<usize>,
+    pub join_server_disclaimer_accepted: bool,
+    pub join_server_disclaimer_pending_target: Option<DesktopConnectTarget>,
     pub join_local_hosts: Vec<Host>,
     pub join_local_discovering: bool,
     pub join_local_discovery_finished: bool,
@@ -17363,6 +17368,8 @@ impl DesktopLauncher {
             join_add_server_edit_index: None,
             join_info_dialog_open: false,
             join_delete_dialog_index: None,
+            join_server_disclaimer_accepted: false,
+            join_server_disclaimer_pending_target: None,
             join_local_hosts: Vec::new(),
             join_local_discovering: false,
             join_local_discovery_finished: false,
@@ -21466,6 +21473,7 @@ impl DesktopLauncher {
                 self.join_add_server_edit_index = None;
                 self.join_info_dialog_open = false;
                 self.join_delete_dialog_index = None;
+                self.join_server_disclaimer_pending_target = None;
                 self.refresh_join_local_hosts();
             } else if route == DesktopMenuRoute::Schematics {
                 self.load_schematic_tags_from_settings();
@@ -27351,6 +27359,17 @@ impl DesktopLauncher {
         )
     }
 
+    fn join_server_disclaimer_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width * 0.66).clamp(420.0, 640.0);
+        let height = 184.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
     fn join_add_dialog_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
         let width = 140.0;
         let gap = 12.0;
@@ -29212,6 +29231,16 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Join);
         let point = RenderPoint::new(x, y);
+        if self.join_server_disclaimer_pending_target.is_some() {
+            let dialog = Self::join_server_disclaimer_dialog_rect_for_panel(panel);
+            if Self::join_add_dialog_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CancelJoinServerDisclaimer);
+            }
+            if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ConfirmJoinServerDisclaimer);
+            }
+            return None;
+        }
         if self.join_info_dialog_open {
             let dialog = Self::join_info_dialog_rect_for_panel(panel);
             if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
@@ -30801,8 +30830,31 @@ impl DesktopLauncher {
                     self.connect_error = Some("missing community host".into());
                     return;
                 };
+                if !self.join_server_disclaimer_accepted {
+                    self.join_server_disclaimer_pending_target = Some(target);
+                    self.join_add_dialog_open = false;
+                    self.join_info_dialog_open = false;
+                    self.join_delete_dialog_index = None;
+                    return;
+                }
                 self.connect_target = Some(target.clone());
                 let _ = self.connect_to_target(target);
+            }
+            DesktopMenuRouteShellAction::ConfirmJoinServerDisclaimer => {
+                let Some(target) = self.join_server_disclaimer_pending_target.take() else {
+                    return;
+                };
+                self.join_server_disclaimer_accepted = true;
+                self.settings_overrides
+                    .insert(JOIN_SERVER_DISCLAIMER_SETTINGS_KEY.into(), "true".into());
+                self.connect_target = Some(target.clone());
+                let _ = self.connect_to_target(target);
+            }
+            DesktopMenuRouteShellAction::CancelJoinServerDisclaimer => {
+                self.join_server_disclaimer_accepted = false;
+                self.join_server_disclaimer_pending_target = None;
+                self.settings_overrides
+                    .insert(JOIN_SERVER_DISCLAIMER_SETTINGS_KEY.into(), "false".into());
             }
             DesktopMenuRouteShellAction::OpenMapListFilters => {
                 self.map_list_filter_dialog_open = true;
@@ -32424,6 +32476,72 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_join_server_disclaimer_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(target) = self.join_server_disclaimer_pending_target.as_ref() else {
+            return;
+        };
+        let dialog = Self::join_server_disclaimer_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.48],
+            Layer::END_PIXELED + 0.096,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.097,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [1.0, 0.66, 0.30, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.098,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@warning",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [1.0, 0.92, 0.76, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.099,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "@servers.disclaimer | {}",
+                desktop_connect_target_display_ip(target)
+            ),
+            RenderPoint::new(dialog.x + 28.0, dialog.center().y + 14.0),
+            [0.88, 0.90, 0.84, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width(dialog.width - 56.0)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.0995,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.100,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 1),
+            "@ok",
+            Some("ok"),
+            Layer::END_PIXELED + 0.100,
+        );
+    }
+
     fn push_join_info_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         if !self.join_info_dialog_open {
             return;
@@ -33252,6 +33370,7 @@ impl DesktopLauncher {
         }
         self.push_join_add_server_dialog(pass, panel);
         self.push_join_delete_dialog(pass, panel);
+        self.push_join_server_disclaimer_dialog(pass, panel);
         self.push_join_info_dialog(pass, panel);
     }
 
@@ -38014,6 +38133,16 @@ impl DesktopLauncher {
                     lines.extend([
                         format!("dialog: @confirm @server.delete index={index}"),
                         "button: @cancel".into(),
+                        "button: @ok".into(),
+                    ]);
+                }
+                if let Some(target) = self.join_server_disclaimer_pending_target.as_ref() {
+                    lines.extend([
+                        format!(
+                            "dialog: @warning @servers.disclaimer target={}",
+                            desktop_connect_target_display_ip(target)
+                        ),
+                        "button: @back".into(),
                         "button: @ok".into(),
                     ]);
                 }
@@ -68227,6 +68356,63 @@ version: "2.0.0"
         );
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(0),
+        );
+        assert_eq!(
+            launcher.join_server_disclaimer_pending_target,
+            Some(super::DesktopConnectTarget {
+                host: "community.example".into(),
+                port: 6567,
+            })
+        );
+        assert_eq!(launcher.connect_target, None);
+        let disclaimer_lines =
+            launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(disclaimer_lines.contains(
+            &"dialog: @warning @servers.disclaimer target=community.example".to_string()
+        ));
+
+        let disclaimer_dialog =
+            DesktopLauncher::join_server_disclaimer_dialog_rect_for_panel(panel);
+        let disclaimer_ok =
+            DesktopLauncher::join_add_dialog_button_rect(disclaimer_dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                disclaimer_ok.x,
+                disclaimer_ok.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ConfirmJoinServerDisclaimer)
+        );
+        let disclaimer_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let disclaimer_texts = disclaimer_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join community disclaimer frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(disclaimer_texts.contains(&"@warning"));
+        assert!(
+            disclaimer_texts
+                .iter()
+                .any(|text| text.contains("@servers.disclaimer")
+                    && text.contains("community.example"))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmJoinServerDisclaimer,
+        );
+        assert!(launcher.join_server_disclaimer_accepted);
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::JOIN_SERVER_DISCLAIMER_SETTINGS_KEY),
+            Some(&"true".to_string())
         );
         assert_eq!(
             launcher.connect_target,
