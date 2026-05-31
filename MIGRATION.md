@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 647. JoinDialog community ServerGroup JSON 解析接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.9%**，仍未达到完整可玩；继续优先前端/UI 与联机入口，当前闭环目标是让 community/global server group 能从 Java 同形 JSON 文本进入 Rust `JoinDialog` 数据层。
+- Java 对照依据：
+  - `JoinDialog.parseServerString(...)` 读取数组对象中的 `name`、`prioritized`、`addresses` 或 `address`；
+  - `address` 既可能是字符串，也可能是数组；
+  - 解析后生成 `ServerGroup(name, addresses, prioritized)` 并排序。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_settings_json_bool_field(...)`、`join_settings_json_string_array_field(...)`；
+    - 新增 `join_community_groups_from_server_json(...)`，支持 `addresses` 数组、`address` 数组与 `address` 字符串；
+    - 新增 `DesktopLauncher::load_join_community_groups_from_server_json(...)`，把解析结果载入 `join_community_groups`；
+    - 回归测试覆盖多种 Java server-list JSON 形状、prioritized、空 name key fallback、搜索过滤与 shell line 可见 group 数。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - 远端 HTTP fetch/cache 文件尚未接入；
+  - Java hash 排序只做了稳定名称排序近似，后续如要字节级一致需复刻 Java `String.hashCode()`；
+  - community host 逐卡片与真实 ping/refresh 仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 646. JoinDialog community 免责声明确认闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

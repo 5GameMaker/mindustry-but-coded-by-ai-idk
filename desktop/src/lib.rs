@@ -27239,6 +27239,15 @@ impl DesktopLauncher {
         true
     }
 
+    pub fn load_join_community_groups_from_server_json(&mut self, value: &str) -> usize {
+        let groups = join_community_groups_from_server_json(value);
+        if groups.is_empty() {
+            return 0;
+        }
+        self.join_community_groups = groups;
+        self.join_community_groups.len()
+    }
+
     fn visible_join_community_groups(&self) -> Vec<(usize, &DesktopJoinCommunityGroup)> {
         self.join_community_groups
             .iter()
@@ -42377,6 +42386,70 @@ fn join_settings_json_u16_field(object: &str, field: &str) -> Option<u16> {
     digits.parse::<u16>().ok()
 }
 
+fn join_settings_json_bool_field(object: &str, field: &str) -> Option<bool> {
+    let key = format!("\"{field}\"");
+    let start = object.find(&key)? + key.len();
+    let after_colon = object[start..].find(':')? + start + 1;
+    let trimmed = object[after_colon..].trim_start();
+    if trimmed.starts_with("true") {
+        Some(true)
+    } else if trimmed.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn join_settings_json_string_array_field(object: &str, field: &str) -> Option<Vec<String>> {
+    let key = format!("\"{field}\"");
+    let start = object.find(&key)? + key.len();
+    let after_colon = object[start..].find(':')? + start + 1;
+    let trimmed = object[after_colon..].trim_start();
+    if !trimmed.starts_with('[') {
+        return None;
+    }
+    let array_start = after_colon + object[after_colon..].find('[')? + 1;
+    let mut rest = &object[array_start..];
+    let mut values = Vec::new();
+    loop {
+        rest = rest.trim_start();
+        if rest.starts_with(']') {
+            break;
+        }
+        if !rest.starts_with('"') {
+            break;
+        }
+        let wrapped = format!("{{\"value\":{rest}");
+        let Some(value) = join_settings_json_string_field(&wrapped, "value") else {
+            break;
+        };
+        values.push(value);
+        let consumed = rest[1..]
+            .char_indices()
+            .scan(false, |escaped, (index, ch)| {
+                if *escaped {
+                    *escaped = false;
+                    Some(None)
+                } else if ch == '\\' {
+                    *escaped = true;
+                    Some(None)
+                } else if ch == '"' {
+                    Some(Some(index + 2))
+                } else {
+                    Some(None)
+                }
+            })
+            .flatten()
+            .next()?;
+        rest = &rest[consumed..];
+        rest = rest.trim_start();
+        if rest.starts_with(',') {
+            rest = &rest[1..];
+        }
+    }
+    Some(values)
+}
+
 fn join_saved_servers_from_settings_json(value: &str) -> Vec<DesktopConnectTarget> {
     let mut rest = value;
     let mut servers = Vec::new();
@@ -42398,6 +42471,30 @@ fn join_saved_servers_from_settings_json(value: &str) -> Vec<DesktopConnectTarge
         rest = &rest[end + 1..];
     }
     servers
+}
+
+fn join_community_groups_from_server_json(value: &str) -> Vec<DesktopJoinCommunityGroup> {
+    let mut rest = value;
+    let mut groups = Vec::new();
+    while let Some(start) = rest.find('{') {
+        rest = &rest[start + 1..];
+        let Some(end) = join_settings_find_json_object_end(rest) else {
+            break;
+        };
+        let object = &rest[..end];
+        let name = join_settings_json_string_field(object, "name").unwrap_or_default();
+        let prioritized = join_settings_json_bool_field(object, "prioritized").unwrap_or(false);
+        let addresses = join_settings_json_string_array_field(object, "addresses")
+            .or_else(|| join_settings_json_string_array_field(object, "address"))
+            .or_else(|| {
+                join_settings_json_string_field(object, "address").map(|address| vec![address])
+            })
+            .unwrap_or_else(|| vec!["<invalid>".into()]);
+        groups.push(DesktopJoinCommunityGroup::new(name, addresses, prioritized));
+        rest = &rest[end + 1..];
+    }
+    groups.sort_by(|a, b| a.name.cmp(&b.name));
+    groups
 }
 
 #[cfg(test)]
@@ -68421,6 +68518,40 @@ version: "2.0.0"
                 port: 6567,
             })
         );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_parses_community_server_group_json_like_java() {
+        let json = r#"[
+            {"name":"Zeta","address":"zeta.example:6567"},
+            {"name":"Alpha","addresses":["alpha-a.example:6567","alpha-b.example"],"prioritized":true},
+            {"address":["array-address.example:6567"]}
+        ]"#;
+        let groups = super::join_community_groups_from_server_json(json);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].name, "");
+        assert_eq!(groups[0].addresses, vec!["array-address.example:6567"]);
+        assert!(!groups[0].prioritized);
+        assert_eq!(groups[1].name, "Alpha");
+        assert_eq!(
+            groups[1].addresses,
+            vec!["alpha-a.example:6567", "alpha-b.example"]
+        );
+        assert!(groups[1].prioritized);
+        assert_eq!(groups[2].name, "Zeta");
+        assert_eq!(groups[2].addresses, vec!["zeta.example:6567"]);
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        assert_eq!(
+            launcher.load_join_community_groups_from_server_json(json),
+            3
+        );
+        launcher.join_search = "alpha-b".into();
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(lines.contains(&"section: @servers.global groups: 1".to_string()));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("community[1]: Alpha")));
     }
 
     #[test]
