@@ -19243,3 +19243,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `showNewIconTag()` 目前只是星形占位，没有迁移 IconSelectDialog、accessibleIcons 和 content icon 选择；
   - `buildTags(schem, ...)` 的单 schematic tag 添加/移除弹窗仍未完整接入 edit/info 内部；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 541. SchematicsDialog 标签 settings JSON 持久化落点
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **57.6%**，仍未达到完整可玩；继续优先前端/UI，目标是把标签管理从纯内存 UI 状态推进到 Java `Core.settings.putJson("schematic-tags", ...)` 的等价持久化落点。
+- Java 对照证据：
+  - `SchematicsDialog.tagsChanged()` 调用 `Core.settings.putJson("schematic-tags", String.class, tags)` 保存全局 tag 顺序；
+  - `checkTags()` 会把当前 schematics 中出现但 settings 未记录的标签补齐到全局 `tags`；
+  - `showAllTags()` 的移动、重命名、删除、新增都应触发 tagsChanged。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SCHEMATIC_TAGS_SETTINGS_KEY = "schematic-tags"`；
+    - 新增最小 JSON array string 序列化/解析：`schematic_tags_to_json(...)` / `schematic_tags_from_json(...)`，覆盖引号、反斜杠和常见转义；
+    - 新增 `persist_schematic_tags()`，把 canonical `schematic_tag_order` 写入 `settings_overrides["schematic-tags"]`；
+    - 新增 `load_schematic_tags_from_settings()`，从 settings JSON 恢复 tag 顺序，并继续补齐当前卡片 labels 中的新标签；
+    - 打开 `Schematics` route 时加载 tag settings；
+    - Tag move/rename/delete/new text/new icon 都会调用 `persist_schematic_tags()`，让 UI 操作具备可验证的持久化落点。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic_tags --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 当前 settings 仍是 `DesktopLauncher.settings_overrides` 内的可验证落点，尚未接真实磁盘 settings 文件和完整 Arc/Core settings 生命周期；
+  - 真实 schematic 文件保存、导入/导出、preview texture 和 per-schematic tag add/remove 仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。

@@ -159,6 +159,7 @@ const SCHEMATICS_CARD_PREVIEW_SIZE: f32 = 200.0;
 const SCHEMATICS_CARD_HEIGHT: f32 = SCHEMATICS_CARD_BUTTON_HEIGHT + SCHEMATICS_CARD_PREVIEW_SIZE;
 const SCHEMATICS_CARD_GAP: f32 = 8.0;
 const SCHEMATICS_CARD_ACTION_SIZE: f32 = 50.0;
+const SCHEMATIC_TAGS_SETTINGS_KEY: &str = "schematic-tags";
 const DATABASE_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const DATABASE_TAB_SIZE: f32 = 36.0;
 const DATABASE_CONTENT_CELL_SIZE: f32 = 32.0;
@@ -656,6 +657,68 @@ fn schematic_search_normalize(value: &str) -> String {
             )
         })
         .collect()
+}
+
+fn schematic_tags_json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn schematic_tags_to_json(tags: &[String]) -> String {
+    let body = tags
+        .iter()
+        .map(|tag| format!("\"{}\"", schematic_tags_json_escape(tag)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{body}]")
+}
+
+fn schematic_tags_from_json(value: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    let mut chars = value.trim().chars().peekable();
+    if chars.next() != Some('[') {
+        return tags;
+    }
+    loop {
+        while matches!(chars.peek(), Some(ch) if ch.is_whitespace() || *ch == ',') {
+            chars.next();
+        }
+        match chars.peek().copied() {
+            Some(']') | None => break,
+            Some('"') => {
+                chars.next();
+                let mut tag = String::new();
+                while let Some(ch) = chars.next() {
+                    match ch {
+                        '"' => break,
+                        '\\' => match chars.next() {
+                            Some('n') => tag.push('\n'),
+                            Some('r') => tag.push('\r'),
+                            Some('t') => tag.push('\t'),
+                            Some(other) => tag.push(other),
+                            None => break,
+                        },
+                        other => tag.push(other),
+                    }
+                }
+                if !tag.is_empty() && !tags.iter().any(|known| known == &tag) {
+                    tags.push(tag);
+                }
+            }
+            _ => break,
+        }
+    }
+    tags
 }
 
 const ABOUT_BANNED_LINK_NAMES: &[&str] = &["google-play", "itch.io", "dev-builds", "f-droid"];
@@ -18851,6 +18914,7 @@ impl DesktopLauncher {
                 self.settings_scroll_drag_state = None;
                 self.settings_scroll_offsets.clear();
             } else if route == DesktopMenuRoute::Schematics {
+                self.load_schematic_tags_from_settings();
                 self.schematic_search.clear();
                 self.schematic_search_focused = true;
                 self.schematic_info_dialog = None;
@@ -19074,6 +19138,35 @@ impl DesktopLauncher {
         self.setting_override_value(table, key)
             .map(ToOwned::to_owned)
             .or_else(|| settings_pref_spec(table, key).map(|spec| spec.default_value.text()))
+    }
+
+    pub fn schematic_tags_persisted_json(&self) -> Option<&str> {
+        self.settings_overrides
+            .get(SCHEMATIC_TAGS_SETTINGS_KEY)
+            .map(String::as_str)
+    }
+
+    pub fn persist_schematic_tags(&mut self) {
+        self.sync_schematic_tag_order();
+        self.settings_overrides.insert(
+            SCHEMATIC_TAGS_SETTINGS_KEY.to_string(),
+            schematic_tags_to_json(&self.schematic_tag_order),
+        );
+    }
+
+    pub fn load_schematic_tags_from_settings(&mut self) -> usize {
+        let Some(value) = self
+            .settings_overrides
+            .get(SCHEMATIC_TAGS_SETTINGS_KEY)
+            .cloned()
+        else {
+            self.sync_schematic_tag_order();
+            return self.schematic_tag_order.len();
+        };
+        let loaded = schematic_tags_from_json(&value);
+        self.schematic_tag_order = loaded;
+        self.sync_schematic_tag_order();
+        self.schematic_tag_order.len()
     }
 
     pub fn reset_settings_table_overrides(&mut self, table: &str) -> usize {
@@ -21319,12 +21412,14 @@ impl DesktopLauncher {
                         self.sync_schematic_tag_order();
                         if index > 0 && index < self.schematic_tag_order.len() {
                             self.schematic_tag_order.swap(index, index - 1);
+                            self.persist_schematic_tags();
                         }
                     }
                     DesktopSchematicModalButton::TagMoveDown(index) => {
                         self.sync_schematic_tag_order();
                         if index + 1 < self.schematic_tag_order.len() {
                             self.schematic_tag_order.swap(index, index + 1);
+                            self.persist_schematic_tags();
                         }
                     }
                     DesktopSchematicModalButton::TagSelect(index) => {
@@ -21357,6 +21452,7 @@ impl DesktopLauncher {
                                     }
                                 }
                                 self.schematic_tag_editor_text.clear();
+                                self.persist_schematic_tags();
                             }
                         }
                     }
@@ -21369,6 +21465,7 @@ impl DesktopLauncher {
                             for entry in &mut self.schematic_cards {
                                 entry.labels.retain(|label| label != &removed);
                             }
+                            self.persist_schematic_tags();
                         }
                     }
                     DesktopSchematicModalButton::TagNewText => {
@@ -21379,6 +21476,7 @@ impl DesktopLauncher {
                         {
                             self.schematic_tag_order.push(name);
                             self.schematic_tag_editor_text.clear();
+                            self.persist_schematic_tags();
                         }
                     }
                     DesktopSchematicModalButton::TagNewIcon => {
@@ -21388,6 +21486,7 @@ impl DesktopLauncher {
                             icon = format!("★{}", self.schematic_tag_order.len() + 1);
                         }
                         self.schematic_tag_order.push(icon);
+                        self.persist_schematic_tags();
                     }
                     DesktopSchematicModalButton::ImportClipboard
                     | DesktopSchematicModalButton::ImportFile
@@ -41070,6 +41169,10 @@ mod tests {
         assert!(launcher
             .schematics_tag_names()
             .contains(&"logic".to_string()));
+        assert!(launcher
+            .schematic_tags_persisted_json()
+            .expect("tag changes should be persisted")
+            .contains("\"logic\""));
 
         let power_index = launcher
             .schematics_tag_names()
@@ -41102,6 +41205,10 @@ mod tests {
             .labels
             .contains(&"energy".to_string()));
         assert_eq!(launcher.schematic_selected_tags, vec!["energy".to_string()]);
+        assert!(launcher
+            .schematic_tags_persisted_json()
+            .expect("rename should persist tag order")
+            .contains("\"energy\""));
 
         let energy_index = launcher
             .schematics_tag_names()
@@ -41117,6 +41224,45 @@ mod tests {
             .labels
             .contains(&"energy".to_string()));
         assert!(launcher.schematic_selected_tags.is_empty());
+        assert!(!launcher
+            .schematic_tags_persisted_json()
+            .expect("delete should persist tag removal")
+            .contains("\"energy\""));
+    }
+
+    #[test]
+    fn desktop_launcher_schematic_tags_load_from_settings_like_core_settings_json() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.schematic_cards = vec![super::DesktopSchematicCardEntry {
+            name: "Escaped".into(),
+            description: String::new(),
+            width: 1,
+            height: 1,
+            tile_count: 1,
+            labels: vec!["gamma".into()],
+            has_steam_id: false,
+            mod_name: None,
+        }];
+        launcher.settings_overrides.insert(
+            super::SCHEMATIC_TAGS_SETTINGS_KEY.to_string(),
+            r#"["alpha","quote\"tag"]"#.into(),
+        );
+
+        assert_eq!(launcher.load_schematic_tags_from_settings(), 3);
+        assert_eq!(
+            launcher.schematic_tag_order,
+            vec![
+                "alpha".to_string(),
+                "quote\"tag".to_string(),
+                "gamma".to_string()
+            ]
+        );
+
+        launcher.persist_schematic_tags();
+        assert_eq!(
+            launcher.schematic_tags_persisted_json(),
+            Some(r#"["alpha","quote\"tag","gamma"]"#)
+        );
     }
 
     #[test]
