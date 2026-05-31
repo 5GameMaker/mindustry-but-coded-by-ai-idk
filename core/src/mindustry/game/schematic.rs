@@ -10,6 +10,10 @@ use crate::mindustry::io::type_io::{
 };
 use crate::mindustry::vars::TILE_SIZE;
 use crate::mindustry::world::{point2_pack, point2_x, point2_y};
+use crate::mindustry::{
+    core::content_loader::ContentLoader,
+    r#type::{ItemSeq, ItemStack},
+};
 
 pub const SCHEMATIC_HEADER: &[u8; 4] = b"msch";
 pub const SCHEMATIC_VERSION: u8 = 1;
@@ -53,6 +57,28 @@ impl Schematic {
 
     pub fn description(&self) -> String {
         self.tags.get("description").cloned().unwrap_or_default()
+    }
+
+    pub fn requirements(&self, content_loader: &ContentLoader) -> Vec<ItemStack> {
+        let item_names = content_loader
+            .items()
+            .iter()
+            .map(|item| item.name().to_string())
+            .collect::<Vec<_>>();
+        let mut requirements = ItemSeq::new(item_names);
+
+        for tile in &self.tiles {
+            let Some(block) = content_loader.block_by_name(&tile.block) else {
+                continue;
+            };
+            for stack in block.requirements() {
+                if let Some(item) = content_loader.item(stack.item) {
+                    requirements.add_name(item.name(), stack.amount);
+                }
+            }
+        }
+
+        requirements.to_vec()
     }
 }
 
@@ -513,12 +539,35 @@ fn invalid_input(message: impl Into<String>) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mindustry::core::content_loader::ContentLoader;
 
     #[test]
     fn schematic_base_properties_follow_java_tag_defaults() {
         let schematic = Schematic::new(Vec::new(), HashMap::new(), 1, 1);
         assert_eq!(schematic.name(), "unknown");
         assert_eq!(schematic.description(), "");
+    }
+
+    #[test]
+    fn schematic_requirements_aggregate_block_requirements_like_java_itemseq() {
+        let content_loader = ContentLoader::create_base_content_or_panic();
+        let schematic = Schematic::new(
+            vec![
+                SchematicTile::new("conveyor", 0, 0, None, 0),
+                SchematicTile::new("router", 1, 0, None, 0),
+                SchematicTile::new("router", 2, 0, None, 0),
+                SchematicTile::new("air", 3, 0, None, 0),
+                SchematicTile::new("missing-block", 4, 0, None, 0),
+            ],
+            HashMap::new(),
+            5,
+            1,
+        );
+
+        assert_eq!(
+            schematic.requirements(&content_loader),
+            vec![ItemStack::new("copper", 7)]
+        );
     }
 
     #[test]

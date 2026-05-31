@@ -38,7 +38,7 @@ use mindustry_core::mindustry::entities::{
     SuppressionFieldAbility, TextureRegionRef, UnitDrawPartKind, WeaponMount, WorldLabelAlign,
     WorldLabelComp, PLAYER_CLASS_ID,
 };
-use mindustry_core::mindustry::game::{Gamemode, Rules, TechNode, TechNodeId, TechTree};
+use mindustry_core::mindustry::game::{Gamemode, Rules, Schematic, TechNode, TechNodeId, TechTree};
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 #[cfg(test)]
@@ -91,8 +91,9 @@ use mindustry_core::mindustry::net::{
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::r#type::{
-    ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, Sector, SectorPreset,
-    SplashDrawPlan, UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX, UNIT_SHADOW_TY,
+    ItemStack, ParticleDrawParticlesPlan, ParticleNoiseLayerPlan, RainDrawPlan, Sector,
+    SectorPreset, SplashDrawPlan, UnitDrawStage, Weapon, WeatherState, UNIT_SHADOW_TX,
+    UNIT_SHADOW_TY,
 };
 use mindustry_core::mindustry::service::{
     AchievementContext, GameServiceApplySummary, GameServiceTriggerSnapshot,
@@ -490,6 +491,7 @@ pub struct DesktopSchematicCardEntry {
     pub width: i32,
     pub height: i32,
     pub tile_count: usize,
+    pub requirements: Vec<ItemStack>,
     pub labels: Vec<String>,
     pub has_steam_id: bool,
     pub mod_name: Option<String>,
@@ -503,10 +505,26 @@ impl DesktopSchematicCardEntry {
             width,
             height,
             tile_count,
+            requirements: Vec::new(),
             labels: Vec::new(),
             has_steam_id: false,
             mod_name: None,
         }
+    }
+
+    pub fn from_schematic(schematic: &Schematic, content_loader: &ContentLoader) -> Self {
+        let mut entry = Self::new(
+            schematic.name(),
+            schematic.width,
+            schematic.height,
+            schematic.tiles.len(),
+        );
+        entry.description = schematic.description();
+        entry.requirements = schematic.requirements(content_loader);
+        entry.labels = schematic.labels.clone();
+        entry.has_steam_id = schematic.tags.contains_key("steamid");
+        entry.mod_name = schematic.r#mod.clone();
+        entry
     }
 }
 
@@ -26826,6 +26844,76 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_schematic_requirements_row(
+        &self,
+        pass: &mut RenderPass,
+        dialog: RenderRect,
+        entry: &DesktopSchematicCardEntry,
+    ) {
+        if entry.requirements.is_empty() {
+            return;
+        }
+
+        let base_y = dialog.y + 104.0;
+        pass.push(RenderCommand::draw_text_styled(
+            "requirements:",
+            RenderPoint::new(dialog.x + 42.0, base_y),
+            [0.58, 0.66, 0.74, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.077,
+        ));
+
+        let start_x = dialog.x + 132.0;
+        let cell_width = 86.0;
+        let row_height = 24.0;
+        for (index, stack) in entry.requirements.iter().take(8).enumerate() {
+            let column = index % 4;
+            let row = index / 4;
+            let center_y = base_y - row as f32 * row_height;
+            let icon_center =
+                RenderPoint::new(start_x + column as f32 * cell_width + 10.0, center_y);
+            let icon_symbol = item_full_icon_region_symbol(&stack.item, &self.content_loader)
+                .filter(|symbol| self.texture_atlas.lookup(symbol).is_ok())
+                .unwrap_or_else(|| stack.item.clone());
+            pass.push(RenderCommand::draw_sprite(
+                icon_symbol,
+                RenderRect::from_center(icon_center, 20.0, 20.0),
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                Layer::END_PIXELED + 0.078 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                stack.amount.to_string(),
+                RenderPoint::new(icon_center.x + 16.0, center_y),
+                [0.80, 0.88, 0.94, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.079 + index as f32 * 0.0001,
+            ));
+        }
+
+        if entry.requirements.len() > 8 {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("+{}", entry.requirements.len() - 8),
+                RenderPoint::new(start_x + 4.0 * cell_width + 2.0, base_y - row_height),
+                [0.66, 0.76, 0.84, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.080,
+            ));
+        }
+    }
+
     fn push_schematic_info_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         let Some(index) = self.schematic_info_dialog else {
             return;
@@ -26988,17 +27076,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.077,
             ));
         }
-        pass.push(RenderCommand::draw_text_styled(
-            "requirements: @none",
-            RenderPoint::new(dialog.center().x, dialog.y + 104.0),
-            [0.58, 0.66, 0.74, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.077,
-        ));
+        self.push_schematic_requirements_row(pass, dialog, entry);
 
         for (button_index, (label, icon)) in [
             ("@back", "left"),
@@ -49529,6 +49607,7 @@ version: "2.0.0"
                 width: 12,
                 height: 8,
                 tile_count: 42,
+                requirements: Vec::new(),
                 labels: vec!["power".into(), "core".into()],
                 has_steam_id: false,
                 mod_name: None,
@@ -49539,6 +49618,7 @@ version: "2.0.0"
                 width: 16,
                 height: 16,
                 tile_count: 85,
+                requirements: Vec::new(),
                 labels: Vec::new(),
                 has_steam_id: true,
                 mod_name: None,
@@ -49725,6 +49805,7 @@ version: "2.0.0"
                 width: 12,
                 height: 8,
                 tile_count: 42,
+                requirements: Vec::new(),
                 labels: vec!["core".into(), "power".into()],
                 has_steam_id: false,
                 mod_name: None,
@@ -49735,6 +49816,7 @@ version: "2.0.0"
                 width: 16,
                 height: 16,
                 tile_count: 85,
+                requirements: Vec::new(),
                 labels: vec!["drill".into()],
                 has_steam_id: false,
                 mod_name: None,
@@ -49745,6 +49827,7 @@ version: "2.0.0"
                 width: 8,
                 height: 8,
                 tile_count: 18,
+                requirements: Vec::new(),
                 labels: vec!["power".into()],
                 has_steam_id: false,
                 mod_name: None,
@@ -49850,18 +49933,30 @@ version: "2.0.0"
 
     #[test]
     fn desktop_launcher_schematics_info_dialog_renders_and_dispatches_buttons() {
+        use mindustry_core::mindustry::game::{Schematic, SchematicTile};
+
         let surface = DesktopSurfaceSize::new(1280, 720);
         let mut launcher = DesktopLauncher::new(Vec::new());
-        launcher.schematic_cards = vec![super::DesktopSchematicCardEntry {
-            name: "Core Starter".into(),
-            description: "basic launch schematic".into(),
-            width: 12,
-            height: 8,
-            tile_count: 42,
-            labels: vec!["core".into(), "power".into()],
-            has_steam_id: false,
-            mod_name: None,
-        }];
+        let mut tags = std::collections::HashMap::new();
+        tags.insert("name".to_string(), "Core Starter".to_string());
+        tags.insert(
+            "description".to_string(),
+            "basic launch schematic".to_string(),
+        );
+        let mut tiles = vec![
+            SchematicTile::new("conveyor", 0, 0, None, 0),
+            SchematicTile::new("router", 1, 0, None, 0),
+            SchematicTile::new("router", 2, 0, None, 0),
+        ];
+        for offset in 0..39 {
+            tiles.push(SchematicTile::new("air", 3 + offset, 0, None, 0));
+        }
+        let mut schematic = Schematic::new(tiles, tags, 12, 8);
+        schematic.labels = vec!["core".into(), "power".into()];
+        launcher.schematic_cards = vec![super::DesktopSchematicCardEntry::from_schematic(
+            &schematic,
+            &launcher.content_loader,
+        )];
         launcher.schematic_tag_order = vec!["core".into(), "power".into(), "logic".into()];
         launcher.dispatch_menu_action(MenuButtonRole::Schematics);
         launcher.dispatch_menu_route_shell_action(
@@ -49880,7 +49975,7 @@ version: "2.0.0"
             super::DesktopMenuRoute::Schematics,
         );
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
-        let texts = frame
+        let commands = frame
             .bundle
             .render_frame
             .as_ref()
@@ -49888,6 +49983,9 @@ version: "2.0.0"
             .passes
             .iter()
             .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
             .filter_map(|command| match command {
                 RenderCommand::DrawText { text, .. } => Some(text.as_str()),
                 _ => None,
@@ -49900,10 +49998,16 @@ version: "2.0.0"
         assert!(texts.contains(&"power"));
         assert!(texts.contains(&"+logic"));
         assert!(texts.contains(&"description: basic launch schematic"));
-        assert!(texts.contains(&"requirements: @none"));
+        assert!(texts.contains(&"requirements:"));
+        assert!(texts.contains(&"7"));
+        assert!(!texts.contains(&"requirements: @none"));
         assert!(!texts
             .iter()
             .any(|text| text.contains("pending real Schematic.requirements()")));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol.contains("copper")
+        )));
         assert!(texts.contains(&"@schematic.addtag"));
         assert!(texts.contains(&"@schematic.texttag"));
         assert!(texts.contains(&"@schematic.icontag"));
@@ -50149,6 +50253,7 @@ version: "2.0.0"
             width: 12,
             height: 8,
             tile_count: 42,
+            requirements: Vec::new(),
             labels: vec!["core".into()],
             has_steam_id: false,
             mod_name: None,
@@ -50274,6 +50379,7 @@ version: "2.0.0"
                 width: 12,
                 height: 8,
                 tile_count: 42,
+                requirements: Vec::new(),
                 labels: vec!["core".into(), "power".into()],
                 has_steam_id: false,
                 mod_name: None,
@@ -50284,6 +50390,7 @@ version: "2.0.0"
                 width: 8,
                 height: 8,
                 tile_count: 18,
+                requirements: Vec::new(),
                 labels: vec!["drill".into()],
                 has_steam_id: false,
                 mod_name: None,
@@ -50413,6 +50520,7 @@ version: "2.0.0"
             width: 1,
             height: 1,
             tile_count: 1,
+            requirements: Vec::new(),
             labels: vec!["gamma".into()],
             has_steam_id: false,
             mod_name: None,
@@ -50450,6 +50558,7 @@ version: "2.0.0"
                 width: 12,
                 height: 8,
                 tile_count: 42,
+                requirements: Vec::new(),
                 labels: vec!["power".into()],
                 has_steam_id: false,
                 mod_name: None,
@@ -50460,6 +50569,7 @@ version: "2.0.0"
                 width: 4,
                 height: 4,
                 tile_count: 6,
+                requirements: Vec::new(),
                 labels: vec!["power".into()],
                 has_steam_id: false,
                 mod_name: None,

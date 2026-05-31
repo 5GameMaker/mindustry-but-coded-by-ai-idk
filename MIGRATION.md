@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 552. SchematicsDialog info 弹层真实 requirements 接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **65.3%**，仍未达到完整可玩；继续优先前端/UI，避免 Dialog 详情页继续出现硬编码占位字段。
+- Java 对照依据：
+  - `core/src/mindustry/game/Schematic.java` 的 `requirements()` 遍历 tiles、读取 block requirements 并按 `ItemSeq` 聚合；
+  - `core/src/mindustry/ui/dialogs/SchematicsDialog.java` 的 info 弹层应显示蓝图真实物品需求，而不是 `requirements: @none` 或 pending 文案。
+- 本轮主改动：
+  - `core/src/mindustry/game/schematic.rs`
+    - 新增 `Schematic::requirements(&ContentLoader)`，按 content item 顺序聚合 block requirements；
+    - 增加 `schematic_requirements_aggregate_block_requirements_like_java_itemseq` 回归测试。
+  - `desktop/src/lib.rs`
+    - `DesktopSchematicCardEntry` 增加 `requirements` 字段；
+    - 新增 `DesktopSchematicCardEntry::from_schematic(...)`，把 core 蓝图数据接入 desktop 卡片模型；
+    - `SchematicsDialog` info 弹层新增物品图标 + 数量行，移除 `requirements: @none` 硬编码显示。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-core schematic_requirements_aggregate_block_requirements_like_java_itemseq`
+  - `cargo test -p mindustry-desktop schematics --features opengl-backend`
+  - `git diff --check`
+- 仍未完成：
+  - 蓝图 power consumption/production、workshop/import/export/delete 末端动作仍需继续接入；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 551. ModsDialog 浏览器弹层首个闭环与 Schematics 占位文案清理
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
