@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 612. DatabaseDialog tabs 与内容图标网格初步对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.2%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 `DatabaseDialog` 从“摘要文本 + 小 tab”推进到 Java 的 50f tab 与 32f 内容图标网格观感。
+- Java 对照依据：
+  - `DatabaseDialog.rebuild()` 中 tab 按钮 `size(50f)`，每 10 个换行；
+  - 内容项使用 `Image(...).size(8 * 4).pad(3)`，列宽按 `32 + 12` 计算；
+  - `@all` tab 在 Java 是 `Icon.eyeSmall`，planet tab 使用 planet icon/color；
+  - 内容区域优先显示 unlockable content 的 `uiIcon/full icon`，文本名只通过 tooltip 暴露。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DATABASE_TAB_SIZE` 从 36 调整为 50，并新增 `DATABASE_TAB_COLUMNS = 10` 换行逻辑；
+    - content cell 间距从 7 调整到 12，最大列数上限提高到 22；
+    - `@all` tab 渲染改为 Icon 字体 `eyeSmall`，planet tab 使用 planet icon/color；
+    - content cell 从白块 + 可见文本名，改为解析 block/item/liquid/unit/status/weather 等 full icon sprite，缺失时 fallback `whiteui`；
+    - 测试补充 50f tab、10 列换行、32f 内容 cell、44f cell 步进和 `eyeSmall` icon font 断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Java `allTabs = Planets.sun + UnlockableContent.databaseTabs` 的完整来源还未建模，当前仍以 base planet tabs 近似；
+  - DatabaseDialog 还没有 search 输入状态、tab selection 状态、content cell 点击打开 ContentInfoDialog、tooltip/shift-copy；
+  - banned/patched/locked overlay 与 databaseCategory/databaseTag 完整分组仍需继续迁移。
+
 ## 611. LoadDialog 存档卡片提升到 160f 预览与 5 行 meta
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

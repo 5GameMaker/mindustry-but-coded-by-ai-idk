@@ -230,11 +230,12 @@ const SCHEMATICS_CARD_GAP: f32 = 8.0;
 const SCHEMATICS_CARD_ACTION_SIZE: f32 = 50.0;
 const SCHEMATIC_TAGS_SETTINGS_KEY: &str = "schematic-tags";
 const DATABASE_SEARCH_BAR_HEIGHT: f32 = 34.0;
-const DATABASE_TAB_SIZE: f32 = 36.0;
+const DATABASE_TAB_SIZE: f32 = 50.0;
+const DATABASE_TAB_COLUMNS: usize = 10;
 const DATABASE_CONTENT_CELL_SIZE: f32 = 32.0;
-const DATABASE_CONTENT_CELL_GAP: f32 = 7.0;
+const DATABASE_CONTENT_CELL_GAP: f32 = 12.0;
 const DATABASE_VISIBLE_CATEGORIES: usize = 4;
-const DATABASE_VISIBLE_ITEMS_PER_CATEGORY: usize = 8;
+const DATABASE_VISIBLE_ITEMS_PER_CATEGORY: usize = 22;
 const TECH_TREE_NODE_WIDTH: f32 = 112.0;
 const TECH_TREE_NODE_HEIGHT: f32 = 38.0;
 const TECH_TREE_VISIBLE_NODES: usize = 11;
@@ -21656,6 +21657,47 @@ impl DesktopLauncher {
         format!("@database-category.{}", content_type.wire_name())
     }
 
+    fn database_content_icon_symbol(&self, content_type: ContentType, name: &str) -> String {
+        let symbol = match content_type {
+            ContentType::Block => self
+                .content_loader
+                .block_by_name(name)
+                .and_then(block_full_icon_region_symbol),
+            ContentType::Item => item_full_icon_region_symbol(name, &self.content_loader),
+            ContentType::Liquid => liquid_full_icon_region_symbol(name, &self.content_loader),
+            ContentType::Unit => unit_full_icon_region_symbol(name, &self.content_loader),
+            ContentType::Status => {
+                self.content_loader
+                    .status_effect_by_name(name)
+                    .and_then(|status| {
+                        status
+                            .base
+                            .icon_candidates(None)
+                            .full_candidates
+                            .into_iter()
+                            .next()
+                    })
+            }
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .and_then(|weather| {
+                    weather
+                        .weather()
+                        .base
+                        .icon_candidates(None)
+                        .full_candidates
+                        .into_iter()
+                        .next()
+                }),
+            ContentType::Sector | ContentType::Planet => Some(name.to_string()),
+            _ => None,
+        };
+        symbol
+            .filter(|symbol| self.texture_atlas.lookup(symbol).is_ok())
+            .unwrap_or_else(|| "whiteui".to_string())
+    }
+
     fn database_route_lines(&self) -> Vec<String> {
         let content_types = self.database_route_content_types();
         let total = content_types
@@ -28210,9 +28252,11 @@ impl DesktopLauncher {
 
     fn database_tab_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let search = Self::database_search_rect_for_panel(panel);
+        let column = index % DATABASE_TAB_COLUMNS;
+        let row = index / DATABASE_TAB_COLUMNS;
         RenderRect::new(
-            panel.x + 28.0 + index as f32 * (DATABASE_TAB_SIZE + 6.0),
-            search.y - DATABASE_TAB_SIZE - 10.0,
+            panel.x + 28.0 + column as f32 * DATABASE_TAB_SIZE,
+            search.y - DATABASE_TAB_SIZE - 10.0 - row as f32 * DATABASE_TAB_SIZE,
             DATABASE_TAB_SIZE,
             DATABASE_TAB_SIZE,
         )
@@ -29780,20 +29824,14 @@ impl DesktopLauncher {
         ));
 
         let all_tab = Self::database_tab_rect_for_panel(panel, 0);
-        pass.push(RenderCommand::draw_sprite(
-            Self::settings_text_button_symbol("flatTogglet", false, true),
-            all_tab,
-            [1.0, 1.0, 1.0, 0.95],
-            0.0,
-            Layer::END_PIXELED + 0.031,
-        ));
         pass.push(RenderCommand::draw_text_styled(
-            "@all",
+            desktop_ui_icon_glyph_or_label("eyeSmall", "eyeSmall"),
             all_tab.center(),
             [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
-            10.0,
+            20.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -29802,29 +29840,29 @@ impl DesktopLauncher {
 
         for (index, planet) in self
             .content_loader
-            .get_by(ContentType::Planet)
+            .catalog()
+            .planets
             .iter()
-            .filter_map(|record| record.name())
-            .take(4)
+            .take(DATABASE_TAB_COLUMNS - 1)
             .enumerate()
         {
             let tab = Self::database_tab_rect_for_panel(panel, index + 1);
-            pass.push(RenderCommand::draw_sprite(
-                Self::settings_text_button_symbol("flatTogglet", false, false),
-                tab,
-                [1.0, 1.0, 1.0, 0.82],
-                0.0,
-                Layer::END_PIXELED + 0.031 + index as f32 * 0.0001,
-            ));
+            let icon = if planet.meta.icon.trim().is_empty() {
+                "commandRally"
+            } else {
+                planet.meta.icon.as_str()
+            };
             pass.push(RenderCommand::draw_text_styled(
-                planet,
+                desktop_ui_icon_glyph_or_label(icon, "commandRally"),
                 tab.center(),
-                [0.76, 0.86, 0.94, 1.0],
-                8.0,
+                rgba8888_to_render_color(planet.icon_color_rgba, 1.0),
+                20.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
+                    .with_integer_position(true)
+                    .with_outline(true),
                 Layer::END_PIXELED + 0.033 + index as f32 * 0.0001,
             ));
         }
@@ -29892,10 +29930,11 @@ impl DesktopLauncher {
             for (item_index, name) in records.iter().enumerate() {
                 let cell =
                     Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
+                let icon_symbol = self.database_content_icon_symbol(content_type, name);
                 pass.push(RenderCommand::draw_sprite(
-                    "whiteui",
+                    icon_symbol,
                     cell,
-                    [0.12, 0.16, 0.20, 0.96],
+                    [0.80, 0.84, 0.88, 0.96],
                     0.0,
                     Layer::END_PIXELED + 0.035 + category_index as f32 * 0.001,
                 ));
@@ -29904,17 +29943,6 @@ impl DesktopLauncher {
                     [0.34, 0.48, 0.58, 0.82],
                     1.0,
                     Layer::END_PIXELED + 0.036 + category_index as f32 * 0.001,
-                ));
-                pass.push(RenderCommand::draw_text_styled(
-                    *name,
-                    RenderPoint::new(cell.center().x, cell.y - 7.0),
-                    [0.66, 0.76, 0.84, 1.0],
-                    7.0,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.037 + category_index as f32 * 0.001,
                 ));
             }
         }
@@ -58103,6 +58131,37 @@ version: "2.0.0"
             .iter()
             .any(|line| line.starts_with("category: @database-category.")));
 
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Database,
+        );
+        let all_tab = DesktopLauncher::database_tab_rect_for_panel(panel, 0);
+        assert_eq!(
+            (all_tab.width, all_tab.height),
+            (50.0, 50.0),
+            "Java DatabaseDialog tabs use size(50f)"
+        );
+        let wrapped_tab =
+            DesktopLauncher::database_tab_rect_for_panel(panel, super::DATABASE_TAB_COLUMNS);
+        assert_eq!(wrapped_tab.x, all_tab.x);
+        assert_eq!(
+            all_tab.y - wrapped_tab.y,
+            50.0,
+            "Java DatabaseDialog wraps tab buttons after ten 50f cells"
+        );
+        let first_cell = DesktopLauncher::database_content_cell_rect_for_panel(panel, 0, 0);
+        let second_cell = DesktopLauncher::database_content_cell_rect_for_panel(panel, 0, 1);
+        assert_eq!(
+            (first_cell.width, first_cell.height),
+            (32.0, 32.0),
+            "Java DatabaseDialog content icons use size(8 * 4)"
+        );
+        assert_eq!(
+            second_cell.x - first_cell.x,
+            44.0,
+            "Java DatabaseDialog icon cells use 32f icon plus roughly 12f pad spacing"
+        );
+
         let route_texts = commands
             .iter()
             .filter_map(|command| match command {
@@ -58111,7 +58170,12 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(route_texts.contains(&"@players.search"));
-        assert!(route_texts.contains(&"@all"));
+        let all_icon = super::desktop_ui_icon_glyph_or_label("eyeSmall", "eyeSmall");
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, position, style, .. }
+                if text == &all_icon && *position == all_tab.center() && style.font == RenderFontId::Icon
+        )));
         assert!(route_texts
             .iter()
             .any(|text| text.starts_with("@database-category.")));
