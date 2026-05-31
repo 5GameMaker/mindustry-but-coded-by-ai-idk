@@ -2996,8 +2996,8 @@ impl DesktopMenuChromeLayout {
         ));
         let info_rect = terminal_rect.map(|terminal_rect| {
             RenderRect::new(
-                terminal_rect.x + terminal_rect.width + 8.0,
-                viewport.y + height - bottom_margin - 45.0,
+                terminal_rect.x,
+                (terminal_rect.y - 49.0).max(viewport.y),
                 84.0,
                 45.0,
             )
@@ -57475,7 +57475,7 @@ version: "2.0.0"
         let right_gutter = RenderRect::new(526.0, 0.0, 14.0, 960.0);
         let bottom_gutter = RenderRect::new(14.0, 948.0, 512.0, 12.0);
         let terminal_rect = RenderRect::new(6.0, 891.0, 60.0, 60.0);
-        let info_rect = RenderRect::new(74.0, 906.0, 84.0, 45.0);
+        let info_rect = RenderRect::new(6.0, 842.0, 84.0, 45.0);
         let discord_rect = RenderRect::new(446.0, 906.0, 84.0, 45.0);
 
         for (symbol, rect) in [
