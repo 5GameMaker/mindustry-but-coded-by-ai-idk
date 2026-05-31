@@ -473,6 +473,28 @@ impl DesktopSchematicCardAction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSchematicModal {
+    Import,
+    Tags,
+    Info { index: usize },
+    Export { index: usize },
+    Edit { index: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSchematicModalButton {
+    Back,
+    ImportClipboard,
+    ImportFile,
+    BrowseWorkshop,
+    ShareWorkshop,
+    Copy,
+    ExportFile,
+    EditOk,
+    EditCancel,
+}
+
 impl DesktopMenuRoute {
     pub const fn from_menu_button(role: MenuButtonRole) -> Option<Self> {
         match role {
@@ -1636,6 +1658,8 @@ pub enum DesktopMenuRouteShellAction {
     CloseSchematicInfo,
     SchematicInfoExport,
     SchematicInfoEdit,
+    CloseSchematicModal,
+    SchematicModalButton(DesktopSchematicModalButton),
     SchematicCard(DesktopSchematicCardAction),
     ShowAboutCredits,
     ShowAboutLinks,
@@ -14451,6 +14475,10 @@ pub struct DesktopLauncher {
     pub schematic_selected_tags: Vec<String>,
     pub last_schematic_tag_toggled: Option<String>,
     pub schematic_info_dialog: Option<usize>,
+    pub schematic_modal: Option<DesktopSchematicModal>,
+    pub schematic_edit_name: String,
+    pub schematic_edit_description: String,
+    pub last_schematic_modal_button: Option<DesktopSchematicModalButton>,
     pub schematic_cards: Vec<DesktopSchematicCardEntry>,
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
     pub settings_dialog_state: DesktopSettingsDialogState,
@@ -15172,6 +15200,10 @@ impl DesktopLauncher {
             schematic_selected_tags: Vec::new(),
             last_schematic_tag_toggled: None,
             schematic_info_dialog: None,
+            schematic_modal: None,
+            schematic_edit_name: String::new(),
+            schematic_edit_description: String::new(),
+            last_schematic_modal_button: None,
             schematic_cards: Vec::new(),
             last_schematic_card_action: None,
             settings_dialog_state: DesktopSettingsDialogState::default(),
@@ -18811,8 +18843,12 @@ impl DesktopLauncher {
                 self.schematic_search.clear();
                 self.schematic_search_focused = true;
                 self.schematic_info_dialog = None;
+                self.schematic_modal = None;
+                self.schematic_edit_name.clear();
+                self.schematic_edit_description.clear();
                 self.last_schematic_card_action = None;
                 self.last_schematic_tag_toggled = None;
+                self.last_schematic_modal_button = None;
             }
         }
         let close_requested = role == MenuButtonRole::Quit;
@@ -20645,6 +20681,99 @@ impl DesktopLauncher {
         None
     }
 
+    fn schematic_modal_option_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + (dialog.width - 280.0) * 0.5,
+            dialog.y + dialog.height - 126.0 - index as f32 * 66.0,
+            280.0,
+            54.0,
+        )
+    }
+
+    fn schematic_modal_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        let modal = self.schematic_modal?;
+        let dialog = Self::schematic_info_dialog_rect_for_panel(panel);
+        match modal {
+            DesktopSchematicModal::Info { .. } => self.schematic_info_action_at_point(panel, point),
+            DesktopSchematicModal::Import => {
+                for (index, button) in [
+                    DesktopSchematicModalButton::ImportClipboard,
+                    DesktopSchematicModalButton::ImportFile,
+                    DesktopSchematicModalButton::BrowseWorkshop,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    if Self::schematic_modal_option_button_rect(dialog, index).contains_point(point)
+                    {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(button));
+                    }
+                }
+                if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                        DesktopSchematicModalButton::Back,
+                    ));
+                }
+                None
+            }
+            DesktopSchematicModal::Tags => {
+                if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                        DesktopSchematicModalButton::Back,
+                    ));
+                }
+                None
+            }
+            DesktopSchematicModal::Export { index } => {
+                let mut buttons = Vec::new();
+                if self
+                    .schematic_cards
+                    .get(index)
+                    .map(|entry| !entry.has_steam_id)
+                    .unwrap_or(false)
+                {
+                    buttons.push(DesktopSchematicModalButton::ShareWorkshop);
+                }
+                buttons.extend([
+                    DesktopSchematicModalButton::Copy,
+                    DesktopSchematicModalButton::ExportFile,
+                ]);
+                for (button_index, button) in buttons.into_iter().enumerate() {
+                    if Self::schematic_modal_option_button_rect(dialog, button_index)
+                        .contains_point(point)
+                    {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(button));
+                    }
+                }
+                if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                        DesktopSchematicModalButton::Back,
+                    ));
+                }
+                None
+            }
+            DesktopSchematicModal::Edit { .. } => {
+                if Self::schematic_info_button_rect(dialog, 1).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                        DesktopSchematicModalButton::EditOk,
+                    ));
+                }
+                if Self::schematic_info_button_rect(dialog, 2).contains_point(point)
+                    || Self::schematic_info_button_rect(dialog, 0).contains_point(point)
+                {
+                    return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                        DesktopSchematicModalButton::EditCancel,
+                    ));
+                }
+                None
+            }
+        }
+    }
+
     fn schematics_card_action_at_point(
         &self,
         panel: RenderRect,
@@ -20740,8 +20869,8 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Schematics);
         let point = RenderPoint::new(x, y);
-        if self.schematic_info_dialog.is_some() {
-            return self.schematic_info_action_at_point(panel, point);
+        if self.schematic_modal.is_some() {
+            return self.schematic_modal_action_at_point(panel, point);
         }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
@@ -20959,6 +21088,25 @@ impl DesktopLauncher {
         self.last_settings_action = Some(action);
     }
 
+    fn open_schematic_modal(&mut self, modal: DesktopSchematicModal) {
+        self.schematic_modal = Some(modal);
+        self.schematic_info_dialog = match modal {
+            DesktopSchematicModal::Info { index } => Some(index),
+            _ => None,
+        };
+        if let DesktopSchematicModal::Edit { index } = modal {
+            if let Some(entry) = self.schematic_cards.get(index) {
+                self.schematic_edit_name = entry.name.clone();
+                self.schematic_edit_description = entry.description.clone();
+            }
+        }
+    }
+
+    fn close_schematic_modal(&mut self) {
+        self.schematic_modal = None;
+        self.schematic_info_dialog = None;
+    }
+
     fn dispatch_menu_route_shell_action(&mut self, action: DesktopMenuRouteShellAction) {
         self.last_menu_route_shell_action = Some(action);
         match action {
@@ -21017,15 +21165,18 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenSchematicImport => {
                 self.schematic_import_dialog_open = true;
+                self.open_schematic_modal(DesktopSchematicModal::Import);
             }
             DesktopMenuRouteShellAction::OpenSchematicTags => {
                 self.schematic_tags_dialog_open = true;
+                self.open_schematic_modal(DesktopSchematicModal::Tags);
             }
             DesktopMenuRouteShellAction::CloseSchematicInfo => {
-                self.schematic_info_dialog = None;
+                self.close_schematic_modal();
             }
             DesktopMenuRouteShellAction::SchematicInfoExport => {
                 if let Some(index) = self.schematic_info_dialog {
+                    self.open_schematic_modal(DesktopSchematicModal::Export { index });
                     self.last_schematic_card_action = Some(DesktopSchematicCardAction::new(
                         index,
                         DesktopSchematicCardActionKind::Export,
@@ -21034,15 +21185,61 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::SchematicInfoEdit => {
                 if let Some(index) = self.schematic_info_dialog {
+                    self.open_schematic_modal(DesktopSchematicModal::Edit { index });
                     self.last_schematic_card_action = Some(DesktopSchematicCardAction::new(
                         index,
                         DesktopSchematicCardActionKind::Edit,
                     ));
                 }
             }
+            DesktopMenuRouteShellAction::CloseSchematicModal => {
+                self.close_schematic_modal();
+            }
+            DesktopMenuRouteShellAction::SchematicModalButton(button) => {
+                self.last_schematic_modal_button = Some(button);
+                match button {
+                    DesktopSchematicModalButton::Back | DesktopSchematicModalButton::EditCancel => {
+                        self.close_schematic_modal();
+                    }
+                    DesktopSchematicModalButton::EditOk => {
+                        if let Some(DesktopSchematicModal::Edit { index }) = self.schematic_modal {
+                            let name = self.schematic_edit_name.trim().to_string();
+                            if !name.is_empty() {
+                                if let Some(entry) = self.schematic_cards.get_mut(index) {
+                                    entry.name = name;
+                                    entry.description = self.schematic_edit_description.clone();
+                                }
+                                self.close_schematic_modal();
+                            }
+                        }
+                    }
+                    DesktopSchematicModalButton::ImportClipboard
+                    | DesktopSchematicModalButton::ImportFile
+                    | DesktopSchematicModalButton::BrowseWorkshop
+                    | DesktopSchematicModalButton::ShareWorkshop
+                    | DesktopSchematicModalButton::Copy
+                    | DesktopSchematicModalButton::ExportFile => {}
+                }
+            }
             DesktopMenuRouteShellAction::SchematicCard(action) => {
-                if action.kind == DesktopSchematicCardActionKind::Info {
-                    self.schematic_info_dialog = Some(action.index);
+                match action.kind {
+                    DesktopSchematicCardActionKind::Info => {
+                        self.open_schematic_modal(DesktopSchematicModal::Info {
+                            index: action.index,
+                        });
+                    }
+                    DesktopSchematicCardActionKind::Export => {
+                        self.open_schematic_modal(DesktopSchematicModal::Export {
+                            index: action.index,
+                        });
+                    }
+                    DesktopSchematicCardActionKind::Edit => {
+                        self.open_schematic_modal(DesktopSchematicModal::Edit {
+                            index: action.index,
+                        });
+                    }
+                    DesktopSchematicCardActionKind::Delete
+                    | DesktopSchematicCardActionKind::ViewWorkshop => {}
                 }
                 self.last_schematic_card_action = Some(action);
             }
@@ -21557,6 +21754,63 @@ impl DesktopLauncher {
         ));
     }
 
+    fn push_schematic_modal_base(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        title: impl Into<String>,
+    ) -> RenderRect {
+        let dialog = Self::schematic_info_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.42],
+            Layer::END_PIXELED + 0.070,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.071,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.072,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            title.into(),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.076,
+        ));
+        dialog
+    }
+
+    fn push_schematic_modal_option_button(
+        &self,
+        pass: &mut RenderPass,
+        dialog: RenderRect,
+        index: usize,
+        label: &'static str,
+        icon: &'static str,
+    ) {
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_modal_option_button_rect(dialog, index),
+            label,
+            Some(icon),
+            Layer::END_PIXELED + 0.078 + index as f32 * 0.001,
+        );
+    }
+
     fn push_schematic_info_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         let Some(index) = self.schematic_info_dialog else {
             return;
@@ -21688,6 +21942,220 @@ impl DesktopLauncher {
                 Some(icon),
                 Layer::END_PIXELED + 0.078 + button_index as f32 * 0.001,
             );
+        }
+    }
+
+    fn push_schematic_modal_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(modal) = self.schematic_modal else {
+            return;
+        };
+        match modal {
+            DesktopSchematicModal::Info { .. } => {
+                self.push_schematic_info_dialog(pass, panel);
+            }
+            DesktopSchematicModal::Import => {
+                let dialog = self.push_schematic_modal_base(pass, panel, "@editor.import");
+                self.push_schematic_modal_option_button(
+                    pass,
+                    dialog,
+                    0,
+                    "@schematic.copy.import",
+                    "copy",
+                );
+                self.push_schematic_modal_option_button(
+                    pass,
+                    dialog,
+                    1,
+                    "@schematic.importfile",
+                    "download",
+                );
+                self.push_schematic_modal_option_button(
+                    pass,
+                    dialog,
+                    2,
+                    "@schematic.browseworkshop",
+                    "book",
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::schematic_info_button_rect(dialog, 0),
+                    "@back",
+                    Some("left"),
+                    Layer::END_PIXELED + 0.083,
+                );
+            }
+            DesktopSchematicModal::Tags => {
+                let dialog = self.push_schematic_modal_base(pass, panel, "@schematic.edittags");
+                pass.push(RenderCommand::draw_text_styled(
+                    format!("tags: {}", self.schematics_tag_names().join(", ")),
+                    RenderPoint::new(dialog.center().x, dialog.center().y + 34.0),
+                    [0.72, 0.80, 0.86, 1.0],
+                    12.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.077,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    "tag editor pending showAllTags/buildTags/showNewTag",
+                    RenderPoint::new(dialog.center().x, dialog.center().y),
+                    [0.58, 0.66, 0.74, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.077,
+                ));
+                self.push_settings_text_button(
+                    pass,
+                    Self::schematic_info_button_rect(dialog, 0),
+                    "@back",
+                    Some("left"),
+                    Layer::END_PIXELED + 0.083,
+                );
+            }
+            DesktopSchematicModal::Export { index } => {
+                let title = self
+                    .schematic_cards
+                    .get(index)
+                    .map(|entry| format!("@editor.export: {}", entry.name))
+                    .unwrap_or_else(|| "@editor.export".to_string());
+                let dialog = self.push_schematic_modal_base(pass, panel, title);
+                let mut button_index = 0;
+                if self
+                    .schematic_cards
+                    .get(index)
+                    .map(|entry| !entry.has_steam_id)
+                    .unwrap_or(false)
+                {
+                    self.push_schematic_modal_option_button(
+                        pass,
+                        dialog,
+                        button_index,
+                        "@schematic.shareworkshop",
+                        "book",
+                    );
+                    button_index += 1;
+                }
+                self.push_schematic_modal_option_button(
+                    pass,
+                    dialog,
+                    button_index,
+                    "@schematic.copy",
+                    "copy",
+                );
+                self.push_schematic_modal_option_button(
+                    pass,
+                    dialog,
+                    button_index + 1,
+                    "@schematic.exportfile",
+                    "upload",
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::schematic_info_button_rect(dialog, 0),
+                    "@back",
+                    Some("left"),
+                    Layer::END_PIXELED + 0.083,
+                );
+            }
+            DesktopSchematicModal::Edit { index } => {
+                let title = self
+                    .schematic_cards
+                    .get(index)
+                    .map(|entry| format!("@schematic.edit: {}", entry.name))
+                    .unwrap_or_else(|| "@schematic.edit".to_string());
+                let dialog = self.push_schematic_modal_base(pass, panel, title);
+                pass.push(RenderCommand::draw_text_styled(
+                    "@schematic.tags",
+                    RenderPoint::new(dialog.x + 42.0, dialog.y + dialog.height - 92.0),
+                    [0.72, 0.82, 0.9, 1.0],
+                    11.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.077,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    format!(
+                        "tags: {}",
+                        self.schematic_cards
+                            .get(index)
+                            .map(|entry| entry.labels.join(", "))
+                            .unwrap_or_default()
+                    ),
+                    RenderPoint::new(dialog.x + 160.0, dialog.y + dialog.height - 92.0),
+                    [0.64, 0.74, 0.82, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.077,
+                ));
+                for (row, (label, value, height)) in [
+                    ("@name", self.schematic_edit_name.as_str(), 46.0),
+                    (
+                        "@editor.description",
+                        self.schematic_edit_description.as_str(),
+                        104.0,
+                    ),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let y = dialog.y + dialog.height - 154.0 - row as f32 * 78.0;
+                    pass.push(RenderCommand::draw_text_styled(
+                        label,
+                        RenderPoint::new(dialog.x + 42.0, y + height * 0.5),
+                        [0.72, 0.82, 0.9, 1.0],
+                        11.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        Layer::END_PIXELED + 0.077,
+                    ));
+                    let field = RenderRect::new(dialog.x + 170.0, y, dialog.width - 220.0, height);
+                    pass.push(RenderCommand::draw_sprite(
+                        Self::settings_text_button_symbol("grayt", false, false),
+                        field,
+                        [1.0, 1.0, 1.0, 0.90],
+                        0.0,
+                        Layer::END_PIXELED + 0.076 + row as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        value.to_string(),
+                        RenderPoint::new(field.x + 12.0, field.center().y),
+                        [0.88, 0.94, 1.0, 1.0],
+                        11.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.079 + row as f32 * 0.001,
+                    ));
+                }
+                self.push_settings_text_button(
+                    pass,
+                    Self::schematic_info_button_rect(dialog, 1),
+                    "@ok",
+                    Some("ok"),
+                    Layer::END_PIXELED + 0.083,
+                );
+                self.push_settings_text_button(
+                    pass,
+                    Self::schematic_info_button_rect(dialog, 2),
+                    "@cancel",
+                    Some("cancel"),
+                    Layer::END_PIXELED + 0.084,
+                );
+            }
         }
     }
 
@@ -21979,7 +22447,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.032,
             ));
-            self.push_schematic_info_dialog(pass, panel);
+            self.push_schematic_modal_dialog(pass, panel);
             return;
         }
 
@@ -21991,7 +22459,7 @@ impl DesktopLauncher {
             }
             self.push_schematics_card(pass, card, card_index, entry);
         }
-        self.push_schematic_info_dialog(pass, panel);
+        self.push_schematic_modal_dialog(pass, panel);
     }
 
     fn push_load_game_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -22691,6 +23159,9 @@ impl DesktopLauncher {
         }
         if let Some(index) = self.schematic_info_dialog {
             lines.push(format!("modal: SchematicInfoDialog index={index}"));
+        }
+        if let Some(modal) = self.schematic_modal {
+            lines.push(format!("schematic modal: {modal:?}"));
         }
         lines
     }
@@ -39752,6 +40223,13 @@ mod tests {
             super::DesktopMenuRouteShellAction::OpenSchematicImport,
         );
         assert!(launcher.schematic_import_dialog_open);
+        assert_eq!(
+            launcher.schematic_modal,
+            Some(super::DesktopSchematicModal::Import)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseSchematicModal,
+        );
 
         let tags = DesktopLauncher::schematics_tag_edit_button_rect_for_panel(panel).center();
         assert_eq!(
@@ -39762,6 +40240,13 @@ mod tests {
             super::DesktopMenuRouteShellAction::OpenSchematicTags,
         );
         assert!(launcher.schematic_tags_dialog_open);
+        assert_eq!(
+            launcher.schematic_modal,
+            Some(super::DesktopSchematicModal::Tags)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseSchematicModal,
+        );
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(panel).center();
         assert_eq!(
@@ -39791,12 +40276,38 @@ mod tests {
                 super::DesktopMenuRouteShellAction::SchematicCard(expected),
             );
             assert_eq!(launcher.last_schematic_card_action, Some(expected));
-            if expected_kind == super::DesktopSchematicCardActionKind::Info {
-                assert_eq!(launcher.schematic_info_dialog, Some(0));
-                launcher.dispatch_menu_route_shell_action(
-                    super::DesktopMenuRouteShellAction::CloseSchematicInfo,
-                );
-                assert_eq!(launcher.schematic_info_dialog, None);
+            match expected_kind {
+                super::DesktopSchematicCardActionKind::Info => {
+                    assert_eq!(launcher.schematic_info_dialog, Some(0));
+                    assert_eq!(
+                        launcher.schematic_modal,
+                        Some(super::DesktopSchematicModal::Info { index: 0 })
+                    );
+                    launcher.dispatch_menu_route_shell_action(
+                        super::DesktopMenuRouteShellAction::CloseSchematicModal,
+                    );
+                    assert_eq!(launcher.schematic_info_dialog, None);
+                }
+                super::DesktopSchematicCardActionKind::Export => {
+                    assert_eq!(
+                        launcher.schematic_modal,
+                        Some(super::DesktopSchematicModal::Export { index: 0 })
+                    );
+                    launcher.dispatch_menu_route_shell_action(
+                        super::DesktopMenuRouteShellAction::CloseSchematicModal,
+                    );
+                }
+                super::DesktopSchematicCardActionKind::Edit => {
+                    assert_eq!(
+                        launcher.schematic_modal,
+                        Some(super::DesktopSchematicModal::Edit { index: 0 })
+                    );
+                    launcher.dispatch_menu_route_shell_action(
+                        super::DesktopMenuRouteShellAction::CloseSchematicModal,
+                    );
+                }
+                super::DesktopSchematicCardActionKind::Delete
+                | super::DesktopSchematicCardActionKind::ViewWorkshop => {}
             }
         }
     }
@@ -39998,6 +40509,15 @@ mod tests {
             ),
             Some(super::DesktopMenuRouteShellAction::SchematicInfoExport)
         );
+        let edit_center = DesktopLauncher::schematic_info_button_rect(dialog, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                edit_center.x,
+                edit_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::SchematicInfoEdit)
+        );
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::SchematicInfoExport,
         );
@@ -40008,15 +40528,20 @@ mod tests {
                 super::DesktopSchematicCardActionKind::Export
             ))
         );
-
-        let edit_center = DesktopLauncher::schematic_info_button_rect(dialog, 2).center();
         assert_eq!(
-            launcher.active_menu_route_shell_action_at_surface_point(
-                surface,
-                edit_center.x,
-                edit_center.y
+            launcher.schematic_modal,
+            Some(super::DesktopSchematicModal::Export { index: 0 })
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseSchematicModal,
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicCard(
+                super::DesktopSchematicCardAction::new(
+                    0,
+                    super::DesktopSchematicCardActionKind::Info,
+                ),
             ),
-            Some(super::DesktopMenuRouteShellAction::SchematicInfoEdit)
         );
 
         let underlying_card = DesktopLauncher::schematics_card_rect_for_panel(panel, 0).center();
@@ -40045,6 +40570,130 @@ mod tests {
             ],
         );
         assert_eq!(launcher.schematic_info_dialog, None);
+    }
+
+    #[test]
+    fn desktop_launcher_schematics_import_export_edit_modals_render_and_handle_buttons() {
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.schematic_cards = vec![super::DesktopSchematicCardEntry {
+            name: "Core Starter".into(),
+            description: "basic launch schematic".into(),
+            width: 12,
+            height: 8,
+            tile_count: 42,
+            labels: vec!["core".into()],
+            has_steam_id: false,
+            mod_name: None,
+        }];
+        launcher.dispatch_menu_action(MenuButtonRole::Schematics);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Schematics,
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenSchematicImport,
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("schematic import modal should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@editor.import"));
+        assert!(texts.contains(&"@schematic.copy.import"));
+        assert!(texts.contains(&"@schematic.importfile"));
+        assert!(texts.contains(&"@schematic.browseworkshop"));
+        let dialog = DesktopLauncher::schematic_info_dialog_rect_for_panel(panel);
+        let import_copy = DesktopLauncher::schematic_modal_option_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                import_copy.x,
+                import_copy.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::ImportClipboard
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::ImportClipboard,
+            ),
+        );
+        assert_eq!(
+            launcher.last_schematic_modal_button,
+            Some(super::DesktopSchematicModalButton::ImportClipboard)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseSchematicModal,
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicCard(
+                super::DesktopSchematicCardAction::new(
+                    0,
+                    super::DesktopSchematicCardActionKind::Export,
+                ),
+            ),
+        );
+        assert_eq!(
+            launcher.schematic_modal,
+            Some(super::DesktopSchematicModal::Export { index: 0 })
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("schematic export modal should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@editor.export: Core Starter"));
+        assert!(texts.contains(&"@schematic.shareworkshop"));
+        assert!(texts.contains(&"@schematic.copy"));
+        assert!(texts.contains(&"@schematic.exportfile"));
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseSchematicModal,
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicCard(
+                super::DesktopSchematicCardAction::new(
+                    0,
+                    super::DesktopSchematicCardActionKind::Edit,
+                ),
+            ),
+        );
+        assert_eq!(
+            launcher.schematic_modal,
+            Some(super::DesktopSchematicModal::Edit { index: 0 })
+        );
+        assert_eq!(launcher.schematic_edit_name, "Core Starter");
+        launcher.schematic_edit_name = "Renamed Core".into();
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::EditOk,
+            ),
+        );
+        assert_eq!(launcher.schematic_cards[0].name, "Renamed Core");
+        assert_eq!(launcher.schematic_modal, None);
     }
 
     #[test]

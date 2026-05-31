@@ -19184,3 +19184,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 目前只完成 `SchematicInfoDialog` 最小可见层，尚未补真实 `Schematic.requirements()`、power consumption/production、真实 preview texture、scroll pane 和资源充足/不足颜色；
   - `showImport()`、`showExport(Schematic)`、`showEdit(Schematic)` 仍需升级为同样的模态 UI，建议后续收敛为统一 `DesktopSchematicModal` 状态，避免 import/tags/info/export/edit 长期分散；
   - 未达到完整可玩，不能宣告目标完成。
+
+## 539. SchematicsDialog Import/Export/Edit 模态闭环
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **57.2%**，仍未达到完整可玩；继续优先前端/UI，目标是让 `SchematicsDialog` 的卡片动作进入同一个模态 UI 流，而不是停留在事件记录。
+- Java 对照证据：
+  - `showImport()` 标题 `@editor.import`，按钮包含 `@schematic.copy.import`、`@schematic.importfile`、Steam 条件下 `@schematic.browseworkshop`；
+  - `showExport(Schematic)` 标题 `@editor.export`，按钮包含 Steam share、`@schematic.copy`、`@schematic.exportfile`；
+  - `showEdit(Schematic)` 标题 `@schematic.edit`，主体包含 tags、`@name`、`@editor.description`，底部 `@ok` / `@cancel`；
+  - 模态打开时 hit-test 必须优先于底层 route，不能让底层 card grid 抢点击。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增统一 `DesktopSchematicModal { Import, Tags, Info, Export, Edit }` 状态和 `DesktopSchematicModalButton`；
+    - `OpenSchematicImport`、`OpenSchematicTags`、卡片 `Info/Export/Edit` 都会打开对应模态；
+    - 新增 import/export/edit/tags 模态绘制，复用原版按钮 label/icon，并保留 info 模态；
+    - edit 模态增加 `schematic_edit_name` / `schematic_edit_description` 缓冲，`EditOk` 会把名称/描述写回当前卡片，`EditCancel/@back` 关闭；
+    - modal hit-test 优先处理 import/export/edit/tags/info 按钮，底层 route 不再穿透；
+    - 保留旧的 `schematic_import_dialog_open` / `schematic_tags_dialog_open` / `schematic_info_dialog` 兼容字段，同时以 `schematic_modal` 作为后续统一收敛入口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematics --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - import/export 仍未接剪贴板、文件选择器、Steam Workshop 与真实 `Schematics.read/writeBase64/write(...)`；
+  - edit 仍未接真实 schematic tags map、`save()`、`rebuildPane.run()` 和完整 TextField/area 输入；
+  - tags modal 仍只是 showAllTags 占位，未迁移 tag 排序、重命名、删除、新建文本/icon tag 与 settings 持久化；
+  - 未达到完整可玩，不能宣告目标完成。
