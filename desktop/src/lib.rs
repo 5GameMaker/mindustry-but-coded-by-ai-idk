@@ -17,8 +17,8 @@ use mindustry_core::mindustry::core::net_client::{
 };
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, DefaultPlatform, GameRuntime,
-    GameRuntimeMapLoadReport, GameRuntimeNetworkContext, GameState, GameStateState, NetClient,
-    Platform,
+    GameRuntimeMapLoadReport, GameRuntimeNetworkContext, GameState, GameStateState,
+    MultiFileChooserRequest, NetClient, Platform,
 };
 use mindustry_core::mindustry::ctype::{ContentId, ContentType, UnlockableContentBase};
 use mindustry_core::mindustry::entities::comp::{
@@ -1740,6 +1740,10 @@ pub enum DesktopMenuRouteShellAction {
     OpenMapListFilters,
     NewEditorMap,
     ImportEditorMap,
+    OpenModsImport,
+    CloseModsImport,
+    ModsImportFile,
+    ModsImportGithub,
     OpenModsDetail(usize),
     OpenModsFolder(usize),
     CloseModsDetail,
@@ -1780,6 +1784,14 @@ pub struct DesktopModsFolderAction {
     pub path: String,
     pub uri: String,
     pub opened: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopModsImportAction {
+    Open,
+    File,
+    Github,
+    Close,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14619,6 +14631,9 @@ pub struct DesktopLauncher {
     pub last_mods_directory_mod_roots: Vec<String>,
     pub mods_selected_mod_index: Option<usize>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
+    pub mods_import_dialog_open: bool,
+    pub last_mods_import_action: Option<DesktopModsImportAction>,
+    pub last_mods_import_file_request: Option<MultiFileChooserRequest>,
     pub args: Vec<String>,
     pub texture_atlas: TextureAtlasPlan<bool>,
     pub font_asset_sources: Vec<DesktopFontAssetSourceTrace>,
@@ -15351,6 +15366,9 @@ impl DesktopLauncher {
             last_mods_directory_mod_roots: Vec::new(),
             mods_selected_mod_index: None,
             last_mods_folder_action: None,
+            mods_import_dialog_open: false,
+            last_mods_import_action: None,
+            last_mods_import_file_request: None,
             args,
             texture_atlas,
             font_asset_sources,
@@ -18935,6 +18953,7 @@ impl DesktopLauncher {
             self.dispatch_menu_platform_action(DesktopMenuPlatformAction::OpenWorkshop);
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
+            self.mods_import_dialog_open = false;
             let dispatch = DesktopMenuActionDispatch {
                 role,
                 submenu_changed,
@@ -18957,6 +18976,7 @@ impl DesktopLauncher {
         let route = if submenu_changed {
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
+            self.mods_import_dialog_open = false;
             None
         } else {
             DesktopMenuRoute::from_menu_button(role)
@@ -18964,6 +18984,7 @@ impl DesktopLauncher {
         if let Some(route) = route {
             self.active_menu_route = Some(route);
             self.mods_selected_mod_index = None;
+            self.mods_import_dialog_open = false;
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
                     &self.content_loader,
@@ -18997,6 +19018,7 @@ impl DesktopLauncher {
         if close_requested {
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
+            self.mods_import_dialog_open = false;
         }
         let dispatch = DesktopMenuActionDispatch {
             role,
@@ -21401,11 +21423,17 @@ impl DesktopLauncher {
         if route == DesktopMenuRoute::Mods {
             let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
             let point = RenderPoint::new(x, y);
+            if self.mods_import_dialog_open {
+                return self.mods_import_action_at_point(panel, point);
+            }
             if let Some(action) = self.mods_route_detail_action_at_point(panel, point) {
                 return Some(action);
             }
             if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseRoute);
+            }
+            if Self::mods_route_action_button_rect_for_panel(panel, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::OpenModsImport);
             }
             if self.mods_selected_mod_index.is_none() {
                 if let Some(index) = self.mods_route_mod_card_index_at_point(panel, point) {
@@ -21612,12 +21640,24 @@ impl DesktopLauncher {
         Some(action)
     }
 
+    fn dispatch_mods_import_file_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> MultiFileChooserRequest {
+        let request = platform.show_multi_file_chooser(&["zip", "jar"]);
+        self.last_mods_import_action = Some(DesktopModsImportAction::File);
+        self.last_mods_import_file_request = Some(request.clone());
+        self.mods_import_dialog_open = false;
+        request
+    }
+
     fn dispatch_menu_route_shell_action(&mut self, action: DesktopMenuRouteShellAction) {
         self.last_menu_route_shell_action = Some(action);
         match action {
             DesktopMenuRouteShellAction::CloseRoute => {
                 self.active_menu_route = None;
                 self.mods_selected_mod_index = None;
+                self.mods_import_dialog_open = false;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -21647,6 +21687,24 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ImportEditorMap => {
                 self.editor_import_map_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::OpenModsImport => {
+                self.mods_import_dialog_open = true;
+                self.mods_selected_mod_index = None;
+                self.last_mods_import_action = Some(DesktopModsImportAction::Open);
+                self.last_mods_import_file_request = None;
+            }
+            DesktopMenuRouteShellAction::CloseModsImport => {
+                self.mods_import_dialog_open = false;
+                self.last_mods_import_action = Some(DesktopModsImportAction::Close);
+            }
+            DesktopMenuRouteShellAction::ModsImportFile => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_import_file_with_platform(&mut platform);
+            }
+            DesktopMenuRouteShellAction::ModsImportGithub => {
+                self.mods_import_dialog_open = false;
+                self.last_mods_import_action = Some(DesktopModsImportAction::Github);
             }
             DesktopMenuRouteShellAction::OpenModsDetail(index) => {
                 if self.last_mods_directory_mod_names.get(index).is_some() {
@@ -24237,11 +24295,47 @@ impl DesktopLauncher {
             })
     }
 
+    fn mods_route_action_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let gap = 8.0;
+        let width = ((panel.width - 56.0 - gap * 2.0) / 3.0).clamp(120.0, 220.0);
+        RenderRect::new(
+            panel.x + 28.0 + index as f32 * (width + gap),
+            panel.y + panel.height - 128.0,
+            width,
+            44.0,
+        )
+    }
+
     fn mods_route_mod_root_at_index(&self, index: usize) -> Option<&str> {
         self.last_mods_directory_mod_roots
             .get(index)
             .map(String::as_str)
             .filter(|root| !root.is_empty())
+    }
+
+    fn mods_import_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        Self::mods_route_detail_dialog_rect_for_panel(panel)
+    }
+
+    fn mods_import_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        if !self.mods_import_dialog_open {
+            return None;
+        }
+        let dialog = Self::mods_import_dialog_rect_for_panel(panel);
+        if Self::schematic_modal_option_button_rect(dialog, 0).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::ModsImportFile);
+        }
+        if Self::schematic_modal_option_button_rect(dialog, 1).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::ModsImportGithub);
+        }
+        if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseModsImport);
+        }
+        None
     }
 
     fn mods_route_detail_action_at_point(
@@ -24360,6 +24454,65 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_mods_import_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if !self.mods_import_dialog_open {
+            return;
+        }
+        let dialog = Self::mods_import_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@mod.import",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 36.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.096,
+        ));
+        for (index, (label, icon)) in [
+            ("@mod.import.file", "file"),
+            ("@mod.import.github", "github"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_settings_text_button(
+                pass,
+                Self::schematic_modal_option_button_rect(dialog, index),
+                label,
+                Some(icon),
+                Layer::END_PIXELED + 0.099 + index as f32 * 0.001,
+            );
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.103,
+        );
+    }
+
     fn push_mods_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         self.push_settings_text_button(
             pass,
@@ -24371,7 +24524,7 @@ impl DesktopLauncher {
 
         pass.push(RenderCommand::draw_text_styled(
             "mods browser",
-            RenderPoint::new(panel.x + 28.0, panel.y + panel.height - 92.0),
+            RenderPoint::new(panel.x + 28.0, panel.y + panel.height - 58.0),
             [0.72, 0.82, 0.9, 1.0],
             13.0,
             0.0,
@@ -24381,6 +24534,23 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.025,
         ));
+
+        for (index, (label, icon)) in [
+            ("@mods.guide", "link"),
+            ("@mod.import", "add"),
+            ("@mods.browser", "menu"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_settings_text_button(
+                pass,
+                Self::mods_route_action_button_rect_for_panel(panel, index),
+                label,
+                Some(icon),
+                Layer::END_PIXELED + 0.026 + index as f32 * 0.001,
+            );
+        }
 
         if let Some(error) = self.mods_directory_error.as_ref() {
             pass.push(RenderCommand::draw_text_styled(
@@ -24459,6 +24629,7 @@ impl DesktopLauncher {
         ));
 
         self.push_mods_detail_dialog(pass, panel);
+        self.push_mods_import_dialog(pass, panel);
     }
 
     fn push_active_menu_route_shell(&self, pass: &mut RenderPass, viewport: RenderViewport) {
@@ -39187,6 +39358,7 @@ mod tests {
         assert!(texts.contains(&"gamma"));
         assert!(texts.contains(&"loaded"));
         assert!(texts.contains(&"@back"));
+        assert!(texts.contains(&"@mod.import"));
         assert!(texts.contains(&"browser search: Icon.zoom + Icon.list"));
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(panel).center();
@@ -39196,6 +39368,92 @@ mod tests {
         );
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseRoute);
         assert_eq!(launcher.active_menu_route, None);
+    }
+
+    #[test]
+    fn desktop_launcher_mods_route_import_dialog_renders_and_records_file_request() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.last_mods_directory_mod_names = vec!["alpha".into()];
+        launcher.dispatch_menu_action(MenuButtonRole::Mods);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Mods,
+        );
+        let import = DesktopLauncher::mods_route_action_button_rect_for_panel(panel, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, import.x, import.y),
+            Some(super::DesktopMenuRouteShellAction::OpenModsImport)
+        );
+
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsImport);
+        assert!(launcher.mods_import_dialog_open);
+        assert_eq!(
+            launcher.last_mods_import_action,
+            Some(super::DesktopModsImportAction::Open)
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods import dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@mod.import"));
+        assert!(texts.contains(&"@mod.import.file"));
+        assert!(texts.contains(&"@mod.import.github"));
+
+        let dialog = DesktopLauncher::mods_import_dialog_rect_for_panel(panel);
+        let file = DesktopLauncher::schematic_modal_option_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, file.x, file.y),
+            Some(super::DesktopMenuRouteShellAction::ModsImportFile)
+        );
+        let card = DesktopLauncher::mods_route_mod_card_rect_for_panel(panel, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, card.x, card.y),
+            None,
+            "open import dialog should block clicks from reaching mod cards"
+        );
+
+        let mut platform = RecordingPlatform::default();
+        let request = launcher.dispatch_mods_import_file_with_platform(&mut platform);
+        assert_eq!(
+            request.extensions,
+            vec!["zip".to_string(), "jar".to_string()]
+        );
+        assert_eq!(launcher.last_mods_import_file_request, Some(request));
+        assert_eq!(
+            launcher.last_mods_import_action,
+            Some(super::DesktopModsImportAction::File)
+        );
+        assert!(!launcher.mods_import_dialog_open);
+
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenModsImport);
+        let github = DesktopLauncher::schematic_modal_option_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, github.x, github.y),
+            Some(super::DesktopMenuRouteShellAction::ModsImportGithub)
+        );
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::ModsImportGithub);
+        assert_eq!(
+            launcher.last_mods_import_action,
+            Some(super::DesktopModsImportAction::Github)
+        );
+        assert!(!launcher.mods_import_dialog_open);
     }
 
     #[test]

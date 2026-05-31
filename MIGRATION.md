@@ -19360,6 +19360,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 549. ModsDialog 导入弹窗最小闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **59.4%**，仍未达到完整可玩；继续优先前端/UI，把 `ModsDialog` 的 `@mod.import` 从文本占位推进为可打开的导入弹窗。
+- Java 对照依据：
+  - `ModsDialog.setup()` 中 `@mod.import` 会打开 `@mod.import` 子对话框；
+  - 子对话框包含 `@mod.import.file` 与 `@mod.import.github` 两个入口；
+  - 文件入口调用 `platform.showMultiFileChooser(..., "zip", "jar")`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `mods_import_dialog_open`、`DesktopModsImportAction` 与 `last_mods_import_file_request`；
+    - Mods 路由开始渲染 `@mods.guide` / `@mod.import` / `@mods.browser` 三个入口按钮；
+    - 点击 `@mod.import` 会打开独立导入弹窗；
+    - 弹窗内 `@mod.import.file` 会记录 zip/jar 多文件选择请求；
+    - 弹窗内 `@mod.import.github` 已有点击分发与状态记录，后续继续接真实 GitHub repo 输入与下载；
+    - 打开导入弹窗时会遮罩底层卡片命中，避免误触。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 文件选择后的真实 zip/jar import pipeline 还没接到 `mods.importMod(...)` 等价逻辑；
+  - GitHub 输入、repo 清理、下载、依赖导入还未迁移；
+  - `@mods.browser` 远程浏览器与 release 子弹窗仍未完成；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 548. ModsDialog 详情页 open folder 行为闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
