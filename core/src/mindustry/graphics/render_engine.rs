@@ -378,6 +378,8 @@ pub enum RenderTextVerticalAlign {
 pub enum RenderFontId {
     Default,
     Outline,
+    Icon,
+    IconLarge,
     Logic,
 }
 
@@ -1814,6 +1816,46 @@ mod tests {
                 assert_eq!(layer, 80.0);
             }
             other => panic!("unexpected styled text command: {other:?}"),
+        }
+
+        let icon_text = RenderCommand::draw_text_styled(
+            "\u{e800}",
+            RenderPoint::new(12.0, 13.0),
+            [1.0, 1.0, 1.0, 1.0],
+            18.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center),
+            81.0,
+        );
+        match icon_text {
+            RenderCommand::DrawText { style, layer, .. } => {
+                assert_eq!(style.font, RenderFontId::Icon);
+                assert_eq!(style.vertical_align, RenderTextVerticalAlign::Center);
+                assert_eq!(layer, 81.0);
+            }
+            other => panic!("unexpected icon text command: {other:?}"),
+        }
+
+        let icon_large_text = RenderCommand::draw_text_styled(
+            "\u{e801}",
+            RenderPoint::new(14.0, 15.0),
+            [1.0, 1.0, 1.0, 1.0],
+            24.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::IconLarge)
+                .with_vertical_align(RenderTextVerticalAlign::Center),
+            82.0,
+        );
+        match icon_large_text {
+            RenderCommand::DrawText { style, layer, .. } => {
+                assert_eq!(style.font, RenderFontId::IconLarge);
+                assert_eq!(style.vertical_align, RenderTextVerticalAlign::Center);
+                assert_eq!(layer, 82.0);
+            }
+            other => panic!("unexpected icon large text command: {other:?}"),
         }
 
         match polygon {

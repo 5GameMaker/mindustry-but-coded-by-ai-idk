@@ -5,12 +5,12 @@
 /// keeps generation and render planning in `mindustry-core`; concrete backends
 /// are expected to translate `MenuRenderCommand` into GPU/cache calls.
 use super::{
-    RenderCamera, RenderCommand, RenderPass, RenderPassKind, RenderPoint, RenderRect,
+    RenderCamera, RenderCommand, RenderFontId, RenderPass, RenderPassKind, RenderPoint, RenderRect,
     RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign, RenderViewport,
 };
 use crate::mindustry::ui::{
     upstream_bundle_en_value, upstream_image_button_style_skin, upstream_text_button_style_skin,
-    upstream_ui_drawable_alias, UiDrawableAlias, UiDrawableTint,
+    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, UiDrawableAlias, UiDrawableTint,
 };
 
 pub const MENU_DARKNESS: f32 = 0.3;
@@ -23,11 +23,11 @@ pub const MENU_DESKTOP_BUTTON_HEIGHT: f32 = 70.0;
 pub const MENU_DESKTOP_BUTTON_MARGIN_LEFT: f32 = 11.0;
 pub const MENU_DESKTOP_BUTTON_ICON_X: f32 = 30.0;
 pub const MENU_DESKTOP_BUTTON_LABEL_GAP: f32 = 23.0;
-pub const MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE: f32 = 14.0;
+pub const MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE: f32 = 30.0;
 pub const MENU_DESKTOP_BACKGROUND_LAYER: f32 = 100.95;
 pub const MENU_MOBILE_BUTTON_ICON_OFFSET_Y: f32 = 17.0;
 pub const MENU_MOBILE_BUTTON_LABEL_OFFSET_Y: f32 = -25.0;
-pub const MENU_MOBILE_BUTTON_ICON_TEXT_SIZE: f32 = 18.0;
+pub const MENU_MOBILE_BUTTON_ICON_TEXT_SIZE: f32 = 42.0;
 
 /// Native-safe approximation of Java `Styles.flatToggleMenut`.
 ///
@@ -93,8 +93,8 @@ pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleM
     fill_layer: 101.0,
     drawable_layer: 101.05,
     text_layer: 101.1,
-    desktop_text_size: 8.0,
-    mobile_text_size: 7.0,
+    desktop_text_size: 18.0,
+    mobile_text_size: 16.0,
 };
 
 impl MenuFlatToggleMenuStyle {
@@ -857,6 +857,23 @@ fn menu_push_icon_render_commands(
     layer: f32,
 ) {
     let size = size.max(1.0);
+    if let Some(glyph) = upstream_ui_icon_glyph_string(icon_name) {
+        commands.push(RenderCommand::draw_text_styled(
+            glyph,
+            center,
+            color,
+            size,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer,
+        ));
+        return;
+    }
+
     let stroke = (size / 9.0).max(1.0);
     match icon_name {
         "play" | "rightOpenOut" => {
@@ -1176,6 +1193,15 @@ impl MenuRenderCommand {
                             if let Some(color) = tile.floor.menu_color() {
                                 commands.push(RenderCommand::fill_rect(rect, color, -0.2));
                             }
+                            if let Some(sprite) = tile.floor.sprite_name() {
+                                commands.push(RenderCommand::draw_sprite(
+                                    sprite,
+                                    rect,
+                                    [1.0, 1.0, 1.0, 1.0],
+                                    0.0,
+                                    -0.1,
+                                ));
+                            }
                             if let Some(color) = tile.ore.menu_color() {
                                 commands.push(RenderCommand::fill_rect(
                                     menu_transform_rect(
@@ -1186,15 +1212,31 @@ impl MenuRenderCommand {
                                     0.1,
                                 ));
                             }
+                            if let Some(sprite) = tile.ore.sprite_name() {
+                                commands.push(RenderCommand::draw_sprite(
+                                    sprite,
+                                    rect,
+                                    [1.0, 1.0, 1.0, 1.0],
+                                    0.0,
+                                    0.15,
+                                ));
+                            }
                         }
                     }
                     "wall" => {
                         for tile in &world.tiles {
+                            let rect =
+                                menu_transform_rect(menu_tile_rect(tile, tile_size), transform);
                             if let Some(color) = tile.wall.menu_color() {
-                                commands.push(RenderCommand::fill_rect(
-                                    menu_transform_rect(menu_tile_rect(tile, tile_size), transform),
-                                    color,
-                                    1.0,
+                                commands.push(RenderCommand::fill_rect(rect, color, 1.0));
+                            }
+                            if let Some(sprite) = tile.wall.sprite_name() {
+                                commands.push(RenderCommand::draw_sprite(
+                                    sprite,
+                                    rect,
+                                    [1.0, 1.0, 1.0, 1.0],
+                                    0.0,
+                                    1.05,
                                 ));
                             }
                         }
@@ -2558,6 +2600,55 @@ mod tests {
     }
 
     #[test]
+    fn menu_cache_render_commands_emit_real_tile_sprite_symbols_with_color_fallbacks() {
+        let world = MenuWorldPlan {
+            width: 1,
+            height: 1,
+            seed: 1,
+            tiles: vec![MenuTile {
+                x: 0,
+                y: 0,
+                floor: MenuBlockKind::Sand,
+                wall: MenuBlockKind::SandWall,
+                ore: MenuBlockKind::CopperOre,
+            }],
+            cache_floor_id: 1,
+            cache_wall_id: 2,
+        };
+
+        let floor = MenuRenderCommand::DrawCache {
+            cache_id: 1,
+            label: "floor+overlay",
+        }
+        .to_render_commands(&world, MENU_TILE_SIZE);
+        assert!(floor.iter().any(|command| matches!(
+            command,
+            RenderCommand::FillRect { layer, .. } if (*layer + 0.2).abs() < f32::EPSILON
+        )));
+        assert!(floor.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, layer, .. }
+                if symbol == "sand" && (*layer + 0.1).abs() < f32::EPSILON
+        )));
+        assert!(floor.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, layer, .. }
+                if symbol == "copper-ore" && (*layer - 0.15).abs() < f32::EPSILON
+        )));
+
+        let wall = MenuRenderCommand::DrawCache {
+            cache_id: 2,
+            label: "wall",
+        }
+        .to_render_commands(&world, MENU_TILE_SIZE);
+        assert!(wall.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, layer, .. }
+                if symbol == "sand-wall" && (*layer - 1.05).abs() < f32::EPSILON
+        )));
+    }
+
+    #[test]
     fn menu_renderer_state_switches_desktop_submenu_roots() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
         assert!(state.select_desktop_root(MenuButtonRole::Database));
@@ -3026,8 +3117,8 @@ mod tests {
         );
         assert_eq!(style.drawable_for(MenuFlatToggleMenuState::Over), "");
         assert_eq!(style.drawable_for(MenuFlatToggleMenuState::Disabled), "");
-        assert_eq!(style.text_size(false), 8.0);
-        assert_eq!(style.text_size(true), 7.0);
+        assert_eq!(style.text_size(false), 18.0);
+        assert_eq!(style.text_size(true), 16.0);
         assert_eq!(
             style.text_style,
             RenderTextStyle::new(RenderTextAlign::Center)
@@ -3114,14 +3205,16 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawTriangle { center, layer, .. }
-                    if (center.x
+                RenderCommand::DrawText { text, position, style, layer, .. }
+                    if *text == upstream_ui_icon_glyph_string("play").unwrap()
+                        && style.font == RenderFontId::Icon
+                        && (position.x
                             - (rect.x
                                 + MENU_DESKTOP_BUTTON_MARGIN_LEFT
                                 + MENU_DESKTOP_BUTTON_ICON_X))
                             .abs()
                             < f32::EPSILON
-                        && (center.y - rect.center().y).abs() < f32::EPSILON
+                        && (position.y - rect.center().y).abs() < f32::EPSILON
                         && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
             )
         }));
@@ -3323,6 +3416,13 @@ mod tests {
                 )),
                 "icon {icon} must not regress to the placeholder question mark"
             );
+            assert!(
+                commands.iter().any(|command| matches!(
+                    command,
+                    RenderCommand::DrawText { style, .. } if style.font == RenderFontId::Icon
+                )),
+                "icon {icon} should be emitted through the upstream Icon font identity"
+            );
         }
     }
 
@@ -3358,9 +3458,11 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawTriangle { center, layer, .. }
-                    if (center.x - rect.center().x).abs() < f32::EPSILON
-                        && (center.y - (rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y)).abs() < f32::EPSILON
+                RenderCommand::DrawText { text, position, style, layer, .. }
+                    if *text == upstream_ui_icon_glyph_string("rightOpenOut").unwrap()
+                        && style.font == RenderFontId::Icon
+                        && (position.x - rect.center().x).abs() < f32::EPSILON
+                        && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y)).abs() < f32::EPSILON
                         && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
             )
         }));
@@ -3507,15 +3609,16 @@ mod tests {
         assert!(render_commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawLine { from, to, layer, .. }
-                    if (from.y - to.y).abs() < f32::EPSILON
-                        && ((from.x + to.x) / 2.0
+                RenderCommand::DrawText { text, position, style, layer, .. }
+                    if *text == upstream_ui_icon_glyph_string("add").unwrap()
+                        && style.font == RenderFontId::Icon
+                        && (position.x
                             - (custom.rect.x
                                 + MENU_DESKTOP_BUTTON_MARGIN_LEFT
                                 + MENU_DESKTOP_BUTTON_ICON_X))
                             .abs()
                             < f32::EPSILON
-                        && (from.y - custom.rect.center().y).abs() < f32::EPSILON
+                        && (position.y - custom.rect.center().y).abs() < f32::EPSILON
                         && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
             )
         }));

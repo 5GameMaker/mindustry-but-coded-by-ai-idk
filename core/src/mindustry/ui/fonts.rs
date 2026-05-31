@@ -53,8 +53,10 @@ impl UpstreamFontRole {
         match self {
             Self::Default | Self::JapaneseDefaultOverride => Some(RenderFontId::Default),
             Self::Outline | Self::JapaneseOutlineOverride => Some(RenderFontId::Outline),
+            Self::Icon => Some(RenderFontId::Icon),
+            Self::IconLarge => Some(RenderFontId::IconLarge),
             Self::Logic => Some(RenderFontId::Logic),
-            Self::Icon | Self::IconLarge | Self::Tech | Self::Monospace => None,
+            Self::Tech | Self::Monospace => None,
         }
     }
 }
@@ -936,12 +938,14 @@ mod tests {
         assert_eq!(icon.source_path, "fonts/icon.ttf");
         assert_eq!(icon.characters, Some("\0"));
         assert!(icon.scaled);
+        assert_eq!(icon.render_font_id(), Some(RenderFontId::Icon));
 
         let icon_large = upstream_font_asset_by_name("iconLarge").unwrap();
         assert_eq!(icon_large.source_path, "fonts/icon.ttf");
         assert_eq!(icon_large.size, 48);
         assert_eq!(icon_large.border_width, Some(5));
         assert!(!icon_large.scaled);
+        assert_eq!(icon_large.render_font_id(), Some(RenderFontId::IconLarge));
 
         let monospace = upstream_font_asset_by_name("monospace").unwrap();
         assert_eq!(monospace.source_path, "fonts/monospace.woff");

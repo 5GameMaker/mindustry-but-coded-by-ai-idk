@@ -20434,6 +20434,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 远程 Mods browser/search/sort/release 下载仍未接入；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 548. 主菜单 UI 真实 tile sprite 与 Icon 字体身份闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **64.8%**，仍未达到完整可玩；本轮继续优先前端/UI，针对“主界面不像原版/图标和背景过于占位”的问题推进。
+- Java 对照依据：
+  - `MenuRenderer` 原版菜单背景是临时 world 的 floor/overlay/wall cache，不应长期停留在纯色块；
+  - `MenuFragment` 菜单按钮使用 `Icon.*` / `Styles.flatToggleMenut`，图标应保留上游 Icon 字体/资源身份，不能只当普通问号占位文本；
+  - `Fonts.icon` / `Fonts.iconLarge` 来源是 `fonts/icon.ttf`，后续真实字体 atlas 必须能从 RenderFontId 主链路接入。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 菜单 cache render commands 在保留颜色 fallback 的同时，开始对 floor/ore/wall 发出真实 tile `DrawSprite` symbol；
+    - desktop/mobile 菜单按钮图标改为通过上游 `upstream_ui_icon_glyph_string(...)` 输出 `RenderFontId::Icon` 文本命令；
+    - 放大菜单按钮文字与图标尺寸，减少“亮屏但 UI 过小/不像原版”的观感问题；
+    - 新增测试锁定真实 tile sprite symbol 与 Icon font identity。
+  - `core/src/mindustry/graphics/render_engine.rs` / `core/src/mindustry/ui/fonts.rs`
+    - 补 `RenderFontId::Icon / IconLarge` 与 `UpstreamFontRole::{Icon, IconLarge}` 的主链映射。
+  - `desktop/src/lib.rs`
+    - OpenGL 占位文字路径对 `RenderFontId::Icon/IconLarge` 增加 icon glyph shape fallback，避免当前真实字体 atlas 未完成时又渲染成 `?`；
+    - 字体资源测试改为允许本机上游默认资产额外解析，并为 env fixture 加锁，避免并行测试污染 `MINDUSTRY_ASSET_ROOT`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_font --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_icon_font_glyphs_use_icon_shape_fallbacks --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib -- --test-threads=1`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `cargo build -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 真实 `fonts/icon.ttf`/`iconLarge` glyph atlas rasterization 与上传仍是占位 fallback，不得标记为完整字体系统；
+  - 菜单背景已经发出真实 tile sprites，但完整 Java cache layer、shadow texture、flyer/lighting 细节还需继续精修；
+  - UI 仍未完全还原 `Scene2D` widget 行为，不能宣告完整前端或完整可玩。
+
 ## 547. ModsDialog 路由卡片详情闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

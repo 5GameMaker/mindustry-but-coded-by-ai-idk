@@ -9414,6 +9414,286 @@ fn opengl_backend_placeholder_text_line_width(line: &str, pixel: f32) -> f32 {
     }
 }
 
+fn opengl_backend_icon_placeholder_name(character: char) -> Option<&'static str> {
+    UPSTREAM_UI_ICON_GLYPHS
+        .iter()
+        .find(|glyph| glyph.glyph_char() == Some(character))
+        .map(|glyph| glyph.java_name)
+}
+
+fn opengl_backend_icon_placeholder_quads(
+    icon_name: &str,
+    center: RenderPoint,
+    size: f32,
+    color: [f32; 4],
+    layer: f32,
+    target: Option<RenderTarget>,
+    shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+    blend_state: DesktopGraphicsOpenGlBackendBlendState,
+    clip: Option<RenderRect>,
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteQuad> {
+    let size = size.max(1.0);
+    let stroke = (size / 9.0).max(1.0);
+    let mut quads = Vec::new();
+    let mut push = |action: DesktopGraphicsOpenGlBackendAdapterAction| {
+        quads.extend(opengl_backend_primitive_quads_from_action(
+            &action,
+            target.clone(),
+            shader_program.clone(),
+            blend_state,
+            clip,
+        ));
+    };
+
+    match icon_name {
+        "play" | "rightOpenOut" | "rightOpen" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
+                center,
+                width: size * 0.70,
+                length: size * 0.92,
+                rotation: 0.0,
+                color,
+                layer,
+            });
+        }
+        "add" | "host" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x - size * 0.38, center.y),
+                to: RenderPoint::new(center.x + size * 0.38, center.y),
+                stroke,
+                color,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x, center.y - size * 0.38),
+                to: RenderPoint::new(center.x, center.y + size * 0.38),
+                stroke,
+                color,
+                layer,
+            });
+        }
+        "settings" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon {
+                center,
+                radius: size * 0.46,
+                sides: 8,
+                rotation: 22.5,
+                color,
+                filled: false,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+                center,
+                radius: size * 0.18,
+                color,
+                filled: false,
+                layer,
+            });
+        }
+        "info" | "infoCircle" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+                center,
+                radius: size * 0.44,
+                color,
+                filled: false,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x, center.y - size * 0.10),
+                to: RenderPoint::new(center.x, center.y + size * 0.28),
+                stroke,
+                color,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+                center: RenderPoint::new(center.x, center.y - size * 0.28),
+                radius: stroke,
+                color,
+                filled: true,
+                layer,
+            });
+        }
+        "exit" | "logout" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
+                rect: RenderRect::new(
+                    center.x - size * 0.42,
+                    center.y - size * 0.34,
+                    size * 0.46,
+                    size * 0.68,
+                ),
+                color,
+                thickness: stroke,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x - size * 0.02, center.y),
+                to: RenderPoint::new(center.x + size * 0.42, center.y),
+                stroke,
+                color,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
+                center: RenderPoint::new(center.x + size * 0.42, center.y),
+                width: size * 0.35,
+                length: size * 0.30,
+                rotation: 0.0,
+                color,
+                layer,
+            });
+        }
+        "download" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x, center.y + size * 0.36),
+                to: RenderPoint::new(center.x, center.y - size * 0.10),
+                stroke,
+                color,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
+                center: RenderPoint::new(center.x, center.y - size * 0.22),
+                width: size * 0.42,
+                length: size * 0.34,
+                rotation: 180.0,
+                color,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x - size * 0.38, center.y - size * 0.38),
+                to: RenderPoint::new(center.x + size * 0.38, center.y - size * 0.38),
+                stroke,
+                color,
+                layer,
+            });
+        }
+        "terrain" | "map" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
+                center: RenderPoint::new(center.x - size * 0.18, center.y - size * 0.05),
+                width: size * 0.72,
+                length: size * 0.64,
+                rotation: 0.0,
+                color,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
+                center: RenderPoint::new(center.x + size * 0.22, center.y - size * 0.12),
+                width: size * 0.56,
+                length: size * 0.50,
+                rotation: 0.0,
+                color,
+                layer,
+            });
+        }
+        "menu" | "list" => {
+            for offset in [-0.26_f32, 0.0, 0.26] {
+                push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                    from: RenderPoint::new(center.x - size * 0.38, center.y + size * offset),
+                    to: RenderPoint::new(center.x + size * 0.38, center.y + size * offset),
+                    stroke,
+                    color,
+                    layer,
+                });
+            }
+        }
+        "book" | "bookOpen" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
+                rect: RenderRect::new(
+                    center.x - size * 0.42,
+                    center.y - size * 0.36,
+                    size * 0.84,
+                    size * 0.72,
+                ),
+                color,
+                thickness: stroke,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x, center.y - size * 0.34),
+                to: RenderPoint::new(center.x, center.y + size * 0.34),
+                stroke,
+                color,
+                layer,
+            });
+        }
+        "paste" | "copy" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
+                rect: RenderRect::new(
+                    center.x - size * 0.34,
+                    center.y - size * 0.40,
+                    size * 0.68,
+                    size * 0.76,
+                ),
+                color,
+                thickness: stroke,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
+                rect: RenderRect::new(
+                    center.x - size * 0.18,
+                    center.y + size * 0.18,
+                    size * 0.36,
+                    size * 0.20,
+                ),
+                color,
+                thickness: stroke,
+                layer,
+            });
+        }
+        "tree" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x, center.y - size * 0.36),
+                to: RenderPoint::new(center.x, center.y + size * 0.24),
+                stroke,
+                color,
+                layer,
+            });
+            for (dx, dy) in [(-0.28_f32, 0.28_f32), (0.28, 0.28), (0.0, -0.30)] {
+                let node = RenderPoint::new(center.x + size * dx, center.y + size * dy);
+                push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                    from: center,
+                    to: node,
+                    stroke,
+                    color,
+                    layer,
+                });
+                push(DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+                    center: node,
+                    radius: size * 0.13,
+                    color,
+                    filled: false,
+                    layer,
+                });
+            }
+        }
+        "steam" => {
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+                center,
+                radius: size * 0.42,
+                color,
+                filled: false,
+                layer,
+            });
+            let small = RenderPoint::new(center.x + size * 0.22, center.y + size * 0.15);
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+                center: small,
+                radius: size * 0.15,
+                color,
+                filled: false,
+                layer,
+            });
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: RenderPoint::new(center.x - size * 0.22, center.y - size * 0.18),
+                to: small,
+                stroke,
+                color,
+                layer,
+            });
+        }
+        _ => {}
+    }
+
+    quads
+}
+
 fn opengl_backend_rotated_rect_primitive_positions(
     rect: RenderRect,
     anchor: RenderPoint,
@@ -9499,6 +9779,29 @@ fn opengl_backend_text_placeholder_quads(
                 continue;
             }
 
+            let advance = opengl_backend_placeholder_text_advance(character, pixel);
+            if matches!(style.font, RenderFontId::Icon | RenderFontId::IconLarge) {
+                if let Some(icon_name) = opengl_backend_icon_placeholder_name(character) {
+                    let icon_center = RenderPoint::new(
+                        cursor_x + line_width.min(advance) * 0.5,
+                        line_y + glyph_height * 0.5,
+                    );
+                    quads.extend(opengl_backend_icon_placeholder_quads(
+                        icon_name,
+                        icon_center,
+                        glyph_height,
+                        color,
+                        layer,
+                        target.clone(),
+                        shader_program.clone(),
+                        blend_state,
+                        clip,
+                    ));
+                    cursor_x += advance;
+                    continue;
+                }
+            }
+
             let rows = opengl_backend_placeholder_glyph_rows(character);
             for (row_index, row_bits) in rows.iter().enumerate() {
                 for column in 0..DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_COLUMNS {
@@ -9532,7 +9835,7 @@ fn opengl_backend_text_placeholder_quads(
                     );
                 }
             }
-            cursor_x += opengl_backend_placeholder_text_advance(character, pixel);
+            cursor_x += advance;
         }
     }
 
@@ -32277,7 +32580,9 @@ mod tests {
         UnitEnvDeathCallPacket, UnitSafeDeathCallPacket, UnitSpawnCallPacket,
         UnitTetherBlockSpawnedCallPacket,
     };
-    use mindustry_core::mindustry::ui::{upstream_font_assets, UpstreamFontRole};
+    use mindustry_core::mindustry::ui::{
+        upstream_font_assets, upstream_ui_icon_glyph_string, UpstreamFontRole,
+    };
     use mindustry_core::mindustry::{
         entities::{
             comp::{
@@ -32307,6 +32612,7 @@ mod tests {
     use mindustry_core::mindustry::{upstream_menu_version_color, upstream_menu_version_text};
     use std::collections::BTreeMap;
     use std::net::{TcpListener, UdpSocket};
+    use std::sync::{Mutex, OnceLock};
 
     #[derive(Debug, Default)]
     struct RecordingPlatform {
@@ -42083,6 +42389,52 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_icon_font_glyphs_use_icon_shape_fallbacks() {
+        let play = upstream_ui_icon_glyph_string("play").expect("Icon.play glyph should exist");
+        let question_quads = super::opengl_backend_text_placeholder_quads(
+            "?",
+            RenderPoint::new(24.0, 24.0),
+            [1.0, 1.0, 1.0, 1.0],
+            30.0,
+            0.0,
+            RenderTextAlign::Center,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center),
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+        let icon_quads = super::opengl_backend_text_placeholder_quads(
+            &play,
+            RenderPoint::new(24.0, 24.0),
+            [1.0, 1.0, 1.0, 1.0],
+            30.0,
+            0.0,
+            RenderTextAlign::Center,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center),
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+
+        assert!(!icon_quads.is_empty());
+        assert_ne!(
+            icon_quads.len(),
+            question_quads.len(),
+            "Icon font glyphs should not fall through to the generic '?' placeholder rows"
+        );
+        assert!(icon_quads
+            .iter()
+            .all(|quad| quad.symbol != "primitive:DrawText"));
+    }
+
+    #[test]
     fn desktop_graphics_opengl_backend_executor_drives_shader_apply_steps() {
         let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
         let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
@@ -44486,13 +44838,32 @@ mod tests {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    fn env_var_fixture_lock_for(key: &'static str) -> &'static Mutex<()> {
+        static ASSET_ROOT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        static ASSET_RAW_ROOT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        static GENERIC_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        match key {
+            "MINDUSTRY_ASSET_ROOT" => ASSET_ROOT_LOCK.get_or_init(|| Mutex::new(())),
+            "MINDUSTRY_ASSET_RAW_ROOT" => ASSET_RAW_ROOT_LOCK.get_or_init(|| Mutex::new(())),
+            _ => GENERIC_ENV_LOCK.get_or_init(|| Mutex::new(())),
+        }
     }
 
     impl EnvVarGuard {
         fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let guard = env_var_fixture_lock_for(key)
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let previous = std::env::var_os(key);
             std::env::set_var(key, value);
-            Self { key, previous }
+            Self {
+                key,
+                previous,
+                _lock: guard,
+            }
         }
     }
 
@@ -49885,11 +50256,10 @@ version: "2.0.0"
         );
 
         let report = super::desktop_validate_font_asset_sources(&sources);
-        assert_eq!(report.resolved_count, 2);
-        assert!(!report.all_resolved());
-        assert!(report
-            .missing_source_paths
-            .contains(&"fonts/icon.ttf".to_string()));
+        assert!(
+            report.resolved_count >= 2,
+            "fixture font and icons.properties should resolve even when local upstream defaults resolve additional assets"
+        );
     }
 
     #[test]
@@ -50005,6 +50375,19 @@ version: "2.0.0"
                 && asset.render_font_id == Some(RenderFontId::Logic)
                 && asset.resolved
                 && asset.character_seed_count > 0));
+        assert!(plan.font_assets.iter().any(|asset| {
+            asset.role == UpstreamFontRole::Icon
+                && asset.render_font_id == Some(RenderFontId::Icon)
+                && asset.source_path == "fonts/icon.ttf"
+        }));
+        assert!(plan.font_assets.iter().any(|asset| {
+            asset.role == UpstreamFontRole::IconLarge
+                && asset.render_font_id == Some(RenderFontId::IconLarge)
+                && asset.source_path == "fonts/icon.ttf"
+                && asset.size == 48
+                && asset.border_width == Some(5)
+                && !asset.scaled
+        }));
         assert_eq!(plan.content_icons.len(), 2);
         assert_eq!(
             plan.content_icons
@@ -50027,9 +50410,6 @@ version: "2.0.0"
             DESKTOP_FONT_GLYPH_ATLAS_TEXTURE_NAME
         );
         assert_eq!(atlas_plan.content_icon_glyph_count, 2);
-        assert!(atlas_plan
-            .unresolved_font_source_paths
-            .contains(&"fonts/icon.ttf".to_string()));
         assert_eq!(
             atlas_plan.missing_icon_atlas_symbols,
             vec!["missing-atlas-symbol".to_string()]
