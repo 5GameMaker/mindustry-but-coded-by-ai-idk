@@ -19636,6 +19636,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - logo/macnotch/scene margin 与移动端 gutter 仍需继续精确对齐；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 565. MenuFragment scene margin / macnotch chrome 闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.7%**，仍未达到完整可玩；继续优先前端/UI，把菜单 logo、移动端 gutter 与 Java `Core.scene.margin*` / `macnotch` 条件对齐。
+- Java 对照依据：
+  - `MenuFragment.build(...)` 中移动端 gutter 只有在 `Core.scene.marginLeft/right/bottom > 0` 时绘制；
+  - logo 使用 `Core.graphics.getHeight() - Core.scene.marginTop` 计算可用高度；
+  - `Core.settings.getBool("macnotch")` 时额外减去 `Scl.scl(macNotchHeight)`，其中 `macNotchHeight = 32f`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuChromeLayoutOptions`，统一携带 console、BE、scene margin、macnotch、ui scale；
+    - `DesktopLauncher` 新增 `menu_scene_margin_top/left/right/bottom`、`menu_macnotch_enabled`、`menu_ui_scale`；
+    - 移动端 gutter 根据 scene margin 尺寸绘制，margin 为 0 时不再强制画边缘 pane；
+    - logo y 坐标开始扣除 scene top margin 与 mac notch 高度，portrait 偏移改为 scale-aware；
+    - 测试覆盖 mobile gutter 的非零/零 margin 行为，以及 logo 在 marginTop + macnotch 下的位置。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_logo --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_mobile_gutters --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - scene margin 仍是 launcher 状态，后续要接真实窗口/平台 safe-area；
+  - desktop submenu anchor 还未接入 scene margin top/bottom；
+  - Java `Scl.scl(...)` 的完整缩放链路仍待替代当前 `menu_ui_scale` 过渡字段；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

@@ -2538,6 +2538,35 @@ pub struct DesktopLoadGameAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+struct DesktopMenuChromeLayoutOptions {
+    console_shown: bool,
+    console_setting_enabled: bool,
+    becheck_active: bool,
+    scene_margin_top: f32,
+    scene_margin_left: f32,
+    scene_margin_right: f32,
+    scene_margin_bottom: f32,
+    macnotch_enabled: bool,
+    ui_scale: f32,
+}
+
+impl Default for DesktopMenuChromeLayoutOptions {
+    fn default() -> Self {
+        Self {
+            console_shown: false,
+            console_setting_enabled: true,
+            becheck_active: true,
+            scene_margin_top: 0.0,
+            scene_margin_left: 14.0,
+            scene_margin_right: 14.0,
+            scene_margin_bottom: 12.0,
+            macnotch_enabled: false,
+            ui_scale: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct DesktopMenuChromeLayout {
     is_mobile: bool,
     left_gutter: Option<RenderRect>,
@@ -2556,14 +2585,12 @@ struct DesktopMenuChromeLayout {
 impl DesktopMenuChromeLayout {
     #[cfg(test)]
     fn for_viewport(viewport: RenderViewport) -> Self {
-        Self::for_viewport_with_state(viewport, false, true, true)
+        Self::for_viewport_with_state(viewport, DesktopMenuChromeLayoutOptions::default())
     }
 
     fn for_viewport_with_state(
         viewport: RenderViewport,
-        console_shown: bool,
-        console_setting_enabled: bool,
-        becheck_active: bool,
+        options: DesktopMenuChromeLayoutOptions,
     ) -> Self {
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
@@ -2571,20 +2598,26 @@ impl DesktopMenuChromeLayout {
         let right_margin = 10.0;
         let bottom_margin = 9.0;
 
-        let left_gutter =
-            is_mobile.then_some(RenderRect::new(viewport.x, viewport.y, 14.0, height));
-        let right_gutter = is_mobile.then_some(RenderRect::new(
-            viewport.x + width - 14.0,
-            viewport.y,
-            14.0,
-            height,
-        ));
-        let bottom_gutter = is_mobile.then_some(RenderRect::new(
-            viewport.x + 14.0,
-            viewport.y + height - 12.0,
-            (width - 28.0).max(1.0),
-            12.0,
-        ));
+        let scene_margin_left = options.scene_margin_left.max(0.0);
+        let scene_margin_right = options.scene_margin_right.max(0.0);
+        let scene_margin_bottom = options.scene_margin_bottom.max(0.0);
+        let left_gutter = (is_mobile && scene_margin_left > f32::EPSILON).then_some(
+            RenderRect::new(viewport.x, viewport.y, scene_margin_left, height),
+        );
+        let right_gutter =
+            (is_mobile && scene_margin_right > f32::EPSILON).then_some(RenderRect::new(
+                viewport.x + width - scene_margin_right,
+                viewport.y,
+                scene_margin_right,
+                height,
+            ));
+        let bottom_gutter =
+            (is_mobile && scene_margin_bottom > f32::EPSILON).then_some(RenderRect::new(
+                viewport.x + scene_margin_left,
+                viewport.y + height - scene_margin_bottom,
+                (width - scene_margin_right - scene_margin_left).max(1.0),
+                scene_margin_bottom,
+            ));
 
         let discord_rect = RenderRect::new(
             viewport.x + width - right_margin - 84.0,
@@ -2623,13 +2656,15 @@ impl DesktopMenuChromeLayout {
             right_gutter,
             bottom_gutter,
             discord_rect,
-            discord_visible: !console_shown,
+            discord_visible: !options.console_shown,
             terminal_rect,
-            terminal_visible: is_mobile && console_setting_enabled && !console_shown,
+            terminal_visible: is_mobile
+                && options.console_setting_enabled
+                && !options.console_shown,
             info_rect,
-            info_visible: is_mobile && !console_shown,
+            info_visible: is_mobile && !options.console_shown,
             becheck_rect,
-            becheck_visible: !is_mobile && becheck_active,
+            becheck_visible: !is_mobile && options.becheck_active,
         }
     }
 
@@ -15321,6 +15356,12 @@ pub struct DesktopLauncher {
     pub menu_mobile_terminal_open: bool,
     pub menu_console_setting_enabled: bool,
     pub menu_becheck_active: bool,
+    pub menu_scene_margin_top: f32,
+    pub menu_scene_margin_left: f32,
+    pub menu_scene_margin_right: f32,
+    pub menu_scene_margin_bottom: f32,
+    pub menu_macnotch_enabled: bool,
+    pub menu_ui_scale: f32,
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
     pub map_list_filter_dialog_open: bool,
@@ -16070,6 +16111,12 @@ impl DesktopLauncher {
             menu_mobile_terminal_open: false,
             menu_console_setting_enabled: true,
             menu_becheck_active: true,
+            menu_scene_margin_top: 0.0,
+            menu_scene_margin_left: 14.0,
+            menu_scene_margin_right: 14.0,
+            menu_scene_margin_bottom: 12.0,
+            menu_macnotch_enabled: false,
+            menu_ui_scale: 1.0,
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
             map_list_filter_dialog_open: false,
@@ -19386,14 +19433,27 @@ impl DesktopLauncher {
     ) -> DesktopMenuChromeLayout {
         DesktopMenuChromeLayout::for_viewport_with_state(
             viewport,
-            self.menu_mobile_terminal_open,
-            self.menu_console_setting_enabled,
-            self.menu_becheck_active,
+            self.current_menu_chrome_options(),
         )
     }
 
+    fn current_menu_chrome_options(&self) -> DesktopMenuChromeLayoutOptions {
+        DesktopMenuChromeLayoutOptions {
+            console_shown: self.menu_mobile_terminal_open,
+            console_setting_enabled: self.menu_console_setting_enabled,
+            becheck_active: self.menu_becheck_active,
+            scene_margin_top: self.menu_scene_margin_top,
+            scene_margin_left: self.menu_scene_margin_left,
+            scene_margin_right: self.menu_scene_margin_right,
+            scene_margin_bottom: self.menu_scene_margin_bottom,
+            macnotch_enabled: self.menu_macnotch_enabled,
+            ui_scale: self.menu_ui_scale,
+        }
+    }
+
     fn push_menu_logo_and_version_chrome(&self, pass: &mut RenderPass, viewport: RenderViewport) {
-        let chrome = self.current_menu_chrome_layout_for_viewport(viewport);
+        let options = self.current_menu_chrome_options();
+        let chrome = DesktopMenuChromeLayout::for_viewport_with_state(viewport, options);
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
 
@@ -19494,9 +19554,16 @@ impl DesktopLauncher {
         let logo_width = 768.0_f32.min((width - 20.0).max(1.0));
         let logo_height = (logo_width / 4.0).max(1.0);
         let logo_x = viewport.x + ((width - logo_width) * 0.5).floor();
-        let portrait_logo_offset = if height > width { 30.0 } else { 0.0 };
+        let ui_scale = options.ui_scale.max(0.01);
+        let portrait_logo_offset = if height > width { 30.0 * ui_scale } else { 0.0 };
+        let macnotch_offset = if options.macnotch_enabled {
+            32.0 * ui_scale
+        } else {
+            0.0
+        };
+        let effective_height = (height - options.scene_margin_top.max(0.0)).max(1.0);
         let logo_y = viewport.y
-            + (height - 6.0 - logo_height - portrait_logo_offset)
+            + (effective_height - 6.0 - logo_height - portrait_logo_offset - macnotch_offset)
                 .max(0.0)
                 .floor();
 
@@ -28207,6 +28274,12 @@ impl DesktopLauncher {
         self.menu_mobile_terminal_open = false;
         self.menu_console_setting_enabled = true;
         self.menu_becheck_active = true;
+        self.menu_scene_margin_top = 0.0;
+        self.menu_scene_margin_left = 14.0;
+        self.menu_scene_margin_right = 14.0;
+        self.menu_scene_margin_bottom = 12.0;
+        self.menu_macnotch_enabled = false;
+        self.menu_ui_scale = 1.0;
         self.about_route_page = DesktopAboutRoutePage::Links;
         self.about_filter_banned_links = false;
         self.settings_dialog_state = DesktopSettingsDialogState::default();
@@ -45207,6 +45280,36 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_menu_logo_respects_scene_margin_top_and_macnotch() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_scene_margin_top = 20.0;
+        launcher.menu_macnotch_enabled = true;
+        launcher.menu_ui_scale = 1.0;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let logo_rect = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .find_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } if symbol == "logo" => Some(*rect),
+                _ => None,
+            })
+            .expect("menu chrome should draw the logo sprite");
+
+        assert_eq!(
+            logo_rect,
+            RenderRect::new(256.0, 470.0, 768.0, 192.0),
+            "Java MenuFragment subtracts Core.scene.marginTop and macNotchHeight before placing logo"
+        );
+    }
+
+    #[test]
     fn desktop_launcher_default_font_asset_sources_follow_upstream_fonts_registry() {
         let launcher = DesktopLauncher::new(Vec::new());
         let source_paths = launcher
@@ -45660,6 +45763,61 @@ mod tests {
         assert!(!commands.iter().any(|command| {
             matches!(command, RenderCommand::DrawText { text, .. } if text == "becheck")
         }));
+    }
+
+    #[test]
+    fn desktop_launcher_mobile_gutters_follow_scene_margins_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_scene_margin_left = 0.0;
+        launcher.menu_scene_margin_right = 0.0;
+        launcher.menu_scene_margin_bottom = 0.0;
+
+        let viewport = RenderViewport::new(0.0, 0.0, 540.0, 960.0);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        for symbol in ["pane-right.9", "pane-left.9", "pane-top.9"] {
+            assert!(
+                !commands.iter().any(|command| {
+                    matches!(command, RenderCommand::DrawSprite { symbol: candidate, .. } if candidate == symbol)
+                }),
+                "Java MenuFragment only draws mobile gutter panes when Core.scene margins are non-zero"
+            );
+        }
+
+        launcher.menu_scene_margin_left = 20.0;
+        launcher.menu_scene_margin_right = 10.0;
+        launcher.menu_scene_margin_bottom = 18.0;
+        let frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        for (symbol, rect) in [
+            ("pane-right.9", RenderRect::new(0.0, 0.0, 20.0, 960.0)),
+            ("pane-left.9", RenderRect::new(530.0, 0.0, 10.0, 960.0)),
+            ("pane-top.9", RenderRect::new(20.0, 942.0, 510.0, 18.0)),
+        ] {
+            assert!(commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol: candidate, rect: candidate_rect, .. }
+                        if candidate == symbol && *candidate_rect == rect
+                )
+            }));
+        }
     }
 
     #[test]
