@@ -19360,6 +19360,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 546. ModsDialog 路由从文本壳推进到 mod 卡片列表
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **58.6%**，仍未达到完整可玩；继续优先前端/UI，目标是让 `ModsDialog` 不再只是 `@mods.none` 文本，而是能把扫描到的 mod 目录名显示成卡片列表，并保留回退按钮。
+- Java 对照证据：
+  - `ModsDialog` 在原版里不只是状态文本，而是可浏览安装模组的真实对话框；
+  - 现阶段 Rust 侧至少应把“已扫描 mod 目录列表”可视化，而不是一直停留在占位文本壳。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `last_mods_directory_mod_names` 状态；
+    - `merge_mods_directory_into_texture_atlas(...)` / `merge_mod_resource_container_plan_into_texture_atlas(...)` 会记录当前扫描到的 mod 名称；
+    - `Mods` 路由不再只输出行文本，开始渲染 back button、mod browser 标题与 mod 卡片；
+    - `CloseRoute` 在 Mods 路由上可点击回退。
+  - 测试：
+    - `desktop_launcher_mods_route_renders_scanned_mod_cards_and_back_button`
+      - 验证 `alpha / beta / gamma` 会显示在 Mods 路由中；
+      - 验证 `@back` 可点击并关闭路由；
+      - 验证底部搜索提示仍存在。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_scanned_mod_cards_and_back_button --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - mod 卡片还只是简化版列表，没有完全复刻 Java 的详情/浏览/导入流程；
+  - `@mods.guide` / `@mod.import` / `@mods.browser` 还没全部接成完整交互；
+  - 当前 mod 浏览器仍没有完全接到真实安装模组浏览/详情链路；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 543. SchematicInfoDialog 复用单蓝图标签 chip
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
