@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 634. DatabaseDialog 接入 Shift-click 图标复制
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.5%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是补齐 Java DatabaseDialog 内容图标的 shift-click 复制 Unicode glyph 行为。
+- Java 对照依据：
+  - `DatabaseDialog.rebuild()` 中 unlocked 内容被点击时，如果按住 shift 且存在 icon glyph，则复制对应字符并显示 `@copied`；
+  - 否则普通点击打开 `ContentInfoDialog`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `menu_shift_pressed` 输入状态，按 `Shift/ShiftLeft/ShiftRight` key event 更新；
+    - 新增 `DesktopDatabaseIconCopyAction` 与 `last_database_icon_copy_action`；
+    - 新增 `database_content_icon_emoji(...)`，通过当前内容 atlas symbol 查询 `DesktopContentIconGlyphRegistry` 的 emoji 字符；
+    - Database content cell 命中时，如果 shift 按下且 glyph 可复制，返回 `CopyDatabaseContentIcon`，否则维持 `OpenDatabaseContent`；
+    - 新增 `dispatch_database_content_icon_copy_with_platform(...)`，复制 emoji 到剪贴板并显示 `@copied`；
+    - 扩展 DatabaseDialog 测试，构造 content icon glyph registry，验证 shift-click 不打开详情而是复制 `\u{f8ff}`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - category 维度仍未完全升级到 Java `databaseCategory` 字符串；
+  - 滚动条暂未支持拖动；
+  - 后续前端/UI 优先转向 JoinDialog，因为它是当前用户可见收益最大的菜单对话框缺口；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 633. DatabaseDialog 补游戏内 banned 优先排序
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

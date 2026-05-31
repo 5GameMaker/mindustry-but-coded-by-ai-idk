@@ -2757,6 +2757,7 @@ pub enum DesktopMenuRouteShellAction {
     FocusDatabaseSearch,
     SelectDatabaseTab(usize),
     OpenDatabaseContent(ContentType, usize),
+    CopyDatabaseContentIcon(ContentType, usize),
     CloseDatabaseContent,
     OpenDatabaseContentFields,
     Settings(DesktopSettingsAction),
@@ -2871,6 +2872,14 @@ pub struct DesktopDatabaseFieldsAction {
     pub opened: bool,
     pub clipboard_text: Option<String>,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopDatabaseIconCopyAction {
+    pub content_type: ContentType,
+    pub name: String,
+    pub atlas_symbol: String,
+    pub emoji: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16229,6 +16238,7 @@ pub struct DesktopLauncher {
     pub last_menu_info_message: Option<String>,
     pub menu_mobile_terminal_open: bool,
     pub menu_console_setting_enabled: bool,
+    pub menu_shift_pressed: bool,
     pub menu_becheck_active: bool,
     pub menu_becheck_update_available: bool,
     pub menu_scene_margin_top: f32,
@@ -16311,6 +16321,7 @@ pub struct DesktopLauncher {
     pub database_scroll_offset: usize,
     pub last_database_content_opened: Option<(ContentType, String)>,
     pub last_database_fields_action: Option<DesktopDatabaseFieldsAction>,
+    pub last_database_icon_copy_action: Option<DesktopDatabaseIconCopyAction>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
     pub last_discord_clipboard_text: Option<String>,
@@ -17090,6 +17101,7 @@ impl DesktopLauncher {
             last_menu_info_message: None,
             menu_mobile_terminal_open: false,
             menu_console_setting_enabled: true,
+            menu_shift_pressed: false,
             menu_becheck_active: true,
             menu_becheck_update_available: false,
             menu_scene_margin_top: 0.0,
@@ -17172,6 +17184,7 @@ impl DesktopLauncher {
             database_scroll_offset: 0,
             last_database_content_opened: None,
             last_database_fields_action: None,
+            last_database_icon_copy_action: None,
             last_about_link_action: None,
             last_about_linkfail_message: None,
             last_discord_clipboard_text: None,
@@ -20996,6 +21009,13 @@ impl DesktopLauncher {
         )
     }
 
+    fn is_shift_key_code(key_code: &str) -> bool {
+        matches!(
+            key_code,
+            "Shift" | "shift" | "ShiftLeft" | "shiftLeft" | "ShiftRight" | "shiftRight"
+        )
+    }
+
     fn menu_role_requires_play_guard(role: MenuButtonRole) -> bool {
         matches!(
             role,
@@ -21290,6 +21310,7 @@ impl DesktopLauncher {
                 self.database_selected_tab = 0;
                 self.database_scroll_offset = 0;
                 self.last_database_content_opened = None;
+                self.last_database_icon_copy_action = None;
             } else if route == DesktopMenuRoute::Schematics {
                 self.load_schematic_tags_from_settings();
                 self.schematic_search.clear();
@@ -21776,6 +21797,19 @@ impl DesktopLauncher {
         symbol
             .filter(|symbol| self.texture_atlas.lookup(symbol).is_ok())
             .unwrap_or_else(|| "whiteui".to_string())
+    }
+
+    fn database_content_icon_emoji(
+        &self,
+        content_type: ContentType,
+        name: &str,
+    ) -> Option<(String, String)> {
+        let atlas_symbol = self.database_content_icon_symbol(content_type, name);
+        let emoji = self
+            .content_icon_glyph_registry
+            .get_by_atlas_symbol(&atlas_symbol)
+            .and_then(UpstreamContentIcon::emoji_string)?;
+        Some((atlas_symbol, emoji))
     }
 
     fn database_content_display_name(&self, content_type: ContentType, name: &str) -> String {
@@ -29411,6 +29445,20 @@ impl DesktopLauncher {
         if let Some((content_type, record_index)) =
             self.database_content_cell_at_point(panel, point)
         {
+            if self.menu_shift_pressed
+                && self
+                    .content_loader
+                    .get_by(content_type)
+                    .get(record_index)
+                    .and_then(|record| record.name())
+                    .and_then(|name| self.database_content_icon_emoji(content_type, name))
+                    .is_some()
+            {
+                return Some(DesktopMenuRouteShellAction::CopyDatabaseContentIcon(
+                    content_type,
+                    record_index,
+                ));
+            }
             return Some(DesktopMenuRouteShellAction::OpenDatabaseContent(
                 content_type,
                 record_index,
@@ -30778,6 +30826,10 @@ impl DesktopLauncher {
                     .map(|name| (content_type, name.to_string()));
                 self.database_search_focused = false;
             }
+            DesktopMenuRouteShellAction::CopyDatabaseContentIcon(content_type, record_index) => {
+                self.dispatch_database_content_icon_copy(content_type, record_index);
+                self.database_search_focused = false;
+            }
             DesktopMenuRouteShellAction::CloseDatabaseContent => {
                 self.last_database_content_opened = None;
                 self.database_search_focused = false;
@@ -30978,6 +31030,44 @@ impl DesktopLauncher {
     pub fn dispatch_database_content_fields(&mut self) -> Option<DesktopDatabaseFieldsAction> {
         let mut platform = DefaultPlatform;
         self.dispatch_database_content_fields_with_platform(&mut platform)
+    }
+
+    pub fn dispatch_database_content_icon_copy_with_platform<P: Platform>(
+        &mut self,
+        content_type: ContentType,
+        record_index: usize,
+        platform: &mut P,
+    ) -> Option<DesktopDatabaseIconCopyAction> {
+        let name = self
+            .content_loader
+            .get_by(content_type)
+            .get(record_index)
+            .and_then(|record| record.name())?
+            .to_string();
+        let (atlas_symbol, emoji) = self.database_content_icon_emoji(content_type, &name)?;
+        platform.set_clipboard_text(&emoji);
+        self.last_menu_info_message = Some("@copied".to_string());
+        let action = DesktopDatabaseIconCopyAction {
+            content_type,
+            name,
+            atlas_symbol,
+            emoji,
+        };
+        self.last_database_icon_copy_action = Some(action.clone());
+        Some(action)
+    }
+
+    pub fn dispatch_database_content_icon_copy(
+        &mut self,
+        content_type: ContentType,
+        record_index: usize,
+    ) -> Option<DesktopDatabaseIconCopyAction> {
+        let mut platform = DefaultPlatform;
+        self.dispatch_database_content_icon_copy_with_platform(
+            content_type,
+            record_index,
+            &mut platform,
+        )
     }
 
     pub fn copy_discord_link_with_platform<P: Platform>(&mut self, platform: &mut P) -> String {
@@ -36105,6 +36195,11 @@ impl DesktopLauncher {
         let mut close_requested = false;
         for input in input_events {
             match input {
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if Self::is_shift_key_code(key_code) =>
+                {
+                    self.menu_shift_pressed = *pressed;
+                }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed && self.last_settings_rebind_key.is_some() =>
                 {
@@ -60101,6 +60196,58 @@ version: "2.0.0"
             RenderCommand::StrokeRect { rect, thickness, .. }
                 if *rect == first_cell && (*thickness - 2.0).abs() < f32::EPSILON
         )));
+        let copper_icon_symbol = launcher.database_content_icon_symbol(ContentType::Item, "copper");
+        launcher.content_icon_glyph_registry = DesktopContentIconGlyphRegistry::new(
+            "icons/icons.properties",
+            Some("icons/icons.properties".into()),
+            vec![super::UpstreamContentIcon {
+                unicode: 0xf8ff,
+                name: "copper".into(),
+                atlas_symbol: copper_icon_symbol.clone(),
+            }],
+            None,
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "ShiftLeft".into(),
+                pressed: true,
+            }],
+        );
+        assert!(launcher.menu_shift_pressed);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                item_cell.x,
+                item_cell.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::CopyDatabaseContentIcon(
+                ContentType::Item,
+                0
+            )),
+            "Java DatabaseDialog uses shift-click on a copyable icon glyph to copy the unicode character instead of opening ContentInfoDialog"
+        );
+        let mut icon_copy_platform = RecordingPlatform::default();
+        let icon_copy = launcher
+            .dispatch_database_content_icon_copy_with_platform(
+                ContentType::Item,
+                0,
+                &mut icon_copy_platform,
+            )
+            .expect("registered content icon glyph should be copyable");
+        assert_eq!(icon_copy.name, "copper");
+        assert_eq!(icon_copy.atlas_symbol, copper_icon_symbol);
+        assert_eq!(icon_copy.emoji, "\u{f8ff}");
+        assert_eq!(icon_copy_platform.clipboard_texts, vec!["\u{f8ff}"]);
+        assert_eq!(launcher.last_menu_info_message.as_deref(), Some("@copied"));
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "ShiftLeft".into(),
+                pressed: false,
+            }],
+        );
+        assert!(!launcher.menu_shift_pressed);
 
         launcher
             .game_state
