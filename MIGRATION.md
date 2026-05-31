@@ -19415,6 +19415,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `KeybindDialog` 视觉还没有完全达到 Java `Dialog + ScrollPane + Styles` 的像素级/布局级还原；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 557. Settings KeybindDialog Java settings 键持久化闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **60.9%**，仍未达到完整可玩；继续优先前端/UI，把 Controls 的 rebind/reset 从纯内存 `settings_keybind_overrides` 推进到 Java `KeyBind.save()` 同形 settings 键。
+- Java 对照依据：
+  - Arc `KeyBind.save()` 写入 `keybind-default-keyboard-{name}-single`；
+  - 单键绑定写 `keybind-default-keyboard-{name}-key`；
+  - 双向 Axis 绑定写 `keybind-default-keyboard-{name}-min/max`；
+  - `resetToDefault()` 移除同一组 `single/key/min/max` 键。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 keybind settings storage helper，统一生成 `keybind-default-keyboard-{name}-...` 键；
+    - rebind 成功后同步写入 Java ordinal 形式的 `single/key/min/max`；
+    - Axis 二段输入 `K / L` 会写成 `single=false, min=80, max=81`；
+    - 单键/鼠标输入会写成 `single=true, key=<KeyCode.ordinal()>`；
+    - `ResetKey` / `ResetAllKeys` 会同步移除对应 Java settings 键；
+    - 打开 Controls 时会从 settings 键回填 `settings_keybind_overrides`，避免 UI 和持久化源脱节；
+    - 保留 `-rust-display` 兜底键，便于遇到尚未映射的键名时保持 Rust 侧显示可恢复，不影响 Java 原版读取 `single/key/min/max`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings_keybind --lib`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - settings 仍是当前 `settings_overrides` 运行时表，后续还要接真实磁盘 settings load/save；
+  - KeyCode ordinal 映射目前覆盖当前 UI/default/test 常用键，仍需逐步补齐完整 Arc `KeyCode`；
+  - 真实输入系统尚未全面消费这组 persisted keybind；
+  - `KeybindDialog` 视觉还没有完全达到 Java `Dialog + ScrollPane + Styles` 级还原；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

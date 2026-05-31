@@ -21196,8 +21196,7 @@ impl DesktopLauncher {
             .unwrap_or(false);
         if axis && !Self::settings_key_code_is_axis(key_code) {
             if let Some(min) = self.settings_keybind_pending_axis_min.take() {
-                self.settings_keybind_overrides
-                    .insert(name, format!("{min} / {display}"));
+                self.set_settings_keybind_override(name, format!("{min} / {display}"));
                 self.last_settings_rebind_key = None;
             } else {
                 self.settings_keybind_pending_axis_min = Some(display);
@@ -21205,7 +21204,7 @@ impl DesktopLauncher {
             return true;
         }
         let value = if axis { display } else { display };
-        self.settings_keybind_overrides.insert(name, value);
+        self.set_settings_keybind_override(name, value);
         self.last_settings_rebind_key = None;
         self.settings_keybind_pending_axis_min = None;
         true
@@ -21619,6 +21618,290 @@ impl DesktopLauncher {
             .get(spec.name)
             .map(String::as_str)
             .unwrap_or(spec.default_value)
+    }
+
+    fn settings_keybind_storage_base(name: &str) -> String {
+        format!("keybind-default-keyboard-{name}")
+    }
+
+    fn settings_keybind_storage_key(name: &str, suffix: &str) -> String {
+        format!("{}-{suffix}", Self::settings_keybind_storage_base(name))
+    }
+
+    fn remove_settings_keybind_storage_keys(&mut self, name: &str) -> usize {
+        ["single", "key", "min", "max", "rust-display"]
+            .iter()
+            .filter(|suffix| {
+                self.settings_overrides
+                    .remove(&Self::settings_keybind_storage_key(name, suffix))
+                    .is_some()
+            })
+            .count()
+    }
+
+    fn set_settings_keybind_override(&mut self, name: &'static str, value: impl Into<String>) {
+        let value = value.into();
+        self.settings_keybind_overrides.insert(name, value.clone());
+        self.persist_settings_keybind_override_to_settings(name, &value);
+    }
+
+    fn reset_settings_keybind_override(&mut self, name: &'static str) -> bool {
+        let removed_memory = self.settings_keybind_overrides.remove(name).is_some();
+        let removed_storage = self.remove_settings_keybind_storage_keys(name) > 0;
+        removed_memory || removed_storage
+    }
+
+    fn reset_all_settings_keybind_overrides(&mut self) -> usize {
+        let mut removed = self.settings_keybind_overrides.len();
+        self.settings_keybind_overrides.clear();
+        for spec in SETTINGS_KEYBIND_SPECS {
+            removed += self.remove_settings_keybind_storage_keys(spec.name);
+        }
+        removed
+    }
+
+    fn persist_settings_keybind_override_to_settings(&mut self, name: &'static str, value: &str) {
+        self.remove_settings_keybind_storage_keys(name);
+        let base = Self::settings_keybind_storage_base(name);
+        if let Some((single, primary, secondary)) =
+            Self::settings_keybind_display_value_to_java_settings(value)
+        {
+            self.settings_overrides
+                .insert(format!("{base}-single"), single.to_string());
+            if single {
+                self.settings_overrides
+                    .insert(format!("{base}-key"), primary.to_string());
+            } else if let Some(max) = secondary {
+                self.settings_overrides
+                    .insert(format!("{base}-min"), primary.to_string());
+                self.settings_overrides
+                    .insert(format!("{base}-max"), max.to_string());
+            }
+        }
+        self.settings_overrides
+            .insert(format!("{base}-rust-display"), value.to_string());
+    }
+
+    pub fn load_settings_keybinds_from_settings(&mut self) -> usize {
+        self.settings_keybind_overrides.clear();
+        let mut loaded = 0;
+        for spec in SETTINGS_KEYBIND_SPECS {
+            if let Some(value) =
+                Self::settings_keybind_display_value_from_settings(&self.settings_overrides, spec)
+            {
+                self.settings_keybind_overrides.insert(spec.name, value);
+                loaded += 1;
+            }
+        }
+        loaded
+    }
+
+    fn settings_keybind_display_value_to_java_settings(
+        value: &str,
+    ) -> Option<(bool, i32, Option<i32>)> {
+        let value = value.trim();
+        if let Some((min, max)) = value.split_once(" / ") {
+            let min = Self::settings_key_code_java_ordinal(min)?;
+            let max = Self::settings_key_code_java_ordinal(max)?;
+            return Some((false, min, Some(max)));
+        }
+        Self::settings_key_code_java_ordinal(value).map(|key| (true, key, None))
+    }
+
+    fn settings_keybind_display_value_from_settings(
+        settings: &BTreeMap<String, String>,
+        spec: &DesktopKeybindSpec,
+    ) -> Option<String> {
+        let base = Self::settings_keybind_storage_base(spec.name);
+        let rust_display = settings.get(&format!("{base}-rust-display")).cloned();
+        let single = settings
+            .get(&format!("{base}-single"))
+            .and_then(|value| Self::settings_parse_bool(value))
+            .unwrap_or(true);
+        if single {
+            settings
+                .get(&format!("{base}-key"))
+                .and_then(|value| value.parse::<i32>().ok())
+                .and_then(Self::settings_key_code_display_for_java_ordinal)
+                .map(str::to_string)
+                .or(rust_display)
+        } else {
+            let min = settings
+                .get(&format!("{base}-min"))
+                .and_then(|value| value.parse::<i32>().ok())
+                .and_then(Self::settings_key_code_display_for_java_ordinal);
+            let max = settings
+                .get(&format!("{base}-max"))
+                .and_then(|value| value.parse::<i32>().ok())
+                .and_then(Self::settings_key_code_display_for_java_ordinal);
+            min.zip(max)
+                .map(|(min, max)| format!("{min} / {max}"))
+                .or(rust_display)
+        }
+    }
+
+    fn settings_parse_bool(value: &str) -> Option<bool> {
+        match value.trim() {
+            "true" | "True" | "TRUE" | "1" => Some(true),
+            "false" | "False" | "FALSE" | "0" => Some(false),
+            _ => None,
+        }
+    }
+
+    fn settings_key_code_java_ordinal(code: &str) -> Option<i32> {
+        match code.trim() {
+            "Mouse Left" | "mouseLeft" | "primary" => Some(21),
+            "Mouse Right" | "mouseRight" | "secondary" => Some(22),
+            "Mouse Middle" | "mouseMiddle" | "middle" => Some(23),
+            "Mouse Back" | "mouseBack" => Some(24),
+            "Mouse Forward" | "mouseForward" => Some(25),
+            "Scroll" | "Scrollwheel" | "scroll" => Some(26),
+            "0" | "num0" => Some(28),
+            "1" | "num1" => Some(29),
+            "2" | "num2" => Some(30),
+            "3" | "num3" => Some(31),
+            "4" | "num4" => Some(32),
+            "5" | "num5" => Some(33),
+            "6" | "num6" => Some(34),
+            "7" | "num7" => Some(35),
+            "8" | "num8" => Some(36),
+            "9" | "num9" => Some(37),
+            "A" | "a" => Some(38),
+            "Alt Left" | "altLeft" | "AltLeft" => Some(39),
+            "B" | "b" => Some(43),
+            "C" | "c" => Some(46),
+            "Comma" | "," | "comma" => Some(50),
+            "D" | "d" => Some(51),
+            "Delete" | "del" => Some(52),
+            "Backspace" | "backspace" => Some(53),
+            "Down" | "down" => Some(61),
+            "Left" | "left" => Some(62),
+            "Right" | "right" => Some(63),
+            "Up" | "up" => Some(64),
+            "E" | "e" => Some(65),
+            "Enter" | "enter" => Some(67),
+            "F" | "f" => Some(71),
+            "G" | "g" => Some(73),
+            "H" | "h" => Some(75),
+            "I" | "i" => Some(78),
+            "J" | "j" => Some(79),
+            "K" | "k" => Some(80),
+            "L" | "l" => Some(81),
+            "[" | "leftBracket" => Some(82),
+            "M" | "m" => Some(83),
+            "N" | "n" => Some(93),
+            "O" | "o" => Some(96),
+            "P" | "p" => Some(97),
+            "Period" | "." | "period" => Some(98),
+            "Q" | "q" => Some(102),
+            "R" | "r" => Some(103),
+            "]" | "rightBracket" => Some(104),
+            "S" | "s" => Some(105),
+            "Shift Left" | "shiftLeft" | "ShiftLeft" => Some(108),
+            "Space" | "space" => Some(113),
+            "T" | "t" => Some(116),
+            "Tab" | "tab" => Some(117),
+            "U" | "u" => Some(118),
+            "V" | "v" => Some(120),
+            "W" | "w" => Some(123),
+            "X" | "x" => Some(124),
+            "Y" | "y" => Some(125),
+            "Z" | "z" => Some(126),
+            "Ctrl Left" | "controlLeft" | "ControlLeft" => Some(134),
+            "Escape" | "escape" => Some(136),
+            "F1" | "f1" => Some(170),
+            "F2" | "f2" => Some(171),
+            "F3" | "f3" => Some(172),
+            "F4" | "f4" => Some(173),
+            "F5" | "f5" => Some(174),
+            "F6" | "f6" => Some(175),
+            "F7" | "f7" => Some(176),
+            "F8" | "f8" => Some(177),
+            "F9" | "f9" => Some(178),
+            "F10" | "f10" => Some(179),
+            "F11" | "f11" => Some(180),
+            "F12" | "f12" => Some(181),
+            "Unset" | "unset" => Some(182),
+            _ => None,
+        }
+    }
+
+    fn settings_key_code_display_for_java_ordinal(ordinal: i32) -> Option<&'static str> {
+        match ordinal {
+            21 => Some("Mouse Left"),
+            22 => Some("Mouse Right"),
+            23 => Some("Mouse Middle"),
+            24 => Some("Mouse Back"),
+            25 => Some("Mouse Forward"),
+            26 => Some("Scroll"),
+            28 => Some("0"),
+            29 => Some("1"),
+            30 => Some("2"),
+            31 => Some("3"),
+            32 => Some("4"),
+            33 => Some("5"),
+            34 => Some("6"),
+            35 => Some("7"),
+            36 => Some("8"),
+            37 => Some("9"),
+            38 => Some("A"),
+            39 => Some("Alt Left"),
+            43 => Some("B"),
+            46 => Some("C"),
+            50 => Some("Comma"),
+            51 => Some("D"),
+            52 => Some("Delete"),
+            53 => Some("Backspace"),
+            61 => Some("Down"),
+            62 => Some("Left"),
+            63 => Some("Right"),
+            64 => Some("Up"),
+            65 => Some("E"),
+            67 => Some("Enter"),
+            71 => Some("F"),
+            73 => Some("G"),
+            75 => Some("H"),
+            78 => Some("I"),
+            79 => Some("J"),
+            80 => Some("K"),
+            81 => Some("L"),
+            82 => Some("["),
+            83 => Some("M"),
+            93 => Some("N"),
+            96 => Some("O"),
+            97 => Some("P"),
+            98 => Some("Period"),
+            102 => Some("Q"),
+            103 => Some("R"),
+            104 => Some("]"),
+            105 => Some("S"),
+            108 => Some("Shift Left"),
+            113 => Some("Space"),
+            116 => Some("T"),
+            117 => Some("Tab"),
+            118 => Some("U"),
+            120 => Some("V"),
+            123 => Some("W"),
+            124 => Some("X"),
+            125 => Some("Y"),
+            126 => Some("Z"),
+            134 => Some("Ctrl Left"),
+            136 => Some("Escape"),
+            170 => Some("F1"),
+            171 => Some("F2"),
+            172 => Some("F3"),
+            173 => Some("F4"),
+            174 => Some("F5"),
+            175 => Some("F6"),
+            176 => Some("F7"),
+            177 => Some("F8"),
+            178 => Some("F9"),
+            179 => Some("F10"),
+            180 => Some("F11"),
+            181 => Some("F12"),
+            182 => Some("Unset"),
+            _ => None,
+        }
     }
 
     fn settings_keybind_filtered_specs(&self) -> Vec<&'static DesktopKeybindSpec> {
@@ -22947,6 +23230,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::OpenControlsDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Controls);
+                self.load_settings_keybinds_from_settings();
                 self.settings_keybind_scroll_offset = 0;
                 self.settings_keybind_search.clear();
                 self.settings_keybind_search_focused = true;
@@ -22969,14 +23253,14 @@ impl DesktopLauncher {
                 self.settings_keybind_search_focused = false;
             }
             DesktopSettingsAction::ResetKey(name) => {
-                self.settings_keybind_overrides.remove(name);
+                self.reset_settings_keybind_override(name);
                 if self.last_settings_rebind_key == Some(name) {
                     self.last_settings_rebind_key = None;
                     self.settings_keybind_pending_axis_min = None;
                 }
             }
             DesktopSettingsAction::ResetAllKeys => {
-                self.settings_keybind_overrides.clear();
+                self.reset_all_settings_keybind_overrides();
                 self.last_settings_rebind_key = None;
                 self.settings_keybind_pending_axis_min = None;
             }
@@ -46584,6 +46868,100 @@ mod tests {
                 .and_then(|spec| spec.category),
             Some("multiplayer")
         );
+    }
+
+    #[test]
+    fn desktop_launcher_settings_keybind_rebinds_persist_to_java_keybind_settings_shape() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.dispatch_menu_action(MenuButtonRole::Settings);
+        launcher.dispatch_settings_action(super::DesktopSettingsAction::OpenControlsDialog);
+
+        launcher.dispatch_settings_action(super::DesktopSettingsAction::StartKeyRebind("move_x"));
+        assert!(launcher.commit_settings_keybind_rebind("K"));
+        assert_eq!(
+            launcher.settings_keybind_pending_axis_min.as_deref(),
+            Some("K")
+        );
+        assert!(!launcher
+            .settings_overrides
+            .contains_key("keybind-default-keyboard-move_x-single"));
+
+        assert!(launcher.commit_settings_keybind_rebind("L"));
+        assert_eq!(
+            launcher
+                .settings_keybind_overrides
+                .get("move_x")
+                .map(String::as_str),
+            Some("K / L")
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get("keybind-default-keyboard-move_x-single")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get("keybind-default-keyboard-move_x-min")
+                .map(String::as_str),
+            Some("80")
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get("keybind-default-keyboard-move_x-max")
+                .map(String::as_str),
+            Some("81")
+        );
+
+        let mut reloaded = DesktopLauncher::new(Vec::new());
+        reloaded.settings_overrides = launcher.settings_overrides.clone();
+        assert_eq!(reloaded.load_settings_keybinds_from_settings(), 1);
+        assert_eq!(
+            reloaded
+                .settings_keybind_overrides
+                .get("move_x")
+                .map(String::as_str),
+            Some("K / L")
+        );
+
+        reloaded.dispatch_settings_action(super::DesktopSettingsAction::StartKeyRebind("select"));
+        assert!(reloaded.commit_settings_keybind_rebind("primary"));
+        assert_eq!(
+            reloaded
+                .settings_overrides
+                .get("keybind-default-keyboard-select-single")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            reloaded
+                .settings_overrides
+                .get("keybind-default-keyboard-select-key")
+                .map(String::as_str),
+            Some("21")
+        );
+
+        reloaded.dispatch_settings_action(super::DesktopSettingsAction::ResetKey("move_x"));
+        assert!(!reloaded.settings_keybind_overrides.contains_key("move_x"));
+        assert!(!reloaded
+            .settings_overrides
+            .contains_key("keybind-default-keyboard-move_x-single"));
+        assert!(!reloaded
+            .settings_overrides
+            .contains_key("keybind-default-keyboard-move_x-min"));
+        assert!(!reloaded
+            .settings_overrides
+            .contains_key("keybind-default-keyboard-move_x-max"));
+
+        reloaded.dispatch_settings_action(super::DesktopSettingsAction::ResetAllKeys);
+        assert!(reloaded.settings_keybind_overrides.is_empty());
+        assert!(!reloaded.settings_overrides.keys().any(|key| {
+            key.starts_with("keybind-default-keyboard-select-")
+                || key.starts_with("keybind-default-keyboard-move_x-")
+        }));
     }
 
     #[test]
