@@ -77,6 +77,7 @@ use mindustry_core::mindustry::input::input_handler::{
     other_player_preview_overlay_plan, OtherPlayerPreviewBlock, OtherPlayerPreviewOverlayFrame,
     OtherPlayerPreviewOverlayPlan,
 };
+use mindustry_core::mindustry::io::versions::read_legacy_servers;
 use mindustry_core::mindustry::io::{
     backup_file_for_path, collect_valid_save_slot_records, read_bullet_sync, read_decal_sync,
     read_deflated_map_info, read_deflated_save_meta, read_deflated_save_meta_with_backup,
@@ -173,6 +174,9 @@ const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
 const JOIN_ADD_SERVER_TEXT_MAX_LENGTH: usize = 96;
+const JOIN_SERVER_CARD_ACTION_BUTTONS: usize = 5;
+const JOIN_SERVERS_SETTINGS_KEY: &str = "servers";
+const JOIN_IP_SETTINGS_KEY: &str = "ip";
 const LOAD_SLOT_CARD_HEIGHT: f32 = 220.0;
 const LOAD_SLOT_CARD_GAP: f32 = 10.0;
 const LOAD_SLOT_CARD_MIN_WIDTH: f32 = 320.0;
@@ -2692,6 +2696,8 @@ pub enum DesktopMenuRouteShellAction {
     FocusJoinAddServerText,
     ConfirmJoinAddServer,
     RefreshJoinServers,
+    MoveJoinServerCardUp(usize),
+    MoveJoinServerCardDown(usize),
     RefreshJoinServerCard(usize),
     EditJoinServerCard(usize),
     DeleteJoinServerCard(usize),
@@ -26910,7 +26916,7 @@ impl DesktopLauncher {
         let state = self.net_client.state();
         let state = state.lock().unwrap();
         let world = state.last_loaded_world_data.as_ref();
-        let address = format!("{}:{}", target.host, target.port);
+        let address = desktop_connect_target_display_ip(target);
         let source = "saved".to_string();
         let status = if let Some(error) = self.connect_error.as_ref() {
             format!("error: {error}")
@@ -26986,6 +26992,52 @@ impl DesktopLauncher {
             .iter()
             .map(|target| self.join_route_server_snapshot_for_target(target))
             .collect()
+    }
+
+    fn persist_join_saved_servers_to_settings(&mut self) {
+        self.settings_overrides.insert(
+            JOIN_SERVERS_SETTINGS_KEY.into(),
+            join_saved_servers_to_settings_json(&self.join_saved_servers),
+        );
+    }
+
+    pub fn load_join_saved_servers_from_settings(&mut self) -> usize {
+        let Some(value) = self.settings_overrides.get(JOIN_SERVERS_SETTINGS_KEY) else {
+            return 0;
+        };
+        let servers = join_saved_servers_from_settings_json(value);
+        if servers.is_empty() {
+            return 0;
+        }
+        self.join_saved_servers = servers;
+        if self
+            .connect_target
+            .as_ref()
+            .is_none_or(|target| !self.join_saved_servers.contains(target))
+        {
+            self.connect_target = self.join_saved_servers.first().cloned();
+        }
+        self.join_saved_servers.len()
+    }
+
+    pub fn import_legacy_join_servers_from_bytes(&mut self, bytes: &[u8]) -> usize {
+        let servers = read_legacy_servers(bytes)
+            .into_iter()
+            .filter_map(|server| {
+                let port = u16::try_from(server.port).ok()?;
+                (!server.ip.trim().is_empty()).then(|| DesktopConnectTarget {
+                    host: server.ip,
+                    port,
+                })
+            })
+            .collect::<Vec<_>>();
+        if servers.is_empty() {
+            return 0;
+        }
+        self.join_saved_servers = servers;
+        self.connect_target = self.join_saved_servers.first().cloned();
+        self.persist_join_saved_servers_to_settings();
+        self.join_saved_servers.len()
     }
 
     fn join_add_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -28872,15 +28924,16 @@ impl DesktopLauncher {
         }
         if let Some(card_index) = self.join_route_server_card_index_at_point(panel, point) {
             let card = Self::join_route_server_card_rect_for_panel(panel, card_index);
-            for button_index in 0..4 {
+            for button_index in 0..JOIN_SERVER_CARD_ACTION_BUTTONS {
                 if Self::join_route_server_card_action_button_rect(card, button_index)
                     .contains_point(point)
                 {
                     return Some(match button_index {
-                        0 => DesktopMenuRouteShellAction::RefreshJoinServerCard(card_index),
-                        1 => DesktopMenuRouteShellAction::EditJoinServerCard(card_index),
-                        2 => DesktopMenuRouteShellAction::DeleteJoinServerCard(card_index),
-                        _ => DesktopMenuRouteShellAction::ConnectJoinServerCard(card_index),
+                        0 => DesktopMenuRouteShellAction::MoveJoinServerCardUp(card_index),
+                        1 => DesktopMenuRouteShellAction::MoveJoinServerCardDown(card_index),
+                        2 => DesktopMenuRouteShellAction::RefreshJoinServerCard(card_index),
+                        3 => DesktopMenuRouteShellAction::EditJoinServerCard(card_index),
+                        _ => DesktopMenuRouteShellAction::DeleteJoinServerCard(card_index),
                     });
                 }
             }
@@ -30210,8 +30263,12 @@ impl DesktopLauncher {
                 self.join_add_server_text = self
                     .connect_target
                     .as_ref()
-                    .map(|target| format!("{}:{}", target.host, target.port))
+                    .map(desktop_connect_target_display_ip)
                     .unwrap_or_default();
+                self.settings_overrides.insert(
+                    JOIN_IP_SETTINGS_KEY.into(),
+                    self.join_add_server_text.clone(),
+                );
                 self.join_add_server_focused = true;
                 self.join_search_focused = false;
                 self.connect_error = None;
@@ -30238,6 +30295,11 @@ impl DesktopLauncher {
                     } else if !self.join_saved_servers.contains(&target) {
                         self.join_saved_servers.push(target.clone());
                     }
+                    self.persist_join_saved_servers_to_settings();
+                    self.settings_overrides.insert(
+                        JOIN_IP_SETTINGS_KEY.into(),
+                        desktop_connect_target_display_ip(&target),
+                    );
                     self.connect_target = Some(target);
                     self.connect_error = None;
                     self.join_add_dialog_open = false;
@@ -30252,6 +30314,20 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
             }
+            DesktopMenuRouteShellAction::MoveJoinServerCardUp(index) => {
+                if index > 0 && index < self.join_saved_servers.len() {
+                    self.join_saved_servers.swap(index, index - 1);
+                    self.persist_join_saved_servers_to_settings();
+                    self.connect_error = None;
+                }
+            }
+            DesktopMenuRouteShellAction::MoveJoinServerCardDown(index) => {
+                if index + 1 < self.join_saved_servers.len() {
+                    self.join_saved_servers.swap(index, index + 1);
+                    self.persist_join_saved_servers_to_settings();
+                    self.connect_error = None;
+                }
+            }
             DesktopMenuRouteShellAction::RefreshJoinServerCard(index) => {
                 if self.join_saved_servers.get(index).is_some() {
                     self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
@@ -30261,7 +30337,11 @@ impl DesktopLauncher {
                 if let Some(target) = self.join_saved_servers.get(index) {
                     self.join_add_dialog_open = true;
                     self.join_add_server_edit_index = Some(index);
-                    self.join_add_server_text = format!("{}:{}", target.host, target.port);
+                    self.join_add_server_text = desktop_connect_target_display_ip(target);
+                    self.settings_overrides.insert(
+                        JOIN_IP_SETTINGS_KEY.into(),
+                        self.join_add_server_text.clone(),
+                    );
                     self.join_add_server_focused = true;
                     self.join_search_focused = false;
                     self.connect_error = None;
@@ -30277,6 +30357,7 @@ impl DesktopLauncher {
                     self.join_add_dialog_open = false;
                     self.join_add_server_focused = false;
                     self.join_add_server_edit_index = None;
+                    self.persist_join_saved_servers_to_settings();
                 }
             }
             DesktopMenuRouteShellAction::ConnectJoinServerCard(index) => {
@@ -32281,7 +32362,7 @@ impl DesktopLauncher {
                         .with_outline(true),
                     layer + 0.003,
                 ));
-                for (button_index, icon) in ["refresh", "pencil", "trash", "rightOpen"]
+                for (button_index, icon) in ["upOpen", "downOpen", "refresh", "pencil", "trash"]
                     .iter()
                     .enumerate()
                 {
@@ -36545,6 +36626,10 @@ impl DesktopLauncher {
                     } else {
                         self.join_add_server_text.clear();
                     }
+                    self.settings_overrides.insert(
+                        JOIN_IP_SETTINGS_KEY.into(),
+                        self.join_add_server_text.clone(),
+                    );
                     self.connect_error = None;
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
@@ -36968,6 +37053,10 @@ impl DesktopLauncher {
                             }
                             self.join_add_server_text.push(ch);
                         }
+                        self.settings_overrides.insert(
+                            JOIN_IP_SETTINGS_KEY.into(),
+                            self.join_add_server_text.clone(),
+                        );
                         self.connect_error = None;
                     } else if self.active_menu_route == Some(DesktopMenuRoute::Join)
                         && self.join_search_focused
@@ -37159,7 +37248,7 @@ impl DesktopLauncher {
                             format!(
                                 "server[{index}] fields: name version description players map mode ping"
                             ),
-                            format!("server[{index}] actions: refresh edit delete open"),
+                            format!("server[{index}] actions: up down refresh edit delete"),
                         ]);
                         if !snapshot.matches_query(&self.join_search)
                             && !self.join_search.trim().is_empty()
@@ -41175,21 +41264,194 @@ fn parse_mods_directory_arg(args: &[String]) -> Option<String> {
     None
 }
 
+fn desktop_connect_target_display_ip(target: &DesktopConnectTarget) -> String {
+    if target.host.matches(':').count() > 1 {
+        if target.port != DEFAULT_MINDUSTRY_PORT {
+            format!("[{}]:{}", target.host, target.port)
+        } else {
+            target.host.clone()
+        }
+    } else if target.port != DEFAULT_MINDUSTRY_PORT {
+        format!("{}:{}", target.host, target.port)
+    } else {
+        target.host.clone()
+    }
+}
+
 fn parse_host_port(value: &str) -> Option<DesktopConnectTarget> {
     let value = value.trim();
     if value.is_empty() {
         return None;
     }
-    let (host, port) = match value.rsplit_once(':') {
-        Some((host, port)) if !host.is_empty() && !port.is_empty() => {
-            (host.trim_matches(['[', ']']), port.parse().ok()?)
+    let colon_count = value.matches(':').count();
+    let (host, port) = if colon_count > 1 {
+        if let Some(idx) = value.find("]:") {
+            let port_text_start = idx + 2;
+            if port_text_start < value.len() {
+                if let Ok(port) = value[port_text_start..].parse::<u16>() {
+                    let host = value
+                        .strip_prefix('[')
+                        .and_then(|trimmed| trimmed.get(..idx.saturating_sub(1)))
+                        .unwrap_or(&value[..idx]);
+                    (host, port)
+                } else {
+                    (value, DEFAULT_MINDUSTRY_PORT)
+                }
+            } else {
+                (value, DEFAULT_MINDUSTRY_PORT)
+            }
+        } else {
+            (value, DEFAULT_MINDUSTRY_PORT)
         }
-        _ => (value.trim_matches(['[', ']']), DEFAULT_MINDUSTRY_PORT),
+    } else if let Some((host, port)) = value.rsplit_once(':') {
+        if !port.is_empty() {
+            port.parse::<u16>()
+                .map(|port| (host, port))
+                .unwrap_or((value, DEFAULT_MINDUSTRY_PORT))
+        } else {
+            (value, DEFAULT_MINDUSTRY_PORT)
+        }
+    } else {
+        (value, DEFAULT_MINDUSTRY_PORT)
     };
-    (!host.is_empty()).then(|| DesktopConnectTarget {
+    Some(DesktopConnectTarget {
         host: host.to_string(),
         port,
     })
+}
+
+fn join_settings_json_escape(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out
+}
+
+fn join_saved_servers_to_settings_json(servers: &[DesktopConnectTarget]) -> String {
+    let entries = servers
+        .iter()
+        .map(|target| {
+            format!(
+                "{{\"ip\":\"{}\",\"port\":{}}}",
+                join_settings_json_escape(&target.host),
+                target.port
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", entries.join(","))
+}
+
+fn join_settings_find_json_object_end(value: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, ch) in value.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_string => escaped = true,
+            '"' => in_string = !in_string,
+            '}' if !in_string => return Some(index),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn join_settings_json_string_field(object: &str, field: &str) -> Option<String> {
+    let key = format!("\"{field}\"");
+    let start = object.find(&key)? + key.len();
+    let after_colon = object[start..].find(':')? + start + 1;
+    let mut chars = object[after_colon..].trim_start().char_indices();
+    let (_, first) = chars.next()?;
+    if first != '"' {
+        return None;
+    }
+    let value_start = after_colon + object[after_colon..].find('"')? + 1;
+    let mut out = String::new();
+    let mut escaped = false;
+    let mut unicode_escape = String::new();
+    let mut unicode_remaining = 0usize;
+    for ch in object[value_start..].chars() {
+        if unicode_remaining > 0 {
+            unicode_escape.push(ch);
+            unicode_remaining -= 1;
+            if unicode_remaining == 0 {
+                if let Ok(code) = u32::from_str_radix(&unicode_escape, 16) {
+                    if let Some(decoded) = char::from_u32(code) {
+                        out.push(decoded);
+                    }
+                }
+                unicode_escape.clear();
+            }
+            continue;
+        }
+        if escaped {
+            match ch {
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                '/' => out.push('/'),
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                'u' => unicode_remaining = 4,
+                other => out.push(other),
+            }
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '"' => return Some(out),
+            other => out.push(other),
+        }
+    }
+    None
+}
+
+fn join_settings_json_u16_field(object: &str, field: &str) -> Option<u16> {
+    let key = format!("\"{field}\"");
+    let start = object.find(&key)? + key.len();
+    let after_colon = object[start..].find(':')? + start + 1;
+    let trimmed = object[after_colon..].trim_start();
+    let digits = trimmed
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    digits.parse::<u16>().ok()
+}
+
+fn join_saved_servers_from_settings_json(value: &str) -> Vec<DesktopConnectTarget> {
+    let mut rest = value;
+    let mut servers = Vec::new();
+    while let Some(start) = rest.find('{') {
+        rest = &rest[start + 1..];
+        let Some(end) = join_settings_find_json_object_end(rest) else {
+            break;
+        };
+        let object = &rest[..end];
+        if let Some(host) =
+            join_settings_json_string_field(object, "ip").filter(|host| !host.trim().is_empty())
+        {
+            servers.push(DesktopConnectTarget {
+                host,
+                port: join_settings_json_u16_field(object, "port")
+                    .unwrap_or(DEFAULT_MINDUSTRY_PORT),
+            });
+        }
+        rest = &rest[end + 1..];
+    }
+    servers
 }
 
 #[cfg(test)]
@@ -66412,7 +66674,7 @@ version: "2.0.0"
         assert!(
             lines.contains(&"section: @servers.community search:@search hidden:off".to_string())
         );
-        assert!(lines.contains(&"server[0]: 127.0.0.1:6567 source:saved".to_string()));
+        assert!(lines.contains(&"server[0]: 127.0.0.1 source:saved".to_string()));
         assert!(lines
             .iter()
             .any(|line| line.starts_with("server[0] status:")));
@@ -66431,7 +66693,7 @@ version: "2.0.0"
         assert!(lines.contains(
             &"server[0] fields: name version description players map mode ping".to_string()
         ));
-        assert!(lines.contains(&"server[0] actions: refresh edit delete open".to_string()));
+        assert!(lines.contains(&"server[0] actions: up down refresh edit delete".to_string()));
         assert!(lines.contains(&"button: @server.add".to_string()));
         assert!(lines.contains(&"button: @refresh".to_string()));
 
@@ -66446,14 +66708,15 @@ version: "2.0.0"
         let search = DesktopLauncher::join_route_search_rect_for_panel(panel);
         let show_hidden = DesktopLauncher::join_route_show_hidden_button_rect_for_panel(panel);
         let card = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 0);
-        let card_refresh =
-            DesktopLauncher::join_route_server_card_action_button_rect(card, 0).center();
-        let card_edit =
+        let card_up = DesktopLauncher::join_route_server_card_action_button_rect(card, 0).center();
+        let card_down =
             DesktopLauncher::join_route_server_card_action_button_rect(card, 1).center();
-        let card_delete =
+        let card_refresh =
             DesktopLauncher::join_route_server_card_action_button_rect(card, 2).center();
-        let card_open =
+        let card_edit =
             DesktopLauncher::join_route_server_card_action_button_rect(card, 3).center();
+        let card_delete =
+            DesktopLauncher::join_route_server_card_action_button_rect(card, 4).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -66499,6 +66762,20 @@ version: "2.0.0"
             Some(super::DesktopMenuRouteShellAction::ConnectJoinServerCard(0))
         );
         assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, card_up.x, card_up.y),
+            Some(super::DesktopMenuRouteShellAction::MoveJoinServerCardUp(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                card_down.x,
+                card_down.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MoveJoinServerCardDown(
+                0
+            ))
+        );
+        assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
                 card_refresh.x,
@@ -66521,14 +66798,6 @@ version: "2.0.0"
                 card_delete.y
             ),
             Some(super::DesktopMenuRouteShellAction::DeleteJoinServerCard(0))
-        );
-        assert_eq!(
-            launcher.active_menu_route_shell_action_at_surface_point(
-                surface,
-                card_open.x,
-                card_open.y
-            ),
-            Some(super::DesktopMenuRouteShellAction::ConnectJoinServerCard(0))
         );
 
         launcher.apply_menu_input_events(
@@ -66568,7 +66837,7 @@ version: "2.0.0"
             Some(super::DesktopMenuRouteShellAction::OpenJoinAddServer)
         );
         assert!(launcher.join_add_dialog_open);
-        assert_eq!(launcher.join_add_server_text, "127.0.0.1:6567");
+        assert_eq!(launcher.join_add_server_text, "127.0.0.1");
         assert!(launcher.join_add_server_focused);
 
         let dialog = DesktopLauncher::join_add_dialog_rect_for_panel(panel);
@@ -66614,6 +66883,33 @@ version: "2.0.0"
             })
         );
         assert_eq!(launcher.join_saved_servers.len(), 2);
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::JOIN_SERVERS_SETTINGS_KEY),
+            Some(
+                &"[{\"ip\":\"127.0.0.1\",\"port\":6567},{\"ip\":\"example.org\",\"port\":6567}]"
+                    .to_string()
+            )
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MoveJoinServerCardUp(1),
+        );
+        assert_eq!(launcher.join_saved_servers[0].host, "example.org");
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::JOIN_SERVERS_SETTINGS_KEY),
+            Some(
+                &"[{\"ip\":\"example.org\",\"port\":6567},{\"ip\":\"127.0.0.1\",\"port\":6567}]"
+                    .to_string()
+            )
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MoveJoinServerCardDown(0),
+        );
+        assert_eq!(launcher.join_saved_servers[1].host, "example.org");
 
         launcher
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::FocusJoinSearch);
@@ -66665,7 +66961,7 @@ version: "2.0.0"
         assert!(texts.contains(&"@servers.global"));
         assert!(texts
             .iter()
-            .any(|text| text.contains("example.org:6567") && text.contains("@server.version")));
+            .any(|text| text.contains("example.org") && text.contains("@server.version")));
         assert!(texts.contains(&"saved favorite server; click card or CONNECT"));
         assert!(texts.contains(&"players: 0"));
         assert!(texts.contains(&"save.map: @unknown / @mode.survival.name"));
@@ -66692,7 +66988,7 @@ version: "2.0.0"
             super::DesktopMenuRouteShellAction::EditJoinServerCard(1),
         );
         assert!(launcher.join_add_dialog_open);
-        assert_eq!(launcher.join_add_server_text, "example.org:6567");
+        assert_eq!(launcher.join_add_server_text, "example.org");
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::CloseJoinAddServer,
         );
@@ -66706,6 +67002,121 @@ version: "2.0.0"
                 host: "127.0.0.1".into(),
                 port: 6567,
             })
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_persists_saved_servers_like_java_settings_json() {
+        let servers = vec![
+            super::DesktopConnectTarget {
+                host: "example.org".into(),
+                port: super::DEFAULT_MINDUSTRY_PORT,
+            },
+            super::DesktopConnectTarget {
+                host: "2001:db8::1".into(),
+                port: 7001,
+            },
+        ];
+        let json = super::join_saved_servers_to_settings_json(&servers);
+        assert_eq!(
+            json,
+            "[{\"ip\":\"example.org\",\"port\":6567},{\"ip\":\"2001:db8::1\",\"port\":7001}]"
+        );
+        assert_eq!(super::join_saved_servers_from_settings_json(&json), servers);
+
+        let escaped = super::join_saved_servers_to_settings_json(&[super::DesktopConnectTarget {
+            host: "quote\"slash\\tab\t".into(),
+            port: 7002,
+        }]);
+        assert_eq!(
+            super::join_saved_servers_from_settings_json(&escaped),
+            vec![super::DesktopConnectTarget {
+                host: "quote\"slash\\tab\t".into(),
+                port: 7002,
+            }]
+        );
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .settings_overrides
+            .insert(super::JOIN_SERVERS_SETTINGS_KEY.into(), json.clone());
+        assert_eq!(launcher.load_join_saved_servers_from_settings(), 2);
+        assert_eq!(launcher.join_saved_servers, servers);
+        assert_eq!(
+            launcher.connect_target,
+            launcher.join_saved_servers.first().cloned()
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::EditJoinServerCard(0),
+        );
+        assert_eq!(launcher.join_add_server_text, "example.org");
+        launcher.join_add_server_text = "renamed.example:7002".into();
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmJoinAddServer,
+        );
+        assert_eq!(launcher.join_saved_servers[0].host, "renamed.example");
+        assert_eq!(
+            launcher.settings_overrides.get(super::JOIN_IP_SETTINGS_KEY),
+            Some(&"renamed.example:7002".to_string())
+        );
+        assert_eq!(
+            launcher.settings_overrides.get(super::JOIN_SERVERS_SETTINGS_KEY),
+            Some(
+                &"[{\"ip\":\"renamed.example\",\"port\":7002},{\"ip\":\"2001:db8::1\",\"port\":7001}]"
+                    .to_string()
+            )
+        );
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::DeleteJoinServerCard(1),
+        );
+        assert_eq!(launcher.join_saved_servers.len(), 1);
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::JOIN_SERVERS_SETTINGS_KEY),
+            Some(&"[{\"ip\":\"renamed.example\",\"port\":7002}]".to_string())
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_imports_legacy_server_list_setting() {
+        let mut bytes = Vec::new();
+        type_io::write_i32(&mut bytes, 2).unwrap();
+        type_io::write_java_utf(&mut bytes, "mindustry.ui.dialogs.JoinDialog$Server").unwrap();
+        type_io::write_java_utf(&mut bytes, "127.0.0.1").unwrap();
+        type_io::write_i32(&mut bytes, 6567).unwrap();
+        type_io::write_java_utf(&mut bytes, "legacy.example").unwrap();
+        type_io::write_i32(&mut bytes, 7003).unwrap();
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        assert_eq!(launcher.import_legacy_join_servers_from_bytes(&bytes), 2);
+        assert_eq!(
+            launcher.join_saved_servers,
+            vec![
+                super::DesktopConnectTarget {
+                    host: "127.0.0.1".into(),
+                    port: 6567,
+                },
+                super::DesktopConnectTarget {
+                    host: "legacy.example".into(),
+                    port: 7003,
+                },
+            ]
+        );
+        assert_eq!(
+            launcher.connect_target,
+            launcher.join_saved_servers.first().cloned()
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::JOIN_SERVERS_SETTINGS_KEY),
+            Some(
+                &"[{\"ip\":\"127.0.0.1\",\"port\":6567},{\"ip\":\"legacy.example\",\"port\":7003}]"
+                    .to_string()
+            )
         );
     }
 
@@ -72986,6 +73397,42 @@ version: "2.0.0"
                 host: "example.org".into(),
                 port: 7001,
             })
+        );
+        assert_eq!(
+            super::parse_host_port("[2001:db8::1]:7001"),
+            Some(super::DesktopConnectTarget {
+                host: "2001:db8::1".into(),
+                port: 7001,
+            })
+        );
+        assert_eq!(
+            super::parse_host_port("2001:db8::1"),
+            Some(super::DesktopConnectTarget {
+                host: "2001:db8::1".into(),
+                port: super::DEFAULT_MINDUSTRY_PORT,
+            })
+        );
+        assert_eq!(
+            super::parse_host_port("foo:bar"),
+            Some(super::DesktopConnectTarget {
+                host: "foo:bar".into(),
+                port: super::DEFAULT_MINDUSTRY_PORT,
+            })
+        );
+        assert_eq!(super::parse_host_port("   "), None);
+        assert_eq!(
+            super::desktop_connect_target_display_ip(&super::DesktopConnectTarget {
+                host: "example.org".into(),
+                port: super::DEFAULT_MINDUSTRY_PORT,
+            }),
+            "example.org"
+        );
+        assert_eq!(
+            super::desktop_connect_target_display_ip(&super::DesktopConnectTarget {
+                host: "2001:db8::1".into(),
+                port: 7001,
+            }),
+            "[2001:db8::1]:7001"
         );
     }
 

@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 638. JoinDialog saved server 持久化与原版排序按钮
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.0%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 JoinDialog saved server 更贴近 Java `JoinDialog` 的 `servers` settings、legacy `server-list` 导入、IPv6/默认端口显示与上/下排序按钮。
+- Java 对照依据：
+  - `JoinDialog.loadServers()` 从 `Core.settings.getJson("servers", Seq.class, Server.class, Seq::new)` 读取，并在存在 legacy `server-list` 时通过 `LegacyIO.readServers()` 导入；
+  - `saveServers()` 写回 `Core.settings.putJson("servers", Server.class, servers)`；
+  - saved server 卡片右侧按钮是上移、下移、刷新、编辑、删除，整卡点击才连接；
+  - `Server.displayIP()` 默认端口不显示，IPv6 非默认端口显示 `[ip]:port`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `JOIN_SERVERS_SETTINGS_KEY/JOIN_IP_SETTINGS_KEY`，add/edit/delete/move 与输入框编辑时写入 `settings_overrides["servers"]` / `settings_overrides["ip"]`；
+    - 新增 `join_saved_servers_to_settings_json(...)` / `join_saved_servers_from_settings_json(...)`，按 Java `Server { ip, port }` JSON 形状保存和回读 saved server；
+    - 新增 `import_legacy_join_servers_from_bytes(...)`，复用 core 里的 `read_legacy_servers(...)` 作为 Java legacy `server-list` 导入落点；
+    - `parse_host_port(...)` 改为更接近 Java `Server.setIP(...)` 的宽松解析：无方括号 IPv6 不再误拆端口，解析失败回落默认端口并保留原输入；
+    - Join card 的地址显示和 add/edit 预填改用 `desktop_connect_target_display_ip(...)`，默认端口不再强行显示；
+    - 卡片按钮从 `refresh/edit/delete/open` 调整为 Java 顺序的 `up/down/refresh/edit/delete`，新增 `MoveJoinServerCardUp/Down` 并持久化顺序。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - `settings_overrides` 仍是 desktop 过渡 settings 承载层，后续要继续接真实 settings 文件读写与 legacy key 清理；
+  - Java 的删除确认、真实 ping/loading 刷新态、本地 LAN discovery、community server group/favorite/hidden/disclaimer 仍待迁移；
+  - 多于两张 saved server 仍缺 ScrollPane/滚动条；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 637. JoinDialog saved server 最小列表状态
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
