@@ -263,32 +263,6 @@ fn menu_push_black6_panel(commands: &mut Vec<RenderCommand>, rect: RenderRect, a
     ));
 }
 
-fn menu_push_desktop_button_focus_outline(
-    commands: &mut Vec<RenderCommand>,
-    rect: RenderRect,
-    state: MenuFlatToggleMenuState,
-    alpha_scale: f32,
-) {
-    let color = match state {
-        MenuFlatToggleMenuState::Down => [0.16, 0.44, 0.58, 0.34],
-        MenuFlatToggleMenuState::Up => return,
-        MenuFlatToggleMenuState::Checked => [0.25, 0.72, 0.92, 0.56],
-        MenuFlatToggleMenuState::Over => [0.28, 0.66, 0.86, 0.42],
-        MenuFlatToggleMenuState::Disabled => [0.0, 0.0, 0.0, 0.0],
-    };
-
-    if color[3] <= f32::EPSILON {
-        return;
-    }
-
-    commands.push(RenderCommand::stroke_rect(
-        rect,
-        menu_color_with_alpha(color, alpha_scale),
-        1.0,
-        MENU_FLAT_TOGGLE_MENU_STYLE.drawable_layer + 0.01,
-    ));
-}
-
 fn menu_union_rect(a: RenderRect, b: RenderRect) -> RenderRect {
     let x = a.x.min(b.x);
     let y = a.y.min(b.y);
@@ -816,7 +790,6 @@ impl MenuUiPlan {
                     style,
                     alpha,
                 );
-                menu_push_desktop_button_focus_outline(&mut commands, button.rect, state, alpha);
             }
             let icon_name = button
                 .icon_name
@@ -3251,20 +3224,23 @@ mod tests {
                     && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.drawable_layer).abs() < f32::EPSILON
             )
         }));
-        assert!(commands.iter().any(|command| {
-            matches!(
-                command,
-                RenderCommand::StrokeRect {
-                    rect: outline_rect,
-                    layer,
-                    ..
-                } if *outline_rect == rect
-                    && (*layer
-                        - (MENU_FLAT_TOGGLE_MENU_STYLE.drawable_layer + 0.01))
-                        .abs()
-                        < f32::EPSILON
-            )
-        }));
+        assert!(
+            !commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::StrokeRect {
+                        rect: outline_rect,
+                        layer,
+                        ..
+                    } if *outline_rect == rect
+                        && (*layer
+                            - (MENU_FLAT_TOGGLE_MENU_STYLE.drawable_layer + 0.01))
+                            .abs()
+                            < f32::EPSILON
+                )
+            }),
+            "Java Styles.flatToggleMenut relies on flatDown/flatOver drawables and does not add an extra desktop-only focus outline"
+        );
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
