@@ -79,10 +79,10 @@ use mindustry_core::mindustry::input::input_handler::{
 };
 use mindustry_core::mindustry::io::{
     backup_file_for_path, collect_valid_save_slot_records, read_bullet_sync, read_decal_sync,
-    read_deflated_map_info, read_deflated_save_meta_with_backup, read_effect_state_sync,
-    read_fire_sync, read_puddle_sync, read_unit_sync, read_weather_state_sync,
-    read_world_label_sync, ContentHeaderSnapshot, LegacyTeamBlocks, SaveSlotRecord, TeamId,
-    TypeValue, Vec2,
+    read_deflated_map_info, read_deflated_save_meta, read_deflated_save_meta_with_backup,
+    read_effect_state_sync, read_fire_sync, read_puddle_sync, read_unit_sync,
+    read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot, LegacyTeamBlocks,
+    SaveSlotRecord, TeamId, TypeValue, Vec2,
 };
 use mindustry_core::mindustry::maps::MapDescriptor;
 use mindustry_core::mindustry::modsys::{
@@ -2691,6 +2691,15 @@ pub enum DesktopLoadGameActionKind {
     Delete,
     Rename,
     Export,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopLoadGameImportResult {
+    pub source: String,
+    pub destination: String,
+    pub map_name: Option<String>,
+    pub timestamp: i64,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -15930,6 +15939,7 @@ pub struct DesktopLauncher {
     pub last_load_game_action: Option<DesktopLoadGameAction>,
     pub load_game_error: Option<String>,
     pub last_load_game_import_request: Option<FileChooserRequest>,
+    pub last_load_game_import_result: Option<DesktopLoadGameImportResult>,
     pub load_game_search: String,
     pub load_game_search_focused: bool,
     pub load_game_scroll_offset: usize,
@@ -16752,6 +16762,7 @@ impl DesktopLauncher {
             last_load_game_action: None,
             load_game_error: None,
             last_load_game_import_request: None,
+            last_load_game_import_result: None,
             load_game_search: String::new(),
             load_game_search_focused: false,
             load_game_scroll_offset: 0,
@@ -23733,6 +23744,60 @@ impl DesktopLauncher {
         let request = platform.show_file_chooser(true, "@save.import", "msav");
         self.last_load_game_import_request = Some(request.clone());
         request
+    }
+
+    fn next_load_game_slot_file(&self) -> PathBuf {
+        let save_dir = PathBuf::from(&self.client.context.paths.save_dir);
+        let mut index = 0usize;
+        loop {
+            let candidate = save_dir.join(format!("{index}.msav"));
+            if !candidate.exists() {
+                return candidate;
+            }
+            index += 1;
+        }
+    }
+
+    fn import_load_game_save_file(
+        &mut self,
+        source: impl AsRef<Path>,
+    ) -> Result<DesktopLoadGameImportResult, String> {
+        let source = source.as_ref();
+        let bytes = std::fs::read(source).map_err(|error| {
+            format!("failed to read imported save {}: {error}", source.display())
+        })?;
+        let meta = read_deflated_save_meta(bytes.as_slice()).map_err(|error| {
+            let message = format!("@save.import.invalid: {error}");
+            self.load_game_error = Some(message.clone());
+            message
+        })?;
+        if meta.has_sector() {
+            self.load_game_error = Some("@save.nocampaign".into());
+            return Err("@save.nocampaign".into());
+        }
+        let destination = self.next_load_game_slot_file();
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("failed to create save dir {}: {error}", parent.display())
+            })?;
+        }
+        std::fs::write(&destination, &bytes).map_err(|error| {
+            format!(
+                "failed to import save {} -> {}: {error}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+        self.refresh_load_game_slots();
+        let result = DesktopLoadGameImportResult {
+            source: source.display().to_string(),
+            destination: destination.display().to_string(),
+            map_name: meta.map_name.clone(),
+            timestamp: meta.timestamp,
+            status: "imported".into(),
+        };
+        self.last_load_game_import_result = Some(result.clone());
+        Ok(result)
     }
 
     fn max_load_game_scroll_offset_for_counts(total_slots: usize, visible_slots: usize) -> usize {
@@ -53939,6 +54004,30 @@ version: "2.0.0"
         assert_eq!(request.title, "@save.import");
         assert_eq!(request.extension, "msav");
         assert_eq!(launcher.last_load_game_import_request, Some(request));
+
+        let mut imported_tags = BTreeMap::new();
+        imported_tags.insert("mapname".into(), "Imported Map".into());
+        imported_tags.insert("saved".into(), "999".into());
+        imported_tags.insert("wave".into(), "12".into());
+        let mut imported_bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut imported_bytes, LATEST_SAVE_VERSION, &imported_tags)
+            .expect("imported save meta should encode");
+        let imported_source = root.join("incoming.msav");
+        std::fs::write(&imported_source, imported_bytes).expect("imported source should write");
+        let imported = launcher
+            .import_load_game_save_file(&imported_source)
+            .expect("valid non-campaign save should import");
+        assert!(imported.destination.ends_with("0.msav"));
+        assert_eq!(imported.map_name.as_deref(), Some("Imported Map"));
+        assert_eq!(imported.timestamp, 999);
+        assert_eq!(imported.status, "imported");
+        assert!(save_dir.join("0.msav").exists());
+        assert_eq!(launcher.last_load_game_import_result, Some(imported));
+        assert_eq!(launcher.load_game_slots.len(), 3);
+        assert!(launcher
+            .load_game_slots
+            .iter()
+            .any(|slot| DesktopLauncher::load_game_slot_title(slot) == "Imported Map"));
 
         std::fs::remove_dir_all(root).ok();
     }

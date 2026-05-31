@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 566. LoadDialog 导入存档选中文件后的真实导入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.8%**，仍未达到完整可玩；继续把 LoadDialog 从按钮/chooser 推进到真实 save I/O。
+- Java 对照依据：
+  - `core/src/mindustry/game/Saves.java` 的 `importSave(Fi file)` 会选择 `getNextSlotFile()`，复制导入文件，读取 meta 并加入 saves；
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 会拒绝无效 save 和 campaign sector save。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGameImportResult` 与 `last_load_game_import_result`；
+    - 新增 `next_load_game_slot_file()`，按 Java `getNextSlotFile()` 语义选择第一个空闲数字 `.msav`；
+    - 新增 `import_load_game_save_file(...)`，读取并校验 deflated save meta，拒绝 `@save.nocampaign`，将有效存档写入 save dir 后刷新列表；
+    - 扩展存档路由测试：通过 `@save.import` chooser 后模拟选中文件，验证导入到 `0.msav`、记录 map/timestamp/status 并刷新 `load_game_slots`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - Java 的异步 chooser 回调与错误弹层还需要接入真实桌面事件流；
+  - rename/export、SaveDialog/覆盖确认仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 565. LoadDialog 删除存档真实副作用
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
