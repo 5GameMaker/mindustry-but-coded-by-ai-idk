@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 588. MenuFragment chrome 按钮进一步贴近 Java Scene2D
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **69.8%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把第一屏 chrome 按钮从“统一自绘按钮”继续收敛到 Java `MenuFragment` 的 Scene2D 按钮结构。
+- Java 对照依据：
+  - `MenuFragment` 的 Discord/info 使用 `discordBanner/infoBanner` 作为按钮 up drawable，不额外套 `button.9` hover/pressed 背景；
+  - `@be.check` 是 `button("@be.check", Icon.refresh, ...)`，视觉上是左图标 + 文字，不是把 icon glyph 拼进同一段默认字体文字；
+  - mobile terminal/info/discord 等图标应走 icon font 语义，避免 native placeholder 把 PUA glyph 当普通文字。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `discord-banner` / `info-banner` chrome 不再在 hover/pressed 时叠通用 `button.9` / `whiteui` / stroke 背景，仅对 banner 本身做轻量 tint；
+    - `@be.check` 改为独立 icon + label 布局，refresh 图标用 `RenderFontId::Icon`，文字用 start 对齐；
+    - mobile terminal chrome 改用 icon 字体绘制，不再把 icon glyph 混入默认字体文本；
+    - 更新 chrome 回归测试，锁定 banner-only hover/pressed 与 `@be.check` 的 icon/text 分离。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_hover_and_pressed_emit_button_feedback --lib`
+- 仍未完成：
+  - `@be.check` 的真实 `becontrol.checkUpdate(...)` / loadfrag / no-update 反馈仍未接入；
+  - 移动端 info 的行布局、真实字体光栅化和更多 dialog 内层 Table 结构仍需继续补齐；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 587. 主菜单文字可读性与 LoadDialog ScrollPane chrome 对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
