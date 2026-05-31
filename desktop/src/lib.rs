@@ -2486,6 +2486,7 @@ pub enum DesktopMenuRouteShellAction {
     OpenModsDetail(usize),
     OpenModsFolder(usize),
     OpenModsContent(usize),
+    CloseModsContent,
     CloseModsDetail,
     FocusSchematicSearch,
     ClearSchematicSearch,
@@ -15447,6 +15448,7 @@ pub struct DesktopLauncher {
     pub mods_selected_mod_index: Option<usize>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
     pub last_mods_content_index: Option<usize>,
+    pub mods_content_dialog_index: Option<usize>,
     pub mods_import_dialog_open: bool,
     pub last_mods_import_action: Option<DesktopModsImportAction>,
     pub last_mods_import_file_request: Option<MultiFileChooserRequest>,
@@ -16205,6 +16207,7 @@ impl DesktopLauncher {
             mods_selected_mod_index: None,
             last_mods_folder_action: None,
             last_mods_content_index: None,
+            mods_content_dialog_index: None,
             mods_import_dialog_open: false,
             last_mods_import_action: None,
             last_mods_import_file_request: None,
@@ -19871,6 +19874,7 @@ impl DesktopLauncher {
             {
                 self.active_menu_route = None;
                 self.mods_selected_mod_index = None;
+                self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
                 self.last_custom_menu_action = Some(DesktopCustomMenuAction {
                     role,
@@ -23788,6 +23792,9 @@ impl DesktopLauncher {
             if self.mods_import_dialog_open {
                 return self.mods_import_action_at_point(panel, point);
             }
+            if self.mods_content_dialog_index.is_some() {
+                return self.mods_content_action_at_point(panel, point);
+            }
             if let Some(action) = self.mods_route_detail_action_at_point(panel, point) {
                 return Some(action);
             }
@@ -24150,10 +24157,15 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::OpenModsContent(index) => {
                 if self.last_mods_directory_mod_names.get(index).is_some() {
                     self.last_mods_content_index = Some(index);
+                    self.mods_content_dialog_index = Some(index);
                 }
+            }
+            DesktopMenuRouteShellAction::CloseModsContent => {
+                self.mods_content_dialog_index = None;
             }
             DesktopMenuRouteShellAction::CloseModsDetail => {
                 self.mods_selected_mod_index = None;
+                self.mods_content_dialog_index = None;
             }
             DesktopMenuRouteShellAction::FocusSchematicSearch => {
                 self.schematic_search_focused = true;
@@ -26864,6 +26876,29 @@ impl DesktopLauncher {
         Self::schematic_info_dialog_rect_for_panel(panel)
     }
 
+    fn mods_content_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        self.mods_content_dialog_index?;
+        let dialog = Self::mods_content_dialog_rect_for_panel(panel);
+        if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseModsContent);
+        }
+        None
+    }
+
+    fn mods_content_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let detail = Self::mods_route_detail_dialog_rect_for_panel(panel);
+        RenderRect::new(
+            detail.x + 24.0,
+            detail.y + 24.0,
+            (detail.width - 48.0).max(240.0),
+            (detail.height - 48.0).max(220.0),
+        )
+    }
+
     fn push_mods_detail_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         let Some(index) = self.mods_selected_mod_index else {
             return;
@@ -26972,6 +27007,75 @@ impl DesktopLauncher {
             "@mods.viewcontent",
             Some("book"),
             Layer::END_PIXELED + 0.083,
+        );
+    }
+
+    fn push_mods_content_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(index) = self.mods_content_dialog_index else {
+            return;
+        };
+        let Some(mod_name) = self.last_mods_directory_mod_names.get(index) else {
+            return;
+        };
+        let dialog = Self::mods_content_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.086,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.087,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.088,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("@mods.viewcontent: {mod_name}"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.089,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@none",
+            RenderPoint::new(dialog.center().x, dialog.center().y + 10.0),
+            [0.70, 0.78, 0.84, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "content source: LoadedMod.minfo",
+            RenderPoint::new(dialog.center().x, dialog.center().y - 18.0),
+            [0.52, 0.62, 0.70, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.091,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.092,
         );
     }
 
@@ -27150,6 +27254,7 @@ impl DesktopLauncher {
         ));
 
         self.push_mods_detail_dialog(pass, panel);
+        self.push_mods_content_dialog(pass, panel);
         self.push_mods_import_dialog(pass, panel);
     }
 
@@ -42083,6 +42188,46 @@ mod tests {
             super::DesktopMenuRouteShellAction::OpenModsContent(0),
         );
         assert_eq!(launcher.last_mods_content_index, Some(0));
+        assert_eq!(launcher.mods_content_dialog_index, Some(0));
+        let content_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let content_texts = content_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods content dialog should render a frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(content_texts.contains(&"@mods.viewcontent: alpha"));
+        assert!(content_texts.contains(&"@none"));
+        assert!(content_texts.contains(&"content source: LoadedMod.minfo"));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                open_folder.x,
+                open_folder.y
+            ),
+            None,
+            "open mods content dialog should block clicks from reaching the detail dialog behind it"
+        );
+        let content_dialog = DesktopLauncher::mods_content_dialog_rect_for_panel(panel);
+        let close_content = DesktopLauncher::schematic_info_button_rect(content_dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                close_content.x,
+                close_content.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::CloseModsContent)
+        );
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseModsContent);
+        assert_eq!(launcher.mods_content_dialog_index, None);
 
         let detail_back = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
         assert_eq!(

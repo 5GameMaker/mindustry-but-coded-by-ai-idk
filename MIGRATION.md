@@ -19921,6 +19921,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `@mods.github.open` / reinstall / remove / enabled toggle 等 Java 详情动作仍需继续迁移；
   - UI 与 Mods 管理仍在长线迁移中，未达到完整可玩，不能宣布目标完成。
 
+## 576. ModsDialog view content 子弹窗闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.8%**，仍未达到完整可玩；继续优先前端/UI，把 Mods 详情页中的 `@mods.viewcontent` 从“只记录点击”推进为可打开、可关闭、可阻塞后层点击的子弹窗闭环。
+- Java 对照依据：
+  - `ModsDialog.showMod(...)` 中的 `@mods.viewcontent` 会进入独立内容查看流程，而不是停留在详情页按钮点击记录；
+  - 打开子弹窗后，后层详情页不应继续响应点击，必须先关闭当前子弹窗；
+  - 子弹窗需要保留回退/关闭入口，为后续接入真实 `LoadedMod.minfo` / `UnlockableContent` 列表做承载。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CloseModsContent` 路由动作与 `mods_content_dialog_index` 状态；
+    - `OpenModsContent(index)` 现在会打开内容子弹窗，并继续记录 `last_mods_content_index`；
+    - 关闭 Mods 详情、切换菜单路由或关闭 Mods 路由时会清理内容子弹窗；
+    - 新增 `mods_content_action_at_point(...)`、`mods_content_dialog_rect_for_panel(...)`、`push_mods_content_dialog(...)`；
+    - 内容子弹窗暂以当前 mod 名、`@none` 与 `LoadedMod.minfo` 来源说明占位，作为后续真实内容列表接入点；
+    - 打开内容子弹窗时优先命中该子弹窗，阻止点击穿透到后层详情页。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_opens_and_closes_detail_dialog --lib`
+  - `cargo test -p mindustry-desktop mods_route --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 内容子弹窗还未读取真实 mod content map / `LoadedMod.minfo`，目前仅为结构化承载层；
+  - mod 作者、版本、描述仍需继续从真实 `mod.json` / meta 接入；
+  - `@mods.browser`、GitHub 导入、删除/启用/重载、真实 open folder 仍需继续对照 Java；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
