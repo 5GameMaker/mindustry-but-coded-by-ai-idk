@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 610. LoadDialog 存档行 action 区改用 40f empty icon 按钮
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.0%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 `LoadDialog` 存档 slot 行右侧操作区从 Rust 过渡期灰底小按钮改回 Java `Styles.emptyi/emptyTogglei` 的透明图标按钮密度。
+- Java 对照依据：
+  - `LoadDialog.java` 中 slot 行 action 表 `t.defaults().size(40f)`；
+  - autosave 使用 `Icon.save` + `Styles.emptyTogglei`；
+  - trash/pencil/export 使用 `Styles.emptyi`；
+  - action 表 cell 使用 `padRight(-10).growX()`，视觉上是贴右侧的 40f 图标按钮组。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `load_game_slot_action_button_rect(...)` 从 30×28/36px 步进改为 40×40/40px 步进，并让最右按钮按 `padRight(-10)` 语义外探 10px；
+    - slot action 渲染移除 `grayt` 背景 sprite，仅绘制 upstream icon font glyph；
+    - autosave checked 仍用 accent tint，hover 状态提高图标亮度；
+    - 回归测试补充 40×40、相邻 40px、无 `grayt` 背景、Icon 字体与 16px 图标尺寸断言。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `LoadDialog` preview/slot 行高仍偏压缩，尚未提升到 Java 160f preview 级别；
+  - slot 行内部 Scene2D 表格的完整 grow/pad/layout 仍是近似；
+  - 真实 save load 恢复链路仍需继续从当前可视 loading/smoke route 过渡到完整游戏恢复。
+
 ## 609. MapPlayDialog 帮助弹窗补 ScrollPane 与 @ok
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

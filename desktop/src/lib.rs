@@ -24550,10 +24550,10 @@ impl DesktopLauncher {
 
     fn load_game_slot_action_button_rect(card: RenderRect, action_index: usize) -> RenderRect {
         RenderRect::new(
-            card.right() - 38.0 - action_index as f32 * 36.0,
-            card.y + card.height - 36.0,
-            30.0,
-            28.0,
+            card.right() - 30.0 - action_index as f32 * 40.0,
+            card.y + card.height - 48.0,
+            40.0,
+            40.0,
         )
     }
 
@@ -33698,27 +33698,21 @@ impl DesktopLauncher {
                 let button = Self::load_game_slot_action_button_rect(rect, action_index);
                 let checked_autosave = kind == DesktopLoadGameActionKind::ToggleAutosave
                     && self.load_game_slot_is_autosave(slot);
-                pass.push(RenderCommand::draw_sprite(
-                    Self::settings_text_button_symbol("grayt", false, checked_autosave),
-                    button,
-                    if checked_autosave {
-                        [0.92, 1.0, 1.0, 0.92]
-                    } else {
-                        [1.0, 1.0, 1.0, 0.70]
-                    },
-                    0.0,
-                    Layer::END_PIXELED + 0.035 + visible_index as f32 * 0.0001,
-                ));
+                let hovered = self
+                    .last_menu_cursor
+                    .is_some_and(|cursor| button.contains_point(cursor));
                 let icon = Self::load_game_slot_action_icon(kind);
                 pass.push(RenderCommand::draw_text_styled(
                     desktop_ui_icon_glyph_or_label(icon, icon),
                     button.center(),
                     if checked_autosave {
                         [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                    } else if hovered {
+                        [0.92, 0.98, 1.0, 1.0]
                     } else {
                         [0.76, 0.86, 0.94, 1.0]
                     },
-                    12.0,
+                    16.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Center)
                         .with_font(RenderFontId::Icon)
@@ -59656,15 +59650,26 @@ version: "2.0.0"
             0,
         );
         let autosave_button = DesktopLauncher::load_game_slot_action_button_rect(slot_card, 0);
-        let autosave_button_symbol =
-            DesktopLauncher::settings_text_button_symbol("grayt", false, true);
+        assert_eq!(
+            (autosave_button.width, autosave_button.height),
+            (40.0, 40.0),
+            "Java LoadDialog slot actions use t.defaults().size(40f)"
+        );
+        let delete_button = DesktopLauncher::load_game_slot_action_button_rect(slot_card, 1);
+        assert_eq!(
+            autosave_button.x - delete_button.x,
+            40.0,
+            "Java LoadDialog slot action buttons are adjacent 40f emptyi cells"
+        );
         assert!(
-            commands.iter().any(|command| matches!(
+            !commands.iter().any(|command| matches!(
                 command,
                 RenderCommand::DrawSprite { symbol, rect, .. }
-                    if symbol == &autosave_button_symbol && *rect == autosave_button
+                    if *rect == autosave_button
+                        && (symbol == &DesktopLauncher::settings_text_button_symbol("grayt", false, false)
+                            || symbol == &DesktopLauncher::settings_text_button_symbol("grayt", false, true))
             )),
-            "Java LoadDialog marks autosave as a checked toggle button"
+            "Java Styles.emptyTogglei autosave action should not draw a grayt background"
         );
         assert!(
             texts.contains(&super::desktop_ui_icon_glyph_or_label("save", "save").as_str()),
@@ -59674,8 +59679,11 @@ version: "2.0.0"
         assert!(
             commands.iter().any(|command| matches!(
                 command,
-                RenderCommand::DrawText { text, style, .. }
-                    if text == &save_glyph && style.font == RenderFontId::Icon
+                RenderCommand::DrawText { text, position, style, size, .. }
+                    if text == &save_glyph
+                        && *position == autosave_button.center()
+                        && *size == 16.0
+                        && style.font == RenderFontId::Icon
             )),
             "LoadDialog action glyphs must render with the upstream icon font"
         );
