@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 578. 世界空帧防黑屏兜底
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **68.3%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是避免客户端进入 world 渲染路径但没有任何 render pass 时呈现纯黑屏。
+- Java/行为对照依据：
+  - 菜单路径已有 `push_menu_empty_plan_fallback(...)`，但世界路径此前没有等价最低可见兜底；
+  - `graphics_frame_for_render(...)` 可能在光照/世界可见元素耗尽后产出 0 pass，native 侧会表现为没有任何 GPU draw；
+  - 防黑屏兜底应只在完全空世界帧触发，不应改变正常世界、菜单、暂停 overlay 的 pass 顺序。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `world_empty_frame_fallback_render_pass(...)`，生成 `Custom("world-empty-fallback")` pass；
+    - 当 `graphics_frame_for_render(...)` 汇总后 `render_frame.passes.is_empty()` 时，补一个深色全屏 `FillRect` 与诊断 `Custom` 命令；
+    - 不改菜单帧选择逻辑，不复用菜单文案，避免把菜单状态误带进游戏画面；
+    - 更新空世界帧测试，从“允许 0 pass”改为“必须有 fallback pass + FillRect”。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_graphics_frame_drains_light_renderer_into_render_pass -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib paused_world_overlay -- --nocapture`
+  - `cargo check --workspace`
+  - `cargo fmt --all --check`
+  - `git diff --check`
+- 仍未完成：
+  - 该兜底只解决“完全空帧黑屏”，不代表世界 renderer、OpenGL atlas、HUD/minimap 都已完整还原；
+  - 后续仍需补关键 sprite 全局 fallback、world_loaded/playable ready 门槛审查，以及真实可玩前端/HUD；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 577. HostDialog 路由、PaletteDialog 色块与暂停 UI 视口修正
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

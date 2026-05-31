@@ -34662,6 +34662,27 @@ impl DesktopLauncher {
         ));
     }
 
+    fn world_empty_frame_fallback_render_pass(viewport: RenderViewport) -> RenderPass {
+        let camera = RenderCamera::new(viewport.as_rect().center(), viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Custom("world-empty-fallback".into()))
+            .with_viewport(viewport)
+            .with_camera(camera);
+        pass.push(RenderCommand::custom(
+            "world-empty-fallback",
+            vec![
+                RenderProperty::new("reason", "empty-world-render-frame"),
+                RenderProperty::new("width", viewport.width.max(0.0).to_string()),
+                RenderProperty::new("height", viewport.height.max(0.0).to_string()),
+            ],
+        ));
+        pass.push(RenderCommand::fill_rect(
+            viewport.as_rect(),
+            [0.018, 0.026, 0.038, 1.0],
+            Layer::END_PIXELED + 0.001,
+        ));
+        pass
+    }
+
     fn push_mobile_terminal_overlay(&self, pass: &mut RenderPass, viewport: RenderViewport) {
         if !self.menu_mobile_terminal_open {
             return;
@@ -35107,6 +35128,9 @@ impl DesktopLauncher {
         }
         if let Some(pause_pass) = self.pause_overlay_render_pass(viewport) {
             render_frame.push_pass(pause_pass);
+        }
+        if render_frame.passes.is_empty() {
+            render_frame.push_pass(Self::world_empty_frame_fallback_render_pass(viewport));
         }
         render_frame.sort_passes_like_java_renderer_draw();
         let floor_chunk_batches = self.floor_chunk_draw_batches(camera, viewport);
@@ -50176,8 +50200,18 @@ version: "2.0.0"
             minimap_camera,
             sample_minimap_overlay_input(true),
         );
-        assert_eq!(empty_frame.bundle.stats.render_passes, 0);
-        assert_eq!(empty_frame.bundle.stats.render_commands, 0);
+        assert_eq!(empty_frame.bundle.stats.render_passes, 1);
+        assert_eq!(empty_frame.bundle.stats.render_commands, 2);
+        let empty_render_frame = empty_frame.bundle.render_frame.as_ref().unwrap();
+        assert_eq!(
+            empty_render_frame.passes[0].kind,
+            RenderPassKind::Custom("world-empty-fallback".into())
+        );
+        assert!(matches!(
+            empty_render_frame.passes[0].commands.as_slice(),
+            [RenderCommand::Custom { name, .. }, RenderCommand::FillRect { .. }]
+                if name == "world-empty-fallback"
+        ));
     }
 
     #[test]
