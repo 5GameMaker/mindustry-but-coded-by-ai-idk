@@ -27221,6 +27221,14 @@ impl DesktopLauncher {
         self.join_community_group_setting_bool(&group.favorite_setting_key())
     }
 
+    fn join_server_disclaimer_effective_accepted(&self) -> bool {
+        self.join_server_disclaimer_accepted
+            || self
+                .settings_overrides
+                .get(JOIN_SERVER_DISCLAIMER_SETTINGS_KEY)
+                .is_some_and(|value| matches!(value.as_str(), "true" | "1"))
+    }
+
     pub fn set_join_community_group_hidden(&mut self, index: usize, hidden: bool) -> bool {
         let Some(group) = self.join_community_groups.get(index) else {
             return false;
@@ -30839,7 +30847,7 @@ impl DesktopLauncher {
                     self.connect_error = Some("missing community host".into());
                     return;
                 };
-                if !self.join_server_disclaimer_accepted {
+                if !self.join_server_disclaimer_effective_accepted() {
                     self.join_server_disclaimer_pending_target = Some(target);
                     self.join_add_dialog_open = false;
                     self.join_info_dialog_open = false;
@@ -68519,6 +68527,24 @@ version: "2.0.0"
         );
         assert_eq!(
             launcher.connect_target,
+            Some(super::DesktopConnectTarget {
+                host: "community.example".into(),
+                port: 6567,
+            })
+        );
+
+        let mut trusted_launcher = DesktopLauncher::new(Vec::new());
+        trusted_launcher.join_community_groups = launcher.join_community_groups.clone();
+        trusted_launcher.settings_overrides.insert(
+            super::JOIN_SERVER_DISCLAIMER_SETTINGS_KEY.into(),
+            "true".into(),
+        );
+        trusted_launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(0),
+        );
+        assert_eq!(trusted_launcher.join_server_disclaimer_pending_target, None);
+        assert_eq!(
+            trusted_launcher.connect_target,
             Some(super::DesktopConnectTarget {
                 host: "community.example".into(),
                 port: 6567,

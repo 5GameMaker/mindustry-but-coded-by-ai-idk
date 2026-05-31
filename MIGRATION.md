@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 649. JoinDialog server-disclaimer 读取语义补齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.1%**，仍未达到完整可玩；继续优先前端/UI 与联机入口，当前闭环目标是让 community connect 在弹免责声明前读取既有 `server-disclaimer` 设置。
+- Java 对照依据：
+  - `JoinDialog.addCommunityHost(...)` 使用 `Core.settings.getBool("server-disclaimer", false)` 判断是否需要弹 `@servers.disclaimer`；
+  - 已确认过的用户不应每次点击 community 服务器都再次弹窗。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_server_disclaimer_effective_accepted()`，同时读取 runtime 字段与 `settings_overrides["server-disclaimer"]`；
+    - `ConnectJoinCommunityGroup` 从只看内存字段改为读取有效设置；
+    - 回归测试覆盖 settings 中已有 `server-disclaimer=true` 时直接连接、不生成 pending disclaimer。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - `server-disclaimer` 尚未接真实 settings 文件加载；
+  - Java `safeConnect(..., version)` 版本门禁仍待迁移；
+  - community 远端 fetch/cache 与逐 host 卡片仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 648. JoinDialog ServerGroup Java hash 排序对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
