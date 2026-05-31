@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 587. 主菜单文字可读性与 LoadDialog ScrollPane chrome 对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **69.7%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是提高原生 OpenGL 客户端用户第一眼看到的 UI 可读性，同时减少桌面主菜单按钮状态与 Java `Styles.flatToggleMenut` 的偏差。
+- Java 对照依据：
+  - Java UI 文本使用 outline 字体；Rust native placeholder 文本以前忽略 `RenderTextStyle.outline`，导致主菜单/按钮文字偏细偏灰；
+  - `Styles.flatToggleMenut` 通过 `flatDown/flatOver/clear` drawable 表达 down/checked/over/up，不额外叠加蓝色描边；
+  - `LoadDialog` 列表是 `ScrollPane`，存档较多时应有滚动轨道/滑块的窗体感。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - OpenGL placeholder 文本路径开始尊重 `outline`：对 MenuFragment、按钮、图标 fallback 等已标注 outline 的文字输出黑色阴影层；
+    - LoadDialog/SaveDialog 的存档列表在溢出时绘制 `defaultPane` 的 vertical scroll track/knob，不再只显示页码；
+    - 补充测试锁定 outline quads 与 LoadDialog 滚动条 chrome。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 移除桌面主菜单 hover/checked/pressed 的额外蓝色 focus outline，回到 Java drawable 本身表达状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan_selected_buttons_emit_java_flat_down_drawable --lib`
+  - `cargo test -p mindustry-core menu_ui_plan_hovered_buttons_emit_java_flat_over_drawable --lib`
+  - `cargo test -p mindustry-desktop desktop_graphics_opengl_backend_placeholder_text_honors_outline_style --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 真实 `font.woff/icon.ttf` 字体光栅化仍未替换 placeholder 字体；
+  - `@be.check`、Discord/info chrome、移动端 terminal/info 排列等 MenuFragment 细节仍需继续对齐；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 586. LoadDialog 日期、自动保存文案与图标对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
