@@ -19663,6 +19663,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Java `Scl.scl(...)` 的完整缩放链路仍待替代当前 `menu_ui_scale` 过渡字段；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 566. MenuFragment submenu scene margin 锚点闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.8%**，仍未达到完整可玩；继续优先前端/UI，把桌面 submenu 的顶部锚点对齐 Java `out[0].getY(Align.topLeft)` 与 scene margin spacer。
+- Java 对照依据：
+  - `MenuFragment.buttons(...)` 展开 submenu 时先插入 spacer：
+    `submenu.add().height((Core.graphics.getHeight() - Core.scene.marginTop - Core.scene.marginBottom - out[0].getY(Align.topLeft)) / Scl.scl(1f))`；
+  - 因此 submenu 第一项不是单纯按 root index 放置，而是要扣除 `Core.scene.marginTop/marginBottom`。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuFrameInput` 新增 `scene_margin_top/scene_margin_bottom`；
+    - 新增 `MenuFrameInput::new(...)` 与 `with_scene_margins(...)`；
+    - 桌面 submenu 起点改为 `selected_root_top_y - scene_margin_top - scene_margin_bottom`；
+    - 新增测试覆盖 database submenu 在 marginTop=10、marginBottom=5 时从 `220` 调整为 `205`。
+  - `desktop/src/lib.rs`
+    - 菜单渲染与 hit-test 使用 launcher 当前 scene margin 生成 `MenuFrameInput`；
+    - 默认测试 helper 标记为 `#[cfg(test)]`，避免非测试构建 dead_code warning。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - scene margin 仍待接真实窗口/平台 safe-area；
+  - Java `Scl.scl(1f)` 与 Scene2D actor 坐标还需要后续进一步复核；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

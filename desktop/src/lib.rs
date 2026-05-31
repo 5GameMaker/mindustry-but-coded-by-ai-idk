@@ -19668,10 +19668,24 @@ impl DesktopLauncher {
         ));
     }
 
+    #[cfg(test)]
     fn default_menu_frame_input_for_viewport(viewport: RenderViewport) -> MenuFrameInput {
         MenuFrameInput {
             graphics_width: viewport.width.max(1.0),
             graphics_height: viewport.height.max(1.0),
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        }
+    }
+
+    fn menu_frame_input_for_viewport(&self, viewport: RenderViewport) -> MenuFrameInput {
+        MenuFrameInput {
+            graphics_width: viewport.width.max(1.0),
+            graphics_height: viewport.height.max(1.0),
+            scene_margin_top: self.menu_scene_margin_top,
+            scene_margin_bottom: self.menu_scene_margin_bottom,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         }
@@ -19720,7 +19734,7 @@ impl DesktopLauncher {
         y: f32,
     ) -> Option<MenuButtonRole> {
         let viewport = self.default_render_viewport_for_surface(surface_size);
-        let input = Self::default_menu_frame_input_for_viewport(viewport);
+        let input = self.menu_frame_input_for_viewport(viewport);
         self.menu_renderer_state.hit_test_ui(input, x, y)
     }
 
@@ -26933,7 +26947,7 @@ impl DesktopLauncher {
         frame_index: u64,
         viewport: RenderViewport,
     ) -> DesktopGraphicsFrame {
-        let input = Self::default_menu_frame_input_for_viewport(viewport);
+        let input = self.menu_frame_input_for_viewport(viewport);
         let mut plan = self.menu_renderer_state.render_plan(input);
         plan.ui = plan
             .ui
@@ -50221,6 +50235,8 @@ mod tests {
         let frame = launcher.menu_frame_for_render(MenuFrameInput {
             graphics_width: 640.0,
             graphics_height: 360.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 1.25,
             delta: 0.016,
         });
@@ -50314,6 +50330,8 @@ mod tests {
         let menu_frame = polluted.menu_frame_for_render(MenuFrameInput {
             graphics_width: 640.0,
             graphics_height: 360.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 1.25,
             delta: 0.5,
         });

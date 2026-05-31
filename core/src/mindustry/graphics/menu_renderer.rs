@@ -478,8 +478,29 @@ impl MenuRendererConfig {
 pub struct MenuFrameInput {
     pub graphics_width: f32,
     pub graphics_height: f32,
+    pub scene_margin_top: f32,
+    pub scene_margin_bottom: f32,
     pub scl4: f32,
     pub delta: f32,
+}
+
+impl MenuFrameInput {
+    pub const fn new(graphics_width: f32, graphics_height: f32, scl4: f32, delta: f32) -> Self {
+        Self {
+            graphics_width,
+            graphics_height,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4,
+            delta,
+        }
+    }
+
+    pub const fn with_scene_margins(mut self, top: f32, bottom: f32) -> Self {
+        self.scene_margin_top = top;
+        self.scene_margin_bottom = bottom;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1805,7 +1826,11 @@ fn menu_desktop_ui_plan(
             .position(|role| *role == submenu_root)
             .unwrap_or(0),
     };
-    let submenu_start_y = start_y + selected_root_index as f32 * (button_height + gap);
+    let selected_root_top_y = start_y + selected_root_index as f32 * (button_height + gap);
+    let submenu_start_y = (selected_root_top_y
+        - input.scene_margin_top.max(0.0)
+        - input.scene_margin_bottom.max(0.0))
+    .max(0.0);
 
     let mut buttons =
         Vec::with_capacity(main_button_count + submenu_roles.len() + custom_submenu_buttons.len());
@@ -2054,6 +2079,8 @@ mod tests {
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 0.0,
         });
@@ -2092,6 +2119,8 @@ mod tests {
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1920.0,
             graphics_height: 1080.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0,
         });
@@ -2165,6 +2194,8 @@ mod tests {
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1920.0,
             graphics_height: 1080.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0,
         });
@@ -2251,6 +2282,8 @@ mod tests {
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         });
@@ -2286,6 +2319,8 @@ mod tests {
         let input = |delta| MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta,
         };
@@ -2361,6 +2396,8 @@ mod tests {
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         });
@@ -2399,6 +2436,35 @@ mod tests {
     }
 
     #[test]
+    fn menu_ui_plan_desktop_submenu_anchor_respects_scene_margins_like_java() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        assert!(state.select_desktop_root(MenuButtonRole::Database));
+
+        let plan = state.render_plan(
+            MenuFrameInput::new(1280.0, 720.0, 4.0, 1.0 / 60.0).with_scene_margins(10.0, 5.0),
+        );
+
+        let database = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Database)
+            .expect("desktop menu should include DATABASE root");
+        let schematics = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Schematics)
+            .expect("database submenu should include SCHEMATICS");
+
+        assert_eq!(database.rect.y, 220.0);
+        assert_eq!(
+            schematics.rect.y, 205.0,
+            "Java submenu spacer subtracts Core.scene.marginTop and marginBottom from the root top anchor"
+        );
+    }
+
+    #[test]
     fn menu_ui_plan_desktop_draws_black6_main_and_submenu_panels_like_java_tables() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
         assert!(state.select_desktop_root(MenuButtonRole::Database));
@@ -2406,6 +2472,8 @@ mod tests {
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         });
@@ -2467,6 +2535,8 @@ mod tests {
         let input = MenuFrameInput {
             graphics_width: 720.0,
             graphics_height: 1280.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         };
@@ -2530,6 +2600,8 @@ mod tests {
         let input = MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         };
@@ -2948,6 +3020,8 @@ mod tests {
         let plan = state.render_plan(MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         });
@@ -3006,6 +3080,8 @@ mod tests {
         let input = MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         };
@@ -3116,6 +3192,8 @@ mod tests {
         let input = MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         };
@@ -3169,6 +3247,8 @@ mod tests {
         let input = MenuFrameInput {
             graphics_width: 1280.0,
             graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
             scl4: 4.0,
             delta: 1.0 / 60.0,
         };
