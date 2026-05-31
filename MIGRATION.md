@@ -15,6 +15,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 606. MapPlayDialog 结构骨架与 LoadDialog 筛选热区继续对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.6%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是减少 CustomGame 地图播放弹窗和 LoadDialog 搜索栏模式筛选的“自绘壳感”。
+- Java 对照依据：
+  - `MapPlayDialog.show(...)`：模式按钮外层是 `Tex.button`，help 按钮为 `width(50f).fillY().padLeft(18f)`，`@customize` 为 230×50，底部 `@play`/`@back` 为 210×64，地图预览是 `BorderImage(map.safeTexture(), 3f)`；
+  - `LoadDialog`：模式筛选使用 `Styles.emptyTogglei`，按钮 `.size(60f).padLeft(-12f)`，hover/checked 由图标状态表达。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `MapPlayDialog` 的 map card dialog 增高，补 2×2 mode table 外层 `button` 背景；
+    - help 按钮改为紧贴 mode table 右侧、50px 宽、填满 mode table 高度；
+    - `@play`/`@back` 改为 Java 底部按钮条尺寸 210×64，`@customize` 改为 230×50；
+    - preview 改为 250×250 的 BorderImage-like 框，优先消费已加载地图 preview texture，缺失时按 Java `safeTexture()` 语义 fallback 到 `error` 图；
+    - 高分文本改为数值分数（默认 0/可从 settings override 取值），不再显示 `hiscore...` key；
+    - 子弹窗打开时先处理子弹窗 close hit-test，避免放大的底部 `@back` 抢走 help/customize child dialog 的关闭点击；
+    - LoadDialog mode filter hit rect 调整为 60×60，间隔 48px 模拟 `padLeft(-12f)`，并补 hover tint。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_uses_java_mode_order_and_first_valid_fallback --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `Map.safeTexture()` 仍缺完整 Java map preview 生成/缓存链路，当前只消费已有 preview 文件并 fallback `error`；
+  - `CustomRulesDialog` 仍是结构化信息页，未完整还原规则编辑 UI；
+  - `LoadDialog` mode filter tooltip/pressed animation 与 slot 行动作区的 Java 行内按钮密度仍需继续收口；
+  - `PlaySelected` 当前仍 seed smoke world，不是完整 `control.playMap(map, rules, playtesting)`。
+
 ## 605. MapPlayDialog 模式按钮尺寸与禁用点击对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

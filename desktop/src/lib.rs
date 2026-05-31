@@ -24311,10 +24311,10 @@ impl DesktopLauncher {
 
     fn load_game_mode_filter_button_rect(search: RenderRect, index: usize) -> RenderRect {
         RenderRect::new(
-            search.right() - 176.0 + index as f32 * 36.0,
-            search.center().y - 16.0,
-            30.0,
-            32.0,
+            search.right() - 216.0 + index as f32 * 48.0,
+            search.center().y - 30.0,
+            60.0,
+            60.0,
         )
     }
 
@@ -26681,7 +26681,7 @@ impl DesktopLauncher {
 
     fn map_card_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         let width = (panel.width - 80.0).clamp(380.0, 560.0);
-        let height = (panel.height - 90.0).clamp(360.0, 500.0);
+        let height = (panel.height + 30.0).clamp(420.0, 620.0);
         RenderRect::new(
             panel.center().x - width * 0.5,
             panel.center().y - height * 0.5,
@@ -26691,7 +26691,12 @@ impl DesktopLauncher {
     }
 
     fn map_card_dialog_close_rect(dialog: RenderRect) -> RenderRect {
-        RenderRect::new(dialog.x + 24.0, dialog.y + 20.0, 128.0, 44.0)
+        RenderRect::new(
+            dialog.x + 24.0,
+            dialog.y + 20.0,
+            SETTINGS_BACK_BUTTON_WIDTH,
+            SETTINGS_BACK_BUTTON_HEIGHT,
+        )
     }
 
     fn map_play_mode_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
@@ -26705,26 +26710,47 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_play_mode_table_rect(dialog: RenderRect) -> RenderRect {
+        let first = Self::map_play_mode_button_rect(dialog, 0);
+        let last = Self::map_play_mode_button_rect(dialog, 3);
+        RenderRect::new(first.x, last.y, first.width * 2.0, first.height * 2.0)
+    }
+
     fn map_play_primary_button_rect(dialog: RenderRect) -> RenderRect {
         RenderRect::new(
-            dialog.x + dialog.width - 24.0 - 176.0,
+            dialog.x + dialog.width - 24.0 - 210.0,
             dialog.y + 20.0,
-            176.0,
-            44.0,
+            210.0,
+            64.0,
         )
     }
 
     fn map_play_customize_button_rect(dialog: RenderRect) -> RenderRect {
-        RenderRect::new(dialog.center().x - 115.0, dialog.y + 72.0, 230.0, 44.0)
+        RenderRect::new(
+            dialog.center().x - 115.0,
+            dialog.y + dialog.height - 262.0,
+            230.0,
+            50.0,
+        )
     }
 
     fn map_play_help_button_rect(dialog: RenderRect) -> RenderRect {
+        let mode_table = Self::map_play_mode_table_rect(dialog);
         RenderRect::new(
-            dialog.right() - 76.0,
-            dialog.y + dialog.height - 92.0,
-            52.0,
-            40.0,
+            mode_table.right() + 18.0,
+            mode_table.y,
+            50.0,
+            mode_table.height,
         )
+    }
+
+    fn map_play_preview_rect(dialog: RenderRect) -> RenderRect {
+        let customize = Self::map_play_customize_button_rect(dialog);
+        let top = customize.y - 12.0;
+        let bottom_limit = dialog.y + SETTINGS_BACK_BUTTON_HEIGHT + 32.0;
+        let available = (top - bottom_limit).max(120.0);
+        let size = 250.0_f32.min(available).max(120.0);
+        RenderRect::new(dialog.center().x - size * 0.5, top - size, size, size)
     }
 
     fn map_play_child_dialog_rect(dialog: RenderRect) -> RenderRect {
@@ -26759,6 +26785,18 @@ impl DesktopLauncher {
         rules
     }
 
+    fn map_play_high_score(&self, map: &MapDescriptor) -> i32 {
+        let key = map.high_score_key();
+        self.settings_overrides
+            .get(&key)
+            .or_else(|| {
+                self.settings_overrides
+                    .get(&Self::settings_storage_key("game", &key))
+            })
+            .and_then(|value| value.trim().parse::<i32>().ok())
+            .unwrap_or(0)
+    }
+
     fn map_editor_action_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
         let width = (dialog.width - 56.0) * 0.5;
         RenderRect::new(
@@ -26784,8 +26822,61 @@ impl DesktopLauncher {
         if cards.is_empty() {
             cards = Self::fallback_builtin_map_cards();
         }
+        self.merge_map_preview_textures(&cards);
         self.map_list_cards = cards;
         self.map_list_cards.len()
+    }
+
+    fn map_preview_dir(&self) -> PathBuf {
+        PathBuf::from(&self.client.context.paths.data_dir).join("previews")
+    }
+
+    fn map_play_preview_symbol(map: &MapDescriptor) -> String {
+        let mut symbol = String::from("map_preview_");
+        for ch in map.file.chars() {
+            if ch.is_ascii_alphanumeric() {
+                symbol.push(ch.to_ascii_lowercase());
+            } else {
+                symbol.push('_');
+            }
+        }
+        symbol
+    }
+
+    fn map_play_preview_file_in_dir(map: &MapDescriptor, preview_dir: &Path) -> Option<PathBuf> {
+        let preview_dir = preview_dir.to_string_lossy();
+        let preview = map.preview_file(preview_dir.as_ref());
+        let preview = PathBuf::from(preview);
+        preview.exists().then_some(preview)
+    }
+
+    fn map_play_preview_symbol_if_loaded(&self, map: &MapDescriptor) -> Option<String> {
+        let symbol = Self::map_play_preview_symbol(map);
+        self.texture_atlas.has(&symbol).then_some(symbol)
+    }
+
+    fn merge_map_preview_textures(&mut self, maps: &[MapDescriptor]) -> usize {
+        let preview_dir = self.map_preview_dir();
+        let preview_atlas = TextureAtlasPlan::from_sprite_sources(maps.iter().filter_map(|map| {
+            Self::map_play_preview_file_in_dir(map, &preview_dir).map(|path| {
+                TextureAtlasSpriteSourceDescriptor::new(
+                    path.display().to_string(),
+                    Self::map_play_preview_symbol(map),
+                )
+                .with_page_hint("ui")
+            })
+        }));
+        let mut merged = 0;
+        for page in preview_atlas.pages {
+            let page_type = page.page_type;
+            for region in page.regions {
+                let _ = self
+                    .texture_atlas
+                    .insert_or_replace_region(page_type, region);
+                merged += 1;
+            }
+        }
+        merged
     }
 
     fn load_map_cards_from_candidate_roots() -> Vec<MapDescriptor> {
@@ -27751,9 +27842,6 @@ impl DesktopLauncher {
         }
         if self.map_play_dialog_index.is_some() || self.editor_map_info_dialog_index.is_some() {
             let dialog = Self::map_card_dialog_rect_for_panel(panel);
-            if Self::map_card_dialog_close_rect(dialog).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::CloseMapCardDialog);
-            }
             if self.map_play_mode_help_dialog_open || self.map_play_customize_dialog_open {
                 let child = Self::map_play_child_dialog_rect(dialog);
                 if Self::map_play_child_dialog_close_rect(child).contains_point(point) {
@@ -27764,6 +27852,9 @@ impl DesktopLauncher {
                     });
                 }
                 return None;
+            }
+            if Self::map_card_dialog_close_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseMapCardDialog);
             }
             if let Some(index) = self.map_play_dialog_index {
                 if Self::map_play_help_button_rect(dialog).contains_point(point) {
@@ -32249,6 +32340,14 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.062,
         ));
+        let mode_table = Self::map_play_mode_table_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            mode_table,
+            [1.0, 1.0, 1.0, 0.90],
+            0.0,
+            Layer::END_PIXELED + 0.0625,
+        ));
         for (index, mode) in Self::map_play_dialog_modes().into_iter().enumerate() {
             self.push_map_list_filter_toggle(
                 pass,
@@ -32266,22 +32365,29 @@ impl DesktopLauncher {
             None,
             Layer::END_PIXELED + 0.067,
         );
-        let preview = RenderRect::from_center(
-            RenderPoint::new(dialog.center().x, dialog.y + 154.0),
-            170.0,
-            130.0,
-        );
+        let preview = Self::map_play_preview_rect(dialog);
         pass.push(RenderCommand::draw_sprite(
-            "whiteui",
+            Self::settings_drawable_symbol("button"),
             preview,
-            [0.10, 0.16, 0.20, 0.98],
+            [1.0, 1.0, 1.0, 0.82],
             0.0,
             Layer::END_PIXELED + 0.068,
+        ));
+        let preview_inner = preview.inflate(-3.0);
+        let preview_symbol = self
+            .map_play_preview_symbol_if_loaded(map)
+            .unwrap_or_else(|| "error".to_string());
+        pass.push(RenderCommand::draw_sprite(
+            preview_symbol,
+            preview_inner,
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::END_PIXELED + 0.0685,
         ));
         pass.push(RenderCommand::stroke_rect(
             preview,
             [0.38, 0.54, 0.64, 0.90],
-            2.0,
+            3.0,
             Layer::END_PIXELED + 0.069,
         ));
         pass.push(RenderCommand::draw_text_styled(
@@ -32302,8 +32408,8 @@ impl DesktopLauncher {
         ));
         if Gamemode::Survival.valid(map) {
             pass.push(RenderCommand::draw_text_styled(
-                format!("@level.highscore: {}", map.high_score_key()),
-                RenderPoint::new(dialog.center().x, preview.y - 34.0),
+                format!("@level.highscore: {}", self.map_play_high_score(map)),
+                RenderPoint::new(dialog.center().x, preview.y - 22.0),
                 [0.78, 0.88, 0.96, 1.0],
                 10.0,
                 0.0,
@@ -33173,6 +33279,9 @@ impl DesktopLauncher {
         {
             let rect = Self::load_game_mode_filter_button_rect(search, index);
             let hidden = self.load_game_hidden_modes.contains(&mode);
+            let hovered = self
+                .last_menu_cursor
+                .is_some_and(|cursor| rect.contains_point(cursor));
             pass.push(RenderCommand::draw_text_styled(
                 desktop_ui_icon_glyph_or_label(
                     Self::load_game_mode_filter_icon(mode),
@@ -33181,10 +33290,12 @@ impl DesktopLauncher {
                 RenderPoint::new(rect.center().x, rect.center().y),
                 if hidden {
                     [0.36, 0.44, 0.50, 0.92]
+                } else if hovered {
+                    [0.92, 0.98, 1.0, 1.0]
                 } else {
                     [0.74, 0.88, 0.96, 1.0]
                 },
-                17.0,
+                18.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_font(RenderFontId::Icon)
@@ -55769,9 +55880,13 @@ version: "2.0.0"
         tags.insert("name".to_string(), "Battle".to_string());
         let mut map = MapDescriptor::new("maps/custom/battle.msav", 180, 180, tags, true, 1, 157);
         map.spawns = 1;
+        let high_score_key = map.high_score_key();
 
         let viewport = DesktopSurfaceSize::new(1280, 720);
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher
+            .settings_overrides
+            .insert(high_score_key, "42".to_string());
         launcher.map_list_cards = vec![map];
         launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
@@ -55799,9 +55914,73 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"?"));
-        assert!(texts
+        assert!(texts.contains(&"@level.highscore: 42"));
+        assert!(
+            !texts.iter().any(|text| text.contains("hiscore")),
+            "Java MapPlayDialog displays the numeric Core.settings score, not the settings key"
+        );
+
+        let sprites = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("map play dialog should render")
+            .passes
             .iter()
-            .any(|text| text.starts_with("@level.highscore:")));
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } => Some((symbol.as_str(), *rect)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mode_table = DesktopLauncher::map_play_mode_table_rect(dialog);
+        assert_eq!(
+            mode_table,
+            RenderRect::new(
+                DesktopLauncher::map_play_mode_button_rect(dialog, 0).x,
+                DesktopLauncher::map_play_mode_button_rect(dialog, 3).y,
+                280.0,
+                108.0
+            ),
+            "Java MapPlayDialog wraps the 2x2 mode buttons in a Tex.button table"
+        );
+        assert!(sprites.iter().any(|(symbol, rect)| *symbol
+            == DesktopLauncher::settings_drawable_symbol("button")
+            && *rect == mode_table));
+        let help = DesktopLauncher::map_play_help_button_rect(dialog);
+        assert_eq!(help.x, mode_table.right() + 18.0);
+        assert_eq!(help.width, 50.0);
+        assert_eq!(help.height, mode_table.height);
+        assert_eq!(
+            DesktopLauncher::map_play_primary_button_rect(dialog).width,
+            210.0
+        );
+        assert_eq!(
+            DesktopLauncher::map_play_primary_button_rect(dialog).height,
+            64.0
+        );
+        assert_eq!(
+            DesktopLauncher::map_card_dialog_close_rect(dialog).width,
+            210.0
+        );
+        assert_eq!(
+            DesktopLauncher::map_card_dialog_close_rect(dialog).height,
+            64.0
+        );
+        assert_eq!(
+            DesktopLauncher::map_play_customize_button_rect(dialog).width,
+            230.0
+        );
+        assert_eq!(
+            DesktopLauncher::map_play_customize_button_rect(dialog).height,
+            50.0
+        );
+        let preview = DesktopLauncher::map_play_preview_rect(dialog);
+        assert_eq!(preview.width, 250.0);
+        assert_eq!(preview.height, 250.0);
+        assert!(sprites
+            .iter()
+            .any(|(symbol, rect)| *symbol == "error" && *rect == preview.inflate(-3.0)));
 
         let help_center = DesktopLauncher::map_play_help_button_rect(dialog).center();
         let help = super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
@@ -59190,6 +59369,20 @@ version: "2.0.0"
         .enumerate()
         {
             let rect = DesktopLauncher::load_game_mode_filter_button_rect(search_rect, index);
+            assert_eq!(
+                (rect.width, rect.height),
+                (60.0, 60.0),
+                "Java LoadDialog mode filters are Styles.emptyTogglei buttons with size(60f)"
+            );
+            if index > 0 {
+                let previous =
+                    DesktopLauncher::load_game_mode_filter_button_rect(search_rect, index - 1);
+                assert_eq!(
+                    rect.x - previous.x,
+                    48.0,
+                    "Java padLeft(-12f) makes adjacent 60f mode filter buttons overlap by 12px"
+                );
+            }
             let icon = DesktopLauncher::load_game_mode_filter_icon(mode);
             let glyph = super::desktop_ui_icon_glyph_or_label(icon, mode.wire_name());
             assert!(
