@@ -1741,6 +1741,7 @@ pub enum DesktopMenuRouteShellAction {
     NewEditorMap,
     ImportEditorMap,
     OpenModsDetail(usize),
+    OpenModsFolder(usize),
     CloseModsDetail,
     FocusSchematicSearch,
     ClearSchematicSearch,
@@ -1771,6 +1772,14 @@ pub enum DesktopMenuChromeAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopMenuPlatformAction {
     OpenWorkshop,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopModsFolderAction {
+    pub index: usize,
+    pub path: String,
+    pub uri: String,
+    pub opened: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14607,7 +14616,9 @@ pub struct DesktopLauncher {
     pub mods_directory_error: Option<String>,
     pub last_mods_directory_merge_count: Option<usize>,
     pub last_mods_directory_mod_names: Vec<String>,
+    pub last_mods_directory_mod_roots: Vec<String>,
     pub mods_selected_mod_index: Option<usize>,
+    pub last_mods_folder_action: Option<DesktopModsFolderAction>,
     pub args: Vec<String>,
     pub texture_atlas: TextureAtlasPlan<bool>,
     pub font_asset_sources: Vec<DesktopFontAssetSourceTrace>,
@@ -15337,7 +15348,9 @@ impl DesktopLauncher {
             mods_directory_error: None,
             last_mods_directory_merge_count: None,
             last_mods_directory_mod_names: Vec::new(),
+            last_mods_directory_mod_roots: Vec::new(),
             mods_selected_mod_index: None,
+            last_mods_folder_action: None,
             args,
             texture_atlas,
             font_asset_sources,
@@ -15406,8 +15419,10 @@ impl DesktopLauncher {
         root: impl AsRef<Path>,
     ) -> io::Result<usize> {
         let mod_name = mod_name.into();
+        let root = root.as_ref();
         let plan = ModResourcePlan::from_directory(mod_name.clone(), headless, root)?;
         self.last_mods_directory_mod_names = vec![mod_name];
+        self.last_mods_directory_mod_roots = vec![root.to_string_lossy().into_owned()];
         self.mods_selected_mod_index = None;
         Ok(self.merge_mod_resource_plan_into_texture_atlas(&plan))
     }
@@ -15430,6 +15445,11 @@ impl DesktopLauncher {
             .iter()
             .map(|mod_dir| mod_dir.mod_name.clone())
             .collect();
+        self.last_mods_directory_mod_roots = container
+            .mods
+            .iter()
+            .map(|mod_dir| mod_dir.root.to_string_lossy().into_owned())
+            .collect();
         self.mods_selected_mod_index = None;
         container
             .mods
@@ -15443,6 +15463,7 @@ impl DesktopLauncher {
             self.last_mods_directory_merge_count = Some(0);
             self.mods_directory_error = None;
             self.last_mods_directory_mod_names.clear();
+            self.last_mods_directory_mod_roots.clear();
             self.mods_selected_mod_index = None;
             return Ok(0);
         };
@@ -15458,6 +15479,7 @@ impl DesktopLauncher {
                 self.last_mods_directory_merge_count = None;
                 self.mods_directory_error = Some(error.to_string());
                 self.last_mods_directory_mod_names.clear();
+                self.last_mods_directory_mod_roots.clear();
                 self.mods_selected_mod_index = None;
                 Err(error)
             }
@@ -21551,6 +21573,45 @@ impl DesktopLauncher {
         self.schematic_info_dialog = None;
     }
 
+    fn mods_folder_uri_for_path(path: &str) -> String {
+        let normalized = path.replace('\\', "/");
+        let mut escaped = String::with_capacity(normalized.len());
+        for ch in normalized.chars() {
+            match ch {
+                ' ' => escaped.push_str("%20"),
+                '#' => escaped.push_str("%23"),
+                '?' => escaped.push_str("%3F"),
+                '%' => escaped.push_str("%25"),
+                _ => escaped.push(ch),
+            }
+        }
+        if escaped.starts_with("//") {
+            format!("file:{escaped}")
+        } else if escaped.starts_with('/') {
+            format!("file://{escaped}")
+        } else {
+            format!("file:///{escaped}")
+        }
+    }
+
+    fn dispatch_mods_folder_action_with_platform<P: Platform>(
+        &mut self,
+        index: usize,
+        platform: &mut P,
+    ) -> Option<DesktopModsFolderAction> {
+        let path = self.mods_route_mod_root_at_index(index)?.to_string();
+        let uri = Self::mods_folder_uri_for_path(&path);
+        let opened = platform.open_uri(&uri);
+        let action = DesktopModsFolderAction {
+            index,
+            path,
+            uri,
+            opened,
+        };
+        self.last_mods_folder_action = Some(action.clone());
+        Some(action)
+    }
+
     fn dispatch_menu_route_shell_action(&mut self, action: DesktopMenuRouteShellAction) {
         self.last_menu_route_shell_action = Some(action);
         match action {
@@ -21591,6 +21652,10 @@ impl DesktopLauncher {
                 if self.last_mods_directory_mod_names.get(index).is_some() {
                     self.mods_selected_mod_index = Some(index);
                 }
+            }
+            DesktopMenuRouteShellAction::OpenModsFolder(index) => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_folder_action_with_platform(index, &mut platform);
             }
             DesktopMenuRouteShellAction::CloseModsDetail => {
                 self.mods_selected_mod_index = None;
@@ -24172,15 +24237,25 @@ impl DesktopLauncher {
             })
     }
 
+    fn mods_route_mod_root_at_index(&self, index: usize) -> Option<&str> {
+        self.last_mods_directory_mod_roots
+            .get(index)
+            .map(String::as_str)
+            .filter(|root| !root.is_empty())
+    }
+
     fn mods_route_detail_action_at_point(
         &self,
         panel: RenderRect,
         point: RenderPoint,
     ) -> Option<DesktopMenuRouteShellAction> {
-        if self.mods_selected_mod_index.is_none() {
-            return None;
-        }
+        let index = self.mods_selected_mod_index?;
         let dialog = Self::mods_route_detail_dialog_rect_for_panel(panel);
+        if self.mods_route_mod_root_at_index(index).is_some()
+            && Self::schematic_info_button_rect(dialog, 1).contains_point(point)
+        {
+            return Some(DesktopMenuRouteShellAction::OpenModsFolder(index));
+        }
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseModsDetail);
         }
@@ -24243,6 +24318,19 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.076,
         ));
+        if let Some(root) = self.mods_route_mod_root_at_index(index) {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("mod path: {root}"),
+                RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 80.0),
+                [0.62, 0.72, 0.8, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.076,
+            ));
+        }
         pass.push(RenderCommand::draw_text_styled(
             "mod detail placeholder: browser/import/delete later",
             RenderPoint::new(dialog.center().x, dialog.y + 104.0),
@@ -24261,6 +24349,15 @@ impl DesktopLauncher {
             Some("left"),
             Layer::END_PIXELED + 0.083,
         );
+        if self.mods_route_mod_root_at_index(index).is_some() {
+            self.push_settings_text_button(
+                pass,
+                Self::schematic_info_button_rect(dialog, 1),
+                "@mods.openfolder",
+                Some("link"),
+                Layer::END_PIXELED + 0.083,
+            );
+        }
     }
 
     fn push_mods_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -39021,6 +39118,22 @@ mod tests {
             .expect("mods container should scan and merge explicitly");
 
         assert_eq!(merge_count, 2);
+        assert_eq!(
+            launcher.last_mods_directory_mod_names,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+        let root_names = launcher
+            .last_mods_directory_mod_roots
+            .iter()
+            .map(|root| {
+                std::path::Path::new(root)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(root_names, vec!["alpha".to_string(), "beta".to_string()]);
         let alpha = launcher.texture_atlas.lookup("alpha-alpha-router").unwrap();
         assert_eq!(alpha.page_type, PageType::Main);
         assert_eq!(alpha.region.source_path, "sprites/alpha-router.png");
@@ -39043,6 +39156,8 @@ mod tests {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.last_mods_directory_mod_names =
             vec!["alpha".into(), "beta".into(), "gamma".into()];
+        launcher.last_mods_directory_mod_roots =
+            vec!["C:/mods/alpha pack".into(), "C:/mods/beta".into()];
         launcher.last_mods_directory_merge_count = Some(3);
         launcher.dispatch_menu_action(MenuButtonRole::Mods);
 
@@ -39088,6 +39203,8 @@ mod tests {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.last_mods_directory_mod_names =
             vec!["alpha".into(), "beta".into(), "gamma".into()];
+        launcher.last_mods_directory_mod_roots =
+            vec!["C:/mods/alpha pack".into(), "C:/mods/beta".into()];
         launcher.last_mods_directory_merge_count = Some(3);
         launcher.dispatch_menu_action(MenuButtonRole::Mods);
 
@@ -39124,9 +39241,35 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(texts.contains(&"[mods] alpha"));
         assert!(texts.contains(&"mods scanned: 3"));
+        assert!(texts.contains(&"mod path: C:/mods/alpha pack"));
+        assert!(texts.contains(&"@mods.openfolder"));
         assert!(texts.contains(&"mod detail placeholder: browser/import/delete later"));
 
         let dialog = DesktopLauncher::mods_route_detail_dialog_rect_for_panel(panel);
+        let open_folder = DesktopLauncher::schematic_info_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                open_folder.x,
+                open_folder.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenModsFolder(0))
+        );
+        let mut platform = RecordingPlatform {
+            open_result: true,
+            ..Default::default()
+        };
+        let folder_action = launcher
+            .dispatch_mods_folder_action_with_platform(0, &mut platform)
+            .expect("mod root should open as file URI");
+        assert_eq!(folder_action.path, "C:/mods/alpha pack");
+        assert_eq!(folder_action.uri, "file:///C:/mods/alpha%20pack");
+        assert!(folder_action.opened);
+        assert_eq!(
+            platform.opened_uris,
+            vec!["file:///C:/mods/alpha%20pack".to_string()]
+        );
+
         let detail_back = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(

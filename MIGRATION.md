@@ -19360,6 +19360,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 548. ModsDialog 详情页 open folder 行为闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **59.2%**，仍未达到完整可玩；继续优先前端/UI，把 `ModsDialog.showMod(...)` 详情页从占位推进到至少有一个真实可触发的本地动作。
+- Java 对照依据：
+  - `ModsDialog.showMod(LoadedMod mod)` 桌面端会显示 `@mods.openfolder` 按钮；
+  - 该按钮调用 `Core.app.openFolder(mod.file.absolutePath())` 打开当前 mod 所在目录；
+  - 详情页仍需要保留关闭/返回行为。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `last_mods_directory_mod_roots`，从单 mod 扫描和 `ModResourceContainerPlan` 中记录每个 mod 的 root 目录；
+    - 新增 `DesktopModsFolderAction` 与 `OpenModsFolder(index)` 路由动作；
+    - Mods 详情弹窗现在会显示 `mod path: ...`，并在 root 存在时渲染 `@mods.openfolder` 按钮；
+    - 点击 open folder 后复用现有 `Platform::open_uri(...)`，通过 `file:///...` URI 打开目录，避免引入新的平台依赖；
+    - 保留现有 `@back` 关闭详情行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop mods --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 详情页还没有完整的 author/version/description/state 展示；
+  - GitHub 打开、browser reinstall、view content、enable/disable、delete/publish 仍未迁移；
+  - 远程 Mods browser/search/sort/release 下载仍未接入；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 547. ModsDialog 路由卡片详情闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
