@@ -780,6 +780,7 @@ pub const ABOUT_DISCORD_LINE: &str = "discord: The official Mindustry Discord ch
 pub const ABOUT_GITHUB_LINE: &str = "github: Game source code";
 const DISCORD_URL: &str = "https://discord.gg/mindustry";
 const MENU_PLAY_GUARD_MESSAGE: &str = "@mod.noerrorplay";
+const MENU_BECHECK_NO_UPDATES_MESSAGE: &str = "@be.noupdates";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AboutLinkEntry {
@@ -21316,6 +21317,7 @@ impl DesktopLauncher {
                 self.last_menu_chrome_action = Some(DesktopMenuChromeAction::InfoOpenAbout);
             }
             DesktopMenuChromeAction::Becheck => {
+                self.last_menu_guard_message = Some(MENU_BECHECK_NO_UPDATES_MESSAGE.into());
                 self.last_menu_chrome_action = Some(DesktopMenuChromeAction::Becheck);
             }
         }
@@ -60448,6 +60450,25 @@ version: "2.0.0"
             launcher.last_menu_chrome_action,
             Some(super::DesktopMenuChromeAction::Becheck)
         );
+        assert_eq!(
+            launcher.last_menu_guard_message.as_deref(),
+            Some(super::MENU_BECHECK_NO_UPDATES_MESSAGE)
+        );
+        let becheck_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let becheck_texts = becheck_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("becheck frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(becheck_texts.contains(&super::MENU_BECHECK_NO_UPDATES_MESSAGE));
         assert_eq!(launcher.last_menu_action, None);
     }
 
