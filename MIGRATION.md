@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 618. UnlockableContentBase 补数据库元数据字段
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.8%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是给后续 Java `DatabaseDialog` 的 `databaseCategory/databaseTag/databaseTabs/allDatabaseTabs` 行为补上 Rust 内容基类承载点，避免 UI 继续硬编码粗分组。
+- Java 对照依据：
+  - `UnlockableContent` 基类持有 `hideDatabase/allDatabaseTabs/databaseTabs/databaseCategory/databaseTag`；
+  - `DatabaseDialog` 用 category/tag/tab 元数据构建内容列表；
+  - `StatusEffect` 构造时 `allDatabaseTabs = true`。
+- 本轮主改动：
+  - `core/src/mindustry/ctype/unlockable_content.rs`
+    - 新增 `all_database_tabs`、`database_tabs`、`database_category`、`database_tag`；
+    - 新增 `database_category_key()`、`database_tag_key()`、`add_database_tab(...)`、`visible_on_database_tab(...)`；
+    - 新增测试覆盖 Java 默认 baseline 与 tab 去重/visible 语义。
+  - `core/src/mindustry/type/status_effect.rs`
+    - `StatusEffect::new(...)` 默认设置 `base.all_database_tabs = true`；
+    - 扩展 status 默认值测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core database_metadata --lib`
+  - `cargo test -p mindustry-core status_effect_defaults_match_java_field_initializers --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Block 还没有统一 `UnlockableContentBase` 等价字段，暂时无法直接承载 Block 的 `databaseTag = category.name()`；
+  - `TechTree.addDatabaseTab/addPlanet` 尚未桥接到 content base 的 `database_tabs`；
+  - desktop `DatabaseDialog` 尚未正式按这些新字段重建 category/tag/tab 分组。
+
 ## 617. ContentInfoDialog 统计行改为左右两列
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

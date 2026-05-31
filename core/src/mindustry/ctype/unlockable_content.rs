@@ -17,6 +17,10 @@ pub struct UnlockableContentBase {
     pub inline_description: bool,
     pub hide_details: bool,
     pub hide_database: bool,
+    pub all_database_tabs: bool,
+    pub database_tabs: Vec<String>,
+    pub database_category: Option<String>,
+    pub database_tag: Option<String>,
     pub generate_icons: bool,
     pub selection_size: f32,
     pub unlocked: bool,
@@ -33,6 +37,10 @@ impl UnlockableContentBase {
             inline_description: false,
             hide_details: true,
             hide_database: false,
+            all_database_tabs: false,
+            database_tabs: Vec::new(),
+            database_category: None,
+            database_tag: None,
             generate_icons: true,
             selection_size: 24.0,
             unlocked: false,
@@ -49,6 +57,29 @@ impl UnlockableContentBase {
 
     pub fn unlocked(&self) -> bool {
         self.always_unlocked || self.unlocked
+    }
+
+    pub fn database_category_key(&self) -> &str {
+        self.database_category
+            .as_deref()
+            .unwrap_or_else(|| self.mappable.base.content_type.wire_name())
+    }
+
+    pub fn database_tag_key(&self) -> &str {
+        self.database_tag.as_deref().unwrap_or("default")
+    }
+
+    pub fn add_database_tab(&mut self, tab: impl Into<String>) {
+        let tab = tab.into();
+        if !self.database_tabs.iter().any(|existing| existing == &tab) {
+            self.database_tabs.push(tab);
+        }
+    }
+
+    pub fn visible_on_database_tab(&self, tab: &str) -> bool {
+        tab == "sun"
+            || self.all_database_tabs
+            || self.database_tabs.iter().any(|entry| entry == tab)
     }
 
     /// Pure data representation of the Java `loadIcon()` fallback chain.
@@ -84,6 +115,43 @@ impl UnlockableContentBase {
 #[cfg(test)]
 mod tests {
     use super::{ContentType, UnlockableContentBase};
+
+    #[test]
+    fn database_metadata_defaults_match_java_unlockable_content_baseline() {
+        let content = UnlockableContentBase::new(2, ContentType::Item, "copper");
+
+        assert!(!content.hide_database);
+        assert!(!content.all_database_tabs);
+        assert!(content.database_tabs.is_empty());
+        assert_eq!(content.database_category, None);
+        assert_eq!(content.database_tag, None);
+        assert_eq!(content.database_category_key(), "item");
+        assert_eq!(content.database_tag_key(), "default");
+        assert!(content.visible_on_database_tab("sun"));
+        assert!(!content.visible_on_database_tab("serpulo"));
+    }
+
+    #[test]
+    fn database_metadata_tabs_keep_java_set_semantics() {
+        let mut content = UnlockableContentBase::new(3, ContentType::Unit, "flare");
+
+        content.database_category = Some("unit".into());
+        content.database_tag = Some("unit-air".into());
+        content.add_database_tab("serpulo");
+        content.add_database_tab("serpulo");
+        content.add_database_tab("erekir");
+
+        assert_eq!(content.database_category_key(), "unit");
+        assert_eq!(content.database_tag_key(), "unit-air");
+        assert_eq!(content.database_tabs, vec!["serpulo", "erekir"]);
+        assert!(content.visible_on_database_tab("sun"));
+        assert!(content.visible_on_database_tab("serpulo"));
+        assert!(content.visible_on_database_tab("erekir"));
+        assert!(!content.visible_on_database_tab("tantros"));
+
+        content.all_database_tabs = true;
+        assert!(content.visible_on_database_tab("tantros"));
+    }
 
     #[test]
     fn icon_candidates_match_java_fallback_order() {

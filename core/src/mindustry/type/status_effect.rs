@@ -71,8 +71,10 @@ pub struct StatusEffect {
 
 impl StatusEffect {
     pub fn new(id: ContentId, name: impl Into<String>) -> Self {
+        let mut base = UnlockableContentBase::new(id, ContentType::Status, name);
+        base.all_database_tabs = true;
         Self {
-            base: UnlockableContentBase::new(id, ContentType::Status, name),
+            base,
             damage_multiplier: 1.0,
             health_multiplier: 1.0,
             speed_multiplier: 1.0,
@@ -267,6 +269,8 @@ mod tests {
         assert!(status.opposites.is_empty());
         assert!(status.transitions.is_empty());
         assert!(status.outline);
+        assert!(status.base.all_database_tabs);
+        assert!(status.base.database_tabs.is_empty());
     }
 
     #[test]
