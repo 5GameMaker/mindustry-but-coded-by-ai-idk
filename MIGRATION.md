@@ -20167,6 +20167,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 地图缩略图、`MapPlayDialog` 完整 play/custom rules/high score，以及 `EditorMapsDialog` 的完整 map info/open/delete/workshop 流程仍需继续迁移；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 585. MapListDialog planet select 子弹窗闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **63.9%**，仍未达到完整可玩；继续优先前端/UI，把 `MapListDialog.showMapFilters()` 里的 planet select 从文字提示推进为可打开、可关闭、可切换的子弹窗，并让筛选实际影响地图列表。
+- Java 对照依据：
+  - `showMapFilters()` 中 planet 按钮会打开 `@editor.filters.planetselect` 子弹窗；
+  - 子弹窗包含 `@rules.anyenv` 和可访问 planet 的 toggle；
+  - active planet filters 非空时，`rebuildMaps()` 只保留 `rules.planet` 命中的地图。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `map_list_planet_filter_dialog_open` 与 `map_list_filter_planets` 状态；
+    - 新增 `OpenMapListPlanetFilters / CloseMapListPlanetFilters / TogglePlanet(index)` route action；
+    - filter 主弹窗底部 planet 行改为真实按钮，点击后打开 `@editor.filters.planetselect` 子弹窗；
+    - planet 子弹窗渲染 `@rules.anyenv`、`erekir`、`serpulo` 等可访问 planet；
+    - `filtered_map_card_indices()` 通过 `MapDescriptor::rules().planet` 接入实际 planet 过滤；
+    - route/back/card 打开等路径会同步关闭 planet 子弹窗，避免遮罩残留。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `@rules.anyenv` 当前按普通 planet 候选显示，尚未完整复刻 Java 右键/长按清空当前可用 planet filters 的交互；
+  - planet 图标和 `planet.name + "-ui"` / tint fallback 尚未完全接原版 atlas；
+  - planet filter 状态还未接 settings JSON 持久化；
+  - 地图缩略图、`MapPlayDialog` 完整 play/custom rules/high score，以及 `EditorMapsDialog` 的完整 map info/open/delete/workshop 流程仍需继续迁移；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

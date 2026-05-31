@@ -552,6 +552,7 @@ pub enum DesktopMapListFilterAction {
     ToggleShowCustom,
     ToggleShowBuiltin,
     ToggleShowModded,
+    TogglePlanet(usize),
     ToggleSearchAuthor,
     ToggleSearchDescription,
     ToggleSearchModName,
@@ -2525,6 +2526,8 @@ pub enum DesktopMenuRouteShellAction {
     RefreshJoinServers,
     OpenMapListFilters,
     CloseMapListFilters,
+    OpenMapListPlanetFilters,
+    CloseMapListPlanetFilters,
     MapListFilter(DesktopMapListFilterAction),
     FocusMapListSearch,
     ClearMapListSearch,
@@ -15442,7 +15445,9 @@ pub struct DesktopLauncher {
     pub map_list_search: String,
     pub map_list_search_focused: bool,
     pub map_list_scroll_offset: usize,
+    pub map_list_planet_filter_dialog_open: bool,
     pub map_list_filter_modes: Vec<Gamemode>,
+    pub map_list_filter_planets: Vec<String>,
     pub map_list_filter_show_builtin: bool,
     pub map_list_filter_show_custom: bool,
     pub map_list_filter_show_modded: bool,
@@ -16220,7 +16225,9 @@ impl DesktopLauncher {
             map_list_search: String::new(),
             map_list_search_focused: false,
             map_list_scroll_offset: 0,
+            map_list_planet_filter_dialog_open: false,
             map_list_filter_modes: Vec::new(),
+            map_list_filter_planets: Vec::new(),
             map_list_filter_show_builtin: true,
             map_list_filter_show_custom: true,
             map_list_filter_show_modded: true,
@@ -19948,6 +19955,7 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
             self.map_list_filter_dialog_open = false;
+            self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -19976,6 +19984,7 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
             self.map_list_filter_dialog_open = false;
+            self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -19998,6 +20007,7 @@ impl DesktopLauncher {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
+                self.map_list_planet_filter_dialog_open = false;
                 self.map_list_search_focused = false;
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
@@ -20033,6 +20043,7 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
             self.map_list_filter_dialog_open = false;
+            self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -20047,6 +20058,7 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
             self.map_list_filter_dialog_open = false;
+            self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -23194,6 +23206,30 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_list_filter_planet_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 34.0, dialog.y + 72.0, dialog.width - 68.0, 38.0)
+    }
+
+    fn map_list_planet_filter_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width * 0.54).clamp(300.0, 380.0);
+        let height = 292.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn map_list_planet_filter_option_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 28.0,
+            dialog.y + dialog.height - 92.0 - index as f32 * 50.0,
+            dialog.width - 56.0,
+            42.0,
+        )
+    }
+
     fn map_list_pane_rect_for_panel(panel: RenderRect, route: DesktopMenuRoute) -> RenderRect {
         let search = Self::map_list_search_rect_for_panel(panel, route);
         let bottom = Self::route_back_button_rect_for_panel(panel).bottom() + 18.0;
@@ -23282,6 +23318,9 @@ impl DesktopLauncher {
                 if !self.map_list_filter_allows_modes(map) {
                     return None;
                 }
+                if !self.map_list_filter_allows_planet(map) {
+                    return None;
+                }
                 if query.is_empty() {
                     return Some(index);
                 }
@@ -23315,6 +23354,34 @@ impl DesktopLauncher {
                 mode.valid(map)
             }
         })
+    }
+
+    fn map_list_planet_filter_candidates(&self) -> Vec<(String, String)> {
+        let mut candidates = vec![("sun".to_string(), "@rules.anyenv".to_string())];
+        candidates.extend(
+            self.content_loader
+                .catalog()
+                .planets
+                .iter()
+                .filter(|planet| planet.meta.accessible)
+                .map(|planet| {
+                    (
+                        planet.name().to_string(),
+                        planet.localized_name().to_string(),
+                    )
+                }),
+        );
+        candidates
+    }
+
+    fn map_list_filter_allows_planet(&self, map: &MapDescriptor) -> bool {
+        if self.map_list_filter_planets.is_empty() {
+            return true;
+        }
+        let planet = map.rules().planet;
+        self.map_list_filter_planets
+            .iter()
+            .any(|selected| selected == &planet)
     }
 
     fn map_list_filter_matches_query(&self, map: &MapDescriptor, query: &str) -> bool {
@@ -23382,6 +23449,19 @@ impl DesktopLauncher {
                 self.map_list_filter_show_modded = !self.map_list_filter_show_modded;
                 if !self.map_list_filter_show_modded {
                     self.map_list_filter_prioritize_modded = false;
+                }
+            }
+            DesktopMapListFilterAction::TogglePlanet(index) => {
+                if let Some((planet, _)) = self.map_list_planet_filter_candidates().get(index) {
+                    if let Some(selected_index) = self
+                        .map_list_filter_planets
+                        .iter()
+                        .position(|selected| selected == planet)
+                    {
+                        self.map_list_filter_planets.remove(selected_index);
+                    } else {
+                        self.map_list_filter_planets.push(planet.clone());
+                    }
                 }
             }
             DesktopMapListFilterAction::ToggleSearchAuthor => {
@@ -24320,10 +24400,31 @@ impl DesktopLauncher {
         }
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
         let point = RenderPoint::new(x, y);
+        if self.map_list_planet_filter_dialog_open {
+            let dialog = Self::map_list_planet_filter_dialog_rect_for_panel(panel);
+            if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseMapListPlanetFilters);
+            }
+            for (index, _) in self
+                .map_list_planet_filter_candidates()
+                .into_iter()
+                .enumerate()
+            {
+                if Self::map_list_planet_filter_option_rect(dialog, index).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapListFilter(
+                        DesktopMapListFilterAction::TogglePlanet(index),
+                    ));
+                }
+            }
+            return None;
+        }
         if self.map_list_filter_dialog_open {
             let dialog = Self::map_list_filter_dialog_rect_for_panel(panel);
             if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseMapListFilters);
+            }
+            if Self::map_list_filter_planet_button_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::OpenMapListPlanetFilters);
             }
             for (index, mode) in Gamemode::ALL
                 .into_iter()
@@ -24897,6 +24998,7 @@ impl DesktopLauncher {
                 self.mods_import_dialog_open = false;
                 self.tech_tree_select_dialog_open = false;
                 self.map_list_filter_dialog_open = false;
+                self.map_list_planet_filter_dialog_open = false;
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
                 self.settings_child_dialog = None;
@@ -24926,9 +25028,19 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenMapListFilters => {
                 self.map_list_filter_dialog_open = true;
+                self.map_list_planet_filter_dialog_open = false;
             }
             DesktopMenuRouteShellAction::CloseMapListFilters => {
                 self.map_list_filter_dialog_open = false;
+                self.map_list_planet_filter_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::OpenMapListPlanetFilters => {
+                if self.map_list_filter_dialog_open {
+                    self.map_list_planet_filter_dialog_open = true;
+                }
+            }
+            DesktopMenuRouteShellAction::CloseMapListPlanetFilters => {
+                self.map_list_planet_filter_dialog_open = false;
             }
             DesktopMenuRouteShellAction::MapListFilter(action) => {
                 self.dispatch_map_list_filter_action(action);
@@ -24944,6 +25056,7 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::MapCard(action) => {
                 if self.map_list_cards.get(action.index).is_some() {
                     self.map_list_filter_dialog_open = false;
+                    self.map_list_planet_filter_dialog_open = false;
                     self.last_map_card_action = Some(action);
                     match action.kind {
                         DesktopMapCardActionKind::OpenPlay => {
@@ -26919,6 +27032,7 @@ impl DesktopLauncher {
 
         self.push_map_card_dialog(pass, panel, route);
         self.push_map_list_filter_dialog(pass, panel);
+        self.push_map_list_planet_filter_dialog(pass, panel);
     }
 
     fn push_map_card_dialog(
@@ -27376,23 +27490,88 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.096 + index as f32 * 0.001,
             );
         }
-        pass.push(RenderCommand::draw_text_styled(
-            "@editor.filters.planetselect: @rules.anyenv",
-            RenderPoint::new(dialog.x + 34.0, dialog.y + 78.0),
-            [0.58, 0.68, 0.76, 0.94],
-            9.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
+        let planet_summary = if self.map_list_filter_planets.is_empty() {
+            "@rules.anyenv".to_string()
+        } else {
+            self.map_list_filter_planets.join(", ")
+        };
+        self.push_settings_text_button(
+            pass,
+            Self::map_list_filter_planet_button_rect(dialog),
+            format!("@editor.filters.planetselect: {planet_summary}"),
+            Some("planet"),
             Layer::END_PIXELED + 0.100,
-        ));
+        );
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
             "@back",
             Some("left"),
             Layer::END_PIXELED + 0.103,
+        );
+    }
+
+    fn push_map_list_planet_filter_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if !self.map_list_planet_filter_dialog_open {
+            return;
+        }
+        let dialog = Self::map_list_planet_filter_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.52],
+            Layer::END_PIXELED + 0.106,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.107,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.108,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@editor.filters.planetselect",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.109,
+        ));
+
+        for (index, (planet_name, label)) in self
+            .map_list_planet_filter_candidates()
+            .into_iter()
+            .enumerate()
+        {
+            let checked = self
+                .map_list_filter_planets
+                .iter()
+                .any(|selected| selected == &planet_name);
+            self.push_map_list_filter_toggle(
+                pass,
+                Self::map_list_planet_filter_option_rect(dialog, index),
+                label,
+                checked,
+                true,
+                Layer::END_PIXELED + 0.112 + index as f32 * 0.001,
+            );
+        }
+
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.120,
         );
     }
 
@@ -47070,6 +47249,107 @@ version: "2.0.0"
                 super::DesktopMapListFilterAction::ToggleMode(Gamemode::Survival)
             ))
         );
+    }
+
+    #[test]
+    fn desktop_launcher_map_list_planet_filter_dialog_filters_maps_by_rules_planet() {
+        fn map_card(name: &str, planet: &str) -> MapDescriptor {
+            let mut tags = BTreeMap::new();
+            tags.insert("name".to_string(), name.to_string());
+            tags.insert("author".to_string(), "Anuke".to_string());
+            let env = if planet == "serpulo" { 1 } else { 16 };
+            tags.insert(
+                "rules".to_string(),
+                format!("{{\"planet\":\"{planet}\",\"env\":{env}}}"),
+            );
+            let mut map =
+                MapDescriptor::new(format!("maps/{name}.msav"), 128, 128, tags, false, 1, 158);
+            map.spawns = 1;
+            map.teams = vec![1, 2];
+            map
+        }
+
+        fn visible_names(launcher: &DesktopLauncher) -> Vec<String> {
+            launcher
+                .filtered_map_card_indices()
+                .into_iter()
+                .map(|index| launcher.map_list_cards[index].plain_name())
+                .collect()
+        }
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![
+            map_card("Serpulo Arena", "serpulo"),
+            map_card("Erekir Arena", "erekir"),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenMapListFilters,
+        );
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let filter_dialog = DesktopLauncher::map_list_filter_dialog_rect_for_panel(panel);
+        let planet_button =
+            DesktopLauncher::map_list_filter_planet_button_rect(filter_dialog).center();
+        let action = launcher.active_menu_route_shell_action_at_surface_point(
+            surface,
+            planet_button.x,
+            planet_button.y,
+        );
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::OpenMapListPlanetFilters)
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert!(launcher.map_list_planet_filter_dialog_open);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("planet filter dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@editor.filters.planetselect"));
+        assert!(texts.contains(&"@rules.anyenv"));
+        assert!(texts.contains(&"erekir"));
+        assert!(texts.contains(&"serpulo"));
+
+        let planet_dialog = DesktopLauncher::map_list_planet_filter_dialog_rect_for_panel(panel);
+        let erekir = DesktopLauncher::map_list_planet_filter_option_rect(planet_dialog, 1).center();
+        let action =
+            launcher.active_menu_route_shell_action_at_surface_point(surface, erekir.x, erekir.y);
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePlanet(1)
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert_eq!(launcher.map_list_filter_planets, vec!["erekir".to_string()]);
+        assert_eq!(visible_names(&launcher), vec!["Erekir Arena".to_string()]);
+
+        let close = DesktopLauncher::schematic_info_button_rect(planet_dialog, 0).center();
+        let action =
+            launcher.active_menu_route_shell_action_at_surface_point(surface, close.x, close.y);
+        assert_eq!(
+            action,
+            Some(super::DesktopMenuRouteShellAction::CloseMapListPlanetFilters)
+        );
+        launcher.dispatch_menu_route_shell_action(action.unwrap());
+        assert!(!launcher.map_list_planet_filter_dialog_open);
+        assert!(launcher.map_list_filter_dialog_open);
     }
 
     #[test]
