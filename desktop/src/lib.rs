@@ -149,9 +149,8 @@ const SETTINGS_RESET_BUTTON_HEIGHT: f32 = 44.0;
 const SETTINGS_BACK_BUTTON_WIDTH: f32 = 210.0;
 const SETTINGS_BACK_BUTTON_HEIGHT: f32 = 64.0;
 const SETTINGS_DATA_BUTTON_WIDTH: f32 = 280.0;
-const SETTINGS_DATA_BUTTON_HEIGHT: f32 = 54.0;
+const SETTINGS_DATA_BUTTON_HEIGHT: f32 = 60.0;
 const SETTINGS_DATA_BUTTON_GAP: f32 = 8.0;
-const SETTINGS_DATA_TWO_COLUMN_MIN_WIDTH: f32 = 620.0;
 const SETTINGS_PLANET_DATA_BUTTON_WIDTH: f32 = 280.0;
 const SETTINGS_PLANET_DATA_BUTTON_HEIGHT: f32 = 60.0;
 const SETTINGS_PLANET_OPTION_WIDTH: f32 = 110.0;
@@ -23497,12 +23496,8 @@ impl DesktopLauncher {
         )
     }
 
-    fn settings_data_action_column_count_for_panel(panel: RenderRect) -> usize {
-        if panel.width >= SETTINGS_DATA_TWO_COLUMN_MIN_WIDTH {
-            2
-        } else {
-            1
-        }
+    fn settings_data_action_column_count_for_panel(_panel: RenderRect) -> usize {
+        1
     }
 
     fn settings_data_actions_container_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -23512,15 +23507,9 @@ impl DesktopLauncher {
             + columns.saturating_sub(1) as f32 * SETTINGS_DATA_BUTTON_GAP;
         let content_height = rows as f32 * SETTINGS_DATA_BUTTON_HEIGHT
             + rows.saturating_sub(1) as f32 * SETTINGS_DATA_BUTTON_GAP;
-        let width = (content_width + 28.0)
-            .min(panel.width - 56.0)
-            .max(content_width);
+        let width = (content_width + 28.0).max(content_width);
         let height = content_height + 64.0;
-        let back_top = Self::settings_back_button_rect_for_panel(panel).bottom();
-        let available_bottom = back_top + 18.0;
-        let available_top = panel.y + panel.height - 84.0;
-        let available_height = (available_top - available_bottom).max(height);
-        let y = available_bottom + (available_height - height).max(0.0) * 0.5;
+        let y = panel.center().y - height * 0.5;
         RenderRect::new(panel.x + (panel.width - width) * 0.5, y, width, height)
     }
 
@@ -61504,9 +61493,14 @@ version: "2.0.0"
             DesktopLauncher::settings_data_action_button_rect_for_panel(settings_panel, 1);
         assert_eq!(first_data_button.width, super::SETTINGS_DATA_BUTTON_WIDTH);
         assert_eq!(first_data_button.height, super::SETTINGS_DATA_BUTTON_HEIGHT);
-        assert!(
-            (first_data_button.y - second_data_button.y).abs() < 0.01,
-            "wide Settings data dialog should keep Java 280x60-like action buttons by laying them out in two columns"
+        assert_eq!(
+            first_data_button.x, second_data_button.x,
+            "Java dataDialog lays 280x60 action buttons in a single vertical column even on wide screens"
+        );
+        assert_eq!(
+            first_data_button.y - second_data_button.y,
+            super::SETTINGS_DATA_BUTTON_HEIGHT + super::SETTINGS_DATA_BUTTON_GAP,
+            "Java dataDialog keeps one 280x60 button per row"
         );
         assert!(data_container.contains_point(first_data_button.center()));
         let data_container_symbol = DesktopLauncher::settings_drawable_symbol("button");

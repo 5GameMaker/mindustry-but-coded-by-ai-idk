@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 607. Settings Data 页改回 Java 单列动作表
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.7%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 Settings → Data 页从宽屏两列网格收回 Java `dataDialog` 的单列按钮表。
+- Java 对照依据：
+  - `SettingsMenuDialog` 的 `dataDialog.cont.pane(t -> { t.defaults().size(280f, 60f).left(); ... })`；
+  - Data 动作按钮是纵向单列，每个按钮 280×60，图标语义仍为 `Icon.trash/upload/download/folder`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `SETTINGS_DATA_BUTTON_HEIGHT` 从 54 调整为 60；
+    - `settings_data_action_column_count_for_panel(...)` 固定返回 1，宽屏不再切成两列；
+    - `settings_data_actions_container_rect_for_panel(...)` 改为按完整单列动作表高度居中布局；
+    - 回归测试从“两列同 y”改为断言前两个 Data 按钮同 x、相邻行距为 `60 + gap`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Java `dataDialog` 是 `pane(...)` 滚动内容；当前 Rust 已恢复单列尺寸/顺序，但还未补独立 ScrollPane 轨道与滚动偏移；
+  - `PlanetDataDialog` 的 planet 选择仍是固定选项条，不是 Java `content.planets()` 动态 4 列 chooser；
+  - DatabaseDialog 仍是轻量路由页，后续需单独还原 50×50 tabs 与完整 content grid。
+
 ## 606. MapPlayDialog 结构骨架与 LoadDialog 筛选热区继续对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
