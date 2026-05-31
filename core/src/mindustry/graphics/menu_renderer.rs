@@ -440,6 +440,7 @@ pub struct MenuRendererConfig {
     pub seed: u64,
     pub tile_size: f32,
     pub desktop_workshop_enabled: bool,
+    pub mobile_ios: bool,
 }
 
 impl MenuRendererConfig {
@@ -449,11 +450,17 @@ impl MenuRendererConfig {
             seed,
             tile_size: MENU_TILE_SIZE,
             desktop_workshop_enabled: false,
+            mobile_ios: false,
         }
     }
 
     pub const fn with_desktop_workshop_enabled(mut self, enabled: bool) -> Self {
         self.desktop_workshop_enabled = enabled;
+        self
+    }
+
+    pub const fn with_mobile_ios(mut self, enabled: bool) -> Self {
+        self.mobile_ios = enabled;
         self
     }
 
@@ -1188,6 +1195,7 @@ impl MenuRendererState {
                 self.submenu_alpha,
                 self.submenu_target_alpha,
                 self.config.desktop_workshop_enabled,
+                self.config.mobile_ios,
                 &self.custom_buttons,
             ),
         }
@@ -1246,6 +1254,7 @@ impl MenuRendererState {
             self.submenu_alpha,
             self.submenu_target_alpha,
             self.config.desktop_workshop_enabled,
+            self.config.mobile_ios,
             &self.custom_buttons,
         )
     }
@@ -1933,7 +1942,16 @@ fn menu_mobile_custom_entry(index: usize, button: &MenuCustomButton) -> MenuMobi
     }
 }
 
-fn menu_mobile_ui_plan(input: MenuFrameInput, custom_buttons: &[MenuCustomButton]) -> MenuUiPlan {
+fn menu_mobile_ui_plan(
+    input: MenuFrameInput,
+    custom_buttons: &[MenuCustomButton],
+    mobile_ios: bool,
+) -> MenuUiPlan {
+    let final_role = if mobile_ios {
+        MenuButtonRole::About
+    } else {
+        MenuButtonRole::Quit
+    };
     let rows: Vec<Vec<MenuMobileEntry>> = if input.graphics_width > input.graphics_height {
         let mut first = vec![
             menu_mobile_button_entry(MenuButtonRole::Campaign),
@@ -1952,7 +1970,7 @@ fn menu_mobile_ui_plan(input: MenuFrameInput, custom_buttons: &[MenuCustomButton
         for index in (0..custom_buttons.len()).step_by(2) {
             second.push(menu_mobile_custom_entry(index, &custom_buttons[index]));
         }
-        second.push(menu_mobile_button_entry(MenuButtonRole::Quit));
+        second.push(menu_mobile_button_entry(final_role));
         vec![first, second]
     } else {
         let mut rows = vec![
@@ -1977,7 +1995,7 @@ fn menu_mobile_ui_plan(input: MenuFrameInput, custom_buttons: &[MenuCustomButton
                 current = Vec::new();
             }
         }
-        current.push(menu_mobile_button_entry(MenuButtonRole::Quit));
+        current.push(menu_mobile_button_entry(final_role));
         rows.push(current);
         rows
     };
@@ -2028,10 +2046,11 @@ fn menu_ui_plan(
     submenu_alpha: f32,
     submenu_target_alpha: f32,
     desktop_workshop_enabled: bool,
+    mobile_ios: bool,
     custom_buttons: &[MenuCustomButton],
 ) -> MenuUiPlan {
     if mobile {
-        menu_mobile_ui_plan(input, custom_buttons)
+        menu_mobile_ui_plan(input, custom_buttons, mobile_ios)
     } else {
         menu_desktop_ui_plan(
             input,
@@ -2657,6 +2676,38 @@ mod tests {
             state.hit_test_ui(input, join_center.x, join_center.y),
             Some(MenuButtonRole::Join)
         );
+    }
+
+    #[test]
+    fn menu_ui_plan_mobile_includes_about_on_ios_and_exit_elsewhere_like_java() {
+        let input = MenuFrameInput {
+            graphics_width: 720.0,
+            graphics_height: 1280.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        };
+
+        let mut android_state = MenuRendererState::new(MenuRendererConfig::new(true, 9));
+        let android_plan = android_state.render_plan(input);
+        assert_eq!(
+            android_plan.ui.buttons.last().map(|button| button.role),
+            Some(MenuButtonRole::Quit)
+        );
+
+        let mut ios_state =
+            MenuRendererState::new(MenuRendererConfig::new(true, 9).with_mobile_ios(true));
+        let ios_plan = ios_state.render_plan(input);
+        assert_eq!(
+            ios_plan.ui.buttons.last().map(|button| button.role),
+            Some(MenuButtonRole::About)
+        );
+        assert!(!ios_plan
+            .ui
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Quit));
     }
 
     #[test]

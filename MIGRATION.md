@@ -19979,6 +19979,31 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - enabled/disabled 状态、依赖错误、删除/重载/GitHub/browser/release 仍需继续迁移；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 578. MenuFragment 移动端 iOS About/Exit 分支闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **63.0%**，仍未达到完整可玩；继续优先前端/UI，把 `MenuFragment.buildMobile()` 中最后一个按钮的 iOS 平台分支接入 Rust 菜单计划。
+- Java 对照依据：
+  - 上游移动端菜单最后一项是 `ios ? about : exit`；
+  - Rust 之前移动端固定放 `Quit`，在 iOS 形态下按钮集合与 Java 不一致；
+  - 这是可见菜单按钮集合差异，属于 UI 还原 P0 小闭环。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuRendererConfig` 新增 `mobile_ios` 与 `with_mobile_ios(...)`；
+    - `menu_mobile_ui_plan(...)` 根据 `mobile_ios` 在最后按钮选择 `About` 或 `Quit`；
+    - 默认保持非 iOS 行为，不影响现有 Android/desktop 测试；
+    - 新增测试覆盖 iOS 使用 `About`、非 iOS 使用 `Quit`，并确认 iOS 移动菜单不再包含 `Quit`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan_mobile_includes_about_on_ios_and_exit_elsewhere_like_java --lib`
+  - `cargo test -p mindustry-core menu_renderer --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 桌面/移动端 logo 与版本文字仍需继续按 Java `Scl.scl(...)` 与真实 logo 比例收紧；
+  - chrome/button 样式仍需继续消除 fallback 色块，完全靠 upstream drawable/state；
+  - 移动端 terminal overlay 仍不是完整 `consolefrag`；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
