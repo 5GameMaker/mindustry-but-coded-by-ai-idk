@@ -2712,6 +2712,15 @@ pub struct DesktopLoadGameExportResult {
     pub status: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopLoadGameRenameResult {
+    pub slot: String,
+    pub setting_key: String,
+    pub previous_name: String,
+    pub new_name: String,
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DesktopMenuChromeLayoutOptions {
     console_shown: bool,
@@ -15952,6 +15961,8 @@ pub struct DesktopLauncher {
     pub last_load_game_import_result: Option<DesktopLoadGameImportResult>,
     pub last_load_game_export_request: Option<FileChooserRequest>,
     pub last_load_game_export_result: Option<DesktopLoadGameExportResult>,
+    pub last_load_game_rename_result: Option<DesktopLoadGameRenameResult>,
+    pub load_game_slot_names: BTreeMap<String, String>,
     pub load_game_search: String,
     pub load_game_search_focused: bool,
     pub load_game_scroll_offset: usize,
@@ -16777,6 +16788,8 @@ impl DesktopLauncher {
             last_load_game_import_result: None,
             last_load_game_export_request: None,
             last_load_game_export_result: None,
+            last_load_game_rename_result: None,
+            load_game_slot_names: BTreeMap::new(),
             load_game_search: String::new(),
             load_game_search_focused: false,
             load_game_scroll_offset: 0,
@@ -20811,6 +20824,13 @@ impl DesktopLauncher {
             .unwrap_or_else(|| slot.index())
     }
 
+    fn load_game_slot_display_title(&self, slot: &SaveSlotRecord) -> String {
+        self.load_game_slot_names
+            .get(&slot.name_setting_key())
+            .cloned()
+            .unwrap_or_else(|| Self::load_game_slot_title(slot))
+    }
+
     fn load_game_slot_lines(&self) -> Vec<String> {
         if let Some(error) = self.load_game_error.as_ref() {
             return vec![format!("save slots: error"), error.clone()];
@@ -20842,7 +20862,7 @@ impl DesktopLauncher {
             let Some(slot) = self.load_game_slots.get(*slot_index) else {
                 continue;
             };
-            let title = Self::load_game_slot_title(slot);
+            let title = self.load_game_slot_display_title(slot);
             let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
             lines.push(format!(
                 "#{visible_index} {} | wave {} | saved {}",
@@ -23605,7 +23625,7 @@ impl DesktopLauncher {
             .enumerate()
             .filter_map(|(index, slot)| {
                 if query.is_empty()
-                    || schematic_search_normalize(&Self::load_game_slot_title(slot))
+                    || schematic_search_normalize(&self.load_game_slot_display_title(slot))
                         .contains(&query)
                     || schematic_search_normalize(&slot.index()).contains(&query)
                     || slot
@@ -23815,6 +23835,16 @@ impl DesktopLauncher {
                 destination.display()
             )
         })?;
+        let imported_name = source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.trim().is_empty())
+            .unwrap_or("untitled")
+            .to_string();
+        self.load_game_slot_names.insert(
+            SaveSlotRecord::new(destination.clone()).name_setting_key(),
+            imported_name,
+        );
         self.refresh_load_game_slots();
         let result = DesktopLoadGameImportResult {
             source: source.display().to_string(),
@@ -23876,6 +23906,38 @@ impl DesktopLauncher {
             status: "exported".into(),
         };
         self.last_load_game_export_result = Some(result.clone());
+        Ok(result)
+    }
+
+    fn rename_load_game_slot(
+        &mut self,
+        slot_index: usize,
+        new_name: impl Into<String>,
+    ) -> Result<DesktopLoadGameRenameResult, String> {
+        let slot = self
+            .load_game_slots
+            .get(slot_index)
+            .cloned()
+            .ok_or_else(|| format!("missing save slot {slot_index}"))?;
+        let new_name = new_name.into();
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            let message = "@save.rename.empty".to_string();
+            self.load_game_error = Some(message.clone());
+            return Err(message);
+        }
+        let previous_name = self.load_game_slot_display_title(&slot);
+        let setting_key = slot.name_setting_key();
+        self.load_game_slot_names
+            .insert(setting_key.clone(), trimmed.to_string());
+        let result = DesktopLoadGameRenameResult {
+            slot: slot.index(),
+            setting_key,
+            previous_name,
+            new_name: trimmed.to_string(),
+            status: "renamed".into(),
+        };
+        self.last_load_game_rename_result = Some(result.clone());
         Ok(result)
     }
 
@@ -30263,7 +30325,7 @@ impl DesktopLauncher {
                 1.0,
                 Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.0001,
             ));
-            let title = Self::load_game_slot_title(slot);
+            let title = self.load_game_slot_display_title(slot);
             let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
             pass.push(RenderCommand::draw_text_styled(
                 format!("[accent]{title}"),
@@ -54107,7 +54169,22 @@ version: "2.0.0"
         assert!(launcher
             .load_game_slots
             .iter()
-            .any(|slot| DesktopLauncher::load_game_slot_title(slot) == "Imported Map"));
+            .any(|slot| launcher.load_game_slot_display_title(slot) == "incoming"));
+
+        let rename = launcher
+            .rename_load_game_slot(0, "Renamed Save")
+            .expect("imported save should rename through settings mirror");
+        assert_eq!(rename.previous_name, "incoming");
+        assert_eq!(rename.new_name, "Renamed Save");
+        assert_eq!(rename.status, "renamed");
+        assert_eq!(launcher.last_load_game_rename_result, Some(rename));
+        assert_eq!(
+            launcher.load_game_slot_display_title(&launcher.load_game_slots[0]),
+            "Renamed Save"
+        );
+        launcher.load_game_search = "renamed".into();
+        assert_eq!(launcher.filtered_load_game_slot_indices(), vec![0]);
+        launcher.load_game_search.clear();
 
         let mut platform = RecordingPlatform::default();
         let export_action = launcher

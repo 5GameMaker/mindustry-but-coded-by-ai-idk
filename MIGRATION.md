@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 569. LoadDialog rename 保存名 settings mirror
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.1%**，仍未达到完整可玩；继续迁移 LoadDialog 槽位命名流程。
+- Java 对照依据：
+  - `core/src/mindustry/game/Saves.java` 的 `SaveSlot.getName()`/`setName()` 使用 `save-<index>-name` settings key；
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 的 rename 按钮通过 text input 调用 `slot.setName(text)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGameRenameResult`、`last_load_game_rename_result` 与 `load_game_slot_names`；
+    - 新增 `load_game_slot_display_title(...)`，优先读取 `SaveSlotRecord::name_setting_key()` 对应名称；
+    - 导入存档时按 Java `importSave(...).setName(file.nameWithoutExtension())` 语义写入导入源文件名；
+    - 新增 `rename_load_game_slot(...)`，复用 `slot.name_setting_key()` 写入 settings mirror，并让列表标题/搜索立即使用新名称；
+    - 扩展 LoadGame 测试覆盖导入后的默认保存名、rename、搜索联动、rename result。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - Java `ui.showTextInput("@save.rename", "@save.rename.text", ...)` 对应的真实输入弹层/持久化 settings 后端仍需接入；
+  - fallback 仍处于过渡兼容：未写入名称时 Rust 仍展示 map name/index，后续需与 Java `untitled` fallback 做最终对齐；
+  - SaveDialog/覆盖确认仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 568. LoadDialog export chooser 标题对齐 Java Platform.export
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
