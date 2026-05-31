@@ -30864,11 +30864,7 @@ impl DesktopLauncher {
                 .collect::<Vec<_>>();
             let label = Self::database_category_label(content_type);
             pass.push(RenderCommand::draw_text_styled(
-                format!(
-                    "{} | {}",
-                    label,
-                    self.content_loader.get_by(content_type).len()
-                ),
+                label,
                 RenderPoint::new(header.x, header.center().y),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
                 12.0,
@@ -59541,6 +59537,13 @@ version: "2.0.0"
         assert!(route_texts
             .iter()
             .any(|text| text.starts_with("@database-category.")));
+        assert!(
+            route_texts
+                .iter()
+                .filter(|text| text.starts_with("@database-category."))
+                .all(|text| !text.contains(" | ")),
+            "Java DatabaseDialog category headers are plain @database-category.* labels without Rust-side debug counts"
+        );
 
         let search = DesktopLauncher::database_search_rect_for_panel(panel).center();
         assert_eq!(

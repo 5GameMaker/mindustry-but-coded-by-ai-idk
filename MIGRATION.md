@@ -15,6 +15,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 626. DatabaseDialog 分类标题去除 Rust 调试计数
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.7%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是移除 DatabaseDialog 分类标题中的 Rust 侧调试计数，让首屏文字更贴近 Java。
+- Java 对照依据：
+  - `DatabaseDialog.rebuild()` 的分类标题只渲染 `@database-category.<name>`，没有追加 `| count`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_database_route_page(...)` 的分类标题从 `@database-category.* | <total>` 改回纯 `@database-category.*`；
+    - 扩展 DatabaseDialog 测试，确认分类标题不再包含 ` | ` 调试计数。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+- 仍未完成：
+  - DatabaseDialog 仍未完全按 Java `category -> tag -> records` 多层布局重排；
+  - Block/Sector/Planet 的完整 `UnlockableContentBase` 迁移仍待推进；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 625. DatabaseDialog 接入 tech tree 页签语义与 viewfields 点击链路
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
