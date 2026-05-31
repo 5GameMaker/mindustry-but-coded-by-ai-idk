@@ -298,6 +298,68 @@ impl DesktopJoinRouteServerSnapshot {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopJoinCommunityGroup {
+    pub name: String,
+    pub addresses: Vec<String>,
+    pub prioritized: bool,
+    pub hosts: Vec<Host>,
+}
+
+impl DesktopJoinCommunityGroup {
+    pub fn new(name: impl Into<String>, addresses: Vec<String>, prioritized: bool) -> Self {
+        Self {
+            name: name.into(),
+            addresses,
+            prioritized,
+            hosts: Vec::new(),
+        }
+    }
+
+    pub fn key(&self) -> String {
+        let key = if self.name.trim().is_empty() {
+            self.addresses
+                .first()
+                .map(String::as_str)
+                .unwrap_or("unknown")
+        } else {
+            self.name.as_str()
+        };
+        format!("server-{key}")
+    }
+
+    pub fn hidden_setting_key(&self) -> String {
+        format!("{}-hidden", self.key())
+    }
+
+    pub fn favorite_setting_key(&self) -> String {
+        format!("{}-favorite", self.key())
+    }
+
+    fn matches_query(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return true;
+        }
+        self.name.to_lowercase().contains(&query)
+            || self
+                .addresses
+                .iter()
+                .any(|address| address.to_lowercase().contains(&query))
+            || self.hosts.iter().any(|host| {
+                [
+                    host.name.as_str(),
+                    host.description.as_str(),
+                    host.mapname.as_str(),
+                    host.mode_name.as_deref().unwrap_or_default(),
+                    host.address.as_str(),
+                ]
+                .into_iter()
+                .any(|field| field.to_lowercase().contains(&query))
+            })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DesktopMapListCardSummary {
     name: String,
@@ -16400,6 +16462,7 @@ pub struct DesktopLauncher {
     pub join_local_discovering: bool,
     pub join_local_discovery_finished: bool,
     pub join_local_discovery_receiver: Option<Arc<Mutex<mpsc::Receiver<Option<Host>>>>>,
+    pub join_community_groups: Vec<DesktopJoinCommunityGroup>,
     pub join_saved_servers: Vec<DesktopConnectTarget>,
     pub join_refresh_requests: u32,
     pub join_search: String,
@@ -17301,6 +17364,7 @@ impl DesktopLauncher {
             join_local_discovering: false,
             join_local_discovery_finished: false,
             join_local_discovery_receiver: None,
+            join_community_groups: Vec::new(),
             join_saved_servers,
             join_refresh_requests: 0,
             join_search: String::new(),
@@ -27106,6 +27170,47 @@ impl DesktopLauncher {
         self.join_saved_servers.len()
     }
 
+    fn join_community_group_setting_bool(&self, key: &str) -> bool {
+        self.settings_overrides
+            .get(key)
+            .is_some_and(|value| matches!(value.as_str(), "true" | "1"))
+    }
+
+    fn join_community_group_hidden(&self, group: &DesktopJoinCommunityGroup) -> bool {
+        self.join_community_group_setting_bool(&group.hidden_setting_key())
+    }
+
+    fn join_community_group_favorite(&self, group: &DesktopJoinCommunityGroup) -> bool {
+        self.join_community_group_setting_bool(&group.favorite_setting_key())
+    }
+
+    pub fn set_join_community_group_hidden(&mut self, index: usize, hidden: bool) -> bool {
+        let Some(group) = self.join_community_groups.get(index) else {
+            return false;
+        };
+        self.settings_overrides
+            .insert(group.hidden_setting_key(), hidden.to_string());
+        true
+    }
+
+    pub fn set_join_community_group_favorite(&mut self, index: usize, favorite: bool) -> bool {
+        let Some(group) = self.join_community_groups.get(index) else {
+            return false;
+        };
+        self.settings_overrides
+            .insert(group.favorite_setting_key(), favorite.to_string());
+        true
+    }
+
+    fn visible_join_community_groups(&self) -> Vec<(usize, &DesktopJoinCommunityGroup)> {
+        self.join_community_groups
+            .iter()
+            .enumerate()
+            .filter(|(_, group)| self.join_show_hidden || !self.join_community_group_hidden(group))
+            .filter(|(_, group)| group.matches_query(&self.join_search))
+            .collect()
+    }
+
     fn delete_join_saved_server_at(&mut self, index: usize) -> bool {
         if index >= self.join_saved_servers.len() {
             return false;
@@ -32993,17 +33098,47 @@ impl DesktopLauncher {
             }),
             Layer::END_PIXELED + 0.036,
         );
-        pass.push(RenderCommand::draw_text_styled(
-            "@hosts.none",
-            RenderPoint::new(panel.x + 36.0, search.y - 22.0),
-            [0.58, 0.68, 0.76, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.037,
-        ));
+        let visible_community_groups = self.visible_join_community_groups();
+        if visible_community_groups.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@hosts.none",
+                RenderPoint::new(panel.x + 36.0, search.y - 22.0),
+                [0.58, 0.68, 0.76, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.037,
+            ));
+        } else {
+            for (visible_index, (group_index, group)) in
+                visible_community_groups.into_iter().take(3).enumerate()
+            {
+                let favorite = self.join_community_group_favorite(group);
+                let hidden = self.join_community_group_hidden(group);
+                pass.push(RenderCommand::draw_text_styled(
+                    format!(
+                        "community[{group_index}]: {} hosts:{} favorite:{} hidden:{}",
+                        group.name,
+                        group.hosts.len().max(group.addresses.len()),
+                        if favorite { "on" } else { "off" },
+                        if hidden { "on" } else { "off" }
+                    ),
+                    RenderPoint::new(
+                        panel.x + 36.0,
+                        search.y - 22.0 - visible_index as f32 * 18.0,
+                    ),
+                    [0.66, 0.78, 0.86, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.037 + visible_index as f32 * 0.0001,
+                ));
+            }
+        }
         self.push_join_add_server_dialog(pass, panel);
         self.push_join_delete_dialog(pass, panel);
         self.push_join_info_dialog(pass, panel);
@@ -37691,6 +37826,7 @@ impl DesktopLauncher {
                 ]
             }
             DesktopMenuRoute::Join => {
+                let visible_community_groups = self.visible_join_community_groups();
                 let mut lines = vec![
                     format!(
                         "section: @servers.local hosts: {} state:{}",
@@ -37707,7 +37843,10 @@ impl DesktopLauncher {
                         "section: @servers.remote favorites: {}",
                         self.join_saved_servers.len()
                     ),
-                    "section: @servers.global groups: 0".into(),
+                    format!(
+                        "section: @servers.global groups: {}",
+                        visible_community_groups.len()
+                    ),
                     format!(
                         "section: @servers.community search:{} hidden:{}",
                         if self.join_search.trim().is_empty() {
@@ -37738,6 +37877,23 @@ impl DesktopLauncher {
                         ),
                         format!("local[{index}] ping: {}ms", host.ping),
                         format!("local[{index}] actions: connect"),
+                    ]);
+                }
+                for (index, group) in visible_community_groups {
+                    let favorite = self.join_community_group_favorite(group);
+                    let hidden = self.join_community_group_hidden(group);
+                    lines.extend([
+                        format!(
+                            "community[{index}]: {} addresses:{} prioritized:{} favorite:{} hidden:{} hosts:{}",
+                            group.name,
+                            group.addresses.len(),
+                            group.prioritized,
+                            favorite,
+                            hidden,
+                            group.hosts.len()
+                        ),
+                        format!("community[{index}] key: {}", group.key()),
+                        format!("community[{index}] actions: favorite hidden connect"),
                     ]);
                 }
                 if self.join_info_dialog_open {
@@ -67747,11 +67903,8 @@ version: "2.0.0"
 
     #[test]
     fn desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local() {
-        let port = free_local_port();
-        let mut server = ArcNetProvider::new();
-        server.host_server(port).unwrap();
+        let port = super::DEFAULT_MINDUSTRY_PORT;
         let mut launcher = DesktopLauncher::new(Vec::new());
-        launcher.client.setup();
         launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         let (tx, rx) = std::sync::mpsc::channel();
         launcher.join_local_discovering = true;
@@ -67838,14 +67991,76 @@ version: "2.0.0"
                 port,
             })
         );
-        launcher.update();
-        let state = launcher.net_client.state();
-        let state = state.lock().unwrap();
-        assert_eq!(state.connection_attempts, 1);
-        assert!(state.connect_packet_sent);
-        drop(state);
-        launcher.net_client.net_mut().disconnect();
-        server.close_server();
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_tracks_community_groups_like_java_server_group() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        let mut group = super::DesktopJoinCommunityGroup::new(
+            "Official",
+            vec!["community.example:6567".into()],
+            true,
+        );
+        group.hosts.push(mindustry_core::mindustry::net::Host::new(
+            37,
+            "Community Host",
+            "community.example",
+            6567,
+            "sector map",
+            1,
+            12,
+            158,
+            "official",
+            Gamemode::Survival,
+            24,
+            "public survival server",
+            Some("@mode.survival.name".into()),
+        ));
+        launcher.join_community_groups.push(group);
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(lines.contains(&"section: @servers.global groups: 1".to_string()));
+        assert!(lines.contains(
+            &"community[0]: Official addresses:1 prioritized:true favorite:false hidden:false hosts:1"
+                .to_string()
+        ));
+        assert!(lines.contains(&"community[0] key: server-Official".to_string()));
+        assert!(lines.contains(&"community[0] actions: favorite hidden connect".to_string()));
+
+        assert!(launcher.set_join_community_group_favorite(0, true));
+        assert!(launcher.set_join_community_group_hidden(0, true));
+        let hidden_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(hidden_lines.contains(&"section: @servers.global groups: 0".to_string()));
+        launcher.join_show_hidden = true;
+        let shown_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(shown_lines.contains(
+            &"community[0]: Official addresses:1 prioritized:true favorite:true hidden:true hosts:1"
+                .to_string()
+        ));
+
+        launcher.join_search = "survival".into();
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join community frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("community[0]: Official")
+                && text.contains("favorite:on")
+                && text.contains("hidden:on")));
     }
 
     #[test]

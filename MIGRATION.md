@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 644. JoinDialog community ServerGroup 数据载体接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.6%**，仍未达到完整可玩；继续优先前端/UI 与联机入口，当前闭环目标是给 Java `ServerGroup` 的 community/global 服务器层补上 Rust 数据载体与可见 UI 骨架，后续 favorite/hidden/disclaimer 交互不再悬空。
+- Java 对照依据：
+  - `ServerGroup` 持有 `name / addresses / prioritized`，并通过 `server-<key>-hidden`、`server-<key>-favorite` 读取隐藏/收藏状态；
+  - `JoinDialog.refreshCommunity()` 按 group 渲染 global/community 列表，搜索会匹配 group name 与 host name/description/map/mode；
+  - hidden group 默认不显示，打开 show hidden 后再进入列表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopJoinCommunityGroup { name, addresses, prioritized, hosts }` 及 `key()/hidden_setting_key()/favorite_setting_key()`；
+    - `DesktopLauncher` 新增 `join_community_groups`，并提供 `set_join_community_group_hidden/favorite(...)` 与 `visible_join_community_groups()`；
+    - `active_menu_route_shell_lines(Join)` 的 `@servers.global` 从固定 `groups: 0` 改为真实可见 group 数，输出 group key、prioritized、favorite、hidden、host 数和后续动作语义；
+    - `push_join_route_page()` 的 community 区域不再只能显示 `@hosts.none`，有 group 时展示 `community[index]` 摘要行，能反映 favorite/hidden 状态；
+    - 搜索匹配 group name、addresses 以及 host name/description/map/mode/address，hidden 过滤跟随 `join_show_hidden`。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - community group 远端 JSON fetch/parse 尚未接入；
+  - favorite/hidden 还没有独立按钮 hit-test，当前先完成数据层与可见摘要；
+  - community host 点击仍未接 Java `server-disclaimer` 与 `safeConnect(host.address, host.port, host.version)`；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 643. JoinDialog 本地 Host 卡片与点击直连接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
