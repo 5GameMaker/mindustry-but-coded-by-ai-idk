@@ -38,7 +38,7 @@ use mindustry_core::mindustry::entities::{
     SuppressionFieldAbility, TextureRegionRef, UnitDrawPartKind, WeaponMount, WorldLabelAlign,
     WorldLabelComp, PLAYER_CLASS_ID,
 };
-use mindustry_core::mindustry::game::{Gamemode, TechNode, TechNodeId, TechTree};
+use mindustry_core::mindustry::game::{Gamemode, Rules, TechNode, TechNodeId, TechTree};
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 #[cfg(test)]
@@ -15475,6 +15475,8 @@ pub struct DesktopLauncher {
     pub map_play_selected_mode: Gamemode,
     pub map_play_mode_help_dialog_open: bool,
     pub map_play_customize_dialog_open: bool,
+    pub map_play_rules: Option<Rules>,
+    pub map_play_playtesting: bool,
     pub last_map_card_action: Option<DesktopMapCardAction>,
     pub editor_new_map_dialog_open: bool,
     pub editor_import_map_dialog_open: bool,
@@ -16259,6 +16261,8 @@ impl DesktopLauncher {
             map_play_selected_mode: Gamemode::Survival,
             map_play_mode_help_dialog_open: false,
             map_play_customize_dialog_open: false,
+            map_play_rules: None,
+            map_play_playtesting: false,
             last_map_card_action: None,
             editor_new_map_dialog_open: false,
             editor_import_map_dialog_open: false,
@@ -23689,6 +23693,14 @@ impl DesktopLauncher {
             .unwrap_or(Gamemode::Survival)
     }
 
+    fn map_play_rules_for_mode(map: &MapDescriptor, mode: Gamemode) -> Rules {
+        let mut rules = map.apply_rules(mode);
+        rules.mode_name = Some(mode.wire_name().to_string());
+        rules.sector = None;
+        rules.editor = false;
+        rules
+    }
+
     fn map_editor_action_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
         let width = (dialog.width - 56.0) * 0.5;
         RenderRect::new(
@@ -25257,6 +25269,13 @@ impl DesktopLauncher {
                                         Self::map_play_first_valid_mode(map);
                                 }
                             }
+                            if let Some(map) = self.map_list_cards.get(action.index) {
+                                self.map_play_rules = Some(Self::map_play_rules_for_mode(
+                                    map,
+                                    self.map_play_selected_mode,
+                                ));
+                            }
+                            self.map_play_playtesting = false;
                             self.map_play_dialog_index = Some(action.index);
                             self.editor_map_info_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
@@ -25267,6 +25286,8 @@ impl DesktopLauncher {
                             self.map_play_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules = None;
+                            self.map_play_playtesting = false;
                         }
                         DesktopMapCardActionKind::SelectPlayMode(mode) => {
                             if self
@@ -25276,6 +25297,10 @@ impl DesktopLauncher {
                                 .unwrap_or(false)
                             {
                                 self.map_play_selected_mode = mode;
+                                if let Some(map) = self.map_list_cards.get(action.index) {
+                                    self.map_play_rules =
+                                        Some(Self::map_play_rules_for_mode(map, mode));
+                                }
                             }
                         }
                         DesktopMapCardActionKind::PlaySelected => {
@@ -25283,8 +25308,19 @@ impl DesktopLauncher {
                                 self.runtime.seed_playable_smoke_world(&self.content_loader);
                             self.runtime
                                 .set_network_context(GameRuntimeNetworkContext::offline());
-                            self.runtime.state.rules.mode_name =
-                                Some(self.map_play_selected_mode.wire_name().to_string());
+                            let selected_map = self.map_list_cards.get(action.index).cloned();
+                            let rules = self.map_play_rules.clone().or_else(|| {
+                                selected_map.as_ref().map(|map| {
+                                    Self::map_play_rules_for_mode(map, self.map_play_selected_mode)
+                                })
+                            });
+                            if let Some(rules) = rules {
+                                self.runtime.state.rules = rules;
+                            }
+                            self.runtime.state.playtesting_map = self
+                                .map_play_playtesting
+                                .then(|| selected_map.clone())
+                                .flatten();
                             self.game_state = self.runtime.state.clone();
                             self.player.team = TeamId(self.game_state.rules.default_team as u8);
                             self.active_menu_route = None;
@@ -25292,6 +25328,8 @@ impl DesktopLauncher {
                             self.editor_map_info_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules = None;
+                            self.map_play_playtesting = false;
                             self.last_campaign_launch_report = Some(report);
                         }
                         DesktopMapCardActionKind::Customize => {
@@ -25308,6 +25346,8 @@ impl DesktopLauncher {
                             self.map_play_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules = None;
+                            self.map_play_playtesting = false;
                         }
                         DesktopMapCardActionKind::Delete => {
                             self.map_list_cards.remove(action.index);
@@ -25315,6 +25355,8 @@ impl DesktopLauncher {
                             self.editor_map_info_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules = None;
+                            self.map_play_playtesting = false;
                             self.map_list_scroll_offset = self
                                 .map_list_scroll_offset
                                 .min(self.map_list_cards.len().saturating_sub(1));
@@ -25332,6 +25374,8 @@ impl DesktopLauncher {
                 self.editor_map_info_dialog_index = None;
                 self.map_play_mode_help_dialog_open = false;
                 self.map_play_customize_dialog_open = false;
+                self.map_play_rules = None;
+                self.map_play_playtesting = false;
             }
             DesktopMenuRouteShellAction::CloseMapPlayHelp => {
                 self.map_play_mode_help_dialog_open = false;
@@ -27723,6 +27767,10 @@ impl DesktopLauncher {
     ) {
         let layer = Layer::END_PIXELED + 0.090;
         let child = self.push_map_play_child_dialog_shell(pass, dialog, "CustomRulesDialog", layer);
+        let rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
         for (index, line) in [
             "@customize".to_string(),
             format!(
@@ -27733,6 +27781,10 @@ impl DesktopLauncher {
                 "map.applyRules({})",
                 self.map_play_selected_mode.wire_name()
             ),
+            format!("rules.waves: {}", rules.waves),
+            format!("rules.attackMode: {}", rules.attack_mode),
+            format!("rules.pvp: {}", rules.pvp),
+            format!("rules.infiniteResources: {}", rules.infinite_resources),
             format!("rules source: {}", map.plain_name()),
         ]
         .into_iter()
@@ -47607,6 +47659,11 @@ version: "2.0.0"
         );
         launcher.dispatch_menu_route_shell_action(select_attack);
         assert_eq!(launcher.map_play_selected_mode, Gamemode::Attack);
+        assert!(launcher
+            .map_play_rules
+            .as_ref()
+            .map(|rules| rules.attack_mode)
+            .unwrap_or(false));
 
         let play_center = DesktopLauncher::map_play_primary_button_rect(dialog).center();
         let play = super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
@@ -47628,6 +47685,7 @@ version: "2.0.0"
             launcher.game_state.rules.mode_name.as_deref(),
             Some(Gamemode::Attack.wire_name())
         );
+        assert!(launcher.game_state.rules.attack_mode);
         assert!(launcher.last_campaign_launch_report.is_some());
 
         let mut launcher = DesktopLauncher::new(Vec::new());
@@ -47738,6 +47796,11 @@ version: "2.0.0"
             Gamemode::Survival,
             "invalid selected mode should reset to the first valid Java mode, not hard-coded sandbox"
         );
+        assert!(launcher
+            .map_play_rules
+            .as_ref()
+            .map(|rules| rules.waves && rules.wave_timer)
+            .unwrap_or(false));
 
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.map_list_cards = vec![map_card("Empty Map", 0, &[])];
@@ -47750,6 +47813,11 @@ version: "2.0.0"
             Gamemode::Sandbox,
             "sandbox is the first valid Java mode when survival/attack/pvp are invalid"
         );
+        assert!(launcher
+            .map_play_rules
+            .as_ref()
+            .map(|rules| rules.infinite_resources && rules.allow_edit_rules)
+            .unwrap_or(false));
     }
 
     #[test]
@@ -47927,6 +47995,8 @@ version: "2.0.0"
         assert!(customize_texts.contains(&"CustomRulesDialog"));
         assert!(customize_texts.contains(&"@customize"));
         assert!(customize_texts.contains(&"map.applyRules(survival)"));
+        assert!(customize_texts.contains(&"rules.waves: true"));
+        assert!(customize_texts.contains(&"rules.attackMode: false"));
     }
 
     #[test]
