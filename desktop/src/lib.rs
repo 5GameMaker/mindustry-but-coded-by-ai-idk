@@ -20850,15 +20850,32 @@ impl DesktopLauncher {
         icon: Option<&'static str>,
         layer: f32,
     ) {
+        self.push_settings_text_button_enabled(pass, rect, label, icon, layer, true);
+    }
+
+    fn push_settings_text_button_enabled(
+        &self,
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        label: impl Into<String>,
+        icon: Option<&'static str>,
+        layer: f32,
+        enabled: bool,
+    ) {
         let label = label.into();
-        let hovered = self
-            .last_menu_cursor
-            .map(|point| rect.contains_point(point))
-            .unwrap_or(false);
+        let hovered = enabled
+            && self
+                .last_menu_cursor
+                .map(|point| rect.contains_point(point))
+                .unwrap_or(false);
         pass.push(RenderCommand::draw_sprite(
             Self::settings_text_button_symbol("defaultt", hovered, false),
             rect,
-            [1.0, 1.0, 1.0, 0.96],
+            if enabled {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [0.42, 0.46, 0.50, 0.54]
+            },
             0.0,
             layer,
         ));
@@ -20866,6 +20883,8 @@ impl DesktopLauncher {
             rect,
             if hovered {
                 [0.62, 0.82, 1.0, 0.96]
+            } else if !enabled {
+                [0.24, 0.30, 0.36, 0.58]
             } else {
                 [0.38, 0.52, 0.64, 0.86]
             },
@@ -20877,7 +20896,11 @@ impl DesktopLauncher {
             pass.push(RenderCommand::draw_text_styled(
                 desktop_ui_icon_glyph_or_label(icon, icon),
                 icon_point,
-                [0.88, 0.94, 1.0, 1.0],
+                if enabled {
+                    [0.88, 0.94, 1.0, 1.0]
+                } else {
+                    [0.48, 0.54, 0.58, 0.74]
+                },
                 16.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
@@ -20893,7 +20916,11 @@ impl DesktopLauncher {
         pass.push(RenderCommand::draw_text_styled(
             label,
             RenderPoint::new(label_x, rect.center().y),
-            [0.94, 0.98, 1.0, 1.0],
+            if enabled {
+                [0.94, 0.98, 1.0, 1.0]
+            } else {
+                [0.52, 0.58, 0.62, 0.78]
+            },
             15.0,
             0.0,
             RenderTextStyle::new(if icon.is_some() {
@@ -23625,10 +23652,17 @@ impl DesktopLauncher {
     fn map_play_dialog_modes() -> [Gamemode; 4] {
         [
             Gamemode::Survival,
-            Gamemode::Attack,
             Gamemode::Sandbox,
+            Gamemode::Attack,
             Gamemode::Pvp,
         ]
+    }
+
+    fn map_play_first_valid_mode(map: &MapDescriptor) -> Gamemode {
+        Self::map_play_dialog_modes()
+            .into_iter()
+            .find(|mode| mode.valid(map))
+            .unwrap_or(Gamemode::Survival)
     }
 
     fn map_editor_action_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
@@ -23639,6 +23673,16 @@ impl DesktopLauncher {
             width,
             44.0,
         )
+    }
+
+    fn map_editor_secondary_action_kind(map: &MapDescriptor) -> Option<DesktopMapCardActionKind> {
+        if map.workshop {
+            Some(DesktopMapCardActionKind::ViewWorkshop)
+        } else if map.custom {
+            Some(DesktopMapCardActionKind::Delete)
+        } else {
+            None
+        }
     }
 
     pub fn refresh_map_list_cards_from_assets(&mut self) -> usize {
@@ -24542,20 +24586,15 @@ impl DesktopLauncher {
                     ));
                 }
                 if Self::map_editor_action_button_rect(dialog, 1).contains_point(point) {
-                    let kind = self
+                    if let Some(kind) = self
                         .map_list_cards
                         .get(index)
-                        .map(|map| {
-                            if map.workshop {
-                                DesktopMapCardActionKind::ViewWorkshop
-                            } else {
-                                DesktopMapCardActionKind::Delete
-                            }
-                        })
-                        .unwrap_or(DesktopMapCardActionKind::Delete);
-                    return Some(DesktopMenuRouteShellAction::MapCard(
-                        DesktopMapCardAction::new(index, kind),
-                    ));
+                        .and_then(Self::map_editor_secondary_action_kind)
+                    {
+                        return Some(DesktopMenuRouteShellAction::MapCard(
+                            DesktopMapCardAction::new(index, kind),
+                        ));
+                    }
                 }
             }
             return None;
@@ -25173,7 +25212,10 @@ impl DesktopLauncher {
                                 .map(|map| self.map_play_selected_mode.valid(map))
                                 .unwrap_or(false)
                             {
-                                self.map_play_selected_mode = Gamemode::Sandbox;
+                                if let Some(map) = self.map_list_cards.get(action.index) {
+                                    self.map_play_selected_mode =
+                                        Self::map_play_first_valid_mode(map);
+                                }
                             }
                             self.map_play_dialog_index = Some(action.index);
                             self.editor_map_info_dialog_index = None;
@@ -27446,7 +27488,7 @@ impl DesktopLauncher {
             self.push_map_list_filter_toggle(
                 pass,
                 Self::map_play_mode_button_rect(dialog, index),
-                mode.wire_name(),
+                format!("@mode.{}.name", mode.wire_name()),
                 self.map_play_selected_mode == mode,
                 mode.valid(map),
                 Layer::END_PIXELED + 0.063 + index as f32 * 0.001,
@@ -27592,7 +27634,8 @@ impl DesktopLauncher {
             Some("export"),
             Layer::END_PIXELED + 0.072,
         );
-        self.push_settings_text_button(
+        let secondary_enabled = Self::map_editor_secondary_action_kind(map).is_some();
+        self.push_settings_text_button_enabled(
             pass,
             Self::map_editor_action_button_rect(dialog, 1),
             if map.workshop {
@@ -27602,6 +27645,7 @@ impl DesktopLauncher {
             },
             Some(if map.workshop { "link" } else { "trash" }),
             Layer::END_PIXELED + 0.073,
+            secondary_enabled,
         );
         self.push_settings_text_button(
             pass,
@@ -47275,7 +47319,7 @@ version: "2.0.0"
                     assert_eq!(launcher.map_play_dialog_index, Some(0));
                     assert_eq!(launcher.editor_map_info_dialog_index, None);
                     assert!(dialog_texts.contains(&"@level.mode"));
-                    assert!(dialog_texts.contains(&"survival"));
+                    assert!(dialog_texts.contains(&"@mode.survival.name"));
                     assert!(dialog_texts.contains(&"@customize"));
                     assert!(dialog_texts.contains(&"@play"));
                 }
@@ -47343,7 +47387,7 @@ version: "2.0.0"
             super::DesktopMenuRoute::CustomGame,
         );
         let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
-        let attack_center = DesktopLauncher::map_play_mode_button_rect(dialog, 1).center();
+        let attack_center = DesktopLauncher::map_play_mode_button_rect(dialog, 2).center();
         let select_attack =
             super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
                 0,
@@ -47447,6 +47491,112 @@ version: "2.0.0"
             Some(super::DesktopMenuPlatformAction::OpenWorkshop)
         );
         assert_eq!(launcher.map_list_cards.len(), 1);
+    }
+
+    #[test]
+    fn desktop_launcher_map_play_dialog_uses_java_mode_order_and_first_valid_fallback() {
+        fn map_card(name: &str, spawns: i32, teams: &[i32]) -> MapDescriptor {
+            let mut tags = BTreeMap::new();
+            tags.insert("name".to_string(), name.to_string());
+            let mut map = MapDescriptor::new(
+                format!("maps/default/{name}.msav"),
+                180,
+                180,
+                tags,
+                false,
+                1,
+                157,
+            );
+            map.spawns = spawns;
+            map.teams = teams.to_vec();
+            map
+        }
+
+        assert_eq!(
+            DesktopLauncher::map_play_dialog_modes(),
+            [
+                Gamemode::Survival,
+                Gamemode::Sandbox,
+                Gamemode::Attack,
+                Gamemode::Pvp
+            ],
+            "Java Gamemode.all order is survival, sandbox, attack, pvp, editor(hidden)"
+        );
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![map_card("Survival Map", 1, &[])];
+        launcher.map_play_selected_mode = Gamemode::Attack;
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlay),
+        ));
+        assert_eq!(
+            launcher.map_play_selected_mode,
+            Gamemode::Survival,
+            "invalid selected mode should reset to the first valid Java mode, not hard-coded sandbox"
+        );
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![map_card("Empty Map", 0, &[])];
+        launcher.map_play_selected_mode = Gamemode::Attack;
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlay),
+        ));
+        assert_eq!(
+            launcher.map_play_selected_mode,
+            Gamemode::Sandbox,
+            "sandbox is the first valid Java mode when survival/attack/pvp are invalid"
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_editor_map_info_disables_builtin_delete_action() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Builtin".to_string());
+        let builtin =
+            MapDescriptor::new("maps/default/builtin.msav", 160, 160, tags, false, 1, 157);
+
+        let viewport = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![builtin];
+        launcher.dispatch_menu_action(MenuButtonRole::Editor);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenEditorInfo),
+        ));
+
+        let render_viewport = launcher.default_render_viewport_for_surface(viewport);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            render_viewport,
+            super::DesktopMenuRoute::Editor,
+        );
+        let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+        let secondary_center = DesktopLauncher::map_editor_action_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                secondary_center.x,
+                secondary_center.y
+            ),
+            None,
+            "Java disables the delete button for builtin non-workshop maps"
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, render_viewport);
+        let disabled_delete_text = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("editor map info should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawText { text, color, .. }
+                        if text == "@delete" && color[3] < 0.9
+                )
+            });
+        assert!(disabled_delete_text);
     }
 
     #[test]
