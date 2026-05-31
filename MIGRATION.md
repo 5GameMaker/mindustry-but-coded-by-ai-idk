@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 613. DatabaseDialog 补搜索、tab 与内容格子命中链路
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.3%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 `DatabaseDialog` 不再只是静态壳，而是具备 Java `TextField`、tab button、content icon click 的最小交互路径。
+- Java 对照依据：
+  - `DatabaseDialog` 的 search field 输入后 `rebuild()`；
+  - tab button 点击会切换 `tab` 并 `rebuild()`；
+  - 内容图标点击会进入 `ui.content.show(unlock)`，Shift 复制 unicode 是后续项。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_search / database_search_focused / database_selected_tab / last_database_content_opened` 状态；
+    - 新增 `FocusDatabaseSearch / SelectDatabaseTab / OpenDatabaseContent` route shell action；
+    - Database 路由加入 search hit-test、tab hit-test、content cell hit-test；
+    - 文本输入与 Backspace/Delete 接入 database search，并按 search 过滤 content grid；
+    - tab selection 已能记录并在 route lines/render tint 中体现；
+    - content cell 点击会记录 `(ContentType, name)`，作为后续 `ContentInfoDialog` 的接入点。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `OpenDatabaseContent` 还只是记录打开目标，尚未弹出完整 Java `ContentInfoDialog`；
+  - selected tab 仍未按 Java `databaseTabs` 过滤内容，因为 Rust content 侧还缺完整 `UnlockableContent.databaseTabs` 建模；
+  - tooltip、shift-copy unicode、locked/banned/patched overlay 仍需继续迁移。
+
 ## 612. DatabaseDialog tabs 与内容图标网格初步对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

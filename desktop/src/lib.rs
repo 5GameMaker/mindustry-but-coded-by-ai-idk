@@ -2752,6 +2752,9 @@ pub enum DesktopMenuRouteShellAction {
     ShowAboutLinks,
     OpenDiscordLink,
     CopyDiscordLink,
+    FocusDatabaseSearch,
+    SelectDatabaseTab(usize),
+    OpenDatabaseContent(ContentType, usize),
     Settings(DesktopSettingsAction),
 }
 
@@ -16276,6 +16279,10 @@ pub struct DesktopLauncher {
     pub settings_scroll_drag_state: Option<DesktopSettingsScrollDragState>,
     pub settings_overrides: BTreeMap<String, String>,
     pub settings_scroll_offsets: BTreeMap<&'static str, i32>,
+    pub database_search: String,
+    pub database_search_focused: bool,
+    pub database_selected_tab: usize,
+    pub last_database_content_opened: Option<(ContentType, String)>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
     pub last_discord_clipboard_text: Option<String>,
@@ -17129,6 +17136,10 @@ impl DesktopLauncher {
             settings_scroll_drag_state: None,
             settings_overrides: BTreeMap::new(),
             settings_scroll_offsets: BTreeMap::new(),
+            database_search: String::new(),
+            database_search_focused: false,
+            database_selected_tab: 0,
+            last_database_content_opened: None,
             last_about_link_action: None,
             last_about_linkfail_message: None,
             last_discord_clipboard_text: None,
@@ -21178,6 +21189,7 @@ impl DesktopLauncher {
             self.map_list_filter_dialog_open = false;
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
+            self.database_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
             self.last_map_card_action = None;
@@ -21215,6 +21227,11 @@ impl DesktopLauncher {
                 self.last_settings_pressed_control = None;
                 self.settings_scroll_drag_state = None;
                 self.settings_scroll_offsets.clear();
+            } else if route == DesktopMenuRoute::Database {
+                self.database_search.clear();
+                self.database_search_focused = false;
+                self.database_selected_tab = 0;
+                self.last_database_content_opened = None;
             } else if route == DesktopMenuRoute::Schematics {
                 self.load_schematic_tags_from_settings();
                 self.schematic_search.clear();
@@ -21698,6 +21715,33 @@ impl DesktopLauncher {
             .unwrap_or_else(|| "whiteui".to_string())
     }
 
+    fn database_tab_count(&self) -> usize {
+        1 + self.content_loader.catalog().planets.len()
+    }
+
+    fn database_selected_tab_label(&self) -> String {
+        if self.database_selected_tab == 0 {
+            return "@all".into();
+        }
+        self.content_loader
+            .catalog()
+            .planets
+            .get(self.database_selected_tab.saturating_sub(1))
+            .map(|planet| planet.localized_name().to_string())
+            .unwrap_or_else(|| "@all".into())
+    }
+
+    fn database_visible_records_for_type(&self, content_type: ContentType) -> Vec<(usize, &str)> {
+        let search = self.database_search.trim().to_lowercase();
+        self.content_loader
+            .get_by(content_type)
+            .iter()
+            .enumerate()
+            .filter_map(|(index, record)| record.name().map(|name| (index, name)))
+            .filter(|(_, name)| search.is_empty() || name.to_lowercase().contains(&search))
+            .collect()
+    }
+
     fn database_route_lines(&self) -> Vec<String> {
         let content_types = self.database_route_content_types();
         let total = content_types
@@ -21705,8 +21749,15 @@ impl DesktopLauncher {
             .map(|content_type| self.content_loader.get_by(*content_type).len())
             .sum::<usize>();
         let mut lines = vec![
-            "search: @players.search".into(),
-            "tab: @all".into(),
+            format!(
+                "search: {}",
+                if self.database_search.is_empty() {
+                    "@players.search"
+                } else {
+                    self.database_search.as_str()
+                }
+            ),
+            format!("tab: {}", self.database_selected_tab_label()),
             format!("content total: {total}"),
         ];
 
@@ -28287,6 +28338,76 @@ impl DesktopLauncher {
         )
     }
 
+    fn database_tab_index_at_point(&self, panel: RenderRect, point: RenderPoint) -> Option<usize> {
+        (0..self.database_tab_count())
+            .find(|index| Self::database_tab_rect_for_panel(panel, *index).contains_point(point))
+    }
+
+    fn database_content_cell_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<(ContentType, usize)> {
+        let visible_columns = ((panel.width - 56.0 + DATABASE_CONTENT_CELL_GAP)
+            / (DATABASE_CONTENT_CELL_SIZE + DATABASE_CONTENT_CELL_GAP))
+            .floor()
+            .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
+            as usize;
+        for (category_index, content_type) in self
+            .database_route_content_types()
+            .into_iter()
+            .take(DATABASE_VISIBLE_CATEGORIES)
+            .enumerate()
+        {
+            let header = Self::database_category_header_rect_for_panel(panel, category_index);
+            if header.y < panel.y + 42.0 {
+                break;
+            }
+            for (item_index, (record_index, _)) in self
+                .database_visible_records_for_type(content_type)
+                .into_iter()
+                .take(visible_columns)
+                .enumerate()
+            {
+                if Self::database_content_cell_rect_for_panel(panel, category_index, item_index)
+                    .contains_point(point)
+                {
+                    return Some((content_type, record_index));
+                }
+            }
+        }
+        None
+    }
+
+    fn database_route_shell_action_at_surface_point(
+        &self,
+        viewport: RenderViewport,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Database);
+        let point = RenderPoint::new(x, y);
+        if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseRoute);
+        }
+        if Self::database_search_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusDatabaseSearch);
+        }
+        if let Some(index) = self.database_tab_index_at_point(panel, point) {
+            return Some(DesktopMenuRouteShellAction::SelectDatabaseTab(index));
+        }
+        if let Some((content_type, record_index)) =
+            self.database_content_cell_at_point(panel, point)
+        {
+            return Some(DesktopMenuRouteShellAction::OpenDatabaseContent(
+                content_type,
+                record_index,
+            ));
+        }
+        None
+    }
+
     fn tech_tree_graph_rect_for_panel(panel: RenderRect) -> RenderRect {
         RenderRect::new(
             panel.x + 28.0,
@@ -28477,6 +28598,12 @@ impl DesktopLauncher {
             let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
             if let Some(action) =
                 self.tech_tree_route_action_at_point(panel, RenderPoint::new(x, y))
+            {
+                return Some(action);
+            }
+        }
+        if route == DesktopMenuRoute::Database {
+            if let Some(action) = self.database_route_shell_action_at_surface_point(viewport, x, y)
             {
                 return Some(action);
             }
@@ -28842,6 +28969,7 @@ impl DesktopLauncher {
                 self.host_error = None;
                 self.join_add_dialog_open = false;
                 self.join_search_focused = false;
+                self.database_search_focused = false;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -29619,6 +29747,24 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CopyDiscordLink => {
                 self.copy_discord_link();
             }
+            DesktopMenuRouteShellAction::FocusDatabaseSearch => {
+                self.database_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::SelectDatabaseTab(index) => {
+                if index < self.database_tab_count() {
+                    self.database_selected_tab = index;
+                }
+                self.database_search_focused = false;
+            }
+            DesktopMenuRouteShellAction::OpenDatabaseContent(content_type, record_index) => {
+                self.last_database_content_opened = self
+                    .content_loader
+                    .get_by(content_type)
+                    .get(record_index)
+                    .and_then(|record| record.name())
+                    .map(|name| (content_type, name.to_string()));
+                self.database_search_focused = false;
+            }
             DesktopMenuRouteShellAction::Settings(action) => {
                 self.dispatch_settings_action(action);
             }
@@ -29812,9 +29958,17 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.03,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@players.search",
+            if self.database_search.is_empty() {
+                "@players.search".to_string()
+            } else {
+                self.database_search.clone()
+            },
             RenderPoint::new(search.x + 44.0, search.center().y),
-            [0.60, 0.70, 0.78, 1.0],
+            if self.database_search.is_empty() {
+                [0.60, 0.70, 0.78, 1.0]
+            } else {
+                [0.90, 0.96, 1.0, 1.0]
+            },
             12.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Start)
@@ -29838,25 +29992,23 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.033,
         ));
 
-        for (index, planet) in self
-            .content_loader
-            .catalog()
-            .planets
-            .iter()
-            .take(DATABASE_TAB_COLUMNS - 1)
-            .enumerate()
-        {
+        for (index, planet) in self.content_loader.catalog().planets.iter().enumerate() {
             let tab = Self::database_tab_rect_for_panel(panel, index + 1);
             let icon = if planet.meta.icon.trim().is_empty() {
                 "commandRally"
             } else {
                 planet.meta.icon.as_str()
             };
+            let selected = self.database_selected_tab == index + 1;
             pass.push(RenderCommand::draw_text_styled(
                 desktop_ui_icon_glyph_or_label(icon, "commandRally"),
                 tab.center(),
-                rgba8888_to_render_color(planet.icon_color_rgba, 1.0),
-                20.0,
+                if selected {
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                } else {
+                    rgba8888_to_render_color(planet.icon_color_rgba, 1.0)
+                },
+                if selected { 22.0 } else { 20.0 },
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_font(RenderFontId::Icon)
@@ -29899,10 +30051,8 @@ impl DesktopLauncher {
                 break;
             }
             let records = self
-                .content_loader
-                .get_by(content_type)
-                .iter()
-                .filter_map(|record| record.name())
+                .database_visible_records_for_type(content_type)
+                .into_iter()
                 .take(visible_columns)
                 .collect::<Vec<_>>();
             let label = Self::database_category_label(content_type);
@@ -29927,7 +30077,7 @@ impl DesktopLauncher {
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
                 Layer::END_PIXELED + 0.0345 + category_index as f32 * 0.001,
             ));
-            for (item_index, name) in records.iter().enumerate() {
+            for (item_index, (_, name)) in records.iter().enumerate() {
                 let cell =
                     Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
                 let icon_symbol = self.database_content_icon_symbol(content_type, name);
@@ -34700,6 +34850,18 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Database)
+                        && self.database_search_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.database_search.pop();
+                    } else {
+                        self.database_search.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && matches!(
                             self.active_menu_route,
                             Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -35138,6 +35300,11 @@ impl DesktopLauncher {
                             self.load_game_search.push(ch);
                         }
                         self.load_game_scroll_offset = 0;
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Database)
+                        && self.database_search_focused
+                    {
+                        self.database_search
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
                     } else if self.active_menu_route == Some(DesktopMenuRoute::Mods)
                         && self.mods_browser_dialog_open
                     {
@@ -58179,6 +58346,67 @@ version: "2.0.0"
         assert!(route_texts
             .iter()
             .any(|text| text.starts_with("@database-category.")));
+
+        let search = DesktopLauncher::database_search_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, search.x, search.y),
+            Some(super::DesktopMenuRouteShellAction::FocusDatabaseSearch)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::FocusDatabaseSearch,
+        );
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("copper".into())]);
+        assert_eq!(launcher.database_search, "copper");
+        assert!(launcher.database_search_focused);
+        assert!(launcher
+            .active_menu_route_shell_lines(super::DesktopMenuRoute::Database)
+            .contains(&"search: copper".to_string()));
+
+        let planet_tab = DesktopLauncher::database_tab_rect_for_panel(panel, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                planet_tab.x,
+                planet_tab.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::SelectDatabaseTab(1))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SelectDatabaseTab(1),
+        );
+        assert_eq!(launcher.database_selected_tab, 1);
+        assert!(!launcher.database_search_focused);
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::FocusDatabaseSearch,
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Delete".into(),
+                pressed: true,
+            }],
+        );
+        assert!(launcher.database_search.is_empty());
+        let item_cell = DesktopLauncher::database_content_cell_rect_for_panel(panel, 0, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                item_cell.x,
+                item_cell.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenDatabaseContent(
+                ContentType::Item,
+                0
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenDatabaseContent(ContentType::Item, 0),
+        );
+        assert_eq!(
+            launcher.last_database_content_opened,
+            Some((ContentType::Item, "copper".to_string()))
+        );
     }
 
     #[test]
