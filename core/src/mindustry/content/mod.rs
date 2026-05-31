@@ -48,7 +48,7 @@ impl ContentCatalog {
         let blocks = blocks::load(&items, &liquids);
         let unit_commands = unit_commands::load();
         let unit_stances = unit_stances::load(&items);
-        Self {
+        let mut catalog = Self {
             blocks,
             bullets: bullets::load(),
             errors: Vec::new(),
@@ -65,7 +65,121 @@ impl ContentCatalog {
             team_entries: team_entries::load(),
             unit_commands,
             unit_stances,
+        };
+        catalog.project_tech_tree_database_tabs();
+        catalog
+    }
+
+    fn project_tech_tree_database_tabs(&mut self) {
+        let serpulo_projects = Self::collect_tech_tree_database_tabs(&self.serpulo_tech_tree);
+        self.apply_tech_tree_database_tabs(serpulo_projects);
+
+        let erekir_projects = Self::collect_tech_tree_database_tabs(&self.erekir_tech_tree);
+        self.apply_tech_tree_database_tabs(erekir_projects);
+    }
+
+    fn collect_tech_tree_database_tabs(
+        tree: &crate::mindustry::game::TechTree,
+    ) -> Vec<(ContentType, String, Vec<String>)> {
+        let mut projects = Vec::new();
+
+        for &root_id in tree.roots() {
+            let Some(root_node) = tree.node(root_id) else {
+                continue;
+            };
+            let Some(root_tab) = root_node.name.as_ref() else {
+                continue;
+            };
+
+            for node_id in tree.each_from(root_id) {
+                let Some(node) = tree.node(node_id) else {
+                    continue;
+                };
+
+                let mut database_tabs =
+                    Vec::with_capacity(1 + node.database_tabs.len() + node.shown_planets.len());
+                database_tabs.push(root_tab.clone());
+                database_tabs.extend(node.database_tabs.iter().map(|tab| tab.name.clone()));
+                database_tabs.extend(node.shown_planets.iter().cloned());
+
+                projects.push((
+                    node.content.content_type,
+                    node.content.name.clone(),
+                    database_tabs,
+                ));
+            }
         }
+
+        projects
+    }
+
+    fn apply_tech_tree_database_tabs(&mut self, projects: Vec<(ContentType, String, Vec<String>)>) {
+        for (content_type, content_name, database_tabs) in projects {
+            for tab in database_tabs {
+                self.add_database_tab(content_type, &content_name, &tab);
+            }
+        }
+    }
+
+    fn add_database_tab(&mut self, content_type: ContentType, name: &str, tab: &str) {
+        match content_type {
+            ContentType::Item => {
+                if let Some(item) = self.item_by_name_mut(name) {
+                    item.base.add_database_tab(tab);
+                }
+            }
+            ContentType::Liquid => {
+                if let Some(liquid) = self.liquid_by_name_mut(name) {
+                    liquid.base.add_database_tab(tab);
+                }
+            }
+            ContentType::Status => {
+                if let Some(status) = self.status_effect_by_name_mut(name) {
+                    status.base.add_database_tab(tab);
+                }
+            }
+            ContentType::Unit => {
+                if let Some(unit) = self.unit_by_name_mut(name) {
+                    unit.base.add_database_tab(tab);
+                }
+            }
+            ContentType::Weather => {
+                if let Some(weather) = self.weather_by_name_mut(name) {
+                    weather.weather_mut().base.add_database_tab(tab);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn item_by_name_mut(&mut self, name: &str) -> Option<&mut Item> {
+        self.items
+            .iter_mut()
+            .find(|item| item.base.mappable.name.as_str() == name)
+    }
+
+    fn liquid_by_name_mut(&mut self, name: &str) -> Option<&mut Liquid> {
+        self.liquids
+            .iter_mut()
+            .find(|liquid| liquid.base.mappable.name.as_str() == name)
+    }
+
+    fn status_effect_by_name_mut(&mut self, name: &str) -> Option<&mut StatusEffect> {
+        self.status_effects
+            .iter_mut()
+            .find(|status| status.base.mappable.name.as_str() == name)
+    }
+
+    fn unit_by_name_mut(&mut self, name: &str) -> Option<&mut UnitType> {
+        self.units
+            .iter_mut()
+            .find(|unit| unit.base.mappable.name.as_str() == name)
+    }
+
+    fn weather_by_name_mut(&mut self, name: &str) -> Option<&mut weathers::WeatherContent> {
+        self.weathers
+            .iter_mut()
+            .find(|weather| weather.name() == name)
     }
 
     pub fn has_content_errors(&self) -> bool {
@@ -477,5 +591,14 @@ mod tests {
         assert_eq!(catalog.unit_stance_by_name("mineauto").unwrap().id(), 7);
         assert_eq!(catalog.unit_stance_by_id(8).unwrap().name(), "item-scrap");
         assert!(catalog.unit_stance_by_id(999).is_none());
+    }
+
+    #[test]
+    fn catalog_projects_tech_tree_database_tabs_onto_content() {
+        let catalog = ContentCatalog::load_base_content();
+        let graphite_tabs = &catalog.item_by_name("graphite").unwrap().base.database_tabs;
+
+        assert!(graphite_tabs.iter().any(|tab| tab == "serpulo"));
+        assert!(graphite_tabs.iter().any(|tab| tab == "erekir"));
     }
 }

@@ -122,7 +122,7 @@ use mindustry_core::mindustry::world::{
 use mindustry_core::mindustry::{
     upstream_menu_version_color, upstream_menu_version_text, UPSTREAM_BASELINE,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -236,6 +236,7 @@ const DATABASE_CONTENT_CELL_SIZE: f32 = 32.0;
 const DATABASE_CONTENT_CELL_GAP: f32 = 12.0;
 const DATABASE_VISIBLE_CATEGORIES: usize = 4;
 const DATABASE_VISIBLE_ITEMS_PER_CATEGORY: usize = 22;
+const DATABASE_FIELDS_URI_PREFIX: &str = "https://mindustrygame.github.io/wiki/Modding%20Classes/";
 const TECH_TREE_NODE_WIDTH: f32 = 112.0;
 const TECH_TREE_NODE_HEIGHT: f32 = 38.0;
 const TECH_TREE_VISIBLE_NODES: usize = 11;
@@ -2757,6 +2758,7 @@ pub enum DesktopMenuRouteShellAction {
     SelectDatabaseTab(usize),
     OpenDatabaseContent(ContentType, usize),
     CloseDatabaseContent,
+    OpenDatabaseContentFields,
     Settings(DesktopSettingsAction),
 }
 
@@ -2856,6 +2858,17 @@ pub struct DesktopAboutLinkAction {
     pub url: String,
     pub opened: bool,
     pub wiki_event_fired: bool,
+    pub clipboard_text: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopDatabaseFieldsAction {
+    pub content_type: ContentType,
+    pub name: String,
+    pub class_name: String,
+    pub url: String,
+    pub opened: bool,
     pub clipboard_text: Option<String>,
     pub error_message: Option<String>,
 }
@@ -16287,6 +16300,7 @@ pub struct DesktopLauncher {
     pub database_search_focused: bool,
     pub database_selected_tab: usize,
     pub last_database_content_opened: Option<(ContentType, String)>,
+    pub last_database_fields_action: Option<DesktopDatabaseFieldsAction>,
     pub last_about_link_action: Option<DesktopAboutLinkAction>,
     pub last_about_linkfail_message: Option<String>,
     pub last_discord_clipboard_text: Option<String>,
@@ -17146,6 +17160,7 @@ impl DesktopLauncher {
             database_search_focused: false,
             database_selected_tab: 0,
             last_database_content_opened: None,
+            last_database_fields_action: None,
             last_about_link_action: None,
             last_about_linkfail_message: None,
             last_discord_clipboard_text: None,
@@ -22007,6 +22022,80 @@ impl DesktopLauncher {
         (tag != "default").then(|| tag.to_string())
     }
 
+    fn database_content_database_tabs(&self, content_type: ContentType, name: &str) -> Vec<String> {
+        match content_type {
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .map(|item| item.base.database_tabs.clone()),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .map(|liquid| liquid.base.database_tabs.clone()),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .map(|status| status.base.database_tabs.clone()),
+            ContentType::Unit => self
+                .content_loader
+                .unit_by_name(name)
+                .map(|unit| unit.base.database_tabs.clone()),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .map(|weather| weather.weather().base.database_tabs.clone()),
+            _ => None,
+        }
+        .unwrap_or_default()
+    }
+
+    fn database_content_all_database_tabs(&self, content_type: ContentType, name: &str) -> bool {
+        match content_type {
+            ContentType::Block => self
+                .content_loader
+                .block_by_name(name)
+                .is_some_and(|block| match block {
+                    BlockDef::Crafting(crafting) => crafting.all_database_tabs,
+                    _ => false,
+                }),
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .is_some_and(|item| item.base.all_database_tabs),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .is_some_and(|liquid| liquid.base.all_database_tabs),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .is_some_and(|status| status.base.all_database_tabs),
+            ContentType::Unit => self
+                .content_loader
+                .unit_by_name(name)
+                .is_some_and(|unit| unit.base.all_database_tabs),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .is_some_and(|weather| weather.weather().base.all_database_tabs),
+            _ => false,
+        }
+    }
+
+    fn database_content_visible_on_tab(
+        &self,
+        content_type: ContentType,
+        name: &str,
+        tab_key: &str,
+    ) -> bool {
+        tab_key == "sun"
+            || self.database_content_all_database_tabs(content_type, name)
+            || self
+                .database_content_database_tabs(content_type, name)
+                .iter()
+                .any(|tab| tab == tab_key)
+    }
+
     fn database_content_visible_in_dialog(&self, content_type: ContentType, name: &str) -> bool {
         !self.database_content_is_hidden(content_type, name)
             && !self.database_content_hide_database(content_type, name)
@@ -22100,29 +22189,66 @@ impl DesktopLauncher {
     }
 
     fn database_tab_count(&self) -> usize {
-        1 + self.content_loader.catalog().planets.len()
+        self.database_tab_keys().len()
+    }
+
+    fn database_tab_keys(&self) -> Vec<String> {
+        let mut tabs = BTreeSet::new();
+        for content_type in ContentType::ALL {
+            for record in self.content_loader.get_by(content_type) {
+                let Some(name) = record.name() else {
+                    continue;
+                };
+                tabs.extend(self.database_content_database_tabs(content_type, name));
+            }
+        }
+
+        if tabs.is_empty() {
+            tabs.extend(
+                self.content_loader
+                    .catalog()
+                    .planets
+                    .iter()
+                    .filter(|planet| planet.name() != "sun" && planet.is_landable())
+                    .map(|planet| planet.name().to_string()),
+            );
+        }
+
+        let mut keys = Vec::with_capacity(tabs.len() + 1);
+        keys.push("sun".to_string());
+        keys.extend(tabs);
+        keys
+    }
+
+    fn database_selected_tab_key(&self) -> String {
+        self.database_tab_keys()
+            .get(self.database_selected_tab)
+            .cloned()
+            .unwrap_or_else(|| "sun".to_string())
     }
 
     fn database_selected_tab_label(&self) -> String {
-        if self.database_selected_tab == 0 {
+        let key = self.database_selected_tab_key();
+        if key == "sun" {
             return "@all".into();
         }
         self.content_loader
             .catalog()
-            .planets
-            .get(self.database_selected_tab.saturating_sub(1))
+            .planet_by_name(&key)
             .map(|planet| planet.localized_name().to_string())
-            .unwrap_or_else(|| "@all".into())
+            .unwrap_or(key)
     }
 
     fn database_visible_records_for_type(&self, content_type: ContentType) -> Vec<(usize, &str)> {
         let search = self.database_search.trim().to_lowercase();
+        let tab_key = self.database_selected_tab_key();
         self.content_loader
             .get_by(content_type)
             .iter()
             .enumerate()
             .filter_map(|(index, record)| record.name().map(|name| (index, name)))
             .filter(|(_, name)| self.database_content_visible_in_dialog(content_type, name))
+            .filter(|(_, name)| self.database_content_visible_on_tab(content_type, name, &tab_key))
             .filter(|(_, name)| {
                 search.is_empty()
                     || name.to_lowercase().contains(&search)
@@ -28882,6 +29008,77 @@ impl DesktopLauncher {
         RenderRect::new(dialog.center().x - 55.0, dialog.y + 18.0, 110.0, 50.0)
     }
 
+    fn database_content_fields_class_name(
+        &self,
+        content_type: ContentType,
+        name: &str,
+    ) -> &'static str {
+        match content_type {
+            ContentType::Item => "Item",
+            ContentType::Block => "Block",
+            ContentType::Liquid => "Liquid",
+            ContentType::Status => "StatusEffect",
+            ContentType::Unit => "UnitType",
+            ContentType::Weather => "Weather",
+            ContentType::Sector => "SectorPreset",
+            ContentType::Planet => "Planet",
+            ContentType::Bullet => "BulletType",
+            ContentType::Team => "Team",
+            ContentType::UnitCommand => "UnitCommand",
+            ContentType::UnitStance => "UnitStance",
+            ContentType::Error => "ErrorContent",
+            _ => self
+                .content_loader
+                .get_by_name(content_type, name)
+                .map(|_| "Content")
+                .unwrap_or("Content"),
+        }
+    }
+
+    fn database_content_fields_url(&self, content_type: ContentType, name: &str) -> String {
+        format!(
+            "{}{}",
+            DATABASE_FIELDS_URI_PREFIX,
+            self.database_content_fields_class_name(content_type, name)
+        )
+    }
+
+    fn database_content_info_viewfields_rect_for_content(
+        &self,
+        clip: RenderRect,
+        content_type: ContentType,
+        name: &str,
+    ) -> Option<RenderRect> {
+        if !self.menu_console_setting_enabled {
+            return None;
+        }
+
+        let mut y = clip.y + clip.height - 18.0;
+        if self
+            .database_content_description(content_type, name)
+            .is_some()
+        {
+            y -= 70.0;
+        }
+
+        let stats = self.database_content_stat_lines(content_type, name);
+        if !stats.is_empty() {
+            y -= 24.0 + stats.len() as f32 * 20.0 + 12.0;
+        }
+
+        if self.database_content_details(content_type, name).is_some() {
+            y -= 58.0;
+        }
+
+        let button_width = 300.0_f32.min((clip.width - 28.0).max(140.0));
+        Some(RenderRect::new(
+            clip.x + (clip.width - button_width) * 0.5,
+            (y - 58.0).max(clip.y + 10.0),
+            button_width,
+            50.0,
+        ))
+    }
+
     fn database_tab_index_at_point(&self, panel: RenderRect, point: RenderPoint) -> Option<usize> {
         (0..self.database_tab_count())
             .find(|index| Self::database_tab_rect_for_panel(panel, *index).contains_point(point))
@@ -28935,10 +29132,17 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Database);
         let point = RenderPoint::new(x, y);
-        if self.last_database_content_opened.is_some() {
+        if let Some((content_type, name)) = self.last_database_content_opened.as_ref() {
             let dialog = Self::database_content_info_dialog_rect_for_panel(panel);
             if Self::database_content_info_close_rect(dialog).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseDatabaseContent);
+            }
+            let clip = Self::database_content_info_scrollpane_rect(dialog);
+            if self
+                .database_content_info_viewfields_rect_for_content(clip, *content_type, name)
+                .is_some_and(|rect| rect.contains_point(point))
+            {
+                return Some(DesktopMenuRouteShellAction::OpenDatabaseContentFields);
             }
             return None;
         }
@@ -30324,6 +30528,10 @@ impl DesktopLauncher {
                 self.last_database_content_opened = None;
                 self.database_search_focused = false;
             }
+            DesktopMenuRouteShellAction::OpenDatabaseContentFields => {
+                self.dispatch_database_content_fields();
+                self.database_search_focused = false;
+            }
             DesktopMenuRouteShellAction::Settings(action) => {
                 self.dispatch_settings_action(action);
             }
@@ -30483,6 +30691,41 @@ impl DesktopLauncher {
         self.dispatch_about_link_action_with_platform(name, &mut platform)
     }
 
+    pub fn dispatch_database_content_fields_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> Option<DesktopDatabaseFieldsAction> {
+        let (content_type, name) = self.last_database_content_opened.clone()?;
+        let class_name = self
+            .database_content_fields_class_name(content_type, &name)
+            .to_string();
+        let url = self.database_content_fields_url(content_type, &name);
+        let opened = platform.open_uri(&url);
+        let (clipboard_text, error_message) = if opened {
+            (None, None)
+        } else {
+            platform.set_clipboard_text(&url);
+            (Some(url.clone()), Some("@linkfail".to_string()))
+        };
+        let action = DesktopDatabaseFieldsAction {
+            content_type,
+            name,
+            class_name,
+            url,
+            opened,
+            clipboard_text,
+            error_message,
+        };
+        self.last_about_linkfail_message = action.error_message.clone();
+        self.last_database_fields_action = Some(action.clone());
+        Some(action)
+    }
+
+    pub fn dispatch_database_content_fields(&mut self) -> Option<DesktopDatabaseFieldsAction> {
+        let mut platform = DefaultPlatform;
+        self.dispatch_database_content_fields_with_platform(&mut platform)
+    }
+
     pub fn copy_discord_link_with_platform<P: Platform>(&mut self, platform: &mut P) -> String {
         platform.set_clipboard_text(DISCORD_URL);
         self.last_discord_clipboard_text = Some(DISCORD_URL.to_string());
@@ -30551,21 +30794,25 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.033,
         ));
 
-        for (index, planet) in self.content_loader.catalog().planets.iter().enumerate() {
-            let tab = Self::database_tab_rect_for_panel(panel, index + 1);
-            let icon = if planet.meta.icon.trim().is_empty() {
-                "commandRally"
-            } else {
-                planet.meta.icon.as_str()
-            };
-            let selected = self.database_selected_tab == index + 1;
+        let tab_keys = self.database_tab_keys();
+        for (index, tab_key) in tab_keys.iter().enumerate().skip(1) {
+            let tab = Self::database_tab_rect_for_panel(panel, index);
+            let planet = self.content_loader.catalog().planet_by_name(tab_key);
+            let icon = planet
+                .and_then(|planet| {
+                    (!planet.meta.icon.trim().is_empty()).then_some(planet.meta.icon.as_str())
+                })
+                .unwrap_or("commandRally");
+            let selected = self.database_selected_tab == index;
             pass.push(RenderCommand::draw_text_styled(
                 desktop_ui_icon_glyph_or_label(icon, "commandRally"),
                 tab.center(),
                 if selected {
                     [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
-                } else {
+                } else if let Some(planet) = planet {
                     rgba8888_to_render_color(planet.icon_color_rgba, 1.0)
+                } else {
+                    [0.86, 0.92, 1.0, 1.0]
                 },
                 if selected { 22.0 } else { 20.0 },
                 0.0,
@@ -30910,7 +31157,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.093,
             ));
             y -= 24.0;
-            for (index, stat) in stats.iter().take(10).enumerate() {
+            for (index, stat) in stats.iter().enumerate() {
                 let (label, value) = stat
                     .split_once(':')
                     .map(|(label, value)| (label.trim(), value.trim()))
@@ -30940,7 +31187,7 @@ impl DesktopLauncher {
                     ));
                 }
             }
-            y -= stats.len().min(10) as f32 * 20.0 + 12.0;
+            y -= stats.len() as f32 * 20.0 + 12.0;
         }
         if let Some(details) = details {
             pass.push(RenderCommand::draw_text_styled(
@@ -30955,16 +31202,10 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.093,
             ));
-            y -= 58.0;
         }
-        if self.menu_console_setting_enabled {
-            let button_width = 300.0_f32.min((clip.width - 28.0).max(140.0));
-            let button = RenderRect::new(
-                clip.x + (clip.width - button_width) * 0.5,
-                (y - 58.0).max(clip.y + 10.0),
-                button_width,
-                50.0,
-            );
+        if let Some(button) =
+            self.database_content_info_viewfields_rect_for_content(clip, *content_type, name)
+        {
             self.push_settings_text_button_with_style(
                 pass,
                 button,
@@ -59342,6 +59583,9 @@ version: "2.0.0"
             }],
         );
         assert!(launcher.database_search.is_empty());
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SelectDatabaseTab(0),
+        );
         let item_cell = DesktopLauncher::database_content_cell_rect_for_panel(panel, 0, 0).center();
         launcher.apply_menu_input_events(
             surface,
@@ -59492,6 +59736,43 @@ version: "2.0.0"
             .any(|command| matches!(command, RenderCommand::ClearClip)));
 
         let detail_dialog = DesktopLauncher::database_content_info_dialog_rect_for_panel(panel);
+        let detail_clip = DesktopLauncher::database_content_info_scrollpane_rect(detail_dialog);
+        let viewfields = launcher
+            .database_content_info_viewfields_rect_for_content(
+                detail_clip,
+                ContentType::Item,
+                "copper",
+            )
+            .expect("console-enabled ContentInfoDialog should expose the @viewfields button");
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                viewfields.center().x,
+                viewfields.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenDatabaseContentFields)
+        );
+        let mut platform = RecordingPlatform::default();
+        let fields_action = launcher
+            .dispatch_database_content_fields_with_platform(&mut platform)
+            .expect("opened ContentInfoDialog should expose a fields URI");
+        assert_eq!(
+            fields_action.url,
+            "https://mindustrygame.github.io/wiki/Modding%20Classes/Item"
+        );
+        assert_eq!(
+            platform.opened_uris,
+            vec!["https://mindustrygame.github.io/wiki/Modding%20Classes/Item"]
+        );
+        assert_eq!(
+            platform.clipboard_texts,
+            vec!["https://mindustrygame.github.io/wiki/Modding%20Classes/Item"]
+        );
+        assert_eq!(
+            launcher.last_database_fields_action.as_ref(),
+            Some(&fields_action)
+        );
+
         let detail_close =
             DesktopLauncher::database_content_info_close_rect(detail_dialog).center();
         assert_eq!(

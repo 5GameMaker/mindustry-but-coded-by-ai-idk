@@ -15,6 +15,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 625. DatabaseDialog 接入 tech tree 页签语义与 viewfields 点击链路
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.6%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 DatabaseDialog 的 tab 来源从“固定 planets 列表”推进到 Java `databaseTabs` 语义，并让 ContentInfoDialog 的 `@viewfields` 不再只是静态按钮。
+- Java 对照依据：
+  - `DatabaseDialog.checkTabList()` 从所有 `UnlockableContent.databaseTabs` 收集页签并在首位插入 `Planets.sun`；
+  - `UnlockableContent.postInit()` 会把 `shownPlanets` 合入 `databaseTabs`；
+  - `Planet.init()` 在 `autoAssignPlanet` 时对整棵 tech tree 调用 `addDatabaseTab(this)` / `addPlanet(this)`；
+  - `ContentInfoDialog.show(...)` 的 `@viewfields` 点击会打开 `https://mindustrygame.github.io/wiki/Modding%20Classes/<ClassName>`。
+- 本轮主改动：
+  - `core/src/mindustry/content/mod.rs`
+    - `ContentCatalog::load_base_content()` 构建完 Serpulo/Erekir tech tree 后投影节点页签；
+    - 将 tech tree root tab、节点 `database_tabs` 与 `shown_planets` 写回 item/liquid/status/unit/weather 的 `UnlockableContentBase.database_tabs`；
+    - 新增回归测试确认 `graphite` 可从两棵 tech tree 获得 `serpulo` 与 `erekir` 页签。
+  - `desktop/src/lib.rs`
+    - DatabaseDialog 页签改为从内容 `database_tabs` 并集生成，并以 `sun` 作为 `@all` 页签；
+    - Database 内容列表按选中页签过滤，保留 base 数据投影缺失时的 planet fallback，避免过渡阶段 tab 退化为空；
+    - `@viewfields` 新增命中矩形、`OpenDatabaseContentFields` route action、URI 生成与 `Platform::open_uri` / 失败复制链接链路；
+    - ContentInfoDialog stats 不再只渲染前 10 项，继续通过 clip 保护可见区域；
+    - 更新 DatabaseDialog/ContentInfoDialog 测试覆盖 tab 点击、tooltip、viewfields URI。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo test -p mindustry-core catalog_projects_tech_tree_database_tabs_onto_content --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Block/Sector/Planet 还没有完整 `UnlockableContentBase` 化，Database tab 投影暂时只能覆盖 item/liquid/status/unit/weather；
+  - DatabaseDialog 仍未完全按 Java `category -> tag -> records` 多层布局重排；
+  - `content.displayExtra(table)`、credit、真实滚动条与 per-content patched 判定仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 624. ContentInfoDialog 补 console viewfields 按钮
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
