@@ -91,7 +91,7 @@ use mindustry_core::mindustry::modsys::{
     ModMetadata, ModResourceContainerPlan, ModResourceDirectoryPlan, ModResourcePlan,
 };
 use mindustry_core::mindustry::net::{
-    ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
+    ArcNetProvider, EffectCallPacket2, Host, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
 };
 use mindustry_core::mindustry::r#type::{
@@ -127,7 +127,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_MINDUSTRY_PORT: u16 = 6567;
@@ -16393,6 +16393,10 @@ pub struct DesktopLauncher {
     pub join_add_server_edit_index: Option<usize>,
     pub join_info_dialog_open: bool,
     pub join_delete_dialog_index: Option<usize>,
+    pub join_local_hosts: Vec<Host>,
+    pub join_local_discovering: bool,
+    pub join_local_discovery_finished: bool,
+    pub join_local_discovery_receiver: Option<Arc<Mutex<mpsc::Receiver<Option<Host>>>>>,
     pub join_saved_servers: Vec<DesktopConnectTarget>,
     pub join_refresh_requests: u32,
     pub join_search: String,
@@ -17263,6 +17267,10 @@ impl DesktopLauncher {
             join_add_server_edit_index: None,
             join_info_dialog_open: false,
             join_delete_dialog_index: None,
+            join_local_hosts: Vec::new(),
+            join_local_discovering: false,
+            join_local_discovery_finished: false,
+            join_local_discovery_receiver: None,
             join_saved_servers,
             join_refresh_requests: 0,
             join_search: String::new(),
@@ -17559,6 +17567,7 @@ impl DesktopLauncher {
         }
         self.client.update();
         self.net_client.update();
+        self.poll_join_local_discovery();
         self.sync_loaded_world_data();
         self.sync_client_loaded_state();
         self.sync_state_snapshot();
@@ -21352,6 +21361,15 @@ impl DesktopLauncher {
                 self.database_scroll_offset = 0;
                 self.last_database_content_opened = None;
                 self.last_database_icon_copy_action = None;
+            } else if route == DesktopMenuRoute::Join {
+                self.join_search.clear();
+                self.join_search_focused = false;
+                self.join_add_dialog_open = false;
+                self.join_add_server_focused = false;
+                self.join_add_server_edit_index = None;
+                self.join_info_dialog_open = false;
+                self.join_delete_dialog_index = None;
+                self.refresh_join_local_hosts();
             } else if route == DesktopMenuRoute::Schematics {
                 self.load_schematic_tags_from_settings();
                 self.schematic_search.clear();
@@ -27075,6 +27093,52 @@ impl DesktopLauncher {
         true
     }
 
+    fn refresh_join_local_hosts(&mut self) {
+        let (tx, rx) = mpsc::channel::<Option<Host>>();
+        let host_tx = tx.clone();
+        self.join_local_hosts.clear();
+        self.join_local_discovering = true;
+        self.join_local_discovery_finished = false;
+        self.join_local_discovery_receiver = Some(Arc::new(Mutex::new(rx)));
+        self.net_client.net_mut().discover_servers(
+            Box::new(move |host| {
+                let _ = host_tx.send(Some(host));
+            }),
+            Box::new(move || {
+                let _ = tx.send(None);
+            }),
+        );
+    }
+
+    fn poll_join_local_discovery(&mut self) {
+        let Some(receiver) = self.join_local_discovery_receiver.as_ref().cloned() else {
+            return;
+        };
+        let mut finished = false;
+        let mut hosts = Vec::new();
+        let receiver = receiver.lock().unwrap();
+        while let Ok(message) = receiver.try_recv() {
+            match message {
+                Some(host) => hosts.push(host),
+                None => finished = true,
+            }
+        }
+        for host in hosts {
+            let duplicate = self
+                .join_local_hosts
+                .iter()
+                .any(|known| known.address == host.address && known.port == host.port);
+            if !duplicate {
+                self.join_local_hosts.push(host);
+            }
+        }
+        if finished {
+            self.join_local_discovering = false;
+            self.join_local_discovery_finished = true;
+            self.join_local_discovery_receiver = None;
+        }
+    }
+
     fn join_add_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         let width = (panel.width * 0.58).clamp(360.0, 520.0);
         let height = 214.0;
@@ -30402,6 +30466,7 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
+                self.refresh_join_local_hosts();
             }
             DesktopMenuRouteShellAction::MoveJoinServerCardUp(index) => {
                 if index > 0 && index < self.join_saved_servers.len() {
@@ -32455,8 +32520,19 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.034,
         );
 
+        let local_detail = if self.join_local_discovering {
+            "@hosts.discovering.any".to_string()
+        } else if self.join_local_hosts.is_empty() {
+            "@hosts.none".to_string()
+        } else {
+            let first = &self.join_local_hosts[0];
+            format!(
+                "{}  {}/{}  {}ms",
+                first.name, first.players, first.player_limit, first.ping
+            )
+        };
         for (index, (label, detail)) in [
-            ("@servers.local", "@hosts.discovering.any"),
+            ("@servers.local", local_detail.as_str()),
             ("@servers.remote", "@server.saved"),
         ]
         .into_iter()
@@ -37443,7 +37519,17 @@ impl DesktopLauncher {
             }
             DesktopMenuRoute::Join => {
                 let mut lines = vec![
-                    "section: @servers.local hosts: 0".into(),
+                    format!(
+                        "section: @servers.local hosts: {} state:{}",
+                        self.join_local_hosts.len(),
+                        if self.join_local_discovering {
+                            "discovering"
+                        } else if self.join_local_discovery_finished {
+                            "done"
+                        } else {
+                            "idle"
+                        }
+                    ),
                     format!(
                         "section: @servers.remote favorites: {}",
                         self.join_saved_servers.len()
@@ -37462,6 +37548,24 @@ impl DesktopLauncher {
                     "button: ? @join.info".into(),
                     "button: @refresh".into(),
                 ];
+                for (index, host) in self.join_local_hosts.iter().enumerate() {
+                    lines.extend([
+                        format!(
+                            "local[{index}]: {} {}:{}",
+                            host.name, host.address, host.port
+                        ),
+                        format!(
+                            "local[{index}] players: {}/{}",
+                            host.players, host.player_limit
+                        ),
+                        format!("local[{index}] map: {}", host.mapname),
+                        format!(
+                            "local[{index}] mode: {}",
+                            host.mode_name.as_deref().unwrap_or("@unknown")
+                        ),
+                        format!("local[{index}] ping: {}ms", host.ping),
+                    ]);
+                }
                 if self.join_info_dialog_open {
                     lines.extend(["dialog: @join.info".into(), "button: @ok".into()]);
                 }
@@ -66932,7 +67036,9 @@ version: "2.0.0"
         );
 
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
-        assert!(lines.contains(&"section: @servers.local hosts: 0".to_string()));
+        assert!(lines
+            .iter()
+            .any(|line| line.starts_with("section: @servers.local hosts: 0 state:")));
         assert!(lines.contains(&"section: @servers.remote favorites: 1".to_string()));
         assert!(lines.contains(&"section: @servers.global groups: 0".to_string()));
         assert!(
@@ -67397,6 +67503,44 @@ version: "2.0.0"
                 .get(super::JOIN_SERVERS_SETTINGS_KEY),
             Some(&"[{\"ip\":\"renamed.example\",\"port\":7002}]".to_string())
         );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let (tx, rx) = std::sync::mpsc::channel();
+        launcher.join_local_discovering = true;
+        launcher.join_local_discovery_receiver = Some(std::sync::Arc::new(Mutex::new(rx)));
+        tx.send(Some(mindustry_core::mindustry::net::Host::new(
+            42,
+            "LAN host",
+            "127.0.0.1",
+            6567,
+            "local map",
+            3,
+            2,
+            158,
+            "official",
+            Gamemode::Survival,
+            8,
+            "local description",
+            Some("@mode.survival.name".into()),
+        )))
+        .unwrap();
+        tx.send(None).unwrap();
+
+        launcher.poll_join_local_discovery();
+
+        assert!(!launcher.join_local_discovering);
+        assert!(launcher.join_local_discovery_finished);
+        assert_eq!(launcher.join_local_hosts.len(), 1);
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(lines.contains(&"section: @servers.local hosts: 1 state:done".to_string()));
+        assert!(lines.contains(&"local[0]: LAN host 127.0.0.1:6567".to_string()));
+        assert!(lines.contains(&"local[0] players: 2/8".to_string()));
+        assert!(lines.contains(&"local[0] map: local map".to_string()));
+        assert!(lines.contains(&"local[0] mode: @mode.survival.name".to_string()));
+        assert!(lines.contains(&"local[0] ping: 42ms".to_string()));
     }
 
     #[test]

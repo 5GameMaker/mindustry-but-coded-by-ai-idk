@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 640. JoinDialog 本地服务器发现状态接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.2%**，仍未达到完整可玩；继续优先前端/UI 与联机入口，本闭环目标是让 JoinDialog 的 Local 分区不再只是静态 `hosts: 0`，而是接入 Rust `Net::discover_servers(...)` 的异步发现结果。
+- Java 对照依据：
+  - `JoinDialog.refreshLocal()` 清空 local 列表、显示 `@hosts.discovering.any`，然后调用 `net.discoverServers(this::addLocalHost, this::finishLocalHosts)`；
+  - `addLocalHost(Host host)` 逐条添加本地 Host；
+  - `finishLocalHosts()` 在无结果时显示 `@hosts.none`，有结果时保留本地 host 列表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_local_hosts`、`join_local_discovering`、`join_local_discovery_finished` 与 discovery receiver；
+    - 进入 Join route 或点击 `@refresh` 时调用 `refresh_join_local_hosts()`，复用已有 `net_client.net_mut().discover_servers(...)`；
+    - discovery callback 只通过 channel 入队，主线程在 `DesktopLauncher::update()` 中 `poll_join_local_discovery()` 合并，避免跨线程直接改 UI；
+    - `active_menu_route_shell_lines(Join)` 输出 local hosts 数量、discovering/done/idle 状态与每个本地 Host 的 name/address/players/map/mode/ping；
+    - Join 页本地分区 detail 会根据状态显示 `@hosts.discovering.any`、`@hosts.none` 或首个本地 host 摘要。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - 本地 Host 还没有独立卡片 hit-test 与点击直连动作；
+  - saved server 单卡 `ping_host(...)` 刷新中/成功/失败状态尚未接；
+  - community server group/favorite/hidden/disclaimer 仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 639. JoinDialog 帮助按钮与删除确认
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
