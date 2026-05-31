@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 604. LoadDialog 模式筛选背景对齐 emptyTogglei
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.4%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 LoadDialog 搜索栏右侧模式筛选更贴近 Java `Styles.emptyTogglei` 的“透明图标按钮”观感。
+- Java 对照依据：
+  - `LoadDialog` 模式筛选按钮调用 `search.button(..., Styles.emptyTogglei, ...)`；
+  - `emptyTogglei` 在上游没有 `up/down/over/checked` 背景 drawable，主要靠图标本身表达模式和 checked 状态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 LoadDialog 模式筛选按钮上的 `grayt` 背景 sprite；
+    - 保留 hit-test rect 与 hidden/checked 的 icon tint；
+    - 回归测试补充断言：模式筛选 rect 内不再绘制 `grayt` 按钮背景。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - hover/pressed/tooltip 的完整 `ImageButton` 行为仍需继续对齐；
+  - 搜索栏整体高度、按钮 size(60f)/padLeft(-12f) 与 Java Scene2D 布局仍需后续精调；
+  - 真实 save load/runtime 恢复仍需继续迁移。
+
 ## 603. MapListDialog 地图卡片模式 badge 改用原版图标
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

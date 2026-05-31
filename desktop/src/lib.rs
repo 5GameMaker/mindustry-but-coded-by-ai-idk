@@ -33167,17 +33167,6 @@ impl DesktopLauncher {
         {
             let rect = Self::load_game_mode_filter_button_rect(search, index);
             let hidden = self.load_game_hidden_modes.contains(&mode);
-            pass.push(RenderCommand::draw_sprite(
-                Self::settings_text_button_symbol("grayt", false, !hidden),
-                rect,
-                if hidden {
-                    [1.0, 1.0, 1.0, 0.32]
-                } else {
-                    [1.0, 1.0, 1.0, 0.72]
-                },
-                0.0,
-                Layer::END_PIXELED + 0.029 + index as f32 * 0.0001,
-            ));
             pass.push(RenderCommand::draw_text_styled(
                 desktop_ui_icon_glyph_or_label(
                     Self::load_game_mode_filter_icon(mode),
@@ -59159,6 +59148,16 @@ version: "2.0.0"
                             && style.font == RenderFontId::Icon
                 )),
                 "Java LoadDialog mode filter should render {icon} as an icon toggle"
+            );
+            assert!(
+                !commands.iter().any(|command| matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol, rect: sprite_rect, .. }
+                        if *sprite_rect == rect
+                            && (symbol == &DesktopLauncher::settings_text_button_symbol("grayt", false, false)
+                                || symbol == &DesktopLauncher::settings_text_button_symbol("grayt", false, true))
+                )),
+                "Java Styles.emptyTogglei mode filter should not draw a grayt button background"
             );
         }
         assert!(!texts.iter().any(|text| text.starts_with("#0 New Map")));
