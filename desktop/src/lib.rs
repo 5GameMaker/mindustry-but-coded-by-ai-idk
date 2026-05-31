@@ -21025,36 +21025,6 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.156,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            Self::settings_keybind_bundle_label(key_name),
-            RenderPoint::new(dialog.center().x, dialog.center().y + 12.0),
-            [0.48, 0.74, 1.0, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
-            Layer::END_PIXELED + 0.157,
-        ));
-        pass.push(RenderCommand::draw_text_styled(
-            self.settings_keybind_rebind_hint(axis),
-            RenderPoint::new(dialog.center().x, dialog.center().y - 16.0),
-            [0.64, 0.72, 0.78, 1.0],
-            10.5,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.158,
-        ));
-        self.push_settings_text_button(
-            pass,
-            Self::settings_keybind_rebind_cancel_rect(dialog),
-            "@back",
-            Some("left"),
-            Layer::END_PIXELED + 0.160,
-        );
     }
 
     fn push_settings_route_controls(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -21729,12 +21699,6 @@ impl DesktopLauncher {
         self.settings_child_dialog?;
         let dialog = Self::settings_child_dialog_rect_for_panel(panel);
         if self.last_settings_rebind_key.is_some() {
-            let rebind_dialog = Self::settings_keybind_rebind_dialog_rect(dialog);
-            if Self::settings_keybind_rebind_cancel_rect(rebind_dialog).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::Settings(
-                    DesktopSettingsAction::CancelKeyRebind,
-                ));
-            }
             return None;
         }
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
@@ -21900,7 +21864,7 @@ impl DesktopLauncher {
 
     fn settings_keybind_rebind_dialog_rect(parent: RenderRect) -> RenderRect {
         let width = (parent.width - 96.0).clamp(320.0, 420.0);
-        let height = 210.0;
+        let height = 104.0;
         RenderRect::new(
             parent.x + (parent.width - width) * 0.5,
             parent.y + (parent.height - height) * 0.5,
@@ -21909,28 +21873,8 @@ impl DesktopLauncher {
         )
     }
 
-    fn settings_keybind_rebind_cancel_rect(dialog: RenderRect) -> RenderRect {
-        RenderRect::new(
-            dialog.x + (dialog.width - SETTINGS_BACK_BUTTON_WIDTH) * 0.5,
-            dialog.y + 18.0,
-            SETTINGS_BACK_BUTTON_WIDTH,
-            46.0,
-        )
-    }
-
     fn settings_keybind_spec_by_name(name: &'static str) -> Option<&'static DesktopKeybindSpec> {
         SETTINGS_KEYBIND_SPECS.iter().find(|spec| spec.name == name)
-    }
-
-    fn settings_keybind_rebind_hint(&self, axis: bool) -> String {
-        if !axis {
-            return "press keyboard/mouse input to bind".into();
-        }
-        if let Some(min) = self.settings_keybind_pending_axis_min.as_deref() {
-            format!("min: {min} / press max axis key")
-        } else {
-            "press min axis key; Scroll binds axis directly".into()
-        }
     }
 
     fn settings_keybind_category_label(category: &'static str) -> &'static str {
@@ -47201,8 +47145,14 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(rebind_texts.contains(&"keybind.press.axis"));
-        assert!(rebind_texts.contains(&"@keybind.move_x.name"));
-        assert!(rebind_texts.contains(&"press min axis key; Scroll binds axis directly"));
+        assert!(
+            !rebind_texts.contains(&"press min axis key; Scroll binds axis directly"),
+            "Java KeybindDialog rebind popup is a bare capture dialog without Rust-only hint text"
+        );
+        assert!(
+            !rebind_texts.contains(&"press keyboard/mouse input to bind"),
+            "Java KeybindDialog rebind popup should not render an extra Rust-only rebind hint"
+        );
         let reset_center =
             DesktopLauncher::settings_keybind_reset_button_rect(child_dialog, 0).center();
         assert_eq!(
@@ -47241,7 +47191,11 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(rebind_second_texts.contains(&"min: K / press max axis key"));
+        assert!(
+            !rebind_second_texts.contains(&"min: K / press max axis key"),
+            "axis second-pass capture should reopen the same bare Java-style dialog"
+        );
+        assert!(rebind_second_texts.contains(&"keybind.press.axis"));
         launcher.apply_menu_input_events(
             surface,
             &[DesktopInputTickEvent::Key {
@@ -47290,24 +47244,23 @@ mod tests {
         );
         assert_eq!(launcher.last_settings_rebind_key, Some("move_x"));
         let rebind_dialog = DesktopLauncher::settings_keybind_rebind_dialog_rect(child_dialog);
-        let cancel_rebind_center =
-            DesktopLauncher::settings_keybind_rebind_cancel_rect(rebind_dialog).center();
+        let old_cancel_button_center =
+            RenderPoint::new(rebind_dialog.center().x, rebind_dialog.y + 42.0);
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
-                cancel_rebind_center.x,
-                cancel_rebind_center.y
+                old_cancel_button_center.x,
+                old_cancel_button_center.y
             ),
-            Some(super::DesktopMenuRouteShellAction::Settings(
-                super::DesktopSettingsAction::CancelKeyRebind
-            ))
+            None,
+            "Java KeybindDialog rebind popup has no explicit cancel/back button"
         );
         launcher.apply_menu_input_events(
             surface,
             &[
                 DesktopInputTickEvent::CursorMoved {
-                    x: cancel_rebind_center.x,
-                    y: cancel_rebind_center.y,
+                    x: old_cancel_button_center.x,
+                    y: old_cancel_button_center.y,
                 },
                 DesktopInputTickEvent::MouseButton {
                     button: "primary".into(),
@@ -47315,7 +47268,41 @@ mod tests {
                 },
             ],
         );
+        assert_eq!(launcher.last_settings_rebind_key, Some("move_x"));
+        assert_eq!(
+            launcher.settings_keybind_pending_axis_min.as_deref(),
+            Some("Mouse Left"),
+            "clicking the bare capture dialog is treated as mouse input instead of a cancel action"
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Q".into(),
+                pressed: true,
+            }],
+        );
         assert_eq!(launcher.last_settings_rebind_key, None);
+        assert_eq!(
+            launcher
+                .settings_keybind_overrides
+                .get("move_x")
+                .map(String::as_str),
+            Some("Mouse Left / Q")
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: reset_center.x,
+                    y: reset_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert!(!launcher.settings_keybind_overrides.contains_key("move_x"));
 
         launcher.apply_menu_input_events(
             surface,

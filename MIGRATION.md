@@ -19736,6 +19736,30 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - rebind modal 仍需要继续向 Java 裸捕获 Dialog 收敛；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 569. Settings Controls rebind 裸捕获弹窗闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.1%**，仍未达到完整可玩；继续优先前端/UI，把 Controls rebind 捕获弹窗从 Rust 自带说明/取消按钮样式收敛到 Java `KeybindDialog.openDialog(...)` 的裸捕获 Dialog。
+- Java 对照依据：
+  - `KeybindDialog.openDialog(...)` 只创建 `new Dialog(bundle.get("keybind.press[.axis]"))`；
+  - rebind Dialog 没有额外内容行、没有显式 `@back` 取消按钮；
+  - `touchDown/keyDown/scrolled` 直接作为输入捕获，Axis 首段非轴输入后重新打开同样的捕获 Dialog。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_settings_keybind_rebind_dialog(...)` 删除 Rust-only keybind 名称副标题、hint 文案和显式 `@back` 取消按钮；
+    - rebind Dialog 高度从 210 收敛到 104，只保留标题与窗口背景；
+    - rebind 模态打开时 hit-test 不再暴露旧取消按钮动作，点击裸捕获窗口会作为鼠标输入进入 axis 二段绑定流程；
+    - 测试断言不再出现 `press min axis key` / `press keyboard/mouse input` / `min: ... press max axis key` 等 Rust-only 提示。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings_controls --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - rebind Dialog 仍是手绘等价，不是完整 Scene2D `Dialog` 控件树；
+  - Controls ScrollPane / 真实焦点 / TextField 选择区仍需继续追原版；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
