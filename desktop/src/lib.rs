@@ -701,7 +701,6 @@ const ABOUT_CREDITS_LINE: &str = "credits: Created by Anuken - anukendev@gmail.c
 pub const ABOUT_DISCORD_LINE: &str = "discord: The official Mindustry Discord chatroom";
 pub const ABOUT_GITHUB_LINE: &str = "github: Game source code";
 const DISCORD_URL: &str = "https://discord.gg/mindustry";
-const MOBILE_CONSOLE_MESSAGES_SHOWN: usize = 30;
 const MENU_PLAY_GUARD_MESSAGE: &str = "@mod.noerrorplay";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2582,6 +2581,10 @@ pub enum DesktopMenuRouteShellAction {
     FocusModsBrowserSearch,
     ClearModsBrowserSearch,
     ToggleModsBrowserSort,
+    ModsBrowserAdd(usize),
+    ModsBrowserReinstall(usize),
+    ModsBrowserOpenGithub(usize),
+    ModsBrowserViewReleases(usize),
     OpenModsDetail(usize),
     OpenModsFolder(usize),
     OpenModsContent(usize),
@@ -2638,6 +2641,23 @@ pub enum DesktopModsImportAction {
     File,
     Github,
     Close,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopModsBrowserActionKind {
+    Add,
+    Reinstall,
+    OpenGithub,
+    ViewReleases,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopModsBrowserAction {
+    pub index: usize,
+    pub kind: DesktopModsBrowserActionKind,
+    pub repo: Option<String>,
+    pub uri: Option<String>,
+    pub opened: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15924,6 +15944,7 @@ pub struct DesktopLauncher {
     pub mods_browser_search: String,
     pub mods_browser_sort_date: bool,
     pub last_mods_import_action: Option<DesktopModsImportAction>,
+    pub last_mods_browser_action: Option<DesktopModsBrowserAction>,
     pub last_mods_import_file_request: Option<MultiFileChooserRequest>,
     pub args: Vec<String>,
     pub texture_atlas: TextureAtlasPlan<bool>,
@@ -16741,6 +16762,7 @@ impl DesktopLauncher {
             mods_browser_search: String::new(),
             mods_browser_sort_date: false,
             last_mods_import_action: None,
+            last_mods_browser_action: None,
             last_mods_import_file_request: None,
             args,
             texture_atlas,
@@ -25730,6 +25752,56 @@ impl DesktopLauncher {
         request
     }
 
+    fn mods_browser_repo_uri(repo: &str) -> String {
+        let repo = repo.trim();
+        if repo.starts_with("https://") || repo.starts_with("http://") {
+            repo.to_string()
+        } else {
+            format!("https://github.com/{repo}")
+        }
+    }
+
+    fn mods_browser_releases_uri(repo: &str) -> String {
+        format!(
+            "{}/releases",
+            Self::mods_browser_repo_uri(repo).trim_end_matches('/')
+        )
+    }
+
+    fn dispatch_mods_browser_action_with_platform<P: Platform>(
+        &mut self,
+        index: usize,
+        kind: DesktopModsBrowserActionKind,
+        platform: &mut P,
+    ) -> Option<DesktopModsBrowserAction> {
+        self.last_mods_directory_mod_names.get(index)?;
+        let repo = self.mods_route_mod_repo_at_index(index).map(str::to_string);
+        let (uri, opened) = match kind {
+            DesktopModsBrowserActionKind::OpenGithub => {
+                let uri = Self::mods_browser_repo_uri(repo.as_deref()?);
+                let opened = platform.open_uri(&uri);
+                (Some(uri), Some(opened))
+            }
+            DesktopModsBrowserActionKind::ViewReleases => {
+                let uri = Self::mods_browser_releases_uri(repo.as_deref()?);
+                let opened = platform.open_uri(&uri);
+                (Some(uri), Some(opened))
+            }
+            DesktopModsBrowserActionKind::Add | DesktopModsBrowserActionKind::Reinstall => {
+                (None, None)
+            }
+        };
+        let action = DesktopModsBrowserAction {
+            index,
+            kind,
+            repo,
+            uri,
+            opened,
+        };
+        self.last_mods_browser_action = Some(action.clone());
+        Some(action)
+    }
+
     fn dispatch_menu_route_shell_action(&mut self, action: DesktopMenuRouteShellAction) {
         self.last_menu_route_shell_action = Some(action);
         match action {
@@ -26007,6 +26079,38 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::ToggleModsBrowserSort => {
                 self.mods_browser_sort_date = !self.mods_browser_sort_date;
                 self.mods_browser_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::ModsBrowserAdd(index) => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_browser_action_with_platform(
+                    index,
+                    DesktopModsBrowserActionKind::Add,
+                    &mut platform,
+                );
+            }
+            DesktopMenuRouteShellAction::ModsBrowserReinstall(index) => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_browser_action_with_platform(
+                    index,
+                    DesktopModsBrowserActionKind::Reinstall,
+                    &mut platform,
+                );
+            }
+            DesktopMenuRouteShellAction::ModsBrowserOpenGithub(index) => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_browser_action_with_platform(
+                    index,
+                    DesktopModsBrowserActionKind::OpenGithub,
+                    &mut platform,
+                );
+            }
+            DesktopMenuRouteShellAction::ModsBrowserViewReleases(index) => {
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_mods_browser_action_with_platform(
+                    index,
+                    DesktopModsBrowserActionKind::ViewReleases,
+                    &mut platform,
+                );
             }
             DesktopMenuRouteShellAction::OpenModsDetail(index) => {
                 if self.last_mods_directory_mod_names.get(index).is_some() {
@@ -30591,6 +30695,13 @@ impl DesktopLauncher {
         self.last_mods_directory_mod_metas.get(index)
     }
 
+    fn mods_route_mod_repo_at_index(&self, index: usize) -> Option<&str> {
+        self.mods_route_mod_meta_at_index(index)
+            .and_then(|meta| meta.repo.as_deref())
+            .map(str::trim)
+            .filter(|repo| !repo.is_empty())
+    }
+
     fn mods_route_mod_display_name_at_index(&self, index: usize) -> Option<&str> {
         self.mods_route_mod_meta_at_index(index)
             .and_then(ModMetadata::display_name_or_name)
@@ -30599,6 +30710,34 @@ impl DesktopLauncher {
                     .get(index)
                     .map(String::as_str)
             })
+    }
+
+    fn mods_route_mod_summary_at_index(&self, index: usize) -> String {
+        let Some(meta) = self.mods_route_mod_meta_at_index(index) else {
+            return "@unknown".to_string();
+        };
+        let mut summary_parts = Vec::new();
+        if let Some(author) = meta
+            .author
+            .as_deref()
+            .map(str::trim)
+            .filter(|author| !author.is_empty())
+        {
+            summary_parts.push(author.to_string());
+        }
+        if let Some(version) = meta
+            .version
+            .as_deref()
+            .map(str::trim)
+            .filter(|version| !version.is_empty())
+        {
+            summary_parts.push(version.to_string());
+        }
+        match summary_parts.len() {
+            0 => "@unknown".to_string(),
+            1 => summary_parts.remove(0),
+            _ => summary_parts.join(" | "),
+        }
     }
 
     fn mods_import_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -30686,6 +30825,15 @@ impl DesktopLauncher {
         indices
     }
 
+    fn mods_browser_entry_action_button_rect(entry: RenderRect, action_index: usize) -> RenderRect {
+        RenderRect::new(
+            entry.x + entry.width - 140.0 - action_index as f32 * 94.0,
+            entry.y + 8.0,
+            86.0,
+            24.0,
+        )
+    }
+
     fn mods_browser_action_at_point(
         &self,
         panel: RenderRect,
@@ -30708,10 +30856,29 @@ impl DesktopLauncher {
         for (visible_index, mod_index) in self
             .filtered_mods_browser_indices()
             .into_iter()
-            .take(6)
+            .take(4)
             .enumerate()
         {
-            if Self::mods_browser_entry_rect_for_list(list, visible_index).contains_point(point) {
+            let entry = Self::mods_browser_entry_rect_for_list(list, visible_index);
+            if self.mods_route_mod_repo_at_index(mod_index).is_some() {
+                for (action_index, action) in [
+                    DesktopMenuRouteShellAction::ModsBrowserReinstall(mod_index),
+                    DesktopMenuRouteShellAction::ModsBrowserOpenGithub(mod_index),
+                    DesktopMenuRouteShellAction::ModsBrowserViewReleases(mod_index),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    if Self::mods_browser_entry_action_button_rect(entry, action_index)
+                        .contains_point(point)
+                    {
+                        return Some(action);
+                    }
+                }
+            } else if Self::mods_browser_entry_action_button_rect(entry, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ModsBrowserAdd(mod_index));
+            }
+            if entry.contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::OpenModsDetail(mod_index));
             }
         }
@@ -30917,6 +31084,7 @@ impl DesktopLauncher {
             return;
         };
         let dialog = Self::mods_content_dialog_rect_for_panel(panel);
+        let meta = self.mods_route_mod_meta_at_index(index);
         pass.push(RenderCommand::fill_rect(
             panel,
             [0.0, 0.0, 0.0, 0.46],
@@ -30948,7 +31116,10 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.089,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@mods.contents.none",
+            meta.and_then(|meta| meta.description.as_deref())
+                .filter(|description| !description.trim().is_empty())
+                .map(|description| format!("content preview: {description}"))
+                .unwrap_or_else(|| "content preview unavailable".to_string()),
             RenderPoint::new(dialog.center().x, dialog.center().y + 24.0),
             [0.70, 0.78, 0.84, 1.0],
             12.0,
@@ -30958,22 +31129,33 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.090,
         ));
-        let meta = self.mods_route_mod_meta_at_index(index);
+        let description = meta
+            .and_then(|meta| meta.description.as_deref())
+            .filter(|description| !description.trim().is_empty());
+        let repo = meta
+            .and_then(|meta| meta.repo.as_deref())
+            .filter(|repo| !repo.trim().is_empty());
+        let source_path = meta
+            .and_then(|meta| meta.source_path.as_deref())
+            .filter(|source_path| !source_path.trim().is_empty());
         for (row, detail) in [
-            format!("@editor.name: {mod_name}"),
-            format!(
+            Some(format!("@editor.name: {mod_name}")),
+            Some(format!(
                 "@editor.author: {}",
                 meta.map(ModMetadata::author_or_unknown)
                     .unwrap_or("@unknown")
-            ),
-            format!(
+            )),
+            Some(format!(
                 "@mod.version: {}",
                 meta.map(ModMetadata::version_or_unknown)
                     .unwrap_or("@unknown")
-            ),
-            "content entries: 0".to_string(),
+            )),
+            description.map(|description| format!("@editor.description: {description}")),
+            repo.map(|repo| format!("repo: {repo}")),
+            source_path.map(|source_path| format!("metadata: {source_path}")),
         ]
         .into_iter()
+        .flatten()
         .enumerate()
         {
             pass.push(RenderCommand::draw_text_styled(
@@ -31164,10 +31346,29 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.096,
         ));
         let indices = self.filtered_mods_browser_indices();
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "{} / {}",
+                indices.len(),
+                self.last_mods_directory_mod_names.len()
+            ),
+            RenderPoint::new(sort.right() - 4.0, sort.y - 14.0),
+            [0.56, 0.68, 0.78, 1.0],
+            8.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::End)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.097,
+        ));
         if indices.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
-                "@mods.none",
-                list.center(),
+                if self.mods_browser_search.trim().is_empty() {
+                    "@mods.none".to_string()
+                } else {
+                    format!("@none.found: {}", self.mods_browser_search)
+                },
+                RenderPoint::new(list.center().x, list.center().y + 10.0),
                 [0.70, 0.78, 0.84, 1.0],
                 12.0,
                 0.0,
@@ -31176,9 +31377,22 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.099,
             ));
+            pass.push(RenderCommand::draw_text_styled(
+                "@mods.browser",
+                RenderPoint::new(list.center().x, list.center().y - 16.0),
+                [0.52, 0.64, 0.74, 1.0],
+                9.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0995,
+            ));
         } else {
             for (visible_index, mod_index) in indices.into_iter().take(4).enumerate() {
                 let rect = Self::mods_browser_entry_rect_for_list(list, visible_index);
+                let icon = RenderRect::new(rect.x + 10.0, rect.y + 10.0, 52.0, 52.0);
+                let text_x = icon.right() + 12.0;
                 let display_name = self
                     .mods_route_mod_display_name_at_index(mod_index)
                     .unwrap_or("@mods.unknown");
@@ -31190,9 +31404,38 @@ impl DesktopLauncher {
                     0.0,
                     Layer::END_PIXELED + 0.098 + visible_index as f32 * 0.001,
                 ));
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("pane"),
+                    icon,
+                    [1.0, 1.0, 1.0, 0.74],
+                    0.0,
+                    Layer::END_PIXELED + 0.0985 + visible_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::stroke_rect(
+                    icon,
+                    [0.56, 0.72, 0.86, 0.90],
+                    1.0,
+                    Layer::END_PIXELED + 0.0986 + visible_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    display_name
+                        .chars()
+                        .next()
+                        .map(|ch| ch.to_ascii_uppercase().to_string())
+                        .unwrap_or_else(|| "?".to_string()),
+                    icon.center(),
+                    [0.82, 0.92, 1.0, 1.0],
+                    16.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.0987 + visible_index as f32 * 0.001,
+                ));
                 pass.push(RenderCommand::draw_text_styled(
                     display_name.to_string(),
-                    RenderPoint::new(rect.x + 18.0, rect.y + rect.height - 17.0),
+                    RenderPoint::new(text_x, rect.y + rect.height - 17.0),
                     [0.94, 0.98, 1.0, 1.0],
                     11.0,
                     0.0,
@@ -31209,8 +31452,8 @@ impl DesktopLauncher {
                     .and_then(|meta| meta.version.as_deref())
                     .unwrap_or("@unknown");
                 pass.push(RenderCommand::draw_text_styled(
-                    format!("@editor.author: {author}  @mod.version: {version}"),
-                    RenderPoint::new(rect.x + 18.0, rect.y + rect.height - 37.0),
+                    format!("@mod.installed  @editor.author: {author}  @mod.version: {version}"),
+                    RenderPoint::new(text_x, rect.y + rect.height - 37.0),
                     [0.66, 0.76, 0.84, 1.0],
                     8.5,
                     0.0,
@@ -31219,13 +31462,11 @@ impl DesktopLauncher {
                         .with_integer_position(true),
                     Layer::END_PIXELED + 0.100 + visible_index as f32 * 0.001,
                 ));
-                let repo = meta
-                    .and_then(|meta| meta.repo.as_deref())
-                    .filter(|repo| !repo.trim().is_empty());
+                let repo = self.mods_route_mod_repo_at_index(mod_index);
                 pass.push(RenderCommand::draw_text_styled(
                     repo.map(|repo| format!("repo: {repo}"))
                         .unwrap_or_else(|| "source: local scan".to_string()),
-                    RenderPoint::new(rect.x + 18.0, rect.y + 17.0),
+                    RenderPoint::new(text_x, rect.y + 17.0),
                     [0.58, 0.68, 0.76, 1.0],
                     8.5,
                     0.0,
@@ -31245,12 +31486,7 @@ impl DesktopLauncher {
                     [Some("@mods.browser.add"), None, None]
                 };
                 for (action_index, action) in actions.into_iter().flatten().enumerate() {
-                    let button = RenderRect::new(
-                        rect.x + rect.width - 140.0 - action_index as f32 * 94.0,
-                        rect.y + 8.0,
-                        86.0,
-                        24.0,
-                    );
+                    let button = Self::mods_browser_entry_action_button_rect(rect, action_index);
                     pass.push(RenderCommand::draw_sprite(
                         Self::settings_text_button_symbol("grayt", false, false),
                         button,
@@ -31291,7 +31527,7 @@ impl DesktopLauncher {
         );
 
         pass.push(RenderCommand::draw_text_styled(
-            "mods browser",
+            "@mods",
             RenderPoint::new(panel.x + 28.0, panel.y + panel.height - 58.0),
             [0.72, 0.82, 0.9, 1.0],
             13.0,
@@ -31333,16 +31569,40 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.026,
             ));
         } else if self.last_mods_directory_mod_names.is_empty() {
+            let empty = RenderRect::new(
+                panel.x + 28.0,
+                panel.y + panel.height - 204.0,
+                panel.width - 56.0,
+                76.0,
+            );
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("pane"),
+                empty,
+                [1.0, 1.0, 1.0, 0.62],
+                0.0,
+                Layer::END_PIXELED + 0.026,
+            ));
             pass.push(RenderCommand::draw_text_styled(
                 "@mods.none",
-                RenderPoint::new(panel.center().x, panel.y + panel.height - 132.0),
+                RenderPoint::new(panel.center().x, empty.center().y + 10.0),
                 [0.78, 0.86, 0.92, 1.0],
                 12.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
-                Layer::END_PIXELED + 0.026,
+                Layer::END_PIXELED + 0.027,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "@mod.import / @mods.browser",
+                RenderPoint::new(panel.center().x, empty.center().y - 14.0),
+                [0.58, 0.70, 0.80, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0275,
             ));
         } else {
             for (index, _mod_name) in self
@@ -31374,7 +31634,7 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.027 + index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
-                    "loaded",
+                    self.mods_route_mod_summary_at_index(index),
                     RenderPoint::new(card.center().x, card.center().y + 12.0),
                     [0.72, 0.82, 0.9, 1.0],
                     10.0,
@@ -31618,7 +31878,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.091,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!("ConsoleFragment shown / open=false / messagesShown={MOBILE_CONSOLE_MESSAGES_SHOWN}"),
+            ">",
             RenderPoint::new(message_strip.x + 10.0, message_strip.center().y),
             [0.70, 0.88, 0.94, 1.0],
             10.0,
@@ -46321,11 +46581,12 @@ repo: "Beta/Override"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"mods browser"));
+        assert!(texts.contains(&"@mods"));
         assert!(texts.contains(&"Alpha Pack"));
         assert!(texts.contains(&"Beta Override"));
         assert!(texts.contains(&"gamma"));
-        assert!(texts.contains(&"loaded"));
+        assert!(texts.contains(&"Alpha Author | 1.0.0"));
+        assert!(texts.contains(&"Beta Author | 2.0.0"));
         assert!(texts.contains(&"@back"));
         assert!(texts.contains(&"@mod.import"));
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
@@ -46436,6 +46697,101 @@ version: "3.0.0"
         assert_eq!(launcher.filtered_mods_browser_indices(), vec![1]);
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
 
+        let list = DesktopLauncher::mods_browser_list_rect_for_dialog(dialog);
+        let beta_entry = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0);
+        for (button_index, expected) in [
+            (
+                0,
+                super::DesktopMenuRouteShellAction::ModsBrowserReinstall(1),
+            ),
+            (
+                1,
+                super::DesktopMenuRouteShellAction::ModsBrowserOpenGithub(1),
+            ),
+            (
+                2,
+                super::DesktopMenuRouteShellAction::ModsBrowserViewReleases(1),
+            ),
+        ] {
+            let button =
+                DesktopLauncher::mods_browser_entry_action_button_rect(beta_entry, button_index)
+                    .center();
+            assert_eq!(
+                launcher
+                    .active_menu_route_shell_action_at_surface_point(surface, button.x, button.y),
+                Some(expected)
+            );
+        }
+
+        let mut platform = RecordingPlatform {
+            open_result: true,
+            ..Default::default()
+        };
+        let github_action = launcher
+            .dispatch_mods_browser_action_with_platform(
+                1,
+                super::DesktopModsBrowserActionKind::OpenGithub,
+                &mut platform,
+            )
+            .expect("repo mod should open GitHub");
+        assert_eq!(
+            github_action.kind,
+            super::DesktopModsBrowserActionKind::OpenGithub
+        );
+        assert_eq!(github_action.repo.as_deref(), Some("Beta/Override"));
+        assert_eq!(
+            github_action.uri.as_deref(),
+            Some("https://github.com/Beta/Override")
+        );
+        assert_eq!(github_action.opened, Some(true));
+        assert_eq!(
+            launcher.last_mods_browser_action.as_ref(),
+            Some(&github_action)
+        );
+
+        let releases_action = launcher
+            .dispatch_mods_browser_action_with_platform(
+                1,
+                super::DesktopModsBrowserActionKind::ViewReleases,
+                &mut platform,
+            )
+            .expect("repo mod should open releases");
+        assert_eq!(
+            releases_action.uri.as_deref(),
+            Some("https://github.com/Beta/Override/releases")
+        );
+        assert_eq!(
+            platform.opened_uris,
+            vec![
+                "https://github.com/Beta/Override".to_string(),
+                "https://github.com/Beta/Override/releases".to_string()
+            ]
+        );
+
+        launcher.mods_browser_search = "alpha".into();
+        assert_eq!(launcher.filtered_mods_browser_indices(), vec![0]);
+        let alpha_entry = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0);
+        let add = DesktopLauncher::mods_browser_entry_action_button_rect(alpha_entry, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, add.x, add.y),
+            Some(super::DesktopMenuRouteShellAction::ModsBrowserAdd(0))
+        );
+        launcher
+            .dispatch_mods_browser_action_with_platform(
+                0,
+                super::DesktopModsBrowserActionKind::Add,
+                &mut platform,
+            )
+            .expect("local mod add action should be recorded");
+        assert_eq!(
+            launcher
+                .last_mods_browser_action
+                .as_ref()
+                .map(|action| action.kind),
+            Some(super::DesktopModsBrowserActionKind::Add)
+        );
+        launcher.mods_browser_search = "beta".into();
+
         let sort = DesktopLauncher::mods_browser_sort_button_rect_for_dialog(dialog).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(surface, sort.x, sort.y),
@@ -46450,7 +46806,6 @@ version: "3.0.0"
             .iter()
             .any(|line| line.contains("modal: @mods.browser") && line.contains("@mods.sort.date")));
 
-        let list = DesktopLauncher::mods_browser_list_rect_for_dialog(dialog);
         let entry = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(surface, entry.x, entry.y),
@@ -46682,13 +47037,14 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(content_texts.contains(&"@mods.viewcontent: Alpha Pack"));
-        assert!(content_texts.contains(&"@mods.contents.none"));
+        assert!(content_texts.contains(&"content preview: Alpha fixture mod."));
         assert!(content_texts.contains(&"@editor.name: Alpha Pack"));
         assert!(content_texts.contains(&"@editor.author: Alpha Author"));
         assert!(content_texts.contains(&"@mod.version: 1.0.0"));
-        assert!(content_texts.contains(&"content entries: 0"));
+        assert!(content_texts.contains(&"@editor.description: Alpha fixture mod."));
         assert!(!content_texts.contains(&"@none"));
-        assert!(!content_texts.contains(&"content source: LoadedMod.minfo"));
+        assert!(!content_texts.contains(&"@mods.contents.none"));
+        assert!(!content_texts.contains(&"content entries: 0"));
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -48928,6 +49284,7 @@ version: "2.0.0"
                     "button: @mods.guide Icon.link",
                     "button: @mod.import Icon.add",
                     "empty: @mods.none",
+                    "browser: BaseDialog @mods.browser",
                 ],
             ),
         ];
@@ -52499,7 +52856,10 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
 
-        assert!(texts.contains(&"ConsoleFragment shown / open=false / messagesShown=30"));
+        assert!(!texts
+            .iter()
+            .any(|text| text.contains("ConsoleFragment shown / open=false / messagesShown=30")));
+        assert!(texts.contains(&">"));
         assert!(texts.contains(&"console.mobile.chat"));
         assert!(texts.contains(&"console.mobile.up"));
         assert!(texts.contains(&"console.mobile.down"));

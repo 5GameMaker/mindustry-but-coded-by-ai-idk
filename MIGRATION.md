@@ -15,6 +15,51 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 561. ModsBrowser 按钮命中与平台动作闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.3%**，仍未达到完整可玩；继续优先前端/UI，减少“只画出来但不能点”的壳感。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java` 的 `rebuildBrowser()` / 选择弹层提供 `@mods.browser.add`、`@mods.browser.reinstall`、`@mods.github.open`、`@mods.browser.view-releases` 等可点击动作；
+  - browser 条目包含图标占位、安装状态、作者/版本/repo 信息，而不是纯文本列表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopModsBrowserActionKind` / `DesktopModsBrowserAction` 与 `last_mods_browser_action`，把 browser 按钮点击记录到 launcher 状态；
+    - `mods_browser_action_at_point(...)` 优先命中 entry 内按钮，再命中整张卡片，避免按钮只是装饰；
+    - `dispatch_mods_browser_action_with_platform(...)` 接入 `Platform::open_uri`，GitHub / releases 生成 `https://github.com/<repo>` 与 `/releases` URI；
+    - browser entry 复用统一按钮矩形 helper，并增加图标占位、安装状态、结果数与搜索空态，主 Mods 空态也改为带导入/浏览提示的 pane；
+    - 更新 Mods browser/route 回归测试，覆盖 reinstall/github/releases/add 命中与 GitHub URI 调度。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_browser_dialog_renders_search_sort_and_filtered_entries --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_scanned_mod_cards_and_back_button --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_menu_routes_use_upstream_dialog_structure --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - browser 数据源仍主要来自本地扫描的 mod metadata，尚未接 Java 的远程 `ModListing` / stars / release API；
+  - add/reinstall 目前先记录动作，真实下载、安装、reload required 与错误弹层还需继续接入；
+  - 未达到完整可玩，不能宣告目标完成。
+
+## 560. ModsDialog 路由卡片与 mobile console 调试壳继续收敛
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.2%**，仍未达到完整可玩；继续优先前端/UI，清理可见调试壳与静态 placeholder 文案。
+- Java 对照依据：
+  - `core/src/mindustry/ui/fragments/ConsoleFragment.java` 的 mobile 端仅保留按钮与 `>` prompt，不应出现 `ConsoleFragment shown...` 这种调试串；
+  - `core/src/mindustry/ui/dialogs/ModsDialog.java` 的 card/detail/content 路径应更偏真实 metadata 与预览摘要，而不是固定 `loaded` / `content entries: 0`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_mods_route_page(...)` 将路由卡片状态从固定 `loaded` 改为作者/版本摘要，避免首页卡片继续暴露纯壳文案；
+    - `push_mods_content_dialog(...)` 将 `@mods.contents.none` / `content entries: 0` 改为 description 预览 + metadata 摘要，并保留 detail / folder / content 的闭环；
+    - `push_mobile_terminal_overlay(...)` 去掉 `ConsoleFragment shown / open=false / messagesShown=30` 调试文案，改为更接近原版的 `>` prompt，顺手删除废弃常量；
+    - 更新 mods route / content / mobile console 回归测试，改为断言真实信息而不是调试字符串。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mods_route_renders_scanned_mod_cards_and_back_button --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_mobile_terminal_toggle_renders_consolefrag_shell --features opengl-backend --lib -- --test-threads=1`
+- 仍未完成：
+  - 真实 mod content registry、content 分类/图标网格、browser 远程仓库卡片、reinstall/download/releases 仍需继续接入；
+
 ## 559. LoadRenderer 接入 LoadingFragment 遮罩结构
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
