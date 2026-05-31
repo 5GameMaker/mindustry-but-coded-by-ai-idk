@@ -77,10 +77,12 @@ use mindustry_core::mindustry::input::input_handler::{
 };
 use mindustry_core::mindustry::io::{
     backup_file_for_path, collect_valid_save_slot_records, read_bullet_sync, read_decal_sync,
-    read_deflated_save_meta_with_backup, read_effect_state_sync, read_fire_sync, read_puddle_sync,
-    read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
-    LegacyTeamBlocks, SaveSlotRecord, TeamId, TypeValue, Vec2,
+    read_deflated_map_info, read_deflated_save_meta_with_backup, read_effect_state_sync,
+    read_fire_sync, read_puddle_sync, read_unit_sync, read_weather_state_sync,
+    read_world_label_sync, ContentHeaderSnapshot, LegacyTeamBlocks, SaveSlotRecord, TeamId,
+    TypeValue, Vec2,
 };
+use mindustry_core::mindustry::maps::MapDescriptor;
 use mindustry_core::mindustry::modsys::{
     ModMetadata, ModResourceContainerPlan, ModResourceDirectoryPlan, ModResourcePlan,
 };
@@ -117,6 +119,7 @@ use mindustry_core::mindustry::{
     upstream_menu_version_color, upstream_menu_version_text, UPSTREAM_BASELINE,
 };
 use std::collections::BTreeMap;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -168,6 +171,9 @@ const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
 const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
 const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 44.0;
+const MAP_LIST_CARD_WIDTH: f32 = 190.0;
+const MAP_LIST_CARD_HEIGHT: f32 = 96.0;
+const MAP_LIST_CARD_GAP: f32 = 10.0;
 const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
 const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
 const MENU_LOGO_UPSTREAM_WIDTH: f32 = 768.0;
@@ -518,6 +524,24 @@ pub struct DesktopSchematicCardAction {
 
 impl DesktopSchematicCardAction {
     pub const fn new(index: usize, kind: DesktopSchematicCardActionKind) -> Self {
+        Self { index, kind }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopMapCardActionKind {
+    OpenPlay,
+    OpenEditorInfo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopMapCardAction {
+    pub index: usize,
+    pub kind: DesktopMapCardActionKind,
+}
+
+impl DesktopMapCardAction {
+    pub const fn new(index: usize, kind: DesktopMapCardActionKind) -> Self {
         Self { index, kind }
     }
 }
@@ -2488,6 +2512,10 @@ pub enum DesktopMenuRouteShellAction {
     RefreshJoinServers,
     OpenMapListFilters,
     CloseMapListFilters,
+    FocusMapListSearch,
+    ClearMapListSearch,
+    MapCard(DesktopMapCardAction),
+    CloseMapCardDialog,
     NewEditorMap,
     ImportEditorMap,
     OpenTechTreeSelect,
@@ -15396,6 +15424,13 @@ pub struct DesktopLauncher {
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
     pub map_list_filter_dialog_open: bool,
+    pub map_list_cards: Vec<MapDescriptor>,
+    pub map_list_search: String,
+    pub map_list_search_focused: bool,
+    pub map_list_scroll_offset: usize,
+    pub map_play_dialog_index: Option<usize>,
+    pub editor_map_info_dialog_index: Option<usize>,
+    pub last_map_card_action: Option<DesktopMapCardAction>,
     pub editor_new_map_dialog_open: bool,
     pub editor_import_map_dialog_open: bool,
     pub tech_tree_selected_root: Option<String>,
@@ -16158,6 +16193,13 @@ impl DesktopLauncher {
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
             map_list_filter_dialog_open: false,
+            map_list_cards: Vec::new(),
+            map_list_search: String::new(),
+            map_list_search_focused: false,
+            map_list_scroll_offset: 0,
+            map_play_dialog_index: None,
+            editor_map_info_dialog_index: None,
+            last_map_card_action: None,
             editor_new_map_dialog_open: false,
             editor_import_map_dialog_open: false,
             tech_tree_selected_root: None,
@@ -19874,6 +19916,9 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
             self.map_list_filter_dialog_open = false;
+            self.map_list_search_focused = false;
+            self.map_play_dialog_index = None;
+            self.editor_map_info_dialog_index = None;
             self.last_menu_dispatch = None;
             self.last_menu_route_shell_action = None;
             return true;
@@ -19899,6 +19944,9 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
             self.map_list_filter_dialog_open = false;
+            self.map_list_search_focused = false;
+            self.map_play_dialog_index = None;
+            self.editor_map_info_dialog_index = None;
             let dispatch = DesktopMenuActionDispatch {
                 role,
                 submenu_changed,
@@ -19918,6 +19966,9 @@ impl DesktopLauncher {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
+                self.map_list_search_focused = false;
+                self.map_play_dialog_index = None;
+                self.editor_map_info_dialog_index = None;
                 self.last_custom_menu_action = Some(DesktopCustomMenuAction {
                     role,
                     label,
@@ -19950,6 +20001,9 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
             self.map_list_filter_dialog_open = false;
+            self.map_list_search_focused = false;
+            self.map_play_dialog_index = None;
+            self.editor_map_info_dialog_index = None;
             None
         } else {
             DesktopMenuRoute::from_menu_button(role)
@@ -19961,6 +20015,10 @@ impl DesktopLauncher {
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
             self.map_list_filter_dialog_open = false;
+            self.map_list_search_focused = false;
+            self.map_play_dialog_index = None;
+            self.editor_map_info_dialog_index = None;
+            self.last_map_card_action = None;
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
                     &self.content_loader,
@@ -19989,6 +20047,14 @@ impl DesktopLauncher {
                 self.last_schematic_card_action = None;
                 self.last_schematic_tag_toggled = None;
                 self.last_schematic_modal_button = None;
+            } else if matches!(
+                route,
+                DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
+            ) {
+                self.map_list_search.clear();
+                self.map_list_search_focused = true;
+                self.map_list_scroll_offset = 0;
+                self.last_map_card_action = None;
             }
         }
         let close_requested = role == MenuButtonRole::Quit;
@@ -19996,6 +20062,9 @@ impl DesktopLauncher {
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
             self.mods_import_dialog_open = false;
+            self.map_list_search_focused = false;
+            self.map_play_dialog_index = None;
+            self.editor_map_info_dialog_index = None;
         }
         let dispatch = DesktopMenuActionDispatch {
             role,
@@ -23077,6 +23146,317 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_list_card_columns_for_pane(pane: RenderRect) -> usize {
+        ((pane.width + MAP_LIST_CARD_GAP) / (MAP_LIST_CARD_WIDTH + MAP_LIST_CARD_GAP))
+            .floor()
+            .max(1.0) as usize
+    }
+
+    fn map_list_card_rect_for_pane(pane: RenderRect, index: usize) -> RenderRect {
+        let columns = Self::map_list_card_columns_for_pane(pane);
+        let col = index % columns;
+        let row = index / columns;
+        RenderRect::new(
+            pane.x + 12.0 + col as f32 * (MAP_LIST_CARD_WIDTH + MAP_LIST_CARD_GAP),
+            pane.y + pane.height
+                - 14.0
+                - MAP_LIST_CARD_HEIGHT
+                - row as f32 * (MAP_LIST_CARD_HEIGHT + MAP_LIST_CARD_GAP),
+            MAP_LIST_CARD_WIDTH,
+            MAP_LIST_CARD_HEIGHT,
+        )
+    }
+
+    fn map_list_card_preview_rect(card: RenderRect) -> RenderRect {
+        RenderRect::new(card.x + 8.0, card.y + 34.0, 58.0, 50.0)
+    }
+
+    fn map_list_card_type_label(map: &MapDescriptor) -> &'static str {
+        if map.workshop {
+            "@workshop"
+        } else if map.custom {
+            "@custom"
+        } else if map.mod_name.is_some() {
+            "@mods"
+        } else {
+            "@builtin"
+        }
+    }
+
+    fn map_list_card_visible_in_pane(pane: RenderRect, card: RenderRect) -> bool {
+        card.y >= pane.y + 8.0 && card.right() <= pane.right() + f32::EPSILON
+    }
+
+    fn map_list_card_index_at_point(
+        &self,
+        panel: RenderRect,
+        route: DesktopMenuRoute,
+        point: RenderPoint,
+    ) -> Option<usize> {
+        let pane = Self::map_list_pane_rect_for_panel(panel, route);
+        let columns = Self::map_list_card_columns_for_pane(pane);
+        let start = self.map_list_scroll_offset * columns;
+        for (visible_index, map_index) in self
+            .filtered_map_card_indices()
+            .into_iter()
+            .skip(start)
+            .enumerate()
+        {
+            let card = Self::map_list_card_rect_for_pane(pane, visible_index);
+            if Self::map_list_card_visible_in_pane(pane, card) && card.contains_point(point) {
+                return Some(map_index);
+            }
+        }
+        None
+    }
+
+    fn filtered_map_card_indices(&self) -> Vec<usize> {
+        let query = schematic_search_normalize(&self.map_list_search);
+        self.map_list_cards
+            .iter()
+            .enumerate()
+            .filter_map(|(index, map)| {
+                if query.is_empty() {
+                    return Some(index);
+                }
+                let haystack = schematic_search_normalize(&format!(
+                    "{} {} {} {}",
+                    map.plain_name(),
+                    map.plain_author(),
+                    map.plain_description(),
+                    map.mod_name.as_deref().unwrap_or_default()
+                ));
+                haystack.contains(&query).then_some(index)
+            })
+            .collect()
+    }
+
+    fn map_list_visible_row_capacity_for_pane(pane: RenderRect) -> usize {
+        ((pane.height - 14.0 + MAP_LIST_CARD_GAP) / (MAP_LIST_CARD_HEIGHT + MAP_LIST_CARD_GAP))
+            .floor()
+            .max(1.0) as usize
+    }
+
+    fn max_map_list_scroll_offset_for_counts(
+        total_cards: usize,
+        columns: usize,
+        visible_rows: usize,
+    ) -> usize {
+        let total_rows = total_cards.div_ceil(columns.max(1));
+        total_rows.saturating_sub(visible_rows.max(1))
+    }
+
+    fn max_map_list_scroll_offset(&self, pane: RenderRect) -> usize {
+        let filtered_count = self.filtered_map_card_indices().len();
+        Self::max_map_list_scroll_offset_for_counts(
+            filtered_count,
+            Self::map_list_card_columns_for_pane(pane),
+            Self::map_list_visible_row_capacity_for_pane(pane),
+        )
+    }
+
+    fn apply_map_list_scroll_delta(
+        &mut self,
+        surface_size: DesktopSurfaceSize,
+        delta_y: f32,
+    ) -> bool {
+        let Some(route @ (DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)) =
+            self.active_menu_route
+        else {
+            return false;
+        };
+        if self.map_list_filter_dialog_open
+            || self.map_play_dialog_index.is_some()
+            || self.editor_map_info_dialog_index.is_some()
+        {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
+        let pane = Self::map_list_pane_rect_for_panel(panel, route);
+        if !pane.contains_point(cursor) {
+            return false;
+        }
+        let max = self.max_map_list_scroll_offset(pane);
+        if max == 0 {
+            return false;
+        }
+        let current = self.map_list_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.map_list_scroll_offset = next;
+        next != current
+    }
+
+    fn map_card_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 80.0).clamp(380.0, 560.0);
+        let height = (panel.height - 90.0).clamp(360.0, 500.0);
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn map_card_dialog_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.x + 24.0, dialog.y + 20.0, 128.0, 44.0)
+    }
+
+    fn map_play_mode_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let col = index % 2;
+        let row = index / 2;
+        RenderRect::new(
+            dialog.x + 48.0 + col as f32 * 146.0,
+            dialog.y + dialog.height - 126.0 - row as f32 * 48.0,
+            132.0,
+            40.0,
+        )
+    }
+
+    fn map_play_primary_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + dialog.width - 24.0 - 176.0,
+            dialog.y + 20.0,
+            176.0,
+            44.0,
+        )
+    }
+
+    fn map_editor_action_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = (dialog.width - 56.0) * 0.5;
+        RenderRect::new(
+            dialog.x + 24.0 + index as f32 * (width + 8.0),
+            dialog.y + 20.0,
+            width,
+            44.0,
+        )
+    }
+
+    pub fn refresh_map_list_cards_from_assets(&mut self) -> usize {
+        let mut cards = Self::load_map_cards_from_candidate_roots();
+        if cards.is_empty() {
+            cards = Self::fallback_builtin_map_cards();
+        }
+        self.map_list_cards = cards;
+        self.map_list_cards.len()
+    }
+
+    fn load_map_cards_from_candidate_roots() -> Vec<MapDescriptor> {
+        let mut cards = Vec::new();
+        for root in Self::map_asset_candidate_roots() {
+            if root.is_dir() && Self::collect_map_cards_from_dir(&root, &root, &mut cards).is_ok() {
+                break;
+            }
+        }
+        cards.sort_by_key(|map| map.plain_name());
+        cards.dedup_by(|left, right| left.file == right.file);
+        cards
+    }
+
+    fn map_asset_candidate_roots() -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+        if let Some(value) = std::env::var_os("MINDUSTRY_MAPS_DIR") {
+            roots.push(PathBuf::from(value));
+        }
+        if let Some(value) = std::env::var_os("MINDUSTRY_ASSETS_DIR") {
+            let assets = PathBuf::from(value);
+            roots.push(assets.join("maps"));
+            roots.push(assets);
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            roots.push(cwd.join("core/assets/maps"));
+            roots.push(cwd.join("../mindustry-upstream-v157.4/core/assets/maps"));
+            roots.push(cwd.join("../_upstream_mindustry/core/assets/maps"));
+        }
+        roots.push(PathBuf::from(
+            "D:/MDT/mindustry-upstream-v157.4/core/assets/maps",
+        ));
+
+        let mut deduped = Vec::new();
+        for root in roots {
+            if !deduped.iter().any(|known: &PathBuf| known == &root) {
+                deduped.push(root);
+            }
+        }
+        deduped
+    }
+
+    fn collect_map_cards_from_dir(
+        root: &Path,
+        dir: &Path,
+        out: &mut Vec<MapDescriptor>,
+    ) -> io::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                Self::collect_map_cards_from_dir(root, &path, out)?;
+                continue;
+            }
+            if path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("msav"))
+            {
+                if let Ok(card) = Self::map_descriptor_from_asset_file(root, &path) {
+                    out.push(card);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn map_descriptor_from_asset_file(root: &Path, path: &Path) -> io::Result<MapDescriptor> {
+        let file = fs::File::open(path)?;
+        let info = read_deflated_map_info(file, false)?;
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        Ok(MapDescriptor::new(
+            format!("maps/{relative}"),
+            info.width,
+            info.height,
+            info.tags,
+            false,
+            info.version,
+            info.build,
+        ))
+    }
+
+    fn fallback_builtin_map_cards() -> Vec<MapDescriptor> {
+        [
+            ("maps/default/archipelago.msav", "Archipelago", 300, 300),
+            ("maps/default/fork.msav", "Fork", 350, 350),
+            ("maps/default/fortress.msav", "Fortress", 500, 500),
+            ("maps/default/glacier.msav", "Glacier", 300, 300),
+            ("maps/default/islands.msav", "Islands", 300, 300),
+            ("maps/default/maze.msav", "Maze", 300, 300),
+            ("maps/default/shattered.msav", "Shattered", 350, 350),
+            ("maps/default/veins.msav", "Veins", 300, 300),
+        ]
+        .into_iter()
+        .map(|(file, name, width, height)| {
+            let mut tags = BTreeMap::new();
+            tags.insert("name".to_string(), name.to_string());
+            tags.insert("author".to_string(), "Anuke".to_string());
+            MapDescriptor::new(file, width, height, tags, false, 1, 158)
+        })
+        .collect()
+    }
+
     fn schematics_import_button_rect_for_panel(panel: RenderRect) -> RenderRect {
         RenderRect::new(
             panel.x + 28.0,
@@ -23763,8 +24143,18 @@ impl DesktopLauncher {
             }
             return None;
         }
+        if self.map_play_dialog_index.is_some() || self.editor_map_info_dialog_index.is_some() {
+            let dialog = Self::map_card_dialog_rect_for_panel(panel);
+            if Self::map_card_dialog_close_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseMapCardDialog);
+            }
+            return None;
+        }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
+        }
+        if Self::map_list_search_rect_for_panel(panel, route).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusMapListSearch);
         }
         if Self::map_list_filter_button_rect_for_panel(panel, route).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::OpenMapListFilters);
@@ -23776,6 +24166,16 @@ impl DesktopLauncher {
             if Self::map_list_action_button_rect_for_panel(panel, 1).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::ImportEditorMap);
             }
+        }
+        if let Some(index) = self.map_list_card_index_at_point(panel, route, point) {
+            let kind = match route {
+                DesktopMenuRoute::CustomGame => DesktopMapCardActionKind::OpenPlay,
+                DesktopMenuRoute::Editor => DesktopMapCardActionKind::OpenEditorInfo,
+                _ => return None,
+            };
+            return Some(DesktopMenuRouteShellAction::MapCard(
+                DesktopMapCardAction::new(index, kind),
+            ));
         }
         None
     }
@@ -24267,6 +24667,8 @@ impl DesktopLauncher {
                 self.mods_import_dialog_open = false;
                 self.tech_tree_select_dialog_open = false;
                 self.map_list_filter_dialog_open = false;
+                self.map_play_dialog_index = None;
+                self.editor_map_info_dialog_index = None;
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
@@ -24297,6 +24699,34 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::CloseMapListFilters => {
                 self.map_list_filter_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::FocusMapListSearch => {
+                self.map_list_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::ClearMapListSearch => {
+                self.map_list_search.clear();
+                self.map_list_scroll_offset = 0;
+                self.map_list_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::MapCard(action) => {
+                if self.map_list_cards.get(action.index).is_some() {
+                    self.map_list_filter_dialog_open = false;
+                    self.last_map_card_action = Some(action);
+                    match action.kind {
+                        DesktopMapCardActionKind::OpenPlay => {
+                            self.map_play_dialog_index = Some(action.index);
+                            self.editor_map_info_dialog_index = None;
+                        }
+                        DesktopMapCardActionKind::OpenEditorInfo => {
+                            self.editor_map_info_dialog_index = Some(action.index);
+                            self.map_play_dialog_index = None;
+                        }
+                    }
+                }
+            }
+            DesktopMenuRouteShellAction::CloseMapCardDialog => {
+                self.map_play_dialog_index = None;
+                self.editor_map_info_dialog_index = None;
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
                 self.editor_new_map_dialog_open = true;
@@ -26095,9 +26525,17 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.031,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@editor.search",
+            if self.map_list_search.is_empty() {
+                "@editor.search".to_string()
+            } else {
+                self.map_list_search.clone()
+            },
             RenderPoint::new(search.x + 44.0, search.center().y),
-            [0.60, 0.70, 0.78, 1.0],
+            if self.map_list_search.is_empty() {
+                [0.60, 0.70, 0.78, 1.0]
+            } else {
+                [0.90, 0.96, 1.0, 1.0]
+            },
             12.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Start)
@@ -26141,19 +26579,356 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.028,
         ));
+        let filtered_indices = self.filtered_map_card_indices();
+        if filtered_indices.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@maps.none",
+                pane.center(),
+                [0.70, 0.78, 0.84, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.032,
+            ));
+        } else {
+            let columns = Self::map_list_card_columns_for_pane(pane);
+            let start = self.map_list_scroll_offset * columns;
+            for (visible_index, map_index) in filtered_indices.into_iter().skip(start).enumerate() {
+                let Some(map) = self.map_list_cards.get(map_index) else {
+                    continue;
+                };
+                let card = Self::map_list_card_rect_for_pane(pane, visible_index);
+                if !Self::map_list_card_visible_in_pane(pane, card) {
+                    continue;
+                }
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("button"),
+                    card,
+                    [1.0, 1.0, 1.0, 0.84],
+                    0.0,
+                    Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.001,
+                ));
+                let preview = Self::map_list_card_preview_rect(card);
+                pass.push(RenderCommand::draw_sprite(
+                    "whiteui",
+                    preview,
+                    [0.10, 0.16, 0.20, 0.96],
+                    0.0,
+                    Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::stroke_rect(
+                    preview,
+                    [0.38, 0.54, 0.64, 0.88],
+                    1.0,
+                    Layer::END_PIXELED + 0.035 + visible_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    map.plain_name(),
+                    RenderPoint::new(card.x + 76.0, card.y + card.height - 22.0),
+                    [0.94, 0.98, 1.0, 1.0],
+                    11.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.036 + visible_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    format!(
+                        "{}  {}x{}",
+                        Self::map_list_card_type_label(map),
+                        map.width,
+                        map.height
+                    ),
+                    RenderPoint::new(card.x + 76.0, card.y + card.height - 44.0),
+                    [0.70, 0.82, 0.90, 1.0],
+                    9.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.037 + visible_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    map.plain_author(),
+                    RenderPoint::new(card.x + 76.0, card.y + 18.0),
+                    [0.56, 0.68, 0.76, 1.0],
+                    8.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.038 + visible_index as f32 * 0.001,
+                ));
+            }
+            let max_scroll = self.max_map_list_scroll_offset(pane);
+            if max_scroll > 0 {
+                pass.push(RenderCommand::draw_text_styled(
+                    format!(
+                        "{}/{}",
+                        self.map_list_scroll_offset.min(max_scroll) + 1,
+                        max_scroll + 1
+                    ),
+                    RenderPoint::new(pane.right() - 26.0, pane.y + 16.0),
+                    [0.54, 0.64, 0.72, 1.0],
+                    9.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.045,
+                ));
+            }
+        }
+
+        self.push_map_card_dialog(pass, panel, route);
+        self.push_map_list_filter_dialog(pass, panel);
+    }
+
+    fn push_map_card_dialog(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        route: DesktopMenuRoute,
+    ) {
+        let (index, play_dialog) = match route {
+            DesktopMenuRoute::CustomGame => match self.map_play_dialog_index {
+                Some(index) => (index, true),
+                None => return,
+            },
+            DesktopMenuRoute::Editor => match self.editor_map_info_dialog_index {
+                Some(index) => (index, false),
+                None => return,
+            },
+            _ => return,
+        };
+        let Some(map) = self.map_list_cards.get(index) else {
+            return;
+        };
+        let dialog = Self::map_card_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.50],
+            Layer::END_PIXELED + 0.058,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.059,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.060,
+        ));
+
+        if play_dialog {
+            self.push_map_play_dialog(pass, dialog, map);
+        } else {
+            self.push_editor_map_info_dialog(pass, dialog, map);
+        }
+    }
+
+    fn push_map_play_dialog(&self, pass: &mut RenderPass, dialog: RenderRect, map: &MapDescriptor) {
         pass.push(RenderCommand::draw_text_styled(
-            "@maps.none",
-            pane.center(),
-            [0.70, 0.78, 0.84, 1.0],
-            13.0,
+            map.plain_name(),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            17.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.061,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@level.mode",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 70.0),
+            [0.80, 0.90, 0.96, 1.0],
+            12.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true),
-            Layer::END_PIXELED + 0.032,
+            Layer::END_PIXELED + 0.062,
         ));
+        for (index, label) in ["survival", "attack", "sandbox", "pvp"]
+            .into_iter()
+            .enumerate()
+        {
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_mode_button_rect(dialog, index),
+                label,
+                None,
+                Layer::END_PIXELED + 0.063 + index as f32 * 0.001,
+            );
+        }
+        let preview = RenderRect::from_center(
+            RenderPoint::new(dialog.center().x, dialog.y + 154.0),
+            170.0,
+            130.0,
+        );
+        pass.push(RenderCommand::draw_sprite(
+            "whiteui",
+            preview,
+            [0.10, 0.16, 0.20, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.068,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            preview,
+            [0.38, 0.54, 0.64, 0.90],
+            2.0,
+            Layer::END_PIXELED + 0.069,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!(
+                "{}  {}x{}",
+                Self::map_list_card_type_label(map),
+                map.width,
+                map.height
+            ),
+            RenderPoint::new(dialog.center().x, preview.y - 16.0),
+            [0.68, 0.80, 0.88, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.070,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::map_card_dialog_close_rect(dialog),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.071,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_primary_button_rect(dialog),
+            "@play",
+            Some("play"),
+            Layer::END_PIXELED + 0.072,
+        );
+        self.push_settings_text_button(
+            pass,
+            RenderRect::new(dialog.center().x - 115.0, dialog.y + 72.0, 230.0, 44.0),
+            "@customize",
+            Some("settings"),
+            Layer::END_PIXELED + 0.073,
+        );
+    }
 
-        self.push_map_list_filter_dialog(pass, panel);
+    fn push_editor_map_info_dialog(
+        &self,
+        pass: &mut RenderPass,
+        dialog: RenderRect,
+        map: &MapDescriptor,
+    ) {
+        pass.push(RenderCommand::draw_text_styled(
+            "@editor.mapinfo",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            17.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.061,
+        ));
+        let preview = RenderRect::new(dialog.x + 28.0, dialog.y + 106.0, 168.0, 168.0);
+        pass.push(RenderCommand::draw_sprite(
+            "whiteui",
+            preview,
+            [0.10, 0.16, 0.20, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.062,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            preview,
+            [0.38, 0.54, 0.64, 0.90],
+            2.0,
+            Layer::END_PIXELED + 0.063,
+        ));
+        let desc = RenderRect::new(
+            preview.right() + 16.0,
+            preview.y,
+            dialog.right() - preview.right() - 44.0,
+            preview.height,
+        );
+        pass.push(RenderCommand::fill_rect(
+            desc,
+            [0.0, 0.0, 0.0, 0.52],
+            Layer::END_PIXELED + 0.064,
+        ));
+        for (index, (label, value)) in [
+            ("@editor.mapname", map.plain_name()),
+            ("@editor.author", map.plain_author()),
+            ("@editor.description", map.plain_description()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let y = desc.y + desc.height - 22.0 - index as f32 * 48.0;
+            pass.push(RenderCommand::draw_text_styled(
+                label,
+                RenderPoint::new(desc.x + 12.0, y),
+                [0.56, 0.64, 0.70, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.065 + index as f32 * 0.002,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                value,
+                RenderPoint::new(desc.x + 12.0, y - 18.0),
+                [0.90, 0.96, 1.0, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.066 + index as f32 * 0.002,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::map_editor_action_button_rect(dialog, 0),
+            "@editor.openin",
+            Some("export"),
+            Layer::END_PIXELED + 0.072,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::map_editor_action_button_rect(dialog, 1),
+            if map.workshop {
+                "@view.workshop"
+            } else {
+                "@delete"
+            },
+            Some(if map.workshop { "link" } else { "trash" }),
+            Layer::END_PIXELED + 0.073,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::map_card_dialog_close_rect(dialog),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.074,
+        );
     }
 
     fn push_map_list_filter_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -26842,6 +27617,22 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && matches!(
+                            self.active_menu_route,
+                            Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
+                        )
+                        && self.map_list_search_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.map_list_search.pop();
+                    } else {
+                        self.map_list_search.clear();
+                    }
+                    self.map_list_scroll_offset = 0;
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Settings)
                         && self.settings_child_dialog
                             == Some(DesktopSettingsChildDialog::Controls)
@@ -26926,6 +27717,24 @@ impl DesktopLauncher {
                     if *pressed && Self::is_secondary_menu_mouse_button(button) =>
                 {
                     if let Some(cursor) = self.last_menu_cursor {
+                        if matches!(
+                            self.active_menu_route,
+                            Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
+                        ) {
+                            let route = self.active_menu_route.unwrap();
+                            let viewport = self.default_render_viewport_for_surface(surface_size);
+                            let panel =
+                                Self::active_menu_route_shell_panel_for_route(viewport, route);
+                            if Self::map_list_search_rect_for_panel(panel, route)
+                                .contains_point(cursor)
+                            {
+                                self.dispatch_menu_route_shell_action(
+                                    DesktopMenuRouteShellAction::ClearMapListSearch,
+                                );
+                                self.last_menu_action = None;
+                                continue;
+                            }
+                        }
                         if self.active_menu_route == Some(DesktopMenuRoute::Schematics) {
                             let viewport = self.default_render_viewport_for_surface(surface_size);
                             let panel = Self::active_menu_route_shell_panel_for_route(
@@ -27044,9 +27853,20 @@ impl DesktopLauncher {
                     if self.apply_settings_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
+                    if self.apply_map_list_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
                 }
                 DesktopInputTickEvent::Text(text) => {
-                    if self.active_menu_route == Some(DesktopMenuRoute::Settings)
+                    if matches!(
+                        self.active_menu_route,
+                        Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
+                    ) && self.map_list_search_focused
+                    {
+                        self.map_list_search
+                            .extend(text.chars().filter(|ch| !ch.is_control()));
+                        self.map_list_scroll_offset = 0;
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Settings)
                         && self.settings_child_dialog == Some(DesktopSettingsChildDialog::Controls)
                         && self.settings_keybind_search_focused
                     {
@@ -27159,13 +27979,18 @@ impl DesktopLauncher {
     }
 
     fn map_list_route_lines(&self, title_key: &str, display_type: bool) -> Vec<String> {
+        let maps_line = if self.map_list_cards.is_empty() {
+            "maps: @maps.none".to_string()
+        } else {
+            format!("maps: card grid count={}", self.map_list_cards.len())
+        };
         let mut lines = vec![
             format!("dialog: MapListDialog title={title_key}"),
             "button: @back Icon.left size=210x64".into(),
             "search: @editor.search Icon.zoom".into(),
             "filter: @editor.filters Icon.filter".into(),
             "pane: mapTable ScrollPane no-x-scroll".into(),
-            "maps: @maps.none".into(),
+            maps_line,
         ];
         if display_type {
             lines.push("type label: @custom / @workshop / @builtin".into());
@@ -30036,6 +30861,7 @@ impl DesktopLauncher {
 pub fn run(args: Vec<String>) -> DesktopLauncher {
     let mut launcher = DesktopLauncher::new(args);
     launcher.client.setup();
+    launcher.refresh_map_list_cards_from_assets();
     let _ = launcher.merge_mods_directory_arg_into_texture_atlas();
     launcher.connect_from_args();
     launcher
@@ -30197,6 +31023,7 @@ mod tests {
         write_deflated_save_meta_prefix, ContentHeaderEntry, ContentHeaderSnapshot,
         LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, LATEST_SAVE_VERSION,
     };
+    use mindustry_core::mindustry::maps::MapDescriptor;
     use mindustry_core::mindustry::modsys::{ModMetadata, ModResourcePlan, ModSpritePackSource};
     use mindustry_core::mindustry::net::{
         packet_ids, ConnectPacket, PacketEnvelope, PacketKind, PacketSerializer,
@@ -45358,6 +46185,266 @@ version: "2.0.0"
                     if symbol == &pane_symbol && *rect == DesktopLauncher::map_list_pane_rect_for_panel(panel, route)
             )));
         }
+    }
+
+    #[test]
+    fn desktop_launcher_custom_and_editor_routes_render_map_list_cards_when_seeded() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Archipelago".to_string());
+        tags.insert("author".to_string(), "Anuken".to_string());
+        let builtin = MapDescriptor::new(
+            "maps/default/archipelago.msav",
+            300,
+            300,
+            tags,
+            false,
+            1,
+            157,
+        );
+
+        let mut custom_tags = BTreeMap::new();
+        custom_tags.insert("name".to_string(), "Workshop Arena".to_string());
+        custom_tags.insert("author".to_string(), "Mapper".to_string());
+        let mut custom = MapDescriptor::new(
+            "maps/custom/arena.msav",
+            180,
+            180,
+            custom_tags,
+            true,
+            1,
+            157,
+        );
+        custom.workshop = true;
+
+        for (role, route) in [
+            (
+                MenuButtonRole::CustomGame,
+                super::DesktopMenuRoute::CustomGame,
+            ),
+            (MenuButtonRole::Editor, super::DesktopMenuRoute::Editor),
+        ] {
+            let mut launcher = DesktopLauncher::new(Vec::new());
+            launcher.map_list_cards = vec![builtin.clone(), custom.clone()];
+            launcher.dispatch_menu_action(role);
+
+            let viewport =
+                launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(1280, 720));
+            let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+            let commands = frame
+                .bundle
+                .render_frame
+                .as_ref()
+                .expect("seeded map list route should produce a render frame")
+                .passes
+                .iter()
+                .flat_map(|pass| pass.commands.iter())
+                .collect::<Vec<_>>();
+            let texts = commands
+                .iter()
+                .filter_map(|command| match command {
+                    RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert!(
+                !texts.contains(&"@maps.none"),
+                "{route:?} should render cards instead of empty text"
+            );
+            assert!(texts.contains(&"Archipelago"));
+            assert!(texts.contains(&"Workshop Arena"));
+            assert!(texts.contains(&"@builtin  300x300"));
+            assert!(texts.contains(&"@workshop  180x180"));
+            assert!(texts.contains(&"Anuken"));
+            assert!(texts.contains(&"Mapper"));
+            assert!(commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol, .. } if symbol == "whiteui"
+                )
+            }));
+
+            let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(viewport, route);
+            let pane = DesktopLauncher::map_list_pane_rect_for_panel(panel, route);
+            let card_center = DesktopLauncher::map_list_card_rect_for_pane(pane, 0).center();
+            let expected_kind = match route {
+                super::DesktopMenuRoute::CustomGame => super::DesktopMapCardActionKind::OpenPlay,
+                super::DesktopMenuRoute::Editor => super::DesktopMapCardActionKind::OpenEditorInfo,
+                _ => unreachable!(),
+            };
+            let expected = super::DesktopMapCardAction::new(0, expected_kind);
+            assert_eq!(
+                launcher.active_menu_route_shell_action_at_surface_point(
+                    DesktopSurfaceSize::new(1280, 720),
+                    card_center.x,
+                    card_center.y
+                ),
+                Some(super::DesktopMenuRouteShellAction::MapCard(expected))
+            );
+            launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+                expected,
+            ));
+            assert_eq!(launcher.last_map_card_action, Some(expected));
+
+            let dialog_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+            let dialog_texts = dialog_frame
+                .bundle
+                .render_frame
+                .as_ref()
+                .expect("map card dialog should render")
+                .passes
+                .iter()
+                .flat_map(|pass| pass.commands.iter())
+                .filter_map(|command| match command {
+                    RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            match route {
+                super::DesktopMenuRoute::CustomGame => {
+                    assert_eq!(launcher.map_play_dialog_index, Some(0));
+                    assert_eq!(launcher.editor_map_info_dialog_index, None);
+                    assert!(dialog_texts.contains(&"@level.mode"));
+                    assert!(dialog_texts.contains(&"survival"));
+                    assert!(dialog_texts.contains(&"@customize"));
+                    assert!(dialog_texts.contains(&"@play"));
+                }
+                super::DesktopMenuRoute::Editor => {
+                    assert_eq!(launcher.editor_map_info_dialog_index, Some(0));
+                    assert_eq!(launcher.map_play_dialog_index, None);
+                    assert!(dialog_texts.contains(&"@editor.mapinfo"));
+                    assert!(dialog_texts.contains(&"@editor.mapname"));
+                    assert!(dialog_texts.contains(&"@editor.author"));
+                    assert!(dialog_texts.contains(&"@editor.openin"));
+                    assert!(dialog_texts.contains(&"@delete"));
+                }
+                _ => unreachable!(),
+            }
+            let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+            let close = DesktopLauncher::map_card_dialog_close_rect(dialog).center();
+            assert_eq!(
+                launcher.active_menu_route_shell_action_at_surface_point(
+                    DesktopSurfaceSize::new(1280, 720),
+                    close.x,
+                    close.y
+                ),
+                Some(super::DesktopMenuRouteShellAction::CloseMapCardDialog)
+            );
+            launcher.dispatch_menu_route_shell_action(
+                super::DesktopMenuRouteShellAction::CloseMapCardDialog,
+            );
+            assert_eq!(launcher.map_play_dialog_index, None);
+            assert_eq!(launcher.editor_map_info_dialog_index, None);
+        }
+    }
+
+    #[test]
+    fn desktop_launcher_refresh_map_cards_seeds_actual_client_map_list() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        assert!(launcher.map_list_cards.is_empty());
+
+        let count = launcher.refresh_map_list_cards_from_assets();
+        assert!(
+            count >= 8,
+            "client map list should discover upstream assets or use fallback cards"
+        );
+        assert!(launcher
+            .map_list_cards
+            .iter()
+            .any(|map| map.plain_name() == "Archipelago"));
+        let lines = launcher.map_list_route_lines("@customgame", false);
+        assert!(lines
+            .iter()
+            .any(|line| line.starts_with("maps: card grid count=")));
+        assert!(!lines.contains(&"maps: @maps.none".to_string()));
+    }
+
+    #[test]
+    fn desktop_launcher_map_list_search_and_scroll_filter_visible_cards() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = (0..18)
+            .map(|index| {
+                let mut tags = BTreeMap::new();
+                tags.insert("name".to_string(), format!("Arena {index}"));
+                tags.insert("author".to_string(), "Mapper".to_string());
+                MapDescriptor::new(
+                    format!("maps/default/arena-{index}.msav"),
+                    128,
+                    128,
+                    tags,
+                    false,
+                    1,
+                    158,
+                )
+            })
+            .collect();
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        assert!(launcher.map_list_search_focused);
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let pane = DesktopLauncher::map_list_pane_rect_for_panel(
+            panel,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: pane.center().x,
+                    y: pane.center().y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert!(
+            launcher.map_list_scroll_offset > 0,
+            "MapListDialog ScrollPane should advance rows when many cards exist"
+        );
+
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("17".into())]);
+        assert_eq!(launcher.map_list_search, "17");
+        assert_eq!(launcher.map_list_scroll_offset, 0);
+        assert_eq!(launcher.filtered_map_card_indices(), vec![17]);
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("filtered map list should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"17"));
+        assert!(texts.contains(&"Arena 17"));
+        assert!(!texts.contains(&"Arena 0"));
+
+        let search = DesktopLauncher::map_list_search_rect_for_panel(
+            panel,
+            super::DesktopMenuRoute::CustomGame,
+        )
+        .center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, search.x, search.y),
+            Some(super::DesktopMenuRouteShellAction::FocusMapListSearch)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ClearMapListSearch,
+        );
+        assert!(launcher.map_list_search.is_empty());
+        assert_eq!(launcher.map_list_scroll_offset, 0);
     }
 
     #[test]
