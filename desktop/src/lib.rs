@@ -30955,6 +30955,24 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.093,
             ));
+            y -= 58.0;
+        }
+        if self.menu_console_setting_enabled {
+            let button_width = 300.0_f32.min((clip.width - 28.0).max(140.0));
+            let button = RenderRect::new(
+                clip.x + (clip.width - button_width) * 0.5,
+                (y - 58.0).max(clip.y + 10.0),
+                button_width,
+                50.0,
+            );
+            self.push_settings_text_button_with_style(
+                pass,
+                button,
+                "@viewfields",
+                Some("link"),
+                Layer::END_PIXELED + 0.0937,
+                "grayt",
+            );
         }
         pass.push(RenderCommand::clear_clip());
 
@@ -59462,6 +59480,10 @@ version: "2.0.0"
         assert!(detail_texts.contains(&"@database.patched"));
         assert!(detail_texts.contains(&"@stat.id"));
         assert!(detail_texts.contains(&"0"));
+        assert!(
+            detail_texts.contains(&"@viewfields"),
+            "Java ContentInfoDialog shows the @viewfields button when console mode is enabled"
+        );
         assert!(detail_commands
             .iter()
             .any(|command| matches!(command, RenderCommand::SetClip { .. })));

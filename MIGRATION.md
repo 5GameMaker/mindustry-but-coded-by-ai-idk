@@ -15,6 +15,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 624. ContentInfoDialog 补 console viewfields 按钮
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.4%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是补齐 Java `ContentInfoDialog` 在 console 设置打开时显示的 `@viewfields` 入口。
+- Java 对照依据：
+  - `ContentInfoDialog.show(...)` 在 `settings.getBool("console")` 为真时追加 `table.button("@viewfields", Icon.link, Styles.grayt, ...)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_database_content_info_dialog(...)` 在 ScrollPane-like clip 内、details/stats 后追加 `@viewfields` grayt 按钮；
+    - 按钮使用 Icon 字体 `link`，复用 settings text button 样式；
+    - 扩展 Database 内容详情测试，断言 console 模式下详情弹窗渲染 `@viewfields`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+- 仍未完成：
+  - 按钮点击后的 `openURI("https://mindustrygame.github.io/wiki/Modding%20Classes/...")` 尚未接 route action；
+  - `content.displayExtra(table)` 和 `credit` 数据模型仍待迁移。
+
 ## 623. DatabaseDialog 补 databaseTag 读取与标签行雏形
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
