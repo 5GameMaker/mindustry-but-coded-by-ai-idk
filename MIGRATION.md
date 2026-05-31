@@ -20110,6 +20110,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - planet filter 还未接真实 planets 列表；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 583. ConsoleFragment 移动端按钮条视觉闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **63.5%**，仍未达到完整可玩；继续优先前端/UI，把移动端 terminal overlay 从固定 debug 文本推进到更接近 Java `ConsoleFragment.toggleMobile()` 的底部按钮条结构。
+- Java 对照依据：
+  - `ConsoleFragment.toggleMobile()` 在 mobile 下只切换 `shown`，并保持 `open = false`；
+  - mobile 真实 UI 有 `chat / upOpen / downOpen / fileText / cancel` 五个 `Styles.cleari` 按钮；
+  - 消息显示上限是 `messagesShown = 30`，空消息时不应只显示调试壳文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 mobile console button size/pad 常量；
+    - `push_mobile_terminal_overlay(...)` 删除 `consolefrag: mobile/open/buttons/history` 固定调试行；
+    - 改为绘制 bottom button row：`chat/upOpen/downOpen/fileText/cancel`；
+    - 保留 `open=false` 与 `messagesShown=30` 的状态条；
+    - 使用透明/clear drawable 近似 `Styles.cleari` 的无背景按钮视觉；
+    - 更新测试断言五个移动 console 控制入口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_mobile_terminal_toggle_renders_consolefrag_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_mobile_terminal_info_and_gutter_chrome --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - chat/file/up/down/cancel 按钮还未分别接系统文本输入、脚本文件选择、滚动与显式关闭 action；
+  - 消息缓冲区与历史栈还未接真实 console runtime；
+  - `Styles.cleari` 仍需在 skin/style registry 中做正式别名，而不是当前 clear drawable 近似；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

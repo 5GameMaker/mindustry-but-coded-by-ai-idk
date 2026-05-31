@@ -172,6 +172,8 @@ const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
 const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
 const MENU_LOGO_UPSTREAM_WIDTH: f32 = 768.0;
 const MENU_LOGO_UPSTREAM_HEIGHT: f32 = 107.0;
+const MOBILE_CONSOLE_BUTTON_SIZE: f32 = 58.0;
+const MOBILE_CONSOLE_BUTTON_PAD: f32 = 4.0;
 const SCHEMATICS_IMPORT_BUTTON_WIDTH: f32 = 210.0;
 const SCHEMATICS_IMPORT_BUTTON_HEIGHT: f32 = 54.0;
 const SCHEMATICS_SEARCH_BAR_HEIGHT: f32 = 34.0;
@@ -28052,55 +28054,90 @@ impl DesktopLauncher {
         if !self.menu_mobile_terminal_open {
             return;
         }
-        let panel_width = (viewport.width - 40.0).clamp(260.0, 460.0);
-        let panel = RenderRect::new(viewport.x + 20.0, viewport.y + 72.0, panel_width, 150.0);
+        let button_count = 5.0;
+        let row_width = button_count * MOBILE_CONSOLE_BUTTON_SIZE
+            + (button_count - 1.0) * MOBILE_CONSOLE_BUTTON_PAD;
+        let row = RenderRect::new(
+            viewport.x + 8.0,
+            viewport.y + self.menu_scene_margin_bottom.max(0.0) + 8.0,
+            row_width,
+            MOBILE_CONSOLE_BUTTON_SIZE,
+        );
+        let message_strip = RenderRect::new(
+            row.x,
+            row.y + row.height + 6.0,
+            (viewport.width - 16.0).min(420.0),
+            32.0,
+        );
         pass.push(RenderCommand::fill_rect(
-            panel,
-            [0.0, 0.0, 0.0, 0.72],
+            message_strip,
+            [0.0, 0.0, 0.0, 0.58],
             Layer::END_PIXELED + 0.09,
         ));
         pass.push(RenderCommand::stroke_rect(
-            panel,
-            [0.35, 0.75, 0.85, 0.95],
-            2.0,
-            Layer::END_PIXELED + 0.1,
+            message_strip,
+            [0.28, 0.54, 0.62, 0.72],
+            1.0,
+            Layer::END_PIXELED + 0.091,
         ));
-        for (index, line) in [
-            "consolefrag: mobile",
-            "open: false",
-            "buttons: chat, up, down, file, cancel",
-            "history: empty",
-        ]
-        .iter()
-        .enumerate()
-        {
-            pass.push(RenderCommand::draw_text_styled(
-                (*line).to_string(),
-                RenderPoint::new(
-                    panel.x + 16.0,
-                    panel.y + panel.height - 24.0 - index as f32 * 20.0,
-                ),
-                [0.78, 0.95, 1.0, 1.0],
-                13.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
-                Layer::END_PIXELED + 0.11,
-            ));
-        }
         pass.push(RenderCommand::draw_text_styled(
-            format!("messages shown: {MOBILE_CONSOLE_MESSAGES_SHOWN}"),
-            RenderPoint::new(panel.x + 16.0, panel.y + 28.0),
-            [0.62, 0.72, 0.8, 1.0],
-            12.0,
+            format!("ConsoleFragment shown / open=false / messagesShown={MOBILE_CONSOLE_MESSAGES_SHOWN}"),
+            RenderPoint::new(message_strip.x + 10.0, message_strip.center().y),
+            [0.70, 0.88, 0.94, 1.0],
+            10.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Start)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true),
-            Layer::END_PIXELED + 0.11,
+            Layer::END_PIXELED + 0.092,
         ));
+        for (index, (label, icon)) in [
+            ("console.mobile.chat", "chat"),
+            ("console.mobile.up", "upOpen"),
+            ("console.mobile.down", "downOpen"),
+            ("console.mobile.file", "fileText"),
+            ("console.mobile.cancel", "cancel"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rect = RenderRect::new(
+                row.x + index as f32 * (MOBILE_CONSOLE_BUTTON_SIZE + MOBILE_CONSOLE_BUTTON_PAD),
+                row.y,
+                MOBILE_CONSOLE_BUTTON_SIZE,
+                MOBILE_CONSOLE_BUTTON_SIZE,
+            );
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("clear"),
+                rect,
+                [1.0, 1.0, 1.0, 0.42],
+                0.0,
+                Layer::END_PIXELED + 0.095 + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label(icon, icon),
+                RenderPoint::new(rect.center().x, rect.center().y + 7.0),
+                [0.90, 0.98, 1.0, 1.0],
+                18.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.100 + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                label,
+                RenderPoint::new(rect.center().x, rect.y + 9.0),
+                [0.54, 0.68, 0.76, 1.0],
+                6.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.101 + index as f32 * 0.001,
+            ));
+        }
     }
 
     fn menu_graphics_frame_for_surface(
@@ -47523,10 +47560,12 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
 
-        assert!(texts.contains(&"consolefrag: mobile"));
-        assert!(texts.contains(&"open: false"));
-        assert!(texts.contains(&"buttons: chat, up, down, file, cancel"));
-        assert!(texts.contains(&"messages shown: 30"));
+        assert!(texts.contains(&"ConsoleFragment shown / open=false / messagesShown=30"));
+        assert!(texts.contains(&"console.mobile.chat"));
+        assert!(texts.contains(&"console.mobile.up"));
+        assert!(texts.contains(&"console.mobile.down"));
+        assert!(texts.contains(&"console.mobile.file"));
+        assert!(texts.contains(&"console.mobile.cancel"));
     }
 
     #[test]
