@@ -20084,6 +20084,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 科技树节点点击详情、解锁、拖拽缩放仍需继续迁移；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 582. MapListDialog filter 弹窗可见结构闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **63.4%**，仍未达到完整可玩；继续优先前端/UI，把 `CustomGame/Editor` 共用的 `MapListDialog` filter 从纯状态开关推进为可见弹窗结构。
+- Java 对照依据：
+  - 上游 `MapListDialog` filter 包含 custom/builtin/modded 可见性、搜索范围、优先级与 planet 过滤；
+  - Rust 之前只设置 `map_list_filter_dialog_open = true`，没有弹窗内容；
+  - 打开 filter 弹窗时后层 route back/filter/map list 不应继续响应。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CloseMapListFilters` route action；
+    - 新增 `map_list_filter_dialog_rect_for_panel(...)` 与 option row 几何；
+    - `push_map_list_filter_dialog(...)` 渲染 `@editor.filters`、custom/builtin/modded、搜索范围、priority、planet 与 `@back`；
+    - filter 弹窗打开时优先 hit-test 自己并阻塞后层 back；
+    - 关闭 action 会清理 `map_list_filter_dialog_open`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_route_controls_dispatch_actions --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_custom_and_editor_routes_render_map_list_widgets --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - filter 选项还未接真实开关状态与持久化；
+  - 地图列表仍缺真实 map card grid、缩略图与 `MapPlayDialog` / `EditorMapsDialog` 详情流程；
+  - planet filter 还未接真实 planets 列表；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

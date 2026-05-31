@@ -2485,6 +2485,7 @@ pub enum DesktopMenuRouteShellAction {
     OpenJoinAddServer,
     RefreshJoinServers,
     OpenMapListFilters,
+    CloseMapListFilters,
     NewEditorMap,
     ImportEditorMap,
     OpenTechTreeSelect,
@@ -19870,6 +19871,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
+            self.map_list_filter_dialog_open = false;
             self.last_menu_dispatch = None;
             self.last_menu_route_shell_action = None;
             return true;
@@ -19894,6 +19896,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
+            self.map_list_filter_dialog_open = false;
             let dispatch = DesktopMenuActionDispatch {
                 role,
                 submenu_changed,
@@ -19944,6 +19947,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
+            self.map_list_filter_dialog_open = false;
             None
         } else {
             DesktopMenuRoute::from_menu_button(role)
@@ -19954,6 +19958,7 @@ impl DesktopLauncher {
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             self.tech_tree_select_dialog_open = false;
+            self.map_list_filter_dialog_open = false;
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
                     &self.content_loader,
@@ -23039,6 +23044,26 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_list_filter_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width * 0.62).clamp(300.0, 430.0);
+        let height = 292.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn map_list_filter_option_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 34.0,
+            dialog.y + dialog.height - 92.0 - index as f32 * 38.0,
+            dialog.width - 68.0,
+            30.0,
+        )
+    }
+
     fn map_list_pane_rect_for_panel(panel: RenderRect, route: DesktopMenuRoute) -> RenderRect {
         let search = Self::map_list_search_rect_for_panel(panel, route);
         let bottom = Self::route_back_button_rect_for_panel(panel).bottom() + 18.0;
@@ -23729,6 +23754,13 @@ impl DesktopLauncher {
         }
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
         let point = RenderPoint::new(x, y);
+        if self.map_list_filter_dialog_open {
+            let dialog = Self::map_list_filter_dialog_rect_for_panel(panel);
+            if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseMapListFilters);
+            }
+            return None;
+        }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
         }
@@ -24232,6 +24264,7 @@ impl DesktopLauncher {
                 self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
                 self.tech_tree_select_dialog_open = false;
+                self.map_list_filter_dialog_open = false;
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
@@ -24259,6 +24292,9 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenMapListFilters => {
                 self.map_list_filter_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::CloseMapListFilters => {
+                self.map_list_filter_dialog_open = false;
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
                 self.editor_new_map_dialog_open = true;
@@ -26114,6 +26150,81 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.032,
         ));
+
+        self.push_map_list_filter_dialog(pass, panel);
+    }
+
+    fn push_map_list_filter_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if !self.map_list_filter_dialog_open {
+            return;
+        }
+        let dialog = Self::map_list_filter_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.070,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.071,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.072,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@editor.filters",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.073,
+        ));
+        for (index, label) in [
+            "show: @custom / @builtin / @mods",
+            "search: name / author / description / mod",
+            "priority: @custom / @mods",
+            "planet: @all",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let rect = Self::map_list_filter_option_rect(dialog, index);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("grayt", false, false),
+                rect,
+                [1.0, 1.0, 1.0, 0.74],
+                0.0,
+                Layer::END_PIXELED + 0.074 + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                label,
+                RenderPoint::new(rect.x + 14.0, rect.center().y),
+                [0.78, 0.88, 0.96, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.075 + index as f32 * 0.001,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.083,
+        );
     }
 
     fn push_schematics_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -45236,8 +45347,46 @@ version: "2.0.0"
             super::DesktopMenuRouteShellAction::OpenMapListFilters,
         );
         assert!(custom.map_list_filter_dialog_open);
+        let filter_frame = custom.menu_graphics_frame_for_surface(0, viewport);
+        let filter_texts = filter_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("map list filter dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(filter_texts.contains(&"@editor.filters"));
+        assert!(filter_texts.contains(&"show: @custom / @builtin / @mods"));
+        assert!(filter_texts.contains(&"search: name / author / description / mod"));
+        assert!(filter_texts.contains(&"priority: @custom / @mods"));
+        assert!(filter_texts.contains(&"planet: @all"));
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(custom_panel).center();
+        assert_eq!(
+            custom.active_menu_route_shell_action_at_surface_point(surface, back.x, back.y),
+            None,
+            "open map filter dialog should block route back clicks behind it"
+        );
+        let dialog = DesktopLauncher::map_list_filter_dialog_rect_for_panel(custom_panel);
+        let close_filter = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
+        assert_eq!(
+            custom.active_menu_route_shell_action_at_surface_point(
+                surface,
+                close_filter.x,
+                close_filter.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::CloseMapListFilters)
+        );
+        custom.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseMapListFilters,
+        );
+        assert!(!custom.map_list_filter_dialog_open);
         assert_eq!(
             custom.active_menu_route_shell_action_at_surface_point(surface, back.x, back.y),
             Some(super::DesktopMenuRouteShellAction::CloseRoute)
