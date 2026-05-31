@@ -538,6 +538,7 @@ pub enum DesktopMapCardActionKind {
     SelectPlayMode(Gamemode),
     PlaySelected,
     Customize,
+    ShowModeHelp,
     OpenInEditor,
     Delete,
     ViewWorkshop,
@@ -2542,6 +2543,8 @@ pub enum DesktopMenuRouteShellAction {
     ClearMapListSearch,
     MapCard(DesktopMapCardAction),
     CloseMapCardDialog,
+    CloseMapPlayHelp,
+    CloseMapPlayCustomize,
     NewEditorMap,
     ImportEditorMap,
     OpenTechTreeSelect,
@@ -15470,6 +15473,8 @@ pub struct DesktopLauncher {
     pub map_play_dialog_index: Option<usize>,
     pub editor_map_info_dialog_index: Option<usize>,
     pub map_play_selected_mode: Gamemode,
+    pub map_play_mode_help_dialog_open: bool,
+    pub map_play_customize_dialog_open: bool,
     pub last_map_card_action: Option<DesktopMapCardAction>,
     pub editor_new_map_dialog_open: bool,
     pub editor_import_map_dialog_open: bool,
@@ -16252,6 +16257,8 @@ impl DesktopLauncher {
             map_play_dialog_index: None,
             editor_map_info_dialog_index: None,
             map_play_selected_mode: Gamemode::Survival,
+            map_play_mode_help_dialog_open: false,
+            map_play_customize_dialog_open: false,
             last_map_card_action: None,
             editor_new_map_dialog_open: false,
             editor_import_map_dialog_open: false,
@@ -23649,6 +23656,23 @@ impl DesktopLauncher {
         RenderRect::new(dialog.center().x - 115.0, dialog.y + 72.0, 230.0, 44.0)
     }
 
+    fn map_play_help_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.right() - 76.0,
+            dialog.y + dialog.height - 92.0,
+            52.0,
+            40.0,
+        )
+    }
+
+    fn map_play_child_dialog_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::from_center(dialog.center(), dialog.width - 70.0, dialog.height - 94.0)
+    }
+
+    fn map_play_child_dialog_close_rect(child: RenderRect) -> RenderRect {
+        RenderRect::new(child.x + 18.0, child.y + 16.0, 112.0, 40.0)
+    }
+
     fn map_play_dialog_modes() -> [Gamemode; 4] {
         [
             Gamemode::Survival,
@@ -24557,7 +24581,23 @@ impl DesktopLauncher {
             if Self::map_card_dialog_close_rect(dialog).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseMapCardDialog);
             }
+            if self.map_play_mode_help_dialog_open || self.map_play_customize_dialog_open {
+                let child = Self::map_play_child_dialog_rect(dialog);
+                if Self::map_play_child_dialog_close_rect(child).contains_point(point) {
+                    return Some(if self.map_play_mode_help_dialog_open {
+                        DesktopMenuRouteShellAction::CloseMapPlayHelp
+                    } else {
+                        DesktopMenuRouteShellAction::CloseMapPlayCustomize
+                    });
+                }
+                return None;
+            }
             if let Some(index) = self.map_play_dialog_index {
+                if Self::map_play_help_button_rect(dialog).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::MapCard(
+                        DesktopMapCardAction::new(index, DesktopMapCardActionKind::ShowModeHelp),
+                    ));
+                }
                 for (mode_index, mode) in Self::map_play_dialog_modes().into_iter().enumerate() {
                     if Self::map_play_mode_button_rect(dialog, mode_index).contains_point(point) {
                         return Some(DesktopMenuRouteShellAction::MapCard(
@@ -25219,10 +25259,14 @@ impl DesktopLauncher {
                             }
                             self.map_play_dialog_index = Some(action.index);
                             self.editor_map_info_dialog_index = None;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_customize_dialog_open = false;
                         }
                         DesktopMapCardActionKind::OpenEditorInfo => {
                             self.editor_map_info_dialog_index = Some(action.index);
                             self.map_play_dialog_index = None;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_customize_dialog_open = false;
                         }
                         DesktopMapCardActionKind::SelectPlayMode(mode) => {
                             if self
@@ -25246,18 +25290,31 @@ impl DesktopLauncher {
                             self.active_menu_route = None;
                             self.map_play_dialog_index = None;
                             self.editor_map_info_dialog_index = None;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_customize_dialog_open = false;
                             self.last_campaign_launch_report = Some(report);
                         }
-                        DesktopMapCardActionKind::Customize => {}
+                        DesktopMapCardActionKind::Customize => {
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::ShowModeHelp => {
+                            self.map_play_mode_help_dialog_open = true;
+                            self.map_play_customize_dialog_open = false;
+                        }
                         DesktopMapCardActionKind::OpenInEditor => {
                             self.active_menu_route = Some(DesktopMenuRoute::Editor);
                             self.editor_map_info_dialog_index = Some(action.index);
                             self.map_play_dialog_index = None;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_customize_dialog_open = false;
                         }
                         DesktopMapCardActionKind::Delete => {
                             self.map_list_cards.remove(action.index);
                             self.map_play_dialog_index = None;
                             self.editor_map_info_dialog_index = None;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_customize_dialog_open = false;
                             self.map_list_scroll_offset = self
                                 .map_list_scroll_offset
                                 .min(self.map_list_cards.len().saturating_sub(1));
@@ -25273,6 +25330,14 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CloseMapCardDialog => {
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
+                self.map_play_mode_help_dialog_open = false;
+                self.map_play_customize_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::CloseMapPlayHelp => {
+                self.map_play_mode_help_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::CloseMapPlayCustomize => {
+                self.map_play_customize_dialog_open = false;
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
                 self.editor_new_map_dialog_open = true;
@@ -27494,6 +27559,13 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.063 + index as f32 * 0.001,
             );
         }
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_help_button_rect(dialog),
+            "?",
+            None,
+            Layer::END_PIXELED + 0.067,
+        );
         let preview = RenderRect::from_center(
             RenderPoint::new(dialog.center().x, dialog.y + 154.0),
             170.0,
@@ -27528,6 +27600,19 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.070,
         ));
+        if Gamemode::Survival.valid(map) {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("@level.highscore: {}", map.high_score_key()),
+                RenderPoint::new(dialog.center().x, preview.y - 34.0),
+                [0.78, 0.88, 0.96, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0705,
+            ));
+        }
         self.push_settings_text_button(
             pass,
             Self::map_card_dialog_close_rect(dialog),
@@ -27549,6 +27634,125 @@ impl DesktopLauncher {
             Some("settings"),
             Layer::END_PIXELED + 0.073,
         );
+        if self.map_play_mode_help_dialog_open {
+            self.push_map_play_mode_help_dialog(pass, dialog);
+        }
+        if self.map_play_customize_dialog_open {
+            self.push_map_play_customize_dialog(pass, dialog, map);
+        }
+    }
+
+    fn push_map_play_child_dialog_shell(
+        &self,
+        pass: &mut RenderPass,
+        dialog: RenderRect,
+        title: impl Into<String>,
+        layer: f32,
+    ) -> RenderRect {
+        let child = Self::map_play_child_dialog_rect(dialog);
+        pass.push(RenderCommand::fill_rect(
+            dialog,
+            [0.0, 0.0, 0.0, 0.54],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            child,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            child,
+            [0.58, 0.76, 0.90, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            title.into(),
+            RenderPoint::new(child.center().x, child.y + child.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.003,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::map_play_child_dialog_close_rect(child),
+            "@back",
+            Some("left"),
+            layer + 0.004,
+        );
+        child
+    }
+
+    fn push_map_play_mode_help_dialog(&self, pass: &mut RenderPass, dialog: RenderRect) {
+        let layer = Layer::END_PIXELED + 0.090;
+        let child = self.push_map_play_child_dialog_shell(pass, dialog, "@mode.help.title", layer);
+        for (index, mode) in Self::map_play_dialog_modes().into_iter().enumerate() {
+            pass.push(RenderCommand::draw_text_styled(
+                format!(
+                    "@mode.{}.name: @mode.{}.description",
+                    mode.wire_name(),
+                    mode.wire_name()
+                ),
+                RenderPoint::new(
+                    child.x + 32.0,
+                    child.y + child.height - 78.0 - index as f32 * 42.0,
+                ),
+                [0.82, 0.91, 0.98, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.010 + index as f32 * 0.001,
+            ));
+        }
+    }
+
+    fn push_map_play_customize_dialog(
+        &self,
+        pass: &mut RenderPass,
+        dialog: RenderRect,
+        map: &MapDescriptor,
+    ) {
+        let layer = Layer::END_PIXELED + 0.090;
+        let child = self.push_map_play_child_dialog_shell(pass, dialog, "CustomRulesDialog", layer);
+        for (index, line) in [
+            "@customize".to_string(),
+            format!(
+                "@level.mode: @mode.{}.name",
+                self.map_play_selected_mode.wire_name()
+            ),
+            format!(
+                "map.applyRules({})",
+                self.map_play_selected_mode.wire_name()
+            ),
+            format!("rules source: {}", map.plain_name()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            pass.push(RenderCommand::draw_text_styled(
+                line,
+                RenderPoint::new(
+                    child.x + 32.0,
+                    child.y + child.height - 82.0 - index as f32 * 34.0,
+                ),
+                [0.82, 0.91, 0.98, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.010 + index as f32 * 0.001,
+            ));
+        }
     }
 
     fn push_editor_map_info_dialog(
@@ -47597,6 +47801,132 @@ version: "2.0.0"
                 )
             });
         assert!(disabled_delete_text);
+    }
+
+    #[test]
+    fn desktop_launcher_map_play_dialog_opens_help_customize_and_highscore() {
+        let mut tags = BTreeMap::new();
+        tags.insert("name".to_string(), "Battle".to_string());
+        let mut map = MapDescriptor::new("maps/custom/battle.msav", 180, 180, tags, true, 1, 157);
+        map.spawns = 1;
+
+        let viewport = DesktopSurfaceSize::new(1280, 720);
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![map];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlay),
+        ));
+
+        let render_viewport = launcher.default_render_viewport_for_surface(viewport);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            render_viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+        let frame = launcher.menu_graphics_frame_for_surface(0, render_viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("map play dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"?"));
+        assert!(texts
+            .iter()
+            .any(|text| text.starts_with("@level.highscore:")));
+
+        let help_center = DesktopLauncher::map_play_help_button_rect(dialog).center();
+        let help = super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+            0,
+            super::DesktopMapCardActionKind::ShowModeHelp,
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                help_center.x,
+                help_center.y
+            ),
+            Some(help)
+        );
+        launcher.dispatch_menu_route_shell_action(help);
+        assert!(launcher.map_play_mode_help_dialog_open);
+
+        let help_frame = launcher.menu_graphics_frame_for_surface(1, render_viewport);
+        let help_texts = help_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mode help should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(help_texts.contains(&"@mode.help.title"));
+        assert!(help_texts
+            .iter()
+            .any(|text| text.contains("@mode.survival.description")));
+        assert!(help_texts
+            .iter()
+            .any(|text| text.contains("@mode.pvp.description")));
+
+        let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
+        let child_close = DesktopLauncher::map_play_child_dialog_close_rect(child).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                child_close.x,
+                child_close.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::CloseMapPlayHelp)
+        );
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseMapPlayHelp);
+        assert!(!launcher.map_play_mode_help_dialog_open);
+
+        let customize_center = DesktopLauncher::map_play_customize_button_rect(dialog).center();
+        let customize = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::Customize),
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                customize_center.x,
+                customize_center.y
+            ),
+            Some(customize)
+        );
+        launcher.dispatch_menu_route_shell_action(customize);
+        assert!(launcher.map_play_customize_dialog_open);
+
+        let customize_frame = launcher.menu_graphics_frame_for_surface(2, render_viewport);
+        let customize_texts = customize_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("custom rules dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(customize_texts.contains(&"CustomRulesDialog"));
+        assert!(customize_texts.contains(&"@customize"));
+        assert!(customize_texts.contains(&"map.applyRules(survival)"));
     }
 
     #[test]
