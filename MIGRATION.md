@@ -15,6 +15,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 616. ContentInfoDialog 补 patched 提示
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.6%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 Java `ContentInfoDialog` 中游戏内 patched 内容提示先接到 Rust 已有 patcher 状态。
+- Java 对照依据：
+  - `ContentInfoDialog.show(...)` 在 `Vars.state.isGame() && Vars.state.patcher.isPatched(content)` 时显示 `@database.patched` 与 `Icon.info`；
+  - Rust 当前 `GameState.patcher.is_patched()` 仍是全局/会话级 patch 记录，尚未达到 Java 的逐 content 精度。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `push_database_content_info_dialog(...)` 在 `game_state.patcher.is_patched()` 时渲染 Icon 字体 `info` 与 `@database.patched`；
+    - 扩展 Database 内容详情测试，构造 `patcher.patches` 后断言详情弹窗出现 `@database.patched`；
+    - 保留 `ContentInfoDialog` 当前 header → description/stats/details → close 的顺序，patched banner 位于 raw content 行之后、ScrollPane 之前。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - patcher 仍需细化为 Java `isPatched(content)` 的逐内容判定；
+  - `ContentInfoDialog` 的真实 `Stats` 分类渲染、credit、`displayExtra(table)`、console `@viewfields` 仍待迁移。
+
 ## 615. DatabaseDialog 补 hidden/hideDatabase 与锁定覆盖层
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

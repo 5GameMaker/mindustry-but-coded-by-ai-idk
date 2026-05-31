@@ -30562,6 +30562,32 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.092,
         ));
+        if self.game_state.patcher.is_patched() {
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label("info", "info"),
+                RenderPoint::new(icon.right() + 20.0, dialog.y + dialog.height - 122.0),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.092,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "@database.patched",
+                RenderPoint::new(icon.right() + 36.0, dialog.y + dialog.height - 122.0),
+                [0.72, 0.82, 0.90, 1.0],
+                10.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.092,
+            ));
+        }
 
         pass.push(RenderCommand::draw_sprite(
             Self::settings_drawable_symbol("button"),
@@ -58991,6 +59017,11 @@ version: "2.0.0"
         assert!(detail_lines.contains(&"@info.title".to_string()));
         assert!(detail_lines.contains(&"content: item / copper".to_string()));
 
+        launcher
+            .game_state
+            .patcher
+            .patches
+            .push("test-patch".into());
         let detail_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
         let detail_commands = detail_frame
             .bundle
@@ -59011,6 +59042,7 @@ version: "2.0.0"
         assert!(detail_texts.contains(&"@info.title"));
         assert!(detail_texts.contains(&"[accent]copper"));
         assert!(detail_texts.contains(&"content: item / copper"));
+        assert!(detail_texts.contains(&"@database.patched"));
         assert!(detail_commands
             .iter()
             .any(|command| matches!(command, RenderCommand::SetClip { .. })));
