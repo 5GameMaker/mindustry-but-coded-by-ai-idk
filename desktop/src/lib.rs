@@ -97,7 +97,8 @@ use mindustry_core::mindustry::ui::{
     upstream_font_source_paths, upstream_image_button_style_skin, upstream_scroll_pane_style_skin,
     upstream_slider_style_skin, upstream_text_button_style_skin, upstream_ui_drawable_alias,
     upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw,
-    UpstreamContentIcon, UpstreamFontRole, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH,
+    UpstreamContentIcon, UpstreamFontRole, UpstreamUiIconGlyph,
+    UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_UI_ICON_GLYPHS,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -481,6 +482,7 @@ pub enum DesktopSchematicModal {
     Info { index: usize },
     Export { index: usize },
     Edit { index: usize },
+    IconTag { card_index: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -501,9 +503,24 @@ pub enum DesktopSchematicModalButton {
     TagDelete(usize),
     TagNewText,
     TagNewIcon,
-    CardTagRemove { card_index: usize, tag_index: usize },
-    CardTagAdd { card_index: usize, tag_index: usize },
-    CardTagNewText { card_index: usize },
+    CardTagRemove {
+        card_index: usize,
+        tag_index: usize,
+    },
+    CardTagAdd {
+        card_index: usize,
+        tag_index: usize,
+    },
+    CardTagNewText {
+        card_index: usize,
+    },
+    CardTagNewIcon {
+        card_index: usize,
+    },
+    CardTagAddIcon {
+        card_index: usize,
+        icon_index: usize,
+    },
 }
 
 impl DesktopMenuRoute {
@@ -20819,6 +20836,11 @@ impl DesktopLauncher {
                     DesktopSchematicModalButton::CardTagNewText { card_index: index },
                 ));
             }
+            if Self::schematic_label_add_icon_button_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                    DesktopSchematicModalButton::CardTagNewIcon { card_index: index },
+                ));
+            }
         }
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseSchematicInfo);
@@ -20908,17 +20930,52 @@ impl DesktopLauncher {
         RenderRect::new(
             dialog.x + 150.0,
             dialog.y + dialog.height - 184.0,
-            220.0,
+            250.0,
             28.0,
         )
     }
 
     fn schematic_label_add_button_rect(dialog: RenderRect) -> RenderRect {
         RenderRect::new(
-            dialog.x + 380.0,
-            dialog.y + dialog.height - 184.0,
+            dialog.x + 150.0,
+            dialog.y + dialog.height - 188.0,
             118.0,
             28.0,
+        )
+    }
+
+    fn schematic_label_add_icon_button_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 276.0,
+            dialog.y + dialog.height - 188.0,
+            118.0,
+            28.0,
+        )
+    }
+
+    fn schematic_icon_tag_candidates(&self) -> Vec<&'static UpstreamUiIconGlyph> {
+        let tags = self.schematics_tag_names();
+        UPSTREAM_UI_ICON_GLYPHS
+            .iter()
+            .filter(|icon| {
+                icon.glyph_string()
+                    .map(|glyph| !tags.iter().any(|tag| tag == &glyph))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    fn schematic_icon_tag_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let cols = 6usize;
+        let size = 44.0;
+        let gap = 8.0;
+        let col = index % cols;
+        let row = index / cols;
+        RenderRect::new(
+            dialog.x + 28.0 + col as f32 * (size + gap),
+            dialog.y + dialog.height - 138.0 - row as f32 * (size + gap),
+            size,
+            size,
         )
     }
 
@@ -21062,6 +21119,11 @@ impl DesktopLauncher {
                             DesktopSchematicModalButton::CardTagNewText { card_index: index },
                         ));
                     }
+                    if Self::schematic_label_add_icon_button_rect(dialog).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                            DesktopSchematicModalButton::CardTagNewIcon { card_index: index },
+                        ));
+                    }
                 }
                 if Self::schematic_info_button_rect(dialog, 1).contains_point(point) {
                     return Some(DesktopMenuRouteShellAction::SchematicModalButton(
@@ -21073,6 +21135,28 @@ impl DesktopLauncher {
                 {
                     return Some(DesktopMenuRouteShellAction::SchematicModalButton(
                         DesktopSchematicModalButton::EditCancel,
+                    ));
+                }
+                None
+            }
+            DesktopSchematicModal::IconTag { card_index } => {
+                let candidates = self.schematic_icon_tag_candidates();
+                for (icon_index, icon) in candidates.iter().take(24).enumerate() {
+                    if Self::schematic_icon_tag_button_rect(dialog, icon_index)
+                        .contains_point(point)
+                    {
+                        return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                            DesktopSchematicModalButton::CardTagAddIcon {
+                                card_index,
+                                icon_index,
+                            },
+                        ));
+                    }
+                    let _ = icon;
+                }
+                if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::SchematicModalButton(
+                        DesktopSchematicModalButton::Back,
                     ));
                 }
                 None
@@ -21643,6 +21727,37 @@ impl DesktopLauncher {
                         let tag = self.schematic_label_add_text.trim().to_string();
                         if !tag.is_empty() {
                             self.sync_schematic_tag_order();
+                            let known = self.schematic_tag_order.iter().any(|known| known == &tag);
+                            let mut added = false;
+                            if !known {
+                                self.schematic_tag_order.push(tag.clone());
+                            }
+                            if let Some(entry) = self.schematic_cards.get_mut(card_index) {
+                                if !entry.labels.iter().any(|label| label == &tag) {
+                                    entry.labels.push(tag);
+                                    added = true;
+                                }
+                            }
+                            self.persist_schematic_tags();
+                            if added {
+                                self.schematic_label_add_text.clear();
+                                self.close_schematic_modal();
+                            }
+                        }
+                    }
+                    DesktopSchematicModalButton::CardTagNewIcon { card_index } => {
+                        self.open_schematic_modal(DesktopSchematicModal::IconTag { card_index });
+                    }
+                    DesktopSchematicModalButton::CardTagAddIcon {
+                        card_index,
+                        icon_index,
+                    } => {
+                        let candidates = self.schematic_icon_tag_candidates();
+                        if let Some(icon) = candidates.get(icon_index).copied() {
+                            let tag = icon
+                                .glyph_string()
+                                .unwrap_or_else(|| icon.java_name.to_string());
+                            self.sync_schematic_tag_order();
                             if !self.schematic_tag_order.iter().any(|known| known == &tag) {
                                 self.schematic_tag_order.push(tag.clone());
                             }
@@ -21651,8 +21766,8 @@ impl DesktopLauncher {
                                     entry.labels.push(tag);
                                 }
                             }
-                            self.schematic_label_add_text.clear();
                             self.persist_schematic_tags();
+                            self.close_schematic_modal();
                         }
                     }
                     DesktopSchematicModalButton::ImportClipboard
@@ -22293,6 +22408,13 @@ impl DesktopLauncher {
             Some("add"),
             Layer::END_PIXELED + layer_offset + 0.002,
         );
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_label_add_icon_button_rect(dialog),
+            "@schematic.icontag",
+            Some("add"),
+            Layer::END_PIXELED + layer_offset + 0.003,
+        );
     }
 
     fn push_schematic_info_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -22841,6 +22963,43 @@ impl DesktopLauncher {
                     "@cancel",
                     Some("cancel"),
                     Layer::END_PIXELED + 0.084,
+                );
+            }
+            DesktopSchematicModal::IconTag { card_index } => {
+                let title = self
+                    .schematic_cards
+                    .get(card_index)
+                    .map(|entry| format!("@schematic.icontag: {}", entry.name))
+                    .unwrap_or_else(|| "@schematic.icontag".to_string());
+                let dialog = self.push_schematic_modal_base(pass, panel, title);
+                let candidates = self.schematic_icon_tag_candidates();
+                for (index, icon) in candidates.iter().take(24).enumerate() {
+                    let rect = Self::schematic_icon_tag_button_rect(dialog, index);
+                    pass.push(RenderCommand::draw_sprite(
+                        Self::settings_text_button_symbol("grayt", false, false),
+                        rect,
+                        [1.0, 1.0, 1.0, 0.86],
+                        0.0,
+                        Layer::END_PIXELED + 0.076 + index as f32 * 0.001,
+                    ));
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label(icon.java_name, icon.java_name),
+                        rect.center(),
+                        [0.92, 0.97, 1.0, 1.0],
+                        14.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.079 + index as f32 * 0.001,
+                    ));
+                }
+                self.push_settings_text_button(
+                    pass,
+                    Self::schematic_info_button_rect(dialog, 0),
+                    "@back",
+                    Some("left"),
+                    Layer::END_PIXELED + 0.083,
                 );
             }
         }
@@ -41228,6 +41387,9 @@ mod tests {
         assert!(texts.contains(&"+logic"));
         assert!(texts.contains(&"description: basic launch schematic"));
         assert!(texts.contains(&"requirements: pending real Schematic.requirements()"));
+        assert!(texts.contains(&"@schematic.addtag"));
+        assert!(texts.contains(&"@schematic.texttag"));
+        assert!(texts.contains(&"@schematic.icontag"));
         assert!(texts.contains(&"@back"));
         assert!(texts.contains(&"@editor.export"));
         assert!(texts.contains(&"@edit"));
@@ -41284,6 +41446,110 @@ mod tests {
         assert!(launcher.schematic_cards[0]
             .labels
             .contains(&"core".to_string()));
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("starter".into())]);
+        assert_eq!(launcher.schematic_label_add_text, "starter");
+        let add_new = DesktopLauncher::schematic_label_add_button_rect(dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, add_new.x, add_new.y),
+            Some(super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagNewText { card_index: 0 }
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagNewText { card_index: 0 },
+            ),
+        );
+        assert!(launcher.schematic_cards[0]
+            .labels
+            .contains(&"starter".to_string()));
+        assert_eq!(launcher.schematic_modal, None);
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicCard(
+                super::DesktopSchematicCardAction::new(
+                    0,
+                    super::DesktopSchematicCardActionKind::Info,
+                ),
+            ),
+        );
+        assert_eq!(
+            launcher.schematic_modal,
+            Some(super::DesktopSchematicModal::Info { index: 0 })
+        );
+        let icon_button = DesktopLauncher::schematic_label_add_icon_button_rect(dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                icon_button.x,
+                icon_button.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagNewIcon { card_index: 0 }
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagNewIcon { card_index: 0 },
+            ),
+        );
+        assert_eq!(
+            launcher.schematic_modal,
+            Some(super::DesktopSchematicModal::IconTag { card_index: 0 })
+        );
+        let icon_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let icon_texts = icon_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("icon picker should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let first_icon = launcher
+            .schematic_icon_tag_candidates()
+            .first()
+            .and_then(|icon| icon.glyph_string())
+            .expect("icon picker should have at least one candidate");
+        assert!(icon_texts.iter().any(|text| *text == first_icon.as_str()));
+        let icon_center = DesktopLauncher::schematic_icon_tag_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                icon_center.x,
+                icon_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagAddIcon {
+                    card_index: 0,
+                    icon_index: 0
+                }
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicModalButton(
+                super::DesktopSchematicModalButton::CardTagAddIcon {
+                    card_index: 0,
+                    icon_index: 0,
+                },
+            ),
+        );
+        assert!(launcher.schematic_cards[0].labels.contains(&first_icon));
+        assert!(launcher.schematic_modal.is_none());
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SchematicCard(
+                super::DesktopSchematicCardAction::new(
+                    0,
+                    super::DesktopSchematicCardActionKind::Info,
+                ),
+            ),
+        );
         let export_center = DesktopLauncher::schematic_info_button_rect(dialog, 1).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(

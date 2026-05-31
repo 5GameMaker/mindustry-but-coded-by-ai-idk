@@ -19330,6 +19330,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 545. SchematicsDialog 单蓝图 icon tag 选择面板
+
+- 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **58.4%**，仍未达到完整可玩；继续优先前端/UI，目标是让 `Info/Edit` 里的 `@schematic.icontag` 不再只是占位，而是能打开独立 icon 选择面板并把选中的 icon tag 写回当前 schematic。
+- Java 对照证据：
+  - `showNewIconTag(...)` 会在全屏弹窗中展示可选 icon 网格；
+  - 选择后将 icon 编码写入全局 tag 列表，再把标签加入当前 schematic；
+  - 已存在的 icon tag 应被过滤掉，避免重复。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `Info/Edit` 标签添加区新增 `@schematic.icontag` 按钮；
+    - 新增独立 `IconTag` 模态，展示可选 icon 网格；
+    - 选中 icon 后会把对应 glyph string 加入当前 schematic，并持久化全局 tag 顺序；
+    - `@schematic.texttag` 成功后会自动关闭当前模态。
+  - 测试：
+    - `desktop_launcher_schematics_info_dialog_renders_and_dispatches_buttons`
+      - 验证 `@schematic.addtag` / `@schematic.texttag` / `@schematic.icontag` 渲染；
+      - 验证文本 tag `starter` 可写回 current schematic；
+      - 验证 icon picker 打开后能显示 icon glyph 并写回第一项 icon tag。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_schematic --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - icon picker 目前仍是简化版网格，还没有完全复制 Java `showNewIconTag()` 的全量分类/滚动行为；
+  - add tag picker 还没有完全做成 Java 那种“已有 tag / text / icon”同屏选择器；
+  - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 543. SchematicInfoDialog 复用单蓝图标签 chip
 
 - 固定路径：Rust 仓库 `D:\MDT\rust-mindustry`；Java 参考 `D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考基线为 `v158.1 / 05b2ecd`）；废案 `D:\MDT\mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
