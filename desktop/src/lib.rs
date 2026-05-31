@@ -22376,6 +22376,80 @@ impl DesktopLauncher {
         }
     }
 
+    fn database_hovered_tab_for_panel(
+        &self,
+        panel: RenderRect,
+    ) -> Option<(usize, String, RenderRect)> {
+        let cursor = self.last_menu_cursor?;
+        let index = self.database_tab_index_at_point(panel, cursor)?;
+        let rect = Self::database_tab_rect_for_panel(panel, index);
+        let label = if index == 0 {
+            "@all".to_string()
+        } else {
+            self.database_tab_keys()
+                .get(index)
+                .and_then(|key| {
+                    self.content_loader
+                        .catalog()
+                        .planet_by_name(key)
+                        .map(|planet| planet.localized_name().to_string())
+                        .or_else(|| Some(key.clone()))
+                })
+                .unwrap_or_else(|| "@all".to_string())
+        };
+        Some((index, label, rect))
+    }
+
+    fn push_database_tab_hover_tooltip(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some((_, label, tab)) = self.database_hovered_tab_for_panel(panel) else {
+            return;
+        };
+        let Some(cursor) = self.last_menu_cursor else {
+            return;
+        };
+        let tooltip_width = (label.len() as f32 * 7.0 + 28.0).clamp(86.0, 240.0);
+        let tooltip_height = 32.0;
+        let tooltip_x = (cursor.x + 14.0)
+            .min(panel.right() - tooltip_width - 4.0)
+            .max(panel.x + 4.0);
+        let tooltip_y = (cursor.y + 14.0)
+            .min(panel.y + panel.height - tooltip_height - 4.0)
+            .max(panel.y + 4.0);
+        let tooltip = RenderRect::new(tooltip_x, tooltip_y, tooltip_width, tooltip_height);
+
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            tooltip,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            Layer::END_PIXELED + 0.078,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tooltip,
+            [0.42, 0.58, 0.70, 0.94],
+            1.0,
+            Layer::END_PIXELED + 0.079,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            tab,
+            [0.86, 0.94, 1.0, 0.98],
+            2.0,
+            Layer::END_PIXELED + 0.079,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            label,
+            RenderPoint::new(tooltip.x + 12.0, tooltip.y + tooltip.height - 15.0),
+            [0.94, 0.98, 1.0, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.080,
+        ));
+    }
+
     fn database_route_lines(&self) -> Vec<String> {
         let content_types = self.database_route_content_types();
         let total = content_types
@@ -30992,6 +31066,7 @@ impl DesktopLauncher {
                 }
             }
         }
+        self.push_database_tab_hover_tooltip(pass, panel);
         self.push_database_content_hover_tooltip(pass, panel);
         self.push_database_content_info_dialog(pass, panel);
     }
@@ -59583,6 +59658,43 @@ version: "2.0.0"
                 planet_tab.y
             ),
             Some(super::DesktopMenuRouteShellAction::SelectDatabaseTab(1))
+        );
+        let tab_label = launcher
+            .database_tab_keys()
+            .get(1)
+            .and_then(|key| {
+                launcher
+                    .content_loader
+                    .catalog()
+                    .planet_by_name(key)
+                    .map(|planet| planet.localized_name().to_string())
+                    .or_else(|| Some(key.clone()))
+            })
+            .expect("base database should expose a second tab");
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: planet_tab.x,
+                y: planet_tab.y,
+            }],
+        );
+        let tab_hover_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let tab_hover_texts = tab_hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("database tab hover frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            tab_hover_texts.contains(&tab_label.as_str()),
+            "Java DatabaseDialog tab buttons expose a tooltip with @all or the tab localized name"
         );
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::SelectDatabaseTab(1),

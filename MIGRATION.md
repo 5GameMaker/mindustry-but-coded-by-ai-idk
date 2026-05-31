@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 628. DatabaseDialog 补页签 hover tooltip
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.9%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是补齐 Java DatabaseDialog tab button 上的 tooltip 行为。
+- Java 对照依据：
+  - `DatabaseDialog.rebuild()` 中 tab button 调用 `.tooltip(content == Planets.sun ? "@all" : content.localizedName)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_hovered_tab_for_panel(...)` 与 `push_database_tab_hover_tooltip(...)`；
+    - 鼠标悬停 Database tab 时绘制 tooltip，`sun` 显示 `@all`，planet tab 显示 localized name；
+    - tab hover 同时描边当前 tab，视觉上与内容 cell hover 保持一致；
+    - 扩展 DatabaseDialog 测试，确认第二个 tab 悬停时会显示对应 localized tooltip。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - DatabaseDialog 仍未完全按 Java `category -> tag -> records` 多层布局重排；
+  - tooltip 样式仍复用 Rust 现有按钮背景近似，尚未完全复刻 Scene2D Tooltip 过渡；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 627. Block 接入 DatabaseDialog 页签投影与筛选
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
