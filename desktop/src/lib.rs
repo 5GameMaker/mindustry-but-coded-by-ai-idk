@@ -10003,6 +10003,85 @@ fn opengl_backend_text_placeholder_quads(
     blend_state: DesktopGraphicsOpenGlBackendBlendState,
     clip: Option<RenderRect>,
 ) -> Vec<DesktopGraphicsOpenGlBackendSpriteQuad> {
+    if style.outline && color[3] > f32::EPSILON {
+        let mut outline_style = style;
+        outline_style.outline = false;
+        let pixel = (size / DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_ROWS as f32).max(1.0);
+        let outline_color = [0.0, 0.0, 0.0, (color[3] * 0.74).clamp(0.0, 1.0)];
+        let outline_layer = layer - 0.0001;
+        let mut quads = Vec::new();
+        for (dx, dy) in [
+            (-pixel, 0.0),
+            (pixel, 0.0),
+            (0.0, -pixel),
+            (0.0, pixel),
+            (-pixel, -pixel),
+            (-pixel, pixel),
+            (pixel, -pixel),
+            (pixel, pixel),
+        ] {
+            quads.extend(opengl_backend_text_placeholder_quads_without_outline(
+                text,
+                RenderPoint::new(position.x + dx, position.y + dy),
+                outline_color,
+                size,
+                rotation,
+                align,
+                outline_style,
+                outline_layer,
+                target.clone(),
+                shader_program.clone(),
+                blend_state,
+                clip,
+            ));
+        }
+        quads.extend(opengl_backend_text_placeholder_quads_without_outline(
+            text,
+            position,
+            color,
+            size,
+            rotation,
+            align,
+            outline_style,
+            layer,
+            target,
+            shader_program,
+            blend_state,
+            clip,
+        ));
+        return quads;
+    }
+
+    opengl_backend_text_placeholder_quads_without_outline(
+        text,
+        position,
+        color,
+        size,
+        rotation,
+        align,
+        style,
+        layer,
+        target,
+        shader_program,
+        blend_state,
+        clip,
+    )
+}
+
+fn opengl_backend_text_placeholder_quads_without_outline(
+    text: &str,
+    position: RenderPoint,
+    color: [f32; 4],
+    size: f32,
+    rotation: f32,
+    align: RenderTextAlign,
+    style: RenderTextStyle,
+    layer: f32,
+    target: Option<RenderTarget>,
+    shader_program: DesktopGraphicsOpenGlBackendShaderProgramIdentity,
+    blend_state: DesktopGraphicsOpenGlBackendBlendState,
+    clip: Option<RenderRect>,
+) -> Vec<DesktopGraphicsOpenGlBackendSpriteQuad> {
     if text.is_empty() || size <= f32::EPSILON || color[3] <= f32::EPSILON {
         return Vec::new();
     }
@@ -24135,6 +24214,69 @@ impl DesktopLauncher {
             .max(1.0) as usize
     }
 
+    fn load_game_scrollbar_track_rect_for_list(list: RenderRect) -> RenderRect {
+        RenderRect::new(
+            list.right() - 8.0,
+            list.y + 6.0,
+            6.0,
+            (list.height - 12.0).max(1.0),
+        )
+    }
+
+    fn load_game_scrollbar_knob_rect_for_list(
+        list: RenderRect,
+        total_slots: usize,
+        visible_slots: usize,
+        scroll_offset: usize,
+    ) -> Option<RenderRect> {
+        if total_slots <= visible_slots || visible_slots == 0 {
+            return None;
+        }
+        let track = Self::load_game_scrollbar_track_rect_for_list(list);
+        let knob_height =
+            (track.height * visible_slots as f32 / total_slots as f32).clamp(36.0, track.height);
+        let max_scroll = total_slots.saturating_sub(visible_slots).max(1);
+        let travel = (track.height - knob_height).max(0.0);
+        let t = (scroll_offset.min(max_scroll) as f32 / max_scroll as f32).clamp(0.0, 1.0);
+        Some(RenderRect::new(
+            track.x - 2.0,
+            track.y + track.height - knob_height - travel * t,
+            10.0,
+            knob_height,
+        ))
+    }
+
+    fn push_load_game_scrollbar(
+        pass: &mut RenderPass,
+        list: RenderRect,
+        total_slots: usize,
+        scroll_offset: usize,
+    ) {
+        let visible_slots = Self::load_game_visible_slot_capacity_for_list(list).min(total_slots);
+        let Some(knob) = Self::load_game_scrollbar_knob_rect_for_list(
+            list,
+            total_slots,
+            visible_slots,
+            scroll_offset,
+        ) else {
+            return;
+        };
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_scroll_track_symbol(),
+            Self::load_game_scrollbar_track_rect_for_list(list),
+            [1.0, 1.0, 1.0, 0.82],
+            0.0,
+            Layer::END_PIXELED + 0.046,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_scroll_knob_symbol(),
+            knob,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.047,
+        ));
+    }
+
     fn filtered_load_game_slot_indices(&self) -> Vec<usize> {
         let query = schematic_search_normalize(&self.load_game_search);
         self.load_game_slots
@@ -32572,6 +32714,7 @@ impl DesktopLauncher {
         ));
 
         let filtered_indices = self.filtered_load_game_slot_indices();
+        let filtered_count = filtered_indices.len();
         for (index, mode) in Gamemode::ALL
             .into_iter()
             .filter(|mode| !mode.hidden())
@@ -32813,6 +32956,7 @@ impl DesktopLauncher {
         }
         let max_scroll = self.max_load_game_scroll_offset(list);
         if max_scroll > 0 {
+            Self::push_load_game_scrollbar(pass, list, filtered_count, start);
             pass.push(RenderCommand::draw_text_styled(
                 format!("{}/{}", start + 1, max_scroll + 1),
                 RenderPoint::new(list.right() - 26.0, list.y + 16.0),
@@ -47909,6 +48053,55 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_placeholder_text_honors_outline_style() {
+        let base_style = RenderTextStyle::new(RenderTextAlign::Center)
+            .with_vertical_align(RenderTextVerticalAlign::Center)
+            .with_integer_position(true);
+        let base_quads = super::opengl_backend_text_placeholder_quads(
+            "Play",
+            RenderPoint::new(80.0, 42.0),
+            [0.88, 0.96, 1.0, 1.0],
+            18.0,
+            0.0,
+            RenderTextAlign::Center,
+            base_style,
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+        let outlined_quads = super::opengl_backend_text_placeholder_quads(
+            "Play",
+            RenderPoint::new(80.0, 42.0),
+            [0.88, 0.96, 1.0, 1.0],
+            18.0,
+            0.0,
+            RenderTextAlign::Center,
+            base_style.with_outline(true),
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+
+        assert!(!base_quads.is_empty());
+        assert!(
+            outlined_quads.len() > base_quads.len() * 4,
+            "Mindustry UI text uses outlined fonts; the native placeholder path must emit extra shadow quads instead of flat unreadable text"
+        );
+        assert!(outlined_quads.iter().any(|quad| {
+            let color = quad.vertices[0].color;
+            quad.layer < Layer::OVERLAY_UI
+                && color[0] == 0.0
+                && color[1] == 0.0
+                && color[2] == 0.0
+                && color[3] > 0.0
+        }));
+    }
+
+    #[test]
     fn desktop_graphics_opengl_backend_icon_font_glyphs_use_icon_shape_fallbacks() {
         let play = upstream_ui_icon_glyph_string("play").expect("Icon.play glyph should exist");
         let question_quads = super::opengl_backend_text_placeholder_quads(
@@ -58766,6 +58959,48 @@ version: "2.0.0"
             launcher.load_game_slot_at_surface_point(surface, top_slot.x, top_slot.y),
             Some(1),
             "scroll offset should shift card hit-test to the second filtered save"
+        );
+        let scrolled_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let scrolled_commands = scrolled_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("scrolled load game frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let visible_slots = DesktopLauncher::load_game_visible_slot_capacity_for_list(list)
+            .min(launcher.filtered_load_game_slot_indices().len());
+        let scroll_track = DesktopLauncher::load_game_scrollbar_track_rect_for_list(list);
+        let scroll_knob = DesktopLauncher::load_game_scrollbar_knob_rect_for_list(
+            list,
+            launcher.filtered_load_game_slot_indices().len(),
+            visible_slots,
+            launcher.load_game_scroll_offset,
+        )
+        .expect("overflowing Java LoadDialog-style list should draw a scroll knob");
+        let scroll_track_symbol = DesktopLauncher::settings_scroll_track_symbol();
+        let scroll_knob_symbol = DesktopLauncher::settings_scroll_knob_symbol();
+        assert!(
+            scrolled_commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol, rect, .. }
+                        if symbol == &scroll_track_symbol && *rect == scroll_track
+                )
+            }),
+            "LoadDialog route should expose ScrollPane track chrome when saves overflow"
+        );
+        assert!(
+            scrolled_commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RenderCommand::DrawSprite { symbol, rect, .. }
+                        if symbol == &scroll_knob_symbol && *rect == scroll_knob
+                )
+            }),
+            "LoadDialog route should expose ScrollPane knob chrome when saves overflow"
         );
 
         let search = DesktopLauncher::load_game_search_rect_for_panel(panel).center();
