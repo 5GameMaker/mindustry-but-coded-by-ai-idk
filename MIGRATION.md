@@ -19360,6 +19360,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 551. Settings LanguageDialog 和 KeybindDialog 占位消除
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **59.8%**，仍未达到完整可玩；继续优先前端/UI，把刚接入的 Settings 语言/控制子弹窗从纯 placeholder 推进到带真实上游数据的可交互 UI。
+- Java 对照依据：
+  - `LanguageDialog.java` 使用 `displayNames` 维护语言显示名，点击语言会写入 `Core.settings.locale` 并提示 `@language.restart`；
+  - `KeybindDialog.java` 顶部有搜索栏，按 `KeyBind.all` 分组显示 category、绑定名、当前按键、`@settings.rebind` 与 `@settings.resetKey`，底部有 `@settings.reset`；
+  - `Binding.java` 定义了 general/command/blocks/view/multiplayer 等 keybind 默认值。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `SETTINGS_LANGUAGE_OPTIONS`，覆盖 Java `LanguageDialog.displayNames` 的 36 个 locale/display name；
+    - Language 子弹窗改为渲染真实语言按钮网格，显示当前选中语言；
+    - 新增 `SelectLanguage(code)`，点击语言后写入 `settings_locale` 并记录 `@language.restart`；
+    - 新增 `SETTINGS_KEYBIND_SPECS`，以 Java `Binding.java` 的 keybind 名称、category 和默认按键为 UI 数据源；
+    - Controls 子弹窗改为渲染 KeybindDialog 风格搜索栏、category、按键行、`@settings.rebind`、`@settings.resetKey` 与 `@settings.reset`；
+    - 新增 `StartKeyRebind / ResetKey / ResetAllKeys`，形成可测试的 rebind/reset 状态闭环；
+    - 相关测试改为断言不再出现 `LanguageDialog placeholder` / `ControlsDialog placeholder`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - LanguageDialog 还未接真实 `Core.settings` 持久化、locale reload 与系统 locale 最近匹配；
+  - ControlsDialog 目前只渲染首屏 keybind 行，滚动、搜索输入过滤、真实按键捕获弹窗和冲突处理仍需继续迁移；
+  - Settings 其他 Data/Game/Graphics/Sound 即时副作用与确认弹窗仍未完整还原；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 550. SettingsMenuDialog 语言和控制弹窗入口闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

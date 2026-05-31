@@ -136,6 +136,14 @@ const SETTINGS_RESET_BUTTON_WIDTH: f32 = 240.0;
 const SETTINGS_RESET_BUTTON_HEIGHT: f32 = 44.0;
 const SETTINGS_BACK_BUTTON_WIDTH: f32 = 210.0;
 const SETTINGS_BACK_BUTTON_HEIGHT: f32 = 64.0;
+const SETTINGS_LANGUAGE_ROW_HEIGHT: f32 = 26.0;
+const SETTINGS_LANGUAGE_ROW_GAP: f32 = 3.0;
+const SETTINGS_LANGUAGE_COLUMNS: usize = 3;
+const SETTINGS_KEYBIND_ROW_HEIGHT: f32 = 34.0;
+const SETTINGS_KEYBIND_ROW_GAP: f32 = 4.0;
+const SETTINGS_KEYBIND_REBIND_WIDTH: f32 = 126.0;
+const SETTINGS_KEYBIND_RESET_WIDTH: f32 = 126.0;
+const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 9;
 const JOIN_SERVER_CARD_HEIGHT: f32 = 76.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
@@ -419,6 +427,10 @@ pub enum DesktopSettingsAction {
     OpenLanguageDialog,
     OpenControlsDialog,
     CloseChildDialog,
+    SelectLanguage(&'static str),
+    StartKeyRebind(&'static str),
+    ResetKey(&'static str),
+    ResetAllKeys,
     BackToMain,
     ResetCurrentPage,
     ToggleSetting(&'static str, &'static str),
@@ -780,6 +792,278 @@ const SETTINGS_MENU_ENTRIES: &[DesktopSettingsMenuEntry] = &[
         label: "@settings.data",
         icon: "save",
         target: "data-dialog",
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopLanguageOption {
+    pub code: &'static str,
+    pub display_name: &'static str,
+}
+
+const SETTINGS_LANGUAGE_OPTIONS: &[DesktopLanguageOption] = &[
+    DesktopLanguageOption {
+        code: "ca",
+        display_name: "Català",
+    },
+    DesktopLanguageOption {
+        code: "id_ID",
+        display_name: "Bahasa Indonesia",
+    },
+    DesktopLanguageOption {
+        code: "da",
+        display_name: "Dansk",
+    },
+    DesktopLanguageOption {
+        code: "de",
+        display_name: "Deutsch",
+    },
+    DesktopLanguageOption {
+        code: "et",
+        display_name: "Eesti",
+    },
+    DesktopLanguageOption {
+        code: "en",
+        display_name: "English",
+    },
+    DesktopLanguageOption {
+        code: "es",
+        display_name: "Español",
+    },
+    DesktopLanguageOption {
+        code: "eu",
+        display_name: "Euskara",
+    },
+    DesktopLanguageOption {
+        code: "fil",
+        display_name: "Filipino",
+    },
+    DesktopLanguageOption {
+        code: "fr",
+        display_name: "Français",
+    },
+    DesktopLanguageOption {
+        code: "it",
+        display_name: "Italiano",
+    },
+    DesktopLanguageOption {
+        code: "lt",
+        display_name: "Lietuvių",
+    },
+    DesktopLanguageOption {
+        code: "hu",
+        display_name: "Magyar",
+    },
+    DesktopLanguageOption {
+        code: "nl",
+        display_name: "Nederlands",
+    },
+    DesktopLanguageOption {
+        code: "nl_BE",
+        display_name: "Nederlands (België)",
+    },
+    DesktopLanguageOption {
+        code: "pl",
+        display_name: "Polski",
+    },
+    DesktopLanguageOption {
+        code: "pt_BR",
+        display_name: "Português (Brasil)",
+    },
+    DesktopLanguageOption {
+        code: "pt_PT",
+        display_name: "Português (Portugal)",
+    },
+    DesktopLanguageOption {
+        code: "ro",
+        display_name: "Română",
+    },
+    DesktopLanguageOption {
+        code: "fi",
+        display_name: "Suomi",
+    },
+    DesktopLanguageOption {
+        code: "sv",
+        display_name: "Svenska",
+    },
+    DesktopLanguageOption {
+        code: "vi",
+        display_name: "Tiếng Việt",
+    },
+    DesktopLanguageOption {
+        code: "tk",
+        display_name: "Türkmen dili",
+    },
+    DesktopLanguageOption {
+        code: "tr",
+        display_name: "Türkçe",
+    },
+    DesktopLanguageOption {
+        code: "cs",
+        display_name: "Čeština",
+    },
+    DesktopLanguageOption {
+        code: "be",
+        display_name: "Беларуская",
+    },
+    DesktopLanguageOption {
+        code: "bg",
+        display_name: "Български",
+    },
+    DesktopLanguageOption {
+        code: "ru",
+        display_name: "Русский",
+    },
+    DesktopLanguageOption {
+        code: "sr",
+        display_name: "Српски",
+    },
+    DesktopLanguageOption {
+        code: "uk_UA",
+        display_name: "Українська",
+    },
+    DesktopLanguageOption {
+        code: "th",
+        display_name: "ไทย",
+    },
+    DesktopLanguageOption {
+        code: "zh_CN",
+        display_name: "简体中文",
+    },
+    DesktopLanguageOption {
+        code: "zh_TW",
+        display_name: "正體中文",
+    },
+    DesktopLanguageOption {
+        code: "ja",
+        display_name: "日本語",
+    },
+    DesktopLanguageOption {
+        code: "ko",
+        display_name: "한국어",
+    },
+    DesktopLanguageOption {
+        code: "router",
+        display_name: "router",
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopKeybindSpec {
+    pub name: &'static str,
+    pub category: Option<&'static str>,
+    pub default_value: &'static str,
+    pub axis: bool,
+}
+
+const SETTINGS_KEYBIND_SPECS: &[DesktopKeybindSpec] = &[
+    DesktopKeybindSpec {
+        name: "move_x",
+        category: Some("general"),
+        default_value: "A / D",
+        axis: true,
+    },
+    DesktopKeybindSpec {
+        name: "move_y",
+        category: None,
+        default_value: "S / W",
+        axis: true,
+    },
+    DesktopKeybindSpec {
+        name: "mouse_move",
+        category: None,
+        default_value: "Mouse Back",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "pan",
+        category: None,
+        default_value: "Mouse Forward",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "boost",
+        category: None,
+        default_value: "Shift Left",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "respawn",
+        category: None,
+        default_value: "V",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "control",
+        category: None,
+        default_value: "Ctrl Left",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "select",
+        category: None,
+        default_value: "Mouse Left",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "deselect",
+        category: None,
+        default_value: "Mouse Right",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "break_block",
+        category: None,
+        default_value: "Mouse Right",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "command_mode",
+        category: Some("command"),
+        default_value: "Shift Left",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "command_queue",
+        category: None,
+        default_value: "Mouse Middle",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "category_prev",
+        category: Some("blocks"),
+        default_value: "Comma",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "category_next",
+        category: None,
+        default_value: "Period",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "zoom",
+        category: Some("view"),
+        default_value: "Scroll",
+        axis: true,
+    },
+    DesktopKeybindSpec {
+        name: "menu",
+        category: None,
+        default_value: "Escape",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "player_list",
+        category: Some("multiplayer"),
+        default_value: "Tab",
+        axis: false,
+    },
+    DesktopKeybindSpec {
+        name: "chat",
+        category: None,
+        default_value: "Enter",
+        axis: false,
     },
 ];
 
@@ -14606,6 +14890,10 @@ pub struct DesktopLauncher {
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
     pub settings_dialog_state: DesktopSettingsDialogState,
     pub settings_child_dialog: Option<DesktopSettingsChildDialog>,
+    pub settings_locale: String,
+    pub last_settings_language_restart_message: Option<String>,
+    pub settings_keybind_overrides: BTreeMap<&'static str, String>,
+    pub last_settings_rebind_key: Option<&'static str>,
     pub last_settings_action: Option<DesktopSettingsAction>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
@@ -15342,6 +15630,10 @@ impl DesktopLauncher {
             last_schematic_card_action: None,
             settings_dialog_state: DesktopSettingsDialogState::default(),
             settings_child_dialog: None,
+            settings_locale: "en".into(),
+            last_settings_language_restart_message: None,
+            settings_keybind_overrides: BTreeMap::new(),
+            last_settings_rebind_key: None,
             last_settings_action: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
@@ -19773,23 +20065,181 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.096,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            Self::settings_child_dialog_summary(child),
-            RenderPoint::new(dialog.center().x, dialog.center().y + 24.0),
-            [0.62, 0.72, 0.8, 1.0],
-            11.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.097,
-        ));
+        match child {
+            DesktopSettingsChildDialog::Language => {
+                self.push_settings_language_dialog_content(pass, dialog);
+            }
+            DesktopSettingsChildDialog::Controls => {
+                self.push_settings_controls_dialog_content(pass, dialog);
+            }
+        }
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
             "@back",
             Some("left"),
             Layer::END_PIXELED + 0.103,
+        );
+    }
+
+    fn push_settings_language_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
+        for (index, option) in SETTINGS_LANGUAGE_OPTIONS.iter().enumerate() {
+            let rect = Self::settings_language_row_rect(dialog, index);
+            let selected = self.settings_locale == option.code;
+            let hovered = self
+                .last_menu_cursor
+                .map(|point| rect.contains_point(point))
+                .unwrap_or(false);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("flatTogglet", hovered, selected),
+                rect,
+                if selected {
+                    [0.82, 0.94, 1.0, 0.98]
+                } else if hovered {
+                    [0.78, 0.86, 0.94, 0.92]
+                } else {
+                    [0.56, 0.64, 0.72, 0.78]
+                },
+                0.0,
+                Layer::END_PIXELED + 0.098 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                option.display_name,
+                RenderPoint::new(rect.center().x, rect.center().y),
+                if selected {
+                    [0.98, 1.0, 1.0, 1.0]
+                } else {
+                    [0.86, 0.92, 0.96, 1.0]
+                },
+                10.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.122 + index as f32 * 0.0001,
+            ));
+        }
+        pass.push(RenderCommand::draw_text_styled(
+            "LanguageDialog locales: Core.settings.locale + @language.restart",
+            RenderPoint::new(dialog.center().x, dialog.y + 80.0),
+            [0.56, 0.68, 0.76, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.121,
+        ));
+    }
+
+    fn push_settings_controls_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
+        let search = Self::settings_keybind_search_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            search,
+            [1.0, 1.0, 1.0, 0.72],
+            0.0,
+            Layer::END_PIXELED + 0.098,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("zoom", "zoom"),
+            RenderPoint::new(search.x + 22.0, search.center().y),
+            [0.82, 0.9, 1.0, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.105,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "keybind search",
+            RenderPoint::new(search.x + 48.0, search.center().y),
+            [0.62, 0.72, 0.8, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.106,
+        ));
+
+        let mut last_category = None;
+        for (index, spec) in SETTINGS_KEYBIND_SPECS
+            .iter()
+            .take(SETTINGS_KEYBIND_VISIBLE_ROWS)
+            .enumerate()
+        {
+            if spec.category != last_category {
+                if let Some(category) = spec.category {
+                    let rect = Self::settings_keybind_category_rect(dialog, index);
+                    pass.push(RenderCommand::draw_text_styled(
+                        Self::settings_keybind_category_label(category),
+                        RenderPoint::new(rect.x + 8.0, rect.center().y),
+                        [0.56, 0.62, 0.68, 1.0],
+                        10.5,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        Layer::END_PIXELED + 0.107 + index as f32 * 0.0001,
+                    ));
+                }
+                last_category = spec.category;
+            }
+
+            let row = Self::settings_keybind_row_rect(dialog, index);
+            pass.push(RenderCommand::draw_text_styled(
+                Self::settings_keybind_bundle_label(spec.name),
+                RenderPoint::new(row.x + 8.0, row.center().y),
+                [0.94, 0.96, 0.98, 1.0],
+                10.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.108 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                self.settings_keybind_effective_value(spec),
+                RenderPoint::new(row.x + row.width * 0.44, row.center().y),
+                if self.settings_keybind_overrides.contains_key(spec.name) {
+                    [1.0, 0.86, 0.48, 1.0]
+                } else {
+                    [0.48, 0.74, 1.0, 1.0]
+                },
+                10.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.109 + index as f32 * 0.0001,
+            ));
+            self.push_settings_text_button(
+                pass,
+                Self::settings_keybind_rebind_button_rect(dialog, index),
+                "@settings.rebind",
+                None,
+                Layer::END_PIXELED + 0.110 + index as f32 * 0.0001,
+            );
+            self.push_settings_text_button(
+                pass,
+                Self::settings_keybind_reset_button_rect(dialog, index),
+                "@settings.resetKey",
+                None,
+                Layer::END_PIXELED + 0.111 + index as f32 * 0.0001,
+            );
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::settings_keybind_reset_all_rect(dialog),
+            "@settings.reset",
+            Some("refresh"),
+            Layer::END_PIXELED + 0.129,
         );
     }
 
@@ -20236,6 +20686,24 @@ impl DesktopLauncher {
             }
         }
 
+        if let Some(child) = self.settings_child_dialog {
+            match child {
+                DesktopSettingsChildDialog::Language => {
+                    lines.push(format!(
+                        "child dialog: LanguageDialog locales:{} selected:{}",
+                        SETTINGS_LANGUAGE_OPTIONS.len(),
+                        self.settings_locale
+                    ));
+                }
+                DesktopSettingsChildDialog::Controls => {
+                    lines.push(format!(
+                        "child dialog: KeybindDialog binds:{}",
+                        SETTINGS_KEYBIND_SPECS.len()
+                    ));
+                }
+            }
+        }
+
         lines
     }
 
@@ -20344,17 +20812,6 @@ impl DesktopLauncher {
         }
     }
 
-    fn settings_child_dialog_summary(dialog: DesktopSettingsChildDialog) -> &'static str {
-        match dialog {
-            DesktopSettingsChildDialog::Language => {
-                "LanguageDialog placeholder: locale list and bundle reload later"
-            }
-            DesktopSettingsChildDialog::Controls => {
-                "ControlsDialog placeholder: keybind rows and reset later"
-            }
-        }
-    }
-
     fn settings_child_dialog_action_at_point(
         &self,
         panel: RenderRect,
@@ -20367,7 +20824,160 @@ impl DesktopLauncher {
                 DesktopSettingsAction::CloseChildDialog,
             ));
         }
+        match self.settings_child_dialog {
+            Some(DesktopSettingsChildDialog::Language) => {
+                for (index, option) in SETTINGS_LANGUAGE_OPTIONS.iter().enumerate() {
+                    if Self::settings_language_row_rect(dialog, index).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::Settings(
+                            DesktopSettingsAction::SelectLanguage(option.code),
+                        ));
+                    }
+                }
+            }
+            Some(DesktopSettingsChildDialog::Controls) => {
+                for (index, spec) in SETTINGS_KEYBIND_SPECS
+                    .iter()
+                    .take(SETTINGS_KEYBIND_VISIBLE_ROWS)
+                    .enumerate()
+                {
+                    if Self::settings_keybind_rebind_button_rect(dialog, index)
+                        .contains_point(point)
+                    {
+                        return Some(DesktopMenuRouteShellAction::Settings(
+                            DesktopSettingsAction::StartKeyRebind(spec.name),
+                        ));
+                    }
+                    if Self::settings_keybind_reset_button_rect(dialog, index).contains_point(point)
+                    {
+                        return Some(DesktopMenuRouteShellAction::Settings(
+                            DesktopSettingsAction::ResetKey(spec.name),
+                        ));
+                    }
+                }
+                if Self::settings_keybind_reset_all_rect(dialog).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::Settings(
+                        DesktopSettingsAction::ResetAllKeys,
+                    ));
+                }
+            }
+            None => {}
+        }
         None
+    }
+
+    fn settings_language_row_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let col = index % SETTINGS_LANGUAGE_COLUMNS;
+        let row = index / SETTINGS_LANGUAGE_COLUMNS;
+        let gap = 6.0;
+        let width = (dialog.width - 36.0 - gap * (SETTINGS_LANGUAGE_COLUMNS as f32 - 1.0))
+            / SETTINGS_LANGUAGE_COLUMNS as f32;
+        let top = dialog.y + dialog.height
+            - 72.0
+            - row as f32 * (SETTINGS_LANGUAGE_ROW_HEIGHT + SETTINGS_LANGUAGE_ROW_GAP);
+        RenderRect::new(
+            dialog.x + 18.0 + col as f32 * (width + gap),
+            top - SETTINGS_LANGUAGE_ROW_HEIGHT,
+            width,
+            SETTINGS_LANGUAGE_ROW_HEIGHT,
+        )
+    }
+
+    fn settings_keybind_search_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 22.0,
+            dialog.y + dialog.height - 92.0,
+            dialog.width - 44.0,
+            32.0,
+        )
+    }
+
+    fn settings_keybind_category_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let row = Self::settings_keybind_row_rect(dialog, index);
+        RenderRect::new(row.x, row.y + row.height + 2.0, row.width, 16.0)
+    }
+
+    fn settings_keybind_row_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let search = Self::settings_keybind_search_rect(dialog);
+        let top = search.y
+            - 22.0
+            - index as f32 * (SETTINGS_KEYBIND_ROW_HEIGHT + SETTINGS_KEYBIND_ROW_GAP);
+        RenderRect::new(
+            dialog.x + 22.0,
+            top - SETTINGS_KEYBIND_ROW_HEIGHT,
+            dialog.width - 44.0,
+            SETTINGS_KEYBIND_ROW_HEIGHT,
+        )
+    }
+
+    fn settings_keybind_rebind_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let row = Self::settings_keybind_row_rect(dialog, index);
+        RenderRect::new(
+            row.x + row.width - SETTINGS_KEYBIND_REBIND_WIDTH - SETTINGS_KEYBIND_RESET_WIDTH - 10.0,
+            row.y + 2.0,
+            SETTINGS_KEYBIND_REBIND_WIDTH,
+            row.height - 4.0,
+        )
+    }
+
+    fn settings_keybind_reset_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let row = Self::settings_keybind_row_rect(dialog, index);
+        RenderRect::new(
+            row.x + row.width - SETTINGS_KEYBIND_RESET_WIDTH,
+            row.y + 2.0,
+            SETTINGS_KEYBIND_RESET_WIDTH,
+            row.height - 4.0,
+        )
+    }
+
+    fn settings_keybind_reset_all_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + dialog.width - 170.0,
+            dialog.y + 18.0,
+            150.0,
+            46.0,
+        )
+    }
+
+    fn settings_keybind_category_label(category: &'static str) -> &'static str {
+        match category {
+            "general" => "@category.general.name",
+            "command" => "@category.command.name",
+            "blocks" => "@category.blocks.name",
+            "view" => "@category.view.name",
+            "multiplayer" => "@category.multiplayer.name",
+            _ => category,
+        }
+    }
+
+    fn settings_keybind_bundle_label(name: &'static str) -> &'static str {
+        match name {
+            "move_x" => "@keybind.move_x.name",
+            "move_y" => "@keybind.move_y.name",
+            "mouse_move" => "@keybind.mouse_move.name",
+            "pan" => "@keybind.pan.name",
+            "boost" => "@keybind.boost.name",
+            "respawn" => "@keybind.respawn.name",
+            "control" => "@keybind.control.name",
+            "select" => "@keybind.select.name",
+            "deselect" => "@keybind.deselect.name",
+            "break_block" => "@keybind.break_block.name",
+            "command_mode" => "@keybind.command_mode.name",
+            "command_queue" => "@keybind.command_queue.name",
+            "category_prev" => "@keybind.category_prev.name",
+            "category_next" => "@keybind.category_next.name",
+            "zoom" => "@keybind.zoom.name",
+            "menu" => "@keybind.menu.name",
+            "player_list" => "@keybind.player_list.name",
+            "chat" => "@keybind.chat.name",
+            _ => name,
+        }
+    }
+
+    fn settings_keybind_effective_value<'a>(&'a self, spec: &'a DesktopKeybindSpec) -> &'a str {
+        self.settings_keybind_overrides
+            .get(spec.name)
+            .map(String::as_str)
+            .unwrap_or(spec.default_value)
     }
 
     fn settings_route_shell_action_at_surface_point(
@@ -21676,6 +22286,27 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::CloseChildDialog => {
                 self.settings_child_dialog = None;
+            }
+            DesktopSettingsAction::SelectLanguage(code) => {
+                if self.settings_locale != code {
+                    self.settings_locale = code.to_string();
+                    self.last_settings_language_restart_message = Some("@language.restart".into());
+                }
+            }
+            DesktopSettingsAction::StartKeyRebind(name) => {
+                self.last_settings_rebind_key = Some(name);
+                self.settings_keybind_overrides
+                    .insert(name, "waiting for key...".into());
+            }
+            DesktopSettingsAction::ResetKey(name) => {
+                self.settings_keybind_overrides.remove(name);
+                if self.last_settings_rebind_key == Some(name) {
+                    self.last_settings_rebind_key = None;
+                }
+            }
+            DesktopSettingsAction::ResetAllKeys => {
+                self.settings_keybind_overrides.clear();
+                self.last_settings_rebind_key = None;
             }
             DesktopSettingsAction::ClearAllData
             | DesktopSettingsAction::ClearPlanetData
@@ -44534,13 +45165,15 @@ mod tests {
 
         let data_center =
             DesktopLauncher::settings_main_menu_button_rect_for_panel(settings_panel, 5).center();
-        assert_eq!(
+        assert_ne!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
                 data_center.x,
                 data_center.y
             ),
-            None,
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::OpenPage(super::DesktopSettingsPage::Data)
+            )),
             "Settings child dialog should be modal and block clicks to the page behind it"
         );
 
@@ -44559,11 +45192,53 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(language_texts.contains(&"@settings.language"));
+        assert!(language_texts.contains(&"English"));
+        assert!(language_texts.contains(&"简体中文"));
         assert!(language_texts
+            .contains(&"LanguageDialog locales: Core.settings.locale + @language.restart"));
+        assert!(!language_texts
             .contains(&"LanguageDialog placeholder: locale list and bundle reload later"));
         assert!(language_texts.contains(&"@back"));
+        assert!(launcher
+            .settings_route_lines()
+            .contains(&"child dialog: LanguageDialog locales:36 selected:en".to_string()));
 
         let child_dialog = DesktopLauncher::settings_child_dialog_rect_for_panel(settings_panel);
+        let zh_index = super::SETTINGS_LANGUAGE_OPTIONS
+            .iter()
+            .position(|option| option.code == "zh_CN")
+            .expect("LanguageDialog should include Simplified Chinese");
+        let zh_center =
+            DesktopLauncher::settings_language_row_rect(child_dialog, zh_index).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                zh_center.x,
+                zh_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::SelectLanguage("zh_CN")
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: zh_center.x,
+                    y: zh_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.settings_locale, "zh_CN");
+        assert_eq!(
+            launcher.last_settings_language_restart_message.as_deref(),
+            Some("@language.restart")
+        );
+
         let close_child_center =
             DesktopLauncher::schematic_info_button_rect(child_dialog, 0).center();
         assert_eq!(
@@ -44629,9 +45304,70 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(controls_texts.contains(&"@settings.controls"));
+        assert!(controls_texts.contains(&"keybind search"));
+        assert!(controls_texts.contains(&"@category.general.name"));
+        assert!(controls_texts.contains(&"@keybind.move_x.name"));
+        assert!(controls_texts.contains(&"A / D"));
+        assert!(controls_texts.contains(&"@settings.rebind"));
+        assert!(controls_texts.contains(&"@settings.resetKey"));
         assert!(
-            controls_texts.contains(&"ControlsDialog placeholder: keybind rows and reset later")
+            !controls_texts.contains(&"ControlsDialog placeholder: keybind rows and reset later")
         );
+        assert!(launcher
+            .settings_route_lines()
+            .contains(&"child dialog: KeybindDialog binds:18".to_string()));
+
+        let rebind_center =
+            DesktopLauncher::settings_keybind_rebind_button_rect(child_dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                rebind_center.x,
+                rebind_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::StartKeyRebind("move_x")
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: rebind_center.x,
+                    y: rebind_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.last_settings_rebind_key, Some("move_x"));
+        assert_eq!(
+            launcher
+                .settings_keybind_overrides
+                .get("move_x")
+                .map(String::as_str),
+            Some("waiting for key...")
+        );
+
+        let reset_center =
+            DesktopLauncher::settings_keybind_reset_button_rect(child_dialog, 0).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: reset_center.x,
+                    y: reset_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.last_settings_rebind_key, None);
+        assert!(!launcher.settings_keybind_overrides.contains_key("move_x"));
         launcher.apply_menu_input_events(
             surface,
             &[
