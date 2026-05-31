@@ -2647,7 +2647,13 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
                 .push(mindustry_desktop::DesktopFrameLoopEvent::Tick);
         }
         let events = std::mem::take(&mut self.pending_events);
-        let graphics_renderer = self.graphics_renderer.as_mut()?;
+        let Some(graphics_renderer) = self.graphics_renderer.as_mut() else {
+            desktop_native_trace_summary(
+                "app.frame: redraw requested before native OpenGL renderer was ready; deferring",
+            );
+            self.pending_events = events;
+            return None;
+        };
         if desktop_native_trace_enabled() {
             desktop_native_trace(format!(
                 "app.frame: begin index={} events={}",
@@ -2683,12 +2689,14 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
             .expect("failed to initialize native OpenGL desktop runtime");
         let window_id = runtime.window.id();
         let size = runtime.window_surface_size();
-        runtime.request_redraw();
         self.pending_events
             .push(mindustry_desktop::DesktopFrameLoopEvent::Resize(size));
         self.window_id = Some(window_id);
         self.graphics_renderer =
             Some(mindustry_desktop::DesktopOpenGlBackendGraphicsRenderer::new(runtime));
+        if let Some(renderer) = self.graphics_renderer.as_ref() {
+            renderer.runtime.request_redraw();
+        }
         desktop_native_trace("app.resumed: renderer ready");
     }
 
@@ -2722,8 +2730,6 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
                 if result.should_stop() {
                     event_loop.exit();
                 }
-            } else {
-                event_loop.exit();
             }
         }
 

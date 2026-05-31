@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 601. Native OpenGL 首帧 redraw 不再抢跑 renderer
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.1%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是降低启动后黑屏/首帧空白风险，让 native OpenGL 路径更接近 Java “renderer/UI 初始化完成后再进入 draw loop”的时序。
+- Java 对照依据：
+  - Java `UI.loadSync()` / `Renderer.init()` 先初始化 Scene、Tex/Icon/Styles/Fonts 与 renderer，再进入稳定绘制；
+  - 原 Rust `resumed()` 中先 `request_redraw()` 再保存 `graphics_renderer`，理论上存在 Redraw 事件早于 renderer ready 的首帧竞态。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - `DesktopNativeOpenGlApp::resumed()` 改为先保存 `DesktopOpenGlBackendGraphicsRenderer`，再请求 redraw；
+    - `drain_present_frame()` 遇到 renderer 尚未准备好时保留 pending events 并记录 trace summary，不再把 `None` 当作退出条件；
+    - `window_event()` 的 RedrawRequested 分支只在实际拿到 `DesktopPresentResult` 后判断 `should_stop()`，避免 renderer 未就绪时直接退出窗口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_native_opengl_runtime_config_builds_winit_window_attributes --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop native_opengl_visible_fallback_covers_empty_or_invalid_draw_frames --features opengl-native-runtime`
+  - `cargo test -p mindustry-desktop desktop_opengl_backend_graphics_renderer_submits_frame_to_runtime --features opengl-native-runtime`
+- 仍未完成：
+  - 这只解决 native event-loop 首帧竞态风险；真实 UI 还原仍需继续补主菜单、LoadDialog、Settings、Mods、IconSelectDialog 等高可见界面；
+  - 资产根/字体/icon atlas 的完整 Java `UI.loadSync()` 等价 bootstrap 仍需继续接入；
+  - 完整可玩与联机互通目标仍远未完成，不能宣告目标完成。
+
 ## 600. LoadDialog 点击存档进入 loading/Playing 流转
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
