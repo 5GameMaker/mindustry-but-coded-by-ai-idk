@@ -1685,13 +1685,14 @@ fn menu_custom_button_plan(
     index: usize,
     button: &MenuCustomButton,
     rect: RenderRect,
+    selected: bool,
 ) -> MenuButtonPlan {
     MenuButtonPlan {
         role: MenuButtonRole::Custom(index.min(u16::MAX as usize) as u16),
         label: button.label.clone(),
         icon_name: button.icon_name.clone(),
         rect,
-        selected: false,
+        selected,
         hovered: false,
         pressed: false,
         submenu: button.has_submenu(),
@@ -1816,6 +1817,7 @@ fn menu_desktop_ui_plan(
     }
     for (custom_index, custom) in custom_buttons.iter().enumerate() {
         let index = main_role_count + custom_index;
+        let role = MenuButtonRole::Custom(custom_index.min(u16::MAX as usize) as u16);
         buttons.push(menu_custom_button_plan(
             custom_index,
             custom,
@@ -1825,6 +1827,7 @@ fn menu_desktop_ui_plan(
                 button_width,
                 button_height,
             ),
+            active_root == Some(role),
         ));
     }
     let quit_index = main_role_count + custom_buttons.len();
@@ -3080,6 +3083,17 @@ mod tests {
         assert!(roles.contains(&MenuButtonRole::Custom(0)));
         assert!(roles.contains(&MenuButtonRole::CustomSubmenu { root: 0, item: 0 }));
         assert!(roles.contains(&MenuButtonRole::CustomSubmenu { root: 0, item: 1 }));
+
+        let root_button = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Custom(0))
+            .expect("custom submenu root should stay visible");
+        assert!(
+            root_button.selected,
+            "Java flatToggleMenut root stays checked while its submenu is currentMenu"
+        );
 
         let submenu = plan
             .ui

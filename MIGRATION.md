@@ -19592,6 +19592,28 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - chrome 的九宫格/字体/hover/pressed/tooltip 仍需继续精细还原；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 563. MenuFragment 自定义子菜单根按钮 checked 状态闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.5%**，仍未达到完整可玩；继续优先前端/UI，把 custom submenu root 的视觉状态对齐 Java `currentMenu == out[0]`。
+- Java 对照依据：
+  - `buttons(...)` 中 `out[0].update(() -> out[0].setChecked(currentMenu == out[0]))`；
+  - 自定义根按钮如果在桌面端展开 submenu，应保持 `flatToggleMenut` checked/down 视觉，而不是普通 up 状态。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `menu_custom_button_plan(...)` 接收 `selected`；
+    - 桌面 custom root 处于 `active_root` 时写入 `selected=true`；
+    - 测试覆盖自定义子菜单展开后 root button 仍保持 checked 状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_dispatches_custom --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - custom action_id 仍待接真实插件/模组 callback registry；
+  - custom submenu 的 Scene2D Table/Style 细节仍需继续向 Java 对齐；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
