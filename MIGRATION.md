@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 600. LoadDialog 点击存档进入 loading/Playing 流转
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.0%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 LoadDialog 点击存档卡片从“只记录 selected-for-load”推进到可见 `@loading` 过渡并切入 Playing 状态。
+- Java 对照依据：
+  - `LoadDialog.runLoadSave(...)` 通过 `ui.loadAnd("@loading", ...)` 显示加载层；
+  - `slot.cautiousLoad(...)` 完成后会隐藏对话框、重置网络状态并 `state.set(State.playing)`；
+  - 点击存档卡片应被视作一次启动加载，而不是停留在菜单 telemetry。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGamePendingLoad`、`load_game_pending_load` 和 `last_load_game_result`；
+    - 点击 Load slot 会启动 pending load，保留 `last_load_game_action.status == "selected-for-load"` 作为点击审计；
+    - LoadGame route 渲染半透明遮罩、`pane` 弹窗、Icon refresh 与 `@loading` 文案，同时 shell lines 暴露 `loadfrag: @loading`；
+    - pending 期间屏蔽底层 slot/route 点击，Back/Escape 不会抢先关闭 route；
+    - 延迟若干帧后关闭 LoadGame route，将 `game_state` 与 `runtime.state` 切到 Playing，并把完成态写入 `last_load_game_result.status == "loaded"`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 这一步仍是 Java `LoadDialog.runLoadSave` 的 UI/runtime 最小接线；真实 `SaveSnapshot -> GameRuntime` 完整恢复还没有一键接入；
+  - `slot.load()` 等价逻辑、网络状态 reset、World/Teams/Rules/Entity 完整恢复仍需继续迁移；
+  - loading overlay 仍是 Rust renderer 内的过渡实现，后续需要继续对齐 Java loadfrag 动画、bundle format 和错误处理。
+
 ## 599. LoadDialog autosave toggle 接入设置持久化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

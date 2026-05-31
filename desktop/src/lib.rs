@@ -177,6 +177,7 @@ const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const LOAD_SEARCH_TEXT_MAX_LENGTH: usize = 50;
 const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
 const SAVE_NEW_TEXT_MAX_LENGTH: usize = 30;
+const LOAD_GAME_LOADING_DELAY_FRAMES: u8 = 5;
 const SAVE_GAME_SAVING_DELAY_FRAMES: u8 = 5;
 const HOST_NAME_TEXT_MAX_LENGTH: usize = 40;
 const HOST_PORT_TEXT_MAX_LENGTH: usize = 5;
@@ -2936,6 +2937,25 @@ impl DesktopSaveGamePendingSave {
             operation,
             frames_remaining: SAVE_GAME_SAVING_DELAY_FRAMES,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopLoadGamePendingLoad {
+    pub action: DesktopLoadGameAction,
+    pub frames_remaining: u8,
+}
+
+impl DesktopLoadGamePendingLoad {
+    fn new(action: DesktopLoadGameAction) -> Self {
+        Self {
+            action,
+            frames_remaining: LOAD_GAME_LOADING_DELAY_FRAMES,
+        }
+    }
+
+    fn status_line(&self) -> String {
+        format!("@loading: @load | slot {}", self.action.slot)
     }
 }
 
@@ -16255,6 +16275,8 @@ pub struct DesktopLauncher {
     pub last_discord_clipboard_text: Option<String>,
     pub load_game_slots: Vec<SaveSlotRecord>,
     pub last_load_game_action: Option<DesktopLoadGameAction>,
+    pub last_load_game_result: Option<DesktopLoadGameAction>,
+    pub load_game_pending_load: Option<DesktopLoadGamePendingLoad>,
     pub load_game_error: Option<String>,
     pub last_load_game_import_request: Option<FileChooserRequest>,
     pub last_load_game_import_result: Option<DesktopLoadGameImportResult>,
@@ -17105,6 +17127,8 @@ impl DesktopLauncher {
             last_discord_clipboard_text: None,
             load_game_slots: Vec::new(),
             last_load_game_action: None,
+            last_load_game_result: None,
+            load_game_pending_load: None,
             load_game_error: None,
             last_load_game_import_request: None,
             last_load_game_import_result: None,
@@ -20949,6 +20973,10 @@ impl DesktopLauncher {
             self.last_menu_route_shell_action = None;
             return true;
         }
+        if self.load_game_pending_load.is_some() {
+            self.last_menu_route_shell_action = None;
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::About)
             && self.about_route_page == DesktopAboutRoutePage::Credits
         {
@@ -21013,6 +21041,7 @@ impl DesktopLauncher {
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.load_game_search_focused = false;
+            self.load_game_pending_load = None;
             self.load_game_rename_dialog_slot = None;
             self.load_game_delete_dialog_slot = None;
             self.load_game_rename_text.clear();
@@ -21162,6 +21191,7 @@ impl DesktopLauncher {
                 self.load_game_scroll_offset = 0;
                 self.load_game_hidden_modes.clear();
                 self.load_game_rename_dialog_slot = None;
+                self.load_game_pending_load = None;
                 self.load_game_delete_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
@@ -24527,6 +24557,9 @@ impl DesktopLauncher {
         ) {
             return None;
         }
+        if self.load_game_pending_load.is_some() || self.save_game_pending_save.is_some() {
+            return None;
+        }
         let viewport = self.default_render_viewport_for_surface(surface_size);
         let panel = Self::active_menu_route_shell_panel_for_route(
             viewport,
@@ -24558,6 +24591,9 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::LoadGame);
         let point = RenderPoint::new(x, y);
+        if self.load_game_pending_load.is_some() {
+            return None;
+        }
         if self.load_game_rename_dialog_slot.is_some() {
             let dialog = Self::load_game_rename_dialog_rect_for_panel(panel);
             if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
@@ -24754,7 +24790,9 @@ impl DesktopLauncher {
             kind,
             status: status.into(),
         };
-        if kind == DesktopLoadGameActionKind::ToggleAutosave {
+        if kind == DesktopLoadGameActionKind::Load {
+            self.start_load_game_pending_load(action.clone());
+        } else if kind == DesktopLoadGameActionKind::ToggleAutosave {
             let enabled = !self.load_game_slot_is_autosave(&slot);
             self.settings_overrides
                 .insert(slot.autosave_setting_key(), enabled.to_string());
@@ -24793,6 +24831,55 @@ impl DesktopLauncher {
         }
         self.last_load_game_action = Some(action.clone());
         Some(action)
+    }
+
+    fn start_load_game_pending_load(&mut self, action: DesktopLoadGameAction) {
+        self.load_game_error = None;
+        self.last_load_game_result = None;
+        self.load_game_search_focused = false;
+        self.load_game_rename_dialog_slot = None;
+        self.load_game_delete_dialog_slot = None;
+        self.load_game_rename_text.clear();
+        self.load_game_pending_load = Some(DesktopLoadGamePendingLoad::new(action));
+    }
+
+    fn tick_load_game_pending_load(&mut self) -> bool {
+        let should_complete = match self.load_game_pending_load.as_mut() {
+            Some(pending) => {
+                if pending.frames_remaining > 0 {
+                    pending.frames_remaining -= 1;
+                }
+                pending.frames_remaining == 0
+            }
+            None => false,
+        };
+        if should_complete {
+            self.complete_load_game_pending_load();
+        }
+        should_complete
+    }
+
+    fn complete_load_game_pending_load(&mut self) -> Option<DesktopLoadGameAction> {
+        let mut pending = self.load_game_pending_load.take()?;
+        pending.action.status = "loaded".into();
+        self.game_state.set(GameStateState::Playing);
+        self.sync_runtime_state_from_game_state();
+        self.active_menu_route = None;
+        self.load_game_search_focused = false;
+        self.load_game_rename_dialog_slot = None;
+        self.load_game_delete_dialog_slot = None;
+        self.load_game_rename_text.clear();
+        self.save_game_new_dialog_open = false;
+        self.save_game_new_text.clear();
+        self.save_game_overwrite_dialog_slot = None;
+        self.save_game_pending_save = None;
+        self.last_menu_route_shell_action = None;
+        self.last_menu_guard_message = Some(format!(
+            "LoadDialog.runLoadSave loaded slot {}",
+            pending.action.slot
+        ));
+        self.last_load_game_result = Some(pending.action.clone());
+        Some(pending.action)
     }
 
     fn dispatch_load_game_import_with_platform<P: Platform>(
@@ -25539,6 +25626,7 @@ impl DesktopLauncher {
                 self.load_game_scroll_offset = 0;
                 self.load_game_hidden_modes.clear();
                 self.load_game_rename_dialog_slot = None;
+                self.load_game_pending_load = None;
                 self.load_game_delete_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
@@ -28377,6 +28465,7 @@ impl DesktopLauncher {
                 self.editor_map_info_dialog_index = None;
                 self.load_game_search_focused = false;
                 self.load_game_rename_dialog_slot = None;
+                self.load_game_pending_load = None;
                 self.load_game_delete_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
@@ -33335,7 +33424,76 @@ impl DesktopLauncher {
         } else {
             self.push_load_game_rename_dialog(pass, panel);
             self.push_load_game_delete_dialog(pass, panel);
+            self.push_load_game_loading_overlay(pass, panel);
         }
+    }
+
+    fn push_load_game_loading_overlay(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(pending) = self.load_game_pending_load.as_ref() else {
+            return;
+        };
+        let width = (panel.width - 140.0).clamp(260.0, 380.0);
+        let height = 118.0;
+        let dialog = RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        );
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.54],
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("refresh", "refresh"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
+            [0.80, 0.94, 1.0, 1.0],
+            20.0,
+            self.render_time * 8.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.093,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@loading",
+            RenderPoint::new(dialog.center().x, dialog.center().y - 2.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.094,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            pending.status_line(),
+            RenderPoint::new(dialog.center().x, dialog.y + 24.0),
+            [0.60, 0.72, 0.82, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.0945,
+        ));
     }
 
     fn push_save_game_saving_overlay(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -34700,7 +34858,14 @@ impl DesktopLauncher {
                 format!("field: @server.port value={}", self.host_port_text),
                 format!("button: @host enabled={}", self.host_port_is_valid()),
             ],
-            DesktopMenuRoute::LoadGame => self.load_game_slot_lines(),
+            DesktopMenuRoute::LoadGame => {
+                let mut lines = self.load_game_slot_lines();
+                if let Some(pending) = self.load_game_pending_load.as_ref() {
+                    lines.insert(0, pending.status_line());
+                    lines.insert(0, "loadfrag: @loading".into());
+                }
+                lines
+            }
             DesktopMenuRoute::SaveGame => {
                 let mut lines = self.load_game_slot_lines();
                 lines.insert(0, "button: @save.new Icon.add".into());
@@ -36689,6 +36854,7 @@ impl DesktopLauncher {
         self.push_mobile_terminal_overlay(&mut menu_pass, frame_viewport);
         self.push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
         self.tick_save_game_pending_save();
+        self.tick_load_game_pending_load();
         let camera = menu_pass
             .camera
             .unwrap_or_else(|| self.default_render_camera_for_viewport(frame_viewport));
@@ -58904,6 +59070,17 @@ version: "2.0.0"
         assert_eq!(action.timestamp, 200);
         assert_eq!(action.kind, super::DesktopLoadGameActionKind::Load);
         assert_eq!(action.status, "selected-for-load");
+        assert!(
+            launcher.load_game_pending_load.is_some(),
+            "Java LoadDialog.runLoadSave should enter a visible loading phase before playing"
+        );
+        assert_eq!(launcher.last_load_game_result, None);
+        let loading_lines =
+            launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::LoadGame);
+        assert!(loading_lines.contains(&"loadfrag: @loading".to_string()));
+        assert!(loading_lines
+            .iter()
+            .any(|line| line.contains("@loading: @load | slot 2")));
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
         let commands = frame
@@ -58924,6 +59101,8 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(texts.contains(&"@save.search"));
         assert!(texts.contains(&"@save.import"));
+        assert!(texts.contains(&"@loading"));
+        assert!(texts.iter().any(|text| text == &"@loading: @load | slot 2"));
         assert!(texts.contains(&"[accent]New Map"));
         assert!(texts.contains(&"@save.map: New Map / @mode.attack.name"));
         assert!(texts
@@ -58977,6 +59156,36 @@ version: "2.0.0"
                     if text == &save_glyph && style.font == RenderFontId::Icon
             )),
             "LoadDialog action glyphs must render with the upstream icon font"
+        );
+        for frame_index in 1..=u64::from(super::LOAD_GAME_LOADING_DELAY_FRAMES) {
+            launcher.menu_graphics_frame_for_surface(frame_index, viewport);
+        }
+        assert_eq!(
+            launcher.active_menu_route, None,
+            "completed load should close the LoadDialog route like Java runLoadSave"
+        );
+        assert!(launcher.load_game_pending_load.is_none());
+        assert!(launcher.game_state.is_playing());
+        assert!(launcher.runtime.state.is_playing());
+        assert_eq!(
+            launcher
+                .last_load_game_action
+                .as_ref()
+                .map(|action| action.status.as_str()),
+            Some("selected-for-load"),
+            "click audit should remain distinct from the completed load result"
+        );
+        let loaded = launcher
+            .last_load_game_result
+            .as_ref()
+            .expect("completed pending load should record a loaded result");
+        assert_eq!(loaded.slot, "2");
+        assert_eq!(loaded.status, "loaded");
+
+        launcher.dispatch_menu_action(MenuButtonRole::LoadGame);
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::LoadGame)
         );
         launcher.apply_menu_input_events(
             surface,
