@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 592. Settings Data 页动作区改为内层 dataDialog 风格
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.2%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 Settings Data 页更接近 Java `dataDialog.cont.table(Tex.button, ...)` 的动作按钮区，而不是普通 route 页面列表。
+- Java 对照依据：
+  - `SettingsMenuDialog` 构造 `dataDialog = new BaseDialog("@settings.data")`；
+  - `dataDialog.cont.table(Tex.button, t -> { t.defaults().size(280f, 60f).left(); ... })`；
+  - Data 对话框自身是数据动作按钮表，选中 planet 只在 `planetDataDialog` 内部出现。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `settings_data_actions_container_rect_for_panel(...)` 改为内层 `Tex.button` 风格卡，顶部显示 `@settings.data`；
+    - Data action 按钮宽度收敛到 Java 的 `280f` 语义，高度增大并在宽屏分两列避免原先单列溢出/压到底部 Back 区；
+    - Data 页不再在主动作区显示 `planet: ...` 状态，避免把 `planetDataDialog` 的状态泄漏到 dataDialog；
+    - 更新 Settings Data/PlanetData 命中和渲染测试，锁定内层 `button` container、两列 action rect 和 `@settings.data` 标题。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_controls_write_overrides_from_hit_tests --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Data 页仍在 Settings route 内承载，未完全拆成 Java 那种独立弹出的 `BaseDialog` 生命周期；
+  - Planet 选择弹窗目前仍简化在 `PlanetDataDialog` 内，而不是单独 `BaseDialog("") + pane(Tex.button)`；
+  - Settings 主菜单 icon/label 与真实字体光栅化仍需继续推进。
+
 ## 591. SettingsTable 子页行 chrome 收敛到 Java 表格感
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

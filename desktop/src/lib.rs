@@ -148,9 +148,10 @@ const SETTINGS_RESET_BUTTON_WIDTH: f32 = 240.0;
 const SETTINGS_RESET_BUTTON_HEIGHT: f32 = 44.0;
 const SETTINGS_BACK_BUTTON_WIDTH: f32 = 210.0;
 const SETTINGS_BACK_BUTTON_HEIGHT: f32 = 64.0;
-const SETTINGS_DATA_BUTTON_WIDTH: f32 = 360.0;
-const SETTINGS_DATA_BUTTON_HEIGHT: f32 = 46.0;
-const SETTINGS_DATA_BUTTON_GAP: f32 = 7.0;
+const SETTINGS_DATA_BUTTON_WIDTH: f32 = 280.0;
+const SETTINGS_DATA_BUTTON_HEIGHT: f32 = 54.0;
+const SETTINGS_DATA_BUTTON_GAP: f32 = 8.0;
+const SETTINGS_DATA_TWO_COLUMN_MIN_WIDTH: f32 = 620.0;
 const SETTINGS_PLANET_DATA_BUTTON_WIDTH: f32 = 280.0;
 const SETTINGS_PLANET_DATA_BUTTON_HEIGHT: f32 = 60.0;
 const SETTINGS_PLANET_OPTION_WIDTH: f32 = 110.0;
@@ -22268,23 +22269,23 @@ impl DesktopLauncher {
     fn push_settings_data_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         let container = Self::settings_data_actions_container_rect_for_panel(panel);
         pass.push(RenderCommand::draw_sprite(
-            Self::settings_drawable_symbol("pane"),
+            Self::settings_drawable_symbol("button"),
             container,
-            [1.0, 1.0, 1.0, 0.82],
+            [1.0, 1.0, 1.0, 0.86],
             0.0,
             Layer::END_PIXELED + 0.021,
         ));
         pass.push(RenderCommand::stroke_rect(
             container,
-            [0.22, 0.34, 0.42, 0.70],
+            [0.32, 0.44, 0.54, 0.82],
             1.0,
             Layer::END_PIXELED + 0.022,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!("planet: {}", self.settings_dialog_state.selected_planet),
-            RenderPoint::new(container.center().x, container.y + container.height - 18.0),
-            [0.62, 0.72, 0.82, 1.0],
-            10.5,
+            "@settings.data",
+            RenderPoint::new(container.center().x, container.y + container.height - 24.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -23391,31 +23392,49 @@ impl DesktopLauncher {
     }
 
     fn settings_data_action_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
-        let width = SETTINGS_DATA_BUTTON_WIDTH.min(panel.width - 72.0);
-        let top = panel.y + panel.height
-            - 142.0
-            - index as f32 * (SETTINGS_DATA_BUTTON_HEIGHT + SETTINGS_DATA_BUTTON_GAP);
+        let dialog = Self::settings_data_actions_container_rect_for_panel(panel);
+        let columns = Self::settings_data_action_column_count_for_panel(panel);
+        let column = index % columns;
+        let row = index / columns;
+        let total_width = columns as f32 * SETTINGS_DATA_BUTTON_WIDTH
+            + columns.saturating_sub(1) as f32 * SETTINGS_DATA_BUTTON_GAP;
+        let start_x = dialog.center().x - total_width * 0.5;
+        let top = dialog.y + dialog.height
+            - 48.0
+            - row as f32 * (SETTINGS_DATA_BUTTON_HEIGHT + SETTINGS_DATA_BUTTON_GAP);
         RenderRect::new(
-            panel.x + (panel.width - width) * 0.5,
+            start_x + column as f32 * (SETTINGS_DATA_BUTTON_WIDTH + SETTINGS_DATA_BUTTON_GAP),
             top - SETTINGS_DATA_BUTTON_HEIGHT,
-            width,
+            SETTINGS_DATA_BUTTON_WIDTH,
             SETTINGS_DATA_BUTTON_HEIGHT,
         )
     }
 
+    fn settings_data_action_column_count_for_panel(panel: RenderRect) -> usize {
+        if panel.width >= SETTINGS_DATA_TWO_COLUMN_MIN_WIDTH {
+            2
+        } else {
+            1
+        }
+    }
+
     fn settings_data_actions_container_rect_for_panel(panel: RenderRect) -> RenderRect {
-        let first = Self::settings_data_action_button_rect_for_panel(panel, 0);
-        let last = Self::settings_data_action_button_rect_for_panel(
-            panel,
-            SETTINGS_DATA_ACTIONS.len() - 1,
-        );
-        let pad = 14.0;
-        RenderRect::new(
-            first.x - pad,
-            last.y - pad,
-            first.width + pad * 2.0,
-            first.bottom() - last.y + pad * 2.0 + 22.0,
-        )
+        let columns = Self::settings_data_action_column_count_for_panel(panel);
+        let rows = (SETTINGS_DATA_ACTIONS.len() + columns - 1) / columns;
+        let content_width = columns as f32 * SETTINGS_DATA_BUTTON_WIDTH
+            + columns.saturating_sub(1) as f32 * SETTINGS_DATA_BUTTON_GAP;
+        let content_height = rows as f32 * SETTINGS_DATA_BUTTON_HEIGHT
+            + rows.saturating_sub(1) as f32 * SETTINGS_DATA_BUTTON_GAP;
+        let width = (content_width + 28.0)
+            .min(panel.width - 56.0)
+            .max(content_width);
+        let height = content_height + 64.0;
+        let back_top = Self::settings_back_button_rect_for_panel(panel).bottom();
+        let available_bottom = back_top + 18.0;
+        let available_top = panel.y + panel.height - 84.0;
+        let available_height = (available_top - available_bottom).max(height);
+        let y = available_bottom + (available_height - height).max(0.0) * 0.5;
+        RenderRect::new(panel.x + (panel.width - width) * 0.5, y, width, height)
     }
 
     fn settings_reset_button_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -60527,7 +60546,7 @@ version: "2.0.0"
         );
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
-        let texts = frame
+        let commands = frame
             .bundle
             .render_frame
             .as_ref()
@@ -60535,13 +60554,39 @@ version: "2.0.0"
             .passes
             .iter()
             .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
             .filter_map(|command| match command {
                 RenderCommand::DrawText { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let data_container =
+            DesktopLauncher::settings_data_actions_container_rect_for_panel(settings_panel);
+        let first_data_button =
+            DesktopLauncher::settings_data_action_button_rect_for_panel(settings_panel, 0);
+        let second_data_button =
+            DesktopLauncher::settings_data_action_button_rect_for_panel(settings_panel, 1);
+        assert_eq!(first_data_button.width, super::SETTINGS_DATA_BUTTON_WIDTH);
+        assert_eq!(first_data_button.height, super::SETTINGS_DATA_BUTTON_HEIGHT);
+        assert!(
+            (first_data_button.y - second_data_button.y).abs() < 0.01,
+            "wide Settings data dialog should keep Java 280x60-like action buttons by laying them out in two columns"
+        );
+        assert!(data_container.contains_point(first_data_button.center()));
+        let data_container_symbol = DesktopLauncher::settings_drawable_symbol("button");
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol == &data_container_symbol && *rect == data_container
+        )));
         assert!(texts.contains(&"upstream: SettingsMenuDialog"));
-        assert!(texts.contains(&"planet: erekir"));
+        assert!(texts.contains(&"@settings.data"));
+        assert!(
+            !texts.contains(&"planet: erekir"),
+            "Java dataDialog itself is a data-action button table; selected planet is shown inside PlanetDataDialog"
+        );
         assert!(texts.contains(&"@settings.cleardata"));
         assert!(texts.contains(&"@data.export"));
         assert!(
