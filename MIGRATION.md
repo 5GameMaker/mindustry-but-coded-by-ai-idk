@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 608. PlanetDataDialog 改为 Java 风格独立星球选择弹窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.8%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 Settings → Data → PlanetDataDialog 的星球选择从 Rust 过渡期 inline 固定选项条改成 Java `BaseDialog("") + pane(...)` 的独立 chooser。
+- Java 对照依据：
+  - `SettingsMenuDialog.java` 中 `planetDataDialog.cont.table(Tex.button, ...)` 只包含 `settings.planetselect`、`clearplanetresearch`、`clearplanetcampaignsaves` 三个 280×60 按钮；
+  - 点击 `settings.planetselect` 后新建空标题 `BaseDialog("")`，内部 `pane(p -> p.background(Tex.button).margin(1f))`；
+  - 星球选项来自 `content.planets()`，过滤 `generator != null && sectors.size > 0 && accessible`，按钮 `110f × 45f`，每 4 个换行，选中后关闭弹窗。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 移除 `SETTINGS_PLANET_OPTIONS` 硬编码 inline 选项条；
+    - 新增 `settings_planet_chooser_open` 状态与 `OpenPlanetChooser / ClosePlanetChooser / SelectPlanet(index)` 动作；
+    - `PlanetDataDialog` 主体改回三行 280×60 `Styles.flatt` 数据按钮表，选中星球只显示在 `@settings.planetselect` 按钮内；
+    - 新增 Java 风格二级 planet chooser：`pane` 背景、`flatTogglet` 选项、110×45、最多 4 列、底部 close button；
+    - chooser 选项改为从 `ContentLoader.catalog().planets` 动态过滤 accessible/generator/sector_count，当前基线可见顺序为 `erekir, serpulo`；
+    - hit-test 在 chooser 打开时优先命中 chooser close/option，并阻断底层 `PlanetDataDialog` 按钮；
+    - 清理确认文案改为使用选中 planet 的 localized label。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Java `dataDialog`/`planetDataDialog` 仍缺真正 Scene2D ScrollPane 行为与滚动条视觉；
+  - planet chooser 目前已动态过滤 base content，但还未接完整 modded planet/localization rich markup 与 `[#iconColor]` 文字颜色解析；
+  - Data 清理动作当前仍是确认/状态记录，后续需要接入真实 universe/settings/save/tech-tree 清理链路。
+
 ## 607. Settings Data 页改回 Java 单列动作表
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

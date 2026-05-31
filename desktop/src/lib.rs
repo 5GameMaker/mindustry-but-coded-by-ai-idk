@@ -155,6 +155,8 @@ const SETTINGS_PLANET_DATA_BUTTON_WIDTH: f32 = 280.0;
 const SETTINGS_PLANET_DATA_BUTTON_HEIGHT: f32 = 60.0;
 const SETTINGS_PLANET_OPTION_WIDTH: f32 = 110.0;
 const SETTINGS_PLANET_OPTION_HEIGHT: f32 = 45.0;
+const SETTINGS_PLANET_OPTION_GAP: f32 = 0.0;
+const SETTINGS_PLANET_OPTION_COLUMNS: usize = 4;
 const SETTINGS_LANGUAGE_ROW_HEIGHT: f32 = 50.0;
 const SETTINGS_LANGUAGE_ROW_GAP: f32 = 0.0;
 const SETTINGS_LANGUAGE_VISIBLE_ROWS: usize = 7;
@@ -543,7 +545,9 @@ pub enum DesktopSettingsAction {
     ClearSaves,
     ClearResearch,
     ClearCampaignSaves,
-    SelectPlanet(&'static str),
+    OpenPlanetChooser,
+    ClosePlanetChooser,
+    SelectPlanet(usize),
     ClearPlanetResearch,
     ClearPlanetCampaignSaves,
     ExportData,
@@ -2290,8 +2294,6 @@ const SETTINGS_DATA_ACTIONS: &[DesktopSettingsDataAction] = &[
         action: DesktopSettingsAction::ExportCrashLogs,
     },
 ];
-
-const SETTINGS_PLANET_OPTIONS: &[&str] = &["serpulo", "erekir"];
 
 const ABOUT_LINKS: &[AboutLinkEntry] = &[
     AboutLinkEntry {
@@ -16251,6 +16253,7 @@ pub struct DesktopLauncher {
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
     pub settings_dialog_state: DesktopSettingsDialogState,
     pub settings_child_dialog: Option<DesktopSettingsChildDialog>,
+    pub settings_planet_chooser_open: bool,
     pub settings_locale: String,
     pub player_locale: String,
     pub settings_language_scroll_offset: usize,
@@ -17103,6 +17106,7 @@ impl DesktopLauncher {
             last_schematic_card_action: None,
             settings_dialog_state: DesktopSettingsDialogState::default(),
             settings_child_dialog: None,
+            settings_planet_chooser_open: false,
             settings_locale: "en".into(),
             player_locale: "en".into(),
             settings_language_scroll_offset: 0,
@@ -21201,6 +21205,7 @@ impl DesktopLauncher {
             } else if route == DesktopMenuRoute::Settings {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
                 self.settings_child_dialog = None;
+                self.settings_planet_chooser_open = false;
                 self.last_settings_action = None;
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
@@ -22450,6 +22455,9 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.103,
         );
         self.push_settings_keybind_rebind_dialog(pass, dialog);
+        if child == DesktopSettingsChildDialog::PlanetData && self.settings_planet_chooser_open {
+            self.push_settings_planet_chooser_dialog(pass, panel);
+        }
     }
 
     fn push_settings_planet_data_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
@@ -22472,43 +22480,12 @@ impl DesktopLauncher {
             Self::settings_planet_data_button_rect(dialog, 0),
             format!(
                 "@settings.planetselect: {}",
-                self.settings_dialog_state.selected_planet
+                self.settings_selected_planet_label()
             ),
             Some("planet"),
             Layer::END_PIXELED + 0.101,
             "flatt",
         );
-        for (index, planet) in SETTINGS_PLANET_OPTIONS.iter().enumerate() {
-            let rect = Self::settings_planet_option_rect(dialog, index);
-            let selected = self.settings_dialog_state.selected_planet == *planet;
-            pass.push(RenderCommand::draw_sprite(
-                Self::settings_text_button_symbol("flatTogglet", false, selected),
-                rect,
-                if selected {
-                    [0.82, 0.94, 1.0, 0.98]
-                } else {
-                    [0.56, 0.64, 0.72, 0.78]
-                },
-                0.0,
-                Layer::END_PIXELED + 0.107 + index as f32 * 0.0001,
-            ));
-            pass.push(RenderCommand::draw_text_styled(
-                *planet,
-                rect.center(),
-                if selected {
-                    [0.98, 1.0, 1.0, 1.0]
-                } else {
-                    [0.86, 0.92, 0.96, 1.0]
-                },
-                10.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
-                Layer::END_PIXELED + 0.108 + index as f32 * 0.0001,
-            ));
-        }
         self.push_settings_text_button_with_style(
             pass,
             Self::settings_planet_data_button_rect(dialog, 1),
@@ -22524,6 +22501,81 @@ impl DesktopLauncher {
             Some("trash"),
             Layer::END_PIXELED + 0.112,
             "flatt",
+        );
+    }
+
+    fn push_settings_planet_chooser_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let dialog =
+            Self::settings_planet_chooser_dialog_rect(panel, self.settings_visible_planet_count());
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.132,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.133,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.72, 0.86, 1.0, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.134,
+        ));
+        let pane = Self::settings_planet_chooser_pane_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            pane,
+            [1.0, 1.0, 1.0, 0.82],
+            0.0,
+            Layer::END_PIXELED + 0.135,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            pane,
+            [0.24, 0.34, 0.42, 0.76],
+            1.0,
+            Layer::END_PIXELED + 0.136,
+        ));
+        for (index, planet) in self.settings_visible_planets().into_iter().enumerate() {
+            let rect = Self::settings_planet_option_rect(dialog, index);
+            let selected = self.settings_dialog_state.selected_planet == planet.name();
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("flatTogglet", false, selected),
+                rect,
+                if selected {
+                    [0.82, 0.94, 1.0, 0.98]
+                } else {
+                    [0.64, 0.70, 0.76, 0.84]
+                },
+                0.0,
+                Layer::END_PIXELED + 0.138 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                planet.localized_name(),
+                rect.center(),
+                if selected {
+                    [0.98, 1.0, 1.0, 1.0]
+                } else {
+                    [0.88, 0.94, 0.98, 1.0]
+                },
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.139 + index as f32 * 0.0001,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.146,
         );
     }
 
@@ -23325,6 +23377,40 @@ impl DesktopLauncher {
         }
     }
 
+    fn settings_visible_planets(
+        &self,
+    ) -> Vec<&mindustry_core::mindustry::content::planets::PlanetContent> {
+        self.content_loader
+            .catalog()
+            .planets
+            .iter()
+            .filter(|planet| {
+                planet.generator.is_some() && planet.sector_count > 0 && planet.meta.accessible
+            })
+            .collect()
+    }
+
+    fn settings_visible_planet_count(&self) -> usize {
+        self.content_loader
+            .catalog()
+            .planets
+            .iter()
+            .filter(|planet| {
+                planet.generator.is_some() && planet.sector_count > 0 && planet.meta.accessible
+            })
+            .count()
+    }
+
+    fn settings_selected_planet_label(&self) -> String {
+        self.content_loader
+            .catalog()
+            .planets
+            .iter()
+            .find(|planet| planet.name() == self.settings_dialog_state.selected_planet)
+            .map(|planet| planet.localized_name().to_string())
+            .unwrap_or_else(|| self.settings_dialog_state.selected_planet.clone())
+    }
+
     fn settings_data_confirm_message(&self, action: DesktopSettingsAction) -> String {
         match action {
             DesktopSettingsAction::ClearAllData => "@settings.clearall.confirm".into(),
@@ -23335,11 +23421,11 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::ClearPlanetResearch => format!(
                 "@settings.clearplanetresearch.confirm: {}",
-                self.settings_dialog_state.selected_planet
+                self.settings_selected_planet_label()
             ),
             DesktopSettingsAction::ClearPlanetCampaignSaves => format!(
                 "@settings.clearplanetcampaignsaves.confirm: {}",
-                self.settings_dialog_state.selected_planet
+                self.settings_selected_planet_label()
             ),
             _ => "@confirm".into(),
         }
@@ -23424,8 +23510,15 @@ impl DesktopLauncher {
                     lines.push(format!(
                         "child dialog: PlanetDataDialog planet:{} actions:2 planets:{}",
                         self.settings_dialog_state.selected_planet,
-                        SETTINGS_PLANET_OPTIONS.len()
+                        self.settings_visible_planet_count()
                     ));
+                    if self.settings_planet_chooser_open {
+                        lines.push(format!(
+                            "child dialog: PlanetSelectDialog options:{} columns:{}",
+                            self.settings_visible_planet_count(),
+                            SETTINGS_PLANET_OPTION_COLUMNS
+                        ));
+                    }
                     lines.push("@settings.clearplanetresearch".into());
                     lines.push("@settings.clearplanetcampaignsaves".into());
                 }
@@ -23600,6 +23693,27 @@ impl DesktopLauncher {
         if self.last_settings_rebind_key.is_some() {
             return None;
         }
+        if self.settings_child_dialog == Some(DesktopSettingsChildDialog::PlanetData)
+            && self.settings_planet_chooser_open
+        {
+            let chooser = Self::settings_planet_chooser_dialog_rect(
+                panel,
+                self.settings_visible_planet_count(),
+            );
+            if Self::schematic_info_button_rect(chooser, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::Settings(
+                    DesktopSettingsAction::ClosePlanetChooser,
+                ));
+            }
+            for index in 0..self.settings_visible_planet_count() {
+                if Self::settings_planet_option_rect(chooser, index).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::Settings(
+                        DesktopSettingsAction::SelectPlanet(index),
+                    ));
+                }
+            }
+            return None;
+        }
         if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::Settings(
                 DesktopSettingsAction::CloseChildDialog,
@@ -23664,12 +23778,10 @@ impl DesktopLauncher {
                 }
             }
             Some(DesktopSettingsChildDialog::PlanetData) => {
-                for (index, planet) in SETTINGS_PLANET_OPTIONS.iter().enumerate() {
-                    if Self::settings_planet_option_rect(dialog, index).contains_point(point) {
-                        return Some(DesktopMenuRouteShellAction::Settings(
-                            DesktopSettingsAction::SelectPlanet(planet),
-                        ));
-                    }
+                if Self::settings_planet_data_button_rect(dialog, 0).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::Settings(
+                        DesktopSettingsAction::OpenPlanetChooser,
+                    ));
                 }
                 if Self::settings_planet_data_button_rect(dialog, 1).contains_point(point) {
                     return Some(DesktopMenuRouteShellAction::Settings(
@@ -23700,11 +23812,8 @@ impl DesktopLauncher {
     }
 
     fn settings_planet_data_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
-        let top = match index {
-            0 => dialog.y + dialog.height - 94.0,
-            1 => dialog.y + dialog.height - 254.0,
-            _ => dialog.y + dialog.height - 322.0,
-        };
+        let top =
+            dialog.y + dialog.height - 94.0 - index as f32 * SETTINGS_PLANET_DATA_BUTTON_HEIGHT;
         RenderRect::new(
             dialog.x + (dialog.width - SETTINGS_PLANET_DATA_BUTTON_WIDTH) * 0.5,
             top - SETTINGS_PLANET_DATA_BUTTON_HEIGHT,
@@ -23714,13 +23823,23 @@ impl DesktopLauncher {
     }
 
     fn settings_planet_option_rect(dialog: RenderRect, index: usize) -> RenderRect {
-        let total_width = SETTINGS_PLANET_OPTIONS.len() as f32 * SETTINGS_PLANET_OPTION_WIDTH
-            + SETTINGS_PLANET_OPTIONS.len().saturating_sub(1) as f32 * 8.0;
+        let pane = Self::settings_planet_chooser_pane_rect(dialog);
+        let column_span = SETTINGS_PLANET_OPTION_WIDTH + SETTINGS_PLANET_OPTION_GAP;
+        let columns = ((pane.width + SETTINGS_PLANET_OPTION_GAP) / column_span)
+            .floor()
+            .max(1.0) as usize;
+        let columns = columns.min(SETTINGS_PLANET_OPTION_COLUMNS).max(1);
+        let row = index / columns;
+        let column = index % columns;
+        let total_width = columns as f32 * SETTINGS_PLANET_OPTION_WIDTH
+            + columns.saturating_sub(1) as f32 * SETTINGS_PLANET_OPTION_GAP;
         RenderRect::new(
-            dialog.x
-                + (dialog.width - total_width) * 0.5
-                + index as f32 * (SETTINGS_PLANET_OPTION_WIDTH + 8.0),
-            dialog.y + dialog.height - 204.0,
+            pane.x
+                + (pane.width - total_width) * 0.5
+                + column as f32 * (SETTINGS_PLANET_OPTION_WIDTH + SETTINGS_PLANET_OPTION_GAP),
+            pane.y + pane.height
+                - SETTINGS_PLANET_OPTION_HEIGHT
+                - row as f32 * (SETTINGS_PLANET_OPTION_HEIGHT + SETTINGS_PLANET_OPTION_GAP),
             SETTINGS_PLANET_OPTION_WIDTH,
             SETTINGS_PLANET_OPTION_HEIGHT,
         )
@@ -23735,6 +23854,35 @@ impl DesktopLauncher {
             last.y - pad,
             first.width + pad * 2.0,
             first.bottom() - last.y + pad * 2.0,
+        )
+    }
+
+    fn settings_planet_chooser_dialog_rect(parent: RenderRect, option_count: usize) -> RenderRect {
+        let count = option_count.max(1);
+        let columns = count.min(SETTINGS_PLANET_OPTION_COLUMNS).max(1);
+        let rows = count.div_ceil(SETTINGS_PLANET_OPTION_COLUMNS).max(1);
+        let pane_width = columns as f32 * SETTINGS_PLANET_OPTION_WIDTH
+            + columns.saturating_sub(1) as f32 * SETTINGS_PLANET_OPTION_GAP;
+        let pane_height = rows as f32 * SETTINGS_PLANET_OPTION_HEIGHT
+            + rows.saturating_sub(1) as f32 * SETTINGS_PLANET_OPTION_GAP;
+        let width = (pane_width + 36.0).clamp(180.0, parent.width - 80.0);
+        let height = (pane_height + 96.0).clamp(140.0, parent.height - 96.0);
+        RenderRect::new(
+            parent.x + (parent.width - width) * 0.5,
+            parent.y + (parent.height - height) * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn settings_planet_chooser_pane_rect(dialog: RenderRect) -> RenderRect {
+        let back = Self::schematic_info_button_rect(dialog, 0);
+        let y = back.y + back.height + 14.0;
+        RenderRect::new(
+            dialog.x + 18.0,
+            y,
+            dialog.width - 36.0,
+            (dialog.y + dialog.height - 18.0 - y).max(SETTINGS_PLANET_OPTION_HEIGHT),
         )
     }
 
@@ -25637,6 +25785,7 @@ impl DesktopLauncher {
             DesktopMenuRoute::Settings => {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
                 self.settings_child_dialog = None;
+                self.settings_planet_chooser_open = false;
                 self.last_settings_action = None;
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
@@ -28294,12 +28443,14 @@ impl DesktopLauncher {
         match action {
             DesktopSettingsAction::OpenPage(page) => {
                 self.settings_dialog_state.page = page;
+                self.settings_planet_chooser_open = false;
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
                 self.settings_scroll_drag_state = None;
             }
             DesktopSettingsAction::BackToMain => {
                 self.settings_child_dialog = None;
+                self.settings_planet_chooser_open = false;
                 self.settings_language_scroll_offset = 0;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
@@ -28337,11 +28488,13 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::OpenLanguageDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Language);
+                self.settings_planet_chooser_open = false;
                 self.load_settings_locale_from_settings();
                 self.settings_language_scroll_offset = 0;
             }
             DesktopSettingsAction::OpenControlsDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Controls);
+                self.settings_planet_chooser_open = false;
                 self.load_settings_keybinds_from_settings();
                 self.settings_keybind_scroll_offset = 0;
                 self.settings_keybind_search.clear();
@@ -28349,6 +28502,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::CloseChildDialog => {
                 self.settings_child_dialog = None;
+                self.settings_planet_chooser_open = false;
                 self.settings_language_scroll_offset = 0;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
@@ -28391,9 +28545,23 @@ impl DesktopLauncher {
             DesktopSettingsAction::ClearPlanetData => {
                 self.settings_dialog_state.page = DesktopSettingsPage::Data;
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::PlanetData);
+                self.settings_planet_chooser_open = false;
             }
-            DesktopSettingsAction::SelectPlanet(planet) => {
-                self.settings_dialog_state.selected_planet = planet.into();
+            DesktopSettingsAction::OpenPlanetChooser => {
+                self.settings_planet_chooser_open = true;
+            }
+            DesktopSettingsAction::ClosePlanetChooser => {
+                self.settings_planet_chooser_open = false;
+            }
+            DesktopSettingsAction::SelectPlanet(index) => {
+                if let Some(planet_name) = self
+                    .settings_visible_planets()
+                    .get(index)
+                    .map(|planet| planet.name().to_string())
+                {
+                    self.settings_dialog_state.selected_planet = planet_name;
+                }
+                self.settings_planet_chooser_open = false;
             }
             DesktopSettingsAction::ClearAllData
             | DesktopSettingsAction::ClearSaves
@@ -28562,6 +28730,7 @@ impl DesktopLauncher {
                 self.save_game_overwrite_dialog_slot = None;
                 self.save_game_pending_save = None;
                 self.settings_child_dialog = None;
+                self.settings_planet_chooser_open = false;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
                 self.settings_keybind_pending_axis_min = None;
@@ -61332,8 +61501,62 @@ version: "2.0.0"
                 if symbol == &planet_button_symbol && *rect == planet_clear_research_button
         )));
 
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                planet_select_button.center().x,
+                planet_select_button.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::OpenPlanetChooser
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: planet_select_button.center().x,
+                    y: planet_select_button.center().y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert!(launcher.settings_planet_chooser_open);
+        assert!(launcher
+            .settings_route_lines()
+            .iter()
+            .any(|line| { line == "child dialog: PlanetSelectDialog options:2 columns:4" }));
+        let visible_planets = launcher
+            .settings_visible_planets()
+            .into_iter()
+            .map(|planet| planet.name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(visible_planets, vec!["erekir", "serpulo"]);
+        let chooser_dialog = DesktopLauncher::settings_planet_chooser_dialog_rect(
+            settings_panel,
+            launcher.settings_visible_planet_count(),
+        );
+        let chooser_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let chooser_texts = chooser_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("planet chooser dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(chooser_texts.contains(&"erekir"));
+        assert!(chooser_texts.contains(&"serpulo"));
         let erekir_center =
-            DesktopLauncher::settings_planet_option_rect(data_child_dialog, 1).center();
+            DesktopLauncher::settings_planet_option_rect(chooser_dialog, 0).center();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -61348,9 +61571,10 @@ version: "2.0.0"
             ],
         );
         assert_eq!(launcher.settings_dialog_state.selected_planet, "erekir");
+        assert!(!launcher.settings_planet_chooser_open);
         assert_eq!(
             launcher.last_settings_action,
-            Some(super::DesktopSettingsAction::SelectPlanet("erekir"))
+            Some(super::DesktopSettingsAction::SelectPlanet(0))
         );
 
         let clear_research_center =
