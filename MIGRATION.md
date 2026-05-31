@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 594. LoadDialog/SaveDialog 宽屏多列卡片布局
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.4%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是补上 Java `LoadDialog` 在宽屏下不止单列显示存档卡的明显差距。
+- Java 对照依据：
+  - `LoadDialog.rebuild()` 计算 `maxwidth = Math.max((int)(Core.graphics.getWidth() / Scl.scl(470)), 1)`；
+  - 每个 `SaveSlot` 通过 `slots.add(button)...` 加入表格，`if(++i % maxwidth == 0) slots.row()`，宽屏会先填满一行再换行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `LOAD_SLOT_CARD_MIN_WIDTH`、`load_game_slot_column_count_for_list(...)` 与 `load_game_slot_card_rect_for_list(...)`；
+    - `load_game_slot_card_rect_for_panel(...)` 改为按列/行计算卡片位置，1280x720 宽屏当前为 2 列；
+    - `load_game_visible_slot_capacity_for_list(...)` 改为 `可见行数 * 列数`，scrollbar/scroll offset/hit-test 继续共用同一 rect 函数；
+    - 更新 LoadDialog 搜索/滚动测试，锁定宽屏两列、同一行先放第 0/1 张卡。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_creates_and_overwrites_save_slots --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Rust 当前 scroll offset 仍按 slot 偏移，未完整模拟 Java `ScrollPane` 像素级滚动；
+  - 多列阈值按 Rust list 宽度估算，仍未完全复刻 `Core.graphics.getWidth()/Scl.scl(470)`；
+  - 卡片内标题/按钮同一行的文字截断、wrap 与 Java `Label.wrap()` 仍未完整实现。
+
 ## 593. LoadDialog/SaveDialog 存档卡片预览放大
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

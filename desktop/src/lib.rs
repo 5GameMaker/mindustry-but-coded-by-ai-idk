@@ -172,6 +172,7 @@ const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
 const LOAD_SLOT_CARD_HEIGHT: f32 = 112.0;
 const LOAD_SLOT_CARD_GAP: f32 = 10.0;
+const LOAD_SLOT_CARD_MIN_WIDTH: f32 = 320.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const LOAD_SEARCH_TEXT_MAX_LENGTH: usize = 50;
 const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
@@ -24281,12 +24282,28 @@ impl DesktopLauncher {
 
     fn load_game_slot_card_rect_for_panel(panel: RenderRect, slot_index: usize) -> RenderRect {
         let list = Self::load_game_list_rect_for_panel(panel);
+        Self::load_game_slot_card_rect_for_list(list, slot_index)
+    }
+
+    fn load_game_slot_column_count_for_list(list: RenderRect) -> usize {
+        ((list.width + LOAD_SLOT_CARD_GAP) / (LOAD_SLOT_CARD_MIN_WIDTH + LOAD_SLOT_CARD_GAP))
+            .floor()
+            .max(1.0) as usize
+    }
+
+    fn load_game_slot_card_rect_for_list(list: RenderRect, slot_index: usize) -> RenderRect {
+        let columns = Self::load_game_slot_column_count_for_list(list);
+        let row_index = slot_index / columns;
+        let column_index = slot_index % columns;
+        let card_width = ((list.width - columns.saturating_sub(1) as f32 * LOAD_SLOT_CARD_GAP)
+            / columns as f32)
+            .max(LOAD_SLOT_CARD_MIN_WIDTH.min(list.width));
         let top =
-            list.y + list.height - slot_index as f32 * (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP);
+            list.y + list.height - row_index as f32 * (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP);
         RenderRect::new(
-            list.x,
+            list.x + column_index as f32 * (card_width + LOAD_SLOT_CARD_GAP),
             top - LOAD_SLOT_CARD_HEIGHT,
-            list.width,
+            card_width,
             LOAD_SLOT_CARD_HEIGHT,
         )
     }
@@ -24332,9 +24349,11 @@ impl DesktopLauncher {
     }
 
     fn load_game_visible_slot_capacity_for_list(list: RenderRect) -> usize {
-        ((list.height + LOAD_SLOT_CARD_GAP) / (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP))
+        let rows = ((list.height + LOAD_SLOT_CARD_GAP)
+            / (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP))
             .floor()
-            .max(1.0) as usize
+            .max(1.0) as usize;
+        rows * Self::load_game_slot_column_count_for_list(list)
     }
 
     fn load_game_scrollbar_track_rect_for_list(list: RenderRect) -> RenderRect {
@@ -59269,6 +59288,17 @@ version: "2.0.0"
             super::DesktopMenuRoute::LoadGame,
         );
         let list = DesktopLauncher::load_game_list_rect_for_panel(panel);
+        assert_eq!(
+            DesktopLauncher::load_game_slot_column_count_for_list(list),
+            2,
+            "Java LoadDialog uses maxwidth > 1 on wide desktop surfaces; Rust should not stay single-column"
+        );
+        let first_card = DesktopLauncher::load_game_slot_card_rect_for_panel(panel, 0);
+        let second_card = DesktopLauncher::load_game_slot_card_rect_for_panel(panel, 1);
+        assert!(
+            (first_card.y - second_card.y).abs() < 0.01 && second_card.x > first_card.x,
+            "wide LoadDialog cards should fill the first row before starting the next row"
+        );
         assert!(
             DesktopLauncher::load_game_visible_slot_capacity_for_list(list)
                 < launcher.load_game_slots.len(),
