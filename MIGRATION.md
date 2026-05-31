@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 633. DatabaseDialog 补游戏内 banned 优先排序
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.4%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是补齐 Java DatabaseDialog 在游戏内按 banned 状态重排 block/unit 内容的行为。
+- Java 对照依据：
+  - `DatabaseDialog.rebuild()` 在 `state.isGame()` 时对内容执行排序，banned 内容在同类内容前面，再按 id 保持稳定顺序；
+  - 当前 Rust 已有 banned 红叉覆盖层，因此排序也必须进入同一 UI 数据流，避免只渲染 overlay 但顺序不一致。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `database_visible_records_for_type(...)` 在 `game_state.is_game()` 时按 `(banned优先, id)` 排序；
+    - 排序结果继续流入 tag group、grid row、scroll、hover 和 content hit-test；
+    - 扩展 DatabaseDialog 测试，选取非首位 block 标记 banned 后确认其在游戏内列表首位出现，并恢复 Menu 状态避免影响后续 UI 测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `shift + click` 复制 Unicode 仍未接入；
+  - category 维度仍未完全升级到 Java `databaseCategory` 字符串；
+  - 滚动条暂未支持拖动；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 632. DatabaseDialog tag 内图标按列换行
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -22261,7 +22261,8 @@ impl DesktopLauncher {
     fn database_visible_records_for_type(&self, content_type: ContentType) -> Vec<(usize, &str)> {
         let search = self.database_search.trim().to_lowercase();
         let tab_key = self.database_selected_tab_key();
-        self.content_loader
+        let mut records = self
+            .content_loader
             .get_by(content_type)
             .iter()
             .enumerate()
@@ -22276,7 +22277,20 @@ impl DesktopLauncher {
                         .to_lowercase()
                         .contains(&search)
             })
-            .collect()
+            .collect::<Vec<_>>();
+        if self.game_state.is_game() {
+            records.sort_by_key(|(index, name)| {
+                (
+                    if self.database_content_is_banned(content_type, name) {
+                        0
+                    } else {
+                        1
+                    },
+                    *index,
+                )
+            });
+        }
+        records
     }
 
     fn database_visible_tag_groups_for_type(
@@ -59858,6 +59872,36 @@ version: "2.0.0"
                     && row.records.iter().any(|(_, name)| name == "conveyor")),
             "Block.databaseTag rows should keep distribution blocks such as conveyor together"
         );
+        let visible_blocks_before_ban =
+            launcher.database_visible_records_for_type(ContentType::Block);
+        let banned_sort_probe = visible_blocks_before_ban
+            .iter()
+            .skip(1)
+            .find(|(_, name)| !launcher.game_state.rules.is_block_banned(name))
+            .map(|(_, name)| (*name).to_string())
+            .expect(
+                "base DatabaseDialog block list should have a non-leading block for banned sorting",
+            );
+        launcher.game_state.set(GameStateState::Playing);
+        launcher
+            .game_state
+            .rules
+            .banned_blocks
+            .insert(banned_sort_probe.clone());
+        assert_eq!(
+            launcher
+                .database_visible_records_for_type(ContentType::Block)
+                .first()
+                .map(|(_, name)| *name),
+            Some(banned_sort_probe.as_str()),
+            "Java DatabaseDialog sorts banned in-game block/unit content before the normal id order"
+        );
+        launcher
+            .game_state
+            .rules
+            .banned_blocks
+            .remove(&banned_sort_probe);
+        launcher.game_state.set(GameStateState::Menu);
         let visible_database_columns = DesktopLauncher::database_visible_columns_for_panel(panel);
         let wrapped_group = group_rows
             .iter()
