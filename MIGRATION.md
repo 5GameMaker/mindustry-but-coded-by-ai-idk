@@ -19503,6 +19503,38 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - bundle reload / `Core.bundle` 替换仍未完成；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 560. MenuFragment 自定义按钮 icon/action 语义闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.2%**，仍未达到完整可玩；继续优先前端/UI，把 `MenuFragment.addButton(MenuButton)` 的 custom button 从纯 label 占位推进到具备 icon 与 runnable/action 语义。
+- Java 对照依据：
+  - `MenuFragment.MenuButton` 可以携带 `icon`；
+  - `MenuButton.clicked(...)` 可触发 `Runnable`;
+  - custom buttons 会按 Java 顺序插入到主菜单，桌面在 quit 前，移动端按 odd/even 插入。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MenuCustomButton` 新增 `icon_name/action_id/has_submenu`；
+    - 新增 builder：`with_icon_name(...)`、`with_action_id(...)`、`with_submenu(...)`；
+    - 新增 `add_custom_button_with(...)`、`custom_button(...)`、`custom_button_action_id(...)`；
+    - `MenuButtonPlan` 新增 `icon_name`，渲染时 custom icon 优先于 role 默认 icon；
+    - mobile custom entry 也保留 custom icon，避免移动端 custom button 退化为纯文本。
+  - `core/src/mindustry/graphics/mod.rs`
+    - 导出 `MenuCustomButton`，供桌面层和后续 UI 插件/模组入口复用。
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopCustomMenuAction` 和 `last_custom_menu_action`；
+    - 点击 custom button 时记录 label/action_id，不再只留下 `MenuButtonRole::Custom(_)` 的静态占位。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - custom submenu 目前只进入数据模型标记，尚未像 Java 子表那样完整渲染/分发；
+  - custom action_id 只是桌面层记录，后续还要接真实插件/模组 callback registry；
+  - Workshop/Steam gate 和 desktop chrome 显隐条件仍需继续对齐；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

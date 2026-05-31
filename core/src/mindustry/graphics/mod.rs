@@ -43,7 +43,7 @@ pub use light_renderer::{
 };
 pub use load_renderer::*;
 pub use menu_renderer::{
-    MenuBlockKind, MenuButtonPlan, MenuButtonRole, MenuFrameInput, MenuFramePlan,
+    MenuBlockKind, MenuButtonPlan, MenuButtonRole, MenuCustomButton, MenuFrameInput, MenuFramePlan,
     MenuRenderCommand, MenuRendererConfig, MenuRendererState, MenuTile, MenuUiPlan, MenuWorldPlan,
     MENU_DARKNESS, MENU_DARKNESS_LAYER, MENU_TILE_SIZE,
 };

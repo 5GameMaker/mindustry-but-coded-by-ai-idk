@@ -609,13 +609,34 @@ impl MenuButtonRole {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuCustomButton {
     pub label: String,
+    pub icon_name: Option<String>,
+    pub action_id: Option<String>,
+    pub has_submenu: bool,
 }
 
 impl MenuCustomButton {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
+            icon_name: None,
+            action_id: None,
+            has_submenu: false,
         }
+    }
+
+    pub fn with_icon_name(mut self, icon_name: impl Into<String>) -> Self {
+        self.icon_name = Some(icon_name.into());
+        self
+    }
+
+    pub fn with_action_id(mut self, action_id: impl Into<String>) -> Self {
+        self.action_id = Some(action_id.into());
+        self
+    }
+
+    pub fn with_submenu(mut self, has_submenu: bool) -> Self {
+        self.has_submenu = has_submenu;
+        self
     }
 }
 
@@ -623,6 +644,7 @@ impl MenuCustomButton {
 pub struct MenuButtonPlan {
     pub role: MenuButtonRole,
     pub label: String,
+    pub icon_name: Option<String>,
     pub rect: RenderRect,
     pub selected: bool,
     pub hovered: bool,
@@ -721,7 +743,10 @@ impl MenuUiPlan {
                     alpha,
                 );
             }
-            let icon_name = button.role.icon_name(self.mobile);
+            let icon_name = button
+                .icon_name
+                .as_deref()
+                .or_else(|| button.role.icon_name(self.mobile));
             if let Some(icon_name) = icon_name {
                 let icon = menu_icon_text(icon_name);
                 let icon_point = if self.mobile {
@@ -1233,13 +1258,29 @@ impl MenuRendererState {
     }
 
     pub fn add_custom_button(&mut self, label: impl Into<String>) -> MenuButtonRole {
+        self.add_custom_button_with(MenuCustomButton::new(label))
+    }
+
+    pub fn add_custom_button_with(&mut self, button: MenuCustomButton) -> MenuButtonRole {
         let index = self.custom_buttons.len().min(u16::MAX as usize) as u16;
-        self.custom_buttons.push(MenuCustomButton::new(label));
+        self.custom_buttons.push(button);
         MenuButtonRole::Custom(index)
     }
 
     pub fn clear_custom_buttons(&mut self) {
         self.custom_buttons.clear();
+    }
+
+    pub fn custom_button(&self, role: MenuButtonRole) -> Option<&MenuCustomButton> {
+        let MenuButtonRole::Custom(index) = role else {
+            return None;
+        };
+        self.custom_buttons.get(index as usize)
+    }
+
+    pub fn custom_button_action_id(&self, role: MenuButtonRole) -> Option<&str> {
+        self.custom_button(role)
+            .and_then(|button| button.action_id.as_deref())
     }
 
     pub fn has_active_desktop_submenu(&self) -> bool {
@@ -1613,6 +1654,7 @@ fn menu_button_plan(role: MenuButtonRole, rect: RenderRect, selected: bool) -> M
     MenuButtonPlan {
         role,
         label: role.label().to_string(),
+        icon_name: None,
         rect,
         selected,
         hovered: false,
@@ -1629,11 +1671,12 @@ fn menu_custom_button_plan(
     MenuButtonPlan {
         role: MenuButtonRole::Custom(index.min(u16::MAX as usize) as u16),
         label: button.label.clone(),
+        icon_name: button.icon_name.clone(),
         rect,
         selected: false,
         hovered: false,
         pressed: false,
-        submenu: false,
+        submenu: button.has_submenu,
     }
 }
 
@@ -1645,6 +1688,7 @@ fn menu_mobile_button_plan(
     MenuButtonPlan {
         role,
         label: role.label().to_string(),
+        icon_name: None,
         rect,
         selected,
         hovered: false,
@@ -1764,70 +1808,80 @@ fn menu_desktop_ui_plan(
     }
 }
 
-fn menu_mobile_button_entry(role: MenuButtonRole) -> (MenuButtonRole, String, bool) {
-    (role, role.label().to_string(), false)
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MenuMobileEntry {
+    role: MenuButtonRole,
+    label: String,
+    selected: bool,
+    icon_name: Option<String>,
 }
 
-fn menu_mobile_custom_entry(
-    index: usize,
-    button: &MenuCustomButton,
-) -> (MenuButtonRole, String, bool) {
-    (
-        MenuButtonRole::Custom(index.min(u16::MAX as usize) as u16),
-        button.label.clone(),
-        false,
-    )
+fn menu_mobile_button_entry(role: MenuButtonRole) -> MenuMobileEntry {
+    MenuMobileEntry {
+        role,
+        label: role.label().to_string(),
+        selected: false,
+        icon_name: None,
+    }
+}
+
+fn menu_mobile_custom_entry(index: usize, button: &MenuCustomButton) -> MenuMobileEntry {
+    MenuMobileEntry {
+        role: MenuButtonRole::Custom(index.min(u16::MAX as usize) as u16),
+        label: button.label.clone(),
+        selected: false,
+        icon_name: button.icon_name.clone(),
+    }
 }
 
 fn menu_mobile_ui_plan(input: MenuFrameInput, custom_buttons: &[MenuCustomButton]) -> MenuUiPlan {
-    let rows: Vec<Vec<(MenuButtonRole, String, bool)>> =
-        if input.graphics_width > input.graphics_height {
-            let mut first = vec![
+    let rows: Vec<Vec<MenuMobileEntry>> = if input.graphics_width > input.graphics_height {
+        let mut first = vec![
+            menu_mobile_button_entry(MenuButtonRole::Campaign),
+            menu_mobile_button_entry(MenuButtonRole::Join),
+            menu_mobile_button_entry(MenuButtonRole::CustomGame),
+            menu_mobile_button_entry(MenuButtonRole::LoadGame),
+        ];
+        for index in (1..custom_buttons.len()).step_by(2) {
+            first.push(menu_mobile_custom_entry(index, &custom_buttons[index]));
+        }
+        let mut second = vec![
+            menu_mobile_button_entry(MenuButtonRole::Editor),
+            menu_mobile_button_entry(MenuButtonRole::Settings),
+            menu_mobile_button_entry(MenuButtonRole::Mods),
+        ];
+        for index in (0..custom_buttons.len()).step_by(2) {
+            second.push(menu_mobile_custom_entry(index, &custom_buttons[index]));
+        }
+        second.push(menu_mobile_button_entry(MenuButtonRole::Quit));
+        vec![first, second]
+    } else {
+        let mut rows = vec![
+            vec![
                 menu_mobile_button_entry(MenuButtonRole::Campaign),
-                menu_mobile_button_entry(MenuButtonRole::Join),
-                menu_mobile_button_entry(MenuButtonRole::CustomGame),
                 menu_mobile_button_entry(MenuButtonRole::LoadGame),
-            ];
-            for index in (1..custom_buttons.len()).step_by(2) {
-                first.push(menu_mobile_custom_entry(index, &custom_buttons[index]));
-            }
-            let mut second = vec![
+            ],
+            vec![
+                menu_mobile_button_entry(MenuButtonRole::CustomGame),
+                menu_mobile_button_entry(MenuButtonRole::Join),
+            ],
+            vec![
                 menu_mobile_button_entry(MenuButtonRole::Editor),
                 menu_mobile_button_entry(MenuButtonRole::Settings),
-                menu_mobile_button_entry(MenuButtonRole::Mods),
-            ];
-            for index in (0..custom_buttons.len()).step_by(2) {
-                second.push(menu_mobile_custom_entry(index, &custom_buttons[index]));
+            ],
+        ];
+        let mut current = vec![menu_mobile_button_entry(MenuButtonRole::Mods)];
+        for (index, custom) in custom_buttons.iter().enumerate() {
+            current.push(menu_mobile_custom_entry(index, custom));
+            if index % 2 == 0 {
+                rows.push(current);
+                current = Vec::new();
             }
-            second.push(menu_mobile_button_entry(MenuButtonRole::Quit));
-            vec![first, second]
-        } else {
-            let mut rows = vec![
-                vec![
-                    menu_mobile_button_entry(MenuButtonRole::Campaign),
-                    menu_mobile_button_entry(MenuButtonRole::LoadGame),
-                ],
-                vec![
-                    menu_mobile_button_entry(MenuButtonRole::CustomGame),
-                    menu_mobile_button_entry(MenuButtonRole::Join),
-                ],
-                vec![
-                    menu_mobile_button_entry(MenuButtonRole::Editor),
-                    menu_mobile_button_entry(MenuButtonRole::Settings),
-                ],
-            ];
-            let mut current = vec![menu_mobile_button_entry(MenuButtonRole::Mods)];
-            for (index, custom) in custom_buttons.iter().enumerate() {
-                current.push(menu_mobile_custom_entry(index, custom));
-                if index % 2 == 0 {
-                    rows.push(current);
-                    current = Vec::new();
-                }
-            }
-            current.push(menu_mobile_button_entry(MenuButtonRole::Quit));
-            rows.push(current);
-            rows
-        };
+        }
+        current.push(menu_mobile_button_entry(MenuButtonRole::Quit));
+        rows.push(current);
+        rows
+    };
     let button_size = 120.0;
     let gap = 10.0;
     let column_count = rows.iter().map(|row| row.len()).max().unwrap_or(0);
@@ -1842,18 +1896,19 @@ fn menu_mobile_ui_plan(input: MenuFrameInput, custom_buttons: &[MenuCustomButton
 
     let mut buttons = Vec::with_capacity(rows.iter().map(|row| row.len()).sum());
     for (row_index, row) in rows.iter().enumerate() {
-        for (column_index, (role, label, selected)) in row.iter().enumerate() {
+        for (column_index, entry) in row.iter().enumerate() {
             let mut button = menu_mobile_button_plan(
-                *role,
+                entry.role,
                 RenderRect::new(
                     start_x + column_index as f32 * (button_size + gap),
                     start_y + row_index as f32 * (button_size + gap),
                     button_size,
                     button_size,
                 ),
-                *selected,
+                entry.selected,
             );
-            button.label = label.clone();
+            button.label = entry.label.clone();
+            button.icon_name = entry.icon_name.clone();
             buttons.push(button);
         }
     }
@@ -2566,6 +2621,7 @@ mod tests {
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::Play,
                 label: "Play".to_string(),
+                icon_name: None,
                 rect,
                 selected: true,
                 hovered: false,
@@ -2624,6 +2680,7 @@ mod tests {
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::Mods,
                 label: "Mods".to_string(),
+                icon_name: None,
                 rect,
                 selected: false,
                 hovered: false,
@@ -2662,6 +2719,7 @@ mod tests {
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::Settings,
                 label: "Settings".to_string(),
+                icon_name: None,
                 rect,
                 selected: false,
                 hovered: true,
@@ -2754,6 +2812,7 @@ mod tests {
             buttons: vec![MenuButtonPlan {
                 role: MenuButtonRole::CustomGame,
                 label: "Custom Game".to_string(),
+                icon_name: None,
                 rect,
                 selected: false,
                 hovered: false,
@@ -2851,7 +2910,11 @@ mod tests {
     fn menu_ui_plan_desktop_inserts_custom_buttons_before_quit_like_java() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
         assert_eq!(
-            state.add_custom_button("SERVER BROWSER"),
+            state.add_custom_button_with(
+                MenuCustomButton::new("SERVER BROWSER")
+                    .with_icon_name("add")
+                    .with_action_id("server-browser")
+            ),
             MenuButtonRole::Custom(0)
         );
         assert!(state.select_desktop_root(MenuButtonRole::Play));
@@ -2897,11 +2960,23 @@ mod tests {
             .find(|button| button.role == MenuButtonRole::Quit)
             .expect("desktop menu should still expose quit after custom buttons");
         assert_eq!(custom.label, "SERVER BROWSER");
+        assert_eq!(custom.icon_name.as_deref(), Some("add"));
         assert!(custom.rect.y < quit.rect.y);
+        assert_eq!(
+            state.custom_button_action_id(MenuButtonRole::Custom(0)),
+            Some("server-browser")
+        );
         assert_eq!(
             state.hit_test_ui(input, custom.rect.center().x, custom.rect.center().y),
             Some(MenuButtonRole::Custom(0))
         );
+        assert!(plan.ui.to_render_commands().iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. }
+                    if text == &menu_icon_text("add")
+            )
+        }));
     }
 
     #[test]

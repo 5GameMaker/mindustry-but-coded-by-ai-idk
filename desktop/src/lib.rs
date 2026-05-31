@@ -42,6 +42,8 @@ use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 #[cfg(test)]
 use mindustry_core::mindustry::graphics::menu_renderer::{MENU_DARKNESS, MENU_DARKNESS_LAYER};
+#[cfg(test)]
+use mindustry_core::mindustry::graphics::MenuCustomButton;
 use mindustry_core::mindustry::graphics::{
     png_dimensions_from_path, png_rgba8888_from_path, BlockRendererBlockParticleWorldSample,
     BlockRendererBuildingSnapshot, BlockRendererBuildingVisualRuntimeLiquidSnapshot,
@@ -2389,6 +2391,13 @@ pub struct DesktopMenuActionDispatch {
     pub submenu_changed: bool,
     pub route: Option<DesktopMenuRoute>,
     pub close_requested: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopCustomMenuAction {
+    pub role: MenuButtonRole,
+    pub label: String,
+    pub action_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15288,6 +15297,7 @@ pub struct DesktopLauncher {
     pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
     pub last_menu_chrome_action: Option<DesktopMenuChromeAction>,
     pub last_menu_platform_action: Option<DesktopMenuPlatformAction>,
+    pub last_custom_menu_action: Option<DesktopCustomMenuAction>,
     pub last_menu_guard_message: Option<String>,
     pub menu_mobile_terminal_open: bool,
     pub about_route_page: DesktopAboutRoutePage,
@@ -16034,6 +16044,7 @@ impl DesktopLauncher {
             last_menu_route_shell_action: None,
             last_menu_chrome_action: None,
             last_menu_platform_action: None,
+            last_custom_menu_action: None,
             last_menu_guard_message: None,
             menu_mobile_terminal_open: false,
             about_route_page: DesktopAboutRoutePage::Links,
@@ -19685,11 +19696,34 @@ impl DesktopLauncher {
     fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
         let submenu_changed = self.menu_renderer_state.select_desktop_root(role);
         self.last_menu_guard_message = None;
+        self.last_custom_menu_action = None;
         if role == MenuButtonRole::Workshop {
             self.dispatch_menu_platform_action(DesktopMenuPlatformAction::OpenWorkshop);
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
             self.mods_import_dialog_open = false;
+            let dispatch = DesktopMenuActionDispatch {
+                role,
+                submenu_changed,
+                route: None,
+                close_requested: false,
+            };
+            self.last_menu_dispatch = Some(dispatch);
+            return dispatch;
+        }
+        if let Some((label, action_id)) = self
+            .menu_renderer_state
+            .custom_button(role)
+            .map(|custom| (custom.label.clone(), custom.action_id.clone()))
+        {
+            self.active_menu_route = None;
+            self.mods_selected_mod_index = None;
+            self.mods_import_dialog_open = false;
+            self.last_custom_menu_action = Some(DesktopCustomMenuAction {
+                role,
+                label,
+                action_id,
+            });
             let dispatch = DesktopMenuActionDispatch {
                 role,
                 submenu_changed,
@@ -43441,6 +43475,64 @@ mod tests {
             launcher.last_menu_dispatch,
             Some(super::DesktopMenuActionDispatch {
                 role: MenuButtonRole::Workshop,
+                submenu_changed: false,
+                route: None,
+                close_requested: false,
+            })
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_dispatches_custom_menu_button_action_like_menu_fragment_runnable() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let role = launcher.menu_renderer_state.add_custom_button_with(
+            super::MenuCustomButton::new("SERVER BROWSER")
+                .with_icon_name("add")
+                .with_action_id("server-browser"),
+        );
+        assert_eq!(role, MenuButtonRole::Custom(0));
+
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let custom = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == role)
+            .expect("custom menu button should be present in desktop menu")
+            .clone();
+        assert_eq!(custom.icon_name.as_deref(), Some("add"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: custom.rect.center().x,
+                    y: custom.rect.center().y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(launcher.last_menu_action, Some(role));
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(
+            launcher.last_custom_menu_action,
+            Some(super::DesktopCustomMenuAction {
+                role,
+                label: "SERVER BROWSER".into(),
+                action_id: Some("server-browser".into()),
+            })
+        );
+        assert_eq!(
+            launcher.last_menu_dispatch,
+            Some(super::DesktopMenuActionDispatch {
+                role,
                 submenu_changed: false,
                 route: None,
                 close_requested: false,
