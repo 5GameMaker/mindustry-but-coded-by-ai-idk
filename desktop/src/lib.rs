@@ -2755,6 +2755,7 @@ pub enum DesktopMenuRouteShellAction {
     FocusDatabaseSearch,
     SelectDatabaseTab(usize),
     OpenDatabaseContent(ContentType, usize),
+    CloseDatabaseContent,
     Settings(DesktopSettingsAction),
 }
 
@@ -20995,6 +20996,15 @@ impl DesktopLauncher {
             self.last_menu_route_shell_action = None;
             return true;
         }
+        if self.active_menu_route == Some(DesktopMenuRoute::Database)
+            && self.last_database_content_opened.is_some()
+        {
+            self.last_database_content_opened = None;
+            self.database_search_focused = false;
+            self.last_menu_route_shell_action =
+                Some(DesktopMenuRouteShellAction::CloseDatabaseContent);
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::About)
             && self.about_route_page == DesktopAboutRoutePage::Credits
         {
@@ -21059,6 +21069,7 @@ impl DesktopLauncher {
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.load_game_search_focused = false;
+            self.last_database_content_opened = None;
             self.load_game_pending_load = None;
             self.load_game_rename_dialog_slot = None;
             self.load_game_delete_dialog_slot = None;
@@ -21715,6 +21726,195 @@ impl DesktopLauncher {
             .unwrap_or_else(|| "whiteui".to_string())
     }
 
+    fn database_content_display_name(&self, content_type: ContentType, name: &str) -> String {
+        match content_type {
+            ContentType::Block => self
+                .content_loader
+                .block_by_name(name)
+                .map(|block| block.base().display_name().to_string()),
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .map(|item| item.localized_name().to_string()),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .map(|liquid| liquid.localized_name().to_string()),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .map(|status| status.localized_name().to_string()),
+            ContentType::Unit => self
+                .content_loader
+                .unit_by_name(name)
+                .map(|unit| unit.localized_name().to_string()),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .map(|weather| weather.weather().localized_name().to_string()),
+            ContentType::Sector => self
+                .content_loader
+                .sector_by_name(name)
+                .map(|sector| sector.localized_name.clone()),
+            ContentType::Planet => self
+                .content_loader
+                .catalog()
+                .planet_by_name(name)
+                .map(|planet| planet.localized_name().to_string()),
+            _ => None,
+        }
+        .unwrap_or_else(|| name.to_string())
+    }
+
+    fn database_content_description(
+        &self,
+        content_type: ContentType,
+        name: &str,
+    ) -> Option<String> {
+        let description = match content_type {
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .and_then(|item| item.base.description.clone()),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .and_then(|liquid| liquid.base.description.clone()),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .and_then(|status| status.base.description.clone()),
+            ContentType::Unit => self
+                .content_loader
+                .unit_by_name(name)
+                .and_then(|unit| unit.base.description.clone()),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .and_then(|weather| weather.weather().base.description.clone()),
+            ContentType::Sector => self
+                .content_loader
+                .sector_by_name(name)
+                .and_then(|sector| sector.description.clone()),
+            _ => None,
+        };
+        description.filter(|text| !text.trim().is_empty())
+    }
+
+    fn database_content_details(&self, content_type: ContentType, name: &str) -> Option<String> {
+        let details = match content_type {
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .and_then(|item| item.base.details.clone()),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .and_then(|liquid| liquid.base.details.clone()),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .and_then(|status| status.base.details.clone()),
+            ContentType::Unit => self
+                .content_loader
+                .unit_by_name(name)
+                .and_then(|unit| unit.base.details.clone()),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .and_then(|weather| weather.weather().base.details.clone()),
+            _ => None,
+        };
+        details.filter(|text| !text.trim().is_empty())
+    }
+
+    fn database_content_stat_lines(&self, content_type: ContentType, name: &str) -> Vec<String> {
+        let mut lines = Vec::new();
+        if let Some(record) = self.content_loader.get_by_name(content_type, name) {
+            lines.push(format!("@stat.id: {}", record.id));
+        }
+        match content_type {
+            ContentType::Block => {
+                if let Some(block) = self.content_loader.block_by_name(name) {
+                    let base = block.base();
+                    lines.push(format!("@stat.health: {}", base.health));
+                    lines.push(format!("@stat.size: {}x{}", base.size, base.size));
+                    lines.push(format!("@stat.placeable: {}", base.placeable_on));
+                }
+            }
+            ContentType::Item => {
+                if let Some(item) = self.content_loader.item_by_name(name) {
+                    lines.push(format!("@stat.explosiveness: {:.2}", item.explosiveness));
+                    lines.push(format!("@stat.flammability: {:.2}", item.flammability));
+                    lines.push(format!("@stat.radioactivity: {:.2}", item.radioactivity));
+                    lines.push(format!("@stat.hardness: {}", item.hardness));
+                }
+            }
+            ContentType::Liquid => {
+                if let Some(liquid) = self.content_loader.liquid_by_name(name) {
+                    lines.push(format!("@stat.temperature: {:.2}", liquid.temperature));
+                    lines.push(format!("@stat.heatcapacity: {:.2}", liquid.heat_capacity));
+                    lines.push(format!("@stat.viscosity: {:.2}", liquid.viscosity));
+                    lines.push(format!("@stat.flammability: {:.2}", liquid.flammability));
+                }
+            }
+            ContentType::Status => {
+                if let Some(status) = self.content_loader.status_effect_by_name(name) {
+                    lines.push(format!("@stat.damage: {:.2}", status.damage));
+                    lines.push(format!(
+                        "@stat.speedmultiplier: {:.2}",
+                        status.speed_multiplier
+                    ));
+                    lines.push(format!(
+                        "@stat.reloadmultiplier: {:.2}",
+                        status.reload_multiplier
+                    ));
+                    lines.push(format!(
+                        "@stat.healthmultiplier: {:.2}",
+                        status.health_multiplier
+                    ));
+                }
+            }
+            ContentType::Unit => {
+                if let Some(unit) = self.content_loader.unit_by_name(name) {
+                    lines.push(format!("@stat.health: {:.0}", unit.health));
+                    lines.push(format!("@stat.speed: {:.2}", unit.speed));
+                    lines.push(format!("@stat.armor: {:.2}", unit.armor));
+                    lines.push(format!("@stat.range: {:.2}", unit.range));
+                }
+            }
+            ContentType::Weather => {
+                if let Some(weather) = self.content_loader.weather_by_name(name) {
+                    let weather = weather.weather();
+                    lines.push(format!("@stat.duration: {:.2}", weather.duration));
+                    lines.push(format!("@stat.opacity: {:.2}", weather.opacity_multiplier));
+                    if !weather.status.is_empty() && weather.status != "none" {
+                        lines.push(format!("@stat.status: {}", weather.status));
+                    }
+                }
+            }
+            ContentType::Sector => {
+                if let Some(sector) = self.content_loader.sector_by_name(name) {
+                    lines.push(format!(
+                        "@stat.planet: {}",
+                        sector.planet_name.as_deref().unwrap_or("-")
+                    ));
+                    lines.push(format!("@stat.difficulty: {:.2}", sector.difficulty));
+                    lines.push(format!("@stat.capturewave: {}", sector.capture_wave));
+                }
+            }
+            ContentType::Planet => {
+                if let Some(planet) = self.content_loader.catalog().planet_by_name(name) {
+                    lines.push(format!("@stat.sectors: {}", planet.sector_count));
+                    lines.push(format!("@stat.landable: {}", planet.is_landable()));
+                    lines.push(format!("@stat.atmosphere: {}", planet.has_atmosphere));
+                }
+            }
+            _ => {}
+        }
+        lines
+    }
+
     fn database_tab_count(&self) -> usize {
         1 + self.content_loader.catalog().planets.len()
     }
@@ -21780,6 +21980,16 @@ impl DesktopLauncher {
 
         if content_types.is_empty() {
             lines.push("@none.found".into());
+        }
+
+        if let Some((content_type, name)) = self.last_database_content_opened.as_ref() {
+            lines.push("dialog: ContentInfoDialog".into());
+            lines.push("@info.title".into());
+            lines.push(format!("content: {} / {}", content_type.wire_name(), name));
+            lines.push(format!(
+                "content name: {}",
+                self.database_content_display_name(*content_type, name)
+            ));
         }
 
         lines
@@ -28338,6 +28548,39 @@ impl DesktopLauncher {
         )
     }
 
+    fn database_content_info_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width - 70.0).clamp(420.0, 640.0);
+        let height = (panel.height - 70.0).clamp(360.0, 560.0);
+        RenderRect::new(
+            panel.x + (panel.width - width) * 0.5,
+            panel.y + (panel.height - height) * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn database_content_info_icon_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 32.0,
+            dialog.y + dialog.height - 130.0,
+            72.0,
+            72.0,
+        )
+    }
+
+    fn database_content_info_scrollpane_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 24.0,
+            dialog.y + 82.0,
+            dialog.width - 48.0,
+            (dialog.height - 232.0).max(120.0),
+        )
+    }
+
+    fn database_content_info_close_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(dialog.center().x - 55.0, dialog.y + 18.0, 110.0, 50.0)
+    }
+
     fn database_tab_index_at_point(&self, panel: RenderRect, point: RenderPoint) -> Option<usize> {
         (0..self.database_tab_count())
             .find(|index| Self::database_tab_rect_for_panel(panel, *index).contains_point(point))
@@ -28388,6 +28631,13 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Database);
         let point = RenderPoint::new(x, y);
+        if self.last_database_content_opened.is_some() {
+            let dialog = Self::database_content_info_dialog_rect_for_panel(panel);
+            if Self::database_content_info_close_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseDatabaseContent);
+            }
+            return None;
+        }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
         }
@@ -28970,6 +29220,7 @@ impl DesktopLauncher {
                 self.join_add_dialog_open = false;
                 self.join_search_focused = false;
                 self.database_search_focused = false;
+                self.last_database_content_opened = None;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -29765,6 +30016,10 @@ impl DesktopLauncher {
                     .map(|name| (content_type, name.to_string()));
                 self.database_search_focused = false;
             }
+            DesktopMenuRouteShellAction::CloseDatabaseContent => {
+                self.last_database_content_opened = None;
+                self.database_search_focused = false;
+            }
             DesktopMenuRouteShellAction::Settings(action) => {
                 self.dispatch_settings_action(action);
             }
@@ -30032,6 +30287,7 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.034,
             ));
+            self.push_database_content_info_dialog(pass, panel);
             return;
         }
 
@@ -30096,6 +30352,185 @@ impl DesktopLauncher {
                 ));
             }
         }
+        self.push_database_content_info_dialog(pass, panel);
+    }
+
+    fn push_database_content_info_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some((content_type, name)) = self.last_database_content_opened.as_ref() else {
+            return;
+        };
+        let dialog = Self::database_content_info_dialog_rect_for_panel(panel);
+        let icon = Self::database_content_info_icon_rect(dialog);
+        let clip = Self::database_content_info_scrollpane_rect(dialog);
+        let close = Self::database_content_info_close_rect(dialog);
+        let display_name = self.database_content_display_name(*content_type, name);
+        let icon_symbol = self.database_content_icon_symbol(*content_type, name);
+        let description = self.database_content_description(*content_type, name);
+        let details = self.database_content_details(*content_type, name);
+        let stats = self.database_content_stat_lines(*content_type, name);
+
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.48],
+            Layer::END_PIXELED + 0.086,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.087,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.088,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@info.title",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            icon_symbol,
+            icon,
+            [0.88, 0.92, 0.96, 1.0],
+            0.0,
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            icon,
+            [0.34, 0.48, 0.58, 0.88],
+            1.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("[accent]{display_name}"),
+            RenderPoint::new(icon.right() + 12.0, dialog.y + dialog.height - 70.0),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("content: {} / {}", content_type.wire_name(), name),
+            RenderPoint::new(icon.right() + 12.0, dialog.y + dialog.height - 96.0),
+            [0.66, 0.76, 0.84, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.092,
+        ));
+
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            clip,
+            [1.0, 1.0, 1.0, 0.72],
+            0.0,
+            Layer::END_PIXELED + 0.089,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            clip,
+            [0.22, 0.30, 0.36, 0.90],
+            1.0,
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::set_clip(clip));
+        let mut y = clip.y + clip.height - 18.0;
+        if let Some(description) = description {
+            pass.push(RenderCommand::draw_text_styled(
+                "@category.purpose",
+                RenderPoint::new(clip.x + 14.0, y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.093,
+            ));
+            y -= 26.0;
+            pass.push(RenderCommand::draw_text_styled(
+                format!("[lightgray]{description}"),
+                RenderPoint::new(clip.x + 14.0, y),
+                [0.72, 0.78, 0.84, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_wrap_width((clip.width - 28.0).min(500.0))
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.093,
+            ));
+            y -= 44.0;
+        }
+        if !stats.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@category.general",
+                RenderPoint::new(clip.x + 14.0, y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.093,
+            ));
+            y -= 24.0;
+            for (index, stat) in stats.iter().take(10).enumerate() {
+                pass.push(RenderCommand::draw_text_styled(
+                    stat.clone(),
+                    RenderPoint::new(clip.x + 22.0, y - index as f32 * 20.0),
+                    [0.78, 0.86, 0.92, 1.0],
+                    10.5,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.093 + index as f32 * 0.0001,
+                ));
+            }
+            y -= stats.len().min(10) as f32 * 20.0 + 12.0;
+        }
+        if let Some(details) = details {
+            pass.push(RenderCommand::draw_text_styled(
+                format!("[gray]{details}"),
+                RenderPoint::new(clip.x + 14.0, y),
+                [0.56, 0.64, 0.72, 1.0],
+                10.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_wrap_width((clip.width - 28.0).min(400.0))
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.093,
+            ));
+        }
+        pass.push(RenderCommand::clear_clip());
+
+        self.push_settings_text_button(
+            pass,
+            close,
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.094,
+        );
     }
 
     fn push_join_add_server_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -58407,6 +58842,54 @@ version: "2.0.0"
             launcher.last_database_content_opened,
             Some((ContentType::Item, "copper".to_string()))
         );
+        let detail_lines =
+            launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Database);
+        assert!(detail_lines.contains(&"dialog: ContentInfoDialog".to_string()));
+        assert!(detail_lines.contains(&"@info.title".to_string()));
+        assert!(detail_lines.contains(&"content: item / copper".to_string()));
+
+        let detail_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let detail_commands = detail_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("database content info frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let detail_texts = detail_commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(detail_texts.contains(&"@info.title"));
+        assert!(detail_texts.contains(&"[accent]copper"));
+        assert!(detail_texts.contains(&"content: item / copper"));
+        assert!(detail_commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::SetClip { .. })));
+        assert!(detail_commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::ClearClip)));
+
+        let detail_dialog = DesktopLauncher::database_content_info_dialog_rect_for_panel(panel);
+        let detail_close =
+            DesktopLauncher::database_content_info_close_rect(detail_dialog).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                detail_close.x,
+                detail_close.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::CloseDatabaseContent)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseDatabaseContent,
+        );
+        assert_eq!(launcher.last_database_content_opened, None);
     }
 
     #[test]

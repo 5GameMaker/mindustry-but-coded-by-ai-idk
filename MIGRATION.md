@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 614. Database 内容点击接入 ContentInfoDialog-like 弹窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.4%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 `DatabaseDialog` 的 content icon click 从“只记录目标”推进到 Java `ui.content.show(unlock)` 的最小可见详情弹窗。
+- Java 对照依据：
+  - `DatabaseDialog` 点击已解锁内容时调用 `ui.content.show(unlock)`；
+  - `ContentInfoDialog` 标题为 `@info.title`，顶部为大图标 + localized name，正文放在 `ScrollPane` 中，并按 description/stats/details 顺序展示；
+  - 弹窗关闭应先拦截输入，不让点击穿透到底层数据库格子。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `CloseDatabaseContent` route shell action；
+    - `OpenDatabaseContent` 继续记录 `(ContentType, name)`，同时该状态现在作为 `ContentInfoDialog` 打开状态；
+    - 新增 content display name / description / details / stats 摘要 helper，优先读取 Rust content registry 中 item/liquid/unit/status/weather/sector/planet/block 的现有字段；
+    - 新增 `database_content_info_dialog_rect_for_panel`、icon/scrollpane/close rect 和 modal 渲染；
+    - 内容详情弹窗包含 `@info.title`、大图标、`[accent]name`、`content: type / name`、ScrollPane-like `SetClip/ClearClip` 正文、`@category.purpose`/`@category.general`、底部 `@back`；
+    - 弹窗打开时 route hit-test 先处理 close，其余点击阻断；Escape/Back 也会优先关闭内容弹窗。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `ContentInfoDialog` 的完整 Java stats 分类、`content.displayExtra(table)`、patched 提示、credit、console `@viewfields` 尚未迁移；
+  - `DatabaseDialog` 仍未完整实现 `databaseCategory/databaseTag` 分组、`databaseTabs/allDatabaseTabs` 过滤、locked/banned/patched overlay、tooltip 与 Shift-copy unicode；
+  - 后续应继续把详情弹窗从摘要字段升级到真实 `Stats`/bundle localization 渲染。
+
 ## 613. DatabaseDialog 补搜索、tab 与内容格子命中链路
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
