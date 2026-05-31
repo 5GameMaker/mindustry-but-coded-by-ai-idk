@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 636. JoinDialog saved server 卡片按钮命中
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.8%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 JoinDialog 已经绘制出来的 saved server 卡片按钮具备真实命中和动作分发。
+- Java 对照依据：
+  - `JoinDialog` 的 saved server 行不只是整卡点击；右侧按钮可刷新、编辑、删除或打开/连接；
+  - 之前 Rust 侧只画了 `refresh/pencil/trash/rightOpen` 图标，但 hit-test 仍把整张卡都当成连接。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `RefreshJoinServerCard/EditJoinServerCard/DeleteJoinServerCard/ConnectJoinServerCard` route shell action；
+    - 新增 `join_route_server_card_action_button_rect(...)`，渲染与 hit-test 共用同一几何；
+    - 卡片按钮优先于整卡命中：refresh 增加刷新计数，edit 打开并预填 add server 输入框，delete 清空当前 saved target，open/整卡执行当前目标连接；
+    - `active_menu_route_shell_lines(Join)` 标出 `server actions: refresh edit delete open`，后续审查可直接看到卡片动作契约。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - JoinDialog 仍只有单个 `connect_target` 快照，尚未迁移 Java `Seq<Server>` 多 saved server 列表和持久化；
+  - card 上下移动、社区分组、hidden group、真实 ping/refresh community 仍未接入；
+  - add/edit 共用输入框，但还没有区分新建/编辑索引与持久化保存；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 635. JoinDialog 输入框与主菜单子菜单状态清理
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

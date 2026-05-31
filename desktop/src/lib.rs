@@ -2691,6 +2691,10 @@ pub enum DesktopMenuRouteShellAction {
     FocusJoinAddServerText,
     ConfirmJoinAddServer,
     RefreshJoinServers,
+    RefreshJoinServerCard(usize),
+    EditJoinServerCard(usize),
+    DeleteJoinServerCard(usize),
+    ConnectJoinServerCard(usize),
     OpenMapListFilters,
     CloseMapListFilters,
     OpenMapListPlanetFilters,
@@ -27010,6 +27014,19 @@ impl DesktopLauncher {
         )
     }
 
+    fn join_route_server_card_action_button_rect(
+        card: RenderRect,
+        button_index: usize,
+    ) -> RenderRect {
+        let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
+        RenderRect::new(
+            card.x + card.width - 36.0 - button_index as f32 * 32.0,
+            header.center().y - 13.0,
+            26.0,
+            26.0,
+        )
+    }
+
     fn join_route_server_card_index_at_point(
         &self,
         panel: RenderRect,
@@ -28832,11 +28849,23 @@ impl DesktopLauncher {
         if Self::join_route_show_hidden_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::ToggleJoinShowHidden);
         }
-        if self
-            .join_route_server_card_index_at_point(panel, point)
-            .is_some()
-        {
-            return Some(DesktopMenuRouteShellAction::ConnectJoin);
+        if let Some(card_index) = self.join_route_server_card_index_at_point(panel, point) {
+            let card = Self::join_route_server_card_rect_for_panel(panel, card_index);
+            for button_index in 0..4 {
+                if Self::join_route_server_card_action_button_rect(card, button_index)
+                    .contains_point(point)
+                {
+                    return Some(match button_index {
+                        0 => DesktopMenuRouteShellAction::RefreshJoinServerCard(card_index),
+                        1 => DesktopMenuRouteShellAction::EditJoinServerCard(card_index),
+                        2 => DesktopMenuRouteShellAction::DeleteJoinServerCard(card_index),
+                        _ => DesktopMenuRouteShellAction::ConnectJoinServerCard(card_index),
+                    });
+                }
+            }
+            return Some(DesktopMenuRouteShellAction::ConnectJoinServerCard(
+                card_index,
+            ));
         }
         None
     }
@@ -30188,6 +30217,41 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
+            }
+            DesktopMenuRouteShellAction::RefreshJoinServerCard(index) => {
+                if index == 0 && self.connect_target.is_some() {
+                    self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
+                }
+            }
+            DesktopMenuRouteShellAction::EditJoinServerCard(index) => {
+                if index == 0 && self.connect_target.is_some() {
+                    self.join_add_dialog_open = true;
+                    self.join_add_server_text = self
+                        .connect_target
+                        .as_ref()
+                        .map(|target| format!("{}:{}", target.host, target.port))
+                        .unwrap_or_default();
+                    self.join_add_server_focused = true;
+                    self.join_search_focused = false;
+                    self.connect_error = None;
+                }
+            }
+            DesktopMenuRouteShellAction::DeleteJoinServerCard(index) => {
+                if index == 0 {
+                    self.connect_target = None;
+                    self.connect_error = None;
+                    self.join_add_dialog_open = false;
+                    self.join_add_server_focused = false;
+                }
+            }
+            DesktopMenuRouteShellAction::ConnectJoinServerCard(index) => {
+                if index == 0 {
+                    let Some(target) = self.connect_target.clone() else {
+                        self.connect_error = Some("missing connect target".into());
+                        return;
+                    };
+                    let _ = self.connect_to_target(target);
+                }
             }
             DesktopMenuRouteShellAction::OpenMapListFilters => {
                 self.map_list_filter_dialog_open = true;
@@ -32134,12 +32198,8 @@ impl DesktopLauncher {
                     .iter()
                     .enumerate()
                 {
-                    let button = RenderRect::new(
-                        card.x + card.width - 36.0 - button_index as f32 * 32.0,
-                        header.center().y - 13.0,
-                        26.0,
-                        26.0,
-                    );
+                    let button =
+                        Self::join_route_server_card_action_button_rect(card, button_index);
                     pass.push(RenderCommand::draw_text_styled(
                         desktop_ui_icon_glyph_or_label(icon, icon),
                         button.center(),
@@ -37007,6 +37067,7 @@ impl DesktopLauncher {
                         format!("server mode: {}", snapshot.mode),
                         format!("server ping: {}", snapshot.ping),
                         "server fields: name version description players map mode ping".into(),
+                        "server actions: refresh edit delete open".into(),
                     ]);
                     if !snapshot.matches_query(&self.join_search)
                         && !self.join_search.trim().is_empty()
@@ -66282,6 +66343,7 @@ version: "2.0.0"
         assert!(lines.contains(
             &"server fields: name version description players map mode ping".to_string()
         ));
+        assert!(lines.contains(&"server actions: refresh edit delete open".to_string()));
         assert!(lines.contains(&"button: @server.add".to_string()));
         assert!(lines.contains(&"button: @refresh".to_string()));
 
@@ -66296,6 +66358,14 @@ version: "2.0.0"
         let search = DesktopLauncher::join_route_search_rect_for_panel(panel);
         let show_hidden = DesktopLauncher::join_route_show_hidden_button_rect_for_panel(panel);
         let card = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 0);
+        let card_refresh =
+            DesktopLauncher::join_route_server_card_action_button_rect(card, 0).center();
+        let card_edit =
+            DesktopLauncher::join_route_server_card_action_button_rect(card, 1).center();
+        let card_delete =
+            DesktopLauncher::join_route_server_card_action_button_rect(card, 2).center();
+        let card_open =
+            DesktopLauncher::join_route_server_card_action_button_rect(card, 3).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -66338,7 +66408,39 @@ version: "2.0.0"
                 card.center().x,
                 card.center().y
             ),
-            Some(super::DesktopMenuRouteShellAction::ConnectJoin)
+            Some(super::DesktopMenuRouteShellAction::ConnectJoinServerCard(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                card_refresh.x,
+                card_refresh.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::RefreshJoinServerCard(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                card_edit.x,
+                card_edit.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::EditJoinServerCard(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                card_delete.x,
+                card_delete.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::DeleteJoinServerCard(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                card_open.x,
+                card_open.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ConnectJoinServerCard(0))
         );
 
         launcher.apply_menu_input_events(
@@ -66497,6 +66599,18 @@ version: "2.0.0"
             super::DesktopMenuRouteShellAction::CloseJoinAddServer,
         );
         assert!(!launcher.join_add_dialog_open);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::EditJoinServerCard(0),
+        );
+        assert!(launcher.join_add_dialog_open);
+        assert_eq!(launcher.join_add_server_text, "example.org:6567");
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseJoinAddServer,
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::DeleteJoinServerCard(0),
+        );
+        assert_eq!(launcher.connect_target, None);
     }
 
     #[test]
