@@ -171,7 +171,7 @@ const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
-const LOAD_SLOT_CARD_HEIGHT: f32 = 112.0;
+const LOAD_SLOT_CARD_HEIGHT: f32 = 220.0;
 const LOAD_SLOT_CARD_GAP: f32 = 10.0;
 const LOAD_SLOT_CARD_MIN_WIDTH: f32 = 320.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
@@ -21419,6 +21419,25 @@ impl DesktopLauncher {
         format!("@save.map: {map} / @mode.{}.name", mode.wire_name())
     }
 
+    fn load_game_slot_map_name_line(slot: &SaveSlotRecord) -> String {
+        let map = slot
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.map_name.as_deref())
+            .filter(|map| !map.trim().is_empty())
+            .unwrap_or("@unknown");
+        format!("@save.map: {map}")
+    }
+
+    fn load_game_slot_mode_wave_line(slot: &SaveSlotRecord) -> String {
+        let mode = Self::load_game_slot_gamemode(slot);
+        format!(
+            "@mode.{}.name / {}",
+            mode.wire_name(),
+            Self::load_game_slot_wave_line(slot)
+        )
+    }
+
     fn load_game_slot_gamemode(slot: &SaveSlotRecord) -> Gamemode {
         let mode = slot
             .meta
@@ -33640,6 +33659,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.0001,
             ));
             let text_x = preview.right() + 12.0;
+            let meta_top = preview.y + preview.height;
             let title = self.load_game_slot_display_title(slot);
             pass.push(RenderCommand::draw_text_styled(
                 format!("[accent]{title}"),
@@ -33654,8 +33674,8 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                Self::load_game_slot_map_line(slot),
-                RenderPoint::new(text_x, rect.y + rect.height - 46.0),
+                Self::load_game_slot_map_name_line(slot),
+                RenderPoint::new(text_x, meta_top - 16.0),
                 [0.66, 0.76, 0.84, 1.0],
                 11.0,
                 0.0,
@@ -33665,13 +33685,8 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                format!(
-                    "{} | {} | {}",
-                    Self::load_game_slot_wave_line(slot),
-                    Self::load_game_slot_playtime_line(slot),
-                    Self::load_game_slot_date_line(slot)
-                ),
-                RenderPoint::new(text_x, rect.y + rect.height - 68.0),
+                Self::load_game_slot_mode_wave_line(slot),
+                RenderPoint::new(text_x, meta_top - 42.0),
                 [0.54, 0.64, 0.72, 1.0],
                 9.0,
                 0.0,
@@ -33682,7 +33697,29 @@ impl DesktopLauncher {
             ));
             pass.push(RenderCommand::draw_text_styled(
                 self.load_game_slot_autosave_line(slot),
-                RenderPoint::new(text_x, rect.y + 18.0),
+                RenderPoint::new(text_x, meta_top - 68.0),
+                [0.48, 0.60, 0.68, 1.0],
+                8.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                Self::load_game_slot_playtime_line(slot),
+                RenderPoint::new(text_x, meta_top - 94.0),
+                [0.48, 0.60, 0.68, 1.0],
+                8.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                Self::load_game_slot_date_line(slot),
+                RenderPoint::new(text_x, meta_top - 120.0),
                 [0.48, 0.60, 0.68, 1.0],
                 8.0,
                 0.0,
@@ -59572,12 +59609,11 @@ version: "2.0.0"
         assert!(texts.contains(&"@loading"));
         assert!(texts.iter().any(|text| text == &"@loading: @load | slot 2"));
         assert!(texts.contains(&"[accent]New Map"));
-        assert!(texts.contains(&"@save.map: New Map / @mode.attack.name"));
-        assert!(texts
-            .iter()
-            .any(|text| text.contains("@save.wave: 9")
-                && text.contains("@save.date: 1970-01-01 00:00")));
+        assert!(texts.contains(&"@save.map: New Map"));
+        assert!(texts.contains(&"@mode.attack.name / @save.wave: 9"));
         assert!(texts.contains(&"@save.autosave: @on"));
+        assert!(texts.iter().any(|text| text.starts_with("@save.playtime:")));
+        assert!(texts.contains(&"@save.date: 1970-01-01 00:00"));
         let route_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
             super::DesktopMenuRoute::LoadGame,
@@ -60454,6 +60490,10 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(texts.contains(&"Map 2"));
         assert!(texts.contains(&"[accent]Map 2"));
+        assert!(texts.contains(&"@save.map: Map 2"));
+        assert!(texts.contains(&"@mode.survival.name / @save.wave: 2"));
+        assert!(texts.iter().any(|text| text.starts_with("@save.playtime:")));
+        assert!(texts.contains(&"@save.date: 1970-01-01 00:00"));
         assert!(!texts.contains(&"[accent]Map 7"));
         let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
@@ -60462,9 +60502,14 @@ version: "2.0.0"
         let preview_slot = &launcher.load_game_slots[filtered[0]];
         let visible_card = DesktopLauncher::load_game_slot_card_rect_for_panel(panel, 0);
         let preview_rect = DesktopLauncher::load_game_slot_preview_rect(visible_card);
-        assert!(
-            preview_rect.width > 62.0 && visible_card.height > 82.0,
-            "LoadDialog save cards should stay closer to Java's large preview-card density instead of the old compressed list"
+        assert_eq!(
+            visible_card.height, 220.0,
+            "Java LoadDialog card wraps a 40f title/action row plus a 160f preview row and margins"
+        );
+        assert_eq!(
+            (preview_rect.width, preview_rect.height),
+            (160.0, 160.0),
+            "Java LoadDialog preview image is size(160f)"
         );
         let preview_symbol = DesktopLauncher::settings_drawable_symbol("nomap");
         let preview_label = DesktopLauncher::load_game_slot_preview_symbol(preview_slot);

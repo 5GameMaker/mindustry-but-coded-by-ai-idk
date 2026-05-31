@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 611. LoadDialog 存档卡片提升到 160f 预览与 5 行 meta
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.1%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 `LoadDialog` 存档 slot 从压缩列表视觉推进到 Java 的“大预览卡片 + meta 文本表”密度。
+- Java 对照依据：
+  - `LoadDialog.java` 中标题/action 行在上方，action 按钮为 40f；
+  - 预览图使用 `BorderImage(...).size(160f).padRight(6)`；
+  - 右侧 meta 表 `width(250f)`，行宽约 290f，分成 map / mode+wave / autosave / playtime / date 五行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `LOAD_SLOT_CARD_HEIGHT` 从 112 提升到 220，让现有 `load_game_slot_preview_rect(...)` 达到 160×160 上限；
+    - 存档卡片 meta 文本从压缩的“wave/playtime/date 合并行”拆成 Java 风格 5 行；
+    - 新增 `load_game_slot_map_name_line(...)` 与 `load_game_slot_mode_wave_line(...)`，渲染层按 Java 布局拆分，route audit 仍保留原综合摘要；
+    - 测试改为锁定卡片高度 220、preview 160×160，以及 map/mode+wave/autosave/playtime/date 分行渲染。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - preview 仍是消费已有 preview/fallback `nomap`，未完整接 Java `slot.previewTexture()` 生成/缓存生命周期；
+  - LoadDialog 的 `modifyButton(...)` 可扩展钩子和真实 Scene2D grow/pad 行为仍是近似；
+  - save load 恢复到完整可玩 runtime 的链路仍需继续迁移。
+
 ## 610. LoadDialog 存档行 action 区改用 40f empty icon 按钮
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
