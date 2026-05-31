@@ -363,12 +363,12 @@ impl MenuBlockKind {
             Self::StoneWall => Some("stone-wall"),
             Self::SporeWall => Some("spore-wall"),
             Self::Salt => Some("salt"),
-            Self::CopperOre => Some("copper-ore"),
-            Self::LeadOre => Some("lead-ore"),
-            Self::ScrapOre => Some("scrap-ore"),
-            Self::CoalOre => Some("coal-ore"),
-            Self::TitaniumOre => Some("titanium-ore"),
-            Self::ThoriumOre => Some("thorium-ore"),
+            Self::CopperOre => Some("ore-copper"),
+            Self::LeadOre => Some("ore-lead"),
+            Self::ScrapOre => Some("ore-scrap"),
+            Self::CoalOre => Some("ore-coal"),
+            Self::TitaniumOre => Some("ore-titanium"),
+            Self::ThoriumOre => Some("ore-thorium"),
             Self::Hotrock => Some("hotrock"),
             Self::Magmarock => Some("magmarock"),
             Self::DarkPanel3 => Some("dark-panel-3"),
@@ -2633,7 +2633,7 @@ mod tests {
         assert!(floor.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, layer, .. }
-                if symbol == "copper-ore" && (*layer - 0.15).abs() < f32::EPSILON
+                if symbol == "ore-copper" && (*layer - 0.15).abs() < f32::EPSILON
         )));
 
         let wall = MenuRenderCommand::DrawCache {
@@ -2646,6 +2646,19 @@ mod tests {
             RenderCommand::DrawSprite { symbol, layer, .. }
                 if symbol == "sand-wall" && (*layer - 1.05).abs() < f32::EPSILON
         )));
+    }
+
+    #[test]
+    fn menu_ore_sprite_names_use_upstream_floor_region_symbols() {
+        assert_eq!(MenuBlockKind::CopperOre.sprite_name(), Some("ore-copper"));
+        assert_eq!(MenuBlockKind::LeadOre.sprite_name(), Some("ore-lead"));
+        assert_eq!(MenuBlockKind::ScrapOre.sprite_name(), Some("ore-scrap"));
+        assert_eq!(MenuBlockKind::CoalOre.sprite_name(), Some("ore-coal"));
+        assert_eq!(
+            MenuBlockKind::TitaniumOre.sprite_name(),
+            Some("ore-titanium")
+        );
+        assert_eq!(MenuBlockKind::ThoriumOre.sprite_name(), Some("ore-thorium"));
     }
 
     #[test]

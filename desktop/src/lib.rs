@@ -2587,6 +2587,12 @@ pub enum DesktopMenuChromeAction {
     Becheck,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DesktopMenuChromeButtonState {
+    hovered: bool,
+    pressed: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopMenuPlatformAction {
     OpenWorkshop,
@@ -15775,6 +15781,9 @@ pub struct DesktopLauncher {
     pub last_menu_dispatch: Option<DesktopMenuActionDispatch>,
     pub last_menu_route_shell_action: Option<DesktopMenuRouteShellAction>,
     pub last_menu_chrome_action: Option<DesktopMenuChromeAction>,
+    pub last_menu_pressed_chrome_action: Option<DesktopMenuChromeAction>,
+    pub last_menu_visual_pressed_chrome_action: Option<DesktopMenuChromeAction>,
+    pub last_menu_visual_pressed_chrome_frames: u8,
     pub last_menu_platform_action: Option<DesktopMenuPlatformAction>,
     pub last_custom_menu_action: Option<DesktopCustomMenuAction>,
     pub last_menu_guard_message: Option<String>,
@@ -16561,6 +16570,9 @@ impl DesktopLauncher {
             last_menu_dispatch: None,
             last_menu_route_shell_action: None,
             last_menu_chrome_action: None,
+            last_menu_pressed_chrome_action: None,
+            last_menu_visual_pressed_chrome_action: None,
+            last_menu_visual_pressed_chrome_frames: 0,
             last_menu_platform_action: None,
             last_custom_menu_action: None,
             last_menu_guard_message: None,
@@ -17812,13 +17824,28 @@ impl DesktopLauncher {
         })
     }
 
+    fn active_menu_pressed_chrome_action_for_visuals(&self) -> Option<DesktopMenuChromeAction> {
+        self.last_menu_pressed_chrome_action.or_else(|| {
+            (self.last_menu_visual_pressed_chrome_frames > 0)
+                .then_some(self.last_menu_visual_pressed_chrome_action)
+                .flatten()
+        })
+    }
+
     fn apply_menu_visual_pressed_frame_decay(&mut self) {
-        if self.last_menu_pressed_button.is_some() || self.last_menu_visual_pressed_frames == 0 {
-            return;
+        if self.last_menu_pressed_button.is_none() && self.last_menu_visual_pressed_frames > 0 {
+            self.last_menu_visual_pressed_frames -= 1;
+            if self.last_menu_visual_pressed_frames == 0 {
+                self.last_menu_visual_pressed_button = None;
+            }
         }
-        self.last_menu_visual_pressed_frames -= 1;
-        if self.last_menu_visual_pressed_frames == 0 {
-            self.last_menu_visual_pressed_button = None;
+        if self.last_menu_pressed_chrome_action.is_none()
+            && self.last_menu_visual_pressed_chrome_frames > 0
+        {
+            self.last_menu_visual_pressed_chrome_frames -= 1;
+            if self.last_menu_visual_pressed_chrome_frames == 0 {
+                self.last_menu_visual_pressed_chrome_action = None;
+            }
         }
     }
 
@@ -19946,6 +19973,19 @@ impl DesktopLauncher {
         }
     }
 
+    fn menu_chrome_button_state(
+        &self,
+        chrome: DesktopMenuChromeLayout,
+        action: DesktopMenuChromeAction,
+    ) -> DesktopMenuChromeButtonState {
+        let hovered = self
+            .last_menu_cursor
+            .and_then(|point| chrome.action_at_point(point))
+            == Some(action);
+        let pressed = self.active_menu_pressed_chrome_action_for_visuals() == Some(action);
+        DesktopMenuChromeButtonState { hovered, pressed }
+    }
+
     fn push_menu_logo_and_version_chrome(&self, pass: &mut RenderPass, viewport: RenderViewport) {
         let options = self.current_menu_chrome_options();
         let chrome = DesktopMenuChromeLayout::for_viewport_with_state(viewport, options);
@@ -19988,6 +20028,7 @@ impl DesktopLauncher {
             Self::push_menu_chrome_sprite_button(
                 pass,
                 chrome.discord_rect,
+                self.menu_chrome_button_state(chrome, DesktopMenuChromeAction::Discord),
                 "discord-banner",
                 Some(discord_glyph.as_str()),
                 "discord",
@@ -20007,6 +20048,10 @@ impl DesktopLauncher {
                 Self::push_menu_chrome_button(
                     pass,
                     terminal_rect,
+                    self.menu_chrome_button_state(
+                        chrome,
+                        DesktopMenuChromeAction::MobileTerminalToggle,
+                    ),
                     terminal_glyph.as_str(),
                     [0.12, 0.18, 0.22, 0.92],
                     [0.46, 0.64, 0.74, 0.96],
@@ -20021,6 +20066,7 @@ impl DesktopLauncher {
                 Self::push_menu_chrome_sprite_button(
                     pass,
                     info_rect,
+                    self.menu_chrome_button_state(chrome, DesktopMenuChromeAction::InfoOpenAbout),
                     "info-banner",
                     None,
                     "info",
@@ -20037,6 +20083,7 @@ impl DesktopLauncher {
                 Self::push_menu_chrome_button(
                     pass,
                     becheck_rect,
+                    self.menu_chrome_button_state(chrome, DesktopMenuChromeAction::Becheck),
                     becheck_label.as_str(),
                     [0.14, 0.18, 0.27, 0.92],
                     [0.58, 0.72, 0.90, 0.98],
@@ -20092,31 +20139,42 @@ impl DesktopLauncher {
     fn push_menu_chrome_button(
         pass: &mut RenderPass,
         rect: RenderRect,
+        state: DesktopMenuChromeButtonState,
         label: &str,
         fill: [f32; 4],
         stroke: [f32; 4],
         label_size: f32,
         label_color: [f32; 4],
     ) {
-        Self::push_menu_chrome_button_background(pass, rect, fill, stroke);
+        Self::push_menu_chrome_button_background(pass, rect, state, fill, stroke);
         Self::push_menu_chrome_button_label(pass, rect, label, label_size, label_color);
     }
 
     fn push_menu_chrome_sprite_button(
         pass: &mut RenderPass,
         rect: RenderRect,
+        state: DesktopMenuChromeButtonState,
         sprite_symbol: &str,
         sprite_label: Option<&str>,
         fallback_label: &str,
-        _fill: [f32; 4],
-        _stroke: [f32; 4],
+        fill: [f32; 4],
+        stroke: [f32; 4],
         label_size: f32,
         label_color: [f32; 4],
     ) {
+        if state.hovered || state.pressed || sprite_symbol.is_empty() {
+            Self::push_menu_chrome_button_background(pass, rect, state, fill, stroke);
+        }
         pass.push(RenderCommand::draw_sprite(
             sprite_symbol,
             rect,
-            [1.0, 1.0, 1.0, 1.0],
+            if state.pressed {
+                [0.72, 0.86, 1.0, 1.0]
+            } else if state.hovered {
+                [1.08, 1.08, 1.08, 1.0]
+            } else {
+                [1.0, 1.0, 1.0, 1.0]
+            },
             0.0,
             Layer::END_PIXELED + 0.065,
         ));
@@ -20136,16 +20194,46 @@ impl DesktopLauncher {
     fn push_menu_chrome_button_background(
         pass: &mut RenderPass,
         rect: RenderRect,
-        _fill: [f32; 4],
-        _stroke: [f32; 4],
+        state: DesktopMenuChromeButtonState,
+        fill: [f32; 4],
+        stroke: [f32; 4],
     ) {
         pass.push(RenderCommand::draw_sprite(
             "button.9",
             rect,
-            [1.0, 1.0, 1.0, 1.0],
+            if state.pressed {
+                [0.74, 0.90, 1.0, 1.0]
+            } else if state.hovered {
+                [1.10, 1.10, 1.10, 1.0]
+            } else {
+                [1.0, 1.0, 1.0, 1.0]
+            },
             0.0,
             Layer::END_PIXELED + 0.05,
         ));
+        if state.hovered || state.pressed {
+            pass.push(RenderCommand::draw_sprite(
+                "whiteui",
+                rect,
+                if state.pressed {
+                    [fill[0] * 0.65, fill[1] * 0.65, fill[2] * 0.65, 0.24]
+                } else {
+                    [stroke[0], stroke[1], stroke[2], 0.16]
+                },
+                0.0,
+                Layer::END_PIXELED + 0.055,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                rect,
+                if state.pressed {
+                    [stroke[0], stroke[1], stroke[2], 1.0]
+                } else {
+                    [stroke[0], stroke[1], stroke[2], 0.78]
+                },
+                if state.pressed { 2.0 } else { 1.0 },
+                Layer::END_PIXELED + 0.056,
+            ));
+        }
     }
 
     fn push_menu_chrome_button_label(
@@ -29249,7 +29337,13 @@ impl DesktopLauncher {
                         self.last_menu_visual_pressed_button = Some(role);
                         self.last_menu_visual_pressed_frames = MENU_VISUAL_PRESSED_HOLD_FRAMES;
                     }
+                    if let Some(action) = self.last_menu_pressed_chrome_action {
+                        self.last_menu_visual_pressed_chrome_action = Some(action);
+                        self.last_menu_visual_pressed_chrome_frames =
+                            MENU_VISUAL_PRESSED_HOLD_FRAMES;
+                    }
                     self.last_menu_pressed_button = None;
+                    self.last_menu_pressed_chrome_action = None;
                     self.last_settings_pressed_control = None;
                     self.settings_scroll_drag_state = None;
                 }
@@ -29367,6 +29461,9 @@ impl DesktopLauncher {
                             cursor.x,
                             cursor.y,
                         ) {
+                            self.last_menu_pressed_chrome_action = Some(action);
+                            self.last_menu_visual_pressed_chrome_action = None;
+                            self.last_menu_visual_pressed_chrome_frames = 0;
                             self.dispatch_menu_chrome_action(action);
                             continue;
                         }
@@ -31847,6 +31944,9 @@ impl DesktopLauncher {
         self.last_menu_dispatch = None;
         self.last_menu_route_shell_action = None;
         self.last_menu_chrome_action = None;
+        self.last_menu_pressed_chrome_action = None;
+        self.last_menu_visual_pressed_chrome_action = None;
+        self.last_menu_visual_pressed_chrome_frames = 0;
         self.last_menu_platform_action = None;
         self.last_menu_guard_message = None;
         self.menu_mobile_terminal_open = false;
@@ -33047,6 +33147,30 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_default_atlas_resolves_menu_background_tile_symbols() {
+        let launcher = DesktopLauncher::new(Vec::new());
+
+        for symbol in [
+            "sand",
+            "sand-wall",
+            "shale",
+            "shale-wall",
+            "stone",
+            "stone-wall",
+            "ore-copper",
+            "ore-lead",
+            "ore-coal",
+            "ore-titanium",
+            "ore-thorium",
+        ] {
+            assert!(
+                launcher.texture_atlas.has(symbol),
+                "menu background tile sprite `{symbol}` should resolve from the default atlas"
+            );
+        }
     }
 
     #[test]
@@ -50911,6 +51035,78 @@ version: "2.0.0"
             Some(super::DesktopMenuChromeAction::InfoOpenAbout)
         );
         assert_eq!(launcher.last_menu_action, None);
+    }
+
+    #[test]
+    fn desktop_launcher_menu_chrome_hover_and_pressed_emit_button_feedback() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(540, 960);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let chrome = DesktopLauncher::menu_chrome_layout_for_viewport(viewport);
+        let info_rect = chrome
+            .info_rect
+            .expect("mobile chrome layout should include info");
+        let info_center = info_rect.center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: info_center.x,
+                y: info_center.y,
+            }],
+        );
+        let hover_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let hover_commands = hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(hover_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, tint, .. }
+                if symbol == "whiteui" && *rect == info_rect && (tint[3] - 0.16).abs() < 0.0001
+        )));
+        assert!(hover_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::StrokeRect { rect, thickness, .. }
+                if *rect == info_rect && (*thickness - 1.0).abs() < f32::EPSILON
+        )));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::MouseButton {
+                button: "primary".into(),
+                pressed: true,
+            }],
+        );
+        assert_eq!(
+            launcher.last_menu_pressed_chrome_action,
+            Some(super::DesktopMenuChromeAction::InfoOpenAbout)
+        );
+        let pressed_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let pressed_commands = pressed_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(pressed_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, tint, .. }
+                if symbol == "button.9" && *rect == info_rect && *tint == [0.74, 0.90, 1.0, 1.0]
+        )));
+        assert!(pressed_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::StrokeRect { rect, thickness, .. }
+                if *rect == info_rect && (*thickness - 2.0).abs() < f32::EPSILON
+        )));
     }
 
     #[test]

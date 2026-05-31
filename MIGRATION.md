@@ -15,6 +15,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 550. MenuFragment 背景 ore 符号与 chrome 按钮态闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **64.9%**，仍未达到完整可玩；继续优先前端/UI，还原主菜单可见面并避免退回黑屏、纯色壳或静态挂件。
+- Java 对照依据：
+  - `core/src/mindustry/world/blocks/environment/OreBlock.java` 的矿物内容名采用 `ore-` 前缀；
+  - `core/src/mindustry/graphics/MenuRenderer.java` 的菜单背景使用 `Blocks.oreCopper / oreLead / oreCoal / oreTitanium / oreThorium` 等 overlay；
+  - `core/src/mindustry/ui/fragments/MenuFragment.java` 的 discord、mobile terminal、info、desktop becheck 都是可交互 Scene2D 按钮，不应只是静态贴图。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 修正菜单背景矿物 sprite symbol：`copper-ore/lead-ore/...` 改为上游内容与 atlas 一致的 `ore-copper/ore-lead/...`；
+    - `DrawCache("floor+overlay")` 的矿物 overlay 继续走真实 `DrawSprite`，并保留颜色 fallback，防止资源缺失时黑屏；
+    - 增加 `menu_ore_sprite_names_use_upstream_floor_region_symbols`，锁定所有菜单 ore 的上游命名。
+  - `desktop/src/lib.rs`
+    - 增加默认 atlas 对主菜单背景常用 floor/wall/ore symbol 的解析测试；
+    - 为主菜单 chrome 按钮接入 hover/pressed 视觉态：`discord-banner`、mobile terminal、`info-banner`、desktop `@be.check` 不再只是静态挂件；
+    - 新增 chrome pressed hold 状态，沿用菜单按钮的短帧按压反馈主链，而不是独立测试壳。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ore_sprite_names_use_upstream_floor_region_symbols --lib -- --test-threads=1`
+  - `cargo test -p mindustry-core menu_cache_render_commands_emit_real_tile_sprite_symbols_with_color_fallbacks --lib -- --test-threads=1`
+  - `cargo test -p mindustry-core menu --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_default_atlas_resolves_menu_background_tile_symbols --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome_hover_and_pressed_emit_button_feedback --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop menu_chrome --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib -- --test-threads=1`
+- 仍未完成：
+  - 菜单 ore 目前锁定到上游 base region，尚未复刻 Java `variantRegions` 的随机变体；
+  - chrome hover/pressed 已接入渲染主链，但真实 Scene2D `ImageButtonStyle/TextButtonStyle`、九宫格 skin padding、becheck 动态文案和完整 consolefrag 仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 549. MenuFragment 主菜单图标可见渲染兜底
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
