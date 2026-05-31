@@ -38,7 +38,9 @@ use mindustry_core::mindustry::entities::{
     SuppressionFieldAbility, TextureRegionRef, UnitDrawPartKind, WeaponMount, WorldLabelAlign,
     WorldLabelComp, PLAYER_CLASS_ID,
 };
-use mindustry_core::mindustry::game::{Gamemode, Rules, Schematic, TechNode, TechNodeId, TechTree};
+use mindustry_core::mindustry::game::{
+    Gamemode, Rules, Schematic, TechContentRef, TechNode, TechNodeId, TechTree,
+};
 use mindustry_core::mindustry::graphics::floor_renderer::FloorChunkDrawBatch;
 use mindustry_core::mindustry::graphics::light_renderer::LIGHT_RENDER_LAYER;
 #[cfg(test)]
@@ -16163,6 +16165,15 @@ fn item_full_icon_region_symbol(item_name: &str, content_loader: &ContentLoader)
     candidates.full_candidates.into_iter().next()
 }
 
+fn liquid_full_icon_region_symbol(
+    liquid_name: &str,
+    content_loader: &ContentLoader,
+) -> Option<String> {
+    let liquid = content_loader.liquid_by_name(liquid_name)?;
+    let candidates = liquid.base.icon_candidates(None);
+    candidates.full_candidates.into_iter().next()
+}
+
 fn block_full_icon_region_symbol(block: &BlockDef) -> Option<String> {
     let base = block.base();
     let content = UnlockableContentBase::new(base.id, ContentType::Block, base.name.clone());
@@ -27630,6 +27641,23 @@ impl DesktopLauncher {
             .unwrap_or(0)
     }
 
+    fn tech_tree_content_icon_symbol(&self, content: &TechContentRef) -> Option<String> {
+        match content.content_type {
+            ContentType::Block => self
+                .content_loader
+                .block_by_name(&content.name)
+                .and_then(block_full_icon_region_symbol),
+            ContentType::Unit => unit_full_icon_region_symbol(&content.name, &self.content_loader),
+            ContentType::Item => item_full_icon_region_symbol(&content.name, &self.content_loader),
+            ContentType::Liquid => {
+                liquid_full_icon_region_symbol(&content.name, &self.content_loader)
+            }
+            _ => None,
+        }
+        .filter(|symbol| self.texture_atlas.lookup(symbol).is_ok())
+        .or_else(|| Some(content.name.clone()))
+    }
+
     fn push_tech_tree_items_display(&self, pass: &mut RenderPass, panel: RenderRect) {
         let items = Self::tech_tree_items_display_rect_for_panel(panel);
         pass.push(RenderCommand::draw_sprite(
@@ -28072,9 +28100,27 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.0305 + index as f32 * 0.001,
                 ));
             }
+            if let Some(symbol) = self.tech_tree_content_icon_symbol(&node.content) {
+                pass.push(RenderCommand::draw_sprite(
+                    symbol,
+                    RenderRect::from_center(
+                        RenderPoint::new(rect.x + 21.0, rect.center().y),
+                        24.0,
+                        24.0,
+                    ),
+                    [
+                        1.0,
+                        1.0,
+                        1.0,
+                        if locked && !selectable { 0.54 } else { 0.96 },
+                    ],
+                    0.0,
+                    Layer::END_PIXELED + 0.031 + index as f32 * 0.001,
+                ));
+            }
             pass.push(RenderCommand::draw_text_styled(
                 node.content.name.clone(),
-                rect.center(),
+                RenderPoint::new(rect.x + 40.0, rect.center().y),
                 if selected || is_root {
                     [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
                 } else if locked {
@@ -28084,11 +28130,11 @@ impl DesktopLauncher {
                 },
                 9.0,
                 0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
+                RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true)
                     .with_outline(selected || is_root),
-                Layer::END_PIXELED + 0.031 + index as f32 * 0.001,
+                Layer::END_PIXELED + 0.032 + index as f32 * 0.001,
             ));
         }
 
@@ -48609,6 +48655,14 @@ version: "2.0.0"
         assert!(commands.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, .. } if symbol.contains("copper")
+        )));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol.contains("core-shard")
+        )));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol.contains("conveyor")
         )));
         assert!(commands
             .iter()

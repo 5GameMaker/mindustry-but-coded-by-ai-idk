@@ -15,6 +15,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 555. ResearchDialog TechTree 节点内容图标接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **65.6%**，仍未达到完整可玩；继续优先前端/UI，让 TechTree 图本体更接近原版内容图标树。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/ResearchDialog.java` 的 tech node button 使用内容图标/锁定态展示，而不是只有 content name 文本；
+  - `UnlockableContent` 的 full icon fallback 顺序适用于 block/unit/item/liquid。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `liquid_full_icon_region_symbol(...)` 与 `tech_tree_content_icon_symbol(...)`；
+    - TechTree 节点现在渲染 block/unit/item/liquid 内容图标 sprite，并保留名称文本；
+    - 锁定且不可选节点图标使用半透明态；
+    - 更新 TechTree 渲染测试，验证 `core-shard`、`conveyor` 等节点图标 sprite 进入 render pass。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop techtree --features opengl-backend`
+- 仍未完成：
+  - 节点布局仍是简化矩形按钮，尚未完全复刻 Java `ResearchDialog.View` 的 pan/zoom、hover info follow、按钮尺寸与连线细节；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 554. ResearchDialog 节点 requirements 行图标化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
