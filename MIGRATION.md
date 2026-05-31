@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 648. JoinDialog ServerGroup Java hash 排序对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.0%**，仍未达到完整可玩；继续优先前端/UI 与联机入口，当前闭环目标是让 community ServerGroup JSON 解析后的排序更贴近 Java `parseServerString(...)`。
+- Java 对照依据：
+  - `JoinDialog.parseServerString(...)` 在构造 `ServerGroup` 后执行 `servers.sort(s -> s.name == null ? Integer.MAX_VALUE : s.name.hashCode())`；
+  - Java `String.hashCode()` 基于 UTF-16 code unit，使用 31 倍累加并按 32-bit signed int 溢出。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `java_string_hash_code(...)`，使用 `encode_utf16()` 与 wrapping `i32` 复刻 Java 字符串 hash；
+    - `join_community_groups_from_server_json(...)` 从名称字典序改为 Java hash key 排序；
+    - 回归测试断言 `"" == 0`、`"Zeta" == 2781944`、`"Alpha" == 63357246`，并同步验证解析后的 group index。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - 远端 HTTP fetch/cache 文件尚未接入；
+  - community host 逐卡片与真实 ping/refresh 仍待迁移；
+  - Java `safeConnect(..., version)` 版本门禁仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 647. JoinDialog community ServerGroup JSON 解析接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

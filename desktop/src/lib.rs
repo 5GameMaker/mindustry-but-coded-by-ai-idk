@@ -42493,8 +42493,14 @@ fn join_community_groups_from_server_json(value: &str) -> Vec<DesktopJoinCommuni
         groups.push(DesktopJoinCommunityGroup::new(name, addresses, prioritized));
         rest = &rest[end + 1..];
     }
-    groups.sort_by(|a, b| a.name.cmp(&b.name));
+    groups.sort_by_key(|group| java_string_hash_code(&group.name));
     groups
+}
+
+fn java_string_hash_code(value: &str) -> i32 {
+    value.encode_utf16().fold(0i32, |hash, unit| {
+        hash.wrapping_mul(31).wrapping_add(unit as i32)
+    })
 }
 
 #[cfg(test)]
@@ -68532,14 +68538,17 @@ version: "2.0.0"
         assert_eq!(groups[0].name, "");
         assert_eq!(groups[0].addresses, vec!["array-address.example:6567"]);
         assert!(!groups[0].prioritized);
-        assert_eq!(groups[1].name, "Alpha");
+        assert_eq!(groups[1].name, "Zeta");
+        assert_eq!(groups[1].addresses, vec!["zeta.example:6567"]);
+        assert_eq!(groups[2].name, "Alpha");
         assert_eq!(
-            groups[1].addresses,
+            groups[2].addresses,
             vec!["alpha-a.example:6567", "alpha-b.example"]
         );
-        assert!(groups[1].prioritized);
-        assert_eq!(groups[2].name, "Zeta");
-        assert_eq!(groups[2].addresses, vec!["zeta.example:6567"]);
+        assert!(groups[2].prioritized);
+        assert_eq!(super::java_string_hash_code(""), 0);
+        assert_eq!(super::java_string_hash_code("Zeta"), 2781944);
+        assert_eq!(super::java_string_hash_code("Alpha"), 63357246);
 
         let mut launcher = DesktopLauncher::new(Vec::new());
         assert_eq!(
@@ -68551,7 +68560,7 @@ version: "2.0.0"
         assert!(lines.contains(&"section: @servers.global groups: 1".to_string()));
         assert!(lines
             .iter()
-            .any(|line| line.contains("community[1]: Alpha")));
+            .any(|line| line.contains("community[2]: Alpha")));
     }
 
     #[test]
