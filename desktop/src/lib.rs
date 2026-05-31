@@ -182,6 +182,15 @@ const MAP_LIST_CARD_HEIGHT: f32 = 96.0;
 const MAP_LIST_CARD_GAP: f32 = 10.0;
 const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
 const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
+const PAUSE_OVERLAY_PANEL_WIDTH: f32 = 304.0;
+const PAUSE_OVERLAY_PANEL_TOP_MARGIN: f32 = 54.0;
+const PAUSE_OVERLAY_TITLE_HEIGHT: f32 = 34.0;
+const PAUSE_OVERLAY_BUTTON_WIDTH: f32 = 268.0;
+const PAUSE_OVERLAY_BUTTON_HEIGHT: f32 = 52.0;
+const PAUSE_OVERLAY_BUTTON_GAP: f32 = 8.0;
+const PAUSE_OVERLAY_BUTTON_SIDE_PADDING: f32 = 18.0;
+const PAUSE_OVERLAY_BUTTON_TOP_PADDING: f32 = 18.0;
+const PAUSE_OVERLAY_BUTTON_BOTTOM_PADDING: f32 = 20.0;
 const MENU_LOGO_UPSTREAM_WIDTH: f32 = 768.0;
 const MENU_LOGO_UPSTREAM_HEIGHT: f32 = 107.0;
 const MOBILE_CONSOLE_BUTTON_SIZE: f32 = 58.0;
@@ -671,7 +680,7 @@ impl DesktopMenuRoute {
             Self::Join => "JOIN GAME",
             Self::CustomGame => "CUSTOM GAME",
             Self::SaveGame => "@savegame",
-            Self::LoadGame => "LOAD GAME",
+            Self::LoadGame => "@loadgame",
             Self::Schematics => "SCHEMATICS",
             Self::Database => "DATABASE",
             Self::TechTree => "TECH TREE",
@@ -2624,6 +2633,16 @@ pub enum DesktopMenuRouteShellAction {
     OpenDiscordLink,
     CopyDiscordLink,
     Settings(DesktopSettingsAction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesktopPausedOverlayAction {
+    Back,
+    Settings,
+    SaveGame,
+    LoadGame,
+    HostServer,
+    Quit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20557,6 +20576,14 @@ impl DesktopLauncher {
     }
 
     fn apply_menu_back_key(&mut self) -> bool {
+        if self.has_renderable_world_for_default_frame()
+            && self.game_state.is_paused()
+            && self.active_menu_route.is_none()
+        {
+            self.game_state.set(GameStateState::Playing);
+            self.last_menu_route_shell_action = None;
+            return true;
+        }
         if self.menu_mobile_terminal_open {
             self.menu_mobile_terminal_open = false;
             self.last_menu_chrome_action = None;
@@ -20905,6 +20932,88 @@ impl DesktopLauncher {
             .unwrap_or_else(|| Self::load_game_slot_title(slot))
     }
 
+    fn load_game_slot_map_line(slot: &SaveSlotRecord) -> String {
+        let map = slot
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.map_name.as_deref())
+            .filter(|map| !map.trim().is_empty())
+            .unwrap_or("@unknown");
+        let mode = slot
+            .meta
+            .as_ref()
+            .and_then(|meta| Self::save_meta_mode_name_from_rules_json(&meta.rules_json))
+            .unwrap_or_else(|| Gamemode::Survival.wire_name().to_string());
+        format!("@save.map: {map} / @mode.{mode}.name")
+    }
+
+    fn load_game_slot_wave_line(slot: &SaveSlotRecord) -> String {
+        let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
+        format!("@save.wave: {wave}")
+    }
+
+    fn load_game_slot_playtime_line(slot: &SaveSlotRecord) -> String {
+        format!(
+            "@save.playtime: {}",
+            Self::format_save_playtime(slot.time_played())
+        )
+    }
+
+    fn load_game_slot_date_line(slot: &SaveSlotRecord) -> String {
+        format!("saved: {}", slot.timestamp())
+    }
+
+    fn load_game_slot_autosave_line(slot: &SaveSlotRecord) -> String {
+        let autosave = slot
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.tags.get("autosave"))
+            .map(|value| matches!(value.as_str(), "true" | "1" | "yes"))
+            .unwrap_or(false);
+        format!("@save.autosave: {autosave}")
+    }
+
+    fn format_save_playtime(time_played_millis: i64) -> String {
+        let seconds = (time_played_millis.max(0) / 1000) as u64;
+        let minutes = seconds / 60;
+        let hours = minutes / 60;
+        let minutes_remainder = minutes % 60;
+        let seconds_remainder = seconds % 60;
+        if hours > 0 {
+            format!("{hours}h {minutes_remainder:02}m")
+        } else if minutes > 0 {
+            format!("{minutes}m {seconds_remainder:02}s")
+        } else {
+            format!("{seconds}s")
+        }
+    }
+
+    fn save_meta_mode_name_from_rules_json(rules_json: &str) -> Option<String> {
+        let key_index = rules_json.find("\"modeName\"")?;
+        let after_key = &rules_json[key_index + "\"modeName\"".len()..];
+        let colon_index = after_key.find(':')?;
+        let mut value = after_key[colon_index + 1..].trim_start();
+        if value.starts_with("null") {
+            return None;
+        }
+        value = value.strip_prefix('"')?;
+        let mut out = String::new();
+        let mut escaped = false;
+        for ch in value.chars() {
+            if escaped {
+                out.push(ch);
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                break;
+            } else {
+                out.push(ch);
+            }
+        }
+        (!out.trim().is_empty()).then_some(out)
+    }
+
     fn load_game_slot_lines(&self) -> Vec<String> {
         if let Some(error) = self.load_game_error.as_ref() {
             return vec![format!("save slots: error"), error.clone()];
@@ -20937,13 +21046,14 @@ impl DesktopLauncher {
                 continue;
             };
             let title = self.load_game_slot_display_title(slot);
-            let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
             lines.push(format!(
-                "#{visible_index} {} | wave {} | saved {}",
+                "#{visible_index} {} | {} | {}",
                 title,
-                wave,
-                slot.timestamp()
+                Self::load_game_slot_wave_line(slot),
+                Self::load_game_slot_date_line(slot)
             ));
+            lines.push(Self::load_game_slot_map_line(slot));
+            lines.push(Self::load_game_slot_playtime_line(slot));
         }
         if self.load_game_scroll_offset > 0 {
             lines.push(format!("scroll: {}", self.load_game_scroll_offset));
@@ -24357,6 +24467,140 @@ impl DesktopLauncher {
         Self::active_menu_route_shell_panel_for_viewport(viewport)
     }
 
+    fn pause_overlay_panel_for_viewport(viewport: RenderViewport) -> RenderRect {
+        let panel_width = PAUSE_OVERLAY_PANEL_WIDTH.clamp(280.0, 360.0);
+        let panel_height = PAUSE_OVERLAY_BUTTON_TOP_PADDING
+            + PAUSE_OVERLAY_TITLE_HEIGHT
+            + 18.0
+            + 6.0 * PAUSE_OVERLAY_BUTTON_HEIGHT
+            + 5.0 * PAUSE_OVERLAY_BUTTON_GAP
+            + PAUSE_OVERLAY_BUTTON_BOTTOM_PADDING;
+        RenderRect::new(
+            viewport.x + 48.0,
+            viewport.y
+                + ((viewport.height - panel_height).max(0.0) * 0.5)
+                    .min(
+                        viewport.y + viewport.height
+                            - panel_height
+                            - PAUSE_OVERLAY_PANEL_TOP_MARGIN,
+                    )
+                    .max(viewport.y + PAUSE_OVERLAY_PANEL_TOP_MARGIN),
+            panel_width,
+            panel_height,
+        )
+    }
+
+    fn pause_overlay_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let total_height = 6.0 * PAUSE_OVERLAY_BUTTON_HEIGHT + 5.0 * PAUSE_OVERLAY_BUTTON_GAP;
+        let button_width =
+            PAUSE_OVERLAY_BUTTON_WIDTH.min(panel.width - PAUSE_OVERLAY_BUTTON_SIDE_PADDING * 2.0);
+        let start_y = panel.y
+            + PAUSE_OVERLAY_BUTTON_TOP_PADDING
+            + PAUSE_OVERLAY_TITLE_HEIGHT
+            + 18.0
+            + (panel.height
+                - PAUSE_OVERLAY_BUTTON_TOP_PADDING
+                - PAUSE_OVERLAY_TITLE_HEIGHT
+                - 18.0
+                - PAUSE_OVERLAY_BUTTON_BOTTOM_PADDING
+                - total_height)
+                * 0.0;
+        RenderRect::new(
+            panel.x + (panel.width - button_width) * 0.5,
+            start_y + index as f32 * (PAUSE_OVERLAY_BUTTON_HEIGHT + PAUSE_OVERLAY_BUTTON_GAP),
+            button_width.max(1.0),
+            PAUSE_OVERLAY_BUTTON_HEIGHT,
+        )
+    }
+
+    fn pause_overlay_button_for_index(index: usize) -> Option<DesktopPausedOverlayAction> {
+        match index {
+            0 => Some(DesktopPausedOverlayAction::Back),
+            1 => Some(DesktopPausedOverlayAction::Settings),
+            2 => Some(DesktopPausedOverlayAction::SaveGame),
+            3 => Some(DesktopPausedOverlayAction::LoadGame),
+            4 => Some(DesktopPausedOverlayAction::HostServer),
+            5 => Some(DesktopPausedOverlayAction::Quit),
+            _ => None,
+        }
+    }
+
+    fn pause_overlay_button_label(action: DesktopPausedOverlayAction) -> &'static str {
+        match action {
+            DesktopPausedOverlayAction::Back => "@back",
+            DesktopPausedOverlayAction::Settings => "@settings",
+            DesktopPausedOverlayAction::SaveGame => "@savegame",
+            DesktopPausedOverlayAction::LoadGame => "@loadgame",
+            DesktopPausedOverlayAction::HostServer => "@hostserver",
+            DesktopPausedOverlayAction::Quit => "@quit",
+        }
+    }
+
+    fn pause_overlay_button_icon(action: DesktopPausedOverlayAction) -> Option<&'static str> {
+        match action {
+            DesktopPausedOverlayAction::Back => Some("left"),
+            DesktopPausedOverlayAction::Settings => Some("settings"),
+            DesktopPausedOverlayAction::SaveGame => Some("save"),
+            DesktopPausedOverlayAction::LoadGame => Some("load"),
+            DesktopPausedOverlayAction::HostServer => Some("host"),
+            DesktopPausedOverlayAction::Quit => Some("exit"),
+        }
+    }
+
+    fn pause_overlay_action_at_surface_point(
+        &self,
+        surface_size: DesktopSurfaceSize,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopPausedOverlayAction> {
+        if !self.has_renderable_world_for_default_frame() {
+            return None;
+        }
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel = Self::pause_overlay_panel_for_viewport(viewport);
+        let point = RenderPoint::new(x, y);
+        for index in 0..6 {
+            let Some(action) = Self::pause_overlay_button_for_index(index) else {
+                continue;
+            };
+            if Self::pause_overlay_button_rect_for_panel(panel, index).contains_point(point) {
+                return Some(action);
+            }
+        }
+        None
+    }
+
+    fn open_pause_overlay_route(&mut self, route: DesktopMenuRoute) {
+        self.game_state.set(GameStateState::Paused);
+        self.active_menu_route = Some(route);
+        self.last_menu_guard_message = None;
+        self.last_menu_route_shell_action = None;
+        match route {
+            DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame => {
+                self.refresh_load_game_slots();
+                self.load_game_search.clear();
+                self.load_game_search_focused = true;
+                self.load_game_scroll_offset = 0;
+                self.load_game_rename_dialog_slot = None;
+                self.load_game_rename_text.clear();
+                self.save_game_new_dialog_open = false;
+                self.save_game_new_text.clear();
+                self.save_game_overwrite_dialog_slot = None;
+            }
+            DesktopMenuRoute::Settings => {
+                self.settings_dialog_state = DesktopSettingsDialogState::default();
+                self.settings_child_dialog = None;
+                self.last_settings_action = None;
+                self.last_settings_hovered_control = None;
+                self.last_settings_pressed_control = None;
+                self.settings_scroll_drag_state = None;
+                self.settings_scroll_offsets.clear();
+            }
+            DesktopMenuRoute::Join => {}
+            _ => {}
+        }
+    }
+
     fn about_link_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let columns = if panel.width >= 340.0 { 2usize } else { 1usize };
         let gap = 8.0;
@@ -27269,6 +27513,41 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::Settings(action) => {
                 self.dispatch_settings_action(action);
+            }
+        }
+    }
+
+    fn dispatch_pause_overlay_action(&mut self, action: DesktopPausedOverlayAction) {
+        match action {
+            DesktopPausedOverlayAction::Back => {
+                if self.active_menu_route.is_some() {
+                    self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
+                } else {
+                    self.game_state.set(GameStateState::Playing);
+                    self.active_menu_route = None;
+                    self.last_menu_route_shell_action = None;
+                }
+                self.menu_mobile_terminal_open = false;
+            }
+            DesktopPausedOverlayAction::Settings => {
+                self.open_pause_overlay_route(DesktopMenuRoute::Settings);
+            }
+            DesktopPausedOverlayAction::SaveGame => {
+                self.open_pause_overlay_route(DesktopMenuRoute::SaveGame);
+            }
+            DesktopPausedOverlayAction::LoadGame => {
+                self.open_pause_overlay_route(DesktopMenuRoute::LoadGame);
+            }
+            DesktopPausedOverlayAction::HostServer => {
+                self.open_pause_overlay_route(DesktopMenuRoute::Join);
+            }
+            DesktopPausedOverlayAction::Quit => {
+                self.dispatch_menu_route_shell_action(DesktopMenuRouteShellAction::CloseRoute);
+                self.game_state.set(GameStateState::Menu);
+                self.menu_renderer_state.reset_desktop_root();
+                self.menu_mobile_terminal_open = false;
+                self.last_menu_route_shell_action = None;
+                self.last_menu_guard_message = None;
             }
         }
     }
@@ -30580,6 +30859,36 @@ impl DesktopLauncher {
         ));
 
         let filtered_indices = self.filtered_load_game_slot_indices();
+        for (index, mode) in Gamemode::ALL
+            .into_iter()
+            .filter(|mode| !mode.hidden())
+            .enumerate()
+        {
+            let rect = RenderRect::new(
+                search.right() - 176.0 + index as f32 * 36.0,
+                search.center().y - 16.0,
+                30.0,
+                32.0,
+            );
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("clear"),
+                rect,
+                [1.0, 1.0, 1.0, 0.58],
+                0.0,
+                Layer::END_PIXELED + 0.029 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!("@mode.{}.name", mode.wire_name()),
+                RenderPoint::new(rect.center().x, rect.center().y),
+                [0.68, 0.80, 0.88, 1.0],
+                6.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.030 + index as f32 * 0.0001,
+            ));
+        }
         pass.push(RenderCommand::draw_text_styled(
             format!(
                 "{} / {}",
@@ -30667,7 +30976,6 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.033 + visible_index as f32 * 0.0001,
             ));
             let title = self.load_game_slot_display_title(slot);
-            let wave = slot.meta.as_ref().map_or(0, |meta| meta.wave);
             pass.push(RenderCommand::draw_text_styled(
                 format!("[accent]{title}"),
                 RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 20.0),
@@ -30681,7 +30989,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                format!("slot {} | @save.wave {wave}", slot.index()),
+                Self::load_game_slot_map_line(slot),
                 RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 42.0),
                 [0.66, 0.76, 0.84, 1.0],
                 11.0,
@@ -30692,10 +31000,26 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                format!("saved {}", slot.timestamp()),
+                format!(
+                    "{} | {} | {}",
+                    Self::load_game_slot_wave_line(slot),
+                    Self::load_game_slot_playtime_line(slot),
+                    Self::load_game_slot_date_line(slot)
+                ),
                 RenderPoint::new(rect.x + 84.0, rect.y + rect.height - 60.0),
                 [0.54, 0.64, 0.72, 1.0],
-                10.0,
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                Self::load_game_slot_autosave_line(slot),
+                RenderPoint::new(rect.x + 84.0, rect.y + 14.0),
+                [0.48, 0.60, 0.68, 1.0],
+                8.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -31271,7 +31595,9 @@ impl DesktopLauncher {
         surface_size: DesktopSurfaceSize,
         input_events: &[DesktopInputTickEvent],
     ) -> bool {
-        if self.has_renderable_world_for_default_frame() {
+        let world_overlay_visible = self.has_renderable_world_for_default_frame()
+            && (self.game_state.is_paused() || self.active_menu_route.is_some());
+        if self.has_renderable_world_for_default_frame() && !world_overlay_visible {
             return false;
         }
 
@@ -31574,6 +31900,30 @@ impl DesktopLauncher {
                                 cursor.y,
                             );
                         if self.settings_scroll_drag_state.is_some() {
+                            self.last_menu_action = None;
+                            continue;
+                        }
+                        if world_overlay_visible {
+                            if let Some(action) = self.pause_overlay_action_at_surface_point(
+                                surface_size,
+                                cursor.x,
+                                cursor.y,
+                            ) {
+                                self.dispatch_pause_overlay_action(action);
+                                self.last_menu_action = None;
+                                continue;
+                            }
+                            if let Some(action) = self
+                                .active_menu_route_shell_action_at_surface_point(
+                                    surface_size,
+                                    cursor.x,
+                                    cursor.y,
+                                )
+                            {
+                                self.dispatch_menu_route_shell_action(action);
+                                self.last_menu_action = None;
+                                continue;
+                            }
                             self.last_menu_action = None;
                             continue;
                         }
@@ -33478,6 +33828,80 @@ impl DesktopLauncher {
         }
     }
 
+    fn pause_overlay_render_pass(&self, viewport: RenderViewport) -> Option<RenderPass> {
+        if !self.has_renderable_world_for_default_frame()
+            || (!self.game_state.is_paused() && self.active_menu_route.is_none())
+        {
+            return None;
+        }
+
+        let mut pass = RenderPass::new(RenderPassKind::Ui)
+            .with_order(RenderPassKind::Ui.default_order() + 1)
+            .with_viewport(viewport)
+            .with_camera(self.default_render_camera_for_viewport(viewport));
+        pass.push(RenderCommand::fill_rect(
+            viewport.as_rect(),
+            [0.0, 0.0, 0.0, 0.36],
+            Layer::END_PIXELED + 0.140,
+        ));
+
+        if self.active_menu_route.is_some() {
+            self.push_active_menu_route_shell(&mut pass, viewport);
+            return Some(pass);
+        }
+
+        let panel = Self::pause_overlay_panel_for_viewport(viewport);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            panel,
+            [1.0, 1.0, 1.0, 0.96],
+            0.0,
+            Layer::END_PIXELED + 0.141,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            panel,
+            [0.40, 0.58, 0.70, 0.92],
+            2.0,
+            Layer::END_PIXELED + 0.142,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "PausedDialog",
+            RenderPoint::new(panel.center().x, panel.y + panel.height - 25.0),
+            [0.94, 0.98, 1.0, 1.0],
+            13.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.143,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "upstream: PausedDialog",
+            RenderPoint::new(panel.center().x, panel.y + panel.height - 43.0),
+            [0.55, 0.68, 0.76, 1.0],
+            8.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.144,
+        ));
+        for index in 0..6 {
+            let Some(action) = Self::pause_overlay_button_for_index(index) else {
+                continue;
+            };
+            self.push_settings_text_button(
+                &mut pass,
+                Self::pause_overlay_button_rect_for_panel(panel, index),
+                Self::pause_overlay_button_label(action),
+                Self::pause_overlay_button_icon(action),
+                Layer::END_PIXELED + 0.145 + index as f32 * 0.0001,
+            );
+        }
+        Some(pass)
+    }
+
     fn menu_graphics_frame_for_surface(
         &mut self,
         frame_index: u64,
@@ -33651,6 +34075,9 @@ impl DesktopLauncher {
         }
         if let Some(ui_pass) = self.desktop_ui_render_pass(viewport) {
             render_frame.push_pass(ui_pass);
+        }
+        if let Some(pause_pass) = self.pause_overlay_render_pass(viewport) {
+            render_frame.push_pass(pause_pass);
         }
         render_frame.sort_passes_like_java_renderer_draw();
         let floor_chunk_batches = self.floor_chunk_draw_batches(camera, viewport);
@@ -50577,6 +51004,76 @@ version: "2.0.0"
     }
 
     #[test]
+    fn desktop_launcher_paused_world_overlay_renders_save_and_load_entries() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.game_state.world.resize(16, 16);
+        launcher.game_state.set(GameStateState::Paused);
+        assert!(launcher.game_state.is_paused());
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let mut renderer = HeadlessDesktopGraphicsRenderer::default();
+        launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
+
+        let texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&"PausedDialog"));
+        assert!(texts.contains(&"upstream: PausedDialog"));
+        assert!(texts.contains(&"@back"));
+        assert!(texts.contains(&"@settings"));
+        assert!(texts.contains(&"@savegame"));
+        assert!(texts.contains(&"@loadgame"));
+        assert!(texts.contains(&"@hostserver"));
+        assert!(texts.contains(&"@quit"));
+
+        let panel = DesktopLauncher::pause_overlay_panel_for_viewport(viewport);
+        let save_center = DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 2).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: save_center.x,
+                    y: save_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "left".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::SaveGame)
+        );
+        assert!(launcher.game_state.is_paused());
+
+        launcher.render_default_graphics_frame_for_surface_with(1, surface, 2, &mut renderer);
+        let route_texts = renderer
+            .last_trace
+            .render_passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(route_texts.contains(&"@savegame"));
+        assert!(route_texts.contains(&"@save.new"));
+        assert!(route_texts.contains(&"upstream: SaveDialog"));
+    }
+
+    #[test]
     fn desktop_launcher_menu_primary_action_switches_database_submenu() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let surface = DesktopSurfaceSize::new(800, 600);
@@ -54953,7 +55450,10 @@ version: "2.0.0"
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::LoadGame);
         assert!(lines.contains(&"save slots: 2".to_string()));
         assert!(lines.iter().any(|line| line.contains("#0 New Map")));
-        assert!(lines.iter().any(|line| line.contains("wave 9")));
+        assert!(lines.iter().any(|line| line.contains("@save.wave: 9")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("@save.map: New Map / @mode.survival.name")));
         assert!(!lines
             .iter()
             .any(|line| line.contains("pending LoadDialog port")));
@@ -55011,8 +55511,14 @@ version: "2.0.0"
         assert!(texts.contains(&"@save.search"));
         assert!(texts.contains(&"@save.import"));
         assert!(texts.contains(&"[accent]New Map"));
-        assert!(texts.contains(&"slot 2 | @save.wave 9"));
-        assert!(texts.contains(&"saved 200"));
+        assert!(texts.contains(&"@save.map: New Map / @mode.survival.name"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("@save.wave: 9") && text.contains("saved: 200")));
+        assert!(texts.contains(&"@mode.survival.name"));
+        assert!(texts.contains(&"@mode.sandbox.name"));
+        assert!(texts.contains(&"@mode.attack.name"));
+        assert!(texts.contains(&"@mode.pvp.name"));
         assert!(!texts.iter().any(|text| text.starts_with("#0 New Map")));
         let slot_card = DesktopLauncher::load_game_slot_card_rect_for_panel(
             DesktopLauncher::active_menu_route_shell_panel_for_route(

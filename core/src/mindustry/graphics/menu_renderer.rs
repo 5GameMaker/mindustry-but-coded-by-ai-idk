@@ -24,6 +24,8 @@ pub const MENU_DESKTOP_BUTTON_MARGIN_LEFT: f32 = 11.0;
 pub const MENU_DESKTOP_BUTTON_ICON_X: f32 = 30.0;
 pub const MENU_DESKTOP_BUTTON_LABEL_GAP: f32 = 23.0;
 pub const MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE: f32 = 30.0;
+pub const MENU_BUTTON_ICON_LAYER_OFFSET: f32 = 0.01;
+pub const MENU_BUTTON_LABEL_LAYER_OFFSET: f32 = 0.02;
 pub const MENU_DESKTOP_BACKGROUND_LAYER: f32 = 100.95;
 pub const MENU_MOBILE_BUTTON_ICON_OFFSET_Y: f32 = 17.0;
 pub const MENU_MOBILE_BUTTON_LABEL_OFFSET_Y: f32 = -25.0;
@@ -250,8 +252,40 @@ fn menu_push_black6_panel(commands: &mut Vec<RenderCommand>, rect: RenderRect, a
 
     commands.push(RenderCommand::fill_rect(
         rect,
-        menu_color_with_alpha([0.0, 0.0, 0.0, 0.6], alpha_scale),
+        menu_color_with_alpha([0.0, 0.0, 0.0, 0.66], alpha_scale),
         MENU_DESKTOP_BACKGROUND_LAYER,
+    ));
+    commands.push(RenderCommand::stroke_rect(
+        rect,
+        menu_color_with_alpha([0.0, 0.0, 0.0, 0.42], alpha_scale),
+        1.0,
+        MENU_DESKTOP_BACKGROUND_LAYER + 0.01,
+    ));
+}
+
+fn menu_push_desktop_button_focus_outline(
+    commands: &mut Vec<RenderCommand>,
+    rect: RenderRect,
+    state: MenuFlatToggleMenuState,
+    alpha_scale: f32,
+) {
+    let color = match state {
+        MenuFlatToggleMenuState::Down => [0.16, 0.44, 0.58, 0.34],
+        MenuFlatToggleMenuState::Up => return,
+        MenuFlatToggleMenuState::Checked => [0.25, 0.72, 0.92, 0.56],
+        MenuFlatToggleMenuState::Over => [0.28, 0.66, 0.86, 0.42],
+        MenuFlatToggleMenuState::Disabled => [0.0, 0.0, 0.0, 0.0],
+    };
+
+    if color[3] <= f32::EPSILON {
+        return;
+    }
+
+    commands.push(RenderCommand::stroke_rect(
+        rect,
+        menu_color_with_alpha(color, alpha_scale),
+        1.0,
+        MENU_FLAT_TOGGLE_MENU_STYLE.drawable_layer + 0.01,
     ));
 }
 
@@ -285,7 +319,12 @@ fn menu_push_desktop_panel_backgrounds(
     };
     let inferred_stage_height =
         (main_bounds.y * 2.0 + main_bounds.height).max(main_bounds.bottom());
-    let main_panel = RenderRect::new(main_bounds.x, 0.0, main_bounds.width, inferred_stage_height);
+    let main_panel = RenderRect::new(
+        main_bounds.x,
+        0.0,
+        main_bounds.right() - main_bounds.x,
+        inferred_stage_height,
+    );
     menu_push_black6_panel(commands, main_panel, 1.0);
 
     if let Some(submenu_bounds) = submenu_bounds {
@@ -293,7 +332,7 @@ fn menu_push_desktop_panel_backgrounds(
             let submenu_panel = RenderRect::new(
                 submenu_bounds.x,
                 0.0,
-                submenu_bounds.width,
+                submenu_bounds.right() - submenu_bounds.x,
                 inferred_stage_height,
             );
             menu_push_black6_panel(commands, submenu_panel, submenu_alpha);
@@ -748,7 +787,7 @@ impl MenuUiPlan {
 
     pub fn to_render_commands(&self) -> Vec<RenderCommand> {
         let style = MENU_FLAT_TOGGLE_MENU_STYLE;
-        let mut commands = Vec::with_capacity(self.buttons.len() * 4 + 2);
+        let mut commands = Vec::with_capacity(self.buttons.len() * 6 + 4);
         if !self.mobile {
             menu_push_desktop_panel_backgrounds(&mut commands, &self.buttons, self.submenu_alpha);
         }
@@ -777,11 +816,14 @@ impl MenuUiPlan {
                     style,
                     alpha,
                 );
+                menu_push_desktop_button_focus_outline(&mut commands, button.rect, state, alpha);
             }
             let icon_name = button
                 .icon_name
                 .as_deref()
                 .or_else(|| button.role.icon_name(self.mobile));
+            let icon_layer = style.text_layer + MENU_BUTTON_ICON_LAYER_OFFSET;
+            let label_layer = style.text_layer + MENU_BUTTON_LABEL_LAYER_OFFSET;
             if let Some(icon_name) = icon_name {
                 let icon_point = if self.mobile {
                     RenderPoint::new(
@@ -806,7 +848,7 @@ impl MenuUiPlan {
                         MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE
                     },
                     menu_color_with_alpha(style.text_color, alpha),
-                    style.text_layer,
+                    icon_layer,
                 );
             }
             let (label_point, label_style) = if self.mobile {
@@ -841,7 +883,7 @@ impl MenuUiPlan {
                 style.text_size(self.mobile),
                 0.0,
                 label_style,
-                style.text_layer,
+                label_layer,
             ));
         }
         commands
@@ -2893,7 +2935,7 @@ mod tests {
                         && color[0] == 0.0
                         && color[1] == 0.0
                         && color[2] == 0.0
-                        && (color[3] - 0.6 * alpha_scale).abs() < 0.0001
+                        && (color[3] - 0.66 * alpha_scale).abs() < 0.0001
                         && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
                 }
                 _ => false,
@@ -3212,6 +3254,20 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
+                RenderCommand::StrokeRect {
+                    rect: outline_rect,
+                    layer,
+                    ..
+                } if *outline_rect == rect
+                    && (*layer
+                        - (MENU_FLAT_TOGGLE_MENU_STYLE.drawable_layer + 0.01))
+                        .abs()
+                        < f32::EPSILON
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
                 RenderCommand::DrawText { text, .. } if text == "Play"
             )
         }));
@@ -3228,7 +3284,11 @@ mod tests {
                             .abs()
                             < f32::EPSILON
                         && (position.y - rect.center().y).abs() < f32::EPSILON
-                        && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
+                        && (*layer
+                            - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
+                                + MENU_BUTTON_ICON_LAYER_OFFSET))
+                            .abs()
+                            < f32::EPSILON
             )
         }));
         assert!(!commands.iter().any(|command| matches!(
@@ -3476,7 +3536,11 @@ mod tests {
                         && style.font == RenderFontId::Icon
                         && (position.x - rect.center().x).abs() < f32::EPSILON
                         && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y)).abs() < f32::EPSILON
-                        && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
+                        && (*layer
+                            - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
+                                + MENU_BUTTON_ICON_LAYER_OFFSET))
+                            .abs()
+                            < f32::EPSILON
             )
         }));
         assert!(!commands.iter().any(|command| matches!(
@@ -3490,10 +3554,15 @@ mod tests {
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, position, style, .. }
+                RenderCommand::DrawText { text, position, style, layer, .. }
                     if text == "Custom Game"
                         && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_LABEL_OFFSET_Y)).abs() < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Center
+                        && (*layer
+                            - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
+                                + MENU_BUTTON_LABEL_LAYER_OFFSET))
+                            .abs()
+                            < f32::EPSILON
             )
         }));
     }
@@ -3619,6 +3688,15 @@ mod tests {
             Some(MenuButtonRole::Custom(0))
         );
         let render_commands = plan.ui.to_render_commands();
+        let custom_label_layer = render_commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::DrawText { text, layer, .. } if text == "SERVER BROWSER" => {
+                    Some(*layer)
+                }
+                _ => None,
+            })
+            .expect("desktop custom label should be rendered");
         assert!(render_commands.iter().any(|command| {
             matches!(
                 command,
@@ -3628,11 +3706,15 @@ mod tests {
                         && (position.x
                             - (custom.rect.x
                                 + MENU_DESKTOP_BUTTON_MARGIN_LEFT
-                                + MENU_DESKTOP_BUTTON_ICON_X))
+                            + MENU_DESKTOP_BUTTON_ICON_X))
                             .abs()
                             < f32::EPSILON
                         && (position.y - custom.rect.center().y).abs() < f32::EPSILON
-                        && (*layer - MENU_FLAT_TOGGLE_MENU_STYLE.text_layer).abs() < f32::EPSILON
+                        && (*layer
+                            - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
+                                + MENU_BUTTON_ICON_LAYER_OFFSET))
+                            .abs()
+                            < f32::EPSILON
             )
         }));
         assert!(!render_commands.iter().any(|command| matches!(
@@ -3649,7 +3731,7 @@ mod tests {
         assert!(render_commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, position, style, .. }
+                RenderCommand::DrawText { text, position, style, layer, .. }
                     if text == "SERVER BROWSER"
                         && (position.x
                             - (custom.rect.x
@@ -3659,8 +3741,17 @@ mod tests {
                             .abs()
                             < f32::EPSILON
                         && style.horizontal_align == RenderTextAlign::Start
+                        && (*layer
+                            - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
+                                + MENU_BUTTON_LABEL_LAYER_OFFSET))
+                            .abs()
+                            < f32::EPSILON
             )
         }));
+        assert!(
+            custom_label_layer
+                > MENU_FLAT_TOGGLE_MENU_STYLE.text_layer + MENU_BUTTON_ICON_LAYER_OFFSET
+        );
     }
 
     #[test]

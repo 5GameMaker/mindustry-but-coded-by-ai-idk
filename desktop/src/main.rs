@@ -78,6 +78,109 @@ fn desktop_native_trace_summary(message: impl AsRef<str>) {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_window_title_with_diagnostic(
+    base_title: &str,
+    diagnostic: Option<&str>,
+) -> String {
+    match diagnostic {
+        Some(diagnostic) if !diagnostic.is_empty() => format!("{base_title} - {diagnostic}"),
+        _ => base_title.to_string(),
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_error_categories(errors: &[String]) -> Vec<&'static str> {
+    let mut categories = Vec::new();
+    let mut push_category = |category: &'static str| {
+        if !categories.contains(&category) {
+            categories.push(category);
+        }
+    };
+
+    for error in errors {
+        let error = error.to_ascii_lowercase();
+        if error.contains("shader") {
+            push_category("shader");
+        }
+        if error.contains("texture") {
+            push_category("texture");
+        }
+        if error.contains("program") {
+            push_category("program");
+        }
+        if error.contains("framebuffer") {
+            push_category("framebuffer");
+        }
+        if error.contains("uniform") {
+            push_category("uniform");
+        }
+    }
+
+    categories
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_submit_diagnostic(
+    driver_state: &mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState,
+    invalid_draw_commands: usize,
+    native_errors: &[String],
+) -> Option<String> {
+    let total_commands = driver_state.framebuffer_attachment_plans
+        + driver_state.texture_upload_commands
+        + driver_state.sprite_mesh_upload_commands
+        + driver_state.resolve_mesh_upload_commands
+        + driver_state.shader_commands
+        + driver_state.draw_commands
+        + driver_state.resolve_draw_commands
+        + driver_state.resolve_commands;
+
+    let mut reasons = Vec::new();
+
+    if total_commands == 0 {
+        reasons.push("empty render frame: no GPU commands were recorded".to_string());
+    }
+
+    if driver_state.draw_commands == 0 && driver_state.resolve_draw_commands == 0 {
+        if total_commands > 0 {
+            reasons.push("no draw commands reached the GPU".to_string());
+        }
+    } else if driver_state.draw_commands > 0 {
+        if invalid_draw_commands >= driver_state.draw_commands {
+            reasons.push(format!(
+                "no valid draw commands: {} draw submissions were skipped",
+                invalid_draw_commands
+            ));
+        } else if invalid_draw_commands > 0 {
+            reasons.push(format!(
+                "some draw submissions were skipped: {}",
+                invalid_draw_commands
+            ));
+        }
+    }
+
+    if !native_errors.is_empty() {
+        let categories = desktop_native_opengl_error_categories(native_errors);
+        let latest_error = native_errors
+            .last()
+            .map_or("unknown native OpenGL failure", String::as_str);
+        if categories.is_empty() {
+            reasons.push(format!("native failure: {latest_error}"));
+        } else {
+            reasons.push(format!(
+                "native failure({}): {latest_error}",
+                categories.join("/")
+            ));
+        }
+    }
+
+    if reasons.is_empty() {
+        None
+    } else {
+        Some(reasons.join("; "))
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DesktopNativeOpenGlShaderAssetRootResolution {
     path: std::path::PathBuf,
@@ -199,6 +302,8 @@ struct DesktopNativeOpenGlRuntime {
     shader_asset_root: std::path::PathBuf,
     shader_asset_root_source: &'static str,
     shader_asset_root_shaders_dir_exists: bool,
+    base_window_title: String,
+    current_window_title_diagnostic: Option<String>,
     current_program: Option<u32>,
     current_vertex_array: Option<u32>,
     native_errors: Vec<String>,
@@ -461,10 +566,26 @@ impl DesktopNativeOpenGlRuntime {
             shader_asset_root: shader_asset_root_resolution.path,
             shader_asset_root_source: shader_asset_root_resolution.source,
             shader_asset_root_shaders_dir_exists: shader_asset_root_resolution.shaders_dir_exists,
+            base_window_title: native_config.surface.title.clone(),
+            current_window_title_diagnostic: None,
             current_program: None,
             current_vertex_array: None,
             native_errors: Vec::new(),
         };
+        runtime.update_window_title_diagnostic(None);
+        desktop_native_trace_summary(format!(
+            "runtime.new: window_title={}",
+            runtime.base_window_title
+        ));
+        if !runtime.shader_asset_root_shaders_dir_exists {
+            let diagnostic = format!(
+                "shader assets unavailable: {} (source={})",
+                runtime.shader_asset_root.display(),
+                runtime.shader_asset_root_source
+            );
+            runtime.update_window_title_diagnostic(Some(diagnostic.clone()));
+            desktop_native_trace_summary(format!("runtime.new: diagnosis={diagnostic}"));
+        }
         runtime.resize_native_surface(runtime.window_surface_size());
         desktop_native_trace("runtime.new: resized initial surface");
         Ok(runtime)
@@ -477,6 +598,19 @@ impl DesktopNativeOpenGlRuntime {
 
     fn request_redraw(&self) {
         self.window.request_redraw();
+    }
+
+    fn update_window_title_diagnostic(&mut self, diagnostic: Option<String>) {
+        if self.current_window_title_diagnostic == diagnostic {
+            return;
+        }
+
+        let title = desktop_native_window_title_with_diagnostic(
+            &self.base_window_title,
+            diagnostic.as_deref(),
+        );
+        self.window.set_title(&title);
+        self.current_window_title_diagnostic = diagnostic;
     }
 
     fn resize_native_surface(&mut self, size: mindustry_desktop::DesktopSurfaceSize) {
@@ -556,6 +690,7 @@ struct DesktopNativeOpenGlDriver<'a> {
     current_vertex_array: &'a mut Option<u32>,
     bound_render_target: Option<mindustry_core::mindustry::graphics::RenderTarget>,
     draw_target_available: bool,
+    invalid_draw_commands: usize,
     native_errors: &'a mut Vec<String>,
 }
 
@@ -1956,24 +2091,29 @@ impl DesktopNativeOpenGlDriver<'_> {
                 index_offset_bytes,
             } => {
                 if !self.draw_target_available {
+                    self.invalid_draw_commands += 1;
                     return;
                 }
-                if self.current_program.is_some() && self.current_vertex_array.is_some() {
-                    if let (Ok(index_count), Ok(index_offset_bytes)) = (
-                        i32::try_from(*index_count),
-                        i32::try_from(*index_offset_bytes),
-                    ) {
-                        if index_count > 0 {
-                            unsafe {
-                                self.gl.draw_elements(
-                                    *primitive_type,
-                                    index_count,
-                                    *index_type,
-                                    index_offset_bytes,
-                                );
-                            }
+                let has_program = self.current_program.is_some();
+                let has_vertex_array = self.current_vertex_array.is_some();
+                if let (Ok(index_count), Ok(index_offset_bytes)) = (
+                    i32::try_from(*index_count),
+                    i32::try_from(*index_offset_bytes),
+                ) {
+                    if index_count > 0 && has_program && has_vertex_array {
+                        unsafe {
+                            self.gl.draw_elements(
+                                *primitive_type,
+                                index_count,
+                                *index_type,
+                                index_offset_bytes,
+                            );
                         }
+                    } else {
+                        self.invalid_draw_commands += 1;
                     }
+                } else {
+                    self.invalid_draw_commands += 1;
                 }
             }
         }
@@ -2105,55 +2245,74 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             .state
             .surface_size
             .unwrap_or_else(|| self.window_surface_size());
-        let mut driver = DesktopNativeOpenGlDriver {
-            gl: &self.gl,
-            recording: &mut self.driver,
-            textures: &mut self.textures,
-            framebuffers: &mut self.framebuffers,
-            buffers: &mut self.buffers,
-            vertex_arrays: &mut self.vertex_arrays,
-            shaders: &mut self.shaders,
-            programs: &mut self.programs,
-            program_shaders: &mut self.program_shaders,
-            shader_sources: &mut self.shader_sources,
-            uniform_locations: &mut self.uniform_locations,
-            framebuffer_handle_cache: &mut self.framebuffer_handle_cache,
-            framebuffer_handle_allocator: &mut self.framebuffer_handle_allocator,
-            surface_size,
-            shader_asset_root: &self.shader_asset_root,
-            shader_asset_root_source: self.shader_asset_root_source,
-            shader_asset_root_shaders_dir_exists: self.shader_asset_root_shaders_dir_exists,
-            current_program: &mut self.current_program,
-            current_vertex_array: &mut self.current_vertex_array,
-            bound_render_target: None,
-            draw_target_available: true,
-            native_errors: &mut self.native_errors,
+        let native_errors_start = self.native_errors.len();
+        let (driver_state, invalid_draw_commands) = {
+            let mut driver = DesktopNativeOpenGlDriver {
+                gl: &self.gl,
+                recording: &mut self.driver,
+                textures: &mut self.textures,
+                framebuffers: &mut self.framebuffers,
+                buffers: &mut self.buffers,
+                vertex_arrays: &mut self.vertex_arrays,
+                shaders: &mut self.shaders,
+                programs: &mut self.programs,
+                program_shaders: &mut self.program_shaders,
+                shader_sources: &mut self.shader_sources,
+                uniform_locations: &mut self.uniform_locations,
+                framebuffer_handle_cache: &mut self.framebuffer_handle_cache,
+                framebuffer_handle_allocator: &mut self.framebuffer_handle_allocator,
+                surface_size,
+                shader_asset_root: &self.shader_asset_root,
+                shader_asset_root_source: self.shader_asset_root_source,
+                shader_asset_root_shaders_dir_exists: self.shader_asset_root_shaders_dir_exists,
+                current_program: &mut self.current_program,
+                current_vertex_array: &mut self.current_vertex_array,
+                bound_render_target: None,
+                draw_target_available: true,
+                invalid_draw_commands: 0,
+                native_errors: &mut self.native_errors,
+            };
+            desktop_native_trace("runtime.submit: drive native OpenGL driver");
+            let driver_state = executor.drive_driver(&mut driver);
+            (driver_state, driver.invalid_draw_commands)
         };
-        desktop_native_trace("runtime.submit: drive native OpenGL driver");
-        let driver_state = executor.drive_driver(&mut driver);
+        let frame_native_errors = &self.native_errors[native_errors_start..];
         if desktop_native_trace_summary_enabled() {
             let gl_error = unsafe { self.gl.get_error() };
             desktop_native_trace_summary(format!(
-                "runtime.submit: driver done framebuffer_attachments={} texture_upload_commands={} sprite_mesh_upload_commands={} shader_commands={} draw_commands={} resolve_draw_commands={} resolve_commands={} textures={} vaos={} buffers={} programs={} gl_error=0x{gl_error:04x}",
+                "runtime.submit: driver done framebuffer_attachments={} texture_upload_commands={} sprite_mesh_upload_commands={} resolve_mesh_upload_commands={} shader_commands={} draw_commands={} resolve_draw_commands={} resolve_commands={} invalid_draw_commands={} textures={} vaos={} buffers={} programs={} gl_error=0x{gl_error:04x}",
                 driver_state.framebuffer_attachment_plans,
                 driver_state.texture_upload_commands,
                 driver_state.sprite_mesh_upload_commands,
+                driver_state.resolve_mesh_upload_commands,
                 driver_state.shader_commands,
                 driver_state.draw_commands,
                 driver_state.resolve_draw_commands,
                 driver_state.resolve_commands,
+                invalid_draw_commands,
                 self.textures.len(),
                 self.vertex_arrays.len(),
                 self.buffers.len(),
                 self.programs.len()
             ));
-            if !self.native_errors.is_empty() {
-                for error in self.native_errors.iter().rev().take(5).rev() {
+            if !frame_native_errors.is_empty() {
+                for error in frame_native_errors.iter().rev().take(5).rev() {
                     desktop_native_trace_summary(format!(
                         "runtime.submit: native warning: {error}"
                     ));
                 }
             }
+        }
+        let diagnostic = desktop_native_opengl_submit_diagnostic(
+            &driver_state,
+            invalid_draw_commands,
+            frame_native_errors,
+        );
+        if let Some(diagnostic) = diagnostic {
+            desktop_native_trace_summary(format!("runtime.submit: diagnosis={diagnostic}"));
+            self.update_window_title_diagnostic(Some(diagnostic));
+        } else {
+            self.update_window_title_diagnostic(None);
         }
         self.state.frames_submitted += 1;
         self.state.last_driver_state = Some(driver_state);
@@ -2439,6 +2598,52 @@ mod tests {
             desktop_native_opengl_pixel_projection_matrix(0, -1),
             [2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0,]
         );
+    }
+
+    #[test]
+    fn native_opengl_window_title_with_diagnostic_appends_reason() {
+        assert_eq!(
+            desktop_native_window_title_with_diagnostic("Mindustry", None),
+            "Mindustry"
+        );
+        assert_eq!(
+            desktop_native_window_title_with_diagnostic(
+                "Mindustry",
+                Some("empty render frame: no GPU commands were recorded"),
+            ),
+            "Mindustry - empty render frame: no GPU commands were recorded"
+        );
+    }
+
+    #[test]
+    fn native_opengl_submit_diagnostic_reports_empty_frame_and_shader_failure() {
+        let driver_state =
+            mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState::default();
+        let diagnostic = desktop_native_opengl_submit_diagnostic(
+            &driver_state,
+            0,
+            &[String::from(
+                "failed to compile native OpenGL shader source: boom",
+            )],
+        )
+        .expect("empty frame with shader failure should yield a diagnostic");
+
+        assert!(diagnostic.contains("empty render frame"));
+        assert!(diagnostic.contains("shader"));
+        assert!(diagnostic.contains("boom"));
+    }
+
+    #[test]
+    fn native_opengl_submit_diagnostic_reports_no_valid_draw_commands() {
+        let driver_state = mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
+            draw_commands: 2,
+            ..Default::default()
+        };
+        let diagnostic = desktop_native_opengl_submit_diagnostic(&driver_state, 2, &[])
+            .expect("skipped draw commands should yield a diagnostic");
+
+        assert!(diagnostic.contains("no valid draw commands"));
+        assert!(diagnostic.contains("2 draw submissions were skipped"));
     }
 
     #[test]

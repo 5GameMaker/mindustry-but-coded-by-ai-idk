@@ -15,6 +15,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 573. 前端 UI 暂停入口、LoadDialog 信息密度与 native 黑屏诊断推进
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.5%**，仍未达到完整可玩；继续优先前端/UI 与真实 world save/load 序列化接入。
+- Java 对照依据：
+  - `PausedDialog.java` 桌面暂停菜单包含 `@back`、`@settings`、`@savegame`、`@loadgame`、`@hostserver`、`@quit`，其中 Save/Load 是游戏内入口；
+  - `LoadDialog.java` 搜索栏包含模式过滤入口，slot 卡片展示 map/mode/wave/playtime/date/autosave 等信息；
+  - native 黑屏问题需在 shader/texture/draw command 层提供可见/可定位诊断。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 world paused overlay 的 `PausedDialog` 等价壳，暂停状态下真实 world frame 会渲染 `@back/@settings/@savegame/@loadgame/@hostserver/@quit`；
+    - `@savegame/@loadgame` 从暂停 overlay 进入已有 `SaveGame/LoadGame` route，保存入口不再只依赖测试手动打开；
+    - Load/Save slot 卡片补齐 `@save.map`、`@mode.*.name`、`@save.wave`、`@save.playtime`、`saved`、`@save.autosave` 等更接近原版的信息密度；
+    - LoadGame 标题从硬编码 `LOAD GAME` 改为上游 key `@loadgame`；
+    - 搜索栏增加 survival/sandbox/attack/pvp 模式 key 的可见过滤入口骨架。
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 主菜单 black6 侧栏、子菜单面板、按钮 focus/hover/checked outline 和图标/文本层级更接近 Java `Styles.flatToggleMenut` 表现。
+  - `desktop/src/main.rs`
+    - native OpenGL submit 路径新增窗口标题/trace_summary 诊断，识别空 render frame、无有效 draw command、shader/texture/framebuffer 等失败类别。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_renderer --lib`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_paused_world_overlay_renders_save_and_load_entries -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime --bin mindustry-desktop`
+  - `cargo check --workspace`
+- 仍未完成：
+  - 暂停 overlay 目前是前端入口壳，campaign/editor/mobile 分支和联网禁用态还需继续严格对齐；
+  - LoadDialog 模式过滤目前先完成可见 UI 骨架，尚未接完整隐藏/过滤状态；
+  - SaveGame 写盘仍是最小 meta snapshot，未接完整 world/entity/content 序列化；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 572. SaveDialog 新建存档与覆盖确认前端闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
