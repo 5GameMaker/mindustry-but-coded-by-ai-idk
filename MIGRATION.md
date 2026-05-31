@@ -19812,6 +19812,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 数据管理子对话框与完整 `SettingsTable` 仍需继续迁移；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 572. Settings Data 页与 PlanetData 子弹窗闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.4%**，仍未达到完整可玩；继续优先前端/UI，把 Settings Data 页从诊断文本行推进到 Java `dataDialog` 风格按钮列表，并补上 `clearplanetdata -> planetDataDialog` 的最小交互闭环。
+- Java 对照依据：
+  - `SettingsMenuDialog` 的 `dataDialog` 顶层按钮顺序为清空全部、清空星球数据、清空存档、清空科研、清空战役存档、导出、导入、打开目录、导出 crash；
+  - `@settings.clearplanetdata` 打开 `planetDataDialog`，不是直接 no-op；
+  - `planetDataDialog` 标题为 `@settings.data`，内部有星球选择、`@settings.clearplanetresearch`、`@settings.clearplanetcampaignsaves`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Data 页按钮几何和容器：`settings_data_action_button_rect_for_panel(...)` / `settings_data_actions_container_rect_for_panel(...)`；
+    - 新增 `push_settings_data_page(...)`，Data 页渲染 9 个 Java 顺序 action button，不再使用 route-line 诊断文本作为主 UI；
+    - `ClearPlanetData` 现在打开 `DesktopSettingsChildDialog::PlanetData`；
+    - 新增 `SelectPlanet`、`ClearPlanetResearch`、`ClearPlanetCampaignSaves` 动作；
+    - 新增 PlanetData 子弹窗渲染、星球选择 chip、两个清理按钮，并复用 `selected_planet` 状态；
+    - 测试覆盖打开 PlanetData、选择 `erekir`、触发清理科研动作、关闭返回 Data 页、Data 页继续可触发 export。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - 星球列表仍是 `serpulo/erekir` 的最小静态列表，后续应接真实 content planets 且过滤 generator/sectors/accessible；
+  - 两个 planet 清理动作目前只是 UI/状态入口，还没有接确认框和真实 research/campaign save 清理副作用；
+  - Data 导入/导出/open folder/crash export 仍需继续接真实桌面能力；
+  - UI 与 Settings 数据管理仍在长线迁移中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

@@ -138,6 +138,13 @@ const SETTINGS_RESET_BUTTON_WIDTH: f32 = 240.0;
 const SETTINGS_RESET_BUTTON_HEIGHT: f32 = 44.0;
 const SETTINGS_BACK_BUTTON_WIDTH: f32 = 210.0;
 const SETTINGS_BACK_BUTTON_HEIGHT: f32 = 64.0;
+const SETTINGS_DATA_BUTTON_WIDTH: f32 = 360.0;
+const SETTINGS_DATA_BUTTON_HEIGHT: f32 = 46.0;
+const SETTINGS_DATA_BUTTON_GAP: f32 = 7.0;
+const SETTINGS_PLANET_DATA_BUTTON_WIDTH: f32 = 280.0;
+const SETTINGS_PLANET_DATA_BUTTON_HEIGHT: f32 = 60.0;
+const SETTINGS_PLANET_OPTION_WIDTH: f32 = 110.0;
+const SETTINGS_PLANET_OPTION_HEIGHT: f32 = 45.0;
 const SETTINGS_LANGUAGE_ROW_HEIGHT: f32 = 50.0;
 const SETTINGS_LANGUAGE_ROW_GAP: f32 = 0.0;
 const SETTINGS_LANGUAGE_VISIBLE_ROWS: usize = 7;
@@ -407,6 +414,7 @@ impl DesktopSettingsPage {
 pub enum DesktopSettingsChildDialog {
     Language,
     Controls,
+    PlanetData,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -445,6 +453,9 @@ pub enum DesktopSettingsAction {
     ClearSaves,
     ClearResearch,
     ClearCampaignSaves,
+    SelectPlanet(&'static str),
+    ClearPlanetResearch,
+    ClearPlanetCampaignSaves,
     ExportData,
     ImportData,
     OpenDataFolder,
@@ -2086,6 +2097,8 @@ const SETTINGS_DATA_ACTIONS: &[DesktopSettingsDataAction] = &[
         action: DesktopSettingsAction::ExportCrashLogs,
     },
 ];
+
+const SETTINGS_PLANET_OPTIONS: &[&str] = &["serpulo", "erekir"];
 
 const ABOUT_LINKS: &[AboutLinkEntry] = &[
     AboutLinkEntry {
@@ -20721,6 +20734,43 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_settings_data_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let container = Self::settings_data_actions_container_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            container,
+            [1.0, 1.0, 1.0, 0.82],
+            0.0,
+            Layer::END_PIXELED + 0.021,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            container,
+            [0.22, 0.34, 0.42, 0.70],
+            1.0,
+            Layer::END_PIXELED + 0.022,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            format!("planet: {}", self.settings_dialog_state.selected_planet),
+            RenderPoint::new(container.center().x, container.y + container.height - 18.0),
+            [0.62, 0.72, 0.82, 1.0],
+            10.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.024,
+        ));
+        for (index, action) in SETTINGS_DATA_ACTIONS.iter().enumerate() {
+            self.push_settings_text_button(
+                pass,
+                Self::settings_data_action_button_rect_for_panel(panel, index),
+                action.label,
+                Some(action.icon),
+                Layer::END_PIXELED + 0.030 + index as f32 * 0.0001,
+            );
+        }
+    }
+
     fn push_settings_child_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         let Some(child) = self.settings_child_dialog else {
             return;
@@ -20763,6 +20813,9 @@ impl DesktopLauncher {
             DesktopSettingsChildDialog::Controls => {
                 self.push_settings_controls_dialog_content(pass, dialog);
             }
+            DesktopSettingsChildDialog::PlanetData => {
+                self.push_settings_planet_data_dialog_content(pass, dialog);
+            }
         }
         self.push_settings_text_button(
             pass,
@@ -20772,6 +20825,89 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.103,
         );
         self.push_settings_keybind_rebind_dialog(pass, dialog);
+    }
+
+    fn push_settings_planet_data_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
+        let container = Self::settings_planet_data_container_rect(dialog);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            container,
+            [1.0, 1.0, 1.0, 0.78],
+            0.0,
+            Layer::END_PIXELED + 0.097,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            container,
+            [0.22, 0.34, 0.42, 0.74],
+            1.0,
+            Layer::END_PIXELED + 0.098,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::settings_planet_data_button_rect(dialog, 0),
+            "@settings.planetselect",
+            Some("planet"),
+            Layer::END_PIXELED + 0.101,
+        );
+        pass.push(RenderCommand::draw_text_styled(
+            format!("planet: {}", self.settings_dialog_state.selected_planet),
+            RenderPoint::new(
+                Self::settings_planet_data_button_rect(dialog, 0).center().x,
+                Self::settings_planet_data_button_rect(dialog, 0).y - 11.0,
+            ),
+            [0.62, 0.74, 0.84, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.106,
+        ));
+        for (index, planet) in SETTINGS_PLANET_OPTIONS.iter().enumerate() {
+            let rect = Self::settings_planet_option_rect(dialog, index);
+            let selected = self.settings_dialog_state.selected_planet == *planet;
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("flatTogglet", false, selected),
+                rect,
+                if selected {
+                    [0.82, 0.94, 1.0, 0.98]
+                } else {
+                    [0.56, 0.64, 0.72, 0.78]
+                },
+                0.0,
+                Layer::END_PIXELED + 0.107 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                *planet,
+                rect.center(),
+                if selected {
+                    [0.98, 1.0, 1.0, 1.0]
+                } else {
+                    [0.86, 0.92, 0.96, 1.0]
+                },
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.108 + index as f32 * 0.0001,
+            ));
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::settings_planet_data_button_rect(dialog, 1),
+            "@settings.clearplanetresearch",
+            Some("trash"),
+            Layer::END_PIXELED + 0.111,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::settings_planet_data_button_rect(dialog, 2),
+            "@settings.clearplanetcampaignsaves",
+            Some("trash"),
+            Layer::END_PIXELED + 0.112,
+        );
     }
 
     fn push_settings_language_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
@@ -21579,6 +21715,15 @@ impl DesktopLauncher {
                         self.settings_keybind_search
                     ));
                 }
+                DesktopSettingsChildDialog::PlanetData => {
+                    lines.push(format!(
+                        "child dialog: PlanetDataDialog planet:{} actions:2 planets:{}",
+                        self.settings_dialog_state.selected_planet,
+                        SETTINGS_PLANET_OPTIONS.len()
+                    ));
+                    lines.push("@settings.clearplanetresearch".into());
+                    lines.push("@settings.clearplanetcampaignsaves".into());
+                }
             }
         }
 
@@ -21625,6 +21770,34 @@ impl DesktopLauncher {
                 Self::settings_main_menu_button_rect_for_panel(panel, *index).contains_point(point)
             })
             .map(|(index, _)| index)
+    }
+
+    fn settings_data_action_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let width = SETTINGS_DATA_BUTTON_WIDTH.min(panel.width - 72.0);
+        let top = panel.y + panel.height
+            - 142.0
+            - index as f32 * (SETTINGS_DATA_BUTTON_HEIGHT + SETTINGS_DATA_BUTTON_GAP);
+        RenderRect::new(
+            panel.x + (panel.width - width) * 0.5,
+            top - SETTINGS_DATA_BUTTON_HEIGHT,
+            width,
+            SETTINGS_DATA_BUTTON_HEIGHT,
+        )
+    }
+
+    fn settings_data_actions_container_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let first = Self::settings_data_action_button_rect_for_panel(panel, 0);
+        let last = Self::settings_data_action_button_rect_for_panel(
+            panel,
+            SETTINGS_DATA_ACTIONS.len() - 1,
+        );
+        let pad = 14.0;
+        RenderRect::new(
+            first.x - pad,
+            last.y - pad,
+            first.width + pad * 2.0,
+            first.bottom() - last.y + pad * 2.0 + 22.0,
+        )
     }
 
     fn settings_reset_button_rect_for_panel(panel: RenderRect) -> RenderRect {
@@ -21700,6 +21873,7 @@ impl DesktopLauncher {
         match dialog {
             DesktopSettingsChildDialog::Language => "@settings.language",
             DesktopSettingsChildDialog::Controls => "@settings.controls",
+            DesktopSettingsChildDialog::PlanetData => "@settings.data",
         }
     }
 
@@ -21776,6 +21950,25 @@ impl DesktopLauncher {
                     ));
                 }
             }
+            Some(DesktopSettingsChildDialog::PlanetData) => {
+                for (index, planet) in SETTINGS_PLANET_OPTIONS.iter().enumerate() {
+                    if Self::settings_planet_option_rect(dialog, index).contains_point(point) {
+                        return Some(DesktopMenuRouteShellAction::Settings(
+                            DesktopSettingsAction::SelectPlanet(planet),
+                        ));
+                    }
+                }
+                if Self::settings_planet_data_button_rect(dialog, 1).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::Settings(
+                        DesktopSettingsAction::ClearPlanetResearch,
+                    ));
+                }
+                if Self::settings_planet_data_button_rect(dialog, 2).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::Settings(
+                        DesktopSettingsAction::ClearPlanetCampaignSaves,
+                    ));
+                }
+            }
             None => {}
         }
         None
@@ -21790,6 +21983,45 @@ impl DesktopLauncher {
             top - SETTINGS_LANGUAGE_ROW_HEIGHT,
             clip.width,
             SETTINGS_LANGUAGE_ROW_HEIGHT,
+        )
+    }
+
+    fn settings_planet_data_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let top = match index {
+            0 => dialog.y + dialog.height - 94.0,
+            1 => dialog.y + dialog.height - 254.0,
+            _ => dialog.y + dialog.height - 322.0,
+        };
+        RenderRect::new(
+            dialog.x + (dialog.width - SETTINGS_PLANET_DATA_BUTTON_WIDTH) * 0.5,
+            top - SETTINGS_PLANET_DATA_BUTTON_HEIGHT,
+            SETTINGS_PLANET_DATA_BUTTON_WIDTH,
+            SETTINGS_PLANET_DATA_BUTTON_HEIGHT,
+        )
+    }
+
+    fn settings_planet_option_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let total_width = SETTINGS_PLANET_OPTIONS.len() as f32 * SETTINGS_PLANET_OPTION_WIDTH
+            + SETTINGS_PLANET_OPTIONS.len().saturating_sub(1) as f32 * 8.0;
+        RenderRect::new(
+            dialog.x
+                + (dialog.width - total_width) * 0.5
+                + index as f32 * (SETTINGS_PLANET_OPTION_WIDTH + 8.0),
+            dialog.y + dialog.height - 204.0,
+            SETTINGS_PLANET_OPTION_WIDTH,
+            SETTINGS_PLANET_OPTION_HEIGHT,
+        )
+    }
+
+    fn settings_planet_data_container_rect(dialog: RenderRect) -> RenderRect {
+        let first = Self::settings_planet_data_button_rect(dialog, 0);
+        let last = Self::settings_planet_data_button_rect(dialog, 2);
+        let pad = 14.0;
+        RenderRect::new(
+            first.x - pad,
+            last.y - pad,
+            first.width + pad * 2.0,
+            first.bottom() - last.y + pad * 2.0,
         )
     }
 
@@ -22272,6 +22504,15 @@ impl DesktopLauncher {
             return Some(DesktopMenuRouteShellAction::Settings(
                 DesktopSettingsAction::BackToMain,
             ));
+        }
+        if self.settings_dialog_state.page == DesktopSettingsPage::Data {
+            for (index, action) in SETTINGS_DATA_ACTIONS.iter().enumerate() {
+                if Self::settings_data_action_button_rect_for_panel(panel, index)
+                    .contains_point(point)
+                {
+                    return Some(DesktopMenuRouteShellAction::Settings(action.action));
+                }
+            }
         }
         if let Some(action) = self.settings_route_control_action_at_point(panel, point) {
             return Some(DesktopMenuRouteShellAction::Settings(action));
@@ -23584,11 +23825,19 @@ impl DesktopLauncher {
                 self.last_settings_rebind_key = None;
                 self.settings_keybind_pending_axis_min = None;
             }
+            DesktopSettingsAction::ClearPlanetData => {
+                self.settings_dialog_state.page = DesktopSettingsPage::Data;
+                self.settings_child_dialog = Some(DesktopSettingsChildDialog::PlanetData);
+            }
+            DesktopSettingsAction::SelectPlanet(planet) => {
+                self.settings_dialog_state.selected_planet = planet.into();
+            }
             DesktopSettingsAction::ClearAllData
-            | DesktopSettingsAction::ClearPlanetData
             | DesktopSettingsAction::ClearSaves
             | DesktopSettingsAction::ClearResearch
             | DesktopSettingsAction::ClearCampaignSaves
+            | DesktopSettingsAction::ClearPlanetResearch
+            | DesktopSettingsAction::ClearPlanetCampaignSaves
             | DesktopSettingsAction::ExportData
             | DesktopSettingsAction::ImportData
             | DesktopSettingsAction::OpenDataFolder
@@ -26758,6 +27007,11 @@ impl DesktopLauncher {
             && self.settings_dialog_state.page == DesktopSettingsPage::Main
         {
             self.push_settings_main_menu_buttons(pass, panel);
+        } else if route == DesktopMenuRoute::Settings
+            && self.settings_dialog_state.page == DesktopSettingsPage::Data
+        {
+            self.push_settings_data_page(pass, panel);
+            self.push_settings_route_buttons(pass, panel);
         } else {
             for (index, line) in self.active_menu_route_shell_lines(route).iter().enumerate() {
                 if route == DesktopMenuRoute::Settings && line.starts_with("button:") {
@@ -47545,14 +47799,132 @@ mod tests {
             ))
         );
 
-        let export_index = launcher
-            .settings_route_lines()
+        let planet_data_index = super::SETTINGS_DATA_ACTIONS
             .iter()
-            .position(|line| line.contains("data action: @data.export"))
+            .position(|action| action.action == super::DesktopSettingsAction::ClearPlanetData)
+            .expect("Data page should expose planet data dialog");
+        let planet_data_center = DesktopLauncher::settings_data_action_button_rect_for_panel(
+            settings_panel,
+            planet_data_index,
+        )
+        .center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: planet_data_center.x,
+                    y: planet_data_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::ClearPlanetData)
+        );
+        assert_eq!(
+            launcher.settings_child_dialog,
+            Some(super::DesktopSettingsChildDialog::PlanetData)
+        );
+        assert!(launcher.settings_route_lines().iter().any(|line| {
+            line == "child dialog: PlanetDataDialog planet:serpulo actions:2 planets:2"
+        }));
+        let data_child_dialog =
+            DesktopLauncher::settings_child_dialog_rect_for_panel(settings_panel);
+        let planet_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let planet_texts = planet_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("planet data child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(planet_texts.contains(&"@settings.data"));
+        assert!(planet_texts.contains(&"@settings.planetselect"));
+        assert!(planet_texts.contains(&"planet: serpulo"));
+        assert!(planet_texts.contains(&"@settings.clearplanetresearch"));
+        assert!(planet_texts.contains(&"@settings.clearplanetcampaignsaves"));
+
+        let erekir_center =
+            DesktopLauncher::settings_planet_option_rect(data_child_dialog, 1).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: erekir_center.x,
+                    y: erekir_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.settings_dialog_state.selected_planet, "erekir");
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::SelectPlanet("erekir"))
+        );
+
+        let clear_research_center =
+            DesktopLauncher::settings_planet_data_button_rect(data_child_dialog, 1).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: clear_research_center.x,
+                    y: clear_research_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::ClearPlanetResearch)
+        );
+
+        let close_planet_center =
+            DesktopLauncher::schematic_info_button_rect(data_child_dialog, 0).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: close_planet_center.x,
+                    y: close_planet_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.settings_child_dialog, None);
+        assert_eq!(
+            launcher.settings_dialog_state.page,
+            super::DesktopSettingsPage::Data
+        );
+
+        let export_index = super::SETTINGS_DATA_ACTIONS
+            .iter()
+            .position(|action| action.action == super::DesktopSettingsAction::ExportData)
             .expect("Data page should expose export");
-        let export_center =
-            DesktopLauncher::settings_route_line_rect_for_panel(settings_panel, export_index)
-                .center();
+        let export_center = DesktopLauncher::settings_data_action_button_rect_for_panel(
+            settings_panel,
+            export_index,
+        )
+        .center();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -47586,7 +47958,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"upstream: SettingsMenuDialog"));
-        assert!(texts.contains(&"settings page: data"));
+        assert!(texts.contains(&"planet: erekir"));
+        assert!(texts.contains(&"@settings.cleardata"));
+        assert!(texts.contains(&"@data.export"));
+        assert!(
+            !texts.contains(&"settings page: data"),
+            "Data page should render Java-like action buttons instead of the diagnostic route-line shell"
+        );
     }
 
     #[test]
