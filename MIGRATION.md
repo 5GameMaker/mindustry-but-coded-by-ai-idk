@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 597. SettingsMenuDialog Data/返回语义继续对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.7%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 Settings 主页面关闭、Data/PlanetData 按钮风格和确认文案继续贴近 Java `SettingsMenuDialog`。
+- Java 对照依据：
+  - `SettingsMenuDialog.addCloseButton()` 在主页与子页都保留底部 `@back`，主页点击后关闭 dialog；
+  - Data 页与 PlanetData 页动作按钮使用 `Styles.flatt`；
+  - `@settings.planetselect` 按钮本身携带当前星球名，清理确认文案使用 `@settings.clearall.confirm` 与带星球名的本地化 key。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 增加 `push_settings_text_button_with_style(...)` / `push_settings_text_button_enabled_with_style(...)`，保留默认按钮路径，同时让 Data/PlanetData 动作按钮走 `flatt`；
+    - Settings 主页面底部渲染 `@back` 按钮，hit-test 派发 `BackToMain`，在主页上执行时关闭 Settings route；
+    - PlanetData 选星球按钮文本改为 `@settings.planetselect: <planet>`，移除旧的 `planet: ...` 调试式外挂行；
+    - Data 清空全部确认改为 `@settings.clearall.confirm`，星球研究/战役存档确认改为 `@settings.clearplanet*.confirm: <planet>` 形式；
+    - 扩展 Settings 主页面、Data 页与 PlanetData 子弹窗回归断言，锁定 `@back`、`flatt` 背景、planetselect 文案与确认文案。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_main_page_renders_upstream_menu_buttons --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Java Data/PlanetData 的真实清理、导入导出和打开文件夹业务仍主要是 route/action 记录，尚未全部接入平台 I/O 与完整数据清理；
+  - Settings 控件的文本输入、区域输入和更多 tooltip/localized format 仍需继续逐项对齐；
+  - LoadDialog 删除确认、autosave 持久化切换、真实加载进入 playing 仍是下一批高优先 UI/交互缺口。
+
 ## 596. 前端 UI glyph 使用 Icon 字体
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

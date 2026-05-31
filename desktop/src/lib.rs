@@ -22153,6 +22153,20 @@ impl DesktopLauncher {
         self.push_settings_text_button_enabled(pass, rect, label, icon, layer, true);
     }
 
+    fn push_settings_text_button_with_style(
+        &self,
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        label: impl Into<String>,
+        icon: Option<&'static str>,
+        layer: f32,
+        style_name: &'static str,
+    ) {
+        self.push_settings_text_button_enabled_with_style(
+            pass, rect, label, icon, layer, true, style_name,
+        );
+    }
+
     fn push_settings_text_button_enabled(
         &self,
         pass: &mut RenderPass,
@@ -22162,6 +22176,21 @@ impl DesktopLauncher {
         layer: f32,
         enabled: bool,
     ) {
+        self.push_settings_text_button_enabled_with_style(
+            pass, rect, label, icon, layer, enabled, "defaultt",
+        );
+    }
+
+    fn push_settings_text_button_enabled_with_style(
+        &self,
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        label: impl Into<String>,
+        icon: Option<&'static str>,
+        layer: f32,
+        enabled: bool,
+        style_name: &'static str,
+    ) {
         let label = label.into();
         let hovered = enabled
             && self
@@ -22169,7 +22198,7 @@ impl DesktopLauncher {
                 .map(|point| rect.contains_point(point))
                 .unwrap_or(false);
         pass.push(RenderCommand::draw_sprite(
-            Self::settings_text_button_symbol("defaultt", hovered, false),
+            Self::settings_text_button_symbol(style_name, hovered, false),
             rect,
             if enabled {
                 [1.0, 1.0, 1.0, 0.96]
@@ -22265,7 +22294,15 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.082,
                 );
             }
-            DesktopSettingsPage::Main => {}
+            DesktopSettingsPage::Main => {
+                self.push_settings_text_button(
+                    pass,
+                    Self::settings_back_button_rect_for_panel(panel),
+                    "@back",
+                    Some("left"),
+                    Layer::END_PIXELED + 0.082,
+                );
+            }
         }
     }
 
@@ -22296,12 +22333,13 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.024,
         ));
         for (index, action) in SETTINGS_DATA_ACTIONS.iter().enumerate() {
-            self.push_settings_text_button(
+            self.push_settings_text_button_with_style(
                 pass,
                 Self::settings_data_action_button_rect_for_panel(panel, index),
                 action.label,
                 Some(action.icon),
                 Layer::END_PIXELED + 0.030 + index as f32 * 0.0001,
+                "flatt",
             );
         }
     }
@@ -22377,27 +22415,17 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.098,
         ));
-        self.push_settings_text_button(
+        self.push_settings_text_button_with_style(
             pass,
             Self::settings_planet_data_button_rect(dialog, 0),
-            "@settings.planetselect",
+            format!(
+                "@settings.planetselect: {}",
+                self.settings_dialog_state.selected_planet
+            ),
             Some("planet"),
             Layer::END_PIXELED + 0.101,
+            "flatt",
         );
-        pass.push(RenderCommand::draw_text_styled(
-            format!("planet: {}", self.settings_dialog_state.selected_planet),
-            RenderPoint::new(
-                Self::settings_planet_data_button_rect(dialog, 0).center().x,
-                Self::settings_planet_data_button_rect(dialog, 0).y - 11.0,
-            ),
-            [0.62, 0.74, 0.84, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.106,
-        ));
         for (index, planet) in SETTINGS_PLANET_OPTIONS.iter().enumerate() {
             let rect = Self::settings_planet_option_rect(dialog, index);
             let selected = self.settings_dialog_state.selected_planet == *planet;
@@ -22429,19 +22457,21 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.108 + index as f32 * 0.0001,
             ));
         }
-        self.push_settings_text_button(
+        self.push_settings_text_button_with_style(
             pass,
             Self::settings_planet_data_button_rect(dialog, 1),
             "@settings.clearplanetresearch",
             Some("trash"),
             Layer::END_PIXELED + 0.111,
+            "flatt",
         );
-        self.push_settings_text_button(
+        self.push_settings_text_button_with_style(
             pass,
             Self::settings_planet_data_button_rect(dialog, 2),
             "@settings.clearplanetcampaignsaves",
             Some("trash"),
             Layer::END_PIXELED + 0.112,
+            "flatt",
         );
     }
 
@@ -23245,18 +23275,18 @@ impl DesktopLauncher {
 
     fn settings_data_confirm_message(&self, action: DesktopSettingsAction) -> String {
         match action {
-            DesktopSettingsAction::ClearAllData => "@settings.cleardata.confirm".into(),
+            DesktopSettingsAction::ClearAllData => "@settings.clearall.confirm".into(),
             DesktopSettingsAction::ClearSaves => "@settings.clearsaves.confirm".into(),
             DesktopSettingsAction::ClearResearch => "@settings.clearresearch.confirm".into(),
             DesktopSettingsAction::ClearCampaignSaves => {
                 "@settings.clearcampaignsaves.confirm".into()
             }
             DesktopSettingsAction::ClearPlanetResearch => format!(
-                "settings.clearplanetresearch.confirm: {}",
+                "@settings.clearplanetresearch.confirm: {}",
                 self.settings_dialog_state.selected_planet
             ),
             DesktopSettingsAction::ClearPlanetCampaignSaves => format!(
-                "settings.clearplanetcampaignsaves.confirm: {}",
+                "@settings.clearplanetcampaignsaves.confirm: {}",
                 self.settings_dialog_state.selected_planet
             ),
             _ => "@confirm".into(),
@@ -24163,6 +24193,11 @@ impl DesktopLauncher {
             if let Some(index) = Self::settings_main_menu_entry_index_at_point(panel, point) {
                 return Self::settings_action_for_main_entry(index)
                     .map(DesktopMenuRouteShellAction::Settings);
+            }
+            if Self::settings_back_button_rect_for_panel(panel).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::Settings(
+                    DesktopSettingsAction::BackToMain,
+                ));
             }
         }
         if matches!(
@@ -35869,6 +35904,7 @@ impl DesktopLauncher {
             && self.settings_dialog_state.page == DesktopSettingsPage::Main
         {
             self.push_settings_main_menu_buttons(pass, panel);
+            self.push_settings_route_buttons(pass, panel);
         } else if route == DesktopMenuRoute::Settings
             && self.settings_dialog_state.page == DesktopSettingsPage::Data
         {
@@ -60480,6 +60516,15 @@ version: "2.0.0"
         let data_child_dialog =
             DesktopLauncher::settings_child_dialog_rect_for_panel(settings_panel);
         let planet_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let planet_commands = planet_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("planet data child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
         let planet_texts = planet_frame
             .bundle
             .render_frame
@@ -60494,10 +60539,29 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(planet_texts.contains(&"@settings.data"));
-        assert!(planet_texts.contains(&"@settings.planetselect"));
-        assert!(planet_texts.contains(&"planet: serpulo"));
+        assert!(planet_texts.contains(&"@settings.planetselect: serpulo"));
+        assert!(
+            !planet_texts.contains(&"planet: serpulo"),
+            "Java PlanetDataDialog keeps the selected planet inside the planet select button"
+        );
         assert!(planet_texts.contains(&"@settings.clearplanetresearch"));
         assert!(planet_texts.contains(&"@settings.clearplanetcampaignsaves"));
+        let planet_button_symbol =
+            DesktopLauncher::settings_text_button_symbol("flatt", false, false);
+        let planet_select_button =
+            DesktopLauncher::settings_planet_data_button_rect(data_child_dialog, 0);
+        let planet_clear_research_button =
+            DesktopLauncher::settings_planet_data_button_rect(data_child_dialog, 1);
+        assert!(planet_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol == &planet_button_symbol && *rect == planet_select_button
+        )));
+        assert!(planet_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol == &planet_button_symbol && *rect == planet_clear_research_button
+        )));
 
         let erekir_center =
             DesktopLauncher::settings_planet_option_rect(data_child_dialog, 1).center();
@@ -60558,9 +60622,13 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(confirm_texts.contains(&"@confirm"));
-        assert!(confirm_texts.contains(&"settings.clearplanetresearch.confirm: erekir"));
+        assert!(confirm_texts.contains(&"@settings.clearplanetresearch.confirm: erekir"));
         assert!(confirm_texts.contains(&"@cancel"));
         assert!(confirm_texts.contains(&"@ok"));
+        assert_eq!(
+            launcher.settings_data_confirm_message(super::DesktopSettingsAction::ClearAllData),
+            "@settings.clearall.confirm"
+        );
         let confirm_dialog = DesktopLauncher::settings_data_confirm_dialog_rect(settings_panel);
         let confirm_ok_center =
             DesktopLauncher::settings_data_confirm_ok_rect(confirm_dialog).center();
@@ -60666,6 +60734,13 @@ version: "2.0.0"
             command,
             RenderCommand::DrawSprite { symbol, rect, .. }
                 if symbol == &data_container_symbol && *rect == data_container
+        )));
+        let data_button_symbol =
+            DesktopLauncher::settings_text_button_symbol("flatt", false, false);
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol == &data_button_symbol && *rect == first_data_button
         )));
         assert!(texts.contains(&"upstream: SettingsMenuDialog"));
         assert!(texts.contains(&"@settings.data"));
@@ -60938,6 +61013,7 @@ version: "2.0.0"
         );
         let game_button = DesktopLauncher::settings_main_menu_button_rect_for_panel(panel, 0);
         let menu_container = DesktopLauncher::settings_main_menu_container_rect_for_panel(panel);
+        let back = DesktopLauncher::settings_back_button_rect_for_panel(panel);
         assert_eq!(game_button.width, super::SETTINGS_MENU_BUTTON_WIDTH);
         assert_eq!(game_button.height, super::SETTINGS_MENU_BUTTON_HEIGHT);
         assert!(
@@ -60957,6 +61033,16 @@ version: "2.0.0"
             ),
             Some(super::DesktopMenuRouteShellAction::Settings(
                 super::DesktopSettingsAction::OpenPage(super::DesktopSettingsPage::Game)
+            ))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                back.center().x,
+                back.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::BackToMain
             ))
         );
 
@@ -61002,6 +61088,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
+        assert!(labels.contains(&"@back"));
         for entry in super::SETTINGS_MENU_ENTRIES {
             assert!(labels.contains(&entry.label));
             let glyph = super::desktop_ui_icon_glyph_or_label(entry.icon, entry.icon);
@@ -61016,6 +61103,20 @@ version: "2.0.0"
             );
         }
         assert!(!labels.contains(&"settings page: main"));
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: back.center().x,
+                    y: back.center().y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.active_menu_route, None);
     }
 
     #[test]
