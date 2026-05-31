@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 553. ResearchDialog ItemsDisplay 真实资源条首个闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **65.4%**，仍未达到完整可玩；继续优先前端/UI，避免 TechTree/ResearchDialog 继续呈现摘要式占位文本。
+- Java 对照依据：
+  - `core/src/mindustry/ui/ItemsDisplay.java` 的 `@globalitems` 按钮、`Tex.button` 面板、物品数量、`item.uiIcon` 与本地化名称；
+  - `core/src/mindustry/ui/dialogs/ResearchDialog.java` 的 `cont.stack(titleTable, view, itemDisplay)` 与 `itemDisplay.visible(() -> !net.client())`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `ui_format_amount(...)`，按 Java `UI.formatAmount` 的 k/m/b 阈值输出 UI 数量；
+    - 新增 `tech_tree_global_item_amount(...)`，从当前玩家队伍/默认队伍 core items 中读取真实资源数量；
+    - 新增 `push_tech_tree_items_display(...)`，把旧的 `ItemsDisplay: ...` 文本摘要替换为 `@globalitems` 按钮、资源 chip、物品颜色兜底、真实 item icon sprite、数量和本地化名称；
+    - 更新 TechTree 渲染测试，断言不再输出 `ItemsDisplay:` 占位，并验证 copper icon 与数量行。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop techtree --features opengl-backend`
+- 仍未完成：
+  - `ItemsDisplay` 折叠动画、shine 高亮、滚动 pane、research spend 后动态刷新仍需继续迁移；
+  - ResearchDialog 节点详情 requirements 行仍需进一步改为 Java 风格图标 + 名称 + 当前/需求数量布局；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 552. SchematicsDialog info 弹层真实 requirements 接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

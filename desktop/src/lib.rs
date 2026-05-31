@@ -15966,6 +15966,22 @@ fn rgba8888_to_render_color(rgba: u32, alpha_scale: f32) -> [f32; 4] {
     [r, g, b, (a * alpha_scale).clamp(0.0, 1.0)]
 }
 
+fn ui_format_amount(number: i64) -> String {
+    let sign = if number < 0 { "-" } else { "" };
+    let mag = number.abs();
+    if mag >= 1_000_000_000 {
+        format!("{sign}{:.1}b", mag as f32 / 1_000_000_000.0)
+    } else if mag >= 1_000_000 {
+        format!("{sign}{:.1}m", mag as f32 / 1_000_000.0)
+    } else if mag >= 10_000 {
+        format!("{}k", number / 1000)
+    } else if mag >= 1000 {
+        format!("{sign}{:.1}k", mag as f32 / 1000.0)
+    } else {
+        number.to_string()
+    }
+}
+
 fn rect_to_render_rect(
     rect: mindustry_core::mindustry::entities::entity_group::Rect,
 ) -> RenderRect {
@@ -25278,6 +25294,10 @@ impl DesktopLauncher {
         RenderRect::new(panel.x + 28.0, panel.y + 24.0, panel.width - 56.0, 44.0)
     }
 
+    fn tech_tree_items_display_button_rect(items: RenderRect) -> RenderRect {
+        RenderRect::new(items.x + 12.0, items.y + 7.0, 188.0, items.height - 14.0)
+    }
+
     fn tech_tree_select_rect_for_panel(panel: RenderRect) -> RenderRect {
         RenderRect::new(
             panel.x + panel.width - 238.0,
@@ -27597,6 +27617,154 @@ impl DesktopLauncher {
                 .max(usize::from(node.objectives.is_empty()))
     }
 
+    fn tech_tree_global_item_amount(&self, item_id: i16) -> i32 {
+        self.game_state
+            .teams
+            .get_or_null(self.player.team.0)
+            .or_else(|| {
+                self.game_state
+                    .teams
+                    .get_or_null(self.game_state.rules.default_team as u8)
+            })
+            .and_then(|team| team.core_items.get(&item_id).copied())
+            .unwrap_or(0)
+    }
+
+    fn push_tech_tree_items_display(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let items = Self::tech_tree_items_display_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            items,
+            [1.0, 1.0, 1.0, 0.82],
+            0.0,
+            Layer::END_PIXELED + 0.044,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            items,
+            [0.30, 0.42, 0.52, 0.74],
+            1.0,
+            Layer::END_PIXELED + 0.0445,
+        ));
+
+        let button = Self::tech_tree_items_display_button_rect(items);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("flatTogglet", false, false),
+            button,
+            [1.0, 1.0, 1.0, 0.92],
+            0.0,
+            Layer::END_PIXELED + 0.045,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("downOpen", "down"),
+            RenderPoint::new(button.x + 24.0, button.center().y),
+            [0.86, 0.94, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.046,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@globalitems",
+            RenderPoint::new(button.x + 48.0, button.center().y),
+            [0.94, 0.98, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.047,
+        ));
+
+        let mut item_x = button.x + button.width + 18.0;
+        let item_y = items.center().y;
+        let max_x = items.x + items.width - 14.0;
+        for (index, item) in self
+            .content_loader
+            .items()
+            .iter()
+            .filter(|item| self.tech_tree_global_item_amount(item.base.mappable.base.id) > 0)
+            .take(6)
+            .enumerate()
+        {
+            let amount = self.tech_tree_global_item_amount(item.base.mappable.base.id);
+            let chip_width =
+                100.0_f32.max(54.0 + item.localized_name().chars().count() as f32 * 5.4);
+            if item_x + chip_width > max_x {
+                pass.push(RenderCommand::draw_text_styled(
+                    "+",
+                    RenderPoint::new(item_x + 10.0, item_y),
+                    [0.66, 0.76, 0.84, 1.0],
+                    12.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.048 + index as f32 * 0.0001,
+                ));
+                break;
+            }
+
+            let chip = RenderRect::new(item_x, items.y + 8.0, chip_width, items.height - 16.0);
+            pass.push(RenderCommand::fill_rect(
+                chip,
+                [0.05, 0.08, 0.11, 0.34],
+                Layer::END_PIXELED + 0.048 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                chip,
+                [0.42, 0.52, 0.60, 0.46],
+                1.0,
+                Layer::END_PIXELED + 0.0485 + index as f32 * 0.0001,
+            ));
+
+            pass.push(RenderCommand::draw_text_styled(
+                ui_format_amount(amount as i64),
+                RenderPoint::new(chip.x + 9.0, item_y),
+                [0.88, 0.92, 0.96, 1.0],
+                9.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.049 + index as f32 * 0.0001,
+            ));
+
+            let icon = RenderRect::from_center(RenderPoint::new(chip.x + 38.0, item_y), 22.0, 22.0);
+            pass.push(RenderCommand::fill_rect(
+                icon,
+                rgba8888_to_render_color(item.color_rgba, 0.88),
+                Layer::END_PIXELED + 0.0495 + index as f32 * 0.0001,
+            ));
+            let icon_symbol = item_full_icon_region_symbol(item.name(), &self.content_loader)
+                .filter(|symbol| self.texture_atlas.lookup(symbol).is_ok())
+                .unwrap_or_else(|| item.name().to_string());
+            pass.push(RenderCommand::draw_sprite(
+                icon_symbol,
+                icon,
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                Layer::END_PIXELED + 0.050 + index as f32 * 0.0001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                item.localized_name().to_string(),
+                RenderPoint::new(chip.x + 53.0, item_y),
+                [0.70, 0.78, 0.84, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.051 + index as f32 * 0.0001,
+            ));
+
+            item_x += chip_width + 8.0;
+        }
+    }
+
     fn push_tech_tree_node_detail_panel(
         &self,
         pass: &mut RenderPass,
@@ -27842,33 +28010,7 @@ impl DesktopLauncher {
             }
         }
 
-        let items = Self::tech_tree_items_display_rect_for_panel(panel);
-        pass.push(RenderCommand::draw_sprite(
-            Self::settings_drawable_symbol("button"),
-            items,
-            [1.0, 1.0, 1.0, 0.82],
-            0.0,
-            Layer::END_PIXELED + 0.044,
-        ));
-        let item_summary = self
-            .content_loader
-            .items()
-            .iter()
-            .take(6)
-            .map(|item| item.base.mappable.name.as_str())
-            .collect::<Vec<_>>()
-            .join("  ");
-        pass.push(RenderCommand::draw_text_styled(
-            format!("ItemsDisplay: {item_summary}"),
-            RenderPoint::new(items.x + 18.0, items.center().y),
-            [0.76, 0.86, 0.94, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.045,
-        ));
+        self.push_tech_tree_items_display(pass, panel);
 
         self.push_tech_tree_select_dialog(pass, panel);
     }
@@ -48314,6 +48456,26 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_techtree_route_renders_research_dialog_shell_and_graph() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        let copper_id = launcher
+            .content_loader
+            .item_by_name("copper")
+            .expect("base content should include copper")
+            .base
+            .mappable
+            .base
+            .id;
+        let lead_id = launcher
+            .content_loader
+            .item_by_name("lead")
+            .expect("base content should include lead")
+            .base
+            .mappable
+            .base
+            .id;
+        launcher.game_state.teams.replace_core_items(
+            launcher.player.team.0,
+            std::collections::BTreeMap::from([(copper_id, 1500), (lead_id, 250)]),
+        );
         let dispatch = launcher.dispatch_menu_action(MenuButtonRole::TechTree);
         assert_eq!(dispatch.route, Some(super::DesktopMenuRoute::TechTree));
         assert_eq!(
@@ -48351,7 +48513,14 @@ version: "2.0.0"
         assert!(texts.contains(&"serpulo: serpulo"));
         assert!(texts.contains(&"core-shard"));
         assert!(texts.contains(&"conveyor"));
-        assert!(texts.iter().any(|text| text.starts_with("ItemsDisplay:")));
+        assert!(texts.contains(&"@globalitems"));
+        assert!(texts.contains(&"1.5k"));
+        assert!(texts.contains(&"250"));
+        assert!(!texts.iter().any(|text| text.starts_with("ItemsDisplay:")));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol.contains("copper")
+        )));
         assert!(commands
             .iter()
             .any(|command| matches!(command, RenderCommand::DrawLine { .. })));
