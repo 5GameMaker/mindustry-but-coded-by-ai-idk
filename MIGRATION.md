@@ -19535,6 +19535,36 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Workshop/Steam gate 和 desktop chrome 显隐条件仍需继续对齐；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 561. MenuFragment 自定义子菜单闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.3%**，仍未达到完整可玩；继续优先前端/UI，把 `MenuFragment.MenuButton.submenu(...)` 的 custom button 子表从数据占位推进到可展开、可命中、可分发 action 的闭环。
+- Java 对照依据：
+  - `MenuFragment.MenuButton` 支持 `submenu`，桌面端点击根按钮时展开右侧子表；
+  - 子表项应像普通菜单子项一样参与命中测试，但点击时执行自身 `Runnable`，而不是触发根按钮动作；
+  - 自定义按钮的 icon/label/action 语义需要在根按钮与子表项中一致保留。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - 新增 `MenuButtonRole::CustomSubmenu { root, item }`；
+    - `MenuCustomButton` 将单个 `has_submenu` 标记升级为 `submenu_buttons: Vec<MenuCustomButton>`；
+    - 新增 `with_submenu_buttons(...)` / `has_submenu()`，根 custom button 带子项时可作为桌面 submenu root；
+    - 桌面 UI plan 在 custom root 激活时渲染右侧 custom submenu，并保留子项 label/icon/action_id；
+    - hit-test 与 `custom_button_action_id(...)` 可定位到具体 `CustomSubmenu` 子项。
+  - `desktop/src/lib.rs`
+    - 自定义根按钮带 submenu 时只展开/收起，不再误触发根 action；
+    - 点击 `CustomSubmenu` 子项会记录 `DesktopCustomMenuAction { role, label, action_id }`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_ui_plan --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_dispatches_custom --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - custom action_id 仍只是桌面层记录，后续需要接真实插件/模组 callback registry；
+  - submenu fade、真实 Scene2D Table/Styles 细节、九宫格背景与 Scroll/clip 仍需继续向 Java 对齐；
+  - Workshop/Steam gate 和 desktop chrome 显隐条件仍需继续补齐；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

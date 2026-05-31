@@ -506,6 +506,7 @@ pub enum MenuButtonRole {
     Mods,
     Settings,
     Custom(u16),
+    CustomSubmenu { root: u16, item: u16 },
     Quit,
 }
 
@@ -526,7 +527,7 @@ impl MenuButtonRole {
             Self::Workshop => Some("workshop"),
             Self::Mods => Some("mods"),
             Self::Settings => Some("settings"),
-            Self::Custom(_) => None,
+            Self::Custom(_) | Self::CustomSubmenu { .. } => None,
             Self::Quit => Some("quit"),
         }
     }
@@ -549,7 +550,7 @@ impl MenuButtonRole {
             Self::Workshop => "Workshop",
             Self::Mods => "Mods",
             Self::Settings => "Settings",
-            Self::Custom(_) => "Custom",
+            Self::Custom(_) | Self::CustomSubmenu { .. } => "Custom",
             Self::Quit => "Quit",
         }
     }
@@ -565,6 +566,7 @@ impl MenuButtonRole {
                 | Self::ContentDatabase
                 | Self::TechTree
                 | Self::About
+                | Self::CustomSubmenu { .. }
         )
     }
 
@@ -601,7 +603,7 @@ impl MenuButtonRole {
             Self::Workshop => Some("steam"),
             Self::Settings => Some("settings"),
             Self::Quit => Some("exit"),
-            Self::Custom(_) => None,
+            Self::Custom(_) | Self::CustomSubmenu { .. } => None,
         }
     }
 }
@@ -611,7 +613,7 @@ pub struct MenuCustomButton {
     pub label: String,
     pub icon_name: Option<String>,
     pub action_id: Option<String>,
-    pub has_submenu: bool,
+    pub submenu_buttons: Vec<MenuCustomButton>,
 }
 
 impl MenuCustomButton {
@@ -620,7 +622,7 @@ impl MenuCustomButton {
             label: label.into(),
             icon_name: None,
             action_id: None,
-            has_submenu: false,
+            submenu_buttons: Vec::new(),
         }
     }
 
@@ -634,9 +636,13 @@ impl MenuCustomButton {
         self
     }
 
-    pub fn with_submenu(mut self, has_submenu: bool) -> Self {
-        self.has_submenu = has_submenu;
+    pub fn with_submenu_buttons(mut self, submenu_buttons: Vec<MenuCustomButton>) -> Self {
+        self.submenu_buttons = submenu_buttons;
         self
+    }
+
+    pub fn has_submenu(&self) -> bool {
+        !self.submenu_buttons.is_empty()
     }
 }
 
@@ -1221,8 +1227,16 @@ impl MenuRendererState {
         self.ui_plan(input).hit_test(x, y)
     }
 
+    pub fn role_has_desktop_submenu(&self, role: MenuButtonRole) -> bool {
+        role.has_desktop_submenu()
+            || self
+                .custom_button(role)
+                .map(MenuCustomButton::has_submenu)
+                .unwrap_or(false)
+    }
+
     pub fn select_desktop_root(&mut self, role: MenuButtonRole) -> bool {
-        if self.config.mobile || !role.has_desktop_submenu() {
+        if self.config.mobile || !self.role_has_desktop_submenu(role) {
             return false;
         }
         if self.active_root == Some(role) {
@@ -1272,10 +1286,14 @@ impl MenuRendererState {
     }
 
     pub fn custom_button(&self, role: MenuButtonRole) -> Option<&MenuCustomButton> {
-        let MenuButtonRole::Custom(index) = role else {
-            return None;
-        };
-        self.custom_buttons.get(index as usize)
+        match role {
+            MenuButtonRole::Custom(index) => self.custom_buttons.get(index as usize),
+            MenuButtonRole::CustomSubmenu { root, item } => self
+                .custom_buttons
+                .get(root as usize)
+                .and_then(|button| button.submenu_buttons.get(item as usize)),
+            _ => None,
+        }
     }
 
     pub fn custom_button_action_id(&self, role: MenuButtonRole) -> Option<&str> {
@@ -1676,7 +1694,28 @@ fn menu_custom_button_plan(
         selected: false,
         hovered: false,
         pressed: false,
-        submenu: button.has_submenu,
+        submenu: button.has_submenu(),
+    }
+}
+
+fn menu_custom_submenu_button_plan(
+    root: usize,
+    item: usize,
+    button: &MenuCustomButton,
+    rect: RenderRect,
+) -> MenuButtonPlan {
+    MenuButtonPlan {
+        role: MenuButtonRole::CustomSubmenu {
+            root: root.min(u16::MAX as usize) as u16,
+            item: item.min(u16::MAX as usize) as u16,
+        },
+        label: button.label.clone(),
+        icon_name: button.icon_name.clone(),
+        rect,
+        selected: false,
+        hovered: false,
+        pressed: false,
+        submenu: false,
     }
 }
 
@@ -1738,6 +1777,13 @@ fn menu_desktop_ui_plan(
         MenuButtonRole::Database if submenu_visible => &database_submenu_roles,
         _ => &[],
     };
+    let custom_submenu_buttons: &[MenuCustomButton] = match submenu_root {
+        MenuButtonRole::Custom(root) if submenu_visible => custom_buttons
+            .get(root as usize)
+            .map(|button| button.submenu_buttons.as_slice())
+            .unwrap_or(&[]),
+        _ => &[],
+    };
     let main_role_count = main_roles.len();
     let main_button_count = main_role_count + custom_buttons.len() + 1;
     let total_height =
@@ -1745,13 +1791,17 @@ fn menu_desktop_ui_plan(
     let start_y = ((input.graphics_height - total_height) * 0.5).max(0.0);
     let left_x = (input.graphics_width / 10.0).max(0.0);
     let submenu_x = left_x + button_width;
-    let selected_root_index = main_roles
-        .iter()
-        .position(|role| *role == submenu_root)
-        .unwrap_or(0);
+    let selected_root_index = match submenu_root {
+        MenuButtonRole::Custom(root) => main_role_count + root as usize,
+        _ => main_roles
+            .iter()
+            .position(|role| *role == submenu_root)
+            .unwrap_or(0),
+    };
     let submenu_start_y = start_y + selected_root_index as f32 * (button_height + gap);
 
-    let mut buttons = Vec::with_capacity(main_button_count + submenu_roles.len());
+    let mut buttons =
+        Vec::with_capacity(main_button_count + submenu_roles.len() + custom_submenu_buttons.len());
     for (index, role) in main_roles.iter().copied().enumerate() {
         buttons.push(menu_button_plan(
             role,
@@ -1799,6 +1849,21 @@ fn menu_desktop_ui_plan(
             ),
             false,
         ));
+    }
+    if let MenuButtonRole::Custom(root) = submenu_root {
+        for (index, custom) in custom_submenu_buttons.iter().enumerate() {
+            buttons.push(menu_custom_submenu_button_plan(
+                root as usize,
+                index,
+                custom,
+                RenderRect::new(
+                    submenu_x,
+                    submenu_start_y + index as f32 * (button_height + gap),
+                    button_width,
+                    button_height,
+                ),
+            ));
+        }
     }
 
     MenuUiPlan {
@@ -2977,6 +3042,62 @@ mod tests {
                     if text == &menu_icon_text("add")
             )
         }));
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_expands_custom_submenu_buttons_like_menu_fragment_submenu() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        let root = state.add_custom_button_with(
+            MenuCustomButton::new("TOOLS")
+                .with_icon_name("settings")
+                .with_submenu_buttons(vec![
+                    MenuCustomButton::new("LOCAL SERVER")
+                        .with_icon_name("host")
+                        .with_action_id("local-server"),
+                    MenuCustomButton::new("REPLAY VIEWER")
+                        .with_icon_name("play")
+                        .with_action_id("replay-viewer"),
+                ]),
+        );
+        assert_eq!(root, MenuButtonRole::Custom(0));
+        assert!(state.role_has_desktop_submenu(root));
+        assert!(state.select_desktop_root(root));
+
+        let input = MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        };
+        let plan = state.render_plan(input);
+        let roles = plan
+            .ui
+            .buttons
+            .iter()
+            .map(|button| button.role)
+            .collect::<Vec<_>>();
+
+        assert!(roles.contains(&MenuButtonRole::Custom(0)));
+        assert!(roles.contains(&MenuButtonRole::CustomSubmenu { root: 0, item: 0 }));
+        assert!(roles.contains(&MenuButtonRole::CustomSubmenu { root: 0, item: 1 }));
+
+        let submenu = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::CustomSubmenu { root: 0, item: 0 })
+            .expect("custom root with submenu buttons should render its first submenu item");
+        assert_eq!(submenu.label, "LOCAL SERVER");
+        assert_eq!(submenu.icon_name.as_deref(), Some("host"));
+        assert!(!submenu.submenu);
+        assert_eq!(
+            state.custom_button_action_id(MenuButtonRole::CustomSubmenu { root: 0, item: 0 }),
+            Some("local-server")
+        );
+        assert_eq!(
+            state.hit_test_ui(input, submenu.rect.center().x, submenu.rect.center().y),
+            Some(MenuButtonRole::CustomSubmenu { root: 0, item: 0 })
+        );
     }
 
     #[test]

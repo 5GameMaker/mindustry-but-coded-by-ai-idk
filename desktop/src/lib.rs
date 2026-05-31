@@ -565,6 +565,7 @@ impl DesktopMenuRoute {
             | MenuButtonRole::Database
             | MenuButtonRole::Workshop
             | MenuButtonRole::Custom(_)
+            | MenuButtonRole::CustomSubmenu { .. }
             | MenuButtonRole::Quit => None,
         }
     }
@@ -19711,27 +19712,29 @@ impl DesktopLauncher {
             self.last_menu_dispatch = Some(dispatch);
             return dispatch;
         }
-        if let Some((label, action_id)) = self
-            .menu_renderer_state
-            .custom_button(role)
-            .map(|custom| (custom.label.clone(), custom.action_id.clone()))
-        {
-            self.active_menu_route = None;
-            self.mods_selected_mod_index = None;
-            self.mods_import_dialog_open = false;
-            self.last_custom_menu_action = Some(DesktopCustomMenuAction {
-                role,
-                label,
-                action_id,
-            });
-            let dispatch = DesktopMenuActionDispatch {
-                role,
-                submenu_changed,
-                route: None,
-                close_requested: false,
-            };
-            self.last_menu_dispatch = Some(dispatch);
-            return dispatch;
+        if !submenu_changed {
+            if let Some((label, action_id)) = self
+                .menu_renderer_state
+                .custom_button(role)
+                .map(|custom| (custom.label.clone(), custom.action_id.clone()))
+            {
+                self.active_menu_route = None;
+                self.mods_selected_mod_index = None;
+                self.mods_import_dialog_open = false;
+                self.last_custom_menu_action = Some(DesktopCustomMenuAction {
+                    role,
+                    label,
+                    action_id,
+                });
+                let dispatch = DesktopMenuActionDispatch {
+                    role,
+                    submenu_changed,
+                    route: None,
+                    close_requested: false,
+                };
+                self.last_menu_dispatch = Some(dispatch);
+                return dispatch;
+            }
         }
         if self.block_menu_action_for_content_errors(role) {
             let dispatch = DesktopMenuActionDispatch {
@@ -43533,6 +43536,108 @@ mod tests {
             launcher.last_menu_dispatch,
             Some(super::DesktopMenuActionDispatch {
                 role,
+                submenu_changed: false,
+                route: None,
+                close_requested: false,
+            })
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_dispatches_custom_submenu_button_action_after_expanding_root() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let root = launcher.menu_renderer_state.add_custom_button_with(
+            super::MenuCustomButton::new("TOOLS")
+                .with_icon_name("settings")
+                .with_submenu_buttons(vec![
+                    super::MenuCustomButton::new("LOCAL SERVER")
+                        .with_icon_name("host")
+                        .with_action_id("local-server"),
+                    super::MenuCustomButton::new("REPLAY VIEWER")
+                        .with_icon_name("play")
+                        .with_action_id("replay-viewer"),
+                ]),
+        );
+        assert_eq!(root, MenuButtonRole::Custom(0));
+
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+        let root_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == root)
+            .expect("custom root should be present in desktop menu")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: root_center.x,
+                    y: root_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(launcher.last_menu_action, Some(root));
+        assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(launcher.last_custom_menu_action, None);
+        assert_eq!(
+            launcher.last_menu_dispatch,
+            Some(super::DesktopMenuActionDispatch {
+                role: root,
+                submenu_changed: true,
+                route: None,
+                close_requested: false,
+            })
+        );
+
+        let submenu_role = MenuButtonRole::CustomSubmenu { root: 0, item: 0 };
+        let submenu_center = launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .find(|button| button.role == submenu_role)
+            .expect("expanded custom root should render submenu item")
+            .rect
+            .center();
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: submenu_center.x,
+                    y: submenu_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+
+        assert_eq!(launcher.last_menu_action, Some(submenu_role));
+        assert_eq!(
+            launcher.last_custom_menu_action,
+            Some(super::DesktopCustomMenuAction {
+                role: submenu_role,
+                label: "LOCAL SERVER".into(),
+                action_id: Some("local-server".into()),
+            })
+        );
+        assert_eq!(
+            launcher.last_menu_dispatch,
+            Some(super::DesktopMenuActionDispatch {
+                role: submenu_role,
                 submenu_changed: false,
                 route: None,
                 close_requested: false,
