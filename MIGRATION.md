@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 635. JoinDialog 输入框与主菜单子菜单状态清理
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.7%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 JoinDialog 的 add server 弹窗从静态展示推进到真实可编辑输入，并修复桌面主菜单从打开的 submenu 切到普通 route 后旧高亮/子菜单残留的问题。
+- Java 对照依据：
+  - `JoinDialog` 的 add/edit server 是带 `TextField` 的可编辑对话框，OK 后解析并保存目标地址；
+  - `MenuFragment.buttons(...)` 点击非 submenu 普通按钮时会清掉当前 submenu，高亮不应残留。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_add_server_text` / `join_add_server_focused` 状态与 `FocusJoinAddServerText` / `ConfirmJoinAddServer` 动作；
+    - `OpenJoinAddServer` 会预填当前 `connect_target`，add dialog 文本框可输入、Delete/Backspace 可编辑，Enter/OK 会通过 `parse_host_port(...)` 写回 `connect_target`，无效地址显示 `@server.invalidaddress`；
+    - add dialog hit-test 已区分文本框、Cancel、OK，不再把 OK 当成单纯关闭；
+    - `active_menu_route_shell_lines(Join)` 增加 add dialog 字段状态，方便后续交接和回归；
+    - `dispatch_menu_action(...)` 在点击非 submenu route/custom/action 时会重置桌面 submenu 状态，避免 Java `currentMenu = null; fadeOutMenu()` 语义丢失导致 UI 残留。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_renders_server_browser_skeleton --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_non_submenu_route_clears_open_desktop_submenu_like_java_menu_fragment --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog 仍未拥有 Java 那种 `Seq<Server>` 多收藏列表、上/下移动、逐卡 refresh/edit/delete 与 community group/browser；
+  - add/edit 目前只覆盖 add server 到当前连接目标，尚未接入完整持久化 servers 列表；
+  - fast menu 与普通 menu 的空计划 fallback 仍可继续统一，以进一步压低黑屏/空白首屏风险；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 634. DatabaseDialog 接入 Shift-click 图标复制
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -171,6 +171,7 @@ const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
+const JOIN_ADD_SERVER_TEXT_MAX_LENGTH: usize = 96;
 const LOAD_SLOT_CARD_HEIGHT: f32 = 220.0;
 const LOAD_SLOT_CARD_GAP: f32 = 10.0;
 const LOAD_SLOT_CARD_MIN_WIDTH: f32 = 320.0;
@@ -2687,6 +2688,8 @@ pub enum DesktopMenuRouteShellAction {
     HostRun,
     OpenJoinAddServer,
     CloseJoinAddServer,
+    FocusJoinAddServerText,
+    ConfirmJoinAddServer,
     RefreshJoinServers,
     OpenMapListFilters,
     CloseMapListFilters,
@@ -16370,6 +16373,8 @@ pub struct DesktopLauncher {
     pub host_color_picker_open: bool,
     pub host_error: Option<String>,
     pub join_add_dialog_open: bool,
+    pub join_add_server_text: String,
+    pub join_add_server_focused: bool,
     pub join_refresh_requests: u32,
     pub join_search: String,
     pub join_search_focused: bool,
@@ -17233,6 +17238,8 @@ impl DesktopLauncher {
             host_color_picker_open: false,
             host_error: None,
             join_add_dialog_open: false,
+            join_add_server_text: String::new(),
+            join_add_server_focused: false,
             join_refresh_requests: 0,
             join_search: String::new(),
             join_search_focused: false,
@@ -21159,7 +21166,12 @@ impl DesktopLauncher {
     }
 
     fn dispatch_menu_action(&mut self, role: MenuButtonRole) -> DesktopMenuActionDispatch {
+        let submenu_was_active = self.menu_renderer_state.has_active_desktop_submenu();
+        let role_opens_desktop_submenu = self.menu_renderer_state.role_has_desktop_submenu(role);
         let submenu_changed = self.menu_renderer_state.select_desktop_root(role);
+        if submenu_was_active && !submenu_changed && !role_opens_desktop_submenu {
+            self.menu_renderer_state.reset_desktop_root();
+        }
         self.last_menu_guard_message = None;
         self.last_menu_info_message = None;
         self.last_custom_menu_action = None;
@@ -26977,6 +26989,15 @@ impl DesktopLauncher {
         )
     }
 
+    fn join_add_dialog_text_rect(dialog: RenderRect) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 120.0,
+            dialog.y + dialog.height - 110.0,
+            dialog.width - 154.0,
+            42.0,
+        )
+    }
+
     fn join_route_server_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let top = panel.y + panel.height
             - 204.0
@@ -28788,10 +28809,14 @@ impl DesktopLauncher {
         let point = RenderPoint::new(x, y);
         if self.join_add_dialog_open {
             let dialog = Self::join_add_dialog_rect_for_panel(panel);
-            if Self::join_add_dialog_button_rect(dialog, 0).contains_point(point)
-                || Self::join_add_dialog_button_rect(dialog, 1).contains_point(point)
-            {
+            if Self::join_add_dialog_text_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::FocusJoinAddServerText);
+            }
+            if Self::join_add_dialog_button_rect(dialog, 0).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseJoinAddServer);
+            }
+            if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ConfirmJoinAddServer);
             }
             return None;
         }
@@ -30027,6 +30052,7 @@ impl DesktopLauncher {
                 self.host_color_picker_open = false;
                 self.host_error = None;
                 self.join_add_dialog_open = false;
+                self.join_add_server_focused = false;
                 self.join_search_focused = false;
                 self.database_search_focused = false;
                 self.last_database_content_opened = None;
@@ -30129,9 +30155,36 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenJoinAddServer => {
                 self.join_add_dialog_open = true;
+                self.join_add_server_text = self
+                    .connect_target
+                    .as_ref()
+                    .map(|target| format!("{}:{}", target.host, target.port))
+                    .unwrap_or_default();
+                self.join_add_server_focused = true;
+                self.join_search_focused = false;
+                self.connect_error = None;
             }
             DesktopMenuRouteShellAction::CloseJoinAddServer => {
                 self.join_add_dialog_open = false;
+                self.join_add_server_focused = false;
+            }
+            DesktopMenuRouteShellAction::FocusJoinAddServerText => {
+                if self.join_add_dialog_open {
+                    self.join_add_server_focused = true;
+                    self.join_search_focused = false;
+                }
+            }
+            DesktopMenuRouteShellAction::ConfirmJoinAddServer => {
+                if let Some(target) = parse_host_port(&self.join_add_server_text) {
+                    self.connect_target = Some(target);
+                    self.connect_error = None;
+                    self.join_add_dialog_open = false;
+                    self.join_add_server_focused = false;
+                    self.join_search.clear();
+                } else {
+                    self.connect_error = Some("@server.invalidaddress".into());
+                    self.join_add_server_focused = true;
+                }
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
@@ -31626,12 +31679,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.083,
         ));
 
-        let field = RenderRect::new(
-            dialog.x + 120.0,
-            dialog.y + dialog.height - 110.0,
-            dialog.width - 154.0,
-            42.0,
-        );
+        let field = Self::join_add_dialog_text_rect(dialog);
         pass.push(RenderCommand::draw_text_styled(
             "@joingame.ip",
             RenderPoint::new(dialog.x + 34.0, field.center().y),
@@ -31644,17 +31692,18 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.084,
         ));
         pass.push(RenderCommand::draw_sprite(
-            Self::settings_text_button_symbol("grayt", false, false),
+            Self::settings_text_button_symbol("grayt", self.join_add_server_focused, false),
             field,
-            [1.0, 1.0, 1.0, 0.84],
+            if self.join_add_server_focused {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [1.0, 1.0, 1.0, 0.84]
+            },
             0.0,
             Layer::END_PIXELED + 0.084,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            self.connect_target
-                .as_ref()
-                .map(|target| format!("{}:{}", target.host, target.port))
-                .unwrap_or_default(),
+            self.join_add_server_text.clone(),
             RenderPoint::new(field.x + 14.0, field.center().y),
             [0.90, 0.96, 1.0, 1.0],
             12.0,
@@ -31664,6 +31713,19 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.085,
         ));
+        if let Some(error) = self.connect_error.as_ref() {
+            pass.push(RenderCommand::draw_text_styled(
+                error.clone(),
+                RenderPoint::new(field.x, field.y - 18.0),
+                [1.0, 0.62, 0.56, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0855,
+            ));
+        }
         self.push_settings_text_button(
             pass,
             Self::join_add_dialog_button_rect(dialog, 0),
@@ -36320,6 +36382,40 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_add_dialog_open
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::ConfirmJoinAddServer,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_add_dialog_open
+                        && matches!(key_code.as_str(), "Escape" | "Esc") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::CloseJoinAddServer,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_add_dialog_open
+                        && self.join_add_server_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.join_add_server_text.pop();
+                    } else {
+                        self.join_add_server_text.clear();
+                    }
+                    self.connect_error = None;
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
                         && self.join_search_focused
                         && matches!(key_code.as_str(), "Backspace" | "Delete") =>
                 {
@@ -36729,6 +36825,17 @@ impl DesktopLauncher {
                             self.host_port_text.push(ch);
                         }
                     } else if self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_add_dialog_open
+                        && self.join_add_server_focused
+                    {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.join_add_server_text.len() >= JOIN_ADD_SERVER_TEXT_MAX_LENGTH {
+                                break;
+                            }
+                            self.join_add_server_text.push(ch);
+                        }
+                        self.connect_error = None;
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Join)
                         && self.join_search_focused
                     {
                         for ch in text.chars().filter(|ch| !ch.is_control()) {
@@ -36878,6 +36985,17 @@ impl DesktopLauncher {
                     "button: @server.add".into(),
                     "button: @refresh".into(),
                 ];
+                if self.join_add_dialog_open {
+                    lines.extend([
+                        "dialog: @server.add / @joingame.title".into(),
+                        format!(
+                            "field: @joingame.ip value={} focused={}",
+                            self.join_add_server_text, self.join_add_server_focused
+                        ),
+                        "button: @cancel".into(),
+                        "button: @ok".into(),
+                    ]);
+                }
                 if let Some(snapshot) = self.join_route_server_snapshot() {
                     lines.extend([
                         format!("server: {} source:{}", snapshot.address, snapshot.source),
@@ -56688,6 +56806,65 @@ version: "2.0.0"
     }
 
     #[test]
+    fn desktop_launcher_non_submenu_route_clears_open_desktop_submenu_like_java_menu_fragment() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(800, 600);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
+
+        let play = launcher.dispatch_menu_action(MenuButtonRole::Play);
+        assert_eq!(
+            play,
+            super::DesktopMenuActionDispatch {
+                role: MenuButtonRole::Play,
+                submenu_changed: true,
+                route: None,
+                close_requested: false,
+            }
+        );
+        assert!(launcher.menu_renderer_state.has_active_desktop_submenu());
+        assert!(launcher
+            .menu_renderer_state
+            .ui_plan(input)
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Join));
+
+        let editor = launcher.dispatch_menu_action(MenuButtonRole::Editor);
+        assert_eq!(
+            editor,
+            super::DesktopMenuActionDispatch {
+                role: MenuButtonRole::Editor,
+                submenu_changed: false,
+                route: Some(super::DesktopMenuRoute::Editor),
+                close_requested: false,
+            }
+        );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::Editor)
+        );
+        assert!(!launcher.menu_renderer_state.has_active_desktop_submenu());
+        assert_eq!(
+            launcher.menu_renderer_state.selected_root,
+            MenuButtonRole::Play
+        );
+        let updated = launcher.menu_renderer_state.ui_plan(input);
+        assert!(updated
+            .buttons
+            .iter()
+            .all(|button| button.role != MenuButtonRole::Campaign));
+        assert!(updated
+            .buttons
+            .iter()
+            .all(|button| button.role != MenuButtonRole::Join));
+        assert!(updated
+            .buttons
+            .iter()
+            .any(|button| button.role == MenuButtonRole::Editor));
+    }
+
+    #[test]
     fn desktop_launcher_dispatches_workshop_button_to_platform_without_route_shell() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.menu_renderer_state = super::MenuRendererState::new(
@@ -66201,6 +66378,51 @@ version: "2.0.0"
             Some(super::DesktopMenuRouteShellAction::OpenJoinAddServer)
         );
         assert!(launcher.join_add_dialog_open);
+        assert_eq!(launcher.join_add_server_text, "127.0.0.1:6567");
+        assert!(launcher.join_add_server_focused);
+
+        let dialog = DesktopLauncher::join_add_dialog_rect_for_panel(panel);
+        let field = DesktopLauncher::join_add_dialog_text_rect(dialog);
+        let ok = DesktopLauncher::join_add_dialog_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                field.center().x,
+                field.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::FocusJoinAddServerText)
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
+            Some(super::DesktopMenuRouteShellAction::ConfirmJoinAddServer)
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::Key {
+                    key_code: "Delete".into(),
+                    pressed: true,
+                },
+                DesktopInputTickEvent::Text("example.org:6567".into()),
+                DesktopInputTickEvent::CursorMoved { x: ok.x, y: ok.y },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.last_menu_route_shell_action,
+            Some(super::DesktopMenuRouteShellAction::ConfirmJoinAddServer)
+        );
+        assert!(!launcher.join_add_dialog_open);
+        assert_eq!(
+            launcher.connect_target,
+            Some(super::DesktopConnectTarget {
+                host: "example.org".into(),
+                port: 6567,
+            })
+        );
 
         launcher
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::FocusJoinSearch);
@@ -66224,6 +66446,10 @@ version: "2.0.0"
             ],
         );
         assert_eq!(launcher.join_search, "");
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenJoinAddServer,
+        );
+        assert!(launcher.join_add_dialog_open);
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
         let texts = frame
@@ -66248,7 +66474,7 @@ version: "2.0.0"
         assert!(texts.contains(&"@servers.global"));
         assert!(texts
             .iter()
-            .any(|text| text.contains("127.0.0.1:6567") && text.contains("@server.version")));
+            .any(|text| text.contains("example.org:6567") && text.contains("@server.version")));
         assert!(texts.contains(&"saved favorite server; click card or CONNECT"));
         assert!(texts.contains(&"players: 0"));
         assert!(texts.contains(&"save.map: @unknown / @mode.survival.name"));
