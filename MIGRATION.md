@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 605. MapPlayDialog 模式按钮尺寸与禁用点击对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **71.5%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把自定义游戏地图播放弹窗的模式选择按钮继续贴近 Java `MapPlayDialog`。
+- Java 对照依据：
+  - `MapPlayDialog.show(...)` 中模式按钮使用 `Styles.flatToggleMenut`，桌面尺寸为 `size(140f, 54f)`；
+  - `disabled(!mode.valid(map))` 的无效模式按钮不应触发选择。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `map_play_mode_button_rect(...)` 从 132×40 调整到 Java 桌面 140×54；
+    - MapPlayDialog hit-test 在命中模式按钮后先检查当前地图的 `mode.valid(map)`，无效模式返回 `None`；
+    - 扩展回归测试，锁定按钮尺寸、第二列 x 坐标、无效 Attack 不派发、有效 Sandbox 仍派发。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_uses_java_mode_order_and_first_valid_fallback --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_card_dialog_actions_update_state --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - MapPlayDialog 的 `Tex.button` 容器、help 按钮 padLeft、preview `BorderImage(map.safeTexture())` 仍需继续还原；
+  - CustomRulesDialog 的完整规则编辑 UI 仍是后续大块；
+  - PlaySelected 当前仍 seed smoke world，不是完整 `control.playMap(map, rules, playtesting)`。
+
 ## 604. LoadDialog 模式筛选背景对齐 emptyTogglei
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

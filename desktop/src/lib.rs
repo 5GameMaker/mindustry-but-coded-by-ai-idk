@@ -26698,10 +26698,10 @@ impl DesktopLauncher {
         let col = index % 2;
         let row = index / 2;
         RenderRect::new(
-            dialog.x + 48.0 + col as f32 * 146.0,
-            dialog.y + dialog.height - 126.0 - row as f32 * 48.0,
-            132.0,
-            40.0,
+            dialog.x + 48.0 + col as f32 * 140.0,
+            dialog.y + dialog.height - 140.0 - row as f32 * 54.0,
+            140.0,
+            54.0,
         )
     }
 
@@ -27773,6 +27773,12 @@ impl DesktopLauncher {
                 }
                 for (mode_index, mode) in Self::map_play_dialog_modes().into_iter().enumerate() {
                     if Self::map_play_mode_button_rect(dialog, mode_index).contains_point(point) {
+                        let Some(map) = self.map_list_cards.get(index) else {
+                            return None;
+                        };
+                        if !mode.valid(map) {
+                            return None;
+                        }
                         return Some(DesktopMenuRouteShellAction::MapCard(
                             DesktopMapCardAction::new(
                                 index,
@@ -55609,6 +55615,7 @@ version: "2.0.0"
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.map_list_cards = vec![map_card("Survival Map", 1, &[])];
         launcher.map_play_selected_mode = Gamemode::Attack;
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
         launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
             super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::OpenPlay),
         ));
@@ -55622,6 +55629,52 @@ version: "2.0.0"
             .as_ref()
             .map(|rules| rules.waves && rules.wave_timer)
             .unwrap_or(false));
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::CustomGame,
+        );
+        let dialog = DesktopLauncher::map_card_dialog_rect_for_panel(panel);
+        assert_eq!(
+            DesktopLauncher::map_play_mode_button_rect(dialog, 0),
+            RenderRect::new(
+                dialog.x + 48.0,
+                dialog.y + dialog.height - 140.0,
+                140.0,
+                54.0
+            ),
+            "Java MapPlayDialog mode buttons use size(140f, 54f) on desktop"
+        );
+        assert_eq!(
+            DesktopLauncher::map_play_mode_button_rect(dialog, 1),
+            RenderRect::new(
+                dialog.x + 188.0,
+                dialog.y + dialog.height - 140.0,
+                140.0,
+                54.0
+            )
+        );
+        let invalid_attack = DesktopLauncher::map_play_mode_button_rect(dialog, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                invalid_attack.x,
+                invalid_attack.y
+            ),
+            None,
+            "Java disabled MapPlayDialog mode buttons should not dispatch clicks"
+        );
+        let sandbox = DesktopLauncher::map_play_mode_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, sandbox.x, sandbox.y),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::SelectPlayMode(Gamemode::Sandbox)
+                )
+            ))
+        );
 
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.map_list_cards = vec![map_card("Empty Map", 0, &[])];
