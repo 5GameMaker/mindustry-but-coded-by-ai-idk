@@ -163,7 +163,7 @@ const SETTINGS_KEYBIND_ROW_GAP: f32 = 4.0;
 const SETTINGS_KEYBIND_REBIND_WIDTH: f32 = 126.0;
 const SETTINGS_KEYBIND_RESET_WIDTH: f32 = 126.0;
 const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 9;
-const JOIN_SERVER_CARD_HEIGHT: f32 = 76.0;
+const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
@@ -2553,6 +2553,7 @@ pub enum DesktopMenuRouteShellAction {
     LaunchCampaign,
     ConnectJoin,
     OpenJoinAddServer,
+    CloseJoinAddServer,
     RefreshJoinServers,
     OpenMapListFilters,
     CloseMapListFilters,
@@ -23653,9 +23654,32 @@ impl DesktopLauncher {
         )
     }
 
+    fn join_add_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width * 0.58).clamp(360.0, 520.0);
+        let height = 214.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn join_add_dialog_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let width = 140.0;
+        let gap = 12.0;
+        let total = width * 2.0 + gap;
+        RenderRect::new(
+            dialog.center().x - total * 0.5 + index as f32 * (width + gap),
+            dialog.y + 22.0,
+            width,
+            46.0,
+        )
+    }
+
     fn join_route_server_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let top = panel.y + panel.height
-            - 194.0
+            - 204.0
             - index as f32 * (JOIN_SERVER_CARD_HEIGHT + JOIN_SERVER_CARD_GAP);
         RenderRect::new(
             panel.x + 36.0,
@@ -24986,6 +25010,15 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Join);
         let point = RenderPoint::new(x, y);
+        if self.join_add_dialog_open {
+            let dialog = Self::join_add_dialog_rect_for_panel(panel);
+            if Self::join_add_dialog_button_rect(dialog, 0).contains_point(point)
+                || Self::join_add_dialog_button_rect(dialog, 1).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::CloseJoinAddServer);
+            }
+            return None;
+        }
         if Self::join_route_add_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::OpenJoinAddServer);
         }
@@ -25735,6 +25768,9 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::OpenJoinAddServer => {
                 self.join_add_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::CloseJoinAddServer => {
+                self.join_add_dialog_open = false;
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
@@ -26530,9 +26566,135 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_join_add_server_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if !self.join_add_dialog_open {
+            return;
+        }
+        let dialog = Self::join_add_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.080,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.081,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.082,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@joingame.title",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.083,
+        ));
+
+        let field = RenderRect::new(
+            dialog.x + 120.0,
+            dialog.y + dialog.height - 110.0,
+            dialog.width - 154.0,
+            42.0,
+        );
+        pass.push(RenderCommand::draw_text_styled(
+            "@joingame.ip",
+            RenderPoint::new(dialog.x + 34.0, field.center().y),
+            [0.78, 0.86, 0.94, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.084,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            field,
+            [1.0, 1.0, 1.0, 0.84],
+            0.0,
+            Layer::END_PIXELED + 0.084,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.connect_target
+                .as_ref()
+                .map(|target| format!("{}:{}", target.host, target.port))
+                .unwrap_or_default(),
+            RenderPoint::new(field.x + 14.0, field.center().y),
+            [0.90, 0.96, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.085,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 0),
+            "@cancel",
+            Some("left"),
+            Layer::END_PIXELED + 0.086,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 1),
+            "@ok",
+            Some("ok"),
+            Layer::END_PIXELED + 0.087,
+        );
+    }
+
     fn push_join_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let name_row = RenderRect::new(
+            panel.x + 36.0,
+            panel.y + panel.height - 82.0,
+            panel.width - 72.0,
+            38.0,
+        );
         let add = Self::join_route_add_button_rect_for_panel(panel);
         let refresh = Self::join_route_refresh_button_rect_for_panel(panel);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            name_row,
+            [1.0, 1.0, 1.0, 0.78],
+            0.0,
+            Layer::END_PIXELED + 0.028,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@name",
+            RenderPoint::new(name_row.x + 16.0, name_row.center().y),
+            [0.72, 0.82, 0.90, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.029,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.player.name.clone(),
+            RenderPoint::new(name_row.x + 70.0, name_row.center().y),
+            [0.92, 0.98, 1.0, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.030,
+        ));
         self.push_settings_text_button(
             pass,
             add,
@@ -26548,30 +26710,38 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.034,
         );
 
-        pass.push(RenderCommand::draw_text_styled(
-            "@servers.local",
-            RenderPoint::new(panel.x + 36.0, panel.y + panel.height - 158.0),
-            [0.72, 0.82, 0.9, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
-            Layer::END_PIXELED + 0.03,
-        ));
-        pass.push(RenderCommand::draw_text_styled(
-            "@servers.remote",
-            RenderPoint::new(panel.x + 36.0, panel.y + panel.height - 182.0),
-            [0.72, 0.82, 0.9, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
-            Layer::END_PIXELED + 0.03,
-        ));
+        for (index, (label, detail)) in [
+            ("@servers.local", "@hosts.discovering.any"),
+            ("@servers.remote", "@server.saved"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let y = panel.y + panel.height - 158.0 - index as f32 * 34.0;
+            pass.push(RenderCommand::draw_text_styled(
+                label,
+                RenderPoint::new(panel.x + 36.0, y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.03 + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                detail,
+                RenderPoint::new(panel.x + 188.0, y),
+                [0.58, 0.68, 0.76, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.031 + index as f32 * 0.001,
+            ));
+        }
 
         let card = Self::join_route_server_card_rect_for_panel(panel, 0);
         pass.push(RenderCommand::draw_sprite(
@@ -26588,11 +26758,20 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.032,
         ));
         if let Some(target) = self.connect_target.as_ref() {
+            let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
+            pass.push(RenderCommand::fill_rect(
+                header,
+                [0.30, 0.36, 0.42, 0.44],
+                Layer::END_PIXELED + 0.033,
+            ));
             pass.push(RenderCommand::draw_text_styled(
-                format!("[accent]{}:{}", target.host, target.port),
-                RenderPoint::new(card.x + 14.0, card.y + card.height - 22.0),
+                format!(
+                    "{}:{}   @server.version: {}",
+                    target.host, target.port, UPSTREAM_BASELINE
+                ),
+                RenderPoint::new(card.x + 14.0, header.center().y),
                 [0.90, 0.96, 1.0, 1.0],
-                13.0,
+                12.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -26600,9 +26779,32 @@ impl DesktopLauncher {
                     .with_outline(true),
                 Layer::END_PIXELED + 0.034,
             ));
+            for (button_index, icon) in ["refresh", "pencil", "trash", "rightOpen"]
+                .iter()
+                .enumerate()
+            {
+                let button = RenderRect::new(
+                    card.x + card.width - 36.0 - button_index as f32 * 32.0,
+                    header.center().y - 13.0,
+                    26.0,
+                    26.0,
+                );
+                pass.push(RenderCommand::draw_text_styled(
+                    desktop_ui_icon_glyph_or_label(icon, icon),
+                    button.center(),
+                    [0.78, 0.88, 0.96, 1.0],
+                    13.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.035 + button_index as f32 * 0.0001,
+                ));
+            }
             pass.push(RenderCommand::draw_text_styled(
-                "source: saved | click card or CONNECT",
-                RenderPoint::new(card.x + 14.0, card.y + card.height - 44.0),
+                "saved favorite server; click card or CONNECT",
+                RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
                 [0.62, 0.72, 0.82, 1.0],
                 11.0,
                 0.0,
@@ -26611,6 +26813,29 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.034,
             ));
+            for (index, line) in [
+                "players: 0",
+                "save.map: @unknown / @mode.survival.name",
+                "ping: --ms",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                pass.push(RenderCommand::draw_text_styled(
+                    line,
+                    RenderPoint::new(
+                        card.x + 14.0,
+                        card.y + card.height - 82.0 - index as f32 * 18.0,
+                    ),
+                    [0.72, 0.80, 0.86, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+                ));
+            }
         } else {
             pass.push(RenderCommand::draw_text_styled(
                 "@host.invalid",
@@ -26636,6 +26861,63 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.034,
             ));
         }
+
+        let global_y = card.y - 30.0;
+        pass.push(RenderCommand::draw_text_styled(
+            "@servers.global",
+            RenderPoint::new(panel.x + 36.0, global_y),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.036,
+        ));
+        let search = RenderRect::new(panel.x + 36.0, global_y - 42.0, panel.width - 232.0, 32.0);
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_text_button_symbol("grayt", false, false),
+            search,
+            [1.0, 1.0, 1.0, 0.72],
+            0.0,
+            Layer::END_PIXELED + 0.036,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@search",
+            RenderPoint::new(search.x + 34.0, search.center().y),
+            [0.60, 0.70, 0.78, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.037,
+        ));
+        self.push_settings_text_button(
+            pass,
+            RenderRect::new(
+                search.x + search.width + 10.0,
+                search.y,
+                150.0,
+                search.height,
+            ),
+            "@servers.showhidden",
+            Some("eyeSmall"),
+            Layer::END_PIXELED + 0.036,
+        );
+        pass.push(RenderCommand::draw_text_styled(
+            "@hosts.none",
+            RenderPoint::new(panel.x + 36.0, search.y - 22.0),
+            [0.58, 0.68, 0.76, 1.0],
+            10.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.037,
+        ));
+        self.push_join_add_server_dialog(pass, panel);
     }
 
     fn push_schematics_card(
@@ -30018,7 +30300,9 @@ impl DesktopLauncher {
                     vec![
                         "section: @servers.local hosts: 0".into(),
                         "section: @servers.remote favorites: 1".into(),
+                        "section: @servers.global groups: 0".into(),
                         format!("server: {}:{} source:saved", target.host, target.port),
+                        "server fields: name version description players map mode ping".into(),
                         "button: @server.add".into(),
                         "button: @refresh".into(),
                     ]
@@ -30026,6 +30310,7 @@ impl DesktopLauncher {
                     vec![
                         "section: @servers.local hosts: 0".into(),
                         "section: @servers.remote favorites: 0".into(),
+                        "section: @servers.global groups: 0".into(),
                         "server: not selected".into(),
                         "button: @server.add".into(),
                         "button: @refresh".into(),
@@ -55586,7 +55871,11 @@ version: "2.0.0"
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
         assert!(lines.contains(&"section: @servers.local hosts: 0".to_string()));
         assert!(lines.contains(&"section: @servers.remote favorites: 1".to_string()));
+        assert!(lines.contains(&"section: @servers.global groups: 0".to_string()));
         assert!(lines.contains(&"server: 127.0.0.1:6567 source:saved".to_string()));
+        assert!(lines.contains(
+            &"server fields: name version description players map mode ping".to_string()
+        ));
         assert!(lines.contains(&"button: @server.add".to_string()));
         assert!(lines.contains(&"button: @refresh".to_string()));
 
@@ -55678,9 +55967,36 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(texts.contains(&"@server.add"));
         assert!(texts.contains(&"@refresh"));
+        assert!(texts.contains(&"@name"));
+        assert!(texts.contains(&"frog"));
         assert!(texts.contains(&"@servers.local"));
         assert!(texts.contains(&"@servers.remote"));
-        assert!(texts.contains(&"[accent]127.0.0.1:6567"));
+        assert!(texts.contains(&"@servers.global"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("127.0.0.1:6567") && text.contains("@server.version")));
+        assert!(texts.contains(&"saved favorite server; click card or CONNECT"));
+        assert!(texts.contains(&"players: 0"));
+        assert!(texts.contains(&"save.map: @unknown / @mode.survival.name"));
+        assert!(texts.contains(&"ping: --ms"));
+        assert!(texts.contains(&"@search"));
+        assert!(texts.contains(&"@servers.showhidden"));
+        assert!(texts.contains(&"@hosts.none"));
+        assert!(texts.contains(&"@joingame.title"));
+        assert!(texts.contains(&"@joingame.ip"));
+        assert!(texts.contains(&"@cancel"));
+        assert!(texts.contains(&"@ok"));
+
+        let dialog = DesktopLauncher::join_add_dialog_rect_for_panel(panel);
+        let cancel = DesktopLauncher::join_add_dialog_button_rect(dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, cancel.x, cancel.y),
+            Some(super::DesktopMenuRouteShellAction::CloseJoinAddServer)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseJoinAddServer,
+        );
+        assert!(!launcher.join_add_dialog_open);
     }
 
     #[test]

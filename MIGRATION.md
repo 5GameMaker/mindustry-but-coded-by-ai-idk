@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 556. JoinDialog 三分区与服务器卡片字段首个闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **65.8%**，仍未达到完整可玩；继续优先前端/UI，减少 JoinDialog 的单卡片骨架感。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/JoinDialog.java` 的 `@servers.local` / `@servers.remote` / `@servers.global` 三分区；
+  - `buildServer(...)` 中服务器卡片的名称、版本、描述、players、map/mode、ping 字段；
+  - `@joingame.title` add dialog 与 `@joingame.ip` 输入行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Join route shell lines 增加 global 分区与服务器字段说明；
+    - Join 页面增加玩家名行、local/remote 分区 detail、global 搜索框、`@servers.showhidden`、`@hosts.none`；
+    - saved server 卡片从 `host:port + source` 升级为标题栏、版本、描述、players、map/mode、ping 与卡片操作图标；
+    - 增加 `@joingame.title` add server 弹层、IP 字段、`@cancel`/`@ok` 按钮，并补 `CloseJoinAddServer` 动作；
+    - 更新 join route 测试覆盖三分区、卡片字段和 add dialog 关闭。
+- 已验证：
+  - `cargo fmt`
+  - `cargo test -p mindustry-desktop join_route --features opengl-backend`
+- 仍未完成：
+  - local LAN discovery、remote saved server 列表编辑/删除/排序、global community server 拉取/搜索/隐藏/收藏仍需继续接入真实数据与动作；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 555. ResearchDialog TechTree 节点内容图标接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
