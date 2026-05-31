@@ -80,7 +80,9 @@ use mindustry_core::mindustry::io::{
     read_unit_sync, read_weather_state_sync, read_world_label_sync, ContentHeaderSnapshot,
     LegacyTeamBlocks, SaveSlotRecord, TeamId, TypeValue, Vec2,
 };
-use mindustry_core::mindustry::modsys::{ModResourceContainerPlan, ModResourcePlan};
+use mindustry_core::mindustry::modsys::{
+    ModMetadata, ModResourceContainerPlan, ModResourceDirectoryPlan, ModResourcePlan,
+};
 use mindustry_core::mindustry::net::{
     ArcNetProvider, EffectCallPacket2, Net, NetworkPlayerData, NetworkPlayerSyncData,
     NetworkWorldData, PacketKind, SoundAtCallPacket, StateSnapshotCallPacket,
@@ -15445,6 +15447,7 @@ pub struct DesktopLauncher {
     pub last_mods_directory_merge_count: Option<usize>,
     pub last_mods_directory_mod_names: Vec<String>,
     pub last_mods_directory_mod_roots: Vec<String>,
+    pub last_mods_directory_mod_metas: Vec<ModMetadata>,
     pub mods_selected_mod_index: Option<usize>,
     pub last_mods_folder_action: Option<DesktopModsFolderAction>,
     pub last_mods_content_index: Option<usize>,
@@ -16204,6 +16207,7 @@ impl DesktopLauncher {
             last_mods_directory_merge_count: None,
             last_mods_directory_mod_names: Vec::new(),
             last_mods_directory_mod_roots: Vec::new(),
+            last_mods_directory_mod_metas: Vec::new(),
             mods_selected_mod_index: None,
             last_mods_folder_action: None,
             last_mods_content_index: None,
@@ -16280,11 +16284,12 @@ impl DesktopLauncher {
     ) -> io::Result<usize> {
         let mod_name = mod_name.into();
         let root = root.as_ref();
-        let plan = ModResourcePlan::from_directory(mod_name.clone(), headless, root)?;
+        let plan = ModResourceDirectoryPlan::from_directory(mod_name.clone(), headless, root)?;
         self.last_mods_directory_mod_names = vec![mod_name];
-        self.last_mods_directory_mod_roots = vec![root.to_string_lossy().into_owned()];
+        self.last_mods_directory_mod_roots = vec![plan.root.to_string_lossy().into_owned()];
+        self.last_mods_directory_mod_metas = vec![plan.meta.clone()];
         self.mods_selected_mod_index = None;
-        Ok(self.merge_mod_resource_plan_into_texture_atlas(&plan))
+        Ok(self.merge_mod_resource_plan_into_texture_atlas(&plan.resource_plan))
     }
 
     pub fn merge_mods_directory_into_texture_atlas(
@@ -16310,6 +16315,11 @@ impl DesktopLauncher {
             .iter()
             .map(|mod_dir| mod_dir.root.to_string_lossy().into_owned())
             .collect();
+        self.last_mods_directory_mod_metas = container
+            .mods
+            .iter()
+            .map(|mod_dir| mod_dir.meta.clone())
+            .collect();
         self.mods_selected_mod_index = None;
         container
             .mods
@@ -16324,6 +16334,7 @@ impl DesktopLauncher {
             self.mods_directory_error = None;
             self.last_mods_directory_mod_names.clear();
             self.last_mods_directory_mod_roots.clear();
+            self.last_mods_directory_mod_metas.clear();
             self.mods_selected_mod_index = None;
             return Ok(0);
         };
@@ -16340,6 +16351,7 @@ impl DesktopLauncher {
                 self.mods_directory_error = Some(error.to_string());
                 self.last_mods_directory_mod_names.clear();
                 self.last_mods_directory_mod_roots.clear();
+                self.last_mods_directory_mod_metas.clear();
                 self.mods_selected_mod_index = None;
                 Err(error)
             }
@@ -19835,6 +19847,9 @@ impl DesktopLauncher {
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = None;
             }
+            self.mods_selected_mod_index = None;
+            self.mods_content_dialog_index = None;
+            self.mods_import_dialog_open = false;
             self.last_menu_dispatch = None;
             self.last_menu_route_shell_action = None;
             return true;
@@ -19856,6 +19871,7 @@ impl DesktopLauncher {
             self.dispatch_menu_platform_action(DesktopMenuPlatformAction::OpenWorkshop);
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
+            self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             let dispatch = DesktopMenuActionDispatch {
                 role,
@@ -19904,6 +19920,7 @@ impl DesktopLauncher {
         let route = if submenu_changed {
             self.active_menu_route = None;
             self.mods_selected_mod_index = None;
+            self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             None
         } else {
@@ -19912,6 +19929,7 @@ impl DesktopLauncher {
         if let Some(route) = route {
             self.active_menu_route = Some(route);
             self.mods_selected_mod_index = None;
+            self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
@@ -24092,6 +24110,7 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CloseRoute => {
                 self.active_menu_route = None;
                 self.mods_selected_mod_index = None;
+                self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
@@ -26826,6 +26845,20 @@ impl DesktopLauncher {
             .filter(|root| !root.is_empty())
     }
 
+    fn mods_route_mod_meta_at_index(&self, index: usize) -> Option<&ModMetadata> {
+        self.last_mods_directory_mod_metas.get(index)
+    }
+
+    fn mods_route_mod_display_name_at_index(&self, index: usize) -> Option<&str> {
+        self.mods_route_mod_meta_at_index(index)
+            .and_then(ModMetadata::display_name_or_name)
+            .or_else(|| {
+                self.last_mods_directory_mod_names
+                    .get(index)
+                    .map(String::as_str)
+            })
+    }
+
     fn mods_import_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         Self::mods_route_detail_dialog_rect_for_panel(panel)
     }
@@ -26903,9 +26936,10 @@ impl DesktopLauncher {
         let Some(index) = self.mods_selected_mod_index else {
             return;
         };
-        let Some(mod_name) = self.last_mods_directory_mod_names.get(index) else {
+        let Some(mod_name) = self.mods_route_mod_display_name_at_index(index) else {
             return;
         };
+        let meta = self.mods_route_mod_meta_at_index(index);
         let dialog = Self::mods_route_detail_dialog_rect_for_panel(panel);
         pass.push(RenderCommand::fill_rect(
             panel,
@@ -26964,11 +26998,28 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.076,
             ));
         }
-        let details = [
-            format!("@mod.version: {}", "@unknown"),
-            format!("@editor.author: {}", "@unknown"),
-            format!("@mods.viewcontent: {}", "0"),
+        let version = meta
+            .map(ModMetadata::version_or_unknown)
+            .unwrap_or("@unknown");
+        let author = meta
+            .map(ModMetadata::author_or_unknown)
+            .unwrap_or("@unknown");
+        let content_count = 0;
+        let mut details = vec![
+            format!("@mod.version: {version}"),
+            format!("@editor.author: {author}"),
         ];
+        if let Some(description) = meta
+            .and_then(|meta| meta.description.as_deref())
+            .filter(|description| !description.trim().is_empty())
+        {
+            details.push(description.to_string());
+        }
+        details.extend([
+            format!("@mods.viewcontent: {}", "0"),
+            format!("state: {}", "loaded"),
+            format!("content: {content_count}"),
+        ]);
         for (row, detail) in details.iter().enumerate() {
             pass.push(RenderCommand::draw_text_styled(
                 detail,
@@ -27014,7 +27065,7 @@ impl DesktopLauncher {
         let Some(index) = self.mods_content_dialog_index else {
             return;
         };
-        let Some(mod_name) = self.last_mods_directory_mod_names.get(index) else {
+        let Some(mod_name) = self.mods_route_mod_display_name_at_index(index) else {
             return;
         };
         let dialog = Self::mods_content_dialog_rect_for_panel(panel);
@@ -27202,13 +27253,16 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.026,
             ));
         } else {
-            for (index, mod_name) in self
+            for (index, _mod_name) in self
                 .last_mods_directory_mod_names
                 .iter()
                 .take(6)
                 .enumerate()
             {
                 let card = Self::mods_route_mod_card_rect_for_panel(panel, index);
+                let display_name = self
+                    .mods_route_mod_display_name_at_index(index)
+                    .unwrap_or("@mods.unknown");
                 pass.push(RenderCommand::draw_sprite(
                     Self::settings_drawable_symbol("button"),
                     card,
@@ -27217,7 +27271,7 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.026 + index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
-                    mod_name.clone(),
+                    display_name.to_string(),
                     RenderPoint::new(card.center().x, card.center().y - 8.0),
                     [0.94, 0.98, 1.0, 1.0],
                     12.0,
@@ -29562,7 +29616,7 @@ mod tests {
         write_deflated_save_meta_prefix, ContentHeaderEntry, ContentHeaderSnapshot,
         LegacyMapBlockRecord, LegacyMapFloorRecord, LegacyShortChunkMap, LATEST_SAVE_VERSION,
     };
-    use mindustry_core::mindustry::modsys::{ModResourcePlan, ModSpritePackSource};
+    use mindustry_core::mindustry::modsys::{ModMetadata, ModResourcePlan, ModSpritePackSource};
     use mindustry_core::mindustry::net::{
         packet_ids, ConnectPacket, PacketEnvelope, PacketKind, PacketSerializer,
     };
@@ -41850,10 +41904,27 @@ mod tests {
 
         write_test_png(&alpha.join("sprites/alpha-router.png"));
         write_test_png(&beta.join("sprites-override/router.png"));
-        std::fs::write(alpha.join("mod.hjson"), b"name: alpha")
-            .expect("alpha metadata should be writable");
-        std::fs::write(beta.join("mod.hjson"), b"name: beta")
-            .expect("beta metadata should be writable");
+        std::fs::write(
+            alpha.join("mod.hjson"),
+            br#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+description: "Alpha fixture mod."
+"#,
+        )
+        .expect("alpha metadata should be writable");
+        std::fs::write(
+            beta.join("mod.hjson"),
+            br#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+version: "2.0.0"
+"#,
+        )
+        .expect("beta metadata should be writable");
         write_test_png(&root.join("sprites/ignored-root.png"));
         std::fs::write(root.join(".git/HEAD"), b"ref: refs/heads/main")
             .expect("hidden marker should be writable");
@@ -41936,6 +42007,22 @@ mod tests {
             launcher.last_mods_directory_mod_names,
             vec!["alpha".to_string(), "beta".to_string()]
         );
+        assert_eq!(
+            launcher
+                .last_mods_directory_mod_metas
+                .iter()
+                .map(|meta| meta.display_name_or_name().unwrap_or(""))
+                .collect::<Vec<_>>(),
+            vec!["Alpha Pack", "Beta Override"]
+        );
+        assert_eq!(
+            launcher.last_mods_directory_mod_metas[0].author.as_deref(),
+            Some("Alpha Author")
+        );
+        assert_eq!(
+            launcher.last_mods_directory_mod_metas[0].version.as_deref(),
+            Some("1.0.0")
+        );
         let root_names = launcher
             .last_mods_directory_mod_roots
             .iter()
@@ -41972,6 +42059,29 @@ mod tests {
             vec!["alpha".into(), "beta".into(), "gamma".into()];
         launcher.last_mods_directory_mod_roots =
             vec!["C:/mods/alpha pack".into(), "C:/mods/beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "alpha",
+                Some("mod.hjson"),
+                r#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+description: "Alpha fixture mod."
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "beta",
+                Some("mod.hjson"),
+                r#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+version: "2.0.0"
+"#,
+            ),
+        ];
         launcher.last_mods_directory_merge_count = Some(3);
         launcher.dispatch_menu_action(MenuButtonRole::Mods);
 
@@ -41996,8 +42106,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"mods browser"));
-        assert!(texts.contains(&"alpha"));
-        assert!(texts.contains(&"beta"));
+        assert!(texts.contains(&"Alpha Pack"));
+        assert!(texts.contains(&"Beta Override"));
         assert!(texts.contains(&"gamma"));
         assert!(texts.contains(&"loaded"));
         assert!(texts.contains(&"@back"));
@@ -42106,6 +42216,29 @@ mod tests {
             vec!["alpha".into(), "beta".into(), "gamma".into()];
         launcher.last_mods_directory_mod_roots =
             vec!["C:/mods/alpha pack".into(), "C:/mods/beta".into()];
+        launcher.last_mods_directory_mod_metas = vec![
+            ModMetadata::from_source_text(
+                "alpha",
+                Some("mod.hjson"),
+                r#"
+name: alpha
+displayName: "Alpha Pack"
+author: "Alpha Author"
+version: "1.0.0"
+description: "Alpha fixture mod."
+"#,
+            ),
+            ModMetadata::from_source_text(
+                "beta",
+                Some("mod.hjson"),
+                r#"
+name: beta
+displayName: "Beta Override"
+author: "Beta Author"
+version: "2.0.0"
+"#,
+            ),
+        ];
         launcher.last_mods_directory_merge_count = Some(3);
         launcher.dispatch_menu_action(MenuButtonRole::Mods);
 
@@ -42140,13 +42273,16 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"[mods] alpha"));
+        assert!(texts.contains(&"[mods] Alpha Pack"));
         assert!(texts.contains(&"mods scanned: 3"));
         assert!(texts.contains(&"mod path: C:/mods/alpha pack"));
         assert!(texts.contains(&"@mods.openfolder"));
-        assert!(texts.contains(&"@mod.version: @unknown"));
-        assert!(texts.contains(&"@editor.author: @unknown"));
+        assert!(texts.contains(&"@mod.version: 1.0.0"));
+        assert!(texts.contains(&"@editor.author: Alpha Author"));
+        assert!(texts.contains(&"Alpha fixture mod."));
         assert!(texts.contains(&"@mods.viewcontent: 0"));
+        assert!(texts.contains(&"state: loaded"));
+        assert!(texts.contains(&"content: 0"));
         assert!(texts.contains(&"@mods.viewcontent"));
         assert!(!texts.contains(&"mod detail placeholder: browser/import/delete later"));
 
@@ -42203,7 +42339,7 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(content_texts.contains(&"@mods.viewcontent: alpha"));
+        assert!(content_texts.contains(&"@mods.viewcontent: Alpha Pack"));
         assert!(content_texts.contains(&"@none"));
         assert!(content_texts.contains(&"content source: LoadedMod.minfo"));
         assert_eq!(

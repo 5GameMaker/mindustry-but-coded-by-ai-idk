@@ -14,6 +14,82 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ModMetadata {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub author: Option<String>,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub repo: Option<String>,
+    pub source_path: Option<String>,
+}
+
+impl ModMetadata {
+    pub fn from_directory(
+        fallback_name: impl AsRef<str>,
+        root: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let fallback_name = fallback_name.as_ref();
+        let root = resolve_mod_root(root)?;
+        for file_name in ["mod.hjson", "mod.json", "plugin.hjson", "plugin.json"] {
+            let path = root.join(file_name);
+            if !path.is_file() {
+                continue;
+            }
+
+            let bytes = fs::read(&path)?;
+            let source = String::from_utf8_lossy(&bytes);
+            return Ok(Self::from_source_text(
+                fallback_name,
+                Some(file_name),
+                source.as_ref(),
+            ));
+        }
+
+        Ok(Self {
+            name: Some(fallback_name.to_string()),
+            ..Self::default()
+        })
+    }
+
+    pub fn from_source_text(
+        fallback_name: impl AsRef<str>,
+        source_path: Option<&str>,
+        source: &str,
+    ) -> Self {
+        let fallback_name = fallback_name.as_ref();
+        let name = extract_mod_metadata_value(source, "name")
+            .or_else(|| (!fallback_name.is_empty()).then(|| fallback_name.to_string()));
+        Self {
+            name,
+            display_name: extract_mod_metadata_value(source, "displayName")
+                .or_else(|| extract_mod_metadata_value(source, "display-name"))
+                .or_else(|| extract_mod_metadata_value(source, "display")),
+            author: extract_mod_metadata_value(source, "author"),
+            version: extract_mod_metadata_value(source, "version"),
+            description: extract_mod_metadata_value(source, "description"),
+            repo: extract_mod_metadata_value(source, "repo"),
+            source_path: source_path.map(str::to_string),
+        }
+    }
+
+    pub fn display_name_or_name(&self) -> Option<&str> {
+        self.display_name
+            .as_deref()
+            .or(self.name.as_deref())
+            .filter(|value| !value.trim().is_empty())
+    }
+
+    pub fn author_or_unknown(&self) -> &str {
+        self.author.as_deref().unwrap_or("@unknown")
+    }
+
+    pub fn version_or_unknown(&self) -> &str {
+        self.version.as_deref().unwrap_or("@unknown")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModConfigPaths {
     pub mods_dir: String,
@@ -423,6 +499,7 @@ impl ModResourcePlan {
 pub struct ModResourceDirectoryPlan {
     pub mod_name: String,
     pub root: PathBuf,
+    pub meta: ModMetadata,
     pub file_tree: FileTree,
     pub resource_plan: ModResourcePlan,
 }
@@ -435,12 +512,14 @@ impl ModResourceDirectoryPlan {
     ) -> io::Result<Self> {
         let mod_name = mod_name.into();
         let root = resolve_mod_root(root)?;
+        let meta = ModMetadata::from_directory(&mod_name, &root)?;
         let file_tree = mod_file_tree_from_directory(&root)?;
         let resource_plan = ModResourcePlan::from_directory(mod_name.clone(), headless, &root)?;
 
         Ok(Self {
             mod_name,
             root,
+            meta,
             file_tree,
             resource_plan,
         })
@@ -620,6 +699,106 @@ fn accept_png_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+}
+
+fn extract_mod_metadata_value(source: &str, key: &str) -> Option<String> {
+    source
+        .char_indices()
+        .find_map(|(index, _)| metadata_value_start(source, index, key))
+        .and_then(|value_start| parse_metadata_value(source, value_start))
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn metadata_value_start(source: &str, index: usize, key: &str) -> Option<usize> {
+    if !is_metadata_key_boundary(source, index.checked_sub(1)) {
+        return None;
+    }
+
+    let rest = source.get(index..)?;
+    let after_key = if let Some(rest) = rest.strip_prefix('"') {
+        let rest = rest.strip_prefix(key)?;
+        rest.strip_prefix('"')?
+    } else if let Some(rest) = rest.strip_prefix('\'') {
+        let rest = rest.strip_prefix(key)?;
+        rest.strip_prefix('\'')?
+    } else {
+        let rest = rest.strip_prefix(key)?;
+        if rest.chars().next().is_some_and(is_metadata_identifier_char) {
+            return None;
+        }
+        rest
+    };
+
+    let separator_index = after_key.char_indices().find_map(|(offset, ch)| {
+        if ch.is_whitespace() {
+            None
+        } else {
+            matches!(ch, ':' | '=').then_some(offset + ch.len_utf8())
+        }
+    })?;
+    Some(index + rest.len() - after_key.len() + separator_index)
+}
+
+fn parse_metadata_value(source: &str, mut index: usize) -> Option<String> {
+    while let Some(ch) = source.get(index..)?.chars().next() {
+        if !ch.is_whitespace() {
+            break;
+        }
+        index += ch.len_utf8();
+    }
+
+    let first = source.get(index..)?.chars().next()?;
+    if matches!(first, '"' | '\'') {
+        let quote = first;
+        let mut out = String::new();
+        let mut escaped = false;
+        for ch in source.get(index + quote.len_utf8()..)?.chars() {
+            if escaped {
+                out.push(match ch {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    '"' => '"',
+                    '\'' => '\'',
+                    '\\' => '\\',
+                    other => other,
+                });
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+            if ch == quote {
+                return Some(out.trim().to_string());
+            }
+            out.push(ch);
+        }
+        return None;
+    }
+
+    let raw = source
+        .get(index..)?
+        .split(|ch| matches!(ch, ',' | '\n' | '\r' | '}'))
+        .next()?
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_string();
+    Some(raw)
+}
+
+fn is_metadata_key_boundary(source: &str, previous_index: Option<usize>) -> bool {
+    match previous_index.and_then(|index| source.get(index..)?.chars().next()) {
+        Some(ch) => !is_metadata_identifier_char(ch),
+        None => true,
+    }
+}
+
+fn is_metadata_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')
 }
 
 fn is_skipped_mod_container_entry(name: &std::ffi::OsStr) -> bool {
@@ -1259,6 +1438,19 @@ mod tests {
         let outer_root = temp_mod_root("mod-root-scan");
         let mod_root = outer_root.join("example-pack");
 
+        std::fs::create_dir_all(&mod_root).unwrap();
+        std::fs::write(
+            mod_root.join("mod.hjson"),
+            br#"
+name: example
+displayName: "Example Pack"
+author: "Rust Tester"
+version: "1.2.3"
+description: "Adds routers."
+repo: "Anon/example"
+"#,
+        )
+        .unwrap();
         write_minimal_png(&mod_root.join("sprites/router.png"), 16, 16);
         write_minimal_png(&mod_root.join("sprites-override/ui/icon.png"), 32, 32);
         write_minimal_png(&mod_root.join("sprites/blocks/environment/ore.png"), 24, 24);
@@ -1319,6 +1511,25 @@ mod tests {
                     texture_scale: TextureScale::default(),
                 },
             ]
+        );
+
+        let directory_plan =
+            ModResourceDirectoryPlan::from_directory("example", false, &outer_root).unwrap();
+        assert_eq!(directory_plan.meta.name.as_deref(), Some("example"));
+        assert_eq!(
+            directory_plan.meta.display_name.as_deref(),
+            Some("Example Pack")
+        );
+        assert_eq!(directory_plan.meta.author.as_deref(), Some("Rust Tester"));
+        assert_eq!(directory_plan.meta.version.as_deref(), Some("1.2.3"));
+        assert_eq!(
+            directory_plan.meta.description.as_deref(),
+            Some("Adds routers.")
+        );
+        assert_eq!(directory_plan.meta.repo.as_deref(), Some("Anon/example"));
+        assert_eq!(
+            directory_plan.meta.source_path.as_deref(),
+            Some("mod.hjson")
         );
 
         let _ = std::fs::remove_dir_all(&outer_root);

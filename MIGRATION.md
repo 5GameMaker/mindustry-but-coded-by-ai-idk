@@ -19948,6 +19948,37 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `@mods.browser`、GitHub 导入、删除/启用/重载、真实 open folder 仍需继续对照 Java；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 577. ModsDialog 真实 mod 元信息读取闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.9%**，仍未达到完整可玩；继续优先前端/UI，把 Mods 详情页从 `@unknown` 元信息推进到读取真实 `mod.hjson` / `mod.json` / `plugin.hjson` / `plugin.json` 的承载层。
+- Java 对照依据：
+  - `ModsDialog.showMod(LoadedMod mod)` 展示的是 `LoadedMod.meta.displayName / author / version / description`，不是目录名加固定 unknown；
+  - Java mod root 会解析 mod/plugin 元信息文件；Rust 侧必须先把该元信息随 mod discovery 传到 UI；
+  - 读取文本遇到编码差异时应优先 UTF-8，并保持不因非 UTF-8 字节直接阻断 UI。
+- 本轮主改动：
+  - `core/src/mindustry/modsys/mod.rs`
+    - 新增 `ModMetadata`，保存 `name/display_name/author/version/description/repo/source_path`；
+    - `ModMetadata::from_directory(...)` 依序读取 `mod.hjson`、`mod.json`、`plugin.hjson`、`plugin.json`，读取字节后按 UTF-8 lossless/lossy 文本解析；
+    - 新增轻量 HJSON/JSON 字段提取，覆盖 quoted key/value 与常见 bare key/value；
+    - `ModResourceDirectoryPlan` 现在携带 `meta`，与资源扫描 root unwrap 结果保持一致。
+  - `desktop/src/lib.rs`
+    - 新增 `last_mods_directory_mod_metas`，在单 mod/容器 mod 扫描时随 discovery 保存真实元信息；
+    - Mods 卡片与详情标题优先显示 `displayName`，否则回退 `name/目录名`；
+    - 详情页显示真实 `@mod.version`、`@editor.author`、description，并保留 loaded/content 计数承载行；
+    - route/详情关闭时继续清理 Mods 子弹窗状态，避免旧内容层残留。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core modsys --lib`
+  - `cargo test -p mindustry-desktop mods_route --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_merges_mods_container_into_texture_atlas_explicitly --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 轻量字段提取不是完整 HJSON 解释器，后续若遇到复杂元信息文件需继续靠近 Java `Jval` 行为；
+  - `content: 0` 仍未接真实 `LoadedMod.minfo` / `UnlockableContent` 列表；
+  - enabled/disabled 状态、依赖错误、删除/重载/GitHub/browser/release 仍需继续迁移；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
