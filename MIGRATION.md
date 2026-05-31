@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 574. LoadDialog 模式过滤状态接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.6%**，仍未达到完整可玩；继续优先前端/UI，下一步优先补主菜单 logo/version、Discord/BE chrome 与暂停菜单状态分支。
+- Java 对照依据：
+  - `LoadDialog.java` 搜索栏旁按 `Gamemode.all` 生成模式过滤按钮；
+  - 点击按钮会在 `hidden: Seq<Gamemode>` 中切换该模式，`checked` 状态表示该模式未隐藏；
+  - slot 列表重建时过滤掉 `hidden.contains(slot.mode())` 的存档。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopMenuRouteShellAction::ToggleLoadGameMode(Gamemode)` 与 `DesktopLauncher::load_game_hidden_modes`；
+    - `LoadGame/SaveGame` route 打开时清空模式隐藏状态，避免跨 route 泄漏；
+    - `filtered_load_game_slot_indices()` 现在按存档 meta 中的 `rules.modeName` 推断模式，并过滤隐藏模式；
+    - 搜索栏模式按钮从纯可见骨架推进为可命中、可切换的 checked/hidden 视觉状态；
+    - `LoadDialog` 文本路线输出 `hidden modes: ...`，便于调试和回归测试验证。
+  - 测试：
+    - 新增 `desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog`，覆盖点击 attack 过滤按钮后隐藏 attack 存档、保留 survival 存档、再次点击恢复。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click -- --nocapture`
+- 仍未完成：
+  - LoadDialog 仍未完全对齐 Java 的缩略图截图、可读日期格式、slot 子按钮 checked 风格和 search field 最大长度；
+  - SaveGame 写盘仍是最小 meta snapshot，未接完整 world/entity/content 序列化；
+  - 暂停 overlay 的 campaign/editor/mobile/net disabled 分支仍需继续接入；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 573. 前端 UI 暂停入口、LoadDialog 信息密度与 native 黑屏诊断推进
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

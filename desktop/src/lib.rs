@@ -2578,6 +2578,7 @@ pub enum DesktopMenuRouteShellAction {
     ClearMapListSearch,
     FocusLoadGameSearch,
     ClearLoadGameSearch,
+    ToggleLoadGameMode(Gamemode),
     LoadGameImport,
     LoadGameSlot(usize, DesktopLoadGameActionKind),
     LoadGameRenameOk,
@@ -16010,6 +16011,7 @@ pub struct DesktopLauncher {
     pub load_game_search: String,
     pub load_game_search_focused: bool,
     pub load_game_scroll_offset: usize,
+    pub load_game_hidden_modes: Vec<Gamemode>,
     pub save_game_new_dialog_open: bool,
     pub save_game_new_text: String,
     pub save_game_overwrite_dialog_slot: Option<usize>,
@@ -16843,6 +16845,7 @@ impl DesktopLauncher {
             load_game_search: String::new(),
             load_game_search_focused: false,
             load_game_scroll_offset: 0,
+            load_game_hidden_modes: Vec::new(),
             save_game_new_dialog_open: false,
             save_game_new_text: String::new(),
             save_game_overwrite_dialog_slot: None,
@@ -20788,6 +20791,7 @@ impl DesktopLauncher {
                 self.load_game_search.clear();
                 self.load_game_search_focused = true;
                 self.load_game_scroll_offset = 0;
+                self.load_game_hidden_modes.clear();
                 self.load_game_rename_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
@@ -20939,12 +20943,20 @@ impl DesktopLauncher {
             .and_then(|meta| meta.map_name.as_deref())
             .filter(|map| !map.trim().is_empty())
             .unwrap_or("@unknown");
+        let mode = Self::load_game_slot_gamemode(slot);
+        format!("@save.map: {map} / @mode.{}.name", mode.wire_name())
+    }
+
+    fn load_game_slot_gamemode(slot: &SaveSlotRecord) -> Gamemode {
         let mode = slot
             .meta
             .as_ref()
             .and_then(|meta| Self::save_meta_mode_name_from_rules_json(&meta.rules_json))
             .unwrap_or_else(|| Gamemode::Survival.wire_name().to_string());
-        format!("@save.map: {map} / @mode.{mode}.name")
+        Gamemode::ALL
+            .into_iter()
+            .find(|candidate| candidate.wire_name().eq_ignore_ascii_case(mode.trim()))
+            .unwrap_or(Gamemode::Survival)
     }
 
     fn load_game_slot_wave_line(slot: &SaveSlotRecord) -> String {
@@ -21025,6 +21037,16 @@ impl DesktopLauncher {
                 "search: {} matches {}",
                 self.load_game_search,
                 filtered_indices.len()
+            ));
+        }
+        if !self.load_game_hidden_modes.is_empty() {
+            lines.push(format!(
+                "hidden modes: {}",
+                self.load_game_hidden_modes
+                    .iter()
+                    .map(|mode| mode.wire_name())
+                    .collect::<Vec<_>>()
+                    .join(",")
             ));
         }
         if self.load_game_slots.is_empty() {
@@ -23728,6 +23750,15 @@ impl DesktopLauncher {
         )
     }
 
+    fn load_game_mode_filter_button_rect(search: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            search.right() - 176.0 + index as f32 * 36.0,
+            search.center().y - 16.0,
+            30.0,
+            32.0,
+        )
+    }
+
     fn load_game_list_rect_for_panel(panel: RenderRect) -> RenderRect {
         let search = Self::load_game_search_rect_for_panel(panel);
         let bottom = Self::route_back_button_rect_for_panel(panel).bottom() + 18.0;
@@ -23851,7 +23882,8 @@ impl DesktopLauncher {
                         .map(schematic_search_normalize)
                         .is_some_and(|file| file.contains(&query))
                 {
-                    Some(index)
+                    let mode = Self::load_game_slot_gamemode(slot);
+                    (!self.load_game_hidden_modes.contains(&mode)).then_some(index)
                 } else {
                     None
                 }
@@ -23917,7 +23949,17 @@ impl DesktopLauncher {
         if Self::load_game_import_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::LoadGameImport);
         }
-        if Self::load_game_search_rect_for_panel(panel).contains_point(point) {
+        let search = Self::load_game_search_rect_for_panel(panel);
+        for (mode_index, mode) in Gamemode::ALL
+            .into_iter()
+            .filter(|mode| !mode.hidden())
+            .enumerate()
+        {
+            if Self::load_game_mode_filter_button_rect(search, mode_index).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ToggleLoadGameMode(mode));
+            }
+        }
+        if search.contains_point(point) {
             return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
         }
         let list = Self::load_game_list_rect_for_panel(panel);
@@ -23983,7 +24025,17 @@ impl DesktopLauncher {
         if Self::load_game_import_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::SaveGameNew);
         }
-        if Self::load_game_search_rect_for_panel(panel).contains_point(point) {
+        let search = Self::load_game_search_rect_for_panel(panel);
+        for (mode_index, mode) in Gamemode::ALL
+            .into_iter()
+            .filter(|mode| !mode.hidden())
+            .enumerate()
+        {
+            if Self::load_game_mode_filter_button_rect(search, mode_index).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ToggleLoadGameMode(mode));
+            }
+        }
+        if search.contains_point(point) {
             return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
         }
         let list = Self::load_game_list_rect_for_panel(panel);
@@ -24581,6 +24633,7 @@ impl DesktopLauncher {
                 self.load_game_search.clear();
                 self.load_game_search_focused = true;
                 self.load_game_scroll_offset = 0;
+                self.load_game_hidden_modes.clear();
                 self.load_game_rename_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
@@ -26912,6 +26965,19 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ClearLoadGameSearch => {
                 self.load_game_search.clear();
+                self.load_game_scroll_offset = 0;
+                self.load_game_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::ToggleLoadGameMode(mode) => {
+                if let Some(index) = self
+                    .load_game_hidden_modes
+                    .iter()
+                    .position(|hidden| *hidden == mode)
+                {
+                    self.load_game_hidden_modes.remove(index);
+                } else {
+                    self.load_game_hidden_modes.push(mode);
+                }
                 self.load_game_scroll_offset = 0;
                 self.load_game_search_focused = true;
             }
@@ -30864,23 +30930,27 @@ impl DesktopLauncher {
             .filter(|mode| !mode.hidden())
             .enumerate()
         {
-            let rect = RenderRect::new(
-                search.right() - 176.0 + index as f32 * 36.0,
-                search.center().y - 16.0,
-                30.0,
-                32.0,
-            );
+            let rect = Self::load_game_mode_filter_button_rect(search, index);
+            let hidden = self.load_game_hidden_modes.contains(&mode);
             pass.push(RenderCommand::draw_sprite(
-                Self::settings_drawable_symbol("clear"),
+                Self::settings_text_button_symbol("grayt", false, !hidden),
                 rect,
-                [1.0, 1.0, 1.0, 0.58],
+                if hidden {
+                    [1.0, 1.0, 1.0, 0.32]
+                } else {
+                    [1.0, 1.0, 1.0, 0.72]
+                },
                 0.0,
                 Layer::END_PIXELED + 0.029 + index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
                 format!("@mode.{}.name", mode.wire_name()),
                 RenderPoint::new(rect.center().x, rect.center().y),
-                [0.68, 0.80, 0.88, 1.0],
+                if hidden {
+                    [0.36, 0.44, 0.50, 0.92]
+                } else {
+                    [0.74, 0.88, 0.96, 1.0]
+                },
                 6.5,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
@@ -55423,6 +55493,7 @@ version: "2.0.0"
         new_tags.insert("mapname".into(), "New Map".into());
         new_tags.insert("saved".into(), "200".into());
         new_tags.insert("wave".into(), "9".into());
+        new_tags.insert("rules".into(), r#"{"modeName":"attack"}"#.into());
         let mut new_bytes = Vec::new();
         write_deflated_save_meta_prefix(&mut new_bytes, LATEST_SAVE_VERSION, &new_tags)
             .expect("new save meta should encode");
@@ -55453,7 +55524,7 @@ version: "2.0.0"
         assert!(lines.iter().any(|line| line.contains("@save.wave: 9")));
         assert!(lines
             .iter()
-            .any(|line| line.contains("@save.map: New Map / @mode.survival.name")));
+            .any(|line| line.contains("@save.map: New Map / @mode.attack.name")));
         assert!(!lines
             .iter()
             .any(|line| line.contains("pending LoadDialog port")));
@@ -55511,7 +55582,7 @@ version: "2.0.0"
         assert!(texts.contains(&"@save.search"));
         assert!(texts.contains(&"@save.import"));
         assert!(texts.contains(&"[accent]New Map"));
-        assert!(texts.contains(&"@save.map: New Map / @mode.survival.name"));
+        assert!(texts.contains(&"@save.map: New Map / @mode.attack.name"));
         assert!(texts
             .iter()
             .any(|text| text.contains("@save.wave: 9") && text.contains("saved: 200")));
@@ -55695,6 +55766,123 @@ version: "2.0.0"
             std::fs::read(save_dir.join("0.msav")).expect("imported save should exist"),
             std::fs::read(root.join("exported-save.msav")).expect("exported save should exist")
         );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog() {
+        let root = temp_desktop_path("load-game-mode-filter");
+        let save_dir = root.join("saves");
+        std::fs::create_dir_all(&save_dir).expect("save fixture dir should be writable");
+
+        let mut survival_tags = BTreeMap::new();
+        survival_tags.insert("mapname".into(), "Old Map".into());
+        survival_tags.insert("saved".into(), "100".into());
+        survival_tags.insert("wave".into(), "3".into());
+        let mut survival_bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut survival_bytes, LATEST_SAVE_VERSION, &survival_tags)
+            .expect("survival save meta should encode");
+        std::fs::write(save_dir.join("1.msav"), survival_bytes)
+            .expect("survival save should write");
+
+        let mut attack_tags = BTreeMap::new();
+        attack_tags.insert("mapname".into(), "New Map".into());
+        attack_tags.insert("saved".into(), "200".into());
+        attack_tags.insert("wave".into(), "9".into());
+        attack_tags.insert("rules".into(), r#"{"modeName":"attack"}"#.into());
+        let mut attack_bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut attack_bytes, LATEST_SAVE_VERSION, &attack_tags)
+            .expect("attack save meta should encode");
+        std::fs::write(save_dir.join("2.msav"), attack_bytes).expect("attack save should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.save_dir = save_dir.display().to_string();
+        launcher.dispatch_menu_action(MenuButtonRole::LoadGame);
+
+        assert_eq!(
+            launcher.filtered_load_game_slot_indices(),
+            vec![0, 1],
+            "newer attack save and older survival save should both be visible initially"
+        );
+        assert!(launcher.load_game_hidden_modes.is_empty());
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::LoadGame,
+        );
+        let search = DesktopLauncher::load_game_search_rect_for_panel(panel);
+        let attack_filter = DesktopLauncher::load_game_mode_filter_button_rect(search, 2).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                attack_filter.x,
+                attack_filter.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ToggleLoadGameMode(
+                Gamemode::Attack
+            ))
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: attack_filter.x,
+                    y: attack_filter.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.load_game_hidden_modes, vec![Gamemode::Attack]);
+        assert_eq!(
+            launcher.filtered_load_game_slot_indices(),
+            vec![1],
+            "hiding attack should leave the survival slot visible"
+        );
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::LoadGame);
+        assert!(lines.contains(&"hidden modes: attack".to_string()));
+        assert!(lines.iter().any(|line| line.contains("#0 Old Map")));
+        assert!(!lines.iter().any(|line| line.contains("New Map")));
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("filtered load game frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"[accent]Old Map"));
+        assert!(!texts.contains(&"[accent]New Map"));
+        assert!(texts.contains(&"1 / 2"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: attack_filter.x,
+                    y: attack_filter.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert!(launcher.load_game_hidden_modes.is_empty());
+        assert_eq!(launcher.filtered_load_game_slot_indices(), vec![0, 1]);
 
         std::fs::remove_dir_all(root).ok();
     }
