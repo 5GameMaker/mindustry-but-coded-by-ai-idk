@@ -21676,7 +21676,11 @@ impl DesktopLauncher {
                 self.content_loader
                     .get_by(*content_type)
                     .iter()
-                    .any(|record| record.name().is_some())
+                    .any(|record| {
+                        record.name().is_some_and(|name| {
+                            self.database_content_visible_in_dialog(*content_type, name)
+                        })
+                    })
             })
             .collect()
     }
@@ -21828,6 +21832,103 @@ impl DesktopLauncher {
         details.filter(|text| !text.trim().is_empty())
     }
 
+    fn database_content_is_hidden(&self, content_type: ContentType, name: &str) -> bool {
+        match content_type {
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .map_or(true, |item| item.is_hidden()),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .map_or(true, |liquid| liquid.is_hidden()),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .map_or(true, |status| status.is_hidden()),
+            ContentType::Unit => self
+                .content_loader
+                .unit_by_name(name)
+                .map_or(true, |unit| unit.is_hidden()),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .map_or(true, |weather| weather.weather().is_hidden()),
+            ContentType::Planet => self
+                .content_loader
+                .catalog()
+                .planet_by_name(name)
+                .map_or(true, |planet| !planet.meta.accessible),
+            _ => false,
+        }
+    }
+
+    fn database_content_hide_database(&self, content_type: ContentType, name: &str) -> bool {
+        match content_type {
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .is_some_and(|item| item.base.hide_database),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .is_some_and(|liquid| liquid.base.hide_database),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .is_some_and(|status| status.base.hide_database),
+            ContentType::Unit => self
+                .content_loader
+                .unit_by_name(name)
+                .is_some_and(|unit| unit.base.hide_database),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .is_some_and(|weather| weather.weather().base.hide_database),
+            _ => false,
+        }
+    }
+
+    fn database_content_unlocked(&self, content_type: ContentType, name: &str) -> bool {
+        match content_type {
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .is_some_and(|item| item.base.unlocked()),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .is_some_and(|liquid| liquid.base.unlocked()),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .is_some_and(|status| status.base.unlocked()),
+            ContentType::Unit => self
+                .content_loader
+                .unit_by_name(name)
+                .is_some_and(|unit| unit.base.unlocked()),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .is_some_and(|weather| weather.weather().base.unlocked()),
+            ContentType::Sector => self
+                .content_loader
+                .sector_by_name(name)
+                .is_some_and(|sector| sector.always_unlocked),
+            ContentType::Planet => self
+                .content_loader
+                .catalog()
+                .planet_by_name(name)
+                .is_some_and(|planet| planet.always_unlocked),
+            _ => true,
+        }
+    }
+
+    fn database_content_visible_in_dialog(&self, content_type: ContentType, name: &str) -> bool {
+        !self.database_content_is_hidden(content_type, name)
+            && !self.database_content_hide_database(content_type, name)
+    }
+
     fn database_content_stat_lines(&self, content_type: ContentType, name: &str) -> Vec<String> {
         let mut lines = Vec::new();
         if let Some(record) = self.content_loader.get_by_name(content_type, name) {
@@ -21938,7 +22039,15 @@ impl DesktopLauncher {
             .iter()
             .enumerate()
             .filter_map(|(index, record)| record.name().map(|name| (index, name)))
-            .filter(|(_, name)| search.is_empty() || name.to_lowercase().contains(&search))
+            .filter(|(_, name)| self.database_content_visible_in_dialog(content_type, name))
+            .filter(|(_, name)| {
+                search.is_empty()
+                    || name.to_lowercase().contains(&search)
+                    || self
+                        .database_content_display_name(content_type, name)
+                        .to_lowercase()
+                        .contains(&search)
+            })
             .collect()
     }
 
@@ -28606,7 +28715,7 @@ impl DesktopLauncher {
             if header.y < panel.y + 42.0 {
                 break;
             }
-            for (item_index, (record_index, _)) in self
+            for (item_index, (record_index, name)) in self
                 .database_visible_records_for_type(content_type)
                 .into_iter()
                 .take(visible_columns)
@@ -28615,6 +28724,9 @@ impl DesktopLauncher {
                 if Self::database_content_cell_rect_for_panel(panel, category_index, item_index)
                     .contains_point(point)
                 {
+                    if !self.database_content_unlocked(content_type, name) {
+                        return None;
+                    }
                     return Some((content_type, record_index));
                 }
             }
@@ -30350,6 +30462,21 @@ impl DesktopLauncher {
                     1.0,
                     Layer::END_PIXELED + 0.036 + category_index as f32 * 0.001,
                 ));
+                if !self.database_content_unlocked(content_type, name) {
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label("lock", "lock"),
+                        cell.center(),
+                        [0.50, 0.56, 0.62, 0.92],
+                        18.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_font(RenderFontId::Icon)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        Layer::END_PIXELED + 0.037 + category_index as f32 * 0.001,
+                    ));
+                }
             }
         }
         self.push_database_content_info_dialog(pass, panel);
@@ -58778,6 +58905,22 @@ version: "2.0.0"
             RenderCommand::DrawText { text, position, style, .. }
                 if text == &all_icon && *position == all_tab.center() && style.font == RenderFontId::Icon
         )));
+        let lock_icon = super::desktop_ui_icon_glyph_or_label("lock", "lock");
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, position, style, .. }
+                if text == &lock_icon && *position == second_cell.center() && style.font == RenderFontId::Icon
+        )));
+        let locked_item_cell = second_cell.center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                locked_item_cell.x,
+                locked_item_cell.y
+            ),
+            None,
+            "Java DatabaseDialog shows locked content but does not open ContentInfoDialog for it"
+        );
         assert!(route_texts
             .iter()
             .any(|text| text.starts_with("@database-category.")));

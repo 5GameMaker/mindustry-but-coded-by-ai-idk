@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 615. DatabaseDialog 补 hidden/hideDatabase 与锁定覆盖层
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **72.5%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 Database content grid 从“所有命名内容都能点”继续贴近 Java 的 `!isHidden && !hideDatabase` 与 locked overlay 语义。
+- Java 对照依据：
+  - `DatabaseDialog` 只展示 `!u.isHidden() && !u.hideDatabase` 的内容；
+  - 未解锁内容仍显示图标格子，但叠加 `Icon.lock`，点击不打开 `ContentInfoDialog`；
+  - 搜索匹配使用 localized name，而不是只看 raw internal name。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_content_is_hidden` / `database_content_hide_database` / `database_content_unlocked` / `database_content_visible_in_dialog`；
+    - `database_route_content_types` 与 `database_visible_records_for_type` 现在会跳过 hidden/hideDatabase 内容；
+    - search 现在同时匹配 raw name 与 `database_content_display_name(...)`；
+    - content cell 渲染时对未解锁内容叠加 Icon 字体 `lock`；
+    - locked content 的 hit-test 返回 `None`，避免点击穿透到 `OpenDatabaseContent`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Java 的 banned 红叉、patched 文件图标、tooltip、Shift-copy unicode 尚未迁移；
+  - `databaseCategory/databaseTag` 与 planet tab 过滤仍缺内容基类字段支撑；
+  - Block 的 unlock/database 元数据仍未统一抽到 `UnlockableContentBase` 等价结构。
+
 ## 614. Database 内容点击接入 ContentInfoDialog-like 弹窗
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
