@@ -59,8 +59,20 @@ fn desktop_native_trace_enabled() -> bool {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_trace_summary_enabled() -> bool {
+    desktop_native_trace_enabled() || std::env::var_os("MINDUSTRY_DESKTOP_TRACE_SUMMARY").is_some()
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 fn desktop_native_trace(message: impl AsRef<str>) {
     if desktop_native_trace_enabled() {
+        eprintln!("[desktop-native] {}", message.as_ref());
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_trace_summary(message: impl AsRef<str>) {
+    if desktop_native_trace_summary_enabled() {
         eprintln!("[desktop-native] {}", message.as_ref());
     }
 }
@@ -181,10 +193,10 @@ fn desktop_native_opengl_builtin_sprite_shader_source(
     match stage {
         mindustry_desktop::DesktopGraphicsOpenGlBackendShaderStage::Vertex => Some(
             r#"#version 150
-layout(location = 0) in vec4 a_position;
-layout(location = 1) in vec4 a_color;
-layout(location = 2) in vec2 a_texCoord0;
-layout(location = 3) in vec4 a_mix_color;
+in vec4 a_position;
+in vec4 a_color;
+in vec2 a_texCoord0;
+in vec4 a_mix_color;
 
 uniform mat4 u_projTrans;
 uniform vec2 u_viewportInverse;
@@ -221,6 +233,16 @@ void main(){
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_bind_builtin_mesh_attributes(gl: &glow::Context, program: glow::NativeProgram) {
+    unsafe {
+        gl.bind_attrib_location(program, 0, "a_position");
+        gl.bind_attrib_location(program, 1, "a_color");
+        gl.bind_attrib_location(program, 2, "a_texCoord0");
+        gl.bind_attrib_location(program, 3, "a_mix_color");
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 fn desktop_native_opengl_pixel_projection_matrix(width: i32, height: i32) -> [f32; 16] {
     let width = width.max(1) as f32;
     let height = height.max(1) as f32;
@@ -242,6 +264,24 @@ fn desktop_native_opengl_pixel_projection_matrix(width: i32, height: i32) -> [f3
         0.0,
         1.0,
     ]
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_placeholder_rgba8888_pixels(width: i32, height: i32) -> Vec<u8> {
+    let width = width.max(1).min(4096) as usize;
+    let height = height.max(1).min(4096) as usize;
+    let mut pixels = Vec::with_capacity(width.saturating_mul(height).saturating_mul(4));
+    for y in 0..height {
+        for x in 0..width {
+            let bright = ((x / 8) + (y / 8)) % 2 == 0;
+            if bright {
+                pixels.extend_from_slice(&[255, 255, 255, 255]);
+            } else {
+                pixels.extend_from_slice(&[255, 0, 255, 255]);
+            }
+        }
+    }
+    pixels
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -320,6 +360,13 @@ impl DesktopNativeOpenGlRuntime {
                 gl_display.get_proc_address(symbol) as *const _
             })
         };
+        if desktop_native_trace_summary_enabled() {
+            let version = unsafe { gl.get_parameter_string(glow::VERSION) };
+            let renderer = unsafe { gl.get_parameter_string(glow::RENDERER) };
+            desktop_native_trace_summary(format!(
+                "runtime.new: gl version={version} renderer={renderer}"
+            ));
+        }
 
         let mut runtime = Self {
             window,
@@ -458,6 +505,40 @@ impl DesktopNativeOpenGlDriver<'_> {
         let texture = unsafe { self.gl.create_texture() };
         match texture {
             Ok(texture) => {
+                unsafe {
+                    self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                    self.gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MIN_FILTER,
+                        glow::NEAREST as i32,
+                    );
+                    self.gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_MAG_FILTER,
+                        glow::NEAREST as i32,
+                    );
+                    self.gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_WRAP_S,
+                        glow::CLAMP_TO_EDGE as i32,
+                    );
+                    self.gl.tex_parameter_i32(
+                        glow::TEXTURE_2D,
+                        glow::TEXTURE_WRAP_T,
+                        glow::CLAMP_TO_EDGE as i32,
+                    );
+                    self.gl.tex_image_2d(
+                        glow::TEXTURE_2D,
+                        0,
+                        glow::RGBA as i32,
+                        1,
+                        1,
+                        0,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        glow::PixelUnpackData::Slice(Some(&[255, 255, 255, 255])),
+                    );
+                }
                 self.textures.insert(texture_handle, texture);
                 Some(texture)
             }
@@ -822,6 +903,7 @@ impl DesktopNativeOpenGlDriver<'_> {
             };
             self.gl.attach_shader(program, vertex_shader);
             self.gl.attach_shader(program, fragment_shader);
+            desktop_native_bind_builtin_mesh_attributes(self.gl, program);
             self.gl.link_program(program);
             self.gl.detach_shader(program, vertex_shader);
             self.gl.detach_shader(program, fragment_shader);
@@ -1011,14 +1093,16 @@ impl DesktopNativeOpenGlDriver<'_> {
     fn pixel_data_from_source(
         &mut self,
         pixel_source: &mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadPixelSource,
-    ) -> Option<Vec<u8>> {
+        fallback_width: i32,
+        fallback_height: i32,
+    ) -> Vec<u8> {
         match pixel_source.load_rgba8888_pixels() {
-            Ok(pixels) => Some(pixels.pixels),
+            Ok(pixels) => pixels.pixels,
             Err(error) => {
                 self.native_errors.push(format!(
-                    "failed to load native OpenGL texture pixel source: {error:?}"
+                    "failed to load native OpenGL texture pixel source; using checker fallback: {error:?}"
                 ));
-                None
+                desktop_native_placeholder_rgba8888_pixels(fallback_width, fallback_height)
             }
         }
     }
@@ -1464,8 +1548,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                 pixel_type,
                 pixel_source,
             } => {
-                let pixels = self.pixel_data_from_source(pixel_source);
-                let unpack = glow::PixelUnpackData::Slice(pixels.as_deref());
+                let pixels = self.pixel_data_from_source(pixel_source, *width, *height);
                 unsafe {
                     self.gl.tex_image_2d(
                         *target,
@@ -1476,7 +1559,7 @@ impl DesktopNativeOpenGlDriver<'_> {
                         *border,
                         *format,
                         *pixel_type,
-                        unpack,
+                        glow::PixelUnpackData::Slice(Some(&pixels)),
                     );
                 }
             }
@@ -1491,20 +1574,19 @@ impl DesktopNativeOpenGlDriver<'_> {
                 pixel_type,
                 pixel_source,
             } => {
-                if let Some(pixels) = self.pixel_data_from_source(pixel_source) {
-                    unsafe {
-                        self.gl.tex_sub_image_2d(
-                            *target,
-                            *level,
-                            *xoffset,
-                            *yoffset,
-                            *width,
-                            *height,
-                            *format,
-                            *pixel_type,
-                            glow::PixelUnpackData::Slice(Some(&pixels)),
-                        );
-                    }
+                let pixels = self.pixel_data_from_source(pixel_source, *width, *height);
+                unsafe {
+                    self.gl.tex_sub_image_2d(
+                        *target,
+                        *level,
+                        *xoffset,
+                        *yoffset,
+                        *width,
+                        *height,
+                        *format,
+                        *pixel_type,
+                        glow::PixelUnpackData::Slice(Some(&pixels)),
+                    );
                 }
             }
             mindustry_desktop::DesktopGraphicsOpenGlBackendTextureUploadCommand::TexSubImage2D {
@@ -1963,11 +2045,29 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
         };
         desktop_native_trace("runtime.submit: drive native OpenGL driver");
         let driver_state = executor.drive_driver(&mut driver);
-        if desktop_native_trace_enabled() {
-            desktop_native_trace(format!(
-                "runtime.submit: driver done draw_commands={} resolve_commands={}",
-                driver_state.draw_commands, driver_state.resolve_commands
+        if desktop_native_trace_summary_enabled() {
+            let gl_error = unsafe { self.gl.get_error() };
+            desktop_native_trace_summary(format!(
+                "runtime.submit: driver done framebuffer_attachments={} texture_upload_commands={} sprite_mesh_upload_commands={} shader_commands={} draw_commands={} resolve_draw_commands={} resolve_commands={} textures={} vaos={} buffers={} programs={} gl_error=0x{gl_error:04x}",
+                driver_state.framebuffer_attachment_plans,
+                driver_state.texture_upload_commands,
+                driver_state.sprite_mesh_upload_commands,
+                driver_state.shader_commands,
+                driver_state.draw_commands,
+                driver_state.resolve_draw_commands,
+                driver_state.resolve_commands,
+                self.textures.len(),
+                self.vertex_arrays.len(),
+                self.buffers.len(),
+                self.programs.len()
             ));
+            if !self.native_errors.is_empty() {
+                for error in self.native_errors.iter().rev().take(5).rev() {
+                    desktop_native_trace_summary(format!(
+                        "runtime.submit: native warning: {error}"
+                    ));
+                }
+            }
         }
         self.state.frames_submitted += 1;
         self.state.last_driver_state = Some(driver_state);
@@ -2208,8 +2308,11 @@ mod tests {
         )
         .expect("native sprite fragment shader should override Mesh");
 
-        assert!(vertex.contains("layout(location = 0) in vec4 a_position"));
-        assert!(vertex.contains("layout(location = 3) in vec4 a_mix_color"));
+        assert!(vertex.starts_with("#version 150"));
+        assert!(fragment.starts_with("#version 150"));
+        assert!(vertex.contains("in vec4 a_position"));
+        assert!(vertex.contains("in vec4 a_mix_color"));
+        assert!(!vertex.contains("layout(location"));
         assert!(vertex.contains("uniform mat4 u_projTrans"));
         assert!(vertex.contains("uniform vec2 u_viewportInverse"));
         assert!(vertex.contains("gl_Position = u_projTrans * a_position"));

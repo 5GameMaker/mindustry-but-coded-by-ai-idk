@@ -6549,6 +6549,31 @@ fn desktop_candidate_asset_raw_root_from_asset_root(
     asset_root.parent().map(|parent| parent.join("assets-raw"))
 }
 
+fn desktop_default_asset_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(current_dir) = std::env::current_dir() {
+        roots.push(current_dir.join("core").join("assets"));
+    }
+    roots.push(PathBuf::from(
+        "D:/MDT/mindustry-upstream-v157.4/core/assets",
+    ));
+    roots
+}
+
+fn desktop_existing_sprite_source_path_from_asset_root(
+    asset_root: &Path,
+    normalized_source_path: &str,
+) -> Option<PathBuf> {
+    let asset_path = asset_root.join(normalized_source_path);
+    if asset_path.exists() {
+        return Some(asset_path);
+    }
+
+    desktop_candidate_asset_raw_root_from_asset_root(asset_root).and_then(|asset_raw_root| {
+        desktop_existing_sprite_source_path_from_raw_root(&asset_raw_root, normalized_source_path)
+    })
+}
+
 fn desktop_sprite_source_path_cache() -> &'static Mutex<BTreeMap<String, Option<PathBuf>>> {
     static CACHE: OnceLock<Mutex<BTreeMap<String, Option<PathBuf>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
@@ -6773,18 +6798,10 @@ fn desktop_existing_sprite_source_path(source_path: &str) -> Option<PathBuf> {
 
     if let Ok(asset_root) = std::env::var("MINDUSTRY_ASSET_ROOT") {
         let asset_root = PathBuf::from(asset_root);
-        let asset_path = asset_root.join(&normalized);
-        if asset_path.exists() {
-            return Some(asset_path);
-        }
-
-        if let Some(asset_raw_root) = desktop_candidate_asset_raw_root_from_asset_root(&asset_root)
+        if let Some(path) =
+            desktop_existing_sprite_source_path_from_asset_root(&asset_root, &normalized)
         {
-            if let Some(raw_path) =
-                desktop_existing_sprite_source_path_from_raw_root(&asset_raw_root, &normalized)
-            {
-                return Some(raw_path);
-            }
+            return Some(path);
         }
     }
 
@@ -6794,6 +6811,14 @@ fn desktop_existing_sprite_source_path(source_path: &str) -> Option<PathBuf> {
             &normalized,
         ) {
             return Some(raw_path);
+        }
+    }
+
+    for asset_root in desktop_default_asset_roots() {
+        if let Some(path) =
+            desktop_existing_sprite_source_path_from_asset_root(&asset_root, &normalized)
+        {
+            return Some(path);
         }
     }
 
@@ -6813,6 +6838,13 @@ fn desktop_existing_asset_source_path(source_path: &str) -> Option<PathBuf> {
 
     if let Ok(asset_root) = std::env::var("MINDUSTRY_ASSET_ROOT") {
         let asset_path = PathBuf::from(asset_root).join(&normalized);
+        if asset_path.exists() {
+            return Some(asset_path);
+        }
+    }
+
+    for asset_root in desktop_default_asset_roots() {
+        let asset_path = asset_root.join(&normalized);
         if asset_path.exists() {
             return Some(asset_path);
         }
