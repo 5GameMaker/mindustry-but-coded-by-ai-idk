@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 583. CustomGame/Editor MapListDialog 卡片视觉补强
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **69.2%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 CustomGame 与 Editor 的地图列表卡片从压缩文本卡推进到更接近 Java `MapListDialog` 的预览卡片。
+- Java 对照依据：
+  - CustomGame/Editor 地图列表需要体现地图预览区域、名称、作者、类型/尺寸、可用模式、搜索过滤空态和地图信息弹窗字段；
+  - Editor 信息弹窗应展示名称、作者、尺寸、来源和描述等字段，而不是只保留少量占位信息。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 地图卡片尺寸扩大，预览区改为更接近卡片式布局；
+    - 卡片展示地图名、作者、类型/尺寸、可用模式 badge，并保留 preview 边框；
+    - 过滤后空态展示 `@none.found`/`@maps.none` 与当前过滤摘要；
+    - Editor map info 弹窗增加 `size`、`source` 字段，并压缩字段间距以容纳更多真实信息；
+    - shell lines 改为反映过滤后可见地图数量和空态 hint。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib map_list -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib custom_game -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib editor_route -- --nocapture`
+  - `cargo fmt --all -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - 真实地图缩略图、完整 editor map operations、play/customize 真实 gameplay 侧效应仍需继续接入；
+  - 地图列表仍需继续对齐 Java 的滚动、排序、preview cache、MapInfoDialog 全量按钮与异常提示；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 582. native OpenGL 零有效 draw 可见兜底
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

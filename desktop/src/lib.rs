@@ -191,8 +191,8 @@ const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
 const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
 const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 44.0;
-const MAP_LIST_CARD_WIDTH: f32 = 190.0;
-const MAP_LIST_CARD_HEIGHT: f32 = 96.0;
+const MAP_LIST_CARD_WIDTH: f32 = 200.0;
+const MAP_LIST_CARD_HEIGHT: f32 = 216.0;
 const MAP_LIST_CARD_GAP: f32 = 10.0;
 const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
 const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
@@ -275,6 +275,16 @@ impl DesktopJoinRouteServerSnapshot {
         let query = query.trim().to_lowercase();
         query.is_empty() || self.search_terms.contains(&query)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DesktopMapListCardSummary {
+    name: String,
+    size: String,
+    author: String,
+    description: String,
+    type_label: String,
+    status: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25547,7 +25557,12 @@ impl DesktopLauncher {
     }
 
     fn map_list_card_preview_rect(card: RenderRect) -> RenderRect {
-        RenderRect::new(card.x + 8.0, card.y + 34.0, 58.0, 50.0)
+        RenderRect::new(
+            card.x + 10.0,
+            card.y + 36.0,
+            card.width - 20.0,
+            (card.height - 104.0).max(96.0),
+        )
     }
 
     fn map_list_card_type_label(map: &MapDescriptor) -> &'static str {
@@ -25559,6 +25574,260 @@ impl DesktopLauncher {
             "@mods"
         } else {
             "@builtin"
+        }
+    }
+
+    fn map_list_card_status_summary(map: &MapDescriptor) -> String {
+        let statuses = Gamemode::ALL
+            .into_iter()
+            .filter(|mode| !mode.hidden() && mode.valid(map))
+            .map(|mode| mode.wire_name().to_string())
+            .collect::<Vec<_>>();
+        if statuses.is_empty() {
+            "@none".to_string()
+        } else if statuses.len() <= 2 {
+            statuses.join(" / ")
+        } else {
+            format!("{} / {} +{}", statuses[0], statuses[1], statuses.len() - 2)
+        }
+    }
+
+    fn map_list_card_summary(map: &MapDescriptor) -> DesktopMapListCardSummary {
+        let description = schematic_text_snippet(&map.plain_description(), 40);
+        DesktopMapListCardSummary {
+            name: schematic_text_snippet(&map.plain_name(), 30),
+            size: format!("{}x{}", map.width, map.height),
+            author: schematic_text_snippet(&map.plain_author(), 24),
+            description: if description.is_empty() {
+                "--".to_string()
+            } else {
+                description
+            },
+            type_label: Self::map_list_card_type_label(map).to_string(),
+            status: Self::map_list_card_status_summary(map),
+        }
+    }
+
+    fn map_list_card_summary_line(map: &MapDescriptor) -> String {
+        let summary = Self::map_list_card_summary(map);
+        format!(
+            "name={} size={} author={} description={} type={} status={}",
+            summary.name,
+            summary.size,
+            summary.author,
+            summary.description,
+            summary.type_label,
+            summary.status
+        )
+    }
+
+    fn map_list_filter_state_summary(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.map_list_search.is_empty() {
+            parts.push(format!(
+                "search={}",
+                schematic_text_snippet(&self.map_list_search, 24)
+            ));
+        }
+        if !self.map_list_filter_modes.is_empty() {
+            parts.push(format!(
+                "modes={}",
+                self.map_list_filter_modes
+                    .iter()
+                    .map(|mode| format!("@mode.{}.name", mode.wire_name()))
+                    .collect::<Vec<_>>()
+                    .join("/")
+            ));
+        }
+        if !self.map_list_filter_planets.is_empty() {
+            parts.push(format!(
+                "planets={}",
+                self.map_list_filter_planets.join("/")
+            ));
+        }
+        if !self.map_list_filter_show_builtin
+            || !self.map_list_filter_show_custom
+            || !self.map_list_filter_show_modded
+        {
+            parts.push(format!(
+                "types={}",
+                [
+                    self.map_list_filter_show_custom.then_some("@custom"),
+                    self.map_list_filter_show_builtin.then_some("@builtin"),
+                    self.map_list_filter_show_modded.then_some("@modded"),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("/")
+            ));
+        }
+        if self.map_list_filter_search_author
+            || self.map_list_filter_search_description
+            || self.map_list_filter_search_mod_name
+        {
+            parts.push(format!(
+                "search-scope={}",
+                [
+                    self.map_list_filter_search_author
+                        .then_some("@editor.filters.author"),
+                    self.map_list_filter_search_description
+                        .then_some("@editor.filters.description"),
+                    self.map_list_filter_search_mod_name
+                        .then_some("@editor.filters.modname"),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("/")
+            ));
+        }
+        if self.map_list_filter_prioritize_custom {
+            parts.push("priority=custom".into());
+        }
+        if self.map_list_filter_prioritize_modded {
+            parts.push("priority=modded".into());
+        }
+        if parts.is_empty() {
+            "default".to_string()
+        } else {
+            parts.join(" ")
+        }
+    }
+
+    fn map_list_card_mode_badge_text(mode: Gamemode) -> String {
+        let icon_name = match mode {
+            Gamemode::Survival => "modeSurvivalSmall",
+            Gamemode::Sandbox => "modeSandboxSmall",
+            Gamemode::Attack => "modeAttackSmall",
+            Gamemode::Pvp => "modePvpSmall",
+            _ => return format!("@mode.{}.name", mode.wire_name()),
+        };
+        desktop_ui_icon_glyph_or_label(icon_name, mode.wire_name())
+    }
+
+    fn map_list_card_source_label(map: &MapDescriptor) -> String {
+        if map.workshop {
+            "@workshop".to_string()
+        } else if let Some(mod_name) = map
+            .mod_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|mod_name| !mod_name.is_empty())
+        {
+            format!("@mods: {mod_name}")
+        } else if map.custom {
+            "@custom".to_string()
+        } else {
+            "@builtin".to_string()
+        }
+    }
+
+    fn map_list_has_active_filters(&self) -> bool {
+        !self.map_list_filter_modes.is_empty()
+            || !self.map_list_filter_planets.is_empty()
+            || !self.map_list_filter_show_builtin
+            || !self.map_list_filter_show_custom
+            || !self.map_list_filter_show_modded
+            || self.map_list_filter_search_author
+            || self.map_list_filter_search_description
+            || self.map_list_filter_search_mod_name
+            || self.map_list_filter_prioritize_custom
+            || self.map_list_filter_prioritize_modded
+    }
+
+    fn map_list_filter_summary_text(&self) -> Option<String> {
+        let mut parts = Vec::new();
+
+        if !self.map_list_filter_modes.is_empty() {
+            parts.push(format!(
+                "modes: {}",
+                self.map_list_filter_modes
+                    .iter()
+                    .map(|mode| format!("@mode.{}.name", mode.wire_name()))
+                    .collect::<Vec<_>>()
+                    .join(" / ")
+            ));
+        }
+
+        if !self.map_list_filter_show_custom
+            || !self.map_list_filter_show_builtin
+            || !self.map_list_filter_show_modded
+        {
+            let mut type_parts = Vec::new();
+            if self.map_list_filter_show_custom {
+                type_parts.push("@custom");
+            }
+            if self.map_list_filter_show_builtin {
+                type_parts.push("@builtin");
+            }
+            if self.map_list_filter_show_modded {
+                type_parts.push("@modded");
+            }
+            if type_parts.is_empty() {
+                type_parts.push("@none");
+            }
+            if !type_parts.is_empty() {
+                parts.push(format!("types: {}", type_parts.join(" / ")));
+            }
+        }
+
+        if !self.map_list_filter_planets.is_empty() {
+            parts.push(format!(
+                "planets: {}",
+                self.map_list_filter_planets.join(" / ")
+            ));
+        }
+
+        if self.map_list_filter_search_author
+            || self.map_list_filter_search_description
+            || self.map_list_filter_search_mod_name
+        {
+            let mut scope_parts = Vec::new();
+            if self.map_list_filter_search_author {
+                scope_parts.push("@editor.filters.author");
+            }
+            if self.map_list_filter_search_description {
+                scope_parts.push("@editor.filters.description");
+            }
+            if self.map_list_filter_search_mod_name {
+                scope_parts.push("@editor.filters.modname");
+            }
+            parts.push(format!("search: {}", scope_parts.join(" / ")));
+        }
+
+        if self.map_list_filter_prioritize_custom || self.map_list_filter_prioritize_modded {
+            let mut priority_parts = Vec::new();
+            if self.map_list_filter_prioritize_custom {
+                priority_parts.push("@editor.filters.prioritizecustom");
+            }
+            if self.map_list_filter_prioritize_modded {
+                priority_parts.push("@editor.filters.prioritizemod");
+            }
+            parts.push(format!("priority: {}", priority_parts.join(" / ")));
+        }
+
+        if parts.is_empty() {
+            None
+        } else {
+            Some(format!("filters: {}", parts.join(" | ")))
+        }
+    }
+
+    fn map_list_empty_state_texts(&self) -> (String, Option<String>) {
+        let search = self.map_list_search.trim();
+        if !search.is_empty() {
+            (
+                format!("@none.found: {search}"),
+                self.map_list_filter_summary_text(),
+            )
+        } else if self.map_list_has_active_filters() {
+            (
+                "@maps.none".to_string(),
+                self.map_list_filter_summary_text(),
+            )
+        } else {
+            ("@maps.none".to_string(), None)
         }
     }
 
@@ -31152,8 +31421,9 @@ impl DesktopLauncher {
         ));
         let filtered_indices = self.filtered_map_card_indices();
         if filtered_indices.is_empty() {
+            let (empty_text, empty_hint) = self.map_list_empty_state_texts();
             pass.push(RenderCommand::draw_text_styled(
-                "@maps.none",
+                empty_text,
                 pane.center(),
                 [0.70, 0.78, 0.84, 1.0],
                 13.0,
@@ -31163,6 +31433,19 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.032,
             ));
+            if let Some(empty_hint) = empty_hint {
+                pass.push(RenderCommand::draw_text_styled(
+                    empty_hint,
+                    RenderPoint::new(pane.center().x, pane.center().y + 22.0),
+                    [0.54, 0.64, 0.72, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.033,
+                ));
+            }
         } else {
             let columns = Self::map_list_card_columns_for_pane(pane);
             let start = self.map_list_scroll_offset * columns;
@@ -31195,45 +31478,119 @@ impl DesktopLauncher {
                     1.0,
                     Layer::END_PIXELED + 0.035 + visible_index as f32 * 0.001,
                 ));
-                pass.push(RenderCommand::draw_text_styled(
-                    map.plain_name(),
-                    RenderPoint::new(card.x + 76.0, card.y + card.height - 22.0),
-                    [0.94, 0.98, 1.0, 1.0],
-                    11.0,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Start)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true)
-                        .with_outline(true),
-                    Layer::END_PIXELED + 0.036 + visible_index as f32 * 0.001,
-                ));
-                pass.push(RenderCommand::draw_text_styled(
-                    format!(
-                        "{}  {}x{}",
-                        Self::map_list_card_type_label(map),
-                        map.width,
-                        map.height
+                let DesktopMapListCardSummary {
+                    name,
+                    size,
+                    author,
+                    description,
+                    type_label,
+                    status,
+                } = Self::map_list_card_summary(map);
+                let text_x = card.x + 76.0;
+                let name_line = format!("name: {name}");
+                let size_line = format!("size: {size}");
+                let author_line = format!("author: {author}");
+                let description_line = format!("description: {description}");
+                let type_line = format!("type: {type_label}");
+                let status_line = format!("status: {status}");
+                let mut lines = vec![
+                    (
+                        name.clone(),
+                        card.y + card.height - 16.0,
+                        [0.94, 0.98, 1.0, 1.0],
+                        11.0,
+                        true,
                     ),
-                    RenderPoint::new(card.x + 76.0, card.y + card.height - 44.0),
-                    [0.70, 0.82, 0.90, 1.0],
-                    9.0,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Start)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.037 + visible_index as f32 * 0.001,
-                ));
-                pass.push(RenderCommand::draw_text_styled(
-                    map.plain_author(),
-                    RenderPoint::new(card.x + 76.0, card.y + 18.0),
-                    [0.56, 0.68, 0.76, 1.0],
+                    (
+                        author.clone(),
+                        card.y + card.height - 30.0,
+                        [0.58, 0.70, 0.78, 1.0],
+                        9.0,
+                        false,
+                    ),
+                    (
+                        name_line,
+                        card.y + card.height - 44.0,
+                        [0.78, 0.88, 0.96, 1.0],
+                        8.0,
+                        false,
+                    ),
+                    (
+                        size_line,
+                        card.y + card.height - 58.0,
+                        [0.70, 0.82, 0.90, 1.0],
+                        8.0,
+                        false,
+                    ),
+                    (
+                        author_line,
+                        card.y + card.height - 72.0,
+                        [0.58, 0.70, 0.78, 1.0],
+                        8.0,
+                        false,
+                    ),
+                ];
+                if description != "--" {
+                    lines.push((
+                        description_line,
+                        card.y + card.height - 86.0,
+                        [0.78, 0.86, 0.92, 1.0],
+                        8.0,
+                        false,
+                    ));
+                }
+                lines.push((
+                    type_line,
+                    card.y + 32.0,
+                    [0.82, 0.90, 0.98, 1.0],
                     8.0,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Start)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.038 + visible_index as f32 * 0.001,
+                    false,
                 ));
+                lines.push((
+                    status_line,
+                    card.y + 18.0,
+                    [0.76, 0.86, 0.94, 1.0],
+                    8.0,
+                    false,
+                ));
+                for (line_index, (text, y, color, size, outline)) in lines.into_iter().enumerate() {
+                    pass.push(RenderCommand::draw_text_styled(
+                        text,
+                        RenderPoint::new(text_x, y),
+                        color,
+                        size,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(outline),
+                        Layer::END_PIXELED
+                            + 0.036
+                            + visible_index as f32 * 0.001
+                            + line_index as f32 * 0.0001,
+                    ));
+                }
+                for (badge_index, mode) in Gamemode::ALL
+                    .into_iter()
+                    .filter(|mode| !mode.hidden() && mode.valid(map))
+                    .enumerate()
+                {
+                    let badge_x = card.x + 12.0 + badge_index as f32 * 30.0;
+                    pass.push(RenderCommand::draw_text_styled(
+                        Self::map_list_card_mode_badge_text(mode),
+                        RenderPoint::new(badge_x, card.y + card.height - 18.0),
+                        [0.92, 0.97, 1.0, 1.0],
+                        9.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED
+                            + 0.0385
+                            + visible_index as f32 * 0.001
+                            + badge_index as f32 * 0.0001,
+                    ));
+                }
             }
             let max_scroll = self.max_map_list_scroll_offset(pane);
             if max_scroll > 0 {
@@ -31588,15 +31945,17 @@ impl DesktopLauncher {
             [0.0, 0.0, 0.0, 0.52],
             Layer::END_PIXELED + 0.064,
         ));
-        for (index, (label, value)) in [
+        let mut fields = vec![
             ("@editor.mapname", map.plain_name()),
             ("@editor.author", map.plain_author()),
-            ("@editor.description", map.plain_description()),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let y = desc.y + desc.height - 22.0 - index as f32 * 48.0;
+            ("size", format!("{}x{}", map.width, map.height)),
+            ("source", Self::map_list_card_source_label(map)),
+        ];
+        if !map.plain_description().trim().is_empty() {
+            fields.push(("@editor.description", map.plain_description()));
+        }
+        for (index, (label, value)) in fields.into_iter().enumerate() {
+            let y = desc.y + desc.height - 22.0 - index as f32 * 32.0;
             pass.push(RenderCommand::draw_text_styled(
                 label,
                 RenderPoint::new(desc.x + 12.0, y),
@@ -31610,9 +31969,9 @@ impl DesktopLauncher {
             ));
             pass.push(RenderCommand::draw_text_styled(
                 value,
-                RenderPoint::new(desc.x + 12.0, y - 18.0),
+                RenderPoint::new(desc.x + 12.0, y - 16.0),
                 [0.90, 0.96, 1.0, 1.0],
-                10.0,
+                9.5,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -33740,10 +34099,14 @@ impl DesktopLauncher {
     }
 
     fn map_list_route_lines(&self, title_key: &str, display_type: bool) -> Vec<String> {
+        let visible_count = self.filtered_map_card_indices().len();
         let maps_line = if self.map_list_cards.is_empty() {
             "maps: @maps.none".to_string()
+        } else if visible_count == 0 {
+            let (empty_text, _) = self.map_list_empty_state_texts();
+            format!("maps: {empty_text}")
         } else {
-            format!("maps: card grid count={}", self.map_list_cards.len())
+            format!("maps: card grid count={visible_count}")
         };
         let mut lines = vec![
             format!("dialog: MapListDialog title={title_key}"),
@@ -33756,12 +34119,48 @@ impl DesktopLauncher {
         if display_type {
             lines.push("type label: @custom / @workshop / @builtin".into());
         }
+        lines.push(format!(
+            "filter state: {}",
+            self.map_list_filter_state_summary()
+        ));
+        if let Some(summary) = self.map_list_filter_summary_text() {
+            lines.push(summary);
+        }
+        if !self.map_list_search.is_empty() {
+            lines.push(format!(
+                "search state: query={} focused={}",
+                schematic_text_snippet(&self.map_list_search, 24),
+                self.map_list_search_focused
+            ));
+        }
+        lines.push(format!(
+            "cards: filtered={} total={}",
+            visible_count,
+            self.map_list_cards.len()
+        ));
+        for (index, map_index) in self.filtered_map_card_indices().into_iter().enumerate() {
+            if let Some(map) = self.map_list_cards.get(map_index) {
+                lines.push(format!(
+                    "card[{index}]: {}",
+                    Self::map_list_card_summary_line(map)
+                ));
+            }
+        }
+        if visible_count == 0 && !self.map_list_cards.is_empty() {
+            if let Some(hint) = self.map_list_empty_state_texts().1 {
+                lines.push(format!("empty hint: {hint}"));
+            }
+        }
         lines
     }
 
     fn custom_game_route_lines(&self) -> Vec<String> {
         let mut lines = self.map_list_route_lines("@customgame", false);
         lines.push("map click: MapPlayDialog.show(map)".into());
+        if self.map_play_dialog_index.is_some() {
+            lines.push("dialog: MapPlayDialog".into());
+            lines.push("button hierarchy: @customize > @play".into());
+        }
         lines
     }
 
@@ -53985,6 +54384,10 @@ version: "2.0.0"
         let mut tags = BTreeMap::new();
         tags.insert("name".to_string(), "Archipelago".to_string());
         tags.insert("author".to_string(), "Anuken".to_string());
+        tags.insert(
+            "description".to_string(),
+            "Official vanilla editor map".to_string(),
+        );
         let builtin = MapDescriptor::new(
             "maps/default/archipelago.msav",
             300,
@@ -53998,6 +54401,10 @@ version: "2.0.0"
         let mut custom_tags = BTreeMap::new();
         custom_tags.insert("name".to_string(), "Workshop Arena".to_string());
         custom_tags.insert("author".to_string(), "Mapper".to_string());
+        custom_tags.insert(
+            "description".to_string(),
+            "Community workshop battleground".to_string(),
+        );
         let mut custom = MapDescriptor::new(
             "maps/custom/arena.msav",
             180,
@@ -54045,10 +54452,18 @@ version: "2.0.0"
             );
             assert!(texts.contains(&"Archipelago"));
             assert!(texts.contains(&"Workshop Arena"));
-            assert!(texts.contains(&"@builtin  300x300"));
-            assert!(texts.contains(&"@workshop  180x180"));
-            assert!(texts.contains(&"Anuken"));
-            assert!(texts.contains(&"Mapper"));
+            assert!(texts.contains(&"name: Archipelago"));
+            assert!(texts.contains(&"size: 300x300"));
+            assert!(texts.contains(&"author: Anuken"));
+            assert!(texts.contains(&"description: Official vanilla editor map"));
+            assert!(texts.contains(&"type: @builtin"));
+            assert!(texts.contains(&"status: sandbox"));
+            assert!(texts.contains(&"name: Workshop Arena"));
+            assert!(texts.contains(&"size: 180x180"));
+            assert!(texts.contains(&"author: Mapper"));
+            assert!(texts.contains(&"description: Community workshop battleground"));
+            assert!(texts.contains(&"type: @workshop"));
+            assert!(texts.contains(&"status: sandbox"));
             assert!(commands.iter().any(|command| {
                 matches!(
                     command,
@@ -54077,6 +54492,16 @@ version: "2.0.0"
                 expected,
             ));
             assert_eq!(launcher.last_map_card_action, Some(expected));
+
+            if route == super::DesktopMenuRoute::CustomGame {
+                let lines = launcher.active_menu_route_shell_lines(route);
+                assert!(lines
+                    .iter()
+                    .any(|line| line.contains("card[0]: name=Archipelago")));
+                assert!(lines
+                    .iter()
+                    .any(|line| line.contains("button hierarchy: @customize > @play")));
+            }
 
             let dialog_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
             let dialog_texts = dialog_frame
@@ -54107,6 +54532,11 @@ version: "2.0.0"
                     assert!(dialog_texts.contains(&"@editor.mapinfo"));
                     assert!(dialog_texts.contains(&"@editor.mapname"));
                     assert!(dialog_texts.contains(&"@editor.author"));
+                    assert!(dialog_texts.contains(&"@editor.description"));
+                    assert!(dialog_texts.contains(&"size"));
+                    assert!(dialog_texts.contains(&"300x300"));
+                    assert!(dialog_texts.contains(&"source"));
+                    assert!(dialog_texts.contains(&"@builtin"));
                     assert!(dialog_texts.contains(&"@editor.openin"));
                     assert!(dialog_texts.contains(&"@delete"));
                 }
@@ -54391,6 +54821,24 @@ version: "2.0.0"
                 )
             });
         assert!(disabled_delete_text);
+
+        let dialog_texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("editor map info should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(dialog_texts.contains(&"size"));
+        assert!(dialog_texts.contains(&"160x160"));
+        assert!(dialog_texts.contains(&"source"));
+        assert!(dialog_texts.contains(&"@builtin"));
     }
 
     #[test]
@@ -54614,6 +55062,25 @@ version: "2.0.0"
         assert!(texts.contains(&"17"));
         assert!(texts.contains(&"Arena 17"));
         assert!(!texts.contains(&"Arena 0"));
+
+        launcher.map_list_search = "missing".into();
+        launcher.map_list_scroll_offset = 0;
+        assert!(launcher.filtered_map_card_indices().is_empty());
+        let empty_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let empty_texts = empty_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("empty search map list should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(empty_texts.contains(&"@none.found: missing"));
 
         let search = DesktopLauncher::map_list_search_rect_for_panel(
             panel,
