@@ -171,6 +171,7 @@ const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const LOAD_SLOT_CARD_HEIGHT: f32 = 82.0;
 const LOAD_SLOT_CARD_GAP: f32 = 8.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
+const LOAD_SEARCH_TEXT_MAX_LENGTH: usize = 50;
 const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
 const SAVE_NEW_TEXT_MAX_LENGTH: usize = 30;
 const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
@@ -20975,14 +20976,16 @@ impl DesktopLauncher {
         format!("saved: {}", slot.timestamp())
     }
 
-    fn load_game_slot_autosave_line(slot: &SaveSlotRecord) -> String {
-        let autosave = slot
-            .meta
+    fn load_game_slot_is_autosave(slot: &SaveSlotRecord) -> bool {
+        slot.meta
             .as_ref()
             .and_then(|meta| meta.tags.get("autosave"))
             .map(|value| matches!(value.as_str(), "true" | "1" | "yes"))
-            .unwrap_or(false);
-        format!("@save.autosave: {autosave}")
+            .unwrap_or(false)
+    }
+
+    fn load_game_slot_autosave_line(slot: &SaveSlotRecord) -> String {
+        format!("@save.autosave: {}", Self::load_game_slot_is_autosave(slot))
     }
 
     fn format_save_playtime(time_played_millis: i64) -> String {
@@ -31101,10 +31104,16 @@ impl DesktopLauncher {
                     continue;
                 };
                 let button = Self::load_game_slot_action_button_rect(rect, action_index);
+                let checked_autosave = kind == DesktopLoadGameActionKind::ToggleAutosave
+                    && Self::load_game_slot_is_autosave(slot);
                 pass.push(RenderCommand::draw_sprite(
-                    Self::settings_text_button_symbol("grayt", false, false),
+                    Self::settings_text_button_symbol("grayt", false, checked_autosave),
                     button,
-                    [1.0, 1.0, 1.0, 0.70],
+                    if checked_autosave {
+                        [0.92, 1.0, 1.0, 0.92]
+                    } else {
+                        [1.0, 1.0, 1.0, 0.70]
+                    },
                     0.0,
                     Layer::END_PIXELED + 0.035 + visible_index as f32 * 0.0001,
                 ));
@@ -31112,7 +31121,11 @@ impl DesktopLauncher {
                 pass.push(RenderCommand::draw_text_styled(
                     desktop_ui_icon_glyph_or_label(icon, icon),
                     button.center(),
-                    [0.76, 0.86, 0.94, 1.0],
+                    if checked_autosave {
+                        [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                    } else {
+                        [0.76, 0.86, 0.94, 1.0]
+                    },
                     12.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Center)
@@ -32149,8 +32162,12 @@ impl DesktopLauncher {
                         Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
                     ) && self.load_game_search_focused
                     {
-                        self.load_game_search
-                            .extend(text.chars().filter(|ch| !ch.is_control()));
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.load_game_search.len() >= LOAD_SEARCH_TEXT_MAX_LENGTH {
+                                break;
+                            }
+                            self.load_game_search.push(ch);
+                        }
                         self.load_game_scroll_offset = 0;
                     } else if self.active_menu_route == Some(DesktopMenuRoute::Mods)
                         && self.mods_browser_dialog_open
@@ -55493,6 +55510,7 @@ version: "2.0.0"
         new_tags.insert("mapname".into(), "New Map".into());
         new_tags.insert("saved".into(), "200".into());
         new_tags.insert("wave".into(), "9".into());
+        new_tags.insert("autosave".into(), "true".into());
         new_tags.insert("rules".into(), r#"{"modeName":"attack"}"#.into());
         let mut new_bytes = Vec::new();
         write_deflated_save_meta_prefix(&mut new_bytes, LATEST_SAVE_VERSION, &new_tags)
@@ -55586,6 +55604,7 @@ version: "2.0.0"
         assert!(texts
             .iter()
             .any(|text| text.contains("@save.wave: 9") && text.contains("saved: 200")));
+        assert!(texts.contains(&"@save.autosave: true"));
         assert!(texts.contains(&"@mode.survival.name"));
         assert!(texts.contains(&"@mode.sandbox.name"));
         assert!(texts.contains(&"@mode.attack.name"));
@@ -55597,6 +55616,17 @@ version: "2.0.0"
                 super::DesktopMenuRoute::LoadGame,
             ),
             0,
+        );
+        let autosave_button = DesktopLauncher::load_game_slot_action_button_rect(slot_card, 0);
+        let autosave_button_symbol =
+            DesktopLauncher::settings_text_button_symbol("grayt", false, true);
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == &autosave_button_symbol && *rect == autosave_button
+            )),
+            "Java LoadDialog marks autosave as a checked toggle button"
         );
         let card_rects = commands
             .iter()
@@ -56189,6 +56219,16 @@ version: "2.0.0"
         );
         assert!(launcher.load_game_search.is_empty());
         assert_eq!(launcher.filtered_load_game_slot_indices().len(), 6);
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::FocusLoadGameSearch,
+        );
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("x".repeat(80))]);
+        assert_eq!(
+            launcher.load_game_search.len(),
+            super::LOAD_SEARCH_TEXT_MAX_LENGTH,
+            "Java LoadDialog search field caps text length at 50"
+        );
 
         std::fs::remove_dir_all(root).ok();
     }

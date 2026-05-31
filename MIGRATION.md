@@ -15,6 +15,28 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 575. LoadDialog 搜索上限与 autosave checked 视觉
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **67.7%**，仍未达到完整可玩；继续优先前端/UI，目标是减少存档页“壳感”并逐步贴近 Java `LoadDialog` 交互细节。
+- Java 对照依据：
+  - `LoadDialog.java` 的搜索框 `maxTextLength(50)`；
+  - autosave 子按钮是 toggle 风格，`checked(slot.isAutosave())`；
+  - autosave 状态属于 slot 级 UI 状态，不应只作为普通文本展示。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `LOAD_SEARCH_TEXT_MAX_LENGTH = 50`，Load/Save 搜索输入超过 50 字符后截断；
+    - 抽出 `load_game_slot_is_autosave(...)`，统一文本行与按钮视觉状态；
+    - autosave 子按钮现在按存档 meta `autosave=true/1/yes` 使用 checked button sprite 与 accent icon 颜色；
+    - 扩展 LoadDialog 回归测试，验证 autosave checked 视觉和搜索长度上限。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib load_game_route -- --nocapture`
+- 仍未完成：
+  - slot 日期仍是过渡 raw timestamp 文本，后续需对齐 Java `slot.getDate()` 的可读日期；
+  - slot 缩略图仍是占位 preview 区域，未接真实 save screenshot/preview；
+  - SaveGame 写盘仍是最小 meta snapshot，未接完整 world/entity/content 序列化；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 574. LoadDialog 模式过滤状态接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
