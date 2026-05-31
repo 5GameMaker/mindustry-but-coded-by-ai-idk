@@ -15,6 +15,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 582. native OpenGL 零有效 draw 可见兜底
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **69.0%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是缓解 native OpenGL 因 shader/VAO/texture 等问题导致“清屏后无有效 draw、用户只看到黑屏”的观感。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 新增 `desktop_native_opengl_submit_needs_visible_fallback(...)`，识别空 draw 或全部 draw 被跳过的提交；
+    - 新增 `desktop_native_visible_fallback_rects(...)`，生成屏幕内可见的主菜单式兜底矩形；
+    - `DesktopNativeOpenGlRuntime::submit_resolving_executor(...)` 在 0 valid draw 时会绘制可见 fallback overlay，而不只依赖窗口标题诊断；
+    - 新增回归测试，锁定空帧/全无效 draw 会触发 fallback，且 fallback 至少包含非黑色选中菜单条。
+- 已验证：
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime --bin mindustry-desktop`
+  - `cargo fmt --all -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - 该兜底只用于 native GL 完全无法有效绘制时的可见保险，不代表真实 UI 渲染、atlas、shader 和 world/HUD 都已完全正确；
+  - 后续仍需继续修正真实 draw path 和完整 UI 像素级还原；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 581. JoinDialog、SchematicsDialog 与 ResearchDialog 前端补强
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

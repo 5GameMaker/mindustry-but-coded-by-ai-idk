@@ -181,6 +181,69 @@ fn desktop_native_opengl_submit_diagnostic(
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DesktopNativeVisibleFallbackRect {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    color: [f32; 4],
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_submit_needs_visible_fallback(
+    driver_state: &mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState,
+    invalid_draw_commands: usize,
+) -> bool {
+    if driver_state.draw_commands == 0 && driver_state.resolve_draw_commands == 0 {
+        return true;
+    }
+    driver_state.draw_commands > 0 && invalid_draw_commands >= driver_state.draw_commands
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_visible_fallback_rects(
+    surface_size: mindustry_desktop::DesktopSurfaceSize,
+) -> Vec<DesktopNativeVisibleFallbackRect> {
+    let width = surface_size.width.max(1).min(i32::MAX as u32) as i32;
+    let height = surface_size.height.max(1).min(i32::MAX as u32) as i32;
+    let button_width = (width / 5).clamp(150, 260);
+    let button_height = (height / 12).clamp(38, 64);
+    let start_x = (width / 10).max(16);
+    let total_height = button_height * 6;
+    let mut y = ((height - total_height) / 2).max(16);
+    let mut rects = vec![DesktopNativeVisibleFallbackRect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+        color: [0.015, 0.018, 0.025, 1.0],
+    }];
+    for index in 0..6 {
+        rects.push(DesktopNativeVisibleFallbackRect {
+            x: start_x,
+            y,
+            width: button_width,
+            height: button_height - 2,
+            color: if index == 0 {
+                [0.18, 0.42, 0.56, 1.0]
+            } else {
+                [0.055, 0.075, 0.095, 1.0]
+            },
+        });
+        y += button_height;
+    }
+    rects.push(DesktopNativeVisibleFallbackRect {
+        x: width / 2 - button_width / 2,
+        y: (height - button_height - 24).max(0),
+        width: button_width,
+        height: button_height / 2,
+        color: [0.48, 0.62, 0.72, 1.0],
+    });
+    rects
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DesktopNativeOpenGlShaderAssetRootResolution {
     path: std::path::PathBuf,
@@ -660,6 +723,26 @@ impl DesktopNativeOpenGlRuntime {
             self.gl.disable(glow::STENCIL_TEST);
             self.gl.clear_color(0.015, 0.018, 0.025, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
+        }
+    }
+
+    fn draw_visible_fallback_overlay(&self) {
+        let size = self.window_surface_size();
+        unsafe {
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            self.gl.use_program(None);
+            self.gl.bind_vertex_array(None);
+            self.gl.disable(glow::BLEND);
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.disable(glow::STENCIL_TEST);
+            self.gl.enable(glow::SCISSOR_TEST);
+            for rect in desktop_native_visible_fallback_rects(size) {
+                self.gl.scissor(rect.x, rect.y, rect.width, rect.height);
+                self.gl
+                    .clear_color(rect.color[0], rect.color[1], rect.color[2], rect.color[3]);
+                self.gl.clear(glow::COLOR_BUFFER_BIT);
+            }
+            self.gl.disable(glow::SCISSOR_TEST);
         }
     }
 }
@@ -2303,6 +2386,11 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
                 }
             }
         }
+        if desktop_native_opengl_submit_needs_visible_fallback(&driver_state, invalid_draw_commands)
+        {
+            desktop_native_trace_summary("runtime.submit: drawing native visible fallback overlay");
+            self.draw_visible_fallback_overlay();
+        }
         let diagnostic = desktop_native_opengl_submit_diagnostic(
             &driver_state,
             invalid_draw_commands,
@@ -2644,6 +2732,38 @@ mod tests {
 
         assert!(diagnostic.contains("no valid draw commands"));
         assert!(diagnostic.contains("2 draw submissions were skipped"));
+    }
+
+    #[test]
+    fn native_opengl_visible_fallback_covers_empty_or_invalid_draw_frames() {
+        let empty = mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState::default();
+        assert!(desktop_native_opengl_submit_needs_visible_fallback(
+            &empty, 0
+        ));
+
+        let invalid = mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
+            draw_commands: 3,
+            ..Default::default()
+        };
+        assert!(desktop_native_opengl_submit_needs_visible_fallback(
+            &invalid, 3
+        ));
+        assert!(!desktop_native_opengl_submit_needs_visible_fallback(
+            &invalid, 1
+        ));
+
+        let rects = desktop_native_visible_fallback_rects(
+            mindustry_desktop::DesktopSurfaceSize::new(1280, 720),
+        );
+        assert_eq!(rects[0].width, 1280);
+        assert_eq!(rects[0].height, 720);
+        assert!(
+            rects
+                .iter()
+                .skip(1)
+                .any(|rect| rect.color == [0.18, 0.42, 0.56, 1.0]),
+            "fallback should show a non-black selected menu bar"
+        );
     }
 
     #[test]
