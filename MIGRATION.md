@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 595. LoadDialog 多列滚动改为行偏移
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.5%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是修正上一轮多列卡片后仍残留的“按单 slot 滚动”语义，使其更贴近 Java `slots.row()`。
+- Java 对照依据：
+  - `LoadDialog.rebuild()` 按 `maxwidth` 添加卡片并在 `++i % maxwidth == 0` 时 `slots.row()`；
+  - 宽屏多列时，滚动窗口应以行作为主要可见窗口单位，而不是从第二列开始切开一行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_game_visible_row_capacity_for_list(...)`、`load_game_total_rows_for_count(...)`、`load_game_scroll_start_slot_for_list(...)`；
+    - `max_load_game_scroll_offset(...)` 改为基于 `total_rows - visible_rows`；
+    - Load/Save 渲染、slot hit-test、slot action hit-test 均把 `load_game_scroll_offset` 解释为 row offset，并通过 `row_offset * columns` 得到起始 slot；
+    - scrollbar knob 高度/位置改为总行数与可见行数比例；
+    - 更新滚动测试，宽屏两列滚动一行后命中第二行第一个 slot。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_creates_and_overwrites_save_slots --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Java `ScrollPane` 是像素级平滑滚动，Rust 当前仍是离散行滚动；
+  - 多列阈值仍按 Rust list 宽度估算，未完全使用 `Core.graphics.getWidth()/Scl.scl(470)`；
+  - 卡片内部文本 wrap/ellipsis 仍需继续补齐。
+
 ## 594. LoadDialog/SaveDialog 宽屏多列卡片布局
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

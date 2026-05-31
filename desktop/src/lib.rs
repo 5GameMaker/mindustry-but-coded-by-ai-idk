@@ -24349,11 +24349,23 @@ impl DesktopLauncher {
     }
 
     fn load_game_visible_slot_capacity_for_list(list: RenderRect) -> usize {
-        let rows = ((list.height + LOAD_SLOT_CARD_GAP)
-            / (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP))
-            .floor()
-            .max(1.0) as usize;
+        let rows = Self::load_game_visible_row_capacity_for_list(list);
         rows * Self::load_game_slot_column_count_for_list(list)
+    }
+
+    fn load_game_visible_row_capacity_for_list(list: RenderRect) -> usize {
+        ((list.height + LOAD_SLOT_CARD_GAP) / (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP))
+            .floor()
+            .max(1.0) as usize
+    }
+
+    fn load_game_total_rows_for_count(list: RenderRect, total_slots: usize) -> usize {
+        let columns = Self::load_game_slot_column_count_for_list(list).max(1);
+        total_slots.div_ceil(columns)
+    }
+
+    fn load_game_scroll_start_slot_for_list(list: RenderRect, scroll_offset: usize) -> usize {
+        scroll_offset * Self::load_game_slot_column_count_for_list(list).max(1)
     }
 
     fn load_game_scrollbar_track_rect_for_list(list: RenderRect) -> RenderRect {
@@ -24368,16 +24380,17 @@ impl DesktopLauncher {
     fn load_game_scrollbar_knob_rect_for_list(
         list: RenderRect,
         total_slots: usize,
-        visible_slots: usize,
         scroll_offset: usize,
     ) -> Option<RenderRect> {
-        if total_slots <= visible_slots || visible_slots == 0 {
+        let visible_rows = Self::load_game_visible_row_capacity_for_list(list);
+        let total_rows = Self::load_game_total_rows_for_count(list, total_slots);
+        if total_rows <= visible_rows || visible_rows == 0 {
             return None;
         }
         let track = Self::load_game_scrollbar_track_rect_for_list(list);
         let knob_height =
-            (track.height * visible_slots as f32 / total_slots as f32).clamp(36.0, track.height);
-        let max_scroll = total_slots.saturating_sub(visible_slots).max(1);
+            (track.height * visible_rows as f32 / total_rows as f32).clamp(36.0, track.height);
+        let max_scroll = total_rows.saturating_sub(visible_rows).max(1);
         let travel = (track.height - knob_height).max(0.0);
         let t = (scroll_offset.min(max_scroll) as f32 / max_scroll as f32).clamp(0.0, 1.0);
         Some(RenderRect::new(
@@ -24394,13 +24407,9 @@ impl DesktopLauncher {
         total_slots: usize,
         scroll_offset: usize,
     ) {
-        let visible_slots = Self::load_game_visible_slot_capacity_for_list(list).min(total_slots);
-        let Some(knob) = Self::load_game_scrollbar_knob_rect_for_list(
-            list,
-            total_slots,
-            visible_slots,
-            scroll_offset,
-        ) else {
+        let Some(knob) =
+            Self::load_game_scrollbar_knob_rect_for_list(list, total_slots, scroll_offset)
+        else {
             return;
         };
         pass.push(RenderCommand::draw_sprite(
@@ -24464,7 +24473,10 @@ impl DesktopLauncher {
         );
         let list = Self::load_game_list_rect_for_panel(panel);
         let point = RenderPoint::new(x, y);
-        let start = self.load_game_scroll_offset;
+        let start_row = self
+            .load_game_scroll_offset
+            .min(self.max_load_game_scroll_offset(list));
+        let start = Self::load_game_scroll_start_slot_for_list(list, start_row);
         self.filtered_load_game_slot_indices()
             .into_iter()
             .skip(start)
@@ -24517,9 +24529,10 @@ impl DesktopLauncher {
             return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
         }
         let list = Self::load_game_list_rect_for_panel(panel);
-        let start = self
+        let start_row = self
             .load_game_scroll_offset
             .min(self.max_load_game_scroll_offset(list));
+        let start = Self::load_game_scroll_start_slot_for_list(list, start_row);
         for (visible_index, slot_index) in self
             .filtered_load_game_slot_indices()
             .into_iter()
@@ -24596,9 +24609,10 @@ impl DesktopLauncher {
             return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
         }
         let list = Self::load_game_list_rect_for_panel(panel);
-        let start = self
+        let start_row = self
             .load_game_scroll_offset
             .min(self.max_load_game_scroll_offset(list));
+        let start = Self::load_game_scroll_start_slot_for_list(list, start_row);
         for (visible_index, slot_index) in self
             .filtered_load_game_slot_indices()
             .into_iter()
@@ -24972,14 +24986,20 @@ impl DesktopLauncher {
         self.write_save_game_slot_snapshot(slot.file, name, "saved")
     }
 
-    fn max_load_game_scroll_offset_for_counts(total_slots: usize, visible_slots: usize) -> usize {
-        total_slots.saturating_sub(visible_slots.max(1))
+    fn max_load_game_scroll_offset_for_counts(
+        total_slots: usize,
+        visible_rows: usize,
+        columns: usize,
+    ) -> usize {
+        let total_rows = total_slots.div_ceil(columns.max(1));
+        total_rows.saturating_sub(visible_rows.max(1))
     }
 
     fn max_load_game_scroll_offset(&self, list: RenderRect) -> usize {
         Self::max_load_game_scroll_offset_for_counts(
             self.filtered_load_game_slot_indices().len(),
-            Self::load_game_visible_slot_capacity_for_list(list),
+            Self::load_game_visible_row_capacity_for_list(list),
+            Self::load_game_slot_column_count_for_list(list),
         )
     }
 
@@ -32999,9 +33019,10 @@ impl DesktopLauncher {
             return;
         }
 
-        let start = self
+        let start_row = self
             .load_game_scroll_offset
             .min(self.max_load_game_scroll_offset(list));
+        let start = Self::load_game_scroll_start_slot_for_list(list, start_row);
         for (visible_index, slot_index) in filtered_indices.into_iter().skip(start).enumerate() {
             let Some(slot) = self.load_game_slots.get(slot_index) else {
                 continue;
@@ -33159,9 +33180,9 @@ impl DesktopLauncher {
         }
         let max_scroll = self.max_load_game_scroll_offset(list);
         if max_scroll > 0 {
-            Self::push_load_game_scrollbar(pass, list, filtered_count, start);
+            Self::push_load_game_scrollbar(pass, list, filtered_count, start_row);
             pass.push(RenderCommand::draw_text_styled(
-                format!("{}/{}", start + 1, max_scroll + 1),
+                format!("{}/{}", start_row + 1, max_scroll + 1),
                 RenderPoint::new(list.right() - 26.0, list.y + 16.0),
                 [0.54, 0.64, 0.72, 1.0],
                 9.0,
@@ -59322,8 +59343,8 @@ version: "2.0.0"
         let top_slot = DesktopLauncher::load_game_slot_line_rect_for_viewport(viewport, 0).center();
         assert_eq!(
             launcher.load_game_slot_at_surface_point(surface, top_slot.x, top_slot.y),
-            Some(1),
-            "scroll offset should shift card hit-test to the second filtered save"
+            Some(2),
+            "row scroll offset should shift a two-column wide LoadDialog to the first slot of the second row"
         );
         let scrolled_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
         let scrolled_commands = scrolled_frame
@@ -59335,13 +59356,10 @@ version: "2.0.0"
             .iter()
             .flat_map(|pass| pass.commands.iter())
             .collect::<Vec<_>>();
-        let visible_slots = DesktopLauncher::load_game_visible_slot_capacity_for_list(list)
-            .min(launcher.filtered_load_game_slot_indices().len());
         let scroll_track = DesktopLauncher::load_game_scrollbar_track_rect_for_list(list);
         let scroll_knob = DesktopLauncher::load_game_scrollbar_knob_rect_for_list(
             list,
             launcher.filtered_load_game_slot_indices().len(),
-            visible_slots,
             launcher.load_game_scroll_offset,
         )
         .expect("overflowing Java LoadDialog-style list should draw a scroll knob");
