@@ -19840,6 +19840,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Data 导入/导出/open folder/crash export 仍需继续接真实桌面能力；
   - UI 与 Settings 数据管理仍在长线迁移中，未达到完整可玩，不能宣布目标完成。
 
+## 573. SettingsTable 外层 prefs 容器视觉闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.5%**，仍未达到完整可玩；继续优先前端/UI，把 Game/Graphics/Sound 设置子页从单纯滚动 row 列表推进到更像 Java `prefs.margin(14f)` 包住 `SettingsTable` 的页面级容器。
+- Java 对照依据：
+  - `SettingsMenuDialog` 使用 `prefs = new Table(); prefs.top(); prefs.margin(14f);`；
+  - 切页时把 `game/graphics/sound` 的 `SettingsTable` 加入 `prefs`；
+  - `SettingsTable` 内部每个 setting 再通过自身 content margin 和控件样式形成行布局。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_pref_table_container_rect_for_panel(...)`，以当前 pref clip 为内容区向外扩 14px；
+    - `push_settings_route_controls(...)` 在绘制具体设置 rows 前先绘制 upstream `button` drawable 作为 SettingsTable 外层容器，并补描边；
+    - 原有 clip、滚动条、checkbox、slider、hit-test 不变，避免破坏已接入的设置交互；
+    - 测试断言 Game 设置页渲染出该 table container drawable，覆盖 Java `prefs.margin(14f)` 视觉层。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Rust 仍是手绘等价层，不是完整 Scene2D `SettingsTable` actor 树；
+  - `TextSetting` / `AreaTextSetting` 等非 checkbox/slider 控件还需继续迁移；
+  - Settings 子页 reset/back 与 table 容器的精确 Java 对齐仍需后续像素级复核；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

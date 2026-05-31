@@ -20410,6 +20410,17 @@ impl DesktopLauncher {
         )
     }
 
+    fn settings_pref_table_container_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        let margin = 14.0;
+        RenderRect::new(
+            clip.x - margin,
+            clip.y - margin,
+            clip.width + margin * 2.0,
+            clip.height + margin * 2.0,
+        )
+    }
+
     fn settings_pref_widget_row_rect_for_clip_with_scroll(
         clip: RenderRect,
         index: usize,
@@ -21176,8 +21187,22 @@ impl DesktopLauncher {
         let scroll_knob_symbol = Self::settings_scroll_knob_symbol();
         let specs = Self::settings_pref_widget_specs(table);
         let clip = Self::settings_pref_widget_clip_rect_for_panel(panel);
+        let table_container = Self::settings_pref_table_container_rect_for_panel(panel);
         let scroll_offset = self.settings_scroll_offset_pixels(table, clip);
 
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("button"),
+            table_container,
+            [1.0, 1.0, 1.0, 0.74],
+            0.0,
+            Layer::END_PIXELED + 0.020,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            table_container,
+            [0.22, 0.34, 0.42, 0.70],
+            1.0,
+            Layer::END_PIXELED + 0.021,
+        ));
         pass.push(RenderCommand::set_clip(clip));
         for (index, spec) in specs.iter().copied().enumerate() {
             let control_id = DesktopSettingsControlId::new(spec.table, spec.key);
@@ -48388,6 +48413,12 @@ mod tests {
         launcher.set_setting_override("game", "communityservers", "false");
 
         let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Settings,
+        );
+        let table_container = DesktopLauncher::settings_pref_table_container_rect_for_panel(panel);
+        let table_container_symbol = DesktopLauncher::settings_drawable_symbol("button");
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
         let commands = frame
             .bundle
@@ -48412,6 +48443,13 @@ mod tests {
         assert!(sprites.contains(&"scroll-knob-vertical-black"));
         assert!(sprites.contains(&"check-off"));
         assert!(sprites.contains(&"check-on"));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == &table_container_symbol && *rect == table_container
+            )
+        }));
 
         let texts = commands
             .iter()
