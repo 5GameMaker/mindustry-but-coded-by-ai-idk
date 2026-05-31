@@ -19565,6 +19565,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Workshop/Steam gate 和 desktop chrome 显隐条件仍需继续补齐；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 562. MenuFragment chrome 可见条件闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **61.4%**，仍未达到完整可玩；继续优先前端/UI，把主菜单 chrome 的显示条件从“始终画出来”推进到更接近 Java `MenuFragment.build(...)`。
+- Java 对照依据：
+  - Discord banner：`visible(() -> !ui.consolefrag.shown())`；
+  - Mobile terminal：`visible(() -> !ui.consolefrag.shown() && Core.settings.getBool("console"))`；
+  - Mobile info banner：`visible(() -> !ui.consolefrag.shown())`；
+  - Desktop becheck：只在 `becontrol.active()` 分支下添加。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuChromeLayout` 新增 `discord_visible / terminal_visible / info_visible / becheck_visible`；
+    - `DesktopLauncher` 新增 `menu_console_setting_enabled` 与 `menu_becheck_active`，用于模拟 Java settings/BE gate；
+    - 打开移动端 consolefrag 后，discord/terminal/info chrome 不再渲染也不参与命中；
+    - `Escape/Back` 先关闭移动端 consolefrag，再处理 route/submenu 返回；
+    - `becheck` 只有在 `menu_becheck_active` 为 true 时才渲染/命中。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_chrome --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `menu_console_setting_enabled` 与 `menu_becheck_active` 仍是桌面 launcher 状态，后续要接真实 settings 与 BE control runtime；
+  - 移动端 consolefrag 内容仍是简化 overlay，还不是完整 Java ConsoleFragment；
+  - chrome 的九宫格/字体/hover/pressed/tooltip 仍需继续精细还原；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

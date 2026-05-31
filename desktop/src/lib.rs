@@ -2544,13 +2544,27 @@ struct DesktopMenuChromeLayout {
     right_gutter: Option<RenderRect>,
     bottom_gutter: Option<RenderRect>,
     discord_rect: RenderRect,
+    discord_visible: bool,
     terminal_rect: Option<RenderRect>,
+    terminal_visible: bool,
     info_rect: Option<RenderRect>,
+    info_visible: bool,
     becheck_rect: Option<RenderRect>,
+    becheck_visible: bool,
 }
 
 impl DesktopMenuChromeLayout {
+    #[cfg(test)]
     fn for_viewport(viewport: RenderViewport) -> Self {
+        Self::for_viewport_with_state(viewport, false, true, true)
+    }
+
+    fn for_viewport_with_state(
+        viewport: RenderViewport,
+        console_shown: bool,
+        console_setting_enabled: bool,
+        becheck_active: bool,
+    ) -> Self {
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
         let is_mobile = width <= 720.0 || height > width * 1.2;
@@ -2609,28 +2623,32 @@ impl DesktopMenuChromeLayout {
             right_gutter,
             bottom_gutter,
             discord_rect,
+            discord_visible: !console_shown,
             terminal_rect,
+            terminal_visible: is_mobile && console_setting_enabled && !console_shown,
             info_rect,
+            info_visible: is_mobile && !console_shown,
             becheck_rect,
+            becheck_visible: !is_mobile && becheck_active,
         }
     }
 
     fn action_at_point(self, point: RenderPoint) -> Option<DesktopMenuChromeAction> {
-        if self.discord_rect.contains_point(point) {
+        if self.discord_visible && self.discord_rect.contains_point(point) {
             return Some(DesktopMenuChromeAction::Discord);
         }
         if let Some(rect) = self.terminal_rect {
-            if rect.contains_point(point) {
+            if self.terminal_visible && rect.contains_point(point) {
                 return Some(DesktopMenuChromeAction::MobileTerminalToggle);
             }
         }
         if let Some(rect) = self.info_rect {
-            if rect.contains_point(point) {
+            if self.info_visible && rect.contains_point(point) {
                 return Some(DesktopMenuChromeAction::InfoOpenAbout);
             }
         }
         if let Some(rect) = self.becheck_rect {
-            if rect.contains_point(point) {
+            if self.becheck_visible && rect.contains_point(point) {
                 return Some(DesktopMenuChromeAction::Becheck);
             }
         }
@@ -15301,6 +15319,8 @@ pub struct DesktopLauncher {
     pub last_custom_menu_action: Option<DesktopCustomMenuAction>,
     pub last_menu_guard_message: Option<String>,
     pub menu_mobile_terminal_open: bool,
+    pub menu_console_setting_enabled: bool,
+    pub menu_becheck_active: bool,
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
     pub map_list_filter_dialog_open: bool,
@@ -16048,6 +16068,8 @@ impl DesktopLauncher {
             last_custom_menu_action: None,
             last_menu_guard_message: None,
             menu_mobile_terminal_open: false,
+            menu_console_setting_enabled: true,
+            menu_becheck_active: true,
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
             map_list_filter_dialog_open: false,
@@ -19353,12 +19375,25 @@ impl DesktopLauncher {
         size.width > 0.0 && size.height > 0.0
     }
 
+    #[cfg(test)]
     fn menu_chrome_layout_for_viewport(viewport: RenderViewport) -> DesktopMenuChromeLayout {
         DesktopMenuChromeLayout::for_viewport(viewport)
     }
 
-    fn push_menu_logo_and_version_chrome(pass: &mut RenderPass, viewport: RenderViewport) {
-        let chrome = Self::menu_chrome_layout_for_viewport(viewport);
+    fn current_menu_chrome_layout_for_viewport(
+        &self,
+        viewport: RenderViewport,
+    ) -> DesktopMenuChromeLayout {
+        DesktopMenuChromeLayout::for_viewport_with_state(
+            viewport,
+            self.menu_mobile_terminal_open,
+            self.menu_console_setting_enabled,
+            self.menu_becheck_active,
+        )
+    }
+
+    fn push_menu_logo_and_version_chrome(&self, pass: &mut RenderPass, viewport: RenderViewport) {
+        let chrome = self.current_menu_chrome_layout_for_viewport(viewport);
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
 
@@ -19393,59 +19428,67 @@ impl DesktopLauncher {
             }
         }
 
-        let discord_glyph = desktop_ui_icon_glyph_or_label("discord", "discord");
-        Self::push_menu_chrome_sprite_button(
-            pass,
-            chrome.discord_rect,
-            "discord-banner",
-            Some(discord_glyph.as_str()),
-            "discord",
-            [0.16, 0.27, 0.52, 0.94],
-            [0.58, 0.74, 1.0, 0.98],
-            18.0,
-            [0.95, 0.98, 1.0, 1.0],
-        );
-
-        if chrome.is_mobile {
-            let terminal_rect = chrome
-                .terminal_rect
-                .expect("mobile chrome layout should include a terminal rect");
-            let info_rect = chrome
-                .info_rect
-                .expect("mobile chrome layout should include an info rect");
-            let terminal_glyph = desktop_ui_icon_glyph_or_label("terminal", "terminal");
-            Self::push_menu_chrome_button(
-                pass,
-                terminal_rect,
-                terminal_glyph.as_str(),
-                [0.12, 0.18, 0.22, 0.92],
-                [0.46, 0.64, 0.74, 0.96],
-                18.0,
-                [0.92, 0.98, 1.0, 1.0],
-            );
+        if chrome.discord_visible {
+            let discord_glyph = desktop_ui_icon_glyph_or_label("discord", "discord");
             Self::push_menu_chrome_sprite_button(
                 pass,
-                info_rect,
-                "info-banner",
-                None,
-                "info",
-                [0.11, 0.20, 0.31, 0.92],
-                [0.52, 0.72, 0.88, 0.96],
-                13.0,
+                chrome.discord_rect,
+                "discord-banner",
+                Some(discord_glyph.as_str()),
+                "discord",
+                [0.16, 0.27, 0.52, 0.94],
+                [0.58, 0.74, 1.0, 0.98],
+                18.0,
                 [0.95, 0.98, 1.0, 1.0],
             );
-        } else if let Some(becheck_rect) = chrome.becheck_rect {
-            let refresh = desktop_ui_icon_glyph_or_label("refresh", "refresh");
-            let becheck_label = format!("{refresh} @be.check");
-            Self::push_menu_chrome_button(
-                pass,
-                becheck_rect,
-                becheck_label.as_str(),
-                [0.14, 0.18, 0.27, 0.92],
-                [0.58, 0.72, 0.90, 0.98],
-                14.0,
-                [0.96, 0.99, 1.0, 1.0],
-            );
+        }
+
+        if chrome.is_mobile {
+            if chrome.terminal_visible {
+                let terminal_rect = chrome
+                    .terminal_rect
+                    .expect("mobile chrome layout should include a terminal rect");
+                let terminal_glyph = desktop_ui_icon_glyph_or_label("terminal", "terminal");
+                Self::push_menu_chrome_button(
+                    pass,
+                    terminal_rect,
+                    terminal_glyph.as_str(),
+                    [0.12, 0.18, 0.22, 0.92],
+                    [0.46, 0.64, 0.74, 0.96],
+                    18.0,
+                    [0.92, 0.98, 1.0, 1.0],
+                );
+            }
+            if chrome.info_visible {
+                let info_rect = chrome
+                    .info_rect
+                    .expect("mobile chrome layout should include an info rect");
+                Self::push_menu_chrome_sprite_button(
+                    pass,
+                    info_rect,
+                    "info-banner",
+                    None,
+                    "info",
+                    [0.11, 0.20, 0.31, 0.92],
+                    [0.52, 0.72, 0.88, 0.96],
+                    13.0,
+                    [0.95, 0.98, 1.0, 1.0],
+                );
+            }
+        } else if chrome.becheck_visible {
+            if let Some(becheck_rect) = chrome.becheck_rect {
+                let refresh = desktop_ui_icon_glyph_or_label("refresh", "refresh");
+                let becheck_label = format!("{refresh} @be.check");
+                Self::push_menu_chrome_button(
+                    pass,
+                    becheck_rect,
+                    becheck_label.as_str(),
+                    [0.14, 0.18, 0.27, 0.92],
+                    [0.58, 0.72, 0.90, 0.98],
+                    14.0,
+                    [0.96, 0.99, 1.0, 1.0],
+                );
+            }
         }
 
         let logo_width = 768.0_f32.min((width - 20.0).max(1.0));
@@ -19621,7 +19664,7 @@ impl DesktopLauncher {
         y: f32,
     ) -> Option<DesktopMenuChromeAction> {
         let viewport = self.default_render_viewport_for_surface(surface_size);
-        let chrome = Self::menu_chrome_layout_for_viewport(viewport);
+        let chrome = self.current_menu_chrome_layout_for_viewport(viewport);
         chrome.action_at_point(RenderPoint::new(x, y))
     }
 
@@ -19670,6 +19713,11 @@ impl DesktopLauncher {
     }
 
     fn apply_menu_back_key(&mut self) -> bool {
+        if self.menu_mobile_terminal_open {
+            self.menu_mobile_terminal_open = false;
+            self.last_menu_chrome_action = None;
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::About)
             && self.about_route_page == DesktopAboutRoutePage::Credits
         {
@@ -26842,7 +26890,7 @@ impl DesktopLauncher {
         self.push_active_menu_route_shell(&mut menu_pass, frame_viewport);
         self.push_menu_guard_message(&mut menu_pass, frame_viewport);
         self.push_mobile_terminal_overlay(&mut menu_pass, frame_viewport);
-        Self::push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
+        self.push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
         let camera = menu_pass
             .camera
             .unwrap_or_else(|| self.default_render_camera_for_viewport(frame_viewport));
@@ -28157,6 +28205,8 @@ impl DesktopLauncher {
         self.last_menu_platform_action = None;
         self.last_menu_guard_message = None;
         self.menu_mobile_terminal_open = false;
+        self.menu_console_setting_enabled = true;
+        self.menu_becheck_active = true;
         self.about_route_page = DesktopAboutRoutePage::Links;
         self.about_filter_banned_links = false;
         self.settings_dialog_state = DesktopSettingsDialogState::default();
@@ -45613,6 +45663,107 @@ mod tests {
     }
 
     #[test]
+    fn desktop_launcher_menu_chrome_visibility_matches_console_and_becontrol_gates() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mobile_surface = DesktopSurfaceSize::new(540, 960);
+        let mobile_viewport = launcher.default_render_viewport_for_surface(mobile_surface);
+        let mobile_chrome = DesktopLauncher::menu_chrome_layout_for_viewport(mobile_viewport);
+        let terminal_center = mobile_chrome
+            .terminal_rect
+            .expect("mobile chrome layout should include terminal rect")
+            .center();
+        let info_center = mobile_chrome
+            .info_rect
+            .expect("mobile chrome layout should include info rect")
+            .center();
+
+        launcher.menu_console_setting_enabled = false;
+        assert_eq!(
+            launcher.menu_chrome_action_at_surface_point(
+                mobile_surface,
+                terminal_center.x,
+                terminal_center.y
+            ),
+            None,
+            "Java MenuFragment only shows mobile terminal button when console setting is enabled"
+        );
+        assert_eq!(
+            launcher.menu_chrome_action_at_surface_point(
+                mobile_surface,
+                info_center.x,
+                info_center.y
+            ),
+            Some(super::DesktopMenuChromeAction::InfoOpenAbout)
+        );
+
+        launcher.menu_console_setting_enabled = true;
+        launcher.menu_mobile_terminal_open = true;
+        assert_eq!(
+            launcher.menu_chrome_action_at_surface_point(
+                mobile_surface,
+                terminal_center.x,
+                terminal_center.y
+            ),
+            None,
+            "Java MenuFragment hides terminal toggle while consolefrag is shown"
+        );
+        assert_eq!(
+            launcher.menu_chrome_action_at_surface_point(
+                mobile_surface,
+                info_center.x,
+                info_center.y
+            ),
+            None,
+            "Java MenuFragment hides info button while consolefrag is shown"
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, mobile_viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(!commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, .. }
+                    if symbol == "discord-banner" || symbol == "info-banner"
+            )
+        }));
+        assert!(!commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, .. }
+                    if text == &super::desktop_ui_icon_glyph_or_label("terminal", "terminal")
+                        || text == &super::desktop_ui_icon_glyph_or_label("discord", "discord")
+            )
+        }));
+
+        let mut desktop_launcher = DesktopLauncher::new(Vec::new());
+        desktop_launcher.menu_becheck_active = false;
+        let desktop_surface = DesktopSurfaceSize::new(1280, 720);
+        let desktop_viewport =
+            desktop_launcher.default_render_viewport_for_surface(desktop_surface);
+        let desktop_chrome = DesktopLauncher::menu_chrome_layout_for_viewport(desktop_viewport);
+        let becheck_center = desktop_chrome
+            .becheck_rect
+            .expect("desktop chrome layout should still expose becheck geometry")
+            .center();
+        assert_eq!(
+            desktop_launcher.menu_chrome_action_at_surface_point(
+                desktop_surface,
+                becheck_center.x,
+                becheck_center.y
+            ),
+            None,
+            "Java MenuFragment only shows becheck when becontrol.active()"
+        );
+    }
+
+    #[test]
     fn desktop_launcher_menu_chrome_hit_test_and_actions_share_layout() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let surface = DesktopSurfaceSize::new(540, 960);
@@ -45654,6 +45805,36 @@ mod tests {
             .info_rect
             .expect("mobile chrome layout should include info")
             .center();
+        assert_eq!(
+            launcher.menu_chrome_action_at_surface_point(surface, info_center.x, info_center.y),
+            None,
+            "Java MenuFragment hides info/discord/terminal chrome while consolefrag is shown"
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: info_center.x,
+                    y: info_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.active_menu_route, None);
+        assert!(launcher.menu_mobile_terminal_open);
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Escape".into(),
+                pressed: true,
+            }],
+        );
+        assert!(!launcher.menu_mobile_terminal_open);
+
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -45676,25 +45857,6 @@ mod tests {
             Some(super::DesktopMenuChromeAction::InfoOpenAbout)
         );
         assert_eq!(launcher.last_menu_action, None);
-
-        launcher.apply_menu_input_events(
-            surface,
-            &[
-                DesktopInputTickEvent::CursorMoved {
-                    x: terminal_center.x,
-                    y: terminal_center.y,
-                },
-                DesktopInputTickEvent::MouseButton {
-                    button: "primary".into(),
-                    pressed: true,
-                },
-            ],
-        );
-        assert!(!launcher.menu_mobile_terminal_open);
-        assert_eq!(
-            launcher.last_menu_chrome_action,
-            Some(super::DesktopMenuChromeAction::MobileTerminalToggle)
-        );
     }
 
     #[test]
