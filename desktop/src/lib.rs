@@ -20486,15 +20486,14 @@ impl DesktopLauncher {
                 let terminal_rect = chrome
                     .terminal_rect
                     .expect("mobile chrome layout should include a terminal rect");
-                let terminal_glyph = desktop_ui_icon_glyph_or_label("terminal", "terminal");
-                Self::push_menu_chrome_button(
+                Self::push_menu_chrome_icon_button(
                     pass,
                     terminal_rect,
                     self.menu_chrome_button_state(
                         chrome,
                         DesktopMenuChromeAction::MobileTerminalToggle,
                     ),
-                    terminal_glyph.as_str(),
+                    "terminal",
                     [0.12, 0.18, 0.22, 0.92],
                     [0.46, 0.64, 0.74, 0.96],
                     18.0,
@@ -20520,13 +20519,12 @@ impl DesktopLauncher {
             }
         } else if chrome.becheck_visible {
             if let Some(becheck_rect) = chrome.becheck_rect {
-                let refresh = desktop_ui_icon_glyph_or_label("refresh", "refresh");
-                let becheck_label = format!("{refresh} @be.check");
-                Self::push_menu_chrome_button(
+                Self::push_menu_chrome_icon_text_button(
                     pass,
                     becheck_rect,
                     self.menu_chrome_button_state(chrome, DesktopMenuChromeAction::Becheck),
-                    becheck_label.as_str(),
+                    "refresh",
+                    "@be.check",
                     [0.14, 0.18, 0.27, 0.92],
                     [0.58, 0.72, 0.90, 0.98],
                     14.0,
@@ -20578,10 +20576,32 @@ impl DesktopLauncher {
         ));
     }
 
-    fn push_menu_chrome_button(
+    fn push_menu_chrome_icon_button(
         pass: &mut RenderPass,
         rect: RenderRect,
         state: DesktopMenuChromeButtonState,
+        icon_name: &str,
+        fill: [f32; 4],
+        stroke: [f32; 4],
+        icon_size: f32,
+        icon_color: [f32; 4],
+    ) {
+        Self::push_menu_chrome_button_background(pass, rect, state, fill, stroke);
+        let icon = desktop_ui_icon_glyph_or_label(icon_name, icon_name);
+        Self::push_menu_chrome_button_icon(
+            pass,
+            rect.center(),
+            icon.as_str(),
+            icon_size,
+            icon_color,
+        );
+    }
+
+    fn push_menu_chrome_icon_text_button(
+        pass: &mut RenderPass,
+        rect: RenderRect,
+        state: DesktopMenuChromeButtonState,
+        icon_name: &str,
         label: &str,
         fill: [f32; 4],
         stroke: [f32; 4],
@@ -20589,7 +20609,26 @@ impl DesktopLauncher {
         label_color: [f32; 4],
     ) {
         Self::push_menu_chrome_button_background(pass, rect, state, fill, stroke);
-        Self::push_menu_chrome_button_label(pass, rect, label, label_size, label_color);
+        let icon = desktop_ui_icon_glyph_or_label(icon_name, icon_name);
+        Self::push_menu_chrome_button_icon(
+            pass,
+            RenderPoint::new(rect.x + 30.0, rect.center().y),
+            icon.as_str(),
+            18.0,
+            label_color,
+        );
+        pass.push(RenderCommand::draw_text_styled(
+            label,
+            RenderPoint::new(rect.x + 55.0, rect.center().y),
+            label_color,
+            label_size,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.07,
+        ));
     }
 
     fn push_menu_chrome_sprite_button(
@@ -20604,8 +20643,16 @@ impl DesktopLauncher {
         label_size: f32,
         label_color: [f32; 4],
     ) {
-        if state.hovered || state.pressed || sprite_symbol.is_empty() {
+        if sprite_symbol.is_empty() {
             Self::push_menu_chrome_button_background(pass, rect, state, fill, stroke);
+            Self::push_menu_chrome_button_label(
+                pass,
+                rect,
+                fallback_label,
+                label_size,
+                label_color,
+            );
+            return;
         }
         pass.push(RenderCommand::draw_sprite(
             sprite_symbol,
@@ -20621,15 +20668,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.065,
         ));
         if let Some(label) = sprite_label {
-            Self::push_menu_chrome_button_label(pass, rect, label, label_size, label_color);
-        } else if sprite_symbol.is_empty() {
-            Self::push_menu_chrome_button_label(
-                pass,
-                rect,
-                fallback_label,
-                label_size,
-                label_color,
-            );
+            Self::push_menu_chrome_button_icon(pass, rect.center(), label, label_size, label_color);
         }
     }
 
@@ -20692,6 +20731,28 @@ impl DesktopLauncher {
             label_size,
             0.0,
             RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.07,
+        ));
+    }
+
+    fn push_menu_chrome_button_icon(
+        pass: &mut RenderPass,
+        center: RenderPoint,
+        icon_text: &str,
+        icon_size: f32,
+        icon_color: [f32; 4],
+    ) {
+        pass.push(RenderCommand::draw_text_styled(
+            icon_text,
+            center,
+            icon_color,
+            icon_size,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
                 .with_vertical_align(RenderTextVerticalAlign::Center)
                 .with_integer_position(true)
                 .with_outline(true),
@@ -57371,11 +57432,16 @@ version: "2.0.0"
         assert!(commands.iter().any(|command| {
             matches!(
                 command,
-                RenderCommand::DrawText { text, .. }
-                    if text == &format!(
-                        "{} @be.check",
-                        super::desktop_ui_icon_glyph_or_label("refresh", "refresh")
-                    )
+                RenderCommand::DrawText { text, style, .. }
+                    if text == &super::desktop_ui_icon_glyph_or_label("refresh", "refresh")
+                        && style.font == RenderFontId::Icon
+            )
+        }));
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                RenderCommand::DrawText { text, style, .. }
+                    if text == "@be.check" && style.horizontal_align == RenderTextAlign::Start
             )
         }));
         assert!(!commands.iter().any(|command| {
@@ -57757,12 +57823,7 @@ version: "2.0.0"
         assert!(hover_commands.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, rect, tint, .. }
-                if symbol == "whiteui" && *rect == info_rect && (tint[3] - 0.16).abs() < 0.0001
-        )));
-        assert!(hover_commands.iter().any(|command| matches!(
-            command,
-            RenderCommand::StrokeRect { rect, thickness, .. }
-                if *rect == info_rect && (*thickness - 1.0).abs() < f32::EPSILON
+                if symbol == "info-banner" && *rect == info_rect && *tint == [1.08, 1.08, 1.08, 1.0]
         )));
 
         launcher.apply_menu_input_events(
@@ -57789,12 +57850,7 @@ version: "2.0.0"
         assert!(pressed_commands.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, rect, tint, .. }
-                if symbol == "button.9" && *rect == info_rect && *tint == [0.74, 0.90, 1.0, 1.0]
-        )));
-        assert!(pressed_commands.iter().any(|command| matches!(
-            command,
-            RenderCommand::StrokeRect { rect, thickness, .. }
-                if *rect == info_rect && (*thickness - 2.0).abs() < f32::EPSILON
+                if symbol == "info-banner" && *rect == info_rect && *tint == [0.72, 0.86, 1.0, 1.0]
         )));
     }
 
