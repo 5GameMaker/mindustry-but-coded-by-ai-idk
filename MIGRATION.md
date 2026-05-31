@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 563. LoadDialog 槽位操作按钮命中
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **66.5%**，仍未达到完整可玩；继续优先前端/UI，让 LoadDialog 槽位不再只是整卡点击。
+- Java 对照依据：
+  - `core/src/mindustry/ui/dialogs/LoadDialog.java` 每个 save slot 右侧有 autosave、delete、rename、export 操作按钮；
+  - Java `modifyButton()` 使用 `childrenPressed()` 避免点子按钮误触发整行 load。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLoadGameActionKind`，并让 `DesktopLoadGameAction` 记录 `Load / ToggleAutosave / Delete / Rename / Export`；
+    - 新增 `LoadGameSlot(index, kind)` 路由动作与 `load_game_route_shell_action_at_surface_point(...)`；
+    - LoadGame 卡片右上绘制四个小操作按钮，hit-test 优先于整卡 load；
+    - primary click 输入路径先分发子按钮，再分发整卡 load，避免误触；
+    - 扩展回归测试覆盖 delete 子按钮命中与状态记录。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --features opengl-backend --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --features opengl-backend --lib -- --test-threads=1`
+  - `git diff --check`
+- 仍未完成：
+  - autosave/delete/rename/export 目前先记录动作，真实设置、确认弹层、文件删除/重命名/导出还需接入；
+  - `@save.import` 与 SaveDialog/覆盖确认仍需迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 562. LoadDialog 搜索与完整槽位滚动窗口
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

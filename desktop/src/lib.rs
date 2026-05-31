@@ -2563,6 +2563,7 @@ pub enum DesktopMenuRouteShellAction {
     ClearMapListSearch,
     FocusLoadGameSearch,
     ClearLoadGameSearch,
+    LoadGameSlot(usize, DesktopLoadGameActionKind),
     MapCard(DesktopMapCardAction),
     CloseMapCardDialog,
     CloseMapPlayHelp,
@@ -2678,7 +2679,17 @@ pub struct DesktopLoadGameAction {
     pub file: String,
     pub map_name: Option<String>,
     pub timestamp: i64,
+    pub kind: DesktopLoadGameActionKind,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopLoadGameActionKind {
+    Load,
+    ToggleAutosave,
+    Delete,
+    Rename,
+    Export,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -23511,6 +23522,37 @@ impl DesktopLauncher {
         card.y >= list.y + 4.0 && card.right() <= list.right() + f32::EPSILON
     }
 
+    fn load_game_slot_action_button_rect(card: RenderRect, action_index: usize) -> RenderRect {
+        RenderRect::new(
+            card.right() - 38.0 - action_index as f32 * 36.0,
+            card.y + card.height - 36.0,
+            30.0,
+            28.0,
+        )
+    }
+
+    fn load_game_slot_action_kind_for_index(
+        action_index: usize,
+    ) -> Option<DesktopLoadGameActionKind> {
+        match action_index {
+            0 => Some(DesktopLoadGameActionKind::ToggleAutosave),
+            1 => Some(DesktopLoadGameActionKind::Delete),
+            2 => Some(DesktopLoadGameActionKind::Rename),
+            3 => Some(DesktopLoadGameActionKind::Export),
+            _ => None,
+        }
+    }
+
+    fn load_game_slot_action_icon(kind: DesktopLoadGameActionKind) -> &'static str {
+        match kind {
+            DesktopLoadGameActionKind::Load => "play",
+            DesktopLoadGameActionKind::ToggleAutosave => "refresh",
+            DesktopLoadGameActionKind::Delete => "trash",
+            DesktopLoadGameActionKind::Rename => "pencilSmall",
+            DesktopLoadGameActionKind::Export => "export",
+        }
+    }
+
     fn load_game_visible_slot_capacity_for_list(list: RenderRect) -> usize {
         ((list.height + LOAD_SLOT_CARD_GAP) / (LOAD_SLOT_CARD_HEIGHT + LOAD_SLOT_CARD_GAP))
             .floor()
@@ -23568,17 +23610,74 @@ impl DesktopLauncher {
             .map(|(_, slot_index)| slot_index)
     }
 
+    fn load_game_route_shell_action_at_surface_point(
+        &self,
+        viewport: RenderViewport,
+        x: f32,
+        y: f32,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::LoadGame);
+        let point = RenderPoint::new(x, y);
+        if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseRoute);
+        }
+        if Self::load_game_search_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
+        }
+        let list = Self::load_game_list_rect_for_panel(panel);
+        let start = self
+            .load_game_scroll_offset
+            .min(self.max_load_game_scroll_offset(list));
+        for (visible_index, slot_index) in self
+            .filtered_load_game_slot_indices()
+            .into_iter()
+            .skip(start)
+            .enumerate()
+        {
+            let card = Self::load_game_slot_card_rect_for_panel(panel, visible_index);
+            if !Self::load_game_slot_card_visible_in_list(list, card) {
+                continue;
+            }
+            for action_index in 0..4 {
+                if Self::load_game_slot_action_button_rect(card, action_index).contains_point(point)
+                {
+                    if let Some(kind) = Self::load_game_slot_action_kind_for_index(action_index) {
+                        return Some(DesktopMenuRouteShellAction::LoadGameSlot(slot_index, kind));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn dispatch_load_game_slot_action(
         &mut self,
         slot_index: usize,
     ) -> Option<DesktopLoadGameAction> {
+        self.dispatch_load_game_slot_action_kind(slot_index, DesktopLoadGameActionKind::Load)
+    }
+
+    fn dispatch_load_game_slot_action_kind(
+        &mut self,
+        slot_index: usize,
+        kind: DesktopLoadGameActionKind,
+    ) -> Option<DesktopLoadGameAction> {
         let slot = self.load_game_slots.get(slot_index)?;
+        let status = match kind {
+            DesktopLoadGameActionKind::Load => "selected-for-load",
+            DesktopLoadGameActionKind::ToggleAutosave => "toggle-autosave",
+            DesktopLoadGameActionKind::Delete => "delete",
+            DesktopLoadGameActionKind::Rename => "rename",
+            DesktopLoadGameActionKind::Export => "export",
+        };
         let action = DesktopLoadGameAction {
             slot: slot.index(),
             file: slot.file.display().to_string(),
             map_name: slot.meta.as_ref().and_then(|meta| meta.map_name.clone()),
             timestamp: slot.timestamp(),
-            status: "selected-for-load".into(),
+            kind,
+            status: status.into(),
         };
         self.last_load_game_action = Some(action.clone());
         Some(action)
@@ -25620,13 +25719,9 @@ impl DesktopLauncher {
             }
         }
         if route == DesktopMenuRoute::LoadGame {
-            let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
-            let point = RenderPoint::new(x, y);
-            if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::CloseRoute);
-            }
-            if Self::load_game_search_rect_for_panel(panel).contains_point(point) {
-                return Some(DesktopMenuRouteShellAction::FocusLoadGameSearch);
+            if let Some(action) = self.load_game_route_shell_action_at_surface_point(viewport, x, y)
+            {
+                return Some(action);
             }
         }
         if matches!(
@@ -26037,6 +26132,9 @@ impl DesktopLauncher {
                 self.load_game_search.clear();
                 self.load_game_scroll_offset = 0;
                 self.load_game_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::LoadGameSlot(index, kind) => {
+                self.dispatch_load_game_slot_action_kind(index, kind);
             }
             DesktopMenuRouteShellAction::MapCard(action) => {
                 if self.map_list_cards.get(action.index).is_some() {
@@ -29994,6 +30092,35 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.034 + visible_index as f32 * 0.0001,
             ));
+            for action_index in 0..4 {
+                let Some(kind) = Self::load_game_slot_action_kind_for_index(action_index) else {
+                    continue;
+                };
+                let button = Self::load_game_slot_action_button_rect(rect, action_index);
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_text_button_symbol("grayt", false, false),
+                    button,
+                    [1.0, 1.0, 1.0, 0.70],
+                    0.0,
+                    Layer::END_PIXELED + 0.035 + visible_index as f32 * 0.0001,
+                ));
+                let icon = Self::load_game_slot_action_icon(kind);
+                pass.push(RenderCommand::draw_text_styled(
+                    desktop_ui_icon_glyph_or_label(icon, icon),
+                    button.center(),
+                    [0.76, 0.86, 0.94, 1.0],
+                    12.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED
+                        + 0.036
+                        + visible_index as f32 * 0.0001
+                        + action_index as f32 * 0.00001,
+                ));
+            }
         }
         let max_scroll = self.max_load_game_scroll_offset(list);
         if max_scroll > 0 {
@@ -30527,6 +30654,18 @@ impl DesktopLauncher {
                         if self.settings_scroll_drag_state.is_some() {
                             self.last_menu_action = None;
                             continue;
+                        }
+                        if self.active_menu_route == Some(DesktopMenuRoute::LoadGame) {
+                            let viewport = self.default_render_viewport_for_surface(surface_size);
+                            if let Some(action @ DesktopMenuRouteShellAction::LoadGameSlot(_, _)) =
+                                self.load_game_route_shell_action_at_surface_point(
+                                    viewport, cursor.x, cursor.y,
+                                )
+                            {
+                                self.dispatch_menu_route_shell_action(action);
+                                self.last_menu_action = None;
+                                continue;
+                            }
                         }
                         if let Some(slot_index) =
                             self.load_game_slot_at_surface_point(surface_size, cursor.x, cursor.y)
@@ -53676,6 +53815,7 @@ version: "2.0.0"
         assert!(action.file.ends_with("2.msav"));
         assert_eq!(action.map_name.as_deref(), Some("New Map"));
         assert_eq!(action.timestamp, 200);
+        assert_eq!(action.kind, super::DesktopLoadGameActionKind::Load);
         assert_eq!(action.status, "selected-for-load");
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
@@ -53832,6 +53972,36 @@ version: "2.0.0"
         assert!(texts.contains(&"Map 2"));
         assert!(texts.contains(&"[accent]Map 2"));
         assert!(!texts.contains(&"[accent]Map 7"));
+
+        let visible_card = DesktopLauncher::load_game_slot_card_rect_for_panel(panel, 0);
+        let delete = DesktopLauncher::load_game_slot_action_button_rect(visible_card, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, delete.x, delete.y),
+            Some(super::DesktopMenuRouteShellAction::LoadGameSlot(
+                filtered[0],
+                super::DesktopLoadGameActionKind::Delete
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: delete.x,
+                    y: delete.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        let action = launcher
+            .last_load_game_action
+            .as_ref()
+            .expect("slot action button should record an action");
+        assert_eq!(action.kind, super::DesktopLoadGameActionKind::Delete);
+        assert_eq!(action.status, "delete");
+        assert_eq!(action.map_name.as_deref(), Some("Map 2"));
 
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ClearLoadGameSearch,
