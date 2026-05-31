@@ -21201,8 +21201,39 @@ impl DesktopLauncher {
         )
     }
 
+    fn save_timestamp_utc_date_parts(timestamp_millis: i64) -> (i32, u32, u32, u32, u32) {
+        let total_seconds = timestamp_millis.max(0) / 1000;
+        let days = total_seconds / 86_400;
+        let seconds_of_day = total_seconds % 86_400;
+        let hour = (seconds_of_day / 3_600) as u32;
+        let minute = ((seconds_of_day % 3_600) / 60) as u32;
+
+        // Howard Hinnant's civil-from-days transform, with day 0 = 1970-01-01.
+        let z = days + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let day = doy - (153 * mp + 2) / 5 + 1;
+        let month = mp + if mp < 10 { 3 } else { -9 };
+        let year = y + i64::from(month <= 2);
+
+        (year as i32, month as u32, day as u32, hour, minute)
+    }
+
+    fn format_save_timestamp(timestamp_millis: i64) -> String {
+        let (year, month, day, hour, minute) =
+            Self::save_timestamp_utc_date_parts(timestamp_millis);
+        format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
+    }
+
     fn load_game_slot_date_line(slot: &SaveSlotRecord) -> String {
-        format!("saved: {}", slot.timestamp())
+        format!(
+            "@save.date: {}",
+            Self::format_save_timestamp(slot.timestamp())
+        )
     }
 
     fn load_game_slot_is_autosave(slot: &SaveSlotRecord) -> bool {
@@ -21214,7 +21245,14 @@ impl DesktopLauncher {
     }
 
     fn load_game_slot_autosave_line(slot: &SaveSlotRecord) -> String {
-        format!("@save.autosave: {}", Self::load_game_slot_is_autosave(slot))
+        format!(
+            "@save.autosave: {}",
+            if Self::load_game_slot_is_autosave(slot) {
+                "@on"
+            } else {
+                "@off"
+            }
+        )
     }
 
     fn format_save_playtime(time_played_millis: i64) -> String {
@@ -24084,7 +24122,7 @@ impl DesktopLauncher {
     fn load_game_slot_action_icon(kind: DesktopLoadGameActionKind) -> &'static str {
         match kind {
             DesktopLoadGameActionKind::Load => "play",
-            DesktopLoadGameActionKind::ToggleAutosave => "refresh",
+            DesktopLoadGameActionKind::ToggleAutosave => "save",
             DesktopLoadGameActionKind::Delete => "trash",
             DesktopLoadGameActionKind::Rename => "pencilSmall",
             DesktopLoadGameActionKind::Export => "export",
@@ -58179,8 +58217,9 @@ version: "2.0.0"
         assert!(texts.contains(&"@save.map: New Map / @mode.attack.name"));
         assert!(texts
             .iter()
-            .any(|text| text.contains("@save.wave: 9") && text.contains("saved: 200")));
-        assert!(texts.contains(&"@save.autosave: true"));
+            .any(|text| text.contains("@save.wave: 9")
+                && text.contains("@save.date: 1970-01-01 00:00")));
+        assert!(texts.contains(&"@save.autosave: @on"));
         assert!(texts.contains(&"@mode.survival.name"));
         assert!(texts.contains(&"@mode.sandbox.name"));
         assert!(texts.contains(&"@mode.attack.name"));
@@ -58214,6 +58253,10 @@ version: "2.0.0"
                     if symbol == &autosave_button_symbol && *rect == autosave_button
             )),
             "Java LoadDialog marks autosave as a checked toggle button"
+        );
+        assert!(
+            texts.contains(&super::desktop_ui_icon_glyph_or_label("save", "save").as_str()),
+            "Java LoadDialog uses Icon.save for the autosave toggle"
         );
         let card_rects = commands
             .iter()

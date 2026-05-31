@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 586. LoadDialog 日期、自动保存文案与图标对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **69.6%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 LoadDialog 存档卡片中最明显的调试式文字收敛为 Java 风格显示。
+- Java 对照依据：
+  - `LoadDialog` slot meta 中日期显示来自 `slot.getDate()`，不是 raw timestamp；
+  - `save.autosave = Autosave: {0}`，Java 传入 `on/off` bundle 值；
+  - autosave toggle 使用 `Icon.save`，不是刷新图标。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增无依赖 UTC 日期格式化 helper，把 `saved` timestamp 显示为 `YYYY-MM-DD HH:MM`；
+    - `load_game_slot_date_line(...)` 从 `saved: <raw>` 改为 `@save.date: <readable date>`；
+    - `load_game_slot_autosave_line(...)` 从 `true/false` 改为 `@on/@off`；
+    - `ToggleAutosave` 图标从 `refresh` 改为 `save`；
+    - 更新 LoadDialog 渲染测试，锁定日期、人类可读 autosave 文案与 autosave save 图标。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `cargo test -p mindustry-desktop --lib load_game -- --nocapture`
+- 仍未完成：
+  - LoadDialog 的真实 `cautiousLoad -> ui.loadAnd(...) -> slot.load()` 副作用仍未完全接入；
+  - SaveDialog 的 `@saving` 过渡与真实保存序列化仍需继续补齐；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 585. 用户可见界面隐藏 upstream 调试标记
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
