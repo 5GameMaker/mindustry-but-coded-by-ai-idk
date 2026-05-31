@@ -19360,6 +19360,32 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 552. Settings KeybindDialog 滚动浏览闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **60.0%**，仍未达到完整可玩；继续优先前端/UI，把 Controls 子弹窗从“只显示首屏 keybind 行”推进到可滚轮浏览后续绑定。
+- Java 对照依据：
+  - `KeybindDialog.java` 把 `bindsTable` 放进 `ScrollPane`，按 `KeyBind.all` 显示完整按键表；
+  - 搜索栏下的 keybind 表必须能继续向下浏览 command/blocks/view/multiplayer 等后续分组；
+  - rebind/reset 命中应跟当前可见行对应，而不能固定在首屏行。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `settings_keybind_scroll_offset`；
+    - Controls 子弹窗渲染使用 `skip(offset).take(visible_rows)`，滚轮后可显示后续 keybind；
+    - Controls 子弹窗命中测试同样使用当前 visible offset，保证 `@settings.rebind` / `@settings.resetKey` 对应滚动后的行；
+    - `apply_settings_scroll_delta(...)` 在 Controls 子弹窗打开且鼠标位于弹窗内时优先滚动 keybind 列表；
+    - `settings_route_lines()` 记录当前 `KeybindDialog` offset，便于后续审查/交接。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Controls 搜索栏还未接文本输入过滤；
+  - 真实按键捕获弹窗、轴向绑定二段输入、冲突处理和持久化仍需继续迁移；
+  - LanguageDialog/Settings 其他子页仍有持久化和即时副作用缺口；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 551. Settings LanguageDialog 和 KeybindDialog 占位消除
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

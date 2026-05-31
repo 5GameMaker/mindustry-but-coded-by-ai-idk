@@ -14894,6 +14894,7 @@ pub struct DesktopLauncher {
     pub last_settings_language_restart_message: Option<String>,
     pub settings_keybind_overrides: BTreeMap<&'static str, String>,
     pub last_settings_rebind_key: Option<&'static str>,
+    pub settings_keybind_scroll_offset: usize,
     pub last_settings_action: Option<DesktopSettingsAction>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
@@ -15634,6 +15635,7 @@ impl DesktopLauncher {
             last_settings_language_restart_message: None,
             settings_keybind_overrides: BTreeMap::new(),
             last_settings_rebind_key: None,
+            settings_keybind_scroll_offset: 0,
             last_settings_action: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
@@ -20166,9 +20168,14 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.106,
         ));
 
-        let mut last_category = None;
+        let offset = self.settings_keybind_scroll_offset;
+        let mut last_category = SETTINGS_KEYBIND_SPECS[..offset]
+            .iter()
+            .rev()
+            .find_map(|spec| spec.category);
         for (index, spec) in SETTINGS_KEYBIND_SPECS
             .iter()
+            .skip(offset)
             .take(SETTINGS_KEYBIND_VISIBLE_ROWS)
             .enumerate()
         {
@@ -20593,6 +20600,20 @@ impl DesktopLauncher {
         surface_size: DesktopSurfaceSize,
         delta_y: f32,
     ) -> bool {
+        if self.active_menu_route == Some(DesktopMenuRoute::Settings)
+            && self.settings_child_dialog == Some(DesktopSettingsChildDialog::Controls)
+        {
+            let Some(cursor) = self.last_menu_cursor else {
+                return false;
+            };
+            let viewport = self.default_render_viewport_for_surface(surface_size);
+            let panel =
+                Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
+            let dialog = Self::settings_child_dialog_rect_for_panel(panel);
+            if dialog.contains_point(cursor) {
+                return self.apply_settings_keybind_scroll_delta(delta_y);
+            }
+        }
         let (DesktopSettingsPage::Game
         | DesktopSettingsPage::Graphics
         | DesktopSettingsPage::Sound) = self.settings_dialog_state.page
@@ -20627,6 +20648,27 @@ impl DesktopLauncher {
         let next = (current + delta).clamp(0, max);
         self.settings_scroll_offsets.insert(table, next);
         true
+    }
+
+    fn apply_settings_keybind_scroll_delta(&mut self, delta_y: f32) -> bool {
+        let max = SETTINGS_KEYBIND_SPECS
+            .len()
+            .saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS);
+        if max == 0 {
+            return false;
+        }
+        let current = self.settings_keybind_scroll_offset.min(max);
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        let step = if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        };
+        let next = (current as isize + step).clamp(0, max as isize) as usize;
+        self.settings_keybind_scroll_offset = next;
+        next != current
     }
 
     fn settings_route_lines(&self) -> Vec<String> {
@@ -20697,8 +20739,9 @@ impl DesktopLauncher {
                 }
                 DesktopSettingsChildDialog::Controls => {
                     lines.push(format!(
-                        "child dialog: KeybindDialog binds:{}",
-                        SETTINGS_KEYBIND_SPECS.len()
+                        "child dialog: KeybindDialog binds:{} offset:{}",
+                        SETTINGS_KEYBIND_SPECS.len(),
+                        self.settings_keybind_scroll_offset
                     ));
                 }
             }
@@ -20837,6 +20880,7 @@ impl DesktopLauncher {
             Some(DesktopSettingsChildDialog::Controls) => {
                 for (index, spec) in SETTINGS_KEYBIND_SPECS
                     .iter()
+                    .skip(self.settings_keybind_scroll_offset)
                     .take(SETTINGS_KEYBIND_VISIBLE_ROWS)
                     .enumerate()
                 {
@@ -22283,6 +22327,7 @@ impl DesktopLauncher {
             }
             DesktopSettingsAction::OpenControlsDialog => {
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::Controls);
+                self.settings_keybind_scroll_offset = 0;
             }
             DesktopSettingsAction::CloseChildDialog => {
                 self.settings_child_dialog = None;
@@ -45315,7 +45360,7 @@ mod tests {
         );
         assert!(launcher
             .settings_route_lines()
-            .contains(&"child dialog: KeybindDialog binds:18".to_string()));
+            .contains(&"child dialog: KeybindDialog binds:18 offset:0".to_string()));
 
         let rebind_center =
             DesktopLauncher::settings_keybind_rebind_button_rect(child_dialog, 0).center();
@@ -45368,6 +45413,40 @@ mod tests {
         );
         assert_eq!(launcher.last_settings_rebind_key, None);
         assert!(!launcher.settings_keybind_overrides.contains_key("move_x"));
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: child_dialog.center().x,
+                    y: child_dialog.center().y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -12.0,
+                },
+            ],
+        );
+        assert!(launcher.settings_keybind_scroll_offset > 0);
+        assert!(launcher.settings_route_lines().iter().any(|line| {
+            line.starts_with("child dialog: KeybindDialog binds:18 offset:")
+                && !line.ends_with("offset:0")
+        }));
+        let scrolled_controls_frame = launcher.menu_graphics_frame_for_surface(3, viewport);
+        let scrolled_controls_texts = scrolled_controls_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("scrolled controls child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(scrolled_controls_texts.contains(&"@keybind.command_mode.name"));
         launcher.apply_menu_input_events(
             surface,
             &[
