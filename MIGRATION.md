@@ -15,6 +15,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 622. 主菜单 BE check 补 update-available 脉冲文字色
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.2%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是补齐 Java `MenuFragment` 里 BE check 按钮可见的 update-available 状态反馈。
+- Java 对照依据：
+  - `MenuFragment` 桌面 `becheck` 按钮 `update(...)` 会在 `becontrol.isUpdateAvailable()` 为真时把 label 从 `Color.white` 脉冲 lerp 到 `Pal.accent`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `menu_becheck_update_available` 状态位；
+    - 新增 `menu_becheck_label_color()`，按 `desktop_absin(time, 5f, 1f)` 近似 Java `Mathf.absin(5f, 1f)`；
+    - `push_menu_logo_and_version_chrome(...)` 渲染 `@be.check` 时消费该颜色；
+    - reset 路径补清 `last_menu_info_message` 与 `menu_becheck_update_available`；
+    - 扩展主菜单 chrome 测试，断言 update-available 状态下文字颜色向 `Pal.accent` 脉冲。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_renders_desktop_and_discord_chrome_buttons --lib`
+- 仍未完成：
+  - `menu_becheck_update_available` 尚未接入真实 `BeControl::is_update_available()` / `becontrol.checkUpdate(...)`；
+  - BE 检查仍缺 Java `ui.loadfrag.show/hide` 的完整异步路径。
+
 ## 621. DatabaseDialog 补 hover tooltip、patched 文件角标与 banned 红叉
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -16208,6 +16208,7 @@ pub struct DesktopLauncher {
     pub menu_mobile_terminal_open: bool,
     pub menu_console_setting_enabled: bool,
     pub menu_becheck_active: bool,
+    pub menu_becheck_update_available: bool,
     pub menu_scene_margin_top: f32,
     pub menu_scene_margin_left: f32,
     pub menu_scene_margin_right: f32,
@@ -17066,6 +17067,7 @@ impl DesktopLauncher {
             menu_mobile_terminal_open: false,
             menu_console_setting_enabled: true,
             menu_becheck_active: true,
+            menu_becheck_update_available: false,
             menu_scene_margin_top: 0.0,
             menu_scene_margin_left: 14.0,
             menu_scene_margin_right: 14.0,
@@ -20520,6 +20522,20 @@ impl DesktopLauncher {
         DesktopMenuChromeButtonState { hovered, pressed }
     }
 
+    fn menu_becheck_label_color(&self) -> [f32; 4] {
+        if !self.menu_becheck_update_available {
+            return [0.96, 0.99, 1.0, 1.0];
+        }
+
+        let progress = desktop_absin(self.menu_renderer_state.time, 5.0, 1.0);
+        [
+            desktop_lerp(1.0, Pal::ACCENT.r, progress),
+            desktop_lerp(1.0, Pal::ACCENT.g, progress),
+            desktop_lerp(1.0, Pal::ACCENT.b, progress),
+            1.0,
+        ]
+    }
+
     fn push_menu_logo_and_version_chrome(&self, pass: &mut RenderPass, viewport: RenderViewport) {
         let options = self.current_menu_chrome_options();
         let chrome = DesktopMenuChromeLayout::for_viewport_with_state(viewport, options);
@@ -20620,7 +20636,7 @@ impl DesktopLauncher {
                     [0.14, 0.18, 0.27, 0.92],
                     [0.58, 0.72, 0.90, 0.98],
                     14.0,
-                    [0.96, 0.99, 1.0, 1.0],
+                    self.menu_becheck_label_color(),
                 );
             }
         }
@@ -39550,9 +39566,11 @@ impl DesktopLauncher {
         self.last_menu_visual_pressed_chrome_frames = 0;
         self.last_menu_platform_action = None;
         self.last_menu_guard_message = None;
+        self.last_menu_info_message = None;
         self.menu_mobile_terminal_open = false;
         self.menu_console_setting_enabled = true;
         self.menu_becheck_active = true;
+        self.menu_becheck_update_available = false;
         self.menu_scene_margin_top = 0.0;
         self.menu_scene_margin_left = 14.0;
         self.menu_scene_margin_right = 14.0;
@@ -59838,6 +59856,29 @@ version: "2.0.0"
                     if text == "@be.check" && style.horizontal_align == RenderTextAlign::Start
             )
         }));
+        launcher.menu_becheck_update_available = true;
+        launcher.menu_renderer_state.time = core::f32::consts::FRAC_PI_2 * 5.0 - (1.0 / 60.0);
+        let update_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let update_commands = update_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("update-available menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        assert!(
+            update_commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawText { text, color, .. }
+                    if text == "@be.check"
+                        && (color[0] - Pal::ACCENT.r).abs() < 0.02
+                        && (color[1] - Pal::ACCENT.g).abs() < 0.02
+                        && (color[2] - Pal::ACCENT.b).abs() < 0.02
+            )),
+            "Java MenuFragment pulses the BE check label toward Pal.accent when an update is available"
+        );
         assert!(!commands.iter().any(|command| {
             matches!(
                 command,
