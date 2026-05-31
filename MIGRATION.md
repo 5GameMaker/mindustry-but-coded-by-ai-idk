@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 598. LoadDialog 删除前确认弹窗
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.8%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是修正 LoadDialog/SaveDialog slot 垃圾桶按钮“直接删除”的非原版行为，补上 Java `ui.showConfirm("@confirm", "@save.delete.confirm", ...)` 语义。
+- Java 对照依据：
+  - `LoadDialog.modifyButton(...)` 中 delete 按钮先弹确认，再执行 `slot.delete()` 与 `rebuild()`；
+  - SaveDialog 继承 LoadDialog slot 修改按钮，因此 SaveGame 路由下的删除也应走同一确认层。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `load_game_delete_dialog_slot` 状态与 `LoadGameDeleteOk/LoadGameDeleteCancel` route action；
+    - 点击 Load/Save slot 的 Delete 动作只打开确认弹窗，不立即删除 save/backup；
+    - `@confirm` / `@save.delete.confirm | <slot>` 弹窗复用现有两按钮几何，Cancel 关闭弹窗，OK 才调用实际删除逻辑；
+    - Back/Escape 优先关闭删除确认，Enter 可确认删除；
+    - CloseRoute、SaveGame new/overwrite 等路径清理删除确认状态，避免多 modal 叠加；
+    - 更新 LoadDialog 搜索/滚动测试，验证点击 trash 后文件仍存在、弹窗渲染、Cancel 不删、OK 后才删除 save 与 backup。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - autosave 按钮目前仍需继续补真实 `slot.setAutosave(!slot.isAutosave())` 持久化语义；
+  - 点击存档卡片的真实加载、loading overlay、`state.set(State.playing)` 与 pause UI 收起仍需接入；
+  - 删除确认文案后续应接入完整 bundle format/换行 wrap，而不是当前单行 `key | slot` 过渡表达。
+
 ## 597. SettingsMenuDialog Data/返回语义继续对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

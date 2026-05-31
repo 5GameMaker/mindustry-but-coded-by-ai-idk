@@ -2694,6 +2694,8 @@ pub enum DesktopMenuRouteShellAction {
     LoadGameSlot(usize, DesktopLoadGameActionKind),
     LoadGameRenameOk,
     LoadGameRenameCancel,
+    LoadGameDeleteOk,
+    LoadGameDeleteCancel,
     SaveGameNew,
     SaveGameNewOk,
     SaveGameNewCancel,
@@ -16261,6 +16263,7 @@ pub struct DesktopLauncher {
     pub last_load_game_rename_result: Option<DesktopLoadGameRenameResult>,
     pub load_game_slot_names: BTreeMap<String, String>,
     pub load_game_rename_dialog_slot: Option<usize>,
+    pub load_game_delete_dialog_slot: Option<usize>,
     pub load_game_rename_text: String,
     pub load_game_search: String,
     pub load_game_search_focused: bool,
@@ -17110,6 +17113,7 @@ impl DesktopLauncher {
             last_load_game_rename_result: None,
             load_game_slot_names: BTreeMap::new(),
             load_game_rename_dialog_slot: None,
+            load_game_delete_dialog_slot: None,
             load_game_rename_text: String::new(),
             load_game_search: String::new(),
             load_game_search_focused: false,
@@ -20966,6 +20970,16 @@ impl DesktopLauncher {
                 Some(DesktopMenuRouteShellAction::LoadGameRenameCancel);
             return true;
         }
+        if matches!(
+            self.active_menu_route,
+            Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
+        ) && self.load_game_delete_dialog_slot.is_some()
+        {
+            self.load_game_delete_dialog_slot = None;
+            self.last_menu_route_shell_action =
+                Some(DesktopMenuRouteShellAction::LoadGameDeleteCancel);
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::SaveGame)
             && self.save_game_new_dialog_open
         {
@@ -21000,6 +21014,7 @@ impl DesktopLauncher {
             self.map_list_search_focused = false;
             self.load_game_search_focused = false;
             self.load_game_rename_dialog_slot = None;
+            self.load_game_delete_dialog_slot = None;
             self.load_game_rename_text.clear();
             self.save_game_new_dialog_open = false;
             self.save_game_new_text.clear();
@@ -21147,6 +21162,7 @@ impl DesktopLauncher {
                 self.load_game_scroll_offset = 0;
                 self.load_game_hidden_modes.clear();
                 self.load_game_rename_dialog_slot = None;
+                self.load_game_delete_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
                 self.save_game_new_text.clear();
@@ -24547,6 +24563,16 @@ impl DesktopLauncher {
             }
             return None;
         }
+        if self.load_game_delete_dialog_slot.is_some() {
+            let dialog = Self::load_game_delete_dialog_rect_for_panel(panel);
+            if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::LoadGameDeleteCancel);
+            }
+            if Self::load_game_rename_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::LoadGameDeleteOk);
+            }
+            return None;
+        }
         if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::CloseRoute);
         }
@@ -24603,6 +24629,16 @@ impl DesktopLauncher {
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::SaveGame);
         let point = RenderPoint::new(x, y);
         if self.save_game_pending_save.is_some() {
+            return None;
+        }
+        if self.load_game_delete_dialog_slot.is_some() {
+            let dialog = Self::load_game_delete_dialog_rect_for_panel(panel);
+            if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::LoadGameDeleteCancel);
+            }
+            if Self::load_game_rename_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::LoadGameDeleteOk);
+            }
             return None;
         }
         if self.save_game_new_dialog_open {
@@ -25491,6 +25527,7 @@ impl DesktopLauncher {
                 self.load_game_scroll_offset = 0;
                 self.load_game_hidden_modes.clear();
                 self.load_game_rename_dialog_slot = None;
+                self.load_game_delete_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
                 self.save_game_new_text.clear();
@@ -28328,6 +28365,7 @@ impl DesktopLauncher {
                 self.editor_map_info_dialog_index = None;
                 self.load_game_search_focused = false;
                 self.load_game_rename_dialog_slot = None;
+                self.load_game_delete_dialog_slot = None;
                 self.load_game_rename_text.clear();
                 self.save_game_new_dialog_open = false;
                 self.save_game_new_text.clear();
@@ -28503,7 +28541,19 @@ impl DesktopLauncher {
                 let _ = self.dispatch_load_game_import_with_platform(&mut platform);
             }
             DesktopMenuRouteShellAction::LoadGameSlot(index, kind) => {
-                self.dispatch_load_game_slot_action_kind(index, kind);
+                if kind == DesktopLoadGameActionKind::Delete {
+                    if self.load_game_slots.get(index).is_some() {
+                        self.load_game_delete_dialog_slot = Some(index);
+                        self.load_game_rename_dialog_slot = None;
+                        self.load_game_rename_text.clear();
+                        self.save_game_new_dialog_open = false;
+                        self.save_game_new_text.clear();
+                        self.save_game_overwrite_dialog_slot = None;
+                        self.save_game_pending_save = None;
+                    }
+                } else {
+                    self.dispatch_load_game_slot_action_kind(index, kind);
+                }
             }
             DesktopMenuRouteShellAction::LoadGameRenameOk => {
                 if let Some(slot_index) = self.load_game_rename_dialog_slot {
@@ -28522,9 +28572,21 @@ impl DesktopLauncher {
                 self.load_game_rename_dialog_slot = None;
                 self.load_game_rename_text.clear();
             }
+            DesktopMenuRouteShellAction::LoadGameDeleteOk => {
+                if let Some(slot_index) = self.load_game_delete_dialog_slot.take() {
+                    self.dispatch_load_game_slot_action_kind(
+                        slot_index,
+                        DesktopLoadGameActionKind::Delete,
+                    );
+                }
+            }
+            DesktopMenuRouteShellAction::LoadGameDeleteCancel => {
+                self.load_game_delete_dialog_slot = None;
+            }
             DesktopMenuRouteShellAction::SaveGameNew => {
                 self.save_game_new_dialog_open = true;
                 self.save_game_new_text.clear();
+                self.load_game_delete_dialog_slot = None;
                 self.save_game_overwrite_dialog_slot = None;
                 self.save_game_pending_save = None;
             }
@@ -28545,6 +28607,7 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::SaveGameOverwrite(index) => {
                 if self.load_game_slots.get(index).is_some() {
                     self.save_game_overwrite_dialog_slot = Some(index);
+                    self.load_game_delete_dialog_slot = None;
                     self.save_game_new_dialog_open = false;
                     self.save_game_pending_save = None;
                 }
@@ -33255,9 +33318,11 @@ impl DesktopLauncher {
         if self.active_menu_route == Some(DesktopMenuRoute::SaveGame) {
             self.push_save_game_new_dialog(pass, panel);
             self.push_save_game_overwrite_dialog(pass, panel);
+            self.push_load_game_delete_dialog(pass, panel);
             self.push_save_game_saving_overlay(pass, panel);
         } else {
             self.push_load_game_rename_dialog(pass, panel);
+            self.push_load_game_delete_dialog(pass, panel);
         }
     }
 
@@ -33422,6 +33487,10 @@ impl DesktopLauncher {
         )
     }
 
+    fn load_game_delete_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        Self::save_game_overwrite_dialog_rect_for_panel(panel)
+    }
+
     fn push_save_game_new_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
         if !self.save_game_new_dialog_open {
             return;
@@ -33568,6 +33637,73 @@ impl DesktopLauncher {
             "@ok",
             None,
             Layer::END_PIXELED + 0.086,
+        );
+    }
+
+    fn push_load_game_delete_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(slot_index) = self.load_game_delete_dialog_slot else {
+            return;
+        };
+        let dialog = Self::load_game_delete_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.084,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.085,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.90, 0.42, 0.38, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.086,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@confirm",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [1.0, 0.92, 0.88, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.087,
+        ));
+        let slot_name = self
+            .load_game_slots
+            .get(slot_index)
+            .map(|slot| self.load_game_slot_display_title(slot))
+            .unwrap_or_else(|| "?".into());
+        pass.push(RenderCommand::draw_text_styled(
+            format!("@save.delete.confirm | {slot_name}"),
+            RenderPoint::new(dialog.center().x, dialog.center().y + 10.0),
+            [0.88, 0.90, 0.92, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.087,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 0),
+            "@cancel",
+            None,
+            Layer::END_PIXELED + 0.090,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::load_game_rename_button_rect(dialog, 1),
+            "@ok",
+            None,
+            Layer::END_PIXELED + 0.090,
         );
     }
 
@@ -33862,6 +33998,19 @@ impl DesktopLauncher {
                     if *pressed && Self::is_menu_back_key(key_code) =>
                 {
                     self.apply_menu_back_key();
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && matches!(
+                            self.active_menu_route,
+                            Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
+                        )
+                        && self.load_game_delete_dialog_slot.is_some()
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::LoadGameDeleteOk,
+                    );
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
@@ -59554,6 +59703,66 @@ version: "2.0.0"
                 },
             ],
         );
+        assert_eq!(launcher.load_game_delete_dialog_slot, Some(filtered[0]));
+        assert!(
+            save_dir.join("2.msav").exists(),
+            "Java LoadDialog asks for delete confirmation before removing the save file"
+        );
+        assert!(
+            map2_backup.exists(),
+            "delete confirmation should also defer removing the backup target"
+        );
+        let delete_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let delete_texts = delete_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("delete confirmation frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(delete_texts.contains(&"@confirm"));
+        assert!(delete_texts.contains(&"@save.delete.confirm | Map 2"));
+        assert!(delete_texts.contains(&"@cancel"));
+        assert!(delete_texts.contains(&"@ok"));
+        let delete_dialog = DesktopLauncher::load_game_delete_dialog_rect_for_panel(panel);
+        let cancel = DesktopLauncher::load_game_rename_button_rect(delete_dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, cancel.x, cancel.y),
+            Some(super::DesktopMenuRouteShellAction::LoadGameDeleteCancel)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::LoadGameDeleteCancel,
+        );
+        assert_eq!(launcher.load_game_delete_dialog_slot, None);
+        assert!(save_dir.join("2.msav").exists());
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: delete.x,
+                    y: delete.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        let ok = DesktopLauncher::load_game_rename_button_rect(delete_dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
+            Some(super::DesktopMenuRouteShellAction::LoadGameDeleteOk)
+        );
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::LoadGameDeleteOk);
+        assert_eq!(launcher.load_game_delete_dialog_slot, None);
         let action = launcher
             .last_load_game_action
             .as_ref()
