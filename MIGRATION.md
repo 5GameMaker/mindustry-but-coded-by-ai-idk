@@ -20057,6 +20057,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - `ItemsDisplay` 还只是可视承载条，未接 campaign sector item state；
   - 未达到完整可玩，不能宣布目标完成。
 
+## 581. ResearchDialog root 选择弹窗闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **63.3%**，仍未达到完整可玩；继续优先前端/UI，把 `@techtree.select` 从静态按钮推进为可打开、可选择、可关闭的 root/planet 选择子弹窗。
+- Java 对照依据：
+  - 上游 `ResearchDialog` 的 title/root 区域支持打开 `showTechSelect()`；
+  - root 选择后会切换当前科技树并重建 `View`；
+  - 打开选择弹窗时后层科技树不应继续响应普通 route 操作。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `tech_tree_selected_root` 与 `tech_tree_select_dialog_open`；
+    - 新增 `OpenTechTreeSelect / CloseTechTreeSelect / SelectTechTreeRoot(index)` route action；
+    - `tech_tree_route_root_candidates()` 暴露 Serpulo/Erekir 候选；
+    - `@techtree.select` hit-test 打开子弹窗；
+    - 选择 `erekir/serpulo` 后更新当前 root 并关闭弹窗；
+    - `push_tech_tree_select_dialog(...)` 渲染 `@techtree.select`、候选按钮、选中态图标与 `@back`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_techtree_route_renders_research_dialog_shell_and_graph --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_pending_menu_routes_use_upstream_dialog_structure --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - root 选择弹窗还未按 Java 的真实 planet/root 过滤逻辑接 `accessible/generator/sectors`；
+  - 选择后只切换静态首屏根，尚未接 Java `rebuildItems()` / `View.rebuild()` 的完整状态链；
+  - 科技树节点点击详情、解锁、拖拽缩放仍需继续迁移；
+  - 未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

@@ -2487,6 +2487,9 @@ pub enum DesktopMenuRouteShellAction {
     OpenMapListFilters,
     NewEditorMap,
     ImportEditorMap,
+    OpenTechTreeSelect,
+    CloseTechTreeSelect,
+    SelectTechTreeRoot(usize),
     OpenModsImport,
     CloseModsImport,
     ModsImportFile,
@@ -15392,6 +15395,8 @@ pub struct DesktopLauncher {
     pub map_list_filter_dialog_open: bool,
     pub editor_new_map_dialog_open: bool,
     pub editor_import_map_dialog_open: bool,
+    pub tech_tree_selected_root: Option<String>,
+    pub tech_tree_select_dialog_open: bool,
     pub schematic_import_dialog_open: bool,
     pub schematic_tags_dialog_open: bool,
     pub schematic_search: String,
@@ -16152,6 +16157,8 @@ impl DesktopLauncher {
             map_list_filter_dialog_open: false,
             editor_new_map_dialog_open: false,
             editor_import_map_dialog_open: false,
+            tech_tree_selected_root: None,
+            tech_tree_select_dialog_open: false,
             schematic_import_dialog_open: false,
             schematic_tags_dialog_open: false,
             schematic_search: String::new(),
@@ -19862,6 +19869,7 @@ impl DesktopLauncher {
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
+            self.tech_tree_select_dialog_open = false;
             self.last_menu_dispatch = None;
             self.last_menu_route_shell_action = None;
             return true;
@@ -19885,6 +19893,7 @@ impl DesktopLauncher {
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
+            self.tech_tree_select_dialog_open = false;
             let dispatch = DesktopMenuActionDispatch {
                 role,
                 submenu_changed,
@@ -19934,6 +19943,7 @@ impl DesktopLauncher {
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
+            self.tech_tree_select_dialog_open = false;
             None
         } else {
             DesktopMenuRoute::from_menu_button(role)
@@ -19943,6 +19953,7 @@ impl DesktopLauncher {
             self.mods_selected_mod_index = None;
             self.mods_content_dialog_index = None;
             self.mods_import_dialog_open = false;
+            self.tech_tree_select_dialog_open = false;
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = Some(CampaignPlanetDialogState::look(
                     &self.content_loader,
@@ -20694,10 +20705,11 @@ impl DesktopLauncher {
         &self,
         pass: &mut RenderPass,
         rect: RenderRect,
-        label: &'static str,
+        label: impl Into<String>,
         icon: Option<&'static str>,
         layer: f32,
     ) {
+        let label = label.into();
         let hovered = self
             .last_menu_cursor
             .map(|point| rect.contains_point(point))
@@ -23767,6 +23779,32 @@ impl DesktopLauncher {
         None
     }
 
+    fn tech_tree_route_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        if self.tech_tree_select_dialog_open {
+            let dialog = Self::tech_tree_select_dialog_rect_for_panel(panel);
+            for (index, _) in self.tech_tree_route_root_candidates().iter().enumerate() {
+                if Self::tech_tree_select_root_button_rect(dialog, index).contains_point(point) {
+                    return Some(DesktopMenuRouteShellAction::SelectTechTreeRoot(index));
+                }
+            }
+            if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseTechTreeSelect);
+            }
+            return None;
+        }
+        if Self::route_back_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::CloseRoute);
+        }
+        if Self::tech_tree_select_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::OpenTechTreeSelect);
+        }
+        None
+    }
+
     fn database_search_rect_for_panel(panel: RenderRect) -> RenderRect {
         RenderRect::new(
             panel.x + 28.0,
@@ -23842,6 +23880,26 @@ impl DesktopLauncher {
         )
     }
 
+    fn tech_tree_select_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width * 0.62).clamp(280.0, 420.0);
+        let height = 230.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn tech_tree_select_root_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            dialog.x + 34.0,
+            dialog.y + dialog.height - 92.0 - index as f32 * 52.0,
+            dialog.width - 68.0,
+            44.0,
+        )
+    }
+
     fn active_menu_route_shell_action_at_surface_point(
         &self,
         surface_size: DesktopSurfaceSize,
@@ -23905,9 +23963,10 @@ impl DesktopLauncher {
         }
         if route == DesktopMenuRoute::TechTree {
             let panel = Self::active_menu_route_shell_panel_for_route(viewport, route);
-            if Self::route_back_button_rect_for_panel(panel).contains_point(RenderPoint::new(x, y))
+            if let Some(action) =
+                self.tech_tree_route_action_at_point(panel, RenderPoint::new(x, y))
             {
-                return Some(DesktopMenuRouteShellAction::CloseRoute);
+                return Some(action);
             }
         }
         if let Some(rect) = Self::discord_route_shell_copy_rect_for_viewport(viewport, route) {
@@ -24172,6 +24231,7 @@ impl DesktopLauncher {
                 self.mods_selected_mod_index = None;
                 self.mods_content_dialog_index = None;
                 self.mods_import_dialog_open = false;
+                self.tech_tree_select_dialog_open = false;
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
@@ -24205,6 +24265,20 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ImportEditorMap => {
                 self.editor_import_map_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::OpenTechTreeSelect => {
+                self.tech_tree_select_dialog_open = true;
+            }
+            DesktopMenuRouteShellAction::CloseTechTreeSelect => {
+                self.tech_tree_select_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::SelectTechTreeRoot(index) => {
+                if let Some((root_name, _, _)) =
+                    self.tech_tree_route_root_candidates().get(index).copied()
+                {
+                    self.tech_tree_selected_root = Some(root_name.to_string());
+                    self.tech_tree_select_dialog_open = false;
+                }
             }
             DesktopMenuRouteShellAction::OpenModsImport => {
                 self.mods_import_dialog_open = true;
@@ -25714,6 +25788,73 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_tech_tree_select_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if !self.tech_tree_select_dialog_open {
+            return;
+        }
+        let dialog = Self::tech_tree_select_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.070,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.071,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.072,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@techtree.select",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.073,
+        ));
+        for (index, (root_name, tree, root)) in self
+            .tech_tree_route_root_candidates()
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let label = tree
+                .node(root)
+                .and_then(|node| node.name.as_deref())
+                .unwrap_or(root_name);
+            let selected = self
+                .tech_tree_selected_root
+                .as_deref()
+                .map(|selected| selected == root_name)
+                .unwrap_or(index == 0);
+            self.push_settings_text_button(
+                pass,
+                Self::tech_tree_select_root_button_rect(dialog, index),
+                format!("{root_name}: {label}"),
+                Some(if selected { "ok" } else { "rightOpen" }),
+                Layer::END_PIXELED + 0.074 + index as f32 * 0.001,
+            );
+        }
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.083,
+        );
+    }
+
     fn push_tech_tree_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         self.push_settings_text_button(
             pass,
@@ -25860,6 +26001,8 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.045,
         ));
+
+        self.push_tech_tree_select_dialog(pass, panel);
     }
 
     fn push_map_list_route_page(
@@ -26991,21 +27134,29 @@ impl DesktopLauncher {
     }
 
     fn tech_tree_route_root(&self) -> Option<(&'static str, &TechTree, TechNodeId)> {
+        let candidates = self.tech_tree_route_root_candidates();
+        if let Some(selected) = self.tech_tree_selected_root.as_deref() {
+            if let Some(candidate) = candidates
+                .iter()
+                .copied()
+                .find(|(name, _, _)| *name == selected)
+            {
+                return Some(candidate);
+            }
+        }
+        candidates.first().copied()
+    }
+
+    fn tech_tree_route_root_candidates(&self) -> Vec<(&'static str, &TechTree, TechNodeId)> {
         let catalog = self.content_loader.catalog();
-        catalog
-            .serpulo_tech_tree
-            .roots()
-            .first()
-            .copied()
-            .map(|root| ("serpulo", &catalog.serpulo_tech_tree, root))
-            .or_else(|| {
-                catalog
-                    .erekir_tech_tree
-                    .roots()
-                    .first()
-                    .copied()
-                    .map(|root| ("erekir", &catalog.erekir_tech_tree, root))
-            })
+        let mut roots = Vec::new();
+        if let Some(root) = catalog.serpulo_tech_tree.roots().first().copied() {
+            roots.push(("serpulo", &catalog.serpulo_tech_tree, root));
+        }
+        if let Some(root) = catalog.erekir_tech_tree.roots().first().copied() {
+            roots.push(("erekir", &catalog.erekir_tech_tree, root));
+        }
+        roots
     }
 
     fn tech_tree_route_visible_node_rects(
@@ -44943,6 +45094,59 @@ version: "2.0.0"
             launcher.active_menu_route_shell_action_at_surface_point(surface, back.x, back.y),
             Some(super::DesktopMenuRouteShellAction::CloseRoute)
         );
+
+        let select = DesktopLauncher::tech_tree_select_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, select.x, select.y),
+            Some(super::DesktopMenuRouteShellAction::OpenTechTreeSelect)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::OpenTechTreeSelect,
+        );
+        assert!(launcher.tech_tree_select_dialog_open);
+        let select_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let select_texts = select_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("tech tree select dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(select_texts.contains(&"@techtree.select"));
+        assert!(select_texts.contains(&"serpulo: serpulo"));
+        assert!(select_texts.contains(&"erekir: erekir"));
+        let dialog = DesktopLauncher::tech_tree_select_dialog_rect_for_panel(panel);
+        let erekir = DesktopLauncher::tech_tree_select_root_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, erekir.x, erekir.y),
+            Some(super::DesktopMenuRouteShellAction::SelectTechTreeRoot(1))
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::SelectTechTreeRoot(1),
+        );
+        assert_eq!(launcher.tech_tree_selected_root.as_deref(), Some("erekir"));
+        assert!(!launcher.tech_tree_select_dialog_open);
+        let erekir_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let erekir_texts = erekir_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("selected tech tree route should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(erekir_texts.contains(&"erekir: erekir"));
     }
 
     #[test]
