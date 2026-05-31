@@ -21954,6 +21954,59 @@ impl DesktopLauncher {
             }
     }
 
+    fn database_block_tag_key(block: &BlockDef) -> Option<&'static str> {
+        Some(match block {
+            BlockDef::Production(_) => "production",
+            BlockDef::Storage(_) | BlockDef::Effect(_) | BlockDef::Campaign(_) => "effect",
+            BlockDef::Turret(_) => "turret",
+            BlockDef::Crafting(_) => "crafting",
+            BlockDef::DefenseWall(_) => "defense",
+            BlockDef::Distribution(_) => "distribution",
+            BlockDef::Liquid(_) => "liquid",
+            BlockDef::Power(_) => "power",
+            BlockDef::UnitFactory(_)
+            | BlockDef::UnitReconstructor(_)
+            | BlockDef::UnitAssembler(_)
+            | BlockDef::UnitAssemblerModule(_)
+            | BlockDef::UnitRepairTower(_) => "units",
+            BlockDef::Logic(_) => "logic",
+            _ => return None,
+        })
+    }
+
+    fn database_content_tag_key(&self, content_type: ContentType, name: &str) -> Option<String> {
+        let tag = match content_type {
+            ContentType::Block => self
+                .content_loader
+                .block_by_name(name)
+                .and_then(Self::database_block_tag_key),
+            ContentType::Item => self
+                .content_loader
+                .item_by_name(name)
+                .map(|item| item.base.database_tag_key()),
+            ContentType::Liquid => self
+                .content_loader
+                .liquid_by_name(name)
+                .map(|liquid| liquid.base.database_tag_key()),
+            ContentType::Status => self
+                .content_loader
+                .status_effect_by_name(name)
+                .map(|status| status.base.database_tag_key()),
+            ContentType::Unit => self.content_loader.unit_by_name(name).map(|unit| {
+                unit.base
+                    .database_tag
+                    .as_deref()
+                    .unwrap_or(unit.default_database_tag())
+            }),
+            ContentType::Weather => self
+                .content_loader
+                .weather_by_name(name)
+                .map(|weather| weather.weather().base.database_tag_key()),
+            _ => None,
+        }?;
+        (tag != "default").then(|| tag.to_string())
+    }
+
     fn database_content_visible_in_dialog(&self, content_type: ContentType, name: &str) -> bool {
         !self.database_content_is_hidden(content_type, name)
             && !self.database_content_hide_database(content_type, name)
@@ -30584,6 +30637,33 @@ impl DesktopLauncher {
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
                 Layer::END_PIXELED + 0.0345 + category_index as f32 * 0.001,
             ));
+            if let Some(tag) = records
+                .iter()
+                .filter_map(|(_, name)| self.database_content_tag_key(content_type, name))
+                .next()
+            {
+                pass.push(RenderCommand::draw_text_styled(
+                    format!("@database-tag.{tag}"),
+                    RenderPoint::new(header.x + 8.0, header.y - 21.0),
+                    [0.56, 0.62, 0.66, 1.0],
+                    9.5,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.0348 + category_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::fill_rect(
+                    RenderRect::new(
+                        header.x + 128.0,
+                        header.y - 22.5,
+                        (header.width - 128.0).max(8.0),
+                        2.0,
+                    ),
+                    [0.43, 0.46, 0.50, 0.82],
+                    Layer::END_PIXELED + 0.0348 + category_index as f32 * 0.001,
+                ));
+            }
             for (item_index, (_, name)) in records.iter().enumerate() {
                 let cell =
                     Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
@@ -59127,6 +59207,16 @@ version: "2.0.0"
         assert!(route_lines
             .iter()
             .any(|line| line.starts_with("category: @database-category.")));
+        assert_eq!(
+            launcher.database_content_tag_key(ContentType::Unit, "flare"),
+            Some("unit-air".to_string()),
+            "Java UnitType.postInit derives unit-air/unit-naval/unit-ground database tags"
+        );
+        assert_eq!(
+            launcher.database_content_tag_key(ContentType::Block, "conveyor"),
+            Some("distribution".to_string()),
+            "Java Block.postInit defaults databaseTag from block category; Rust keeps a narrow fallback until block category metadata is fully migrated"
+        );
 
         let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,

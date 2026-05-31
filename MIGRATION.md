@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 623. DatabaseDialog 补 databaseTag 读取与标签行雏形
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **73.3%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 DatabaseDialog 开始消费 Java `databaseTag` 语义，而不是完全扁平地按 `ContentType` 展示。
+- Java 对照依据：
+  - `DatabaseDialog.sortContents()` 按 `databaseCategory -> databaseTag -> contents` 分桶；
+  - `UnitType.postInit()` 在 `databaseTag` 为空时派生 `unit-air/unit-naval/unit-ground`；
+  - `Block.postInit()` 在 `databaseTag` 为空时用 block category 名称。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_content_tag_key(...)`；
+    - Unit 动态 fallback 到 `UnitType::default_database_tag()`，覆盖 `unit-air/unit-naval/unit-ground`；
+    - Block 先用窄映射覆盖 Java bundle 中已有的 `turret/production/distribution/liquid/power/defense/crafting/units/effect/logic` 标签，避免渲染不存在的 tag key；
+    - `push_database_route_page(...)` 在 category 下方渲染第一条可见非 default tag 的灰色标签行与分隔线；
+    - 扩展 DatabaseDialog 测试，钉住 `flare -> unit-air` 与 `conveyor -> distribution`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+- 仍未完成：
+  - 这仍是过渡层：完整 Java 行为应由内容注册/初始化阶段写入 `database_category/database_tag/database_tabs`；
+  - 当前 UI 还没有真正按 `category -> tag -> records` 两层分桶重排，只是先渲染 tag 行；
+  - planet tab 来源仍是 `sun + planets`，不是 Java 的全 content `databaseTabs` 并集。
+
 ## 622. 主菜单 BE check 补 update-available 脉冲文字色
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
