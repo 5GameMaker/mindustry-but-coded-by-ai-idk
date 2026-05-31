@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 639. JoinDialog 帮助按钮与删除确认
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.1%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是补齐 Java `JoinDialog` 里高可见的 `?` 帮助入口与 saved server 删除确认，减少“按钮直接删/缺少原版提示”的 UI 偏差。
+- Java 对照依据：
+  - desktop JoinDialog 在按钮栏提供 `?`，触发 `ui.showInfo("@join.info")`；
+  - saved server 的删除按钮不会直接移除，而是 `ui.showConfirm("@confirm", "@server.delete", ...)` 确认后再 `servers.remove(...)`、`saveServers()`、`setupRemote()`、`refreshRemote()`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `OpenJoinInfo/CloseJoinInfo` 与 `join_info_dialog_open`，Join 路由显示 `?` 按钮并渲染 `@join.info` 模态；
+    - 新增 `join_delete_dialog_index`、`ConfirmDeleteJoinServerCard/CancelDeleteJoinServerCard`，卡片 trash 先打开 `@confirm @server.delete`，确认后才删除并持久化；
+    - modal hit-test 优先于底层卡片/搜索/按钮，避免确认框打开后继续触发后层 Join 卡片；
+    - Escape/Enter 支持关闭 info 与确认/取消删除，保持 Java 弹窗式操作语义；
+    - Join route 文本行和渲染测试覆盖 `?`、`@join.info`、`@server.delete`、`@cancel/@ok`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - JoinDialog 首次打开 `joininfo` one-shot settings 提示尚未接真实 settings；
+  - 删除确认尚未触发真实 `refreshRemote()` / ping 刷新链路；
+  - 本地 LAN discovery、community group/favorite/hidden/disclaimer 与真实刷新中动画仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 638. JoinDialog saved server 持久化与原版排序按钮
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

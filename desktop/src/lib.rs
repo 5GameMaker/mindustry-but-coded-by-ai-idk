@@ -2695,12 +2695,16 @@ pub enum DesktopMenuRouteShellAction {
     CloseJoinAddServer,
     FocusJoinAddServerText,
     ConfirmJoinAddServer,
+    OpenJoinInfo,
+    CloseJoinInfo,
     RefreshJoinServers,
     MoveJoinServerCardUp(usize),
     MoveJoinServerCardDown(usize),
     RefreshJoinServerCard(usize),
     EditJoinServerCard(usize),
     DeleteJoinServerCard(usize),
+    ConfirmDeleteJoinServerCard,
+    CancelDeleteJoinServerCard,
     ConnectJoinServerCard(usize),
     OpenMapListFilters,
     CloseMapListFilters,
@@ -16387,6 +16391,8 @@ pub struct DesktopLauncher {
     pub join_add_server_text: String,
     pub join_add_server_focused: bool,
     pub join_add_server_edit_index: Option<usize>,
+    pub join_info_dialog_open: bool,
+    pub join_delete_dialog_index: Option<usize>,
     pub join_saved_servers: Vec<DesktopConnectTarget>,
     pub join_refresh_requests: u32,
     pub join_search: String,
@@ -17255,6 +17261,8 @@ impl DesktopLauncher {
             join_add_server_text: String::new(),
             join_add_server_focused: false,
             join_add_server_edit_index: None,
+            join_info_dialog_open: false,
+            join_delete_dialog_index: None,
             join_saved_servers,
             join_refresh_requests: 0,
             join_search: String::new(),
@@ -21162,6 +21170,11 @@ impl DesktopLauncher {
             self.load_game_rename_dialog_slot = None;
             self.load_game_delete_dialog_slot = None;
             self.load_game_rename_text.clear();
+            self.join_add_dialog_open = false;
+            self.join_add_server_focused = false;
+            self.join_add_server_edit_index = None;
+            self.join_info_dialog_open = false;
+            self.join_delete_dialog_index = None;
             self.save_game_new_dialog_open = false;
             self.save_game_new_text.clear();
             self.save_game_overwrite_dialog_slot = None;
@@ -26894,6 +26907,11 @@ impl DesktopLauncher {
         )
     }
 
+    fn join_route_info_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let add = Self::join_route_add_button_rect_for_panel(panel);
+        RenderRect::new(add.right() + 12.0, add.y, 58.0, add.height)
+    }
+
     fn join_route_search_rect_for_panel(panel: RenderRect) -> RenderRect {
         let card = Self::join_route_server_card_rect_for_panel(
             panel,
@@ -27040,9 +27058,48 @@ impl DesktopLauncher {
         self.join_saved_servers.len()
     }
 
+    fn delete_join_saved_server_at(&mut self, index: usize) -> bool {
+        if index >= self.join_saved_servers.len() {
+            return false;
+        }
+        let removed = self.join_saved_servers.remove(index);
+        if self.connect_target.as_ref() == Some(&removed) {
+            self.connect_target = self.join_saved_servers.first().cloned();
+        }
+        self.connect_error = None;
+        self.join_add_dialog_open = false;
+        self.join_add_server_focused = false;
+        self.join_add_server_edit_index = None;
+        self.join_delete_dialog_index = None;
+        self.persist_join_saved_servers_to_settings();
+        true
+    }
+
     fn join_add_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         let width = (panel.width * 0.58).clamp(360.0, 520.0);
         let height = 214.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn join_info_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width * 0.66).clamp(380.0, 620.0);
+        let height = 190.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn join_delete_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width * 0.58).clamp(360.0, 540.0);
+        let height = 154.0;
         RenderRect::new(
             panel.center().x - width * 0.5,
             panel.center().y - height * 0.5,
@@ -28897,6 +28954,23 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Join);
         let point = RenderPoint::new(x, y);
+        if self.join_info_dialog_open {
+            let dialog = Self::join_info_dialog_rect_for_panel(panel);
+            if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseJoinInfo);
+            }
+            return None;
+        }
+        if self.join_delete_dialog_index.is_some() {
+            let dialog = Self::join_delete_dialog_rect_for_panel(panel);
+            if Self::join_add_dialog_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CancelDeleteJoinServerCard);
+            }
+            if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ConfirmDeleteJoinServerCard);
+            }
+            return None;
+        }
         if self.join_add_dialog_open {
             let dialog = Self::join_add_dialog_rect_for_panel(panel);
             if Self::join_add_dialog_text_rect(dialog).contains_point(point) {
@@ -28912,6 +28986,9 @@ impl DesktopLauncher {
         }
         if Self::join_route_add_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::OpenJoinAddServer);
+        }
+        if Self::join_route_info_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::OpenJoinInfo);
         }
         if Self::join_route_refresh_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::RefreshJoinServers);
@@ -30157,6 +30234,8 @@ impl DesktopLauncher {
                 self.join_add_dialog_open = false;
                 self.join_add_server_focused = false;
                 self.join_add_server_edit_index = None;
+                self.join_info_dialog_open = false;
+                self.join_delete_dialog_index = None;
                 self.join_search_focused = false;
                 self.database_search_focused = false;
                 self.last_database_content_opened = None;
@@ -30311,6 +30390,16 @@ impl DesktopLauncher {
                     self.join_add_server_focused = true;
                 }
             }
+            DesktopMenuRouteShellAction::OpenJoinInfo => {
+                self.join_info_dialog_open = true;
+                self.join_add_dialog_open = false;
+                self.join_add_server_focused = false;
+                self.join_delete_dialog_index = None;
+                self.join_search_focused = false;
+            }
+            DesktopMenuRouteShellAction::CloseJoinInfo => {
+                self.join_info_dialog_open = false;
+            }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
             }
@@ -30349,16 +30438,20 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::DeleteJoinServerCard(index) => {
                 if index < self.join_saved_servers.len() {
-                    let removed = self.join_saved_servers.remove(index);
-                    if self.connect_target.as_ref() == Some(&removed) {
-                        self.connect_target = self.join_saved_servers.first().cloned();
-                    }
-                    self.connect_error = None;
+                    self.join_delete_dialog_index = Some(index);
                     self.join_add_dialog_open = false;
                     self.join_add_server_focused = false;
                     self.join_add_server_edit_index = None;
-                    self.persist_join_saved_servers_to_settings();
+                    self.join_info_dialog_open = false;
                 }
+            }
+            DesktopMenuRouteShellAction::ConfirmDeleteJoinServerCard => {
+                if let Some(index) = self.join_delete_dialog_index {
+                    self.delete_join_saved_server_at(index);
+                }
+            }
+            DesktopMenuRouteShellAction::CancelDeleteJoinServerCard => {
+                self.join_delete_dialog_index = None;
             }
             DesktopMenuRouteShellAction::ConnectJoinServerCard(index) => {
                 let Some(target) = self.join_saved_servers.get(index).cloned() else {
@@ -31921,6 +32014,129 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_join_delete_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(index) = self.join_delete_dialog_index else {
+            return;
+        };
+        let dialog = Self::join_delete_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.46],
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.90, 0.42, 0.38, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@confirm",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
+            [1.0, 0.92, 0.88, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.093,
+        ));
+        let server = self
+            .join_saved_servers
+            .get(index)
+            .map(desktop_connect_target_display_ip)
+            .unwrap_or_else(|| "?".into());
+        pass.push(RenderCommand::draw_text_styled(
+            format!("@server.delete | {server}"),
+            RenderPoint::new(dialog.center().x, dialog.center().y + 10.0),
+            [0.88, 0.90, 0.92, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.093,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 0),
+            "@cancel",
+            None,
+            Layer::END_PIXELED + 0.094,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 1),
+            "@ok",
+            None,
+            Layer::END_PIXELED + 0.094,
+        );
+    }
+
+    fn push_join_info_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        if !self.join_info_dialog_open {
+            return;
+        }
+        let dialog = Self::join_info_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.44],
+            Layer::END_PIXELED + 0.100,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.101,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.102,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@join.info",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.103,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@join.info",
+            RenderPoint::new(dialog.x + 28.0, dialog.center().y + 12.0),
+            [0.78, 0.86, 0.94, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width(dialog.width - 56.0)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.104,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 1),
+            "@ok",
+            Some("ok"),
+            Layer::END_PIXELED + 0.105,
+        );
+    }
+
     fn push_host_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         self.push_settings_text_button(
             pass,
@@ -32191,6 +32407,7 @@ impl DesktopLauncher {
             38.0,
         );
         let add = Self::join_route_add_button_rect_for_panel(panel);
+        let info = Self::join_route_info_button_rect_for_panel(panel);
         let refresh = Self::join_route_refresh_button_rect_for_panel(panel);
         pass.push(RenderCommand::draw_sprite(
             Self::settings_text_button_symbol("grayt", false, false),
@@ -32229,6 +32446,7 @@ impl DesktopLauncher {
             Some("add"),
             Layer::END_PIXELED + 0.03,
         );
+        self.push_settings_text_button(pass, info, "?", None, Layer::END_PIXELED + 0.032);
         self.push_settings_text_button(
             pass,
             refresh,
@@ -32538,6 +32756,8 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.037,
         ));
         self.push_join_add_server_dialog(pass, panel);
+        self.push_join_delete_dialog(pass, panel);
+        self.push_join_info_dialog(pass, panel);
     }
 
     fn push_schematics_card(
@@ -36597,6 +36817,39 @@ impl DesktopLauncher {
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
                         && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_info_dialog_open
+                        && matches!(
+                            key_code.as_str(),
+                            "Enter" | "enter" | "NumpadEnter" | "Escape" | "Esc"
+                        ) =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::CloseJoinInfo,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_delete_dialog_index.is_some()
+                        && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::ConfirmDeleteJoinServerCard,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_delete_dialog_index.is_some()
+                        && matches!(key_code.as_str(), "Escape" | "Esc") =>
+                {
+                    self.dispatch_menu_route_shell_action(
+                        DesktopMenuRouteShellAction::CancelDeleteJoinServerCard,
+                    );
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
                         && self.join_add_dialog_open
                         && matches!(key_code.as_str(), "Enter" | "enter" | "NumpadEnter") =>
                 {
@@ -37206,8 +37459,19 @@ impl DesktopLauncher {
                         if self.join_show_hidden { "on" } else { "off" }
                     ),
                     "button: @server.add".into(),
+                    "button: ? @join.info".into(),
                     "button: @refresh".into(),
                 ];
+                if self.join_info_dialog_open {
+                    lines.extend(["dialog: @join.info".into(), "button: @ok".into()]);
+                }
+                if let Some(index) = self.join_delete_dialog_index {
+                    lines.extend([
+                        format!("dialog: @confirm @server.delete index={index}"),
+                        "button: @cancel".into(),
+                        "button: @ok".into(),
+                    ]);
+                }
                 if self.join_add_dialog_open {
                     lines.extend([
                         "dialog: @server.add / @joingame.title".into(),
@@ -66695,6 +66959,7 @@ version: "2.0.0"
         ));
         assert!(lines.contains(&"server[0] actions: up down refresh edit delete".to_string()));
         assert!(lines.contains(&"button: @server.add".to_string()));
+        assert!(lines.contains(&"button: ? @join.info".to_string()));
         assert!(lines.contains(&"button: @refresh".to_string()));
 
         let surface = DesktopSurfaceSize::new(1280, 720);
@@ -66704,6 +66969,7 @@ version: "2.0.0"
             super::DesktopMenuRoute::Join,
         );
         let add = DesktopLauncher::join_route_add_button_rect_for_panel(panel);
+        let info = DesktopLauncher::join_route_info_button_rect_for_panel(panel);
         let refresh = DesktopLauncher::join_route_refresh_button_rect_for_panel(panel);
         let search = DesktopLauncher::join_route_search_rect_for_panel(panel);
         let show_hidden = DesktopLauncher::join_route_show_hidden_button_rect_for_panel(panel);
@@ -66725,6 +66991,22 @@ version: "2.0.0"
             ),
             Some(super::DesktopMenuRouteShellAction::OpenJoinAddServer)
         );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                info.center().x,
+                info.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::OpenJoinInfo)
+        );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenJoinInfo);
+        assert!(launcher.join_info_dialog_open);
+        assert!(launcher
+            .active_menu_route_shell_lines(super::DesktopMenuRoute::Join)
+            .contains(&"dialog: @join.info".to_string()));
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseJoinInfo);
+        assert!(!launcher.join_info_dialog_open);
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -66995,6 +67277,38 @@ version: "2.0.0"
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::DeleteJoinServerCard(1),
         );
+        assert_eq!(launcher.join_delete_dialog_index, Some(1));
+        let delete_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(delete_lines.contains(&"dialog: @confirm @server.delete index=1".to_string()));
+        let delete_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let delete_texts = delete_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join delete confirmation frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(delete_texts.contains(&"@confirm"));
+        assert!(delete_texts.contains(&"@server.delete | example.org"));
+        assert!(delete_texts.contains(&"@cancel"));
+        assert!(delete_texts.contains(&"@ok"));
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CancelDeleteJoinServerCard,
+        );
+        assert_eq!(launcher.join_delete_dialog_index, None);
+        assert_eq!(launcher.join_saved_servers.len(), 2);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::DeleteJoinServerCard(1),
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmDeleteJoinServerCard,
+        );
         assert_eq!(launcher.join_saved_servers.len(), 1);
         assert_eq!(
             launcher.connect_target,
@@ -67070,6 +67384,11 @@ version: "2.0.0"
 
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::DeleteJoinServerCard(1),
+        );
+        assert_eq!(launcher.join_delete_dialog_index, Some(1));
+        assert_eq!(launcher.join_saved_servers.len(), 2);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConfirmDeleteJoinServerCard,
         );
         assert_eq!(launcher.join_saved_servers.len(), 1);
         assert_eq!(
