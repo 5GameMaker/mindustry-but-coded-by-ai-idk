@@ -170,6 +170,7 @@ const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 9;
 const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_SAVED_SERVER_VISIBLE_CARDS: usize = 2;
+const JOIN_LOCAL_HOST_VISIBLE_CARDS: usize = 1;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
 const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
@@ -2705,6 +2706,7 @@ pub enum DesktopMenuRouteShellAction {
     DeleteJoinServerCard(usize),
     ConfirmDeleteJoinServerCard,
     CancelDeleteJoinServerCard,
+    ConnectJoinLocalHost(usize),
     ConnectJoinServerCard(usize),
     OpenMapListFilters,
     CloseMapListFilters,
@@ -27233,6 +27235,17 @@ impl DesktopLauncher {
         )
     }
 
+    fn join_route_visible_local_host_count(&self) -> usize {
+        self.join_local_hosts
+            .len()
+            .min(JOIN_LOCAL_HOST_VISIBLE_CARDS)
+            .min(JOIN_SAVED_SERVER_VISIBLE_CARDS)
+    }
+
+    fn join_route_visible_saved_server_card_capacity(&self) -> usize {
+        JOIN_SAVED_SERVER_VISIBLE_CARDS.saturating_sub(self.join_route_visible_local_host_count())
+    }
+
     fn join_route_server_card_action_button_rect(
         card: RenderRect,
         button_index: usize,
@@ -27251,13 +27264,17 @@ impl DesktopLauncher {
         panel: RenderRect,
         point: RenderPoint,
     ) -> Option<usize> {
+        let local_count = self.join_route_visible_local_host_count();
+        let saved_capacity = self.join_route_visible_saved_server_card_capacity();
         self.join_saved_server_snapshots()
             .into_iter()
             .enumerate()
-            .take(JOIN_SAVED_SERVER_VISIBLE_CARDS)
             .filter(|(_, snapshot)| snapshot.matches_query(&self.join_search))
-            .find_map(|(index, _)| {
-                let rect = Self::join_route_server_card_rect_for_panel(panel, index);
+            .take(saved_capacity)
+            .enumerate()
+            .find_map(|(visible_index, (index, _))| {
+                let rect =
+                    Self::join_route_server_card_rect_for_panel(panel, local_count + visible_index);
                 rect.contains_point(point).then_some(index)
             })
     }
@@ -29091,8 +29108,28 @@ impl DesktopLauncher {
         if Self::join_route_show_hidden_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::ToggleJoinShowHidden);
         }
+        for local_index in 0..self.join_route_visible_local_host_count() {
+            let rect = Self::join_route_server_card_rect_for_panel(panel, local_index);
+            if rect.contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ConnectJoinLocalHost(
+                    local_index,
+                ));
+            }
+        }
         if let Some(card_index) = self.join_route_server_card_index_at_point(panel, point) {
-            let card = Self::join_route_server_card_rect_for_panel(panel, card_index);
+            let local_count = self.join_route_visible_local_host_count();
+            let visible_saved_index = self
+                .join_saved_server_snapshots()
+                .into_iter()
+                .enumerate()
+                .filter(|(_, snapshot)| snapshot.matches_query(&self.join_search))
+                .take(self.join_route_visible_saved_server_card_capacity())
+                .position(|(index, _)| index == card_index)
+                .unwrap_or(0);
+            let card = Self::join_route_server_card_rect_for_panel(
+                panel,
+                local_count + visible_saved_index,
+            );
             for button_index in 0..JOIN_SERVER_CARD_ACTION_BUTTONS {
                 if Self::join_route_server_card_action_button_rect(card, button_index)
                     .contains_point(point)
@@ -30545,6 +30582,22 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::CancelDeleteJoinServerCard => {
                 self.join_delete_dialog_index = None;
+            }
+            DesktopMenuRouteShellAction::ConnectJoinLocalHost(index) => {
+                let Some(host) = self.join_local_hosts.get(index).cloned() else {
+                    self.connect_error = Some("missing local host".into());
+                    return;
+                };
+                let Ok(port) = u16::try_from(host.port) else {
+                    self.connect_error = Some("invalid local host port".into());
+                    return;
+                };
+                let target = DesktopConnectTarget {
+                    host: host.address,
+                    port,
+                };
+                self.connect_target = Some(target.clone());
+                let _ = self.connect_to_target(target);
             }
             DesktopMenuRouteShellAction::ConnectJoinServerCard(index) => {
                 let Some(target) = self.join_saved_servers.get(index).cloned() else {
@@ -32594,15 +32647,103 @@ impl DesktopLauncher {
 
         let search_rect = Self::join_route_search_rect_for_panel(panel);
         let show_hidden_rect = Self::join_route_show_hidden_button_rect_for_panel(panel);
+        let visible_local_hosts = self
+            .join_local_hosts
+            .iter()
+            .enumerate()
+            .take(self.join_route_visible_local_host_count())
+            .collect::<Vec<_>>();
+        for (visible_index, (_, host)) in visible_local_hosts.iter().enumerate() {
+            let card = Self::join_route_server_card_rect_for_panel(panel, visible_index);
+            let layer = Layer::END_PIXELED + 0.031 + visible_index as f32 * 0.006;
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("pane"),
+                card,
+                [1.0, 1.0, 1.0, 0.92],
+                0.0,
+                layer,
+            ));
+            pass.push(RenderCommand::stroke_rect(
+                card,
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
+                1.0,
+                layer + 0.001,
+            ));
+            let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
+            pass.push(RenderCommand::fill_rect(
+                header,
+                [
+                    Pal::ACCENT.r * 0.55,
+                    Pal::ACCENT.g * 0.55,
+                    Pal::ACCENT.b * 0.55,
+                    0.46,
+                ],
+                layer + 0.002,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{}   @server.version: {}", host.name, host.version),
+                RenderPoint::new(card.x + 14.0, header.center().y),
+                [0.94, 0.99, 1.0, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                layer + 0.003,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!("{}:{}  @servers.local", host.address, host.port),
+                RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
+                [0.66, 0.78, 0.86, 1.0],
+                11.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.003,
+            ));
+            for (index, line) in [
+                format!("players: {}/{}", host.players, host.player_limit),
+                format!(
+                    "save.map: {} / {}",
+                    host.mapname,
+                    host.mode_name.as_deref().unwrap_or("@unknown")
+                ),
+                format!("ping: {}ms", host.ping),
+                "tap to connect".to_string(),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                pass.push(RenderCommand::draw_text_styled(
+                    line,
+                    RenderPoint::new(
+                        card.x + 14.0,
+                        card.y + card.height - 82.0 - index as f32 * 18.0,
+                    ),
+                    [0.74, 0.84, 0.90, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    layer + 0.003 + index as f32 * 0.0001,
+                ));
+            }
+        }
+
         let saved_snapshots = self.join_saved_server_snapshots();
+        let local_card_count = visible_local_hosts.len();
+        let saved_card_capacity = self.join_route_visible_saved_server_card_capacity();
         let visible_saved = saved_snapshots
             .iter()
             .enumerate()
             .filter(|(_, snapshot)| snapshot.matches_query(&self.join_search))
-            .take(JOIN_SAVED_SERVER_VISIBLE_CARDS)
+            .take(saved_card_capacity)
             .collect::<Vec<_>>();
         if visible_saved.is_empty() && !saved_snapshots.is_empty() {
-            let card = Self::join_route_server_card_rect_for_panel(panel, 0);
+            let card = Self::join_route_server_card_rect_for_panel(panel, local_card_count);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("pane"),
                 card,
@@ -32648,8 +32789,12 @@ impl DesktopLauncher {
             ));
         } else if !visible_saved.is_empty() {
             for (visible_index, (_, snapshot)) in visible_saved.into_iter().enumerate() {
-                let card = Self::join_route_server_card_rect_for_panel(panel, visible_index);
-                let layer = Layer::END_PIXELED + 0.031 + visible_index as f32 * 0.006;
+                let card = Self::join_route_server_card_rect_for_panel(
+                    panel,
+                    local_card_count + visible_index,
+                );
+                let layer =
+                    Layer::END_PIXELED + 0.031 + (local_card_count + visible_index) as f32 * 0.006;
                 pass.push(RenderCommand::draw_sprite(
                     Self::settings_drawable_symbol("pane"),
                     card,
@@ -32741,7 +32886,7 @@ impl DesktopLauncher {
                 }
             }
         } else {
-            let card = Self::join_route_server_card_rect_for_panel(panel, 0);
+            let card = Self::join_route_server_card_rect_for_panel(panel, local_card_count);
             pass.push(RenderCommand::draw_sprite(
                 Self::settings_drawable_symbol("pane"),
                 card,
@@ -37592,6 +37737,7 @@ impl DesktopLauncher {
                             host.mode_name.as_deref().unwrap_or("@unknown")
                         ),
                         format!("local[{index}] ping: {}ms", host.ping),
+                        format!("local[{index}] actions: connect"),
                     ]);
                 }
                 if self.join_info_dialog_open {
@@ -67601,7 +67747,12 @@ version: "2.0.0"
 
     #[test]
     fn desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local() {
+        let port = free_local_port();
+        let mut server = ArcNetProvider::new();
+        server.host_server(port).unwrap();
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.setup();
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         let (tx, rx) = std::sync::mpsc::channel();
         launcher.join_local_discovering = true;
         launcher.join_local_discovery_receiver = Some(std::sync::Arc::new(Mutex::new(rx)));
@@ -67609,7 +67760,7 @@ version: "2.0.0"
             42,
             "LAN host",
             "127.0.0.1",
-            6567,
+            port.into(),
             "local map",
             3,
             2,
@@ -67630,11 +67781,71 @@ version: "2.0.0"
         assert_eq!(launcher.join_local_hosts.len(), 1);
         let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
         assert!(lines.contains(&"section: @servers.local hosts: 1 state:done".to_string()));
-        assert!(lines.contains(&"local[0]: LAN host 127.0.0.1:6567".to_string()));
+        assert!(lines.contains(&format!("local[0]: LAN host 127.0.0.1:{port}")));
         assert!(lines.contains(&"local[0] players: 2/8".to_string()));
         assert!(lines.contains(&"local[0] map: local map".to_string()));
         assert!(lines.contains(&"local[0] mode: @mode.survival.name".to_string()));
         assert!(lines.contains(&"local[0] ping: 42ms".to_string()));
+        assert!(lines.contains(&"local[0] actions: connect".to_string()));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let local_card = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 0);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                local_card.center().x,
+                local_card.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ConnectJoinLocalHost(0))
+        );
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join local host frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("LAN host") && text.contains("@server.version: 158")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("127.0.0.1") && text.contains("@servers.local")));
+        assert!(texts.contains(&"players: 2/8"));
+        assert!(texts.contains(&"save.map: local map / @mode.survival.name"));
+        assert!(texts.contains(&"ping: 42ms"));
+        assert!(texts.contains(&"tap to connect"));
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConnectJoinLocalHost(0),
+        );
+        assert_eq!(
+            launcher.connect_target,
+            Some(super::DesktopConnectTarget {
+                host: "127.0.0.1".into(),
+                port,
+            })
+        );
+        launcher.update();
+        let state = launcher.net_client.state();
+        let state = state.lock().unwrap();
+        assert_eq!(state.connection_attempts, 1);
+        assert!(state.connect_packet_sent);
+        drop(state);
+        launcher.net_client.net_mut().disconnect();
+        server.close_server();
     }
 
     #[test]

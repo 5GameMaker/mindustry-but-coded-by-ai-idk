@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 643. JoinDialog 本地 Host 卡片与点击直连接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **75.5%**，仍未达到完整可玩；继续优先前端/UI 与联机入口，当前闭环目标是让 Java `JoinDialog.addLocalHost(...)` 对应的本地 LAN host 不再只是摘要文本，而是进入可见卡片与点击直连链路。
+- Java 对照依据：
+  - `JoinDialog.refreshLocal()` 发现中显示 `@hosts.discovering.any`，`addLocalHost(Host host)` 首个结果到来后清空占位并追加整卡按钮；
+  - local host 卡片复用 `buildServer(host, ..., true, true)` 展示名称、版本、描述、玩家数、地图/模式、ping；
+  - 点击 local host 会触发 `ClientPreConnectEvent` 后 `safeConnect(host.address, host.port, host.version)`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `ConnectJoinLocalHost(usize)` route shell action，点击本地 Host 卡片时从 `join_local_hosts[index]` 构造 `DesktopConnectTarget` 并复用 `connect_to_target(...)`；
+    - 新增 `JOIN_LOCAL_HOST_VISIBLE_CARDS`、`join_route_visible_local_host_count()` 与 `join_route_visible_saved_server_card_capacity()`，本地卡优先占用 Join 卡槽，saved server 卡整体后移，避免两组卡片重叠；
+    - `push_join_route_page()` 渲染本地 Host 独立卡片，展示 host name、version、address/port、players、map/mode、ping 与 `tap to connect` 提示；
+    - `join_route_shell_action_at_surface_point()` 先命中 local host card，再命中 saved server card；saved server 的 hit-test 与 action button rect 同步使用 local card offset；
+    - `active_menu_route_shell_lines(Join)` 增加 `local[index] actions: connect`，测试能稳定验证本地卡连接语义。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - local host 连接仍未做 Java `safeConnect(..., version)` 的版本门禁/提示；
+  - 当前只显示 1 个本地 Host 卡片，后续若扩展多卡需要同步调整 search/global 区域锚点；
+  - saved server 单卡 ping 刷新中/成功/失败状态、community group/favorite/hidden/disclaimer 仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 642. 原生渲染黑屏兜底与菜单随机种子推进
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
