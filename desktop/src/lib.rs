@@ -2874,6 +2874,14 @@ pub struct DesktopDatabaseFieldsAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct DatabaseVisibleGroupRow {
+    content_type: ContentType,
+    tag: Option<String>,
+    records: Vec<(usize, String)>,
+    category_start: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopLoadGameAction {
     pub slot: String,
     pub file: String,
@@ -22288,14 +22296,24 @@ impl DesktopLauncher {
         groups
     }
 
-    fn database_visible_grouped_records_for_type(
-        &self,
-        content_type: ContentType,
-    ) -> Vec<(usize, String)> {
-        self.database_visible_tag_groups_for_type(content_type)
-            .into_iter()
-            .flat_map(|(_, records)| records)
-            .collect()
+    fn database_visible_group_rows(&self) -> Vec<DatabaseVisibleGroupRow> {
+        let mut rows = Vec::new();
+        for content_type in self.database_route_content_types() {
+            for (group_index, (tag, records)) in self
+                .database_visible_tag_groups_for_type(content_type)
+                .into_iter()
+                .filter(|(_, records)| !records.is_empty())
+                .enumerate()
+            {
+                rows.push(DatabaseVisibleGroupRow {
+                    content_type,
+                    tag,
+                    records,
+                    category_start: group_index == 0,
+                });
+            }
+        }
+        rows
     }
 
     fn database_hovered_content_cell_for_panel(
@@ -22312,27 +22330,24 @@ impl DesktopLauncher {
             .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
             as usize;
 
-        for (category_index, content_type) in self
-            .database_route_content_types()
+        for (row_index, row) in self
+            .database_visible_group_rows()
             .into_iter()
             .take(DATABASE_VISIBLE_CATEGORIES)
             .enumerate()
         {
-            let header = Self::database_category_header_rect_for_panel(panel, category_index);
+            let header = Self::database_category_header_rect_for_panel(panel, row_index);
             if header.y < panel.y + 42.0 {
                 break;
             }
-            for (item_index, (record_index, name)) in self
-                .database_visible_grouped_records_for_type(content_type)
-                .into_iter()
-                .take(visible_columns)
-                .enumerate()
+            for (item_index, (record_index, name)) in
+                row.records.into_iter().take(visible_columns).enumerate()
             {
-                let cell =
-                    Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
-                if cell.contains_point(point) && self.database_content_unlocked(content_type, &name)
+                let cell = Self::database_content_cell_rect_for_panel(panel, row_index, item_index);
+                if cell.contains_point(point)
+                    && self.database_content_unlocked(row.content_type, &name)
                 {
-                    return Some((content_type, record_index, name, cell));
+                    return Some((row.content_type, record_index, name, cell));
                 }
             }
         }
@@ -29206,29 +29221,26 @@ impl DesktopLauncher {
             .floor()
             .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
             as usize;
-        for (category_index, content_type) in self
-            .database_route_content_types()
+        for (row_index, row) in self
+            .database_visible_group_rows()
             .into_iter()
             .take(DATABASE_VISIBLE_CATEGORIES)
             .enumerate()
         {
-            let header = Self::database_category_header_rect_for_panel(panel, category_index);
+            let header = Self::database_category_header_rect_for_panel(panel, row_index);
             if header.y < panel.y + 42.0 {
                 break;
             }
-            for (item_index, (record_index, name)) in self
-                .database_visible_grouped_records_for_type(content_type)
-                .into_iter()
-                .take(visible_columns)
-                .enumerate()
+            for (item_index, (record_index, name)) in
+                row.records.into_iter().take(visible_columns).enumerate()
             {
-                if Self::database_content_cell_rect_for_panel(panel, category_index, item_index)
+                if Self::database_content_cell_rect_for_panel(panel, row_index, item_index)
                     .contains_point(point)
                 {
-                    if !self.database_content_unlocked(content_type, &name) {
+                    if !self.database_content_unlocked(row.content_type, &name) {
                         return None;
                     }
-                    return Some((content_type, record_index));
+                    return Some((row.content_type, record_index));
                 }
             }
         }
@@ -30937,8 +30949,8 @@ impl DesktopLauncher {
             ));
         }
 
-        let categories = self.database_route_content_types();
-        if categories.is_empty() {
+        let rows = self.database_visible_group_rows();
+        if rows.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
                 "@none.found",
                 RenderPoint::new(panel.x + panel.width * 0.5, all_tab.y - 50.0),
@@ -30959,48 +30971,32 @@ impl DesktopLauncher {
             .floor()
             .clamp(1.0, DATABASE_VISIBLE_ITEMS_PER_CATEGORY as f32)
             as usize;
-        for (category_index, content_type) in categories
-            .iter()
-            .take(DATABASE_VISIBLE_CATEGORIES)
-            .copied()
-            .enumerate()
-        {
-            let header = Self::database_category_header_rect_for_panel(panel, category_index);
+        for (row_index, row) in rows.iter().take(DATABASE_VISIBLE_CATEGORIES).enumerate() {
+            let header = Self::database_category_header_rect_for_panel(panel, row_index);
             if header.y < panel.y + 42.0 {
                 break;
             }
-            let groups = self.database_visible_tag_groups_for_type(content_type);
-            let records = groups
-                .iter()
-                .flat_map(|(_, records)| records.iter().cloned())
-                .into_iter()
-                .take(visible_columns)
-                .collect::<Vec<_>>();
-            let label = Self::database_category_label(content_type);
-            pass.push(RenderCommand::draw_text_styled(
-                label,
-                RenderPoint::new(header.x, header.center().y),
-                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
-                12.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
-                Layer::END_PIXELED + 0.034 + category_index as f32 * 0.001,
-            ));
-            pass.push(RenderCommand::fill_rect(
-                RenderRect::new(header.x, header.y - 4.0, header.width, 3.0),
-                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
-                Layer::END_PIXELED + 0.0345 + category_index as f32 * 0.001,
-            ));
-            if let Some(tag) = groups
-                .iter()
-                .filter_map(|(tag, records)| {
-                    (!records.is_empty()).then_some(tag.as_ref()).flatten()
-                })
-                .next()
-            {
+            if row.category_start {
+                let label = Self::database_category_label(row.content_type);
+                pass.push(RenderCommand::draw_text_styled(
+                    label,
+                    RenderPoint::new(header.x, header.center().y),
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                    12.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.034 + row_index as f32 * 0.001,
+                ));
+                pass.push(RenderCommand::fill_rect(
+                    RenderRect::new(header.x, header.y - 4.0, header.width, 3.0),
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
+                    Layer::END_PIXELED + 0.0345 + row_index as f32 * 0.001,
+                ));
+            }
+            if let Some(tag) = row.tag.as_ref() {
                 pass.push(RenderCommand::draw_text_styled(
                     format!("@database-tag.{tag}"),
                     RenderPoint::new(header.x + 8.0, header.y - 21.0),
@@ -31010,7 +31006,7 @@ impl DesktopLauncher {
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true),
-                    Layer::END_PIXELED + 0.0348 + category_index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.0348 + row_index as f32 * 0.001,
                 ));
                 pass.push(RenderCommand::fill_rect(
                     RenderRect::new(
@@ -31020,15 +31016,14 @@ impl DesktopLauncher {
                         2.0,
                     ),
                     [0.43, 0.46, 0.50, 0.82],
-                    Layer::END_PIXELED + 0.0348 + category_index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.0348 + row_index as f32 * 0.001,
                 ));
             }
-            for (item_index, (_, name)) in records.iter().enumerate() {
-                let cell =
-                    Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
-                let icon_symbol = self.database_content_icon_symbol(content_type, name);
-                let unlocked = self.database_content_unlocked(content_type, name);
-                let banned = self.database_content_is_banned(content_type, name);
+            for (item_index, (_, name)) in row.records.iter().take(visible_columns).enumerate() {
+                let cell = Self::database_content_cell_rect_for_panel(panel, row_index, item_index);
+                let icon_symbol = self.database_content_icon_symbol(row.content_type, name);
+                let unlocked = self.database_content_unlocked(row.content_type, name);
+                let banned = self.database_content_is_banned(row.content_type, name);
                 let hovered = unlocked
                     && self
                         .last_menu_cursor
@@ -31043,7 +31038,7 @@ impl DesktopLauncher {
                             [0.80, 0.84, 0.88, 0.96]
                         },
                         0.0,
-                        Layer::END_PIXELED + 0.035 + category_index as f32 * 0.001,
+                        Layer::END_PIXELED + 0.035 + row_index as f32 * 0.001,
                     ));
                 }
                 pass.push(RenderCommand::stroke_rect(
@@ -31054,7 +31049,7 @@ impl DesktopLauncher {
                         [0.34, 0.48, 0.58, 0.82]
                     },
                     if hovered { 2.0 } else { 1.0 },
-                    Layer::END_PIXELED + 0.036 + category_index as f32 * 0.001,
+                    Layer::END_PIXELED + 0.036 + row_index as f32 * 0.001,
                 ));
                 if !unlocked {
                     pass.push(RenderCommand::draw_text_styled(
@@ -31068,7 +31063,7 @@ impl DesktopLauncher {
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true)
                             .with_outline(true),
-                        Layer::END_PIXELED + 0.037 + category_index as f32 * 0.001,
+                        Layer::END_PIXELED + 0.037 + row_index as f32 * 0.001,
                     ));
                 } else if banned {
                     pass.push(RenderCommand::draw_text_styled(
@@ -31082,7 +31077,7 @@ impl DesktopLauncher {
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true)
                             .with_outline(true),
-                        Layer::END_PIXELED + 0.038 + category_index as f32 * 0.001,
+                        Layer::END_PIXELED + 0.038 + row_index as f32 * 0.001,
                     ));
                 } else if self.game_state.patcher.is_patched() {
                     pass.push(RenderCommand::draw_text_styled(
@@ -31096,7 +31091,7 @@ impl DesktopLauncher {
                             .with_vertical_align(RenderTextVerticalAlign::Center)
                             .with_integer_position(true)
                             .with_outline(true),
-                        Layer::END_PIXELED + 0.038 + category_index as f32 * 0.001,
+                        Layer::END_PIXELED + 0.038 + row_index as f32 * 0.001,
                     ));
                 }
             }
@@ -59662,6 +59657,12 @@ version: "2.0.0"
             "Java DatabaseDialog category headers are plain @database-category.* labels without Rust-side debug counts"
         );
         assert!(
+            route_texts
+                .iter()
+                .any(|text| text.starts_with("@database-tag.")),
+            "Java DatabaseDialog draws a visible @database-tag.* header for each non-default tag row"
+        );
+        assert!(
             launcher
                 .database_content_database_tabs(ContentType::Block, "router")
                 .iter()
@@ -59677,6 +59678,27 @@ version: "2.0.0"
         assert!(
             air_group.1.iter().any(|(_, name)| name == "flare"),
             "grouped DatabaseDialog records should keep unit-air contents inside their tag bucket"
+        );
+        let group_rows = launcher.database_visible_group_rows();
+        let block_rows = group_rows
+            .iter()
+            .filter(|row| row.content_type == ContentType::Block)
+            .collect::<Vec<_>>();
+        assert!(
+            block_rows.len() >= 2,
+            "Java DatabaseDialog renders every databaseTag as its own visible row instead of flattening blocks into a single category"
+        );
+        assert!(
+            block_rows.first().is_some_and(|row| row.category_start)
+                && block_rows.iter().skip(1).any(|row| !row.category_start),
+            "only the first tag row of a category should draw the @database-category.* header"
+        );
+        assert!(
+            block_rows
+                .iter()
+                .any(|row| row.tag.as_deref() == Some("distribution")
+                    && row.records.iter().any(|(_, name)| name == "conveyor")),
+            "Block.databaseTag rows should keep distribution blocks such as conveyor together"
         );
 
         let search = DesktopLauncher::database_search_rect_for_panel(panel).center();

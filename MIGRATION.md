@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 630. DatabaseDialog 初步接入多 tag row 渲染
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.1%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是让 DatabaseDialog 的渲染与点击命中不再把 tag 分组重新压扁到单个 category 行里。
+- Java 对照依据：
+  - `DatabaseDialog.sortContents()` 生成 `category -> tag -> content` 的嵌套结构；
+  - `DatabaseDialog.rebuild()` 对每个非 `default` tag 绘制 `@database-tag.*` 标题和分隔线；
+  - 每个 tag 小节下的内容图标必须和 hover/click 使用同一顺序。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DatabaseVisibleGroupRow` 与 `database_visible_group_rows()`，把当前可见记录投影成 category/tag 行序；
+    - `push_database_route_page(...)` 改为逐 tag row 渲染，只有 category 的首个 row 绘制 `@database-category.*`，每个非默认 tag 绘制 `@database-tag.*`；
+    - `database_hovered_content_cell_for_panel(...)` 与 `database_content_cell_at_point(...)` 共用同一行序，避免渲染、hover tooltip、打开详情三者错位；
+    - 删除过渡期不再使用的 `database_visible_grouped_records_for_type(...)`；
+    - 扩展 DatabaseDialog 测试，确认 block tag row 至少拆成多行、`distribution` 行保留 `conveyor`，且渲染命令中出现 `@database-tag.*`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前仍使用固定 `DATABASE_VISIBLE_CATEGORIES` 行数和单行 cell 容量，尚未实现 Java `pane(all)` 那种完整滚动列表；
+  - category 维度仍主要来自 `ContentType`，还未完全升级到 Java `databaseCategory` 字符串语义；
+  - `shift + click` 复制 Unicode、游戏态 banned 排序、完整多行 tag 小节仍待继续接入；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 629. DatabaseDialog 建立 tag 分组数据模型
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
