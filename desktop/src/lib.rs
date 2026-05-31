@@ -20994,10 +20994,73 @@ impl DesktopLauncher {
                 .cmp(&a.timestamp())
                 .then_with(|| a.index().cmp(&b.index()))
         });
+        self.merge_load_game_preview_textures(&slots);
         let count = slots.len();
         self.load_game_slots = slots;
         self.load_game_error = None;
         count
+    }
+
+    fn load_game_preview_dir(&self) -> PathBuf {
+        PathBuf::from(&self.client.context.paths.data_dir).join("previews")
+    }
+
+    fn load_game_slot_preview_symbol(slot: &SaveSlotRecord) -> String {
+        format!("save_slot_{}", slot.index())
+    }
+
+    fn load_game_slot_preview_fallback_tint(slot: &SaveSlotRecord) -> [f32; 4] {
+        let hash = slot.index().bytes().fold(0usize, |acc, byte| {
+            acc.wrapping_mul(31).wrapping_add(byte as usize)
+        });
+        let color = HOST_PALETTE_COLORS[hash % HOST_PALETTE_COLORS.len()];
+        let r = ((color >> 24) & 0xff) as f32 / 255.0;
+        let g = ((color >> 16) & 0xff) as f32 / 255.0;
+        let b = ((color >> 8) & 0xff) as f32 / 255.0;
+        [
+            (r * 0.42 + 0.22).min(0.92),
+            (g * 0.42 + 0.22).min(0.92),
+            (b * 0.42 + 0.22).min(0.92),
+            0.96,
+        ]
+    }
+
+    fn load_game_slot_preview_file_in_dir(
+        slot: &SaveSlotRecord,
+        preview_dir: &Path,
+    ) -> Option<PathBuf> {
+        let preview = slot.preview_file(preview_dir);
+        preview.exists().then_some(preview)
+    }
+
+    fn load_game_slot_preview_symbol_if_loaded(&self, slot: &SaveSlotRecord) -> Option<String> {
+        let symbol = Self::load_game_slot_preview_symbol(slot);
+        self.texture_atlas.has(&symbol).then_some(symbol)
+    }
+
+    fn merge_load_game_preview_textures(&mut self, slots: &[SaveSlotRecord]) -> usize {
+        let preview_dir = self.load_game_preview_dir();
+        let preview_atlas =
+            TextureAtlasPlan::from_sprite_sources(slots.iter().filter_map(|slot| {
+                Self::load_game_slot_preview_file_in_dir(slot, &preview_dir).map(|path| {
+                    TextureAtlasSpriteSourceDescriptor::new(
+                        path.display().to_string(),
+                        Self::load_game_slot_preview_symbol(slot),
+                    )
+                    .with_page_hint("ui")
+                })
+            }));
+        let mut merged = 0;
+        for page in preview_atlas.pages {
+            let page_type = page.page_type;
+            for region in page.regions {
+                let _ = self
+                    .texture_atlas
+                    .insert_or_replace_region(page_type, region);
+                merged += 1;
+            }
+        }
+        merged
     }
 
     fn load_game_slot_title(slot: &SaveSlotRecord) -> String {
@@ -24609,13 +24672,22 @@ impl DesktopLauncher {
         Self::active_menu_route_shell_panel_for_viewport(viewport)
     }
 
+    #[cfg(test)]
     fn pause_overlay_panel_for_viewport(viewport: RenderViewport) -> RenderRect {
+        Self::pause_overlay_panel_for_viewport_with_button_count(viewport, 6)
+    }
+
+    fn pause_overlay_panel_for_viewport_with_button_count(
+        viewport: RenderViewport,
+        button_count: usize,
+    ) -> RenderRect {
+        let button_count = button_count.max(1);
         let panel_width = PAUSE_OVERLAY_PANEL_WIDTH.clamp(280.0, 360.0);
         let panel_height = PAUSE_OVERLAY_BUTTON_TOP_PADDING
             + PAUSE_OVERLAY_TITLE_HEIGHT
             + 18.0
-            + 6.0 * PAUSE_OVERLAY_BUTTON_HEIGHT
-            + 5.0 * PAUSE_OVERLAY_BUTTON_GAP
+            + button_count as f32 * PAUSE_OVERLAY_BUTTON_HEIGHT
+            + button_count.saturating_sub(1) as f32 * PAUSE_OVERLAY_BUTTON_GAP
             + PAUSE_OVERLAY_BUTTON_BOTTOM_PADDING;
         RenderRect::new(
             viewport.x + 48.0,
@@ -24632,8 +24704,42 @@ impl DesktopLauncher {
         )
     }
 
+    #[cfg(test)]
+    fn pause_overlay_panel_for_current_state(&self, viewport: RenderViewport) -> RenderRect {
+        Self::pause_overlay_panel_for_viewport_with_button_count(
+            viewport,
+            self.pause_overlay_button_specs().len(),
+        )
+    }
+
+    #[cfg(test)]
+    fn pause_overlay_button_count_from_panel(panel: RenderRect) -> usize {
+        let available_height = (panel.height
+            - PAUSE_OVERLAY_BUTTON_TOP_PADDING
+            - PAUSE_OVERLAY_TITLE_HEIGHT
+            - 18.0
+            - PAUSE_OVERLAY_BUTTON_BOTTOM_PADDING)
+            .max(0.0);
+        let total_button_step = PAUSE_OVERLAY_BUTTON_HEIGHT + PAUSE_OVERLAY_BUTTON_GAP;
+        (((available_height + PAUSE_OVERLAY_BUTTON_GAP) / total_button_step)
+            .round()
+            .max(1.0)) as usize
+    }
+
+    #[cfg(test)]
     fn pause_overlay_button_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
-        let total_height = 6.0 * PAUSE_OVERLAY_BUTTON_HEIGHT + 5.0 * PAUSE_OVERLAY_BUTTON_GAP;
+        let button_count = Self::pause_overlay_button_count_from_panel(panel);
+        Self::pause_overlay_button_rect_for_panel_with_button_count(panel, index, button_count)
+    }
+
+    fn pause_overlay_button_rect_for_panel_with_button_count(
+        panel: RenderRect,
+        index: usize,
+        button_count: usize,
+    ) -> RenderRect {
+        let button_count = button_count.max(1);
+        let total_height = button_count as f32 * PAUSE_OVERLAY_BUTTON_HEIGHT
+            + button_count.saturating_sub(1) as f32 * PAUSE_OVERLAY_BUTTON_GAP;
         let button_width =
             PAUSE_OVERLAY_BUTTON_WIDTH.min(panel.width - PAUSE_OVERLAY_BUTTON_SIDE_PADDING * 2.0);
         let start_y = panel.y
@@ -24810,7 +24916,10 @@ impl DesktopLauncher {
             return None;
         }
         let viewport = self.default_render_viewport_for_surface(surface_size);
-        let panel = Self::pause_overlay_panel_for_viewport(viewport);
+        let button_specs = self.pause_overlay_button_specs();
+        let button_count = button_specs.len();
+        let panel =
+            Self::pause_overlay_panel_for_viewport_with_button_count(viewport, button_count);
         let point = RenderPoint::new(x, y);
         if self.pause_overlay_modal.is_some() {
             let dialog = Self::pause_overlay_modal_rect_for_panel(panel);
@@ -24830,8 +24939,14 @@ impl DesktopLauncher {
             }
             return None;
         }
-        for (index, spec) in self.pause_overlay_button_specs().into_iter().enumerate() {
-            if Self::pause_overlay_button_rect_for_panel(panel, index).contains_point(point) {
+        for (index, spec) in button_specs.into_iter().enumerate() {
+            if Self::pause_overlay_button_rect_for_panel_with_button_count(
+                panel,
+                index,
+                button_count,
+            )
+            .contains_point(point)
+            {
                 return spec.enabled.then_some(spec.action);
             }
         }
@@ -28082,6 +28197,20 @@ impl DesktopLauncher {
     }
 
     fn dispatch_pause_overlay_action(&mut self, action: DesktopPausedOverlayAction) {
+        let action_enabled = match action {
+            DesktopPausedOverlayAction::CloseModal | DesktopPausedOverlayAction::ConfirmQuit => {
+                true
+            }
+            _ => self
+                .pause_overlay_button_specs()
+                .into_iter()
+                .find(|spec| spec.action == action)
+                .map(|spec| spec.enabled)
+                .unwrap_or(false),
+        };
+        if !action_enabled {
+            return;
+        }
         match action {
             DesktopPausedOverlayAction::CloseModal => {
                 self.close_pause_overlay_modal();
@@ -31808,13 +31937,41 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.031 + visible_index as f32 * 0.0001,
             ));
             let preview = RenderRect::new(rect.x + 10.0, rect.y + 10.0, 62.0, rect.height - 20.0);
-            pass.push(RenderCommand::draw_sprite(
-                "whiteui",
-                preview,
-                [0.12, 0.16, 0.20, 0.94],
-                0.0,
-                Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.0001,
-            ));
+            if let Some(preview_symbol) = self.load_game_slot_preview_symbol_if_loaded(slot) {
+                pass.push(RenderCommand::draw_sprite(
+                    "whiteui",
+                    preview,
+                    [0.04, 0.06, 0.08, 0.94],
+                    0.0,
+                    Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.0001,
+                ));
+                pass.push(RenderCommand::draw_sprite(
+                    preview_symbol,
+                    preview,
+                    [1.0, 1.0, 1.0, 1.0],
+                    0.0,
+                    Layer::END_PIXELED + 0.0325 + visible_index as f32 * 0.0001,
+                ));
+            } else {
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("nomap"),
+                    preview,
+                    Self::load_game_slot_preview_fallback_tint(slot),
+                    0.0,
+                    Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.0001,
+                ));
+                pass.push(RenderCommand::draw_text_styled(
+                    Self::load_game_slot_preview_symbol(slot),
+                    preview.center(),
+                    [0.95, 0.98, 1.0, 1.0],
+                    7.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.0325 + visible_index as f32 * 0.0001,
+                ));
+            }
             pass.push(RenderCommand::stroke_rect(
                 preview,
                 [0.52, 0.62, 0.70, 0.78],
@@ -33285,7 +33442,9 @@ impl DesktopLauncher {
         if let Some(error) = self.mods_directory_error.as_ref() {
             lines.push(format!("mods error: {error}"));
         } else {
-            lines.push("empty: @mods.none".into());
+            let (empty_text, hint_text) = self.mods_browser_empty_state_texts();
+            lines.push(format!("empty: {empty_text}"));
+            lines.push(format!("hint: {hint_text}"));
         }
         if self.mods_browser_dialog_open {
             lines.push(format!(
@@ -33352,6 +33511,19 @@ impl DesktopLauncher {
             .filter(|root| !root.is_empty())
     }
 
+    fn mods_route_mod_root_label_at_index(&self, index: usize) -> Option<String> {
+        self.mods_route_mod_root_at_index(index)
+            .map(|root| {
+                std::path::Path::new(root)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(root)
+                    .trim()
+                    .to_string()
+            })
+            .filter(|root| !root.is_empty())
+    }
+
     fn mods_route_mod_meta_at_index(&self, index: usize) -> Option<&ModMetadata> {
         self.last_mods_directory_mod_metas.get(index)
     }
@@ -33374,30 +33546,37 @@ impl DesktopLauncher {
     }
 
     fn mods_route_mod_summary_at_index(&self, index: usize) -> String {
-        let Some(meta) = self.mods_route_mod_meta_at_index(index) else {
-            return "@unknown".to_string();
-        };
         let mut summary_parts = Vec::new();
-        if let Some(author) = meta
-            .author
-            .as_deref()
-            .map(str::trim)
-            .filter(|author| !author.is_empty())
-        {
-            summary_parts.push(author.to_string());
+        let repo = self.mods_route_mod_repo_at_index(index);
+        if let Some(repo) = repo {
+            summary_parts.push(format!("repo: {repo}"));
         }
-        if let Some(version) = meta
-            .version
-            .as_deref()
-            .map(str::trim)
-            .filter(|version| !version.is_empty())
-        {
-            summary_parts.push(version.to_string());
+        if let Some(root) = self.mods_route_mod_root_label_at_index(index) {
+            summary_parts.push(format!("root: {root}"));
         }
-        match summary_parts.len() {
-            0 => "@unknown".to_string(),
-            1 => summary_parts.remove(0),
-            _ => summary_parts.join(" | "),
+        summary_parts.push(format!(
+            "status: {}",
+            if repo.is_some() {
+                "repo-linked"
+            } else {
+                "local"
+            }
+        ));
+        summary_parts.join(" | ")
+    }
+
+    fn mods_browser_empty_state_texts(&self) -> (String, String) {
+        let search = self.mods_browser_search.trim();
+        if search.is_empty() {
+            (
+                "@mods.none".to_string(),
+                "@mod.import / @mods.browser".to_string(),
+            )
+        } else {
+            (
+                format!("@none.found: {search}"),
+                format!("search: {search}"),
+            )
         }
     }
 
@@ -34023,12 +34202,9 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.097,
         ));
         if indices.is_empty() {
+            let (empty_text, hint_text) = self.mods_browser_empty_state_texts();
             pass.push(RenderCommand::draw_text_styled(
-                if self.mods_browser_search.trim().is_empty() {
-                    "@mods.none".to_string()
-                } else {
-                    format!("@none.found: {}", self.mods_browser_search)
-                },
+                empty_text,
                 RenderPoint::new(list.center().x, list.center().y + 10.0),
                 [0.70, 0.78, 0.84, 1.0],
                 12.0,
@@ -34039,7 +34215,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.099,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "@mods.browser",
+                hint_text,
                 RenderPoint::new(list.center().x, list.center().y - 16.0),
                 [0.52, 0.64, 0.74, 1.0],
                 9.5,
@@ -34113,7 +34289,7 @@ impl DesktopLauncher {
                     .and_then(|meta| meta.version.as_deref())
                     .unwrap_or("@unknown");
                 pass.push(RenderCommand::draw_text_styled(
-                    format!("@mod.installed  @editor.author: {author}  @mod.version: {version}"),
+                    format!("@editor.author: {author}  @mod.version: {version}"),
                     RenderPoint::new(text_x, rect.y + rect.height - 37.0),
                     [0.66, 0.76, 0.84, 1.0],
                     8.5,
@@ -34123,10 +34299,8 @@ impl DesktopLauncher {
                         .with_integer_position(true),
                     Layer::END_PIXELED + 0.100 + visible_index as f32 * 0.001,
                 ));
-                let repo = self.mods_route_mod_repo_at_index(mod_index);
                 pass.push(RenderCommand::draw_text_styled(
-                    repo.map(|repo| format!("repo: {repo}"))
-                        .unwrap_or_else(|| "source: local scan".to_string()),
+                    self.mods_route_mod_summary_at_index(mod_index),
                     RenderPoint::new(text_x, rect.y + 17.0),
                     [0.58, 0.68, 0.76, 1.0],
                     8.5,
@@ -34137,7 +34311,7 @@ impl DesktopLauncher {
                     Layer::END_PIXELED + 0.1005 + visible_index as f32 * 0.001,
                 ));
 
-                let actions = if repo.is_some() {
+                let actions = if self.mods_route_mod_repo_at_index(mod_index).is_some() {
                     [
                         Some("@mods.browser.reinstall"),
                         Some("@mods.github.open"),
@@ -34901,7 +35075,10 @@ impl DesktopLauncher {
             return Some(pass);
         }
 
-        let panel = Self::pause_overlay_panel_for_viewport(viewport);
+        let button_specs = self.pause_overlay_button_specs();
+        let button_count = button_specs.len();
+        let panel =
+            Self::pause_overlay_panel_for_viewport_with_button_count(viewport, button_count);
         pass.push(RenderCommand::draw_sprite(
             Self::settings_drawable_symbol("pane"),
             panel,
@@ -34938,10 +35115,14 @@ impl DesktopLauncher {
                 .with_integer_position(true),
             Layer::END_PIXELED + 0.144,
         ));
-        for (index, spec) in self.pause_overlay_button_specs().into_iter().enumerate() {
+        for (index, spec) in button_specs.into_iter().enumerate() {
             self.push_settings_text_button_enabled(
                 &mut pass,
-                Self::pause_overlay_button_rect_for_panel(panel, index),
+                Self::pause_overlay_button_rect_for_panel_with_button_count(
+                    panel,
+                    index,
+                    button_count,
+                ),
                 spec.label,
                 spec.icon,
                 Layer::END_PIXELED + 0.145 + index as f32 * 0.0001,
@@ -49609,8 +49790,11 @@ repo: "Beta/Override"
         assert!(texts.contains(&"Alpha Pack"));
         assert!(texts.contains(&"Beta Override"));
         assert!(texts.contains(&"gamma"));
-        assert!(texts.contains(&"Alpha Author | 1.0.0"));
-        assert!(texts.contains(&"Beta Author | 2.0.0"));
+        assert!(texts.iter().any(|text| text.contains("root: alpha pack")));
+        assert!(texts.iter().any(
+            |text| text.contains("repo: Beta/Override") && text.contains("status: repo-linked")
+        ));
+        assert!(texts.iter().any(|text| text.contains("status: local")));
         assert!(texts.contains(&"@back"));
         assert!(texts.contains(&"@mod.import"));
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
@@ -49713,13 +49897,36 @@ version: "3.0.0"
         assert!(texts.contains(&"beta"));
         assert!(texts.contains(&"@mods.sort.name"));
         assert!(texts.contains(&"Beta Override"));
-        assert!(texts.iter().any(|text| text.contains("Beta Author")));
-        assert!(texts.contains(&"repo: Beta/Override"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("@editor.author: Beta Author")));
+        assert!(texts.iter().any(
+            |text| text.contains("repo: Beta/Override") && text.contains("status: repo-linked")
+        ));
         assert!(texts.contains(&"@mods.browser.reinstall"));
         assert!(texts.contains(&"@mods.github.open"));
         assert!(texts.contains(&"@mods.browser.view-releases"));
         assert_eq!(launcher.filtered_mods_browser_indices(), vec![1]);
         assert!(!texts.contains(&"browser search: Icon.zoom + Icon.list"));
+
+        launcher.mods_browser_search = "missing".into();
+        let empty_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let empty_texts = empty_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mods browser dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(empty_texts.contains(&"@none.found: missing"));
+        assert!(empty_texts.contains(&"search: missing"));
+        launcher.mods_browser_search = "beta".into();
 
         let list = DesktopLauncher::mods_browser_list_rect_for_dialog(dialog);
         let beta_entry = DesktopLauncher::mods_browser_entry_rect_for_list(list, 0);
@@ -52159,6 +52366,10 @@ version: "2.0.0"
             None,
             "Java PausedDialog disables host while already connected as client"
         );
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::LoadGame);
+        assert_eq!(launcher.active_menu_route, None);
+        launcher.dispatch_pause_overlay_action(super::DesktopPausedOverlayAction::HostServer);
+        assert_eq!(launcher.active_menu_route, None);
 
         let mut renderer = HeadlessDesktopGraphicsRenderer::default();
         launcher.render_default_graphics_frame_for_surface_with(0, surface, 1, &mut renderer);
@@ -52178,6 +52389,9 @@ version: "2.0.0"
         launcher.net_client.state().lock().unwrap().connected = false;
         launcher.game_state.rules.editor = true;
         launcher.render_default_graphics_frame_for_surface_with(1, surface, 1, &mut renderer);
+        let editor_panel = launcher.pause_overlay_panel_for_current_state(viewport);
+        let world_processors_center =
+            DesktopLauncher::pause_overlay_button_rect_for_panel(editor_panel, 3).center();
         let editor_texts = renderer
             .last_trace
             .render_passes
@@ -52192,9 +52406,6 @@ version: "2.0.0"
         assert!(editor_texts.contains(&"@editor.worldprocessors"));
         assert!(!editor_texts.contains(&"@savegame"));
         assert!(!editor_texts.contains(&"@loadgame"));
-
-        let world_processors_center =
-            DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 3).center();
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -52885,6 +53096,7 @@ version: "2.0.0"
                     "button: @mods.guide Icon.link",
                     "button: @mod.import Icon.add",
                     "empty: @mods.none",
+                    "hint: @mod.import / @mods.browser",
                     "browser: BaseDialog @mods.browser",
                 ],
             ),
@@ -56938,8 +57150,13 @@ version: "2.0.0"
         std::fs::write(save_dir.join("2.msav"), new_bytes).expect("new save should write");
         std::fs::write(save_dir.join("backup-ignored.msav"), b"not scanned")
             .expect("backup decoy should write");
+        let preview_dir = root.join("previews");
+        std::fs::create_dir_all(&preview_dir).expect("preview fixture dir should be writable");
+        std::fs::write(preview_dir.join("save_slot_2.png"), b"preview")
+            .expect("slot preview fixture should write");
 
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
         launcher.client.context.paths.save_dir = save_dir.display().to_string();
         launcher.dispatch_menu_action(MenuButtonRole::LoadGame);
 
@@ -57030,6 +57247,17 @@ version: "2.0.0"
         assert!(texts.contains(&"@mode.attack.name"));
         assert!(texts.contains(&"@mode.pvp.name"));
         assert!(!texts.iter().any(|text| text.starts_with("#0 New Map")));
+        let symbols = commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, .. } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            symbols.contains(&"save_slot_2"),
+            "Java LoadDialog slot.previewTexture() should surface as the slot preview sprite"
+        );
         let slot_card = DesktopLauncher::load_game_slot_card_rect_for_panel(
             DesktopLauncher::active_menu_route_shell_panel_for_route(
                 viewport,
@@ -57580,14 +57808,18 @@ version: "2.0.0"
         );
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
-        let texts = frame
+        let render_frame = frame
             .bundle
             .render_frame
             .as_ref()
-            .expect("load game frame should contain render frame")
+            .expect("load game frame should contain render frame");
+        let commands = render_frame
             .passes
             .iter()
             .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let texts = commands
+            .iter()
             .filter_map(|command| match command {
                 RenderCommand::DrawText { text, .. } => Some(text.as_str()),
                 _ => None,
@@ -57596,8 +57828,43 @@ version: "2.0.0"
         assert!(texts.contains(&"Map 2"));
         assert!(texts.contains(&"[accent]Map 2"));
         assert!(!texts.contains(&"[accent]Map 7"));
-
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::LoadGame,
+        );
+        let preview_slot = &launcher.load_game_slots[filtered[0]];
         let visible_card = DesktopLauncher::load_game_slot_card_rect_for_panel(panel, 0);
+        let preview_rect = RenderRect::new(
+            visible_card.x + 10.0,
+            visible_card.y + 10.0,
+            62.0,
+            visible_card.height - 20.0,
+        );
+        let preview_symbol = DesktopLauncher::settings_drawable_symbol("nomap");
+        let preview_label = DesktopLauncher::load_game_slot_preview_symbol(preview_slot);
+        assert!(
+            commands.iter().any(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } => {
+                    symbol == &preview_symbol && rect == &preview_rect
+                }
+                _ => false,
+            }),
+            "missing previews should render a slot-specific nomap thumbnail"
+        );
+        assert!(
+            texts.contains(&preview_label.as_str()),
+            "missing previews should expose the stable slot preview label"
+        );
+        assert!(
+            !commands.iter().any(|command| match command {
+                RenderCommand::DrawSprite { symbol, rect, .. } => {
+                    symbol == "whiteui" && rect == &preview_rect
+                }
+                _ => false,
+            }),
+            "missing previews should no longer use the pure whiteui placeholder"
+        );
+
         let delete = DesktopLauncher::load_game_slot_action_button_rect(visible_card, 1).center();
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(surface, delete.x, delete.y),

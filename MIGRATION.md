@@ -15,6 +15,54 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 580. PausedDialog 动态面板与 Mods UI 摘要补强
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **68.6%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是减少暂停菜单和 Mods 页的“固定壳感”。
+- Java 对照依据：
+  - `PausedDialog.java` 按 campaign/editor/net 状态动态显示/禁用按钮，按钮数量变化时面板布局也应随之变化；
+  - `ModsDialog`/浏览器列表不应只有空白占位，应展示 repo/root/status 等可辨识信息，并在无结果时给出搜索/导入引导。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 暂停覆盖层面板高度、按钮 rect、渲染和命中都改为基于当前 `pause_overlay_button_specs()` 的实际按钮数；
+    - disabled 的暂停按钮不再能通过 dispatch 直接绕过命中层触发；
+    - editor/campaign 分支测试改为使用当前状态面板，避免动态按钮数后命中错位；
+    - Mods route 空态增加 `empty` 与 `hint` 两行，浏览器无搜索/有搜索无结果分别显示导入/搜索提示；
+    - mod 卡片和 browser 条目摘要补充 repo/root/status，减少只显示作者/版本导致的占位感；
+    - 继续保持 Host route、Quit confirm、Load/Save 入口既有语义不回退。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib paused_world_overlay -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib mods_route -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib mods_browser -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib pending_menu_routes_use_upstream_dialog_structure -- --nocapture`
+  - `cargo fmt --all -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - PausedDialog 的真实 `runExitSave()`、playtest/editor 返回、Steam invite 与完整 host/network 副作用仍需继续；
+  - Mods 页仍未完整迁移真实在线浏览、版本更新、依赖/错误状态、启停重载与完整卡片视觉；
+  - 未达到完整可玩，不能宣告目标完成。
+
+## 579. LoadDialog/SaveDialog 存档缩略图接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **68.4%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把存档卡片从纯占位 preview 推进到可消费真实 preview 纹理。
+- Java 对照依据：
+  - `LoadDialog.rebuild()` 左侧使用 `BorderImage`，并通过 `slot.previewTexture()` 将存档截图注入卡片预览；
+  - `SaveDialog` 继承同一套存档卡片结构，只改变新建/覆盖保存入口。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `refresh_load_game_slots()` 刷新 slot 时同步扫描 `data/previews/save_slot_<index>.png`；
+    - 新增 slot preview atlas 合并路径，将存在的预览图注册为 `save_slot_<index>` sprite；
+    - Load/Save 存档卡片优先绘制真实 slot preview sprite，缺失时才显示 `@save.preview` 兜底；
+    - 扩展 LoadDialog 测试，验证 `save_slot_2` preview sprite 会进入渲染命令。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --test-threads=1`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route --lib -- --test-threads=1`
+- 仍未完成：
+  - 当前只接已有 preview PNG 的前端显示，尚未迁移 Java 保存时 screenshot 捕获、`.spreview` 异步加载与失败清理完整流程；
+  - SaveGame 写盘仍是最小 meta snapshot，完整 world/entity/content 序列化和真实 slot preview 生成仍需继续；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 578. 世界空帧防黑屏兜底
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
