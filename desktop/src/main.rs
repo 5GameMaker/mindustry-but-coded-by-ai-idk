@@ -205,41 +205,243 @@ fn desktop_native_opengl_submit_needs_visible_fallback(
 fn desktop_native_visible_fallback_rects(
     surface_size: mindustry_desktop::DesktopSurfaceSize,
 ) -> Vec<DesktopNativeVisibleFallbackRect> {
+    fn clamp_span(value: i32, min: i32, max: i32) -> i32 {
+        if max < min {
+            max.max(0)
+        } else {
+            value.clamp(min, max)
+        }
+    }
+
     let width = surface_size.width.max(1).min(i32::MAX as u32) as i32;
     let height = surface_size.height.max(1).min(i32::MAX as u32) as i32;
-    let button_width = (width / 5).clamp(150, 260);
-    let button_height = (height / 12).clamp(38, 64);
-    let start_x = (width / 10).max(16);
-    let total_height = button_height * 6;
-    let mut y = ((height - total_height) / 2).max(16);
-    let mut rects = vec![DesktopNativeVisibleFallbackRect {
-        x: 0,
-        y: 0,
-        width,
-        height,
-        color: [0.015, 0.018, 0.025, 1.0],
-    }];
-    for index in 0..6 {
-        rects.push(DesktopNativeVisibleFallbackRect {
-            x: start_x,
-            y,
-            width: button_width,
-            height: button_height - 2,
-            color: if index == 0 {
-                [0.18, 0.42, 0.56, 1.0]
-            } else {
-                [0.055, 0.075, 0.095, 1.0]
-            },
-        });
-        y += button_height;
+    let mut rects = Vec::with_capacity(20);
+    let push_rect = |rects: &mut Vec<DesktopNativeVisibleFallbackRect>,
+                     x: i32,
+                     y: i32,
+                     width: i32,
+                     height: i32,
+                     color: [f32; 4]| {
+        if width > 0 && height > 0 {
+            rects.push(DesktopNativeVisibleFallbackRect {
+                x,
+                y,
+                width,
+                height,
+                color,
+            });
+        }
+    };
+
+    let background = [0.014, 0.017, 0.023, 1.0];
+    let panel_shadow = [0.021, 0.026, 0.033, 1.0];
+    let panel_fill = [0.040, 0.049, 0.061, 1.0];
+    let panel_edge = [0.071, 0.084, 0.098, 1.0];
+    let row_fill = [0.053, 0.063, 0.077, 1.0];
+    let row_fill_alt = [0.047, 0.056, 0.069, 1.0];
+    let accent = [0.18, 0.42, 0.56, 1.0];
+    let accent_soft = [0.24, 0.53, 0.69, 1.0];
+    let text = [0.82, 0.86, 0.92, 1.0];
+    let text_dim = [0.58, 0.64, 0.70, 1.0];
+
+    push_rect(&mut rects, 0, 0, width, height, background);
+
+    let side_margin = clamp_span(width / 12, 16, 84);
+    let top_margin = clamp_span(height / 10, 18, 72);
+    let bottom_margin = clamp_span(height / 14, 18, 72);
+
+    let panel_width = clamp_span(width / 5, 150, width.saturating_sub(side_margin * 2).max(1));
+    let button_count = 6;
+    let button_height = clamp_span(height / 16, 30, 54);
+    let button_gap = clamp_span(button_height / 6, 4, 8);
+    let panel_padding_y = clamp_span(height / 36, 8, 18);
+    let panel_height =
+        panel_padding_y * 2 + button_count * button_height + (button_count - 1) * button_gap;
+    let panel_x = side_margin;
+    let panel_y = clamp_span(
+        (height - panel_height) / 2,
+        top_margin,
+        height.saturating_sub(bottom_margin + panel_height),
+    );
+
+    let panel_shadow_x = (panel_x - 4).max(0);
+    let panel_shadow_y = (panel_y - 4).max(0);
+    let panel_shadow_width = (panel_width + 8).min(width.saturating_sub(panel_shadow_x));
+    let panel_shadow_height = (panel_height + 8).min(height.saturating_sub(panel_shadow_y));
+    push_rect(
+        &mut rects,
+        panel_shadow_x,
+        panel_shadow_y,
+        panel_shadow_width,
+        panel_shadow_height,
+        panel_shadow,
+    );
+    push_rect(
+        &mut rects,
+        panel_x,
+        panel_y,
+        panel_width,
+        panel_height,
+        panel_fill,
+    );
+    push_rect(&mut rects, panel_x, panel_y, panel_width, 4, panel_edge);
+    push_rect(
+        &mut rects,
+        panel_x,
+        panel_y + panel_height - 4,
+        panel_width,
+        4,
+        panel_edge,
+    );
+    push_rect(&mut rects, panel_x, panel_y, 4, panel_height, panel_edge);
+    push_rect(
+        &mut rects,
+        panel_x + panel_width - 4,
+        panel_y,
+        4,
+        panel_height,
+        panel_edge,
+    );
+
+    let row_inset_x = clamp_span(panel_width / 12, 10, 22);
+    let row_width = (panel_width - row_inset_x * 2).max(1);
+    let row_x = panel_x + row_inset_x;
+    let icon_size = clamp_span(button_height - 14, 10, 22);
+    let text_height = clamp_span(button_height / 8, 4, 6);
+    let text_y_offset = (button_height - text_height) / 2;
+    let row_top = panel_y + panel_padding_y;
+    for index in 0..button_count {
+        let row_y = row_top + index * (button_height + button_gap);
+        let row_color = if index == 0 {
+            accent
+        } else if index % 2 == 0 {
+            row_fill
+        } else {
+            row_fill_alt
+        };
+        let text_color = if index == 0 { text } else { text_dim };
+        push_rect(
+            &mut rects,
+            row_x,
+            row_y,
+            row_width,
+            button_height,
+            row_color,
+        );
+        push_rect(
+            &mut rects,
+            row_x + 8,
+            row_y + 7,
+            icon_size,
+            icon_size,
+            if index == 0 { accent_soft } else { panel_edge },
+        );
+        push_rect(
+            &mut rects,
+            row_x + icon_size + 18,
+            row_y + text_y_offset,
+            (row_width - icon_size - 28).max(10),
+            text_height,
+            text_color,
+        );
+        if index == 0 {
+            push_rect(&mut rects, row_x, row_y, 6, button_height, accent_soft);
+        }
     }
-    rects.push(DesktopNativeVisibleFallbackRect {
-        x: width / 2 - button_width / 2,
-        y: (height - button_height - 24).max(0),
-        width: button_width,
-        height: button_height / 2,
-        color: [0.48, 0.62, 0.72, 1.0],
-    });
+
+    let logo_width = clamp_span(width / 3, 260, width.saturating_sub(side_margin * 2).max(1));
+    let logo_height = clamp_span(logo_width / 6, 44, 92);
+    let logo_x = (width - logo_width) / 2;
+    let logo_y = height.saturating_sub(top_margin + logo_height);
+    push_rect(
+        &mut rects,
+        (logo_x - 4).max(0),
+        (logo_y - 4).max(0),
+        (logo_width + 8).min(width.saturating_sub((logo_x - 4).max(0))),
+        (logo_height + 8).min(height.saturating_sub((logo_y - 4).max(0))),
+        panel_shadow,
+    );
+    push_rect(
+        &mut rects,
+        logo_x,
+        logo_y,
+        logo_width,
+        logo_height,
+        panel_fill,
+    );
+    push_rect(
+        &mut rects,
+        logo_x + logo_width / 12,
+        logo_y + logo_height / 5,
+        (logo_width * 5 / 6).max(1),
+        (logo_height / 4).max(6),
+        accent_soft,
+    );
+    push_rect(
+        &mut rects,
+        logo_x + logo_width / 4,
+        logo_y + logo_height / 2,
+        (logo_width / 2).max(1),
+        (logo_height / 10).max(4),
+        text,
+    );
+    push_rect(
+        &mut rects,
+        logo_x + logo_width / 3,
+        logo_y + logo_height * 2 / 3,
+        (logo_width / 3).max(1),
+        (logo_height / 12).max(3),
+        text_dim,
+    );
+
+    let version_width = clamp_span(logo_width / 2, 150, logo_width);
+    let version_x = logo_x + (logo_width - version_width) / 2;
+    let version_y = (logo_y - clamp_span(height / 60, 8, 14)).max(0);
+    push_rect(
+        &mut rects,
+        version_x,
+        version_y,
+        version_width,
+        text_height,
+        text_dim,
+    );
+    push_rect(
+        &mut rects,
+        version_x + version_width / 6,
+        version_y + text_height + 3,
+        (version_width * 2 / 3).max(1),
+        text_height,
+        text,
+    );
+
+    let diagnostic_width = clamp_span(width / 4, 180, 420);
+    let diagnostic_x = (width - diagnostic_width - side_margin).max(0);
+    let diagnostic_y = clamp_span(height / 18, 10, 28);
+    push_rect(
+        &mut rects,
+        diagnostic_x,
+        diagnostic_y,
+        diagnostic_width,
+        text_height,
+        text_dim,
+    );
+    push_rect(
+        &mut rects,
+        diagnostic_x + diagnostic_width / 8,
+        diagnostic_y + text_height + 4,
+        (diagnostic_width * 3 / 4).max(1),
+        text_height,
+        text,
+    );
+    push_rect(
+        &mut rects,
+        diagnostic_x + diagnostic_width / 4,
+        diagnostic_y + (text_height + 4) * 2,
+        (diagnostic_width / 2).max(1),
+        text_height,
+        accent_soft,
+    );
+
     rects
 }
 
@@ -2763,6 +2965,24 @@ mod tests {
                 .skip(1)
                 .any(|rect| rect.color == [0.18, 0.42, 0.56, 1.0]),
             "fallback should show a non-black selected menu bar"
+        );
+        assert!(
+            rects.iter().any(|rect| {
+                rect.color == [0.040, 0.049, 0.061, 1.0] && rect.width >= 220 && rect.height >= 220
+            }),
+            "fallback should show a left-side menu panel silhouette"
+        );
+        assert!(
+            rects.iter().any(|rect| {
+                rect.color == [0.24, 0.53, 0.69, 1.0] && rect.width >= 250 && rect.height <= 92
+            }),
+            "fallback should show a top logo block"
+        );
+        assert!(
+            rects
+                .iter()
+                .any(|rect| rect.height <= 6 && rect.width >= 150),
+            "fallback should expose version or diagnostic text lines"
         );
     }
 

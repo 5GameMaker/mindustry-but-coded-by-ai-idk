@@ -15,6 +15,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 584. MapListDialog Java 信息密度与 native 黑屏兜底轮廓
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **69.4%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把地图列表从过重文本卡收敛回 Java `MapListDialog` 的“模式图标 + 名称 + 预览图 + Editor 类型标签”信息密度，并让 native OpenGL 兜底更像主菜单轮廓。
+- Java 对照依据：
+  - `MapListDialog.rebuildMaps()` 的卡片正面主要展示 gamemode small icons、地图名、预览图；仅 `displayType` 时额外显示 `@custom/@workshop/@builtin/mod displayName`；
+  - `EditorMapsDialog.showMap()` 主信息区展示 `@editor.mapname`、`@editor.author` 和可选 `@editor.description`，不把 size/source 作为主视觉字段；
+  - native GL 完全无法提交有效 draw 时，兜底也应给出可识别主菜单 silhouette，而不是接近纯黑。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 地图卡片高度与预览区调整为更接近 Java 的卡片/预览比例；
+    - 卡片正面移除 `size/author/description/status` 等说明文式堆叠，仅保留模式 badge、地图名、预览和 Editor 类型标签；
+    - Editor map info 弹窗移除 `size/source` 主视觉字段，回到 Java 的 name/author/description 字段集；
+    - 更新 map list/editor info 回归测试，锁定 CustomGame 不显示 Editor 类型标签、Editor 卡片显示类型标签且信息弹窗字段不过载。
+  - `desktop/src/main.rs`
+    - native visible fallback 从通用黑色兜底扩展为主菜单式轮廓：左侧 black6 风格菜单面板、按钮条、顶部 logo 区、版本/诊断文字条；
+    - 补充 fallback 测试，确保空 draw/全无效 draw 时能看到菜单 silhouette。
+- 已验证：
+  - `cargo fmt --all`
+  - `git diff --check`
+  - `cargo test -p mindustry-desktop --lib map_list -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib editor_map_info -- --nocapture`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl_submit_diagnostic -- --nocapture`
+  - `cargo test -p mindustry-desktop --features opengl-native-runtime native_opengl_visible_fallback -- --nocapture`
+- 仍未完成：
+  - fallback 仍只是 native GL 异常保险，不能替代真实 menu world、atlas、shader、UI pass 的正确渲染；
+  - 地图 preview 仍未接真实缩略图 cache，MapPlayDialog/EditorMapsDialog 仍需继续像素级对齐和接入真实 gameplay/editor 侧效应；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 583. CustomGame/Editor MapListDialog 卡片视觉补强
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
