@@ -19866,6 +19866,34 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - Settings 子页 reset/back 与 table 容器的精确 Java 对齐仍需后续像素级复核；
   - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
 
+## 574. Settings Data 破坏性动作确认弹窗闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **62.6%**，仍未达到完整可玩；继续优先前端/UI，把 Settings Data/PlanetData 的破坏性清理动作从直接状态记录推进到 Java `ui.showConfirm(...)` 风格确认弹窗。
+- Java 对照依据：
+  - `SettingsMenuDialog` 对 `cleardata/clearsaves/clearresearch/clearcampaignsaves` 使用 `ui.showConfirm(...)`；
+  - `planetDataDialog` 的 `clearplanetresearch` / `clearplanetcampaignsaves` 同样先显示确认，再执行清理；
+  - 确认弹窗应阻塞后层点击。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `pending_settings_confirm_action` 与 `last_settings_confirmed_action` 状态；
+    - 新增 `ConfirmPendingDataAction` / `CancelPendingDataAction`；
+    - 新增 `push_settings_data_confirm_dialog(...)`，绘制 `@confirm`、确认消息、`@cancel`、`@ok`；
+    - 破坏性动作现在先进入 pending confirm，点击 `@ok` 后记录 confirmed action；
+    - pending confirm 打开时拦截 Settings 后层点击，避免误触原页面或子弹窗；
+    - 测试覆盖 PlanetData 清理科研动作弹出确认、显示 planet 相关确认文案、点击 `@ok` 后写入 confirmed action。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - `@ok` 后仍只记录 confirmed action，尚未接真实清理 research/campaign/save 数据副作用；
+  - 顶层 Data 清理动作的确认文案仍是 bundle key 等价层，后续需接完整 bundle format/localizedName；
+  - Data 导入/导出/open folder/crash export 仍需继续接真实桌面能力；
+  - UI 与 Settings 数据管理仍在长线迁移中，未达到完整可玩，不能宣布目标完成。
+
 ## 554. Settings KeybindDialog rebind 输入捕获闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。

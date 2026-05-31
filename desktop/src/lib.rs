@@ -444,6 +444,8 @@ pub enum DesktopSettingsAction {
     ResetAllKeys,
     FocusKeybindSearch,
     CancelKeyRebind,
+    ConfirmPendingDataAction,
+    CancelPendingDataAction,
     BackToMain,
     ResetCurrentPage,
     ToggleSetting(&'static str, &'static str),
@@ -15409,6 +15411,8 @@ pub struct DesktopLauncher {
     pub settings_keybind_search: String,
     pub settings_keybind_search_focused: bool,
     pub last_settings_action: Option<DesktopSettingsAction>,
+    pub pending_settings_confirm_action: Option<DesktopSettingsAction>,
+    pub last_settings_confirmed_action: Option<DesktopSettingsAction>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
     pub settings_scroll_drag_state: Option<DesktopSettingsScrollDragState>,
@@ -16164,6 +16168,8 @@ impl DesktopLauncher {
             settings_keybind_search: String::new(),
             settings_keybind_search_focused: false,
             last_settings_action: None,
+            pending_settings_confirm_action: None,
+            last_settings_confirmed_action: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
             settings_scroll_drag_state: None,
@@ -20921,6 +20927,68 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_settings_data_confirm_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(action) = self.pending_settings_confirm_action else {
+            return;
+        };
+        let dialog = Self::settings_data_confirm_dialog_rect(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.50],
+            Layer::END_PIXELED + 0.170,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.171,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.72, 0.86, 1.0, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.172,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@confirm",
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 42.0),
+            [0.96, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.176,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.settings_data_confirm_message(action),
+            RenderPoint::new(dialog.center().x, dialog.center().y + 8.0),
+            [0.76, 0.84, 0.90, 1.0],
+            10.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.177,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::settings_data_confirm_cancel_rect(dialog),
+            "@cancel",
+            Some("left"),
+            Layer::END_PIXELED + 0.180,
+        );
+        self.push_settings_text_button(
+            pass,
+            Self::settings_data_confirm_ok_rect(dialog),
+            "@ok",
+            Some("ok"),
+            Layer::END_PIXELED + 0.181,
+        );
+    }
+
     fn push_settings_language_dialog_content(&self, pass: &mut RenderPass, dialog: RenderRect) {
         let offset = self.settings_language_scroll_offset.min(
             SETTINGS_LANGUAGE_OPTIONS
@@ -21665,6 +21733,26 @@ impl DesktopLauncher {
         }
     }
 
+    fn settings_data_confirm_message(&self, action: DesktopSettingsAction) -> String {
+        match action {
+            DesktopSettingsAction::ClearAllData => "@settings.cleardata.confirm".into(),
+            DesktopSettingsAction::ClearSaves => "@settings.clearsaves.confirm".into(),
+            DesktopSettingsAction::ClearResearch => "@settings.clearresearch.confirm".into(),
+            DesktopSettingsAction::ClearCampaignSaves => {
+                "@settings.clearcampaignsaves.confirm".into()
+            }
+            DesktopSettingsAction::ClearPlanetResearch => format!(
+                "settings.clearplanetresearch.confirm: {}",
+                self.settings_dialog_state.selected_planet
+            ),
+            DesktopSettingsAction::ClearPlanetCampaignSaves => format!(
+                "settings.clearplanetcampaignsaves.confirm: {}",
+                self.settings_dialog_state.selected_planet
+            ),
+            _ => "@confirm".into(),
+        }
+    }
+
     fn settings_route_lines(&self) -> Vec<String> {
         let state = &self.settings_dialog_state;
         let mut lines = vec![
@@ -22048,6 +22136,27 @@ impl DesktopLauncher {
             first.width + pad * 2.0,
             first.bottom() - last.y + pad * 2.0,
         )
+    }
+
+    fn settings_data_confirm_dialog_rect(parent: RenderRect) -> RenderRect {
+        let width = (parent.width - 112.0).clamp(320.0, 460.0);
+        let height = 176.0;
+        RenderRect::new(
+            parent.x + (parent.width - width) * 0.5,
+            parent.y + (parent.height - height) * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn settings_data_confirm_cancel_rect(dialog: RenderRect) -> RenderRect {
+        let width = ((dialog.width - 54.0) * 0.5).clamp(120.0, 190.0);
+        RenderRect::new(dialog.x + 18.0, dialog.y + 18.0, width, 46.0)
+    }
+
+    fn settings_data_confirm_ok_rect(dialog: RenderRect) -> RenderRect {
+        let cancel = Self::settings_data_confirm_cancel_rect(dialog);
+        RenderRect::new(cancel.right() + 18.0, cancel.y, cancel.width, cancel.height)
     }
 
     fn settings_language_scrollpane_rect(dialog: RenderRect) -> RenderRect {
@@ -22505,6 +22614,20 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
         let point = RenderPoint::new(x, y);
+        if self.pending_settings_confirm_action.is_some() {
+            let dialog = Self::settings_data_confirm_dialog_rect(panel);
+            if Self::settings_data_confirm_cancel_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::Settings(
+                    DesktopSettingsAction::CancelPendingDataAction,
+                ));
+            }
+            if Self::settings_data_confirm_ok_rect(dialog).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::Settings(
+                    DesktopSettingsAction::ConfirmPendingDataAction,
+                ));
+            }
+            return None;
+        }
         if self.settings_child_dialog.is_some() {
             return self.settings_child_dialog_action_at_point(panel, point);
         }
@@ -23850,6 +23973,12 @@ impl DesktopLauncher {
                 self.last_settings_rebind_key = None;
                 self.settings_keybind_pending_axis_min = None;
             }
+            DesktopSettingsAction::CancelPendingDataAction => {
+                self.pending_settings_confirm_action = None;
+            }
+            DesktopSettingsAction::ConfirmPendingDataAction => {
+                self.last_settings_confirmed_action = self.pending_settings_confirm_action.take();
+            }
             DesktopSettingsAction::ClearPlanetData => {
                 self.settings_dialog_state.page = DesktopSettingsPage::Data;
                 self.settings_child_dialog = Some(DesktopSettingsChildDialog::PlanetData);
@@ -23862,8 +23991,10 @@ impl DesktopLauncher {
             | DesktopSettingsAction::ClearResearch
             | DesktopSettingsAction::ClearCampaignSaves
             | DesktopSettingsAction::ClearPlanetResearch
-            | DesktopSettingsAction::ClearPlanetCampaignSaves
-            | DesktopSettingsAction::ExportData
+            | DesktopSettingsAction::ClearPlanetCampaignSaves => {
+                self.pending_settings_confirm_action = Some(action);
+            }
+            DesktopSettingsAction::ExportData
             | DesktopSettingsAction::ImportData
             | DesktopSettingsAction::OpenDataFolder
             | DesktopSettingsAction::ExportCrashLogs => {}
@@ -26313,6 +26444,19 @@ impl DesktopLauncher {
                     if *pressed && Self::is_primary_menu_mouse_button(button) =>
                 {
                     if let Some(cursor) = self.last_menu_cursor {
+                        if self.pending_settings_confirm_action.is_some() {
+                            if let Some(action) = self
+                                .active_menu_route_shell_action_at_surface_point(
+                                    surface_size,
+                                    cursor.x,
+                                    cursor.y,
+                                )
+                            {
+                                self.dispatch_menu_route_shell_action(action);
+                            }
+                            self.last_menu_action = None;
+                            continue;
+                        }
                         if self.last_settings_rebind_key.is_some() {
                             if let Some(action) = self
                                 .active_menu_route_shell_action_at_surface_point(
@@ -27064,6 +27208,7 @@ impl DesktopLauncher {
         }
         if route == DesktopMenuRoute::Settings {
             self.push_settings_child_dialog(pass, panel);
+            self.push_settings_data_confirm_dialog(pass, panel);
         }
         if let Some(primary_rect) =
             Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)
@@ -47917,6 +48062,49 @@ mod tests {
         );
         assert_eq!(
             launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::ClearPlanetResearch)
+        );
+        assert_eq!(
+            launcher.pending_settings_confirm_action,
+            Some(super::DesktopSettingsAction::ClearPlanetResearch)
+        );
+        let confirm_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let confirm_texts = confirm_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("planet clear confirm frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(confirm_texts.contains(&"@confirm"));
+        assert!(confirm_texts.contains(&"settings.clearplanetresearch.confirm: erekir"));
+        assert!(confirm_texts.contains(&"@cancel"));
+        assert!(confirm_texts.contains(&"@ok"));
+        let confirm_dialog = DesktopLauncher::settings_data_confirm_dialog_rect(settings_panel);
+        let confirm_ok_center =
+            DesktopLauncher::settings_data_confirm_ok_rect(confirm_dialog).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: confirm_ok_center.x,
+                    y: confirm_ok_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.pending_settings_confirm_action, None);
+        assert_eq!(
+            launcher.last_settings_confirmed_action,
             Some(super::DesktopSettingsAction::ClearPlanetResearch)
         );
 
