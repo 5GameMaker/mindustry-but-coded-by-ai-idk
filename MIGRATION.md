@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 629. DatabaseDialog 建立 tag 分组数据模型
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **74.0%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把 DatabaseDialog 从“只取第一个 tag 的平铺记录”推进到有真实 tag 分组数据模型的过渡层。
+- Java 对照依据：
+  - `DatabaseDialog.sortContents()` 使用 `category -> tag -> Seq<UnlockableContent>` 的 `OrderedMap` 嵌套结构；
+  - `DatabaseDialog.rebuild()` 先按当前 search/tab 过滤，再逐 category、逐 tag 输出内容；
+  - `default` tag 是实际分组，只是 UI 不显示 tag 标题。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `database_visible_tag_groups_for_type(...)`，按现有 hidden/hideDatabase/tab/search 过滤后，以首次出现顺序保留 tag 分组；
+    - 新增 `database_visible_grouped_records_for_type(...)`，为当前单行几何提供过渡期扁平视图；
+    - `push_database_route_page(...)`、`database_hovered_content_cell_for_panel(...)`、`database_content_cell_at_point(...)` 改为使用同一个分组后扁平顺序，避免渲染与 hit-test 顺序分叉；
+    - 扩展 DatabaseDialog 测试，确认 `unit-air` 分组存在且包含 `flare`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_menu_sub_action_routes_to_database_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 当前仍是“分组数据模型 + 单行过渡渲染”，尚未实现 Java 那种一个 category 下多个 tag header、每个 tag 下多行 records 的完整布局；
+  - 后续进入多行布局时必须同步修改 `database_category_header_rect_for_panel(...)`、`database_content_cell_rect_for_panel(...)`、hover 与 hit-test；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 628. DatabaseDialog 补页签 hover tooltip
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

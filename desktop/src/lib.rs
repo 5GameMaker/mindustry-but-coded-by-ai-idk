@@ -22267,6 +22267,37 @@ impl DesktopLauncher {
             .collect()
     }
 
+    fn database_visible_tag_groups_for_type(
+        &self,
+        content_type: ContentType,
+    ) -> Vec<(Option<String>, Vec<(usize, String)>)> {
+        let mut groups: Vec<(Option<String>, Vec<(usize, String)>)> = Vec::new();
+
+        for (record_index, name) in self.database_visible_records_for_type(content_type) {
+            let tag = self.database_content_tag_key(content_type, name);
+            if let Some((_, records)) = groups
+                .iter_mut()
+                .find(|(existing_tag, _)| existing_tag == &tag)
+            {
+                records.push((record_index, name.to_string()));
+            } else {
+                groups.push((tag, vec![(record_index, name.to_string())]));
+            }
+        }
+
+        groups
+    }
+
+    fn database_visible_grouped_records_for_type(
+        &self,
+        content_type: ContentType,
+    ) -> Vec<(usize, String)> {
+        self.database_visible_tag_groups_for_type(content_type)
+            .into_iter()
+            .flat_map(|(_, records)| records)
+            .collect()
+    }
+
     fn database_hovered_content_cell_for_panel(
         &self,
         panel: RenderRect,
@@ -22292,16 +22323,16 @@ impl DesktopLauncher {
                 break;
             }
             for (item_index, (record_index, name)) in self
-                .database_visible_records_for_type(content_type)
+                .database_visible_grouped_records_for_type(content_type)
                 .into_iter()
                 .take(visible_columns)
                 .enumerate()
             {
                 let cell =
                     Self::database_content_cell_rect_for_panel(panel, category_index, item_index);
-                if cell.contains_point(point) && self.database_content_unlocked(content_type, name)
+                if cell.contains_point(point) && self.database_content_unlocked(content_type, &name)
                 {
-                    return Some((content_type, record_index, name.to_string(), cell));
+                    return Some((content_type, record_index, name, cell));
                 }
             }
         }
@@ -29186,7 +29217,7 @@ impl DesktopLauncher {
                 break;
             }
             for (item_index, (record_index, name)) in self
-                .database_visible_records_for_type(content_type)
+                .database_visible_grouped_records_for_type(content_type)
                 .into_iter()
                 .take(visible_columns)
                 .enumerate()
@@ -29194,7 +29225,7 @@ impl DesktopLauncher {
                 if Self::database_content_cell_rect_for_panel(panel, category_index, item_index)
                     .contains_point(point)
                 {
-                    if !self.database_content_unlocked(content_type, name) {
+                    if !self.database_content_unlocked(content_type, &name) {
                         return None;
                     }
                     return Some((content_type, record_index));
@@ -30938,8 +30969,10 @@ impl DesktopLauncher {
             if header.y < panel.y + 42.0 {
                 break;
             }
-            let records = self
-                .database_visible_records_for_type(content_type)
+            let groups = self.database_visible_tag_groups_for_type(content_type);
+            let records = groups
+                .iter()
+                .flat_map(|(_, records)| records.iter().cloned())
                 .into_iter()
                 .take(visible_columns)
                 .collect::<Vec<_>>();
@@ -30961,9 +30994,11 @@ impl DesktopLauncher {
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
                 Layer::END_PIXELED + 0.0345 + category_index as f32 * 0.001,
             ));
-            if let Some(tag) = records
+            if let Some(tag) = groups
                 .iter()
-                .filter_map(|(_, name)| self.database_content_tag_key(content_type, name))
+                .filter_map(|(tag, records)| {
+                    (!records.is_empty()).then_some(tag.as_ref()).flatten()
+                })
                 .next()
             {
                 pass.push(RenderCommand::draw_text_styled(
@@ -59634,6 +59669,15 @@ version: "2.0.0"
             "Java Planet.init/addDatabaseTab projects tech-tree planets onto block databaseTabs"
         );
         assert!(launcher.database_content_visible_on_tab(ContentType::Block, "router", "serpulo"));
+        let unit_tag_groups = launcher.database_visible_tag_groups_for_type(ContentType::Unit);
+        let air_group = unit_tag_groups
+            .iter()
+            .find(|(tag, _)| tag.as_deref() == Some("unit-air"))
+            .expect("Java DatabaseDialog groups units by databaseTag such as unit-air");
+        assert!(
+            air_group.1.iter().any(|(_, name)| name == "flare"),
+            "grouped DatabaseDialog records should keep unit-air contents inside their tag bucket"
+        );
 
         let search = DesktopLauncher::database_search_rect_for_panel(panel).center();
         assert_eq!(
