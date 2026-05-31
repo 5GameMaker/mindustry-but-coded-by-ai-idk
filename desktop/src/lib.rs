@@ -392,6 +392,12 @@ impl DesktopSettingsPage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSettingsChildDialog {
+    Language,
+    Controls,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopSettingsDialogState {
     pub page: DesktopSettingsPage,
@@ -412,6 +418,7 @@ pub enum DesktopSettingsAction {
     OpenPage(DesktopSettingsPage),
     OpenLanguageDialog,
     OpenControlsDialog,
+    CloseChildDialog,
     BackToMain,
     ResetCurrentPage,
     ToggleSetting(&'static str, &'static str),
@@ -14598,6 +14605,7 @@ pub struct DesktopLauncher {
     pub schematic_cards: Vec<DesktopSchematicCardEntry>,
     pub last_schematic_card_action: Option<DesktopSchematicCardAction>,
     pub settings_dialog_state: DesktopSettingsDialogState,
+    pub settings_child_dialog: Option<DesktopSettingsChildDialog>,
     pub last_settings_action: Option<DesktopSettingsAction>,
     pub last_settings_hovered_control: Option<DesktopSettingsControlId>,
     pub last_settings_pressed_control: Option<DesktopSettingsControlId>,
@@ -15333,6 +15341,7 @@ impl DesktopLauncher {
             schematic_cards: Vec::new(),
             last_schematic_card_action: None,
             settings_dialog_state: DesktopSettingsDialogState::default(),
+            settings_child_dialog: None,
             last_settings_action: None,
             last_settings_hovered_control: None,
             last_settings_pressed_control: None,
@@ -18996,6 +19005,7 @@ impl DesktopLauncher {
                 self.refresh_load_game_slots();
             } else if route == DesktopMenuRoute::Settings {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
+                self.settings_child_dialog = None;
                 self.last_settings_action = None;
                 self.last_settings_hovered_control = None;
                 self.last_settings_pressed_control = None;
@@ -19728,6 +19738,61 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_settings_child_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(child) = self.settings_child_dialog else {
+            return;
+        };
+        let dialog = Self::settings_child_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.44],
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            Self::settings_child_dialog_title(child),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 36.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.096,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            Self::settings_child_dialog_summary(child),
+            RenderPoint::new(dialog.center().x, dialog.center().y + 24.0),
+            [0.62, 0.72, 0.8, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.097,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::schematic_info_button_rect(dialog, 0),
+            "@back",
+            Some("left"),
+            Layer::END_PIXELED + 0.103,
+        );
+    }
+
     fn push_settings_route_controls(&self, pass: &mut RenderPass, panel: RenderRect) {
         let (DesktopSettingsPage::Game
         | DesktopSettingsPage::Graphics
@@ -20268,6 +20333,43 @@ impl DesktopLauncher {
         }
     }
 
+    fn settings_child_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        Self::schematic_info_dialog_rect_for_panel(panel)
+    }
+
+    fn settings_child_dialog_title(dialog: DesktopSettingsChildDialog) -> &'static str {
+        match dialog {
+            DesktopSettingsChildDialog::Language => "@settings.language",
+            DesktopSettingsChildDialog::Controls => "@settings.controls",
+        }
+    }
+
+    fn settings_child_dialog_summary(dialog: DesktopSettingsChildDialog) -> &'static str {
+        match dialog {
+            DesktopSettingsChildDialog::Language => {
+                "LanguageDialog placeholder: locale list and bundle reload later"
+            }
+            DesktopSettingsChildDialog::Controls => {
+                "ControlsDialog placeholder: keybind rows and reset later"
+            }
+        }
+    }
+
+    fn settings_child_dialog_action_at_point(
+        &self,
+        panel: RenderRect,
+        point: RenderPoint,
+    ) -> Option<DesktopMenuRouteShellAction> {
+        self.settings_child_dialog?;
+        let dialog = Self::settings_child_dialog_rect_for_panel(panel);
+        if Self::schematic_info_button_rect(dialog, 0).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::Settings(
+                DesktopSettingsAction::CloseChildDialog,
+            ));
+        }
+        None
+    }
+
     fn settings_route_shell_action_at_surface_point(
         &self,
         surface_size: DesktopSurfaceSize,
@@ -20281,6 +20383,9 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Settings);
         let point = RenderPoint::new(x, y);
+        if self.settings_child_dialog.is_some() {
+            return self.settings_child_dialog_action_at_point(panel, point);
+        }
         if self.settings_dialog_state.page == DesktopSettingsPage::Main {
             if let Some(index) = Self::settings_main_menu_entry_index_at_point(panel, point) {
                 return Self::settings_action_for_main_entry(index)
@@ -21531,6 +21636,7 @@ impl DesktopLauncher {
                 self.settings_scroll_drag_state = None;
             }
             DesktopSettingsAction::BackToMain => {
+                self.settings_child_dialog = None;
                 if self.settings_dialog_state.page == DesktopSettingsPage::Main {
                     self.active_menu_route = None;
                 } else {
@@ -21562,9 +21668,16 @@ impl DesktopLauncher {
                     }
                 }
             }
-            DesktopSettingsAction::OpenLanguageDialog
-            | DesktopSettingsAction::OpenControlsDialog
-            | DesktopSettingsAction::ClearAllData
+            DesktopSettingsAction::OpenLanguageDialog => {
+                self.settings_child_dialog = Some(DesktopSettingsChildDialog::Language);
+            }
+            DesktopSettingsAction::OpenControlsDialog => {
+                self.settings_child_dialog = Some(DesktopSettingsChildDialog::Controls);
+            }
+            DesktopSettingsAction::CloseChildDialog => {
+                self.settings_child_dialog = None;
+            }
+            DesktopSettingsAction::ClearAllData
             | DesktopSettingsAction::ClearPlanetData
             | DesktopSettingsAction::ClearSaves
             | DesktopSettingsAction::ClearResearch
@@ -21658,6 +21771,7 @@ impl DesktopLauncher {
                 self.active_menu_route = None;
                 self.mods_selected_mod_index = None;
                 self.mods_import_dialog_open = false;
+                self.settings_child_dialog = None;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -24707,6 +24821,9 @@ impl DesktopLauncher {
                 self.push_settings_route_controls(pass, panel);
                 self.push_settings_route_buttons(pass, panel);
             }
+        }
+        if route == DesktopMenuRoute::Settings {
+            self.push_settings_child_dialog(pass, panel);
         }
         if let Some(primary_rect) =
             Self::active_menu_route_shell_primary_rect_for_viewport(viewport, route)
@@ -44410,9 +44527,126 @@ mod tests {
             launcher.last_settings_action,
             Some(super::DesktopSettingsAction::OpenLanguageDialog)
         );
+        assert_eq!(
+            launcher.settings_child_dialog,
+            Some(super::DesktopSettingsChildDialog::Language)
+        );
 
         let data_center =
             DesktopLauncher::settings_main_menu_button_rect_for_panel(settings_panel, 5).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                data_center.x,
+                data_center.y
+            ),
+            None,
+            "Settings child dialog should be modal and block clicks to the page behind it"
+        );
+
+        let language_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let language_texts = language_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("language child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(language_texts.contains(&"@settings.language"));
+        assert!(language_texts
+            .contains(&"LanguageDialog placeholder: locale list and bundle reload later"));
+        assert!(language_texts.contains(&"@back"));
+
+        let child_dialog = DesktopLauncher::settings_child_dialog_rect_for_panel(settings_panel);
+        let close_child_center =
+            DesktopLauncher::schematic_info_button_rect(child_dialog, 0).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                close_child_center.x,
+                close_child_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::CloseChildDialog
+            ))
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: close_child_center.x,
+                    y: close_child_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.settings_child_dialog, None);
+        assert_eq!(
+            launcher.last_settings_action,
+            Some(super::DesktopSettingsAction::CloseChildDialog)
+        );
+
+        let controls_center =
+            DesktopLauncher::settings_main_menu_button_rect_for_panel(settings_panel, 4).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: controls_center.x,
+                    y: controls_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(
+            launcher.settings_child_dialog,
+            Some(super::DesktopSettingsChildDialog::Controls)
+        );
+        let controls_frame = launcher.menu_graphics_frame_for_surface(2, viewport);
+        let controls_texts = controls_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("controls child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(controls_texts.contains(&"@settings.controls"));
+        assert!(
+            controls_texts.contains(&"ControlsDialog placeholder: keybind rows and reset later")
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: close_child_center.x,
+                    y: close_child_center.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.settings_child_dialog, None);
+
         launcher.apply_menu_input_events(
             surface,
             &[

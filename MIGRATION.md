@@ -19360,6 +19360,33 @@ D:/MDT/rust-mindustry/AI_HANDOFF.md
   - 当前 card tag 修改还没有接真实 schematic 文件 `save()`；
   - 未达到完整可玩，不能宣告目标完成。
 
+## 550. SettingsMenuDialog 语言和控制弹窗入口闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **59.6%**，仍未达到完整可玩；继续优先前端/UI，把 `SettingsMenuDialog` 主菜单里的 `@settings.language` 与 `@settings.controls` 从空动作推进为可打开、可关闭、可遮罩底层点击的子弹窗闭环。
+- Java 对照依据：
+  - 原版 `SettingsMenuDialog` 的语言与控制项是设置主菜单里的独立入口，不应只是无效点击；
+  - 入口打开后应作为模态子对话框处理，底层设置页不应误触；
+  - 子对话框必须保留返回/关闭路径，后续再继续迁移完整语言列表与按键绑定表。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSettingsChildDialog::{Language, Controls}` 与 `settings_child_dialog` 状态；
+    - `OpenLanguageDialog` / `OpenControlsDialog` 现在会打开对应 Settings 子弹窗；
+    - 新增 `CloseChildDialog`，子弹窗内 `@back` 可关闭并回到 Settings 主菜单；
+    - Settings 子弹窗渲染遮罩、pane、标题、占位说明与返回按钮，确保不再是静默空动作；
+    - `settings_route_shell_action_at_surface_point(...)` 在子弹窗打开时优先处理子弹窗命中并阻断底层按钮；
+    - 打开 Settings 路由、返回主菜单、关闭路由时会清理子弹窗状态，避免跨路由残留。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop settings --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - LanguageDialog 目前还是最小占位弹窗，未接完整 locale 列表、bundle reload 和语言持久化；
+  - ControlsDialog 目前还是最小占位弹窗，未接完整 keybind rows、分类、冲突处理和重置行为；
+  - Settings Data/Game/Graphics/Sound 的更多即时副作用与确认弹窗仍需继续按原版迁移；
+  - UI 仍在长线还原中，未达到完整可玩，不能宣布目标完成。
+
 ## 549. ModsDialog 导入弹窗最小闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（目录名不变，当前实际参考基线仍为 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 继续禁止使用；遇到乱码优先 UTF-8。
