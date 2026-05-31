@@ -175,6 +175,7 @@ const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const LOAD_SEARCH_TEXT_MAX_LENGTH: usize = 50;
 const LOAD_RENAME_TEXT_MAX_LENGTH: usize = 32;
 const SAVE_NEW_TEXT_MAX_LENGTH: usize = 30;
+const SAVE_GAME_SAVING_DELAY_FRAMES: u8 = 5;
 const HOST_NAME_TEXT_MAX_LENGTH: usize = 40;
 const HOST_PORT_TEXT_MAX_LENGTH: usize = 5;
 const HOST_PALETTE_COLORS: [u32; 8] = [
@@ -2898,6 +2899,40 @@ pub struct DesktopSaveGameResult {
     pub name: String,
     pub timestamp: i64,
     pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopSaveGamePendingOperation {
+    New { name: String },
+    Overwrite { slot_index: usize },
+}
+
+impl DesktopSaveGamePendingOperation {
+    fn status_line(&self) -> String {
+        match self {
+            Self::New { name } => format!("@saving: @save.new | {name}"),
+            Self::Overwrite { slot_index } => format!("@saving: @overwrite | slot {slot_index}"),
+        }
+    }
+
+    fn closes_route_after_success(&self) -> bool {
+        matches!(self, Self::Overwrite { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopSaveGamePendingSave {
+    pub operation: DesktopSaveGamePendingOperation,
+    pub frames_remaining: u8,
+}
+
+impl DesktopSaveGamePendingSave {
+    fn new(operation: DesktopSaveGamePendingOperation) -> Self {
+        Self {
+            operation,
+            frames_remaining: SAVE_GAME_SAVING_DELAY_FRAMES,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -16232,6 +16267,7 @@ pub struct DesktopLauncher {
     pub save_game_new_dialog_open: bool,
     pub save_game_new_text: String,
     pub save_game_overwrite_dialog_slot: Option<usize>,
+    pub save_game_pending_save: Option<DesktopSaveGamePendingSave>,
     pub last_save_game_result: Option<DesktopSaveGameResult>,
     pub campaign_planet_dialog: Option<CampaignPlanetDialogState>,
     pub last_campaign_launch_report: Option<GameRuntimePlayableSmokeReport>,
@@ -17080,6 +17116,7 @@ impl DesktopLauncher {
             save_game_new_dialog_open: false,
             save_game_new_text: String::new(),
             save_game_overwrite_dialog_slot: None,
+            save_game_pending_save: None,
             last_save_game_result: None,
             campaign_planet_dialog: None,
             last_campaign_launch_report: None,
@@ -17392,6 +17429,9 @@ impl DesktopLauncher {
     pub fn update(&mut self) {
         if !self.game_state.is_paused() {
             self.render_time = (self.render_time + 1.0).max(0.0);
+        }
+        if self.has_renderable_world_for_default_frame() {
+            self.tick_save_game_pending_save();
         }
         self.client.update();
         self.net_client.update();
@@ -20899,6 +20939,10 @@ impl DesktopLauncher {
             self.last_menu_chrome_action = None;
             return true;
         }
+        if self.save_game_pending_save.is_some() {
+            self.last_menu_route_shell_action = None;
+            return true;
+        }
         if self.active_menu_route == Some(DesktopMenuRoute::About)
             && self.about_route_page == DesktopAboutRoutePage::Credits
         {
@@ -20958,6 +21002,7 @@ impl DesktopLauncher {
             self.save_game_new_dialog_open = false;
             self.save_game_new_text.clear();
             self.save_game_overwrite_dialog_slot = None;
+            self.save_game_pending_save = None;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
             self.last_menu_dispatch = None;
@@ -21104,6 +21149,8 @@ impl DesktopLauncher {
                 self.save_game_new_dialog_open = false;
                 self.save_game_new_text.clear();
                 self.save_game_overwrite_dialog_slot = None;
+                self.save_game_pending_save = None;
+                self.load_game_error = None;
             } else if route == DesktopMenuRoute::Settings {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
                 self.settings_child_dialog = None;
@@ -24470,6 +24517,9 @@ impl DesktopLauncher {
         let panel =
             Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::SaveGame);
         let point = RenderPoint::new(x, y);
+        if self.save_game_pending_save.is_some() {
+            return None;
+        }
         if self.save_game_new_dialog_open {
             let dialog = Self::load_game_rename_dialog_rect_for_panel(panel);
             if Self::load_game_rename_button_rect(dialog, 0).contains_point(point) {
@@ -24813,6 +24863,58 @@ impl DesktopLauncher {
         };
         self.last_save_game_result = Some(result.clone());
         Ok(result)
+    }
+
+    fn start_save_game_pending_save(&mut self, operation: DesktopSaveGamePendingOperation) {
+        self.load_game_error = None;
+        self.save_game_pending_save = Some(DesktopSaveGamePendingSave::new(operation));
+    }
+
+    fn tick_save_game_pending_save(&mut self) -> bool {
+        let should_complete = match self.save_game_pending_save.as_mut() {
+            Some(pending) => {
+                if pending.frames_remaining > 0 {
+                    pending.frames_remaining -= 1;
+                }
+                pending.frames_remaining == 0
+            }
+            None => false,
+        };
+        if should_complete {
+            self.complete_save_game_pending_save();
+        }
+        should_complete
+    }
+
+    fn complete_save_game_pending_save(&mut self) -> Option<DesktopSaveGameResult> {
+        let pending = self.save_game_pending_save.take()?;
+        let close_route_after_success = pending.operation.closes_route_after_success();
+        let result = match pending.operation {
+            DesktopSaveGamePendingOperation::New { name } => self.add_save_game_slot(name),
+            DesktopSaveGamePendingOperation::Overwrite { slot_index } => {
+                self.overwrite_save_game_slot(slot_index)
+            }
+        };
+
+        match result {
+            Ok(result) => {
+                self.load_game_error = None;
+                if close_route_after_success {
+                    self.active_menu_route = None;
+                    self.load_game_search_focused = false;
+                    self.load_game_rename_dialog_slot = None;
+                    self.load_game_rename_text.clear();
+                    self.save_game_new_dialog_open = false;
+                    self.save_game_new_text.clear();
+                    self.save_game_overwrite_dialog_slot = None;
+                }
+                Some(result)
+            }
+            Err(error) => {
+                self.load_game_error = Some(format!("[accent]@savefail: {error}"));
+                None
+            }
+        }
     }
 
     fn add_save_game_slot(
@@ -25301,6 +25403,8 @@ impl DesktopLauncher {
                 self.save_game_new_dialog_open = false;
                 self.save_game_new_text.clear();
                 self.save_game_overwrite_dialog_slot = None;
+                self.save_game_pending_save = None;
+                self.load_game_error = None;
             }
             DesktopMenuRoute::Settings => {
                 self.settings_dialog_state = DesktopSettingsDialogState::default();
@@ -28136,6 +28240,7 @@ impl DesktopLauncher {
                 self.save_game_new_dialog_open = false;
                 self.save_game_new_text.clear();
                 self.save_game_overwrite_dialog_slot = None;
+                self.save_game_pending_save = None;
                 self.settings_child_dialog = None;
                 self.settings_keybind_search_focused = false;
                 self.last_settings_rebind_key = None;
@@ -28329,16 +28434,16 @@ impl DesktopLauncher {
                 self.save_game_new_dialog_open = true;
                 self.save_game_new_text.clear();
                 self.save_game_overwrite_dialog_slot = None;
+                self.save_game_pending_save = None;
             }
             DesktopMenuRouteShellAction::SaveGameNewOk => {
                 if self.save_game_new_dialog_open && !self.save_game_new_text.is_empty() {
-                    if self
-                        .add_save_game_slot(self.save_game_new_text.clone())
-                        .is_ok()
-                    {
-                        self.save_game_new_dialog_open = false;
-                        self.save_game_new_text.clear();
-                    }
+                    let name = self.save_game_new_text.clone();
+                    self.save_game_new_dialog_open = false;
+                    self.save_game_new_text.clear();
+                    self.start_save_game_pending_save(DesktopSaveGamePendingOperation::New {
+                        name,
+                    });
                 }
             }
             DesktopMenuRouteShellAction::SaveGameNewCancel => {
@@ -28349,13 +28454,15 @@ impl DesktopLauncher {
                 if self.load_game_slots.get(index).is_some() {
                     self.save_game_overwrite_dialog_slot = Some(index);
                     self.save_game_new_dialog_open = false;
+                    self.save_game_pending_save = None;
                 }
             }
             DesktopMenuRouteShellAction::SaveGameOverwriteOk => {
                 if let Some(index) = self.save_game_overwrite_dialog_slot {
-                    if self.overwrite_save_game_slot(index).is_ok() {
-                        self.save_game_overwrite_dialog_slot = None;
-                    }
+                    self.save_game_overwrite_dialog_slot = None;
+                    self.start_save_game_pending_save(DesktopSaveGamePendingOperation::Overwrite {
+                        slot_index: index,
+                    });
                 }
             }
             DesktopMenuRouteShellAction::SaveGameOverwriteCancel => {
@@ -33037,9 +33144,78 @@ impl DesktopLauncher {
         if self.active_menu_route == Some(DesktopMenuRoute::SaveGame) {
             self.push_save_game_new_dialog(pass, panel);
             self.push_save_game_overwrite_dialog(pass, panel);
+            self.push_save_game_saving_overlay(pass, panel);
         } else {
             self.push_load_game_rename_dialog(pass, panel);
         }
+    }
+
+    fn push_save_game_saving_overlay(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(pending) = self.save_game_pending_save.as_ref() else {
+            return;
+        };
+        let width = (panel.width - 140.0).clamp(260.0, 380.0);
+        let height = 118.0;
+        let dialog = RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        );
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.54],
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            desktop_ui_icon_glyph_or_label("refresh", "refresh"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
+            [0.80, 0.94, 1.0, 1.0],
+            20.0,
+            self.render_time * 8.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_font(RenderFontId::Icon)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.093,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            "@saving",
+            RenderPoint::new(dialog.center().x, dialog.center().y - 2.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.094,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            pending.operation.status_line(),
+            RenderPoint::new(dialog.center().x, dialog.y + 24.0),
+            [0.60, 0.72, 0.82, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.0945,
+        ));
     }
 
     fn push_load_game_rename_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
@@ -33965,6 +34141,10 @@ impl DesktopLauncher {
                                 self.last_menu_action = None;
                                 continue;
                             }
+                            if self.save_game_pending_save.is_some() {
+                                self.last_menu_action = None;
+                                continue;
+                            }
                         }
                         if let Some(slot_index) =
                             self.load_game_slot_at_surface_point(surface_size, cursor.x, cursor.y)
@@ -34250,6 +34430,10 @@ impl DesktopLauncher {
             DesktopMenuRoute::SaveGame => {
                 let mut lines = self.load_game_slot_lines();
                 lines.insert(0, "button: @save.new Icon.add".into());
+                if let Some(pending) = self.save_game_pending_save.as_ref() {
+                    lines.insert(0, pending.operation.status_line());
+                    lines.insert(0, "loadfrag: @saving".into());
+                }
                 lines
             }
             DesktopMenuRoute::CustomGame => self.custom_game_route_lines(),
@@ -36227,6 +36411,7 @@ impl DesktopLauncher {
         self.push_menu_boot_diagnostics(&mut menu_pass, frame_viewport);
         self.push_mobile_terminal_overlay(&mut menu_pass, frame_viewport);
         self.push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
+        self.tick_save_game_pending_save();
         let camera = menu_pass
             .camera
             .unwrap_or_else(|| self.default_render_camera_for_viewport(frame_viewport));
@@ -58907,6 +59092,42 @@ version: "2.0.0"
         launcher
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::SaveGameNewOk);
 
+        assert_eq!(
+            launcher
+                .save_game_pending_save
+                .as_ref()
+                .map(|pending| { (pending.frames_remaining, pending.operation.status_line(),) }),
+            Some((
+                super::SAVE_GAME_SAVING_DELAY_FRAMES,
+                "@saving: @save.new | Alpha Save".to_string(),
+            )),
+            "upstream SaveDialog wraps new saves in ui.loadAnd(\"@saving\", ...)"
+        );
+        assert!(
+            launcher.last_save_game_result.is_none(),
+            "save should finish after the visible @saving frame delay"
+        );
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let saving_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let saving_texts = saving_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("saving frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(saving_texts.contains(&"@saving"));
+        for frame_index in 1..super::SAVE_GAME_SAVING_DELAY_FRAMES as u64 {
+            launcher.menu_graphics_frame_for_surface(frame_index, viewport);
+        }
+
         let created = launcher
             .last_save_game_result
             .clone()
@@ -58930,6 +59151,44 @@ version: "2.0.0"
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::SaveGameOverwriteOk,
         );
+        assert_eq!(
+            launcher
+                .save_game_pending_save
+                .as_ref()
+                .map(|pending| { (pending.frames_remaining, pending.operation.status_line(),) }),
+            Some((
+                super::SAVE_GAME_SAVING_DELAY_FRAMES,
+                "@saving: @overwrite | slot 0".to_string(),
+            )),
+            "overwrite should use the upstream SaveDialog.save loadfrag delay"
+        );
+        assert_eq!(
+            launcher.save_game_overwrite_dialog_slot, None,
+            "confirm dialog should close while @saving overlay owns the UI"
+        );
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::SaveGame),
+            "SaveDialog should stay visible while @saving is shown"
+        );
+        let overwrite_saving_frame = launcher.menu_graphics_frame_for_surface(10, viewport);
+        let overwrite_saving_texts = overwrite_saving_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("overwrite saving frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(overwrite_saving_texts.contains(&"@saving"));
+        for frame_index in 11..(10 + super::SAVE_GAME_SAVING_DELAY_FRAMES as u64) {
+            launcher.menu_graphics_frame_for_surface(frame_index, viewport);
+        }
         let saved = launcher
             .last_save_game_result
             .clone()
@@ -58938,6 +59197,10 @@ version: "2.0.0"
         assert_eq!(saved.slot, "0");
         assert_eq!(saved.name, "Alpha Save");
         assert_eq!(launcher.save_game_overwrite_dialog_slot, None);
+        assert_eq!(
+            launcher.active_menu_route, None,
+            "upstream SaveDialog.save hides the dialog after the delayed save"
+        );
 
         std::fs::remove_dir_all(root).ok();
     }

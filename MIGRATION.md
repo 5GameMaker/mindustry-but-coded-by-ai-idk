@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 590. SaveDialog 保存态与上游 loadfrag 流程对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **70.0%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是补齐 `SaveDialog` 相比 Java 上游最明显的保存状态流差异。
+- Java 对照依据：
+  - `SaveDialog.addSetup()` 使用 `ui.showTextInput("@save", "@save.newslot", 30, "", text -> ui.loadAnd("@saving", ...))`；
+  - `SaveDialog.modifyButton(...)` 点击存档卡弹 `ui.showConfirm("@overwrite", "@save.overwrite", () -> save(slot))`；
+  - `SaveDialog.save(slot)` 先 `ui.loadfrag.show("@saving")`，延迟 `Time.runTask(5f, ...)` 后 `hide()`、`ui.loadfrag.hide()`、`slot.save()`，异常走 `@savefail`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopSaveGamePendingOperation` / `DesktopSaveGamePendingSave`，把新建保存与覆盖保存从“立即写文件”改成先进入 5 帧 `@saving` pending 状态；
+    - SaveGame 路由渲染新增 `@saving` 模态遮罩、refresh 图标和 pending 状态行，保存中阻断底层 SaveDialog 点击；
+    - 新建保存完成后保持 SaveDialog，覆盖保存完成后按上游 `hide()` 语义关闭 route；
+    - 保存失败写入 `load_game_error`，以 `@savefail` 可见错误替代静默失败；
+    - 更新 SaveDialog create/overwrite 测试，锁定 `@saving` 可见、延迟完成和覆盖后关闭行为。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_creates_and_overwrites_save_slots --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_save_dialog_new_save_input_contract_matches_upstream_savegame --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_supports_search_and_scroll_window --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `SaveDialog`/`LoadDialog` 卡片尺寸、宽屏列布局、真实 Scene2D `TextButton`/`Image` 排版仍需继续抠；
+  - `SettingsMenuDialog` 的 Data 独立 BaseDialog 壳和 SettingsTable 行 chrome 仍是下一批高可见 UI 差距；
+  - 真实字体光栅化尚未接入，客户端仍未达到完整可玩，不能宣告目标完成。
+
 ## 589. 移动端 MenuFragment terminal/info 行布局对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前实际参考基线 `v158.1`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
