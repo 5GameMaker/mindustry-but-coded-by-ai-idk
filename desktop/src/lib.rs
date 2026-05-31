@@ -168,6 +168,7 @@ const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
 const JOIN_ACTION_BUTTON_WIDTH: f32 = 170.0;
 const JOIN_ACTION_BUTTON_HEIGHT: f32 = 44.0;
+const JOIN_SEARCH_TEXT_MAX_LENGTH: usize = 64;
 const LOAD_SLOT_CARD_HEIGHT: f32 = 82.0;
 const LOAD_SLOT_CARD_GAP: f32 = 8.0;
 const LOAD_SEARCH_BAR_HEIGHT: f32 = 34.0;
@@ -253,6 +254,27 @@ fn desktop_fast_menu_enabled() -> bool {
 pub struct DesktopConnectTarget {
     pub host: String,
     pub port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DesktopJoinRouteServerSnapshot {
+    address: String,
+    source: String,
+    status: String,
+    version: String,
+    description: String,
+    players: String,
+    map: String,
+    mode: String,
+    ping: String,
+    search_terms: String,
+}
+
+impl DesktopJoinRouteServerSnapshot {
+    fn matches_query(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        query.is_empty() || self.search_terms.contains(&query)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -823,6 +845,50 @@ fn schematic_search_normalize(value: &str) -> String {
             )
         })
         .collect()
+}
+
+fn schematic_text_snippet(value: &str, max_chars: usize) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if index >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+    }
+
+    out
+}
+
+fn schematic_source_summary(entry: &DesktopSchematicCardEntry) -> String {
+    if entry.has_steam_id {
+        "source: workshop".to_string()
+    } else if let Some(mod_name) = entry
+        .mod_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        format!("source: mod {}", schematic_text_snippet(mod_name, 24))
+    } else {
+        "source: local".to_string()
+    }
+}
+
+fn schematic_description_summary(entry: &DesktopSchematicCardEntry) -> Option<String> {
+    let description = entry.description.trim();
+    (!description.is_empty())
+        .then(|| format!("description: {}", schematic_text_snippet(description, 48)))
+}
+
+fn schematic_label_summary(labels: &[String]) -> Option<String> {
+    (!labels.is_empty())
+        .then(|| format!("tags: {}", schematic_text_snippet(&labels.join(", "), 38)))
 }
 
 fn schematic_tags_json_escape(value: &str) -> String {
@@ -2582,6 +2648,9 @@ pub enum DesktopMenuRouteShellAction {
     CloseRoute,
     LaunchCampaign,
     ConnectJoin,
+    FocusJoinSearch,
+    ClearJoinSearch,
+    ToggleJoinShowHidden,
     FocusHostName,
     FocusHostPort,
     ToggleHostFriendsOnly,
@@ -16094,6 +16163,9 @@ pub struct DesktopLauncher {
     pub host_error: Option<String>,
     pub join_add_dialog_open: bool,
     pub join_refresh_requests: u32,
+    pub join_search: String,
+    pub join_search_focused: bool,
+    pub join_show_hidden: bool,
     pub mods_directory_arg: Option<String>,
     pub mods_directory_error: Option<String>,
     pub last_mods_directory_merge_count: Option<usize>,
@@ -16939,6 +17011,9 @@ impl DesktopLauncher {
             host_error: None,
             join_add_dialog_open: false,
             join_refresh_requests: 0,
+            join_search: String::new(),
+            join_search_focused: false,
+            join_show_hidden: false,
             mods_directory_arg,
             mods_directory_error: None,
             last_mods_directory_merge_count: None,
@@ -25087,6 +25162,94 @@ impl DesktopLauncher {
         )
     }
 
+    fn join_route_search_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let card = Self::join_route_server_card_rect_for_panel(panel, 0);
+        let global_y = card.y - 30.0;
+        let search_y = global_y - 42.0;
+        RenderRect::new(panel.x + 36.0, search_y, panel.width - 232.0, 32.0)
+    }
+
+    fn join_route_show_hidden_button_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let search = Self::join_route_search_rect_for_panel(panel);
+        RenderRect::new(search.right() + 10.0, search.y, 150.0, search.height)
+    }
+
+    fn join_route_server_snapshot(&self) -> Option<DesktopJoinRouteServerSnapshot> {
+        let target = self.connect_target.as_ref()?;
+        let state = self.net_client.state();
+        let state = state.lock().unwrap();
+        let world = state.last_loaded_world_data.as_ref();
+        let address = format!("{}:{}", target.host, target.port);
+        let source = "saved".to_string();
+        let status = if let Some(error) = self.connect_error.as_ref() {
+            format!("error: {error}")
+        } else if state.connected {
+            "connected".to_string()
+        } else if state.connecting {
+            "connecting".to_string()
+        } else {
+            "saved".to_string()
+        };
+        let version = UPSTREAM_BASELINE.to_string();
+        let description = world
+            .and_then(|world| {
+                world
+                    .map_tags
+                    .get("description")
+                    .filter(|description| !description.trim().is_empty())
+            })
+            .cloned()
+            .unwrap_or_else(|| "saved favorite server; click card or CONNECT".into());
+        let players = if world.and_then(|world| world.player.as_ref()).is_some()
+            || state.connected
+            || state.connect_confirm_sent
+        {
+            "1".to_string()
+        } else {
+            "0".to_string()
+        };
+        let map = world
+            .and_then(|world| {
+                world
+                    .map_tags
+                    .get("name")
+                    .filter(|name| !name.trim().is_empty())
+            })
+            .cloned()
+            .unwrap_or_else(|| "@unknown".into());
+        let mode = format!("@{}", self.game_state.rules.mode().name_bundle_key());
+        let ping = if state.ping_ms > 0 {
+            format!("{}ms", state.ping_ms)
+        } else {
+            "--ms".into()
+        };
+        let search_terms = [
+            address.clone(),
+            source.clone(),
+            status.clone(),
+            version.clone(),
+            description.clone(),
+            players.clone(),
+            map.clone(),
+            mode.clone(),
+            ping.clone(),
+        ]
+        .join(" ")
+        .to_lowercase();
+        Some(DesktopJoinRouteServerSnapshot {
+            address,
+            source,
+            status,
+            version,
+            description,
+            players,
+            map,
+            mode,
+            ping,
+            search_terms,
+        })
+    }
+
     fn join_add_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         let width = (panel.width * 0.58).clamp(360.0, 520.0);
         let height = 214.0;
@@ -25127,7 +25290,10 @@ impl DesktopLauncher {
         panel: RenderRect,
         point: RenderPoint,
     ) -> Option<usize> {
-        self.connect_target.as_ref()?;
+        let snapshot = self.join_route_server_snapshot()?;
+        if !snapshot.matches_query(&self.join_search) {
+            return None;
+        }
         let rect = Self::join_route_server_card_rect_for_panel(panel, 0);
         rect.contains_point(point).then_some(0)
     }
@@ -25996,6 +26162,23 @@ impl DesktopLauncher {
         !self.schematic_search.is_empty() || !self.schematic_selected_tags.is_empty()
     }
 
+    fn schematic_filter_summary(&self) -> Option<String> {
+        let mut summary = Vec::new();
+        if !self.schematic_search.trim().is_empty() {
+            summary.push(format!(
+                "search: {}",
+                schematic_text_snippet(self.schematic_search.trim(), 40)
+            ));
+        }
+        if !self.schematic_selected_tags.is_empty() {
+            summary.push(format!(
+                "tags: {}",
+                schematic_text_snippet(&self.schematic_selected_tags.join(", "), 40)
+            ));
+        }
+        (!summary.is_empty()).then(|| summary.join(" | "))
+    }
+
     fn schematic_card_matches_filters(&self, entry: &DesktopSchematicCardEntry) -> bool {
         if !self.schematic_selected_tags.is_empty()
             && !self
@@ -26558,6 +26741,12 @@ impl DesktopLauncher {
         if Self::join_route_refresh_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::RefreshJoinServers);
         }
+        if Self::join_route_search_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::FocusJoinSearch);
+        }
+        if Self::join_route_show_hidden_button_rect_for_panel(panel).contains_point(point) {
+            return Some(DesktopMenuRouteShellAction::ToggleJoinShowHidden);
+        }
         if self
             .join_route_server_card_index_at_point(panel, point)
             .is_some()
@@ -26973,6 +27162,32 @@ impl DesktopLauncher {
             width,
             height,
         )
+    }
+
+    fn tech_tree_display_label(label: &str) -> String {
+        if label.is_empty() {
+            return String::new();
+        }
+        if label.chars().any(|c| c.is_uppercase() || c.is_whitespace()) {
+            return label.to_string();
+        }
+
+        label
+            .split(|c: char| c == '-' || c == '_')
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                let mut chars = part.chars();
+                match chars.next() {
+                    Some(first) => {
+                        let mut output = first.to_uppercase().collect::<String>();
+                        output.push_str(&chars.as_str().to_lowercase());
+                        output
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn tech_tree_select_root_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
@@ -27433,6 +27648,8 @@ impl DesktopLauncher {
                 self.host_info_dialog_open = false;
                 self.host_color_picker_open = false;
                 self.host_error = None;
+                self.join_add_dialog_open = false;
+                self.join_search_focused = false;
             }
             DesktopMenuRouteShellAction::LaunchCampaign => {
                 if self.block_menu_action_for_content_errors(MenuButtonRole::Campaign) {
@@ -27447,6 +27664,16 @@ impl DesktopLauncher {
                     return;
                 };
                 let _ = self.connect_to_target(target);
+            }
+            DesktopMenuRouteShellAction::FocusJoinSearch => {
+                self.join_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::ClearJoinSearch => {
+                self.join_search.clear();
+                self.join_search_focused = true;
+            }
+            DesktopMenuRouteShellAction::ToggleJoinShowHidden => {
+                self.join_show_hidden = !self.join_show_hidden;
             }
             DesktopMenuRouteShellAction::FocusHostName => {
                 self.host_name_focused = true;
@@ -28954,6 +29181,8 @@ impl DesktopLauncher {
             ));
         }
 
+        let search_rect = Self::join_route_search_rect_for_panel(panel);
+        let show_hidden_rect = Self::join_route_show_hidden_button_rect_for_panel(panel);
         let card = Self::join_route_server_card_rect_for_panel(panel, 0);
         pass.push(RenderCommand::draw_sprite(
             Self::settings_drawable_symbol("pane"),
@@ -28968,83 +29197,117 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.032,
         ));
-        if let Some(target) = self.connect_target.as_ref() {
-            let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
-            pass.push(RenderCommand::fill_rect(
-                header,
-                [0.30, 0.36, 0.42, 0.44],
-                Layer::END_PIXELED + 0.033,
-            ));
-            pass.push(RenderCommand::draw_text_styled(
-                format!(
-                    "{}:{}   @server.version: {}",
-                    target.host, target.port, UPSTREAM_BASELINE
-                ),
-                RenderPoint::new(card.x + 14.0, header.center().y),
-                [0.90, 0.96, 1.0, 1.0],
-                12.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true)
-                    .with_outline(true),
-                Layer::END_PIXELED + 0.034,
-            ));
-            for (button_index, icon) in ["refresh", "pencil", "trash", "rightOpen"]
-                .iter()
-                .enumerate()
-            {
-                let button = RenderRect::new(
-                    card.x + card.width - 36.0 - button_index as f32 * 32.0,
-                    header.center().y - 13.0,
-                    26.0,
-                    26.0,
-                );
+        if let Some(snapshot) = self.join_route_server_snapshot() {
+            if snapshot.matches_query(&self.join_search) {
+                let header = RenderRect::new(card.x, card.y + card.height - 34.0, card.width, 34.0);
+                pass.push(RenderCommand::fill_rect(
+                    header,
+                    [0.30, 0.36, 0.42, 0.44],
+                    Layer::END_PIXELED + 0.033,
+                ));
                 pass.push(RenderCommand::draw_text_styled(
-                    desktop_ui_icon_glyph_or_label(icon, icon),
-                    button.center(),
-                    [0.78, 0.88, 0.96, 1.0],
+                    format!(
+                        "{}   @server.version: {}",
+                        snapshot.address, snapshot.version
+                    ),
+                    RenderPoint::new(card.x + 14.0, header.center().y),
+                    [0.90, 0.96, 1.0, 1.0],
+                    12.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true)
+                        .with_outline(true),
+                    Layer::END_PIXELED + 0.034,
+                ));
+                for (button_index, icon) in ["refresh", "pencil", "trash", "rightOpen"]
+                    .iter()
+                    .enumerate()
+                {
+                    let button = RenderRect::new(
+                        card.x + card.width - 36.0 - button_index as f32 * 32.0,
+                        header.center().y - 13.0,
+                        26.0,
+                        26.0,
+                    );
+                    pass.push(RenderCommand::draw_text_styled(
+                        desktop_ui_icon_glyph_or_label(icon, icon),
+                        button.center(),
+                        [0.78, 0.88, 0.96, 1.0],
+                        13.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Center)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true)
+                            .with_outline(true),
+                        Layer::END_PIXELED + 0.035 + button_index as f32 * 0.0001,
+                    ));
+                }
+                pass.push(RenderCommand::draw_text_styled(
+                    snapshot.description.clone(),
+                    RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
+                    [0.62, 0.72, 0.82, 1.0],
+                    11.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.034,
+                ));
+                for (index, line) in [
+                    format!("status: {}", snapshot.status),
+                    format!("players: {}", snapshot.players),
+                    format!("save.map: {} / {}", snapshot.map, snapshot.mode),
+                    format!("ping: {}", snapshot.ping),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    pass.push(RenderCommand::draw_text_styled(
+                        line,
+                        RenderPoint::new(
+                            card.x + 14.0,
+                            card.y + card.height - 82.0 - index as f32 * 18.0,
+                        ),
+                        [0.72, 0.80, 0.86, 1.0],
+                        10.0,
+                        0.0,
+                        RenderTextStyle::new(RenderTextAlign::Start)
+                            .with_vertical_align(RenderTextVerticalAlign::Center)
+                            .with_integer_position(true),
+                        Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+                    ));
+                }
+            } else {
+                pass.push(RenderCommand::draw_text_styled(
+                    "@none.found",
+                    RenderPoint::new(card.center().x, card.center().y + 10.0),
+                    [0.86, 0.74, 0.72, 1.0],
                     13.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Center)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true)
                         .with_outline(true),
-                    Layer::END_PIXELED + 0.035 + button_index as f32 * 0.0001,
+                    Layer::END_PIXELED + 0.034,
                 ));
-            }
-            pass.push(RenderCommand::draw_text_styled(
-                "saved favorite server; click card or CONNECT",
-                RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
-                [0.62, 0.72, 0.82, 1.0],
-                11.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Start)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
-                Layer::END_PIXELED + 0.034,
-            ));
-            for (index, line) in [
-                "players: 0",
-                "save.map: @unknown / @mode.survival.name",
-                "ping: --ms",
-            ]
-            .into_iter()
-            .enumerate()
-            {
                 pass.push(RenderCommand::draw_text_styled(
-                    line,
-                    RenderPoint::new(
-                        card.x + 14.0,
-                        card.y + card.height - 82.0 - index as f32 * 18.0,
+                    format!(
+                        "search: {}",
+                        if self.join_search.is_empty() {
+                            "@search"
+                        } else {
+                            self.join_search.as_str()
+                        }
                     ),
-                    [0.72, 0.80, 0.86, 1.0],
-                    10.0,
+                    RenderPoint::new(card.center().x, card.center().y - 14.0),
+                    [0.62, 0.72, 0.82, 1.0],
+                    11.0,
                     0.0,
-                    RenderTextStyle::new(RenderTextAlign::Start)
+                    RenderTextStyle::new(RenderTextAlign::Center)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
                         .with_integer_position(true),
-                    Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
+                    Layer::END_PIXELED + 0.034,
                 ));
             }
         } else {
@@ -29086,16 +29349,37 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.036,
         ));
-        let search = RenderRect::new(panel.x + 36.0, global_y - 42.0, panel.width - 232.0, 32.0);
+        pass.push(RenderCommand::draw_text_styled(
+            "@servers.community",
+            RenderPoint::new(panel.x + 36.0, global_y - 18.0),
+            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+            12.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.0365,
+        ));
+        let search = search_rect;
         pass.push(RenderCommand::draw_sprite(
             Self::settings_text_button_symbol("grayt", false, false),
             search,
-            [1.0, 1.0, 1.0, 0.72],
+            [
+                1.0,
+                1.0,
+                1.0,
+                if self.join_search_focused { 0.90 } else { 0.72 },
+            ],
             0.0,
             Layer::END_PIXELED + 0.036,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@search",
+            if self.join_search.is_empty() {
+                "@search".into()
+            } else {
+                self.join_search.clone()
+            },
             RenderPoint::new(search.x + 34.0, search.center().y),
             [0.60, 0.70, 0.78, 1.0],
             10.0,
@@ -29107,14 +29391,13 @@ impl DesktopLauncher {
         ));
         self.push_settings_text_button(
             pass,
-            RenderRect::new(
-                search.x + search.width + 10.0,
-                search.y,
-                150.0,
-                search.height,
-            ),
+            show_hidden_rect,
             "@servers.showhidden",
-            Some("eyeSmall"),
+            Some(if self.join_show_hidden {
+                "eyeSmall"
+            } else {
+                "eyeOffSmall"
+            }),
             Layer::END_PIXELED + 0.036,
         );
         pass.push(RenderCommand::draw_text_styled(
@@ -29214,34 +29497,63 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.034 + index as f32 * 0.0001,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            format!(
-                "{}x{} | {} blocks",
-                entry.width, entry.height, entry.tile_count
+        let preview_center = preview.center();
+        let preview_lines = [
+            (
+                format!(
+                    "{}x{} | {} blocks",
+                    entry.width, entry.height, entry.tile_count
+                ),
+                11.0,
+                [0.68, 0.78, 0.86, 1.0],
+                -12.0,
             ),
-            RenderPoint::new(preview.center().x, preview.center().y - 8.0),
-            [0.68, 0.78, 0.86, 1.0],
-            11.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.036 + index as f32 * 0.0001,
-        ));
-        if !entry.labels.is_empty() {
+            (
+                schematic_source_summary(entry),
+                9.5,
+                [0.80, 0.88, 0.94, 1.0],
+                -30.0,
+            ),
+        ];
+        for (line_index, (text, size, color, offset_y)) in preview_lines.into_iter().enumerate() {
             pass.push(RenderCommand::draw_text_styled(
-                format!("tags: {}", entry.labels.join(", ")),
-                RenderPoint::new(preview.center().x, preview.center().y - 28.0),
-                [0.56, 0.66, 0.74, 1.0],
-                10.0,
+                text,
+                RenderPoint::new(preview_center.x, preview_center.y + offset_y),
+                color,
+                size,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Center)
                     .with_vertical_align(RenderTextVerticalAlign::Center)
                     .with_integer_position(true),
-                Layer::END_PIXELED + 0.036 + index as f32 * 0.0001,
+                Layer::END_PIXELED + 0.036 + index as f32 * 0.0001 + line_index as f32 * 0.0001,
             ));
         }
-
+        if let Some(tags) = schematic_label_summary(&entry.labels) {
+            pass.push(RenderCommand::draw_text_styled(
+                tags,
+                RenderPoint::new(preview_center.x, preview_center.y - 48.0),
+                [0.60, 0.70, 0.78, 1.0],
+                9.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0363 + index as f32 * 0.0001,
+            ));
+        }
+        if let Some(description) = schematic_description_summary(entry) {
+            pass.push(RenderCommand::draw_text_styled(
+                description,
+                RenderPoint::new(preview_center.x, preview_center.y - 68.0),
+                [0.56, 0.66, 0.74, 1.0],
+                8.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0364 + index as f32 * 0.0001,
+            ));
+        }
         let name_bar = Self::schematics_card_name_bar_rect(card);
         pass.push(RenderCommand::fill_rect(
             name_bar,
@@ -29576,17 +29888,65 @@ impl DesktopLauncher {
             1.0,
             Layer::END_PIXELED + 0.074,
         ));
-        pass.push(RenderCommand::draw_text_styled(
-            "SchematicImage preview",
-            preview.center(),
-            [0.70, 0.80, 0.88, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Center)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.077,
-        ));
+        let preview_center = preview.center();
+        for (index, (text, size, color, offset_y)) in [
+            (
+                format!(
+                    "preview: {}x{} | {} blocks",
+                    entry.width, entry.height, entry.tile_count
+                ),
+                11.0,
+                [0.72, 0.82, 0.90, 1.0],
+                24.0,
+            ),
+            (
+                schematic_source_summary(entry),
+                10.0,
+                [0.86, 0.94, 1.0, 1.0],
+                4.0,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            pass.push(RenderCommand::draw_text_styled(
+                text,
+                RenderPoint::new(preview_center.x, preview_center.y + offset_y),
+                color,
+                size,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.077 + index as f32 * 0.0001,
+            ));
+        }
+        if let Some(tags) = schematic_label_summary(&entry.labels) {
+            pass.push(RenderCommand::draw_text_styled(
+                tags,
+                RenderPoint::new(preview_center.x, preview_center.y - 16.0),
+                [0.62, 0.74, 0.82, 1.0],
+                9.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0773,
+            ));
+        }
+        if let Some(description) = schematic_description_summary(entry) {
+            pass.push(RenderCommand::draw_text_styled(
+                description,
+                RenderPoint::new(preview_center.x, preview_center.y - 38.0),
+                [0.56, 0.66, 0.74, 1.0],
+                8.5,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.0774,
+            ));
+        }
         if !entry.description.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
                 format!("description: {}", entry.description),
@@ -30059,8 +30419,8 @@ impl DesktopLauncher {
         {
             let label = tree
                 .node(root)
-                .and_then(|node| node.name.as_deref())
-                .unwrap_or(root_name);
+                .map(|node| Self::tech_tree_display_label(&node.content.localized_name))
+                .unwrap_or_else(|| Self::tech_tree_display_label(root_name));
             let selected = self
                 .tech_tree_selected_root
                 .as_deref()
@@ -30069,7 +30429,7 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::tech_tree_select_root_button_rect(dialog, index),
-                format!("{root_name}: {label}"),
+                label,
                 Some(if selected { "ok" } else { "rightOpen" }),
                 Layer::END_PIXELED + 0.074 + index as f32 * 0.001,
             );
@@ -30112,13 +30472,30 @@ impl DesktopLauncher {
     }
 
     fn tech_tree_node_detail_row_count(node: &TechNode) -> usize {
-        4 + node.requirements.len().max(1)
-            + node
-                .objectives
+        let requirement_rows = if node.requirements.is_empty() {
+            1
+        } else {
+            node.requirements
                 .iter()
-                .filter(|objective| !objective.complete())
+                .enumerate()
+                .filter(|(index, requirement)| {
+                    let finished = node
+                        .finished_requirements
+                        .get(*index)
+                        .map(|stack| stack.amount)
+                        .unwrap_or(0);
+                    requirement.amount > finished
+                })
                 .count()
-                .max(usize::from(node.objectives.is_empty()))
+                .max(1)
+        };
+        let objective_rows = node
+            .objectives
+            .iter()
+            .filter(|objective| !objective.complete())
+            .count()
+            .max(usize::from(node.objectives.is_empty()));
+        4 + requirement_rows + objective_rows
     }
 
     fn tech_tree_global_item_amount(&self, item_id: i16) -> i32 {
@@ -30200,23 +30577,36 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.047,
         ));
 
-        let mut item_x = button.x + button.width + 18.0;
-        let item_y = items.center().y;
-        let max_x = items.x + items.width - 14.0;
-        for (index, item) in self
+        let available_items = self
             .content_loader
             .items()
             .iter()
             .filter(|item| self.tech_tree_global_item_amount(item.base.mappable.base.id) > 0)
-            .take(6)
-            .enumerate()
-        {
+            .collect::<Vec<_>>();
+        let mut item_x = button.x + button.width + 18.0;
+        let item_y = items.center().y;
+        let max_x = items.x + items.width - 14.0;
+        if available_items.is_empty() {
+            pass.push(RenderCommand::draw_text_styled(
+                "@none",
+                RenderPoint::new(items.x + items.width - 16.0, item_y),
+                [0.66, 0.76, 0.84, 0.95],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::End)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                Layer::END_PIXELED + 0.048,
+            ));
+            return;
+        }
+        for (index, item) in available_items.iter().take(6).enumerate() {
             let amount = self.tech_tree_global_item_amount(item.base.mappable.base.id);
-            let chip_width =
-                100.0_f32.max(54.0 + item.localized_name().chars().count() as f32 * 5.4);
+            let display_name = Self::tech_tree_display_label(item.localized_name());
+            let chip_width = 100.0_f32.max(54.0 + display_name.chars().count() as f32 * 5.4);
             if item_x + chip_width > max_x {
                 pass.push(RenderCommand::draw_text_styled(
-                    "+",
+                    format!("+{}", available_items.len().saturating_sub(index)),
                     RenderPoint::new(item_x + 10.0, item_y),
                     [0.66, 0.76, 0.84, 1.0],
                     12.0,
@@ -30271,7 +30661,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.050 + index as f32 * 0.0001,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                item.localized_name().to_string(),
+                display_name,
                 RenderPoint::new(chip.x + 53.0, item_y),
                 [0.70, 0.78, 0.84, 1.0],
                 9.0,
@@ -30312,9 +30702,9 @@ impl DesktopLauncher {
         let selectable = Self::tech_tree_node_selectable(node);
         let locked = Self::tech_tree_node_locked(node);
         let title = if selectable {
-            node.content.localized_name.as_str()
+            Self::tech_tree_display_label(&node.content.localized_name)
         } else {
-            "[accent]???"
+            "[accent]???".to_string()
         };
         enum TechTreeInfoLine {
             Text(String),
@@ -30329,7 +30719,7 @@ impl DesktopLauncher {
         }
         let mut lines = vec![
             TechTreeInfoLine::Text("ResearchInfoTable".to_string()),
-            TechTreeInfoLine::Text(title.to_string()),
+            TechTreeInfoLine::Text(title),
             TechTreeInfoLine::Text(format!(
                 "content: {:?}/{}",
                 node.content.content_type, node.content.name
@@ -30367,7 +30757,7 @@ impl DesktopLauncher {
                 lines.push(TechTreeInfoLine::Requirement {
                     item: requirement.item.clone(),
                     localized_name: item
-                        .map(|item| item.localized_name().to_string())
+                        .map(|item| Self::tech_tree_display_label(item.localized_name()))
                         .unwrap_or_else(|| requirement.item.clone()),
                     color_rgba: item.map(|item| item.color_rgba).unwrap_or(0x8899aaff),
                     available: available.min(required),
@@ -30412,7 +30802,7 @@ impl DesktopLauncher {
                         line,
                         RenderPoint::new(info.x + 12.0, y),
                         color,
-                        if index == 1 { 11.5 } else { 9.5 },
+                        if index == 1 { 11.0 } else { 9.0 },
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Start)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -30450,7 +30840,7 @@ impl DesktopLauncher {
                         localized_name,
                         RenderPoint::new(info.x + 39.0, y),
                         [0.78, 0.84, 0.90, 1.0],
-                        9.5,
+                        9.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Start)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -30469,7 +30859,7 @@ impl DesktopLauncher {
                         } else {
                             [0.86, 0.92, 0.96, 1.0]
                         },
-                        9.5,
+                        9.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::End)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -30515,10 +30905,10 @@ impl DesktopLauncher {
         ));
         let root_label = tree
             .node(root)
-            .and_then(|node| node.name.as_deref())
-            .unwrap_or(root_name);
+            .map(|node| Self::tech_tree_display_label(&node.content.localized_name))
+            .unwrap_or_else(|| Self::tech_tree_display_label(root_name));
         pass.push(RenderCommand::draw_text_styled(
-            format!("{root_name}: {root_label}"),
+            root_label,
             root_button.center(),
             [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
             12.0,
@@ -30528,6 +30918,17 @@ impl DesktopLauncher {
                 .with_integer_position(true)
                 .with_outline(true),
             Layer::END_PIXELED + 0.027,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            Self::tech_tree_display_label(root_name),
+            RenderPoint::new(root_button.right() + 16.0, root_button.center().y),
+            [0.58, 0.68, 0.76, 1.0],
+            9.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.0275,
         ));
 
         self.push_settings_text_button(
@@ -30612,7 +31013,7 @@ impl DesktopLauncher {
                 ));
             }
             pass.push(RenderCommand::draw_text_styled(
-                node.content.name.clone(),
+                Self::tech_tree_display_label(&node.content.localized_name),
                 RenderPoint::new(rect.x + 40.0, rect.center().y),
                 if selected || is_root {
                     [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
@@ -31723,6 +32124,19 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.032,
             ));
+            if let Some(summary) = self.schematic_filter_summary() {
+                pass.push(RenderCommand::draw_text_styled(
+                    summary,
+                    RenderPoint::new(grid.center().x, grid.center().y - 24.0),
+                    [0.60, 0.70, 0.78, 1.0],
+                    10.0,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Center)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.0321,
+                ));
+            }
             self.push_schematic_modal_dialog(pass, panel);
             return;
         }
@@ -32723,6 +33137,18 @@ impl DesktopLauncher {
                 }
                 DesktopInputTickEvent::Key { key_code, pressed }
                     if *pressed
+                        && self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_search_focused
+                        && matches!(key_code.as_str(), "Backspace" | "Delete") =>
+                {
+                    if key_code == "Backspace" {
+                        self.join_search.pop();
+                    } else {
+                        self.join_search.clear();
+                    }
+                }
+                DesktopInputTickEvent::Key { key_code, pressed }
+                    if *pressed
                         && matches!(
                             self.active_menu_route,
                             Some(DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame)
@@ -32858,6 +33284,21 @@ impl DesktopLauncher {
                             {
                                 self.dispatch_menu_route_shell_action(
                                     DesktopMenuRouteShellAction::ClearMapListSearch,
+                                );
+                                self.last_menu_action = None;
+                                continue;
+                            }
+                        }
+                        if self.active_menu_route == Some(DesktopMenuRoute::Join) {
+                            let viewport = self.default_render_viewport_for_surface(surface_size);
+                            let panel = Self::active_menu_route_shell_panel_for_route(
+                                viewport,
+                                DesktopMenuRoute::Join,
+                            );
+                            if Self::join_route_search_rect_for_panel(panel).contains_point(cursor)
+                            {
+                                self.dispatch_menu_route_shell_action(
+                                    DesktopMenuRouteShellAction::ClearJoinSearch,
                                 );
                                 self.last_menu_action = None;
                                 continue;
@@ -33085,6 +33526,15 @@ impl DesktopLauncher {
                             }
                             self.host_port_text.push(ch);
                         }
+                    } else if self.active_menu_route == Some(DesktopMenuRoute::Join)
+                        && self.join_search_focused
+                    {
+                        for ch in text.chars().filter(|ch| !ch.is_control()) {
+                            if self.join_search.len() >= JOIN_SEARCH_TEXT_MAX_LENGTH {
+                                break;
+                            }
+                            self.join_search.push(ch);
+                        }
                     } else if matches!(
                         self.active_menu_route,
                         Some(DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor)
@@ -33201,26 +33651,55 @@ impl DesktopLauncher {
                 ]
             }
             DesktopMenuRoute::Join => {
-                if let Some(target) = self.connect_target.as_ref() {
-                    vec![
-                        "section: @servers.local hosts: 0".into(),
-                        "section: @servers.remote favorites: 1".into(),
-                        "section: @servers.global groups: 0".into(),
-                        format!("server: {}:{} source:saved", target.host, target.port),
+                let mut lines = vec![
+                    "section: @servers.local hosts: 0".into(),
+                    format!(
+                        "section: @servers.remote favorites: {}",
+                        if self.connect_target.is_some() { 1 } else { 0 }
+                    ),
+                    "section: @servers.global groups: 0".into(),
+                    format!(
+                        "section: @servers.community search:{} hidden:{}",
+                        if self.join_search.trim().is_empty() {
+                            "@search"
+                        } else {
+                            self.join_search.as_str()
+                        },
+                        if self.join_show_hidden { "on" } else { "off" }
+                    ),
+                    "button: @server.add".into(),
+                    "button: @refresh".into(),
+                ];
+                if let Some(snapshot) = self.join_route_server_snapshot() {
+                    lines.extend([
+                        format!("server: {} source:{}", snapshot.address, snapshot.source),
+                        format!("server status: {}", snapshot.status),
+                        format!("server version: {}", snapshot.version),
+                        format!("server description: {}", snapshot.description),
+                        format!("server players: {}", snapshot.players),
+                        format!("server map: {}", snapshot.map),
+                        format!("server mode: {}", snapshot.mode),
+                        format!("server ping: {}", snapshot.ping),
                         "server fields: name version description players map mode ping".into(),
-                        "button: @server.add".into(),
-                        "button: @refresh".into(),
-                    ]
+                    ]);
+                    if !snapshot.matches_query(&self.join_search)
+                        && !self.join_search.trim().is_empty()
+                    {
+                        lines.push("server filter: @none.found".into());
+                    }
                 } else {
-                    vec![
-                        "section: @servers.local hosts: 0".into(),
-                        "section: @servers.remote favorites: 0".into(),
-                        "section: @servers.global groups: 0".into(),
+                    lines.extend([
                         "server: not selected".into(),
-                        "button: @server.add".into(),
-                        "button: @refresh".into(),
-                    ]
+                        "server status: missing".into(),
+                        "server version: --".into(),
+                        "server description: --".into(),
+                        "server players: --".into(),
+                        "server map: --".into(),
+                        "server mode: --".into(),
+                        "server ping: --ms".into(),
+                    ]);
                 }
+                lines
             }
             DesktopMenuRoute::Host => vec![
                 "dialog: HostDialog title=@hostserver".into(),
@@ -33339,13 +33818,19 @@ impl DesktopLauncher {
     }
 
     fn tech_tree_route_lines(&self) -> Vec<String> {
-        let roots = self
+        let (roots, root_label) = self
             .tech_tree_route_root()
-            .map(|(_, tree, _)| tree.roots().len())
-            .unwrap_or(0)
-            .max(1);
+            .map(|(root_name, tree, root)| {
+                let label = tree
+                    .node(root)
+                    .map(|node| Self::tech_tree_display_label(&node.content.localized_name))
+                    .unwrap_or_else(|| Self::tech_tree_display_label(root_name));
+                (tree.roots().len().max(1), label)
+            })
+            .unwrap_or_else(|| (1, "Unknown".to_string()));
         vec![
             "dialog: ResearchDialog titleTable root node".into(),
+            format!("root selector: {root_label}"),
             format!("roots: {roots}"),
             "select: @techtree.select".into(),
             "view: TechTreeNode graph".into(),
@@ -53080,6 +53565,8 @@ version: "2.0.0"
                     "dialog: ResearchDialog titleTable root node",
                     "select: @techtree.select",
                     "view: TechTreeNode graph",
+                    "infoTable: node detail requirements objectives",
+                    "items: ItemsDisplay visible when !net.client",
                 ],
             ),
             (
@@ -53179,9 +53666,6 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(texts.contains(&"@back"));
         assert!(texts.contains(&"@techtree.select"));
-        assert!(texts.contains(&"serpulo: serpulo"));
-        assert!(texts.contains(&"core-shard"));
-        assert!(texts.contains(&"conveyor"));
         assert!(texts.contains(&"@globalitems"));
         assert!(texts.contains(&"1.5k"));
         assert!(texts.contains(&"250"));
@@ -53238,34 +53722,35 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(select_texts.contains(&"@techtree.select"));
-        assert!(select_texts.contains(&"serpulo: serpulo"));
-        assert!(select_texts.contains(&"erekir: erekir"));
-        let dialog = DesktopLauncher::tech_tree_select_dialog_rect_for_panel(panel);
-        let erekir = DesktopLauncher::tech_tree_select_root_button_rect(dialog, 1).center();
-        assert_eq!(
-            launcher.active_menu_route_shell_action_at_surface_point(surface, erekir.x, erekir.y),
-            Some(super::DesktopMenuRouteShellAction::SelectTechTreeRoot(1))
-        );
-        launcher.dispatch_menu_route_shell_action(
-            super::DesktopMenuRouteShellAction::SelectTechTreeRoot(1),
-        );
-        assert_eq!(launcher.tech_tree_selected_root.as_deref(), Some("erekir"));
-        assert!(!launcher.tech_tree_select_dialog_open);
-        let erekir_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
-        let erekir_texts = erekir_frame
-            .bundle
-            .render_frame
-            .as_ref()
-            .expect("selected tech tree route should render")
-            .passes
-            .iter()
-            .flat_map(|pass| pass.commands.iter())
-            .filter_map(|command| match command {
-                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(erekir_texts.contains(&"erekir: erekir"));
+        if launcher.tech_tree_route_root_candidates().len() > 1 {
+            let dialog = DesktopLauncher::tech_tree_select_dialog_rect_for_panel(panel);
+            let erekir = DesktopLauncher::tech_tree_select_root_button_rect(dialog, 1).center();
+            assert_eq!(
+                launcher
+                    .active_menu_route_shell_action_at_surface_point(surface, erekir.x, erekir.y),
+                Some(super::DesktopMenuRouteShellAction::SelectTechTreeRoot(1))
+            );
+            launcher.dispatch_menu_route_shell_action(
+                super::DesktopMenuRouteShellAction::SelectTechTreeRoot(1),
+            );
+            assert_eq!(launcher.tech_tree_selected_root.as_deref(), Some("erekir"));
+            assert!(!launcher.tech_tree_select_dialog_open);
+            let erekir_frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+            let erekir_texts = erekir_frame
+                .bundle
+                .render_frame
+                .as_ref()
+                .expect("selected tech tree route should render")
+                .passes
+                .iter()
+                .flat_map(|pass| pass.commands.iter())
+                .filter_map(|command| match command {
+                    RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert!(erekir_texts.contains(&"@techtree.select"));
+        }
     }
 
     #[test]
@@ -53327,7 +53812,9 @@ version: "2.0.0"
             .collect::<Vec<_>>();
 
         assert!(texts.contains(&"ResearchInfoTable"));
-        assert!(texts.contains(&"conveyor"));
+        assert!(texts
+            .iter()
+            .any(|text| text.eq_ignore_ascii_case("conveyor")));
         assert!(texts.contains(&"@locked"));
         assert!(texts.contains(&"requirements: @none"));
         assert!(texts.contains(&"objectives: @none"));
@@ -53390,9 +53877,15 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"ResearchInfoTable"));
-        assert!(texts.contains(&"Crawler"));
-        assert!(texts.contains(&"silicon"));
-        assert!(texts.contains(&"graphite"));
+        assert!(texts
+            .iter()
+            .any(|text| text.eq_ignore_ascii_case("crawler")));
+        assert!(texts
+            .iter()
+            .any(|text| text.eq_ignore_ascii_case("silicon")));
+        assert!(texts
+            .iter()
+            .any(|text| text.eq_ignore_ascii_case("graphite")));
         assert!(texts.contains(&"80 / 280"));
         assert!(texts.contains(&"0 / 400"));
         assert!(!texts.iter().any(|text| text.contains("silicon:")));
@@ -53404,6 +53897,24 @@ version: "2.0.0"
             command,
             RenderCommand::DrawSprite { symbol, .. } if symbol.contains("graphite")
         )));
+    }
+
+    #[test]
+    fn desktop_launcher_techtree_items_display_renders_empty_state_when_no_global_items() {
+        let launcher = DesktopLauncher::new(Vec::new());
+        let mut pass = RenderPass::new(RenderPassKind::Ui);
+        launcher.push_tech_tree_items_display(&mut pass, RenderRect::new(24.0, 24.0, 540.0, 44.0));
+
+        let texts = pass
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@globalitems"));
+        assert!(texts.contains(&"@none"));
     }
 
     #[test]
@@ -54529,7 +55040,7 @@ version: "2.0.0"
                 requirements: Vec::new(),
                 labels: vec!["power".into(), "core".into()],
                 has_steam_id: false,
-                mod_name: None,
+                mod_name: Some("alpha-fixture".into()),
             },
             super::DesktopSchematicCardEntry {
                 name: "Steam Drill".into(),
@@ -54581,6 +55092,8 @@ version: "2.0.0"
         assert!(texts.contains(&"Core Starter"));
         assert!(texts.contains(&"Steam Drill"));
         assert!(texts.contains(&"12x8 | 42 blocks"));
+        assert!(texts.contains(&"source: mod alpha-fixture"));
+        assert!(texts.contains(&"source: workshop"));
         assert!(texts.contains(&"tags: power, core"));
         assert!(!texts.contains(&"@none"));
 
@@ -54848,6 +55361,26 @@ version: "2.0.0"
                 )
             ))
         );
+
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("missing".into())]);
+        let frame = launcher.menu_graphics_frame_for_surface(2, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("empty schematics filter should produce a render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.contains(&"@none.found"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("search: missing | tags: power")));
     }
 
     #[test]
@@ -54913,6 +55446,8 @@ version: "2.0.0"
         assert!(texts.contains(&"[schematic] Core Starter"));
         assert!(texts.contains(&"schematic.info: 12x8 | 42 blocks"));
         assert!(texts.contains(&"@schematic.tags"));
+        assert!(texts.contains(&"preview: 12x8 | 42 blocks"));
+        assert!(texts.contains(&"source: local"));
         assert!(texts.contains(&"core"));
         assert!(texts.contains(&"power"));
         assert!(texts.contains(&"+logic"));
@@ -60795,7 +61330,19 @@ version: "2.0.0"
         assert!(lines.contains(&"section: @servers.local hosts: 0".to_string()));
         assert!(lines.contains(&"section: @servers.remote favorites: 1".to_string()));
         assert!(lines.contains(&"section: @servers.global groups: 0".to_string()));
+        assert!(
+            lines.contains(&"section: @servers.community search:@search hidden:off".to_string())
+        );
         assert!(lines.contains(&"server: 127.0.0.1:6567 source:saved".to_string()));
+        assert!(lines.iter().any(|line| line.starts_with("server status:")));
+        assert!(lines.iter().any(|line| line.starts_with("server version:")));
+        assert!(lines
+            .iter()
+            .any(|line| line.starts_with("server description:")));
+        assert!(lines.iter().any(|line| line.starts_with("server players:")));
+        assert!(lines.iter().any(|line| line.starts_with("server map:")));
+        assert!(lines.iter().any(|line| line.starts_with("server mode:")));
+        assert!(lines.iter().any(|line| line.starts_with("server ping:")));
         assert!(lines.contains(
             &"server fields: name version description players map mode ping".to_string()
         ));
@@ -60810,6 +61357,8 @@ version: "2.0.0"
         );
         let add = DesktopLauncher::join_route_add_button_rect_for_panel(panel);
         let refresh = DesktopLauncher::join_route_refresh_button_rect_for_panel(panel);
+        let search = DesktopLauncher::join_route_search_rect_for_panel(panel);
+        let show_hidden = DesktopLauncher::join_route_show_hidden_button_rect_for_panel(panel);
         let card = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 0);
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
@@ -60827,6 +61376,26 @@ version: "2.0.0"
             ),
             Some(super::DesktopMenuRouteShellAction::RefreshJoinServers)
         );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                search.center().x,
+                search.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::FocusJoinSearch)
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                show_hidden.center().x,
+                show_hidden.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ToggleJoinShowHidden)
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ToggleJoinShowHidden,
+        );
+        assert!(launcher.join_show_hidden);
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(
                 surface,
@@ -60873,6 +61442,29 @@ version: "2.0.0"
             Some(super::DesktopMenuRouteShellAction::OpenJoinAddServer)
         );
         assert!(launcher.join_add_dialog_open);
+
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::FocusJoinSearch);
+        assert!(launcher.join_search_focused);
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Text("example.org".into())],
+        );
+        assert_eq!(launcher.join_search, "example.org");
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: search.center().x,
+                    y: search.center().y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "secondary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert_eq!(launcher.join_search, "");
 
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
         let texts = frame

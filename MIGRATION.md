@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 581. JoinDialog、SchematicsDialog 与 ResearchDialog 前端补强
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **68.9%**，仍未达到完整可玩；继续优先前端/UI，本闭环目标是把主菜单下三个常见 route 从“骨架页面”推进为更接近 Java Dialog 的信息密度。
+- Java 对照依据：
+  - `JoinDialog` 服务器浏览区包含 local/remote/global/community 分区、搜索/隐藏、服务器状态/版本/玩家/地图/模式/ping；
+  - `SchematicsDialog` 卡片和信息弹窗应展示来源、标签、描述、尺寸、需求与操作按钮层级；
+  - `ResearchDialog` 包含 root selector、node graph、node detail requirements/objectives 与 global items 显示。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Join route 新增搜索框、清空搜索、隐藏服务器 toggle、community/global 引导、服务器 snapshot 摘要和过滤命中；
+    - Join shell lines 与渲染同步输出 server status/version/description/players/map/mode/ping；
+    - Schematics 卡片补充 `source`、`tags`、`description` 摘要，过滤空态展示 search/tag 条件，信息弹窗不再只有 `SchematicImage preview` 占位；
+    - TechTree route 补充 root 标签、items display 空态、node detail requirements/objectives/item rows 与 root select 分支测试；
+    - 保持现有 connect、schematic action、tech node hit-test 行为不回退。
+- 已验证：
+  - `cargo test -p mindustry-desktop --lib join_route -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib schematics_route -- --nocapture`
+  - `cargo test -p mindustry-desktop --lib techtree -- --nocapture`
+  - `cargo fmt --all -- --check`
+  - `git diff --check`
+- 仍未完成：
+  - Join route 仍未接完整 LAN/global/community 在线列表、真实 ping、版本兼容过滤与服务器隐藏持久化；
+  - Schematics 仍未接完整缩略图渲染、导入/导出/useSchematic 的真实 gameplay 侧效应；
+  - TechTree 仍未接完整解锁动画、research spend、campaign persistence 和 Java ResearchDialog 全量交互；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 580. PausedDialog 动态面板与 Mods UI 摘要补强
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
