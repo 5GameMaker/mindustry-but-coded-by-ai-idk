@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **85.1%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **85.2%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：MapListDialog 过滤器设置持久化
+## 最新闭环：LoadDialog runLoadSave 坏档回退与状态清理
+
+- 当前总体迁移完成度：约 **85.2%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/LoadDialog.java` 与 Java `SaveIO.load(...)`：
+  - pending load 完成时先读取 save meta，使用主档+backup 回退；
+  - 加载成功前执行 Rust 侧 `net.reset()` 等价清理；
+  - 成功后同步 wave/map/rules，并清理 `rules.editor` 与 `rules.sector`；
+  - 主档和备份均损坏时保留 LoadDialog 路由，显示 `@save.corrupted`，不进入 playing。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop load_game -- --nocapture`
+  - `cargo test -p mindustry-desktop run_load_save -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 下一步建议继续前端/SaveIO：
+  1. SaveDialog 保存侧 Java 原子 backup/rollback；
+  2. 真实 `SaveIO.load(file, context)` 的 world/entities 恢复接入 runtime；
+  3. MapPlay 极端 mode 渲染禁用态与 help/customize 层级回归。
+
+## 上一闭环：MapListDialog 过滤器设置持久化
 
 - 当前总体迁移完成度：约 **85.1%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/MapListDialog.java`：

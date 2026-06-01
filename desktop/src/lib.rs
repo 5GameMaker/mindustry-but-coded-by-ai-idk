@@ -85,8 +85,8 @@ use mindustry_core::mindustry::io::{
     read_decal_sync, read_deflated_map_info, read_deflated_save_meta,
     read_deflated_save_meta_with_backup, read_effect_state_sync, read_fire_sync, read_puddle_sync,
     read_unit_sync, read_weather_state_sync, read_world_label_sync,
-    write_deflated_save_meta_prefix, ContentHeaderSnapshot, LegacyTeamBlocks, SaveSlotRecord,
-    TeamId, TypeValue, Vec2, LATEST_SAVE_VERSION,
+    write_deflated_save_meta_prefix, ContentHeaderSnapshot, LegacyTeamBlocks, SaveMeta,
+    SaveSlotRecord, TeamId, TypeValue, Vec2, LATEST_SAVE_VERSION,
 };
 use mindustry_core::mindustry::maps::MapDescriptor;
 use mindustry_core::mindustry::modsys::{
@@ -27891,8 +27891,65 @@ impl DesktopLauncher {
         should_complete
     }
 
+    fn read_load_game_pending_save_meta(
+        action: &DesktopLoadGameAction,
+    ) -> Result<SaveMeta, String> {
+        let path = PathBuf::from(&action.file);
+        let primary = fs::read(&path).map_err(|error| {
+            format!(
+                "LoadDialog.runLoadSave failed to read save {}: {error}",
+                path.display()
+            )
+        })?;
+        let backup_path = backup_file_for_path(&path);
+        let backup = fs::read(&backup_path).ok();
+        read_deflated_save_meta_with_backup(primary.as_slice(), backup.as_deref())
+            .map_err(|error| format!("@save.corrupted: {error}"))
+    }
+
+    fn apply_loaded_save_meta_to_state(&mut self, action: &DesktopLoadGameAction, meta: SaveMeta) {
+        let mut rules = meta.rules.clone();
+        let _ = rules.apply_json_str(&meta.rules_json);
+        rules.editor = false;
+        rules.sector = None;
+        self.game_state.rules = rules;
+        self.game_state.set_sector(None);
+        self.game_state.wave = meta.wave;
+        let mut map = MapDescriptor::from_save_meta(action.file.clone(), &meta);
+        if let Some(map_name) = meta.map_name.clone().filter(|name| !name.trim().is_empty()) {
+            map.tags.entry("name".into()).or_insert(map_name);
+        }
+        self.game_state.map = map;
+    }
+
+    fn reset_network_before_load_save(&mut self) {
+        self.net_client.net_mut().reset();
+        self.net_client.set_connect_config(None);
+        self.last_applied_world_data = None;
+    }
+
+    fn fail_load_game_pending_load(
+        &mut self,
+        mut action: DesktopLoadGameAction,
+        error: String,
+    ) -> DesktopLoadGameAction {
+        action.status = "corrupted".into();
+        self.game_state.set(GameStateState::Menu);
+        self.sync_runtime_state_from_game_state();
+        self.load_game_error = Some("@save.corrupted".into());
+        self.last_menu_guard_message = Some(error);
+        self.last_load_game_result = Some(action.clone());
+        action
+    }
+
     fn complete_load_game_pending_load(&mut self) -> Option<DesktopLoadGameAction> {
         let mut pending = self.load_game_pending_load.take()?;
+        self.reset_network_before_load_save();
+        let meta = match Self::read_load_game_pending_save_meta(&pending.action) {
+            Ok(meta) => meta,
+            Err(error) => return Some(self.fail_load_game_pending_load(pending.action, error)),
+        };
+        self.apply_loaded_save_meta_to_state(&pending.action, meta);
         pending.action.status = "loaded".into();
         self.game_state.set(GameStateState::Playing);
         self.sync_runtime_state_from_game_state();
@@ -72946,6 +73003,11 @@ version: "2.0.0"
         launcher.client.context.paths.data_dir = root.display().to_string();
         launcher.client.context.paths.save_dir = save_dir.display().to_string();
         launcher.dispatch_menu_action(MenuButtonRole::LoadGame);
+        launcher.game_state.rules.editor = true;
+        launcher.game_state.set_sector(Some(Sector::new(99)));
+        launcher.runtime.state.rules.editor = true;
+        launcher.runtime.state.set_sector(Some(Sector::new(99)));
+        launcher.net_client.net_mut().mark_server_active();
 
         assert_eq!(
             launcher.active_menu_route,
@@ -73178,6 +73240,16 @@ version: "2.0.0"
         assert!(launcher.load_game_pending_load.is_none());
         assert!(launcher.game_state.is_playing());
         assert!(launcher.runtime.state.is_playing());
+        assert!(
+            !launcher.net_client.net_mut().active(),
+            "Java LoadDialog.runLoadSave calls net.reset() before slot.load()"
+        );
+        assert!(!launcher.game_state.rules.editor);
+        assert_eq!(launcher.game_state.get_sector(), None);
+        assert!(!launcher.runtime.state.rules.editor);
+        assert_eq!(launcher.runtime.state.get_sector(), None);
+        assert_eq!(launcher.game_state.wave, 9);
+        assert_eq!(launcher.game_state.map.name(), "New Map");
         assert_eq!(
             launcher
                 .last_load_game_action
@@ -73414,6 +73486,104 @@ version: "2.0.0"
         assert_eq!(
             std::fs::read(save_dir.join("0.msav")).expect("imported save should exist"),
             std::fs::read(root.join("exported-save.msav")).expect("exported save should exist")
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_run_load_save_falls_back_to_backup_on_corrupt_primary() {
+        let root = temp_desktop_path("load-game-backup-fallback");
+        let save_dir = root.join("saves");
+        std::fs::create_dir_all(&save_dir).expect("save fixture dir should be writable");
+        let primary = save_dir.join("3.msav");
+        std::fs::write(&primary, b"broken primary save").expect("corrupt primary should write");
+
+        let mut backup_tags = BTreeMap::new();
+        backup_tags.insert("mapname".into(), "Backup Map".into());
+        backup_tags.insert("saved".into(), "300".into());
+        backup_tags.insert("wave".into(), "12".into());
+        backup_tags.insert("rules".into(), r#"{"modeName":"pvp"}"#.into());
+        let mut backup_bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut backup_bytes, LATEST_SAVE_VERSION, &backup_tags)
+            .expect("backup save meta should encode");
+        std::fs::write(super::backup_file_for_path(&primary), backup_bytes)
+            .expect("backup save should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.save_dir = save_dir.display().to_string();
+        launcher.dispatch_menu_action(MenuButtonRole::LoadGame);
+
+        assert_eq!(launcher.load_game_slots.len(), 1);
+        assert_eq!(
+            launcher.load_game_slots[0]
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.map_name.as_deref()),
+            Some("Backup Map"),
+            "LoadDialog list should already be able to recover metadata from the backup"
+        );
+
+        launcher
+            .dispatch_load_game_slot_action_kind(0, super::DesktopLoadGameActionKind::Load)
+            .expect("backup-backed save slot should start loading");
+        let viewport =
+            launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(1280, 720));
+        for frame_index in 1..=u64::from(super::LOAD_GAME_LOADING_DELAY_FRAMES) {
+            launcher.menu_graphics_frame_for_surface(frame_index, viewport);
+        }
+
+        assert_eq!(launcher.load_game_error, None);
+        assert_eq!(launcher.active_menu_route, None);
+        assert!(launcher.game_state.is_playing());
+        assert_eq!(launcher.game_state.wave, 12);
+        assert_eq!(launcher.game_state.map.name(), "Backup Map");
+        assert_eq!(
+            launcher
+                .last_load_game_result
+                .as_ref()
+                .map(|action| action.status.as_str()),
+            Some("loaded"),
+            "Java SaveIO.load falls back to the backup before reporting a corrupted save"
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_run_load_save_reports_corrupted_when_primary_and_backup_fail() {
+        let root = temp_desktop_path("load-game-corrupted");
+        let save_dir = root.join("saves");
+        std::fs::create_dir_all(&save_dir).expect("save fixture dir should be writable");
+        let primary = save_dir.join("4.msav");
+        std::fs::write(&primary, b"broken primary save").expect("corrupt primary should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::LoadGame);
+        launcher.load_game_slots = vec![super::SaveSlotRecord::new(primary.clone())];
+        launcher
+            .dispatch_load_game_slot_action_kind(0, super::DesktopLoadGameActionKind::Load)
+            .expect("corrupt save should still enter Java LoadDialog loading flow");
+        let viewport =
+            launcher.default_render_viewport_for_surface(DesktopSurfaceSize::new(1280, 720));
+        for frame_index in 1..=u64::from(super::LOAD_GAME_LOADING_DELAY_FRAMES) {
+            launcher.menu_graphics_frame_for_surface(frame_index, viewport);
+        }
+
+        assert_eq!(
+            launcher.active_menu_route,
+            Some(super::DesktopMenuRoute::LoadGame)
+        );
+        assert!(launcher.load_game_pending_load.is_none());
+        assert!(!launcher.game_state.is_playing());
+        assert_eq!(launcher.load_game_error.as_deref(), Some("@save.corrupted"));
+        assert_eq!(
+            launcher
+                .last_load_game_result
+                .as_ref()
+                .map(|action| action.status.as_str()),
+            Some("corrupted"),
+            "Java LoadDialog.runLoadSave should surface @save.corrupted instead of entering gameplay"
         );
 
         std::fs::remove_dir_all(root).ok();

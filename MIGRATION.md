@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 721. LoadDialog runLoadSave 坏档回退与状态清理
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.2%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - 原版 `LoadDialog.runLoadSave()` 在加载前执行 `net.reset()`；
+  - `SaveIO.load(...)` 主档失败后尝试 backup，最终失败才显示 `@save.corrupted`；
+  - 成功加载后显式清理 `state.rules.editor=false` 与 `state.rules.sector=null`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - pending load 完成阶段改为先读取存档 metadata，并使用 `read_deflated_save_meta_with_backup(...)`；
+    - 成功时应用 save meta 到 `GameState`，同步 wave/map/rules，并清理 editor/sector；
+    - 成功加载前重置 net/client 连接状态并清理上一轮 world data；
+    - 主档+备份均失败时保留 `LoadDialog` 路由，显示 `@save.corrupted`，不进入 playing；
+    - 扩展 LoadGame 回归测试，覆盖 `net.reset`、editor/sector 清理、backup fallback 与 corrupted 回退。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop load_game -- --nocapture`
+  - `cargo test -p mindustry-desktop run_load_save -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 真实完整 `SaveIO.load(file, context)` 世界/实体恢复仍需继续迁移到底层 runtime；
+  - SaveDialog 保存侧的 Java 原子 backup/rollback 仍需补齐；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 720. MapListDialog 过滤器设置持久化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
