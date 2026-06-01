@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 728. KeybindDialog Reset All 纳入滚动内容末尾
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **86.0%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `KeybindDialog.rebuildBinds()` 在所有 `KeyBind.all` 行之后追加 `@settings.reset`；
+  - `bindsTable` 整体放进 `ScrollPane`，因此 Reset All 是滚动内容最后一行，不是固定 footer；
+  - Reset All 仍保持 Java `.height(50f).fill()` 的全宽列表行语义。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Controls 渲染将 `Reset All` 作为 `filtered_specs.len() + 1` 的虚拟尾行纳入同一滚动窗口；
+    - `apply_settings_keybind_scroll_delta(...)` 的最大 offset 把 Reset All 计入滚动内容；
+    - hit-test 与渲染共用 `settings_keybind_reset_all_rect(dialog, visible_index)`，避免显示/点击位置不一致；
+    - 首屏不再固定显示 Reset All，滚到尾部时才显示并可点击 `ResetAllKeys`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop settings --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Controls 分类标题/分隔线、搜索框皮肤和 ScrollPane 裁剪还可继续做像素级收口；
+  - JoinDialog `@connecting/@reconnecting` loadfrag 与版本不匹配 modal 是下一批最高可见前端差异；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 727. KeybindDialog 搜索过滤收紧到显示名
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

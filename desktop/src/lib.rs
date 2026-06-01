@@ -25691,21 +25691,29 @@ impl DesktopLauncher {
         }
 
         let filtered_specs = self.settings_keybind_filtered_specs();
-        let offset = self.settings_keybind_scroll_offset.min(
-            filtered_specs
-                .len()
-                .saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS),
-        );
-        let mut last_category = filtered_specs[..offset]
+        let item_count = filtered_specs.len().saturating_add(1);
+        let offset = self
+            .settings_keybind_scroll_offset
+            .min(item_count.saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS));
+        let mut last_category = filtered_specs[..offset.min(filtered_specs.len())]
             .iter()
             .rev()
             .find_map(|spec| spec.category);
-        for (index, spec) in filtered_specs
-            .iter()
-            .skip(offset)
+        for (index, item_index) in (offset..item_count)
             .take(SETTINGS_KEYBIND_VISIBLE_ROWS)
             .enumerate()
         {
+            if item_index == filtered_specs.len() {
+                self.push_settings_text_button(
+                    pass,
+                    Self::settings_keybind_reset_all_rect(dialog, index),
+                    self.localize_bundle_markup_text("@settings.reset"),
+                    Some("refresh"),
+                    Layer::END_PIXELED + 0.129 + index as f32 * 0.0001,
+                );
+                continue;
+            }
+            let spec = filtered_specs[item_index];
             if spec.category != last_category {
                 if let Some(category) = spec.category {
                     let rect = Self::settings_keybind_category_rect(dialog, index);
@@ -25781,13 +25789,6 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.111 + index as f32 * 0.0001,
             );
         }
-        self.push_settings_text_button(
-            pass,
-            Self::settings_keybind_reset_all_rect(dialog),
-            self.localize_bundle_markup_text("@settings.reset"),
-            Some("refresh"),
-            Layer::END_PIXELED + 0.129,
-        );
     }
 
     fn push_settings_keybind_rebind_dialog(&self, pass: &mut RenderPass, parent: RenderRect) {
@@ -26255,7 +26256,9 @@ impl DesktopLauncher {
 
     fn apply_settings_keybind_scroll_delta(&mut self, delta_y: f32) -> bool {
         let filtered_len = self.settings_keybind_filtered_specs().len();
-        let max = filtered_len.saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS);
+        let max = filtered_len
+            .saturating_add(1)
+            .saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS);
         if max == 0 {
             return false;
         }
@@ -26730,17 +26733,25 @@ impl DesktopLauncher {
                     ));
                 }
                 let filtered_specs = self.settings_keybind_filtered_specs();
-                let offset = self.settings_keybind_scroll_offset.min(
-                    filtered_specs
-                        .len()
-                        .saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS),
-                );
-                for (index, spec) in filtered_specs
-                    .iter()
-                    .skip(offset)
+                let item_count = filtered_specs.len().saturating_add(1);
+                let offset = self
+                    .settings_keybind_scroll_offset
+                    .min(item_count.saturating_sub(SETTINGS_KEYBIND_VISIBLE_ROWS));
+                for (index, item_index) in (offset..item_count)
                     .take(SETTINGS_KEYBIND_VISIBLE_ROWS)
                     .enumerate()
                 {
+                    if item_index == filtered_specs.len() {
+                        if Self::settings_keybind_reset_all_rect(dialog, index)
+                            .contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::Settings(
+                                DesktopSettingsAction::ResetAllKeys,
+                            ));
+                        }
+                        continue;
+                    }
+                    let spec = filtered_specs[item_index];
                     if Self::settings_keybind_rebind_button_rect(dialog, index)
                         .contains_point(point)
                     {
@@ -26754,11 +26765,6 @@ impl DesktopLauncher {
                             DesktopSettingsAction::ResetKey(spec.name),
                         ));
                     }
-                }
-                if Self::settings_keybind_reset_all_rect(dialog).contains_point(point) {
-                    return Some(DesktopMenuRouteShellAction::Settings(
-                        DesktopSettingsAction::ResetAllKeys,
-                    ));
                 }
             }
             Some(DesktopSettingsChildDialog::PlanetData) => {
@@ -26981,12 +26987,12 @@ impl DesktopLauncher {
         )
     }
 
-    fn settings_keybind_reset_all_rect(dialog: RenderRect) -> RenderRect {
-        let back = Self::schematic_info_button_rect(dialog, 0);
+    fn settings_keybind_reset_all_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let row = Self::settings_keybind_row_rect(dialog, index);
         RenderRect::new(
-            dialog.x + 18.0,
-            back.y + back.height + 8.0,
-            dialog.width - 36.0,
+            row.x,
+            row.y - (SETTINGS_KEYBIND_RESET_ALL_HEIGHT - SETTINGS_KEYBIND_ROW_HEIGHT) * 0.5,
+            row.width,
             SETTINGS_KEYBIND_RESET_ALL_HEIGHT,
         )
     }
@@ -75088,18 +75094,13 @@ version: "2.0.0"
         assert!(controls_fills.iter().any(|(rect, color)| {
             (rect.height - 3.0).abs() < f32::EPSILON && *color == [0.32, 0.36, 0.40, 0.88]
         }));
-        let back_rect = DesktopLauncher::schematic_info_button_rect(child_dialog, 0);
-        let reset_all_rect = DesktopLauncher::settings_keybind_reset_all_rect(child_dialog);
-        assert_eq!(reset_all_rect.x, child_dialog.x + 18.0);
-        assert_eq!(reset_all_rect.y, back_rect.y + back_rect.height + 8.0);
-        assert_eq!(
-            reset_all_rect.height,
-            super::SETTINGS_KEYBIND_RESET_ALL_HEIGHT,
-            "Java KeybindDialog reset-all row uses height(50f)"
-        );
         assert!(
-            reset_all_rect.width > child_dialog.width - 40.0,
-            "Java KeybindDialog reset all button should be a full-width list row instead of a footer-side chip"
+            !controls_texts.contains(
+                &launcher
+                    .localize_bundle_markup_text("@settings.reset")
+                    .as_str()
+            ),
+            "Java KeybindDialog keeps Reset All as the final bindsTable row; it should not be a fixed footer on the first page"
         );
         let total_keybinds = super::SETTINGS_KEYBIND_SPECS.len();
         assert!(launcher.settings_route_lines().contains(&format!(
@@ -75389,6 +75390,54 @@ version: "2.0.0"
         assert!(scrolled_controls_texts
             .iter()
             .any(|text| *text == first_scrolled_keybind));
+        let reset_all_tail_offset = total_keybinds
+            .saturating_add(1)
+            .saturating_sub(super::SETTINGS_KEYBIND_VISIBLE_ROWS);
+        launcher.settings_keybind_scroll_offset = reset_all_tail_offset;
+        let reset_all_visible_index = total_keybinds - reset_all_tail_offset;
+        let reset_all_rect =
+            DesktopLauncher::settings_keybind_reset_all_rect(child_dialog, reset_all_visible_index);
+        assert_eq!(reset_all_rect.x, child_dialog.x + 22.0);
+        assert_eq!(
+            reset_all_rect.height,
+            super::SETTINGS_KEYBIND_RESET_ALL_HEIGHT,
+            "Java KeybindDialog reset-all row uses height(50f)"
+        );
+        assert!(
+            reset_all_rect.width > child_dialog.width - 48.0,
+            "Java KeybindDialog reset all button should be a full-width bindsTable row"
+        );
+        let tail_controls_frame = launcher.menu_graphics_frame_for_surface(4, viewport);
+        let tail_controls_texts = tail_controls_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("tail-scrolled controls child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(tail_controls_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.reset")
+                .as_str()
+        ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                reset_all_rect.center().x,
+                reset_all_rect.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::Settings(
+                super::DesktopSettingsAction::ResetAllKeys
+            )),
+            "Reset All should be hit-tested as the last ScrollPane row, not as a fixed footer"
+        );
+        launcher.settings_keybind_scroll_offset = 0;
 
         let search_center = DesktopLauncher::settings_keybind_search_rect(child_dialog).center();
         assert_eq!(
