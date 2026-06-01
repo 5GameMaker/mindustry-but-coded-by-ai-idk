@@ -79,7 +79,7 @@ pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleM
     down_fill: [0.19, 0.38, 0.50, 0.92],
     up_fill: [0.07, 0.11, 0.16, 0.88],
     checked_fill: [0.19, 0.38, 0.50, 0.92],
-    over_fill: [0.10, 0.16, 0.22, 0.86],
+    over_fill: [0.270_588_25, 0.270_588_25, 0.270_588_25, 1.0],
     disabled_fill: [0.0, 0.0, 0.0, 1.0],
     down_drawable: "flat-down-base.9",
     up_drawable: "",
@@ -252,7 +252,7 @@ fn menu_push_black6_panel(commands: &mut Vec<RenderCommand>, rect: RenderRect, a
 
     commands.push(RenderCommand::fill_rect(
         rect,
-        menu_color_with_alpha([0.0, 0.0, 0.0, 0.66], alpha_scale),
+        menu_color_with_alpha([0.0, 0.0, 0.0, 0.6], alpha_scale),
         MENU_DESKTOP_BACKGROUND_LAYER,
     ));
     commands.push(RenderCommand::stroke_rect(
@@ -3008,7 +3008,8 @@ mod tests {
                         && color[0] == 0.0
                         && color[1] == 0.0
                         && color[2] == 0.0
-                        && (color[3] - 0.66 * alpha_scale).abs() < 0.0001
+                        && (color[3] - UiDrawableTint::Black6.rgba()[3] * alpha_scale).abs()
+                            < 0.0001
                         && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
                 }
                 _ => false,
@@ -3208,7 +3209,7 @@ mod tests {
         assert_eq!(style.down_fill, [0.19, 0.38, 0.50, 0.92]);
         assert_eq!(style.up_fill, [0.07, 0.11, 0.16, 0.88]);
         assert_eq!(style.checked_fill, style.down_fill);
-        assert_eq!(style.over_fill, [0.10, 0.16, 0.22, 0.86]);
+        assert_eq!(style.over_fill, UiDrawableTint::FlatOver.rgba());
         assert_eq!(style.disabled_fill, [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(style.down_drawable, "flat-down-base.9");
         assert_eq!(style.up_drawable, "");
@@ -3429,6 +3430,9 @@ mod tests {
                     ..
                 } if symbol == "whiteui"
                     && *sprite_rect == rect
+                    && (tint[0] - UiDrawableTint::FlatOver.rgba()[0]).abs() < 0.0001
+                    && (tint[1] - UiDrawableTint::FlatOver.rgba()[1]).abs() < 0.0001
+                    && (tint[2] - UiDrawableTint::FlatOver.rgba()[2]).abs() < 0.0001
                     && (tint[3] - UiDrawableTint::FlatOver.rgba()[3]).abs() < 0.0001
             )
         }));

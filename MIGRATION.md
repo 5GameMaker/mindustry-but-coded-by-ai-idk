@@ -15,6 +15,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 659. Menu UI flatOver/black6 颜色语义对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.1%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是修正首屏菜单 skin 颜色中最显眼的 Java `Styles.flatOver` / `Styles.black6` 语义偏差。
+- Java 对照依据：
+  - `Styles.load()` 中 `black6 = whiteui.tint(0f, 0f, 0f, 0.6f)`；
+  - `flatOver = whiteui.tint(Color.valueOf("454545"))`，即 RGB `#454545` 且 alpha 为 `1.0`；
+  - `flatToggleMenut.over = flatOver`，菜单按钮 hover/over 态应使用该灰色 drawable，而不是半透明白色覆盖。
+- 本轮主改动：
+  - `core/src/mindustry/ui/styles.rs`
+    - `UiDrawableTint::FlatOver` 从半透明白色 `[1,1,1,0.18]` 改为 Java `#454545ff`；
+  - `core/src/mindustry/ui/dialogs/base_dialog.rs`
+    - 同步更新 drawable alias 回归断言；
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `MENU_FLAT_TOGGLE_MENU_STYLE.over_fill` 与 `flatOver` tint 对齐；
+    - `black6` fallback alpha 从 `0.66` 改为 Java `0.6`，并让测试直接引用 `UiDrawableTint::Black6`；
+    - hover drawable 测试补充 RGB 断言，避免只检查 alpha 导致颜色语义再次退化。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core menu_flat_toggle --lib`
+  - `cargo test -p mindustry-core upstream_ui_drawable_alias --lib`
+  - `cargo test -p mindustry-core menu_ --lib`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 仍未实现 Java `ScaledNinePatchDrawable(new NinePatch(flat-down-base, splits...))` 的真实九宫格拉伸生命周期；
+  - OpenGL atlas 对 `flat-down-base` / `whiteui` 的真实采样、screenshot 级对照仍需继续推进；
+  - 主菜单背景和 JoinDialog 的所有 scene2d 动画/滚动仍未完全复刻；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 658. JoinDialog saved server 独立刷新闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

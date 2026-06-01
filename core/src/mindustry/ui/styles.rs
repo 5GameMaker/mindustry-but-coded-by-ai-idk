@@ -65,7 +65,7 @@ impl UiDrawableTint {
             Self::Black5 => [0.0, 0.0, 0.0, 0.5],
             Self::Black3 => [0.0, 0.0, 0.0, 0.3],
             Self::Transparent => [1.0, 1.0, 1.0, 0.0],
-            Self::FlatOver => [1.0, 1.0, 1.0, 0.18],
+            Self::FlatOver => [0.270_588_25, 0.270_588_25, 0.270_588_25, 1.0],
             Self::Accent => [0.48, 0.74, 0.86, 1.0],
             Self::DarkestGray => [0.12, 0.13, 0.16, 1.0],
             Self::DarkestestGray => [0.08, 0.09, 0.11, 1.0],

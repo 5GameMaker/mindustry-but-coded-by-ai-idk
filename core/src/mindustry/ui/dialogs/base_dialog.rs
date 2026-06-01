@@ -580,7 +580,7 @@ mod tests {
                 "flatOver",
                 "whiteui",
                 Some(UiDrawableTint::FlatOver),
-                [1.0, 1.0, 1.0, 0.18],
+                [0.270_588_25, 0.270_588_25, 0.270_588_25, 1.0],
             ),
             (
                 "accentDrawable",
