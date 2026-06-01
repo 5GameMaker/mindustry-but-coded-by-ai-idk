@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 742. MapListDialog 模式筛选遍历 `Gamemode.all`
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **87.8%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `MapListDialog.showMapFilters()` 遍历 `Gamemode.all`，没有排除 `hidden()`；
+  - map 卡片上的模式小图标同样遍历 `Gamemode.all`；
+  - `Gamemode.editor` 是 hidden，但仍属于 `Gamemode.all`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - MapListFilter mode 按钮、hover tooltip、卡片 badge 与状态摘要改为包含 `Gamemode::Editor`；
+    - 重新排布 mode/priority/planet 三组 60x60 按钮，保证最小 500px dialog 下不重叠；
+    - 回归测试覆盖第 5 个 editor mode 按钮可命中、tooltip 显示 `Editor`、priority 与 planet 不重叠。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - MapListDialog 仍需继续补齐 Java 的 secondary click / mobile long-press 清除 planet、完整 Scene2D 皮肤细节；
+  - `searchModName` 还需进一步确认是否要严格区分 mod internal name 与 Java `mod.meta.displayName`；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 741. BannedContentDialog 补齐搜索批量与滚动命中
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

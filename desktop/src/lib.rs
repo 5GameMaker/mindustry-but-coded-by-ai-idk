@@ -30597,7 +30597,7 @@ impl DesktopLauncher {
 
     fn map_list_filter_mode_rect(dialog: RenderRect, index: usize) -> RenderRect {
         RenderRect::new(
-            dialog.x + 34.0 + index as f32 * 66.0,
+            dialog.x + 8.0 + index as f32 * 60.0,
             dialog.y + dialog.height - 146.0,
             60.0,
             60.0,
@@ -30606,7 +30606,7 @@ impl DesktopLauncher {
 
     fn map_list_filter_priority_rect(dialog: RenderRect, index: usize) -> RenderRect {
         RenderRect::new(
-            dialog.x + 306.0 + index as f32 * 66.0,
+            dialog.x + 310.0 + index as f32 * 60.0,
             dialog.y + dialog.height - 146.0,
             60.0,
             60.0,
@@ -30635,7 +30635,7 @@ impl DesktopLauncher {
 
     fn map_list_filter_planet_button_rect(dialog: RenderRect) -> RenderRect {
         RenderRect::new(
-            dialog.right() - 94.0,
+            dialog.x + 432.0,
             dialog.y + dialog.height - 146.0,
             60.0,
             60.0,
@@ -30761,7 +30761,7 @@ impl DesktopLauncher {
     fn map_list_card_status_summary(map: &MapDescriptor) -> String {
         let statuses = Gamemode::ALL
             .into_iter()
-            .filter(|mode| !mode.hidden() && mode.valid(map))
+            .filter(|mode| mode.valid(map))
             .map(|mode| mode.wire_name().to_string())
             .collect::<Vec<_>>();
         if statuses.is_empty() {
@@ -33890,11 +33890,7 @@ impl DesktopLauncher {
             if Self::map_list_filter_planet_button_rect(dialog).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::OpenMapListPlanetFilters);
             }
-            for (index, mode) in Gamemode::ALL
-                .into_iter()
-                .filter(|mode| !mode.hidden())
-                .enumerate()
-            {
+            for (index, mode) in Gamemode::ALL.into_iter().enumerate() {
                 if Self::map_list_filter_mode_rect(dialog, index).contains_point(point) {
                     return Some(DesktopMenuRouteShellAction::MapListFilter(
                         DesktopMapListFilterAction::ToggleMode(mode),
@@ -41289,7 +41285,7 @@ impl DesktopLauncher {
                 ));
                 for (badge_index, mode) in Gamemode::ALL
                     .into_iter()
-                    .filter(|mode| !mode.hidden() && mode.valid(map))
+                    .filter(|mode| mode.valid(map))
                     .enumerate()
                 {
                     let badge_x = card.x + 12.0 + badge_index as f32 * 30.0;
@@ -43210,11 +43206,7 @@ impl DesktopLauncher {
         if !self.map_list_filter_dialog_open || self.map_list_planet_filter_dialog_open {
             return None;
         }
-        for (index, mode) in Gamemode::ALL
-            .into_iter()
-            .filter(|mode| !mode.hidden())
-            .enumerate()
-        {
+        for (index, mode) in Gamemode::ALL.into_iter().enumerate() {
             if Self::map_list_filter_mode_rect(dialog, index).contains_point(cursor) {
                 return Some(self.localize_bundle_markup_text_or(
                     format!("@mode.{}.name", mode.wire_name()),
@@ -43405,11 +43397,7 @@ impl DesktopLauncher {
                 ));
             }
         }
-        for (index, mode) in Gamemode::ALL
-            .into_iter()
-            .filter(|mode| !mode.hidden())
-            .enumerate()
-        {
+        for (index, mode) in Gamemode::ALL.into_iter().enumerate() {
             self.push_map_list_filter_icon_toggle(
                 pass,
                 Self::map_list_filter_mode_rect(dialog, index),
@@ -70471,6 +70459,16 @@ version: "2.0.0"
             (60.0, 60.0),
             "Java MapListDialog mode filters use 60f icon buttons"
         );
+        assert!(
+            DesktopLauncher::map_list_filter_mode_rect(dialog, 4).right()
+                <= DesktopLauncher::map_list_filter_priority_rect(dialog, 0).x,
+            "MapListDialog must fit Java Gamemode.all, including editor, without overlapping priorities"
+        );
+        assert!(
+            DesktopLauncher::map_list_filter_priority_rect(dialog, 1).right()
+                <= DesktopLauncher::map_list_filter_planet_button_rect(dialog).x,
+            "MapListDialog priority toggles must not overlap the planet filter button"
+        );
         assert_eq!(
             (
                 DesktopLauncher::map_list_filter_priority_rect(dialog, 0).width,
@@ -70506,6 +70504,7 @@ version: "2.0.0"
         for glyph in [
             DesktopLauncher::map_list_card_mode_badge_text(Gamemode::Survival),
             DesktopLauncher::map_list_card_mode_badge_text(Gamemode::Attack),
+            DesktopLauncher::map_list_card_mode_badge_text(Gamemode::Editor),
             super::desktop_ui_icon_glyph_or_label("players", "players"),
             super::desktop_ui_icon_glyph_or_label("hammer", "hammer"),
             super::desktop_ui_icon_glyph_or_label("planet", "planet"),
@@ -70545,6 +70544,40 @@ version: "2.0.0"
             hover_texts.contains(&"Survival"),
             "Java MapListDialog mode icon buttons expose their localized mode name as a tooltip"
         );
+        let editor_mode = DesktopLauncher::map_list_filter_mode_rect(dialog, 4).center();
+        assert_eq!(
+            custom.active_menu_route_shell_action_at_surface_point(
+                surface,
+                editor_mode.x,
+                editor_mode.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleMode(Gamemode::Editor)
+            )),
+            "Java MapListDialog iterates Gamemode.all, so hidden editor still has a filter button"
+        );
+        custom.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::CursorMoved {
+                x: editor_mode.x,
+                y: editor_mode.y,
+            }],
+        );
+        let editor_hover_frame = custom.menu_graphics_frame_for_surface(0, viewport);
+        let editor_hover_texts = editor_hover_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("hovered editor map list filter dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(editor_hover_texts.contains(&"Editor"));
         let close_filter = DesktopLauncher::schematic_info_button_rect(dialog, 0).center();
         assert_eq!(
             custom.active_menu_route_shell_action_at_surface_point(
