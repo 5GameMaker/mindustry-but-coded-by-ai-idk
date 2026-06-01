@@ -15,6 +15,27 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 652. JoinDialog add/edit 弹窗状态对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.4%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是让 JoinDialog 的 add/edit server 弹窗状态更接近 Java。
+- Java 对照依据：
+  - `JoinDialog.add.shown(...)` 在编辑已有 server 时将标题设为 `@server.edit`，新增时为 `@server.add`；
+  - `add.buttons.button("@ok", ...).disabled(b -> Core.settings.getString("ip").isEmpty() || net.active())` 禁止空 IP 或联网态确认。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_add_server_confirm_enabled()`；
+    - `push_join_add_server_dialog()` 标题从固定 `@joingame.title` 改为 `@server.add` / `@server.edit`；
+    - OK 按钮接入 disabled 视觉与 hit-test 禁用，dispatch 侧也忽略空输入/联网态确认；
+    - route shell lines 同步输出当前 add/edit 弹窗标题；
+    - 回归测试覆盖新增弹窗不再渲染 `@joingame.title`，编辑弹窗渲染 `@server.edit`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+- 仍未完成：
+  - JoinDialog 搜索作用域、保存服务器真实 ping/host 信息层级、本地/远端列表密度和滚动仍待继续对齐；
+  - `safeConnect(..., version)` 版本门禁和 community 远端 fetch/cache 仍未完成。
+
 ## 651. 主菜单背景层兜底补齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

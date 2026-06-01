@@ -27420,6 +27420,10 @@ impl DesktopLauncher {
         )
     }
 
+    fn join_add_server_confirm_enabled(&self) -> bool {
+        !self.join_add_server_text.trim().is_empty() && !self.pause_overlay_net_active()
+    }
+
     fn join_route_server_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let top = panel.y + panel.height
             - 204.0
@@ -29295,7 +29299,9 @@ impl DesktopLauncher {
             if Self::join_add_dialog_button_rect(dialog, 0).contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::CloseJoinAddServer);
             }
-            if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
+            if self.join_add_server_confirm_enabled()
+                && Self::join_add_dialog_button_rect(dialog, 1).contains_point(point)
+            {
                 return Some(DesktopMenuRouteShellAction::ConfirmJoinAddServer);
             }
             return None;
@@ -30725,6 +30731,9 @@ impl DesktopLauncher {
                 }
             }
             DesktopMenuRouteShellAction::ConfirmJoinAddServer => {
+                if !self.join_add_server_confirm_enabled() {
+                    return;
+                }
                 if let Some(target) = parse_host_port(&self.join_add_server_text) {
                     if let Some(index) = self.join_add_server_edit_index {
                         if let Some(saved) = self.join_saved_servers.get_mut(index) {
@@ -32383,7 +32392,11 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.082,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@joingame.title",
+            if self.join_add_server_edit_index.is_some() {
+                "@server.edit"
+            } else {
+                "@server.add"
+            },
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -32449,12 +32462,13 @@ impl DesktopLauncher {
             Some("left"),
             Layer::END_PIXELED + 0.086,
         );
-        self.push_settings_text_button(
+        self.push_settings_text_button_enabled(
             pass,
             Self::join_add_dialog_button_rect(dialog, 1),
             "@ok",
             Some("ok"),
             Layer::END_PIXELED + 0.087,
+            self.join_add_server_confirm_enabled(),
         );
     }
 
@@ -38358,8 +38372,13 @@ impl DesktopLauncher {
                     ]);
                 }
                 if self.join_add_dialog_open {
+                    let title = if self.join_add_server_edit_index.is_some() {
+                        "@server.edit"
+                    } else {
+                        "@server.add"
+                    };
                     lines.extend([
-                        "dialog: @server.add / @joingame.title".into(),
+                        format!("dialog: {title}"),
                         format!(
                             "field: @joingame.ip value={} focused={}",
                             self.join_add_server_text, self.join_add_server_focused
@@ -68504,7 +68523,7 @@ version: "2.0.0"
         assert!(texts.contains(&"@search"));
         assert!(texts.contains(&"@servers.showhidden"));
         assert!(texts.contains(&"@hosts.none"));
-        assert!(texts.contains(&"@joingame.title"));
+        assert!(!texts.contains(&"@joingame.title"));
         assert!(texts.contains(&"@joingame.ip"));
         assert!(texts.contains(&"@cancel"));
         assert!(texts.contains(&"@ok"));
@@ -68524,6 +68543,22 @@ version: "2.0.0"
         );
         assert!(launcher.join_add_dialog_open);
         assert_eq!(launcher.join_add_server_text, "example.org");
+        let edit_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let edit_texts = edit_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join edit dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(edit_texts.contains(&"@server.edit"));
+        assert!(!edit_texts.contains(&"@joingame.title"));
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::CloseJoinAddServer,
         );
