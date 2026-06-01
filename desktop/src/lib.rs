@@ -27050,6 +27050,27 @@ impl DesktopLauncher {
         RenderRect::new(add.right() + 12.0, add.y, 58.0, add.height)
     }
 
+    fn join_route_local_section_label(&self) -> &'static str {
+        if self.host_steam_enabled() {
+            "@servers.local.steam"
+        } else {
+            "@servers.local"
+        }
+    }
+
+    fn join_route_info_button_available_for_platform(&self) -> bool {
+        !self.host_steam_enabled()
+    }
+
+    fn join_route_info_button_enabled_for_viewport(&self, viewport: RenderViewport) -> bool {
+        self.join_route_info_button_available_for_platform()
+            && !DesktopMenuChromeLayout::for_viewport_with_state(
+                viewport,
+                DesktopMenuChromeLayoutOptions::default(),
+            )
+            .is_mobile
+    }
+
     fn join_route_server_card_columns_for_panel(panel: RenderRect) -> usize {
         let content_width = (panel.width - 72.0).max(1.0);
         ((content_width / JOIN_SERVER_CARD_TARGET_WIDTH).floor() as usize)
@@ -29338,7 +29359,9 @@ impl DesktopLauncher {
         if Self::join_route_add_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::OpenJoinAddServer);
         }
-        if Self::join_route_info_button_rect_for_panel(panel).contains_point(point) {
+        if self.join_route_info_button_enabled_for_viewport(viewport)
+            && Self::join_route_info_button_rect_for_panel(panel).contains_point(point)
+        {
             return Some(DesktopMenuRouteShellAction::OpenJoinInfo);
         }
         if Self::join_route_refresh_button_rect_for_panel(panel).contains_point(point) {
@@ -30798,6 +30821,9 @@ impl DesktopLauncher {
                 }
             }
             DesktopMenuRouteShellAction::OpenJoinInfo => {
+                if !self.join_route_info_button_available_for_platform() {
+                    return;
+                }
                 self.join_info_dialog_open = true;
                 self.join_add_dialog_open = false;
                 self.join_add_server_focused = false;
@@ -32960,7 +32986,12 @@ impl DesktopLauncher {
         }
     }
 
-    fn push_join_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
+    fn push_join_route_page(
+        &self,
+        pass: &mut RenderPass,
+        viewport: RenderViewport,
+        panel: RenderRect,
+    ) {
         let name_row = RenderRect::new(
             panel.x + 36.0,
             panel.y + panel.height - 82.0,
@@ -33007,7 +33038,9 @@ impl DesktopLauncher {
             Some("add"),
             Layer::END_PIXELED + 0.03,
         );
-        self.push_settings_text_button(pass, info, "?", None, Layer::END_PIXELED + 0.032);
+        if self.join_route_info_button_enabled_for_viewport(viewport) {
+            self.push_settings_text_button(pass, info, "?", None, Layer::END_PIXELED + 0.032);
+        }
         self.push_settings_text_button(
             pass,
             refresh,
@@ -33028,7 +33061,7 @@ impl DesktopLauncher {
             )
         };
         for (index, (label, detail)) in [
-            ("@servers.local", local_detail.as_str()),
+            (self.join_route_local_section_label(), local_detail.as_str()),
             ("@servers.remote", "@server.saved"),
         ]
         .into_iter()
@@ -33132,7 +33165,12 @@ impl DesktopLauncher {
                 layer + 0.003,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                format!("{}:{}  @servers.local", host.address, host.port),
+                format!(
+                    "{}:{}  {}",
+                    host.address,
+                    host.port,
+                    self.join_route_local_section_label()
+                ),
                 RenderPoint::new(card.x + 14.0, card.y + card.height - 58.0),
                 [0.66, 0.78, 0.86, 1.0],
                 11.0,
@@ -38365,7 +38403,8 @@ impl DesktopLauncher {
                 };
                 let mut lines = vec![
                     format!(
-                        "section: @servers.local hosts: {} state:{}",
+                        "section: {} hosts: {} state:{}",
+                        self.join_route_local_section_label(),
                         self.join_local_hosts.len(),
                         if self.join_local_discovering {
                             "discovering"
@@ -38380,9 +38419,11 @@ impl DesktopLauncher {
                         self.join_saved_servers.len()
                     ),
                     "button: @server.add".into(),
-                    "button: ? @join.info".into(),
                     "button: @refresh".into(),
                 ];
+                if self.join_route_info_button_available_for_platform() {
+                    lines.push("button: ? @join.info".into());
+                }
                 if community_servers_enabled {
                     lines.extend([
                         format!(
@@ -39871,7 +39912,7 @@ impl DesktopLauncher {
         if route == DesktopMenuRoute::About {
             self.push_about_route_page(pass, panel);
         } else if route == DesktopMenuRoute::Join {
-            self.push_join_route_page(pass, panel);
+            self.push_join_route_page(pass, viewport, panel);
         } else if route == DesktopMenuRoute::Host {
             self.push_host_route_page(pass, panel);
         } else if matches!(
@@ -68690,6 +68731,87 @@ version: "2.0.0"
                 port: 6567,
             })
         );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_hides_info_button_on_steam_or_mobile_like_java() {
+        let mut steam_launcher = DesktopLauncher::new(Vec::new());
+        steam_launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        steam_launcher.set_setting_override("platform", "steam", "true");
+        let steam_lines =
+            steam_launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(steam_lines
+            .iter()
+            .any(|line| line.starts_with("section: @servers.local.steam")));
+        assert!(!steam_lines.contains(&"button: ? @join.info".to_string()));
+        steam_launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::OpenJoinInfo);
+        assert!(!steam_launcher.join_info_dialog_open);
+
+        let desktop_surface = DesktopSurfaceSize::new(1280, 720);
+        let desktop_viewport = steam_launcher.default_render_viewport_for_surface(desktop_surface);
+        let desktop_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            desktop_viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let info = DesktopLauncher::join_route_info_button_rect_for_panel(desktop_panel);
+        assert_eq!(
+            steam_launcher.active_menu_route_shell_action_at_surface_point(
+                desktop_surface,
+                info.center().x,
+                info.center().y
+            ),
+            None
+        );
+        let steam_frame = steam_launcher.menu_graphics_frame_for_surface(0, desktop_viewport);
+        let steam_texts = steam_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("steam join frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(steam_texts.contains(&"@servers.local.steam"));
+        assert!(!steam_texts.contains(&"?"));
+
+        let mut mobile_launcher = DesktopLauncher::new(Vec::new());
+        mobile_launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        let mobile_surface = DesktopSurfaceSize::new(540, 960);
+        let mobile_viewport = mobile_launcher.default_render_viewport_for_surface(mobile_surface);
+        let mobile_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            mobile_viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let mobile_info = DesktopLauncher::join_route_info_button_rect_for_panel(mobile_panel);
+        assert_eq!(
+            mobile_launcher.active_menu_route_shell_action_at_surface_point(
+                mobile_surface,
+                mobile_info.center().x,
+                mobile_info.center().y
+            ),
+            None
+        );
+        let mobile_frame = mobile_launcher.menu_graphics_frame_for_surface(0, mobile_viewport);
+        let mobile_texts = mobile_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("mobile join frame should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!mobile_texts.contains(&"?"));
     }
 
     #[test]

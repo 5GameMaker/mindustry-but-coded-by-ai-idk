@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 656. JoinDialog 平台条件入口对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.8%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是对齐 Java `JoinDialog` 在 Steam/mobile 平台上的高可见按钮与 local section 标题条件。
+- Java 对照依据：
+  - `JoinDialog` 中 `boolean infoButton = !steam && !mobile`，`?` 帮助按钮只在非 Steam、非 mobile 时展示；
+  - `setup()` 中 local section 标题在 Steam 平台使用 `@servers.local.steam`，否则使用 `@servers.local`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_route_local_section_label()`、`join_route_info_button_available_for_platform()`、`join_route_info_button_enabled_for_viewport()`；
+    - Join route 渲染在 Steam/mobile 情况下不再绘制 `?` info 按钮，hit-test 也不返回 `OpenJoinInfo`；
+    - Steam 平台下 shell lines 与可见 local section 文本切换为 `@servers.local.steam`；
+    - dispatch 侧阻止 Steam 平台直接打开 `@join.info` 弹窗，避免隐藏入口仍能被内部 action 打开。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog 的 `Collapser + collapsed-*` 分区折叠与滚动仍未迁移；
+  - saved server 独立 `pingHost` 刷新与 Java `safeConnect(..., version)` 版本门禁仍待迁移；
+  - mobile JoinDialog 的整体布局仍是 desktop shell 复用，后续需要继续贴近原版 mobile scene2d 行为；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 655. MenuRenderer 小世界阴影与飞行单位兜底
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
