@@ -241,6 +241,14 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("rules.corecapture", "Capture Core On Destruction"),
     ("rules.infiniteresources", "Infinite Resources"),
     ("rules.schematic", "Schematics Allowed"),
+    ("rules.hidebannedblocks", "Hide Banned Blocks"),
+    ("bannedblocks", "Banned Blocks"),
+    ("unbannedblocks", "Unbanned Blocks"),
+    ("bannedunits", "Banned Units"),
+    ("unbannedunits", "Unbanned Units"),
+    ("bannedblocks.whitelist", "Banned Blocks As Whitelist"),
+    ("bannedunits.whitelist", "Banned Units As Whitelist"),
+    ("addall", "Add All"),
     ("rules.buildcostmultiplier", "Build Cost Multiplier"),
     ("rules.buildspeedmultiplier", "Build Speed Multiplier"),
     (
@@ -631,6 +639,14 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("rules.corecapture", "摧毁后占领核心"),
     ("rules.infiniteresources", "无限资源"),
     ("rules.schematic", "允许使用蓝图"),
+    ("rules.hidebannedblocks", "隐藏禁用的建筑"),
+    ("bannedblocks", "禁用建筑"),
+    ("unbannedblocks", "可用建筑"),
+    ("bannedunits", "禁用单位"),
+    ("unbannedunits", "可用单位"),
+    ("bannedblocks.whitelist", "将禁用建筑列入白名单"),
+    ("bannedunits.whitelist", "将禁用单位列入白名单"),
+    ("addall", "全部添加"),
     ("rules.buildcostmultiplier", "建造花费倍率"),
     ("rules.buildspeedmultiplier", "建造速度倍率"),
     (
@@ -1000,6 +1016,14 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("rules.corecapture", "佔領摧毀的核心"),
     ("rules.infiniteresources", "無限資源"),
     ("rules.schematic", "允許使用藍圖"),
+    ("rules.hidebannedblocks", "隱藏禁用的建築"),
+    ("bannedblocks", "禁用方塊"),
+    ("unbannedblocks", "Unbanned Blocks"),
+    ("bannedunits", "禁用單位"),
+    ("unbannedunits", "Unbanned Units"),
+    ("bannedblocks.whitelist", "Banned Blocks As Whitelist"),
+    ("bannedunits.whitelist", "Banned Units As Whitelist"),
+    ("addall", "全部加入"),
     ("rules.buildcostmultiplier", "建設成本倍數"),
     ("rules.buildspeedmultiplier", "建設速度倍數"),
     (
@@ -1334,6 +1358,18 @@ mod tests {
             upstream_bundle_en_value("rules.dropzoneradius"),
             Some("Drop Zone Radius:[lightgray] (tiles)")
         );
+        assert_eq!(
+            upstream_bundle_en_value("rules.hidebannedblocks"),
+            Some("Hide Banned Blocks")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("bannedblocks.whitelist"),
+            Some("Banned Blocks As Whitelist")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("bannedunits.whitelist"),
+            Some("Banned Units As Whitelist")
+        );
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
     }
 
@@ -1447,6 +1483,18 @@ mod tests {
             Some("空降区半径：[lightgray]（格）")
         );
         assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.hidebannedblocks"),
+            Some("隐藏禁用的建筑")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "bannedblocks.whitelist"),
+            Some("将禁用建筑列入白名单")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "bannedunits.whitelist"),
+            Some("将禁用单位列入白名单")
+        );
+        assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "keybind.chat.name"),
             Some("聊天")
         );
@@ -1509,6 +1557,18 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "rules.dropzoneradius"),
             Some("空降區半徑：[lightgray]（格）")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.hidebannedblocks"),
+            Some("隱藏禁用的建築")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "bannedblocks.whitelist"),
+            Some("Banned Blocks As Whitelist")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "bannedunits.whitelist"),
+            Some("Banned Units As Whitelist")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "server.invalidaddress"),

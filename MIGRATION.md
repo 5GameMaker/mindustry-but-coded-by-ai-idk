@@ -17,6 +17,36 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 709. CustomRulesDialog banned policy 开关最小前端闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.0%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，而不是只做主菜单或孤立模块。
+- Java 对照依据：
+  - `CustomRulesDialog` 中 `@rules.hidebannedblocks`、`@bannedblocks.whitelist`、`@bannedunits.whitelist` 会直接写回 `Rules.hideBannedBlocks / blockWhitelist / unitWhitelist`；
+  - `BannedContentDialog` 的完整左右双栏内容选择器仍是后续大闭环，本轮先补 policy 开关与 copy/load 保真。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `HideBannedBlocks / BlockWhitelist / UnitWhitelist` 三个 `DesktopCustomRulesToggle`；
+    - 在 custom rules 面板底部增加 compact banned policy 行，显示 `Hide Banned Blocks`、`Banned Blocks As Whitelist`、`Banned Units As Whitelist`，点击后直接更新当前 `map_play_rules`；
+    - copy/load JSON 现在包含 `hideBannedBlocks / blockWhitelist / unitWhitelist`，避免 policy 开关经剪贴板往返丢失；
+    - 扩展现有 custom rules 测试，验证 banned policy 文案可见、点击命中、`Rules.hide_banned_blocks` 写回，以及 copy JSON 保真。
+  - `core/src/mindustry/game/rules.rs`
+    - `Rules::apply_json_str` 支持 `hideBannedBlocks`、`blockWhitelist`、`unitWhitelist`。
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 `rules.hidebannedblocks`、`bannedblocks(.whitelist)`、`bannedunits(.whitelist)`、`unbannedblocks`、`unbannedunits`、`addall` 的英/简中/繁中 fallback 文案与测试断言。
+  - `README.md`
+    - 迁移百分比更新为 `84.0%`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore -- --nocapture`
+  - `cargo test -p mindustry-core rules_apply_json_str_updates_supported_top_level_fields --lib -- --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_entries_cover_menu_fragment_buttons --lib -- --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle_locale_entries_cover_chinese_menu_fragment_buttons --lib -- --nocapture`
+- 仍未完成：
+  - `BannedContentDialog` 的完整左右双栏列表、搜索、add all、block 分类过滤与逐项 ban/unban 仍未迁移；
+  - `hide_banned_blocks` 仍需继续接到真实 block visibility/build menu 过滤链路；
+  - `CustomRulesDialog` 天气编辑、队伍规则、完整数值文本输入与 `Open In Editor` 真实 `beginEditMap` 仍未完成。
+
 ## 708. CustomRulesDialog waves 数值字段最小编辑闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -759,6 +759,9 @@ pub enum DesktopCustomRulesToggle {
     WaveTimer,
     InfiniteResources,
     SchematicsAllowed,
+    HideBannedBlocks,
+    BlockWhitelist,
+    UnitWhitelist,
     AttackMode,
     Pvp,
     CoreCapture,
@@ -772,6 +775,9 @@ impl DesktopCustomRulesToggle {
             Self::WaveTimer => "@rules.wavetimer",
             Self::InfiniteResources => "@rules.infiniteresources",
             Self::SchematicsAllowed => "@rules.schematic",
+            Self::HideBannedBlocks => "@rules.hidebannedblocks",
+            Self::BlockWhitelist => "@bannedblocks.whitelist",
+            Self::UnitWhitelist => "@bannedunits.whitelist",
             Self::AttackMode => "@rules.attack",
             Self::Pvp => "@mode.pvp.name",
             Self::CoreCapture => "@rules.corecapture",
@@ -785,6 +791,9 @@ impl DesktopCustomRulesToggle {
             Self::WaveTimer => rules.wave_timer,
             Self::InfiniteResources => rules.infinite_resources,
             Self::SchematicsAllowed => rules.schematics_allowed,
+            Self::HideBannedBlocks => rules.hide_banned_blocks,
+            Self::BlockWhitelist => rules.block_whitelist,
+            Self::UnitWhitelist => rules.unit_whitelist,
             Self::AttackMode => rules.attack_mode,
             Self::Pvp => rules.pvp,
             Self::CoreCapture => rules.core_capture,
@@ -805,6 +814,9 @@ impl DesktopCustomRulesToggle {
             Self::WaveTimer => rules.wave_timer = !rules.wave_timer,
             Self::InfiniteResources => rules.infinite_resources = !rules.infinite_resources,
             Self::SchematicsAllowed => rules.schematics_allowed = !rules.schematics_allowed,
+            Self::HideBannedBlocks => rules.hide_banned_blocks = !rules.hide_banned_blocks,
+            Self::BlockWhitelist => rules.block_whitelist = !rules.block_whitelist,
+            Self::UnitWhitelist => rules.unit_whitelist = !rules.unit_whitelist,
             Self::AttackMode => rules.attack_mode = !rules.attack_mode,
             Self::Pvp => rules.pvp = !rules.pvp,
             Self::CoreCapture => rules.core_capture = !rules.core_capture,
@@ -912,6 +924,11 @@ const MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])]
         MAP_PLAY_CUSTOM_RULE_RESOURCE_TOGGLES,
     ),
     ("@rules.title.enemy", MAP_PLAY_CUSTOM_RULE_ENEMY_TOGGLES),
+];
+const MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::HideBannedBlocks,
+    DesktopCustomRulesToggle::BlockWhitelist,
+    DesktopCustomRulesToggle::UnitWhitelist,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30258,6 +30275,16 @@ impl DesktopLauncher {
         RenderRect::new(x, row.y + 1.0, width, row.height - 2.0)
     }
 
+    fn map_play_customize_banned_policy_row_rect(content: RenderRect, index: usize) -> RenderRect {
+        let number_row = Self::map_play_customize_number_row_rect(content, index);
+        RenderRect::new(
+            content.x + 16.0,
+            number_row.y,
+            (number_row.x - content.x - 28.0).max(150.0),
+            number_row.height,
+        )
+    }
+
     fn toggle_map_play_custom_rule(&mut self, index: usize, toggle: DesktopCustomRulesToggle) {
         let Some(map) = self.map_list_cards.get(index) else {
             return;
@@ -30303,6 +30330,9 @@ impl DesktopLauncher {
                 "\"winWave\":{},",
                 "\"infiniteResources\":{},",
                 "\"schematicsAllowed\":{},",
+                "\"hideBannedBlocks\":{},",
+                "\"blockWhitelist\":{},",
+                "\"unitWhitelist\":{},",
                 "\"attackMode\":{},",
                 "\"pvp\":{},",
                 "\"coreCapture\":{},",
@@ -30318,6 +30348,9 @@ impl DesktopLauncher {
             rules.win_wave,
             rules.infinite_resources,
             rules.schematics_allowed,
+            rules.hide_banned_blocks,
+            rules.block_whitelist,
+            rules.unit_whitelist,
             rules.attack_mode,
             rules.pvp,
             rules.core_capture,
@@ -32072,6 +32105,23 @@ impl DesktopLauncher {
                                     DesktopMapCardAction::new(
                                         index,
                                         DesktopMapCardActionKind::AdjustCustomRuleNumber(number, 1),
+                                    ),
+                                ));
+                            }
+                        }
+                        for (policy_index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
+                            .iter()
+                            .enumerate()
+                        {
+                            let row = Self::map_play_customize_banned_policy_row_rect(
+                                content,
+                                policy_index,
+                            );
+                            if row.contains_point(point) {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::ToggleCustomRule(*toggle),
                                     ),
                                 ));
                             }
@@ -39063,6 +39113,55 @@ impl DesktopLauncher {
         }
     }
 
+    fn push_map_play_customize_banned_policy_rows(
+        &self,
+        pass: &mut RenderPass,
+        content: RenderRect,
+        rules: &Rules,
+        layer: f32,
+    ) {
+        for (index, toggle) in MAP_PLAY_CUSTOM_RULE_BANNED_POLICY_TOGGLES
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            let row = Self::map_play_customize_banned_policy_row_rect(content, index);
+            let value = toggle.value(rules);
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_drawable_symbol("button"),
+                row,
+                if value {
+                    [1.0, 1.0, 1.0, 0.32]
+                } else {
+                    [1.0, 1.0, 1.0, 0.15]
+                },
+                0.0,
+                layer + index as f32 * 0.001,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                format!(
+                    "{} {}",
+                    if value { "✓" } else { "□" },
+                    self.localize_bundle_markup_text(toggle.label_key())
+                ),
+                RenderPoint::new(row.x + 8.0, row.center().y),
+                if value {
+                    [0.82, 0.91, 0.98, 1.0]
+                } else {
+                    [0.58, 0.66, 0.72, 0.82]
+                },
+                9.2,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_markup(true)
+                    .with_wrap_width((row.width - 16.0).max(80.0))
+                    .with_integer_position(true),
+                layer + 0.002 + index as f32 * 0.001,
+            ));
+        }
+    }
+
     fn push_map_play_customize_dialog(
         &self,
         pass: &mut RenderPass,
@@ -39199,6 +39298,7 @@ impl DesktopLauncher {
             y -= 10.0;
         }
         self.push_map_play_customize_number_rows(pass, content, &rules, layer + 0.030);
+        self.push_map_play_customize_banned_policy_rows(pass, content, &rules, layer + 0.038);
         if y >= content.y + 18.0 {
             for row in [
                 self.localize_bundle_markup_text("@rules.title.planet"),
@@ -65055,9 +65155,38 @@ version: "2.0.0"
         assert!(customize_texts.contains(&"Wave Spacing:[lightgray] (sec)"));
         assert!(customize_texts.contains(&"Initial Wave Spacing:[lightgray] (sec)"));
         assert!(customize_texts.contains(&"Drop Zone Radius:[lightgray] (tiles)"));
+        assert!(customize_texts.contains(&"□ Hide Banned Blocks"));
+        assert!(customize_texts.contains(&"□ Banned Blocks As Whitelist"));
+        assert!(customize_texts.contains(&"□ Banned Units As Whitelist"));
 
         let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
         let content = DesktopLauncher::map_play_customize_content_rect(child);
+        let hide_banned_center =
+            DesktopLauncher::map_play_customize_banned_policy_row_rect(content, 0).center();
+        let toggle_hide_banned =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleCustomRule(
+                    super::DesktopCustomRulesToggle::HideBannedBlocks,
+                ),
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                hide_banned_center.x,
+                hide_banned_center.y
+            ),
+            Some(toggle_hide_banned)
+        );
+        launcher.dispatch_menu_route_shell_action(toggle_hide_banned);
+        assert!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.hide_banned_blocks)
+                .unwrap_or(false),
+            "CustomRulesDialog hide banned blocks row should update Rules.hideBannedBlocks"
+        );
         let wave_spacing_row = DesktopLauncher::map_play_customize_number_row_rect(content, 1);
         let wave_spacing_plus =
             DesktopLauncher::map_play_customize_number_button_rect(wave_spacing_row, true).center();
@@ -65189,6 +65318,7 @@ version: "2.0.0"
             .clone()
             .expect("copy should store the rules JSON clipboard payload");
         assert!(copied_rules.contains("\"attackMode\":true"));
+        assert!(copied_rules.contains("\"hideBannedBlocks\":true"));
         assert!(copied_rules.contains("\"waveSpacing\":1200"));
 
         let reset_center =

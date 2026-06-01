@@ -239,6 +239,9 @@ struct RulesJsonPatch {
     editor: Option<bool>,
     infinite_resources: Option<bool>,
     schematics_allowed: Option<bool>,
+    hide_banned_blocks: Option<bool>,
+    block_whitelist: Option<bool>,
+    unit_whitelist: Option<bool>,
     core_capture: Option<bool>,
     wave_spacing: Option<f32>,
     initial_wave_spacing: Option<f32>,
@@ -280,6 +283,15 @@ impl RulesJsonPatch {
         }
         if let Some(value) = self.schematics_allowed {
             rules.schematics_allowed = value;
+        }
+        if let Some(value) = self.hide_banned_blocks {
+            rules.hide_banned_blocks = value;
+        }
+        if let Some(value) = self.block_whitelist {
+            rules.block_whitelist = value;
+        }
+        if let Some(value) = self.unit_whitelist {
+            rules.unit_whitelist = value;
         }
         if let Some(value) = self.core_capture {
             rules.core_capture = value;
@@ -354,6 +366,9 @@ impl<'a> RulesJsonParser<'a> {
                     patch.infinite_resources = self.parse_optional_bool()?;
                 }
                 "schematicsAllowed" => patch.schematics_allowed = self.parse_optional_bool()?,
+                "hideBannedBlocks" => patch.hide_banned_blocks = self.parse_optional_bool()?,
+                "blockWhitelist" => patch.block_whitelist = self.parse_optional_bool()?,
+                "unitWhitelist" => patch.unit_whitelist = self.parse_optional_bool()?,
                 "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
                 "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
                 "initialWaveSpacing" => patch.initial_wave_spacing = self.parse_optional_f32()?,
@@ -1058,6 +1073,9 @@ mod tests {
                     "editor": true,
                     "infiniteResources": true,
                     "schematicsAllowed": false,
+                    "hideBannedBlocks": true,
+                    "blockWhitelist": true,
+                    "unitWhitelist": true,
                     "coreCapture": true,
                     "waveSpacing": 7200.5,
                     "initialWaveSpacing": 600.25,
@@ -1082,6 +1100,9 @@ mod tests {
         assert!(rules.editor);
         assert!(rules.infinite_resources);
         assert!(!rules.schematics_allowed);
+        assert!(rules.hide_banned_blocks);
+        assert!(rules.block_whitelist);
+        assert!(rules.unit_whitelist);
         assert!(rules.core_capture);
         assert_eq!(rules.wave_spacing, 7200.5);
         assert_eq!(rules.initial_wave_spacing, 600.25);
