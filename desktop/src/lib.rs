@@ -23645,7 +23645,7 @@ impl DesktopLauncher {
             return lines;
         }
         if filtered_indices.is_empty() {
-            lines.push("empty: @none.found".into());
+            lines.push("empty: @save.none".into());
             return lines;
         }
         for (visible_index, slot_index) in filtered_indices
@@ -43530,7 +43530,7 @@ impl DesktopLauncher {
 
         if self.load_game_slots.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
-                "@save.none",
+                self.localize_bundle_markup_text("@save.none"),
                 list.center(),
                 [0.70, 0.78, 0.84, 1.0],
                 13.0,
@@ -43546,7 +43546,7 @@ impl DesktopLauncher {
 
         if filtered_indices.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
-                "@none.found",
+                self.localize_bundle_markup_text("@save.none"),
                 list.center(),
                 [0.70, 0.78, 0.84, 1.0],
                 13.0,
@@ -75013,6 +75013,61 @@ version: "2.0.0"
         assert!(texts.contains(&"[accent]Old Map"));
         assert!(!texts.contains(&"[accent]New Map"));
         assert!(texts.contains(&"1 / 2"));
+
+        let survival_filter =
+            DesktopLauncher::load_game_mode_filter_button_rect(search, 0).center();
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: survival_filter.x,
+                    y: survival_filter.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
+        assert!(launcher.load_game_hidden_modes.contains(&Gamemode::Attack));
+        assert!(launcher
+            .load_game_hidden_modes
+            .contains(&Gamemode::Survival));
+        assert!(launcher.filtered_load_game_slot_indices().is_empty());
+        let empty_lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::LoadGame);
+        assert!(empty_lines.contains(&"empty: @save.none".to_string()));
+        assert!(!empty_lines.contains(&"empty: @none.found".to_string()));
+        let empty_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
+        let empty_texts = empty_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("empty filtered load game frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(empty_texts.contains(&launcher.localize_bundle_markup_text("@save.none").as_str()));
+        assert!(
+            !empty_texts.contains(&launcher.localize_bundle_markup_text("@none.found").as_str())
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: survival_filter.x,
+                    y: survival_filter.y,
+                },
+                DesktopInputTickEvent::MouseButton {
+                    button: "primary".into(),
+                    pressed: true,
+                },
+            ],
+        );
 
         launcher.apply_menu_input_events(
             surface,

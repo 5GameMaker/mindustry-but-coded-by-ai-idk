@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 736. LoadDialog 过滤空态文案对齐 `@save.none`
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **87.2%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `LoadDialog` 构建槽位列表后，如果没有可显示项，统一 `slots.add("@save.none")`；
+  - Java 原版没有为搜索/模式过滤为空单独显示 `@none.found`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `load_game_slot_lines()` 的过滤空态从 `empty: @none.found` 改为 `empty: @save.none`；
+    - `push_load_game_route_page(...)` 的过滤空态和无存档空态都走本地化 `@save.none`；
+    - 扩展 LoadGame 模式过滤测试，覆盖隐藏 Attack+Survival 后列表为空，画面出现 `@save.none` 且不出现 `@none.found`。
+  - `README.md`
+    - 迁移进度百分比同步到 `87.2%`。
+- 已验证：
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_toggles_mode_filters_like_upstream_load_dialog --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - LoadDialog 仍需继续补齐更多 Java Scene2D 细节，如真实搜索 field 光标表现、滚动条拖动与按钮皮肤；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 735. AboutDialog 链接与 Credits 接入滚动 offset
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
