@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 741. BannedContentDialog 补齐搜索批量与滚动命中
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **87.7%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `BannedContentDialog.build()` 顶部有 `@search` field 和清空按钮；
+  - 左栏 `@addall` 将当前过滤集全部加入 banned，右栏 `@addall` 将当前过滤集全部移出 banned；
+  - Java 两栏通过 `pane(...)` 展示完整列表，滚动后仍应能命中超过首屏的候选；
+  - `rebuildTable(...)` 两侧空列表都显示 `@empty`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 BannedContentDialog 新增搜索文本、焦点和滚动 offset 状态；
+    - 候选集统一封装为 name/label 条目，按 label 排序并按搜索词过滤；
+    - 渲染顶部搜索栏、清空按钮、双侧 `@addall`、滚动页码和双侧 `@empty`；
+    - hit-test 与 render 共用同一过滤/排序/滚动模型，避免隐藏行可点或可见行点错；
+    - `AddAllBannedContent/RemoveAllBannedContent` 直接更新真实 `Rules.banned_blocks/banned_units`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_banned_content_dialog_search_addall_and_scrolls --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - BannedContentDialog 还未补齐 Blocks 专属 Category 分类按钮；
+  - 条目仍以文本方式渲染，后续还需接 block/unit `uiIcon`、tooltip 和更接近 Java 的 grid pane；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 740. MapListFilterDialog 模组搜索与优先级回归
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
