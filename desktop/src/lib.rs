@@ -41607,6 +41607,20 @@ impl DesktopLauncher {
         );
     }
 
+    fn ensure_menu_pass_has_screen_visible_commands(
+        &self,
+        pass: &mut RenderPass,
+        viewport: RenderViewport,
+    ) {
+        if !render_pass_has_screen_visible_commands(pass) {
+            self.push_menu_empty_plan_fallback(pass, viewport);
+        }
+        debug_assert!(
+            render_pass_has_screen_visible_commands(pass),
+            "menu graphics frame should keep at least one screen-visible command"
+        );
+    }
+
     fn world_empty_frame_fallback_render_pass(viewport: RenderViewport) -> RenderPass {
         let camera = RenderCamera::new(viewport.as_rect().center(), viewport);
         let mut pass = RenderPass::new(RenderPassKind::Custom("world-empty-fallback".into()))
@@ -41944,10 +41958,7 @@ impl DesktopLauncher {
         self.push_menu_logo_and_version_chrome(&mut menu_pass, frame_viewport);
         self.tick_save_game_pending_save();
         self.tick_load_game_pending_load();
-        debug_assert!(
-            render_pass_has_screen_visible_commands(&menu_pass),
-            "menu graphics frame should keep at least one screen-visible command"
-        );
+        self.ensure_menu_pass_has_screen_visible_commands(&mut menu_pass, frame_viewport);
         let camera = menu_pass
             .camera
             .unwrap_or_else(|| self.default_render_camera_for_viewport(frame_viewport));
@@ -72810,6 +72821,29 @@ version: "2.0.0"
         assert!(pass.commands.iter().any(|command| matches!(
             command,
             RenderCommand::DrawText { text, .. } if text == "check MINDUSTRY_ASSET_ROOT and stderr trace"
+        )));
+    }
+
+    #[test]
+    fn desktop_launcher_menu_visible_guard_injects_fallback_for_non_visible_pass() {
+        let launcher = DesktopLauncher::new(Vec::new());
+        let viewport = RenderViewport::new(0.0, 0.0, 640.0, 360.0);
+        let camera = launcher.default_render_camera_for_viewport(viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Custom("menu".to_string()))
+            .with_viewport(viewport)
+            .with_camera(camera);
+        pass.push(RenderCommand::Custom {
+            name: "logic-only".to_string(),
+            properties: Vec::new(),
+        });
+
+        assert!(!super::render_pass_has_screen_visible_commands(&pass));
+        launcher.ensure_menu_pass_has_screen_visible_commands(&mut pass, viewport);
+
+        assert!(super::render_pass_has_screen_visible_commands(&pass));
+        assert!(pass.commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, .. } if text == "menu render plan empty"
         )));
     }
 
