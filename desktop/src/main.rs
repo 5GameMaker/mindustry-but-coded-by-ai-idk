@@ -581,6 +581,9 @@ struct DesktopNativeOpenGlRuntime {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+const DESKTOP_NATIVE_WINDOW_ICON_SOURCE_PATH: &str = "icons/icon_64.png";
+
+#[cfg(feature = "opengl-native-runtime")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesktopNativeOpenGlContextProfile {
     Core,
@@ -745,6 +748,82 @@ fn desktop_native_context_attributes_for_candidate(
         builder = builder.with_context_api(ContextApi::OpenGl(Some(Version::new(major, minor))));
     }
     builder.build(Some(raw_window_handle))
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_window_icon_candidate_paths_from_roots<I, P>(roots: I) -> Vec<std::path::PathBuf>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<std::path::Path>,
+{
+    roots
+        .into_iter()
+        .map(|root| root.as_ref().join(DESKTOP_NATIVE_WINDOW_ICON_SOURCE_PATH))
+        .collect()
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_window_icon_candidate_paths() -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(path) = std::env::var_os("MINDUSTRY_ASSET_ROOT") {
+        roots.push(std::path::PathBuf::from(path));
+    }
+    roots.push(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+            .join("core")
+            .join("assets"),
+    );
+    roots.push(std::path::PathBuf::from(
+        "D:/MDT/mindustry-upstream-v157.4/core/assets",
+    ));
+    if let Ok(current_dir) = std::env::current_dir() {
+        roots.push(current_dir.join("core").join("assets"));
+    }
+    desktop_native_window_icon_candidate_paths_from_roots(roots)
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_window_icon_from_rgba(
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Result<winit::window::Icon, String> {
+    winit::window::Icon::from_rgba(pixels, width, height)
+        .map_err(|error| format!("invalid window icon rgba data: {error}"))
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_window_icon_from_path(
+    path: &std::path::Path,
+) -> Result<winit::window::Icon, String> {
+    let image = mindustry_core::mindustry::graphics::png_rgba8888_from_path(path)
+        .map_err(|error| format!("failed to decode window icon {}: {error:?}", path.display()))?;
+    desktop_native_window_icon_from_rgba(image.pixels, image.width, image.height)
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_window_attributes_with_icon(
+    attributes: winit::window::WindowAttributes,
+) -> winit::window::WindowAttributes {
+    for path in desktop_native_window_icon_candidate_paths() {
+        match desktop_native_window_icon_from_path(&path) {
+            Ok(icon) => {
+                desktop_native_trace_summary(format!(
+                    "runtime.new: window_icon path={}",
+                    path.display()
+                ));
+                return attributes.with_window_icon(Some(icon));
+            }
+            Err(error) => {
+                desktop_native_trace(format!(
+                    "runtime.new: window_icon candidate skipped: {error}"
+                ));
+            }
+        }
+    }
+    attributes
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -916,8 +995,10 @@ impl DesktopNativeOpenGlRuntime {
         let template = ConfigTemplateBuilder::new();
         let antialias_enabled =
             desktop_native_antialias_enabled_from_args(std::env::args().collect::<Vec<_>>());
+        let window_attributes =
+            desktop_native_window_attributes_with_icon(native_config.window_attributes());
         let (window, gl_config) = DisplayBuilder::new()
-            .with_window_attributes(Some(native_config.window_attributes()))
+            .with_window_attributes(Some(window_attributes))
             .build(event_loop, template, |configs| {
                 if antialias_enabled {
                     configs
@@ -3150,6 +3231,31 @@ mod tests {
             "mindustry-desktop",
             "--antialias"
         ]));
+    }
+
+    #[test]
+    fn native_opengl_window_icon_candidates_match_upstream_asset_path() {
+        let paths = desktop_native_window_icon_candidate_paths_from_roots([
+            std::path::PathBuf::from("core/assets"),
+            std::path::PathBuf::from("D:/MDT/mindustry-upstream-v157.4/core/assets"),
+        ]);
+        assert_eq!(
+            paths,
+            vec![
+                std::path::PathBuf::from("core/assets").join("icons/icon_64.png"),
+                std::path::PathBuf::from("D:/MDT/mindustry-upstream-v157.4/core/assets")
+                    .join("icons/icon_64.png"),
+            ]
+        );
+    }
+
+    #[test]
+    fn native_opengl_window_icon_accepts_rgba8888_pixels() {
+        assert!(desktop_native_window_icon_from_rgba(vec![255, 255, 255, 255], 1, 1).is_ok());
+        assert!(
+            desktop_native_window_icon_from_rgba(vec![255, 255, 255], 1, 1).is_err(),
+            "winit icon creation should reject non-RGBA pixel lengths"
+        );
     }
 
     #[test]

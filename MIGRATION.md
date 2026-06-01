@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 664. Desktop 窗口图标接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.6%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是补齐 Java `setWindowIcon(FileType.internal, "icons/icon_64.png")` 的桌面窗口外观契约。
+- Java 对照依据：
+  - `DesktopLauncher.java` 启动配置末尾显式调用 `setWindowIcon(FileType.internal, "icons/icon_64.png")`。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 新增 `DESKTOP_NATIVE_WINDOW_ICON_SOURCE_PATH = "icons/icon_64.png"`；
+    - 新增窗口图标候选路径生成，按 `MINDUSTRY_ASSET_ROOT`、Rust 仓库 assets、Java 参考 assets、current-dir assets 顺序查找；
+    - 复用 `mindustry_core::mindustry::graphics::png_rgba8888_from_path` 解码 PNG；
+    - 通过 `winit::window::Icon::from_rgba(...)` 生成原生窗口图标，并注入 `WindowAttributes::with_window_icon(Some(icon))`；
+    - trace 中记录成功图标路径，失败候选只作为 trace 信息跳过。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop native_opengl_window_icon --bin mindustry-desktop`
+  - `cargo test -p mindustry-desktop native_opengl --bin mindustry-desktop`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - Rust 仓库自身 `core/assets/icons/icon_64.png` 资产同步仍需后续确认；当前会回退到 Java 参考 assets；
+  - 窗口图标真实显示仍需在 native window 运行时人工/截图验证；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 663. Desktop 窗口默认契约与 CLI 覆盖对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
