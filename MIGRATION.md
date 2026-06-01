@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 715. Rules JSON team rules 读取基础
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **84.6%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - 原版 `CustomRulesDialog` 的 `teams` 分组会编辑 `Rules.defaultTeam`、`Rules.waveTeam` 与 `Rules.teams[team]`；
+  - team rules 如果不进入 JSON copy/load，后续前端 UI 即使能改也会在剪贴板往返时丢失。
+- 本轮主改动：
+  - `core/src/mindustry/game/rules.rs`
+    - 新增 `TeamRuleJsonPatch`；
+    - `Rules::apply_json_str` 支持读取 `teams` nested object，并按 team id 合并到 `rules.teams.get_or_insert(team_id)`；
+    - 支持 Java 可见 team 字段，包括 `protectCores/checkPlacement/infiniteResources/rtsAi/buildAi/*Multiplier/unitFactoryActivationDelay/extraCoreBuildRadius` 等；
+    - 扩展未知字段/错误形状回归，确保未知 nested 字段被跳过，非法 team key/非对象 team value 不污染规则；
+    - 扩展 copy 深拷贝回归，确认 `TeamRules` 不会和原对象共享可变状态。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core rules_apply_json -- --nocapture`
+  - `cargo test -p mindustry-core rules_copy_is_a_deep_clone_for_owned_lightweight_fields -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - desktop copy JSON 还未导出 `teams` 全量字段；
+  - CustomRulesDialog 的 team rules 子弹窗还未实现；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 714. CustomRulesDialog 天气时长/频率编辑闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

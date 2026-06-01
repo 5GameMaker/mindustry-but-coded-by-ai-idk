@@ -259,6 +259,120 @@ struct RulesJsonPatch {
     mode_name: Option<Option<String>>,
     planet: Option<String>,
     env: Option<u32>,
+    teams: Option<Vec<(usize, TeamRuleJsonPatch)>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+struct TeamRuleJsonPatch {
+    ai_core_spawn: Option<bool>,
+    protect_cores: Option<bool>,
+    check_placement: Option<bool>,
+    cheat: Option<bool>,
+    fill_items: Option<bool>,
+    infinite_resources: Option<bool>,
+    infinite_ammo: Option<bool>,
+    prebuild_ai: Option<bool>,
+    build_ai: Option<bool>,
+    build_ai_tier: Option<f32>,
+    respawn: Option<bool>,
+    unit_damage_multiplier: Option<f32>,
+    unit_health_multiplier: Option<f32>,
+    unit_crash_damage_multiplier: Option<f32>,
+    unit_mine_speed_multiplier: Option<f32>,
+    unit_cost_multiplier: Option<f32>,
+    unit_build_speed_multiplier: Option<f32>,
+    block_damage_multiplier: Option<f32>,
+    block_health_multiplier: Option<f32>,
+    build_speed_multiplier: Option<f32>,
+    rts_ai: Option<bool>,
+    rts_min_squad: Option<i32>,
+    rts_max_squad: Option<i32>,
+    rts_min_weight: Option<f32>,
+    unit_factory_activation_delay: Option<f32>,
+    extra_core_build_radius: Option<f32>,
+}
+
+impl TeamRuleJsonPatch {
+    fn apply(self, rule: &mut TeamRule) {
+        if let Some(value) = self.ai_core_spawn {
+            rule.ai_core_spawn = value;
+        }
+        if let Some(value) = self.protect_cores {
+            rule.protect_cores = value;
+        }
+        if let Some(value) = self.check_placement {
+            rule.check_placement = value;
+        }
+        if let Some(value) = self.cheat {
+            rule.cheat = value;
+        }
+        if let Some(value) = self.fill_items {
+            rule.fill_items = value;
+        }
+        if let Some(value) = self.infinite_resources {
+            rule.infinite_resources = value;
+        }
+        if let Some(value) = self.infinite_ammo {
+            rule.infinite_ammo = value;
+        }
+        if let Some(value) = self.prebuild_ai {
+            rule.prebuild_ai = value;
+        }
+        if let Some(value) = self.build_ai {
+            rule.build_ai = value;
+        }
+        if let Some(value) = self.build_ai_tier {
+            rule.build_ai_tier = value;
+        }
+        if let Some(value) = self.respawn {
+            rule.respawn = value;
+        }
+        if let Some(value) = self.unit_damage_multiplier {
+            rule.unit_damage_multiplier = value;
+        }
+        if let Some(value) = self.unit_health_multiplier {
+            rule.unit_health_multiplier = value;
+        }
+        if let Some(value) = self.unit_crash_damage_multiplier {
+            rule.unit_crash_damage_multiplier = value;
+        }
+        if let Some(value) = self.unit_mine_speed_multiplier {
+            rule.unit_mine_speed_multiplier = value;
+        }
+        if let Some(value) = self.unit_cost_multiplier {
+            rule.unit_cost_multiplier = value;
+        }
+        if let Some(value) = self.unit_build_speed_multiplier {
+            rule.unit_build_speed_multiplier = value;
+        }
+        if let Some(value) = self.block_damage_multiplier {
+            rule.block_damage_multiplier = value;
+        }
+        if let Some(value) = self.block_health_multiplier {
+            rule.block_health_multiplier = value;
+        }
+        if let Some(value) = self.build_speed_multiplier {
+            rule.build_speed_multiplier = value;
+        }
+        if let Some(value) = self.rts_ai {
+            rule.rts_ai = value;
+        }
+        if let Some(value) = self.rts_min_squad {
+            rule.rts_min_squad = value;
+        }
+        if let Some(value) = self.rts_max_squad {
+            rule.rts_max_squad = value;
+        }
+        if let Some(value) = self.rts_min_weight {
+            rule.rts_min_weight = value;
+        }
+        if let Some(value) = self.unit_factory_activation_delay {
+            rule.unit_factory_activation_delay = value;
+        }
+        if let Some(value) = self.extra_core_build_radius {
+            rule.extra_core_build_radius = value;
+        }
+    }
 }
 
 impl RulesJsonPatch {
@@ -339,6 +453,11 @@ impl RulesJsonPatch {
         if let Some(value) = self.env {
             rules.env = value;
         }
+        if let Some(teams) = self.teams {
+            for (team_id, patch) in teams {
+                patch.apply(rules.teams.get_or_insert(team_id));
+            }
+        }
     }
 }
 
@@ -398,6 +517,7 @@ impl<'a> RulesJsonParser<'a> {
                 "modeName" => patch.mode_name = self.parse_optional_nullable_string()?,
                 "planet" => patch.planet = self.parse_optional_string_value()?,
                 "env" => patch.env = self.parse_optional_u32()?,
+                "teams" => patch.teams = self.parse_optional_team_rules()?,
                 _ => self.skip_value()?,
             }
             self.skip_ws();
@@ -549,6 +669,223 @@ impl<'a> RulesJsonParser<'a> {
                 Some(']') => return Ok(Some(values)),
                 Some(ch) => return Err(format!("expected ',' or ']', found '{ch}'")),
                 None => return Err("unterminated json string array".into()),
+            }
+        }
+    }
+
+    fn parse_optional_team_rules(
+        &mut self,
+    ) -> Result<Option<Vec<(usize, TeamRuleJsonPatch)>>, String> {
+        self.skip_ws();
+        if self.peek() != Some('{') {
+            self.skip_value()?;
+            return Ok(None);
+        }
+        self.expect('{')?;
+        self.skip_ws();
+        let mut values = Vec::new();
+        if self.peek() == Some('}') {
+            self.index += 1;
+            return Ok(Some(values));
+        }
+        loop {
+            let key = self.parse_string()?;
+            self.expect(':')?;
+            match key.parse::<usize>() {
+                Ok(team_id) if self.peek_after_ws() == Some('{') => {
+                    if let Some(patch) = self.parse_team_rule_object()? {
+                        values.push((team_id, patch));
+                    }
+                }
+                _ => self.skip_value()?,
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some('}') => return Ok(Some(values)),
+                Some(ch) => return Err(format!("expected ',' or '}}', found '{ch}'")),
+                None => return Err("unterminated teams json object".into()),
+            }
+        }
+    }
+
+    fn parse_team_rule_object(&mut self) -> Result<Option<TeamRuleJsonPatch>, String> {
+        self.expect('{')?;
+        self.skip_ws();
+        let mut patch = TeamRuleJsonPatch::default();
+        let mut saw_field = false;
+        if self.peek() == Some('}') {
+            self.index += 1;
+            return Ok(None);
+        }
+        loop {
+            let key = self.parse_string()?;
+            self.expect(':')?;
+            match key.as_str() {
+                "aiCoreSpawn" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.ai_core_spawn = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "protectCores" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.protect_cores = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "checkPlacement" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.check_placement = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "cheat" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.cheat = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "fillItems" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.fill_items = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "infiniteResources" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.infinite_resources = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "infiniteAmmo" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.infinite_ammo = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "prebuildAi" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.prebuild_ai = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "buildAi" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.build_ai = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "buildAiTier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.build_ai_tier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "respawn" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.respawn = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "unitDamageMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.unit_damage_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "unitHealthMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.unit_health_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "unitCrashDamageMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.unit_crash_damage_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "unitMineSpeedMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.unit_mine_speed_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "unitCostMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.unit_cost_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "unitBuildSpeedMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.unit_build_speed_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "blockDamageMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.block_damage_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "blockHealthMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.block_health_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "buildSpeedMultiplier" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.build_speed_multiplier = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "rtsAi" => {
+                    if let Some(value) = self.parse_optional_bool()? {
+                        patch.rts_ai = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "rtsMinSquad" => {
+                    if let Some(value) = self.parse_optional_i32()? {
+                        patch.rts_min_squad = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "rtsMaxSquad" => {
+                    if let Some(value) = self.parse_optional_i32()? {
+                        patch.rts_max_squad = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "rtsMinWeight" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.rts_min_weight = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "unitFactoryActivationDelay" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.unit_factory_activation_delay = Some(value);
+                        saw_field = true;
+                    }
+                }
+                "extraCoreBuildRadius" => {
+                    if let Some(value) = self.parse_optional_f32()? {
+                        patch.extra_core_build_radius = Some(value);
+                        saw_field = true;
+                    }
+                }
+                _ => self.skip_value()?,
+            }
+            self.skip_ws();
+            match self.next() {
+                Some(',') => continue,
+                Some('}') => return Ok(saw_field.then_some(patch)),
+                Some(ch) => return Err(format!("expected ',' or '}}', found '{ch}'")),
+                None => return Err("unterminated team rule json object".into()),
             }
         }
     }
@@ -864,6 +1201,14 @@ impl<'a> RulesJsonParser<'a> {
 
     fn peek(&self) -> Option<char> {
         self.chars.get(self.index).copied()
+    }
+
+    fn peek_after_ws(&self) -> Option<char> {
+        let mut index = self.index;
+        while self.chars.get(index).is_some_and(|ch| ch.is_whitespace()) {
+            index += 1;
+        }
+        self.chars.get(index).copied()
     }
 
     fn next(&mut self) -> Option<char> {
@@ -1260,7 +1605,30 @@ mod tests {
                     "modeName": "duel",
                     "planet": "erekir",
                     "env": 42,
-                    "teams": {"1": {"infiniteResources": true}},
+                    "teams": {
+                        "1": {
+                            "protectCores": false,
+                            "checkPlacement": false,
+                            "infiniteResources": true,
+                            "rtsAi": true,
+                            "rtsMinSquad": 8,
+                            "rtsMaxSquad": 120,
+                            "rtsMinWeight": 2.5,
+                            "buildAi": true,
+                            "buildAiTier": 0.4,
+                            "blockHealthMultiplier": 1.5,
+                            "blockDamageMultiplier": 1.6,
+                            "buildSpeedMultiplier": 1.7,
+                            "unitFactoryActivationDelay": 90.0,
+                            "unitDamageMultiplier": 2.1,
+                            "unitCrashDamageMultiplier": 2.2,
+                            "unitMineSpeedMultiplier": 2.3,
+                            "unitBuildSpeedMultiplier": 2.4,
+                            "unitCostMultiplier": 2.5,
+                            "unitHealthMultiplier": 2.6,
+                            "extraCoreBuildRadius": 64.0
+                        }
+                    },
                     "spawns": [{"type": "dagger"}]
                 }"#,
             )
@@ -1299,6 +1667,27 @@ mod tests {
         assert_eq!(rules.mode_name.as_deref(), Some("duel"));
         assert_eq!(rules.planet, "erekir");
         assert_eq!(rules.env, 42);
+        let team = rules.teams.get_or_default(1);
+        assert!(!team.protect_cores);
+        assert!(!team.check_placement);
+        assert!(team.infinite_resources);
+        assert!(team.rts_ai);
+        assert_eq!(team.rts_min_squad, 8);
+        assert_eq!(team.rts_max_squad, 120);
+        assert_eq!(team.rts_min_weight, 2.5);
+        assert!(team.build_ai);
+        assert_eq!(team.build_ai_tier, 0.4);
+        assert_eq!(team.block_health_multiplier, 1.5);
+        assert_eq!(team.block_damage_multiplier, 1.6);
+        assert_eq!(team.build_speed_multiplier, 1.7);
+        assert_eq!(team.unit_factory_activation_delay, 90.0);
+        assert_eq!(team.unit_damage_multiplier, 2.1);
+        assert_eq!(team.unit_crash_damage_multiplier, 2.2);
+        assert_eq!(team.unit_mine_speed_multiplier, 2.3);
+        assert_eq!(team.unit_build_speed_multiplier, 2.4);
+        assert_eq!(team.unit_cost_multiplier, 2.5);
+        assert_eq!(team.unit_health_multiplier, 2.6);
+        assert_eq!(team.extra_core_build_radius, 64.0);
     }
 
     #[test]
@@ -1320,6 +1709,11 @@ mod tests {
                     "modeName": [1, 2, 3],
                     "planet": null,
                     "env": {"value": 9},
+                    "teams": {
+                        "1": {"protectCores": false, "unknown": {"nested": true}},
+                        "bad": {"protectCores": false},
+                        "2": []
+                    },
                     "unknown": {"nested": [{"deep": true}]}
                 }"#,
             )
@@ -1331,6 +1725,8 @@ mod tests {
         assert_eq!(rules.mode_name.as_deref(), Some("keep"));
         assert_eq!(rules.planet, "serpulo");
         assert_eq!(rules.env, 7);
+        assert!(!rules.teams.get_or_default(1).protect_cores);
+        assert!(rules.teams.get_or_default(2).protect_cores);
     }
 
     #[test]
@@ -1353,18 +1749,22 @@ mod tests {
         rules.background_texture = Some("sprites/space.png".into());
         rules.tags.insert("author".into(), "java".into());
         rules.banned_blocks.insert("router".into());
+        rules.teams.get_or_insert(1).protect_cores = false;
 
         let mut copied = rules.copy();
         copied.mode_name = Some("changed".into());
         copied.tags.insert("author".into(), "rust".into());
         copied.banned_blocks.insert("duo".into());
+        copied.teams.get_or_insert(1).protect_cores = true;
 
         assert_eq!(rules.mode_name.as_deref(), Some("custom"));
         assert_eq!(rules.tags.get("author").map(String::as_str), Some("java"));
         assert!(rules.banned_blocks.contains("router"));
         assert!(!rules.banned_blocks.contains("duo"));
+        assert!(!rules.teams.get_or_default(1).protect_cores);
         assert_eq!(copied.mode_name.as_deref(), Some("changed"));
         assert_eq!(copied.tags.get("author").map(String::as_str), Some("rust"));
+        assert!(copied.teams.get_or_default(1).protect_cores);
     }
 
     #[test]
