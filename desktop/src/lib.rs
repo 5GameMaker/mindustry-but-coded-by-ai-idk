@@ -27313,21 +27313,16 @@ impl DesktopLauncher {
     }
 
     fn settings_keybind_filtered_specs(&self) -> Vec<&'static DesktopKeybindSpec> {
-        let query = self.settings_keybind_search.trim().to_lowercase();
+        let query = self.settings_keybind_search.to_lowercase();
         if query.is_empty() {
             return SETTINGS_KEYBIND_SPECS.iter().collect();
         }
         SETTINGS_KEYBIND_SPECS
             .iter()
             .filter(|spec| {
-                spec.name.to_lowercase().contains(&query)
-                    || Self::settings_keybind_bundle_label(spec.name)
-                        .to_lowercase()
-                        .contains(&query)
-                    || spec
-                        .category
-                        .map(|category| category.to_lowercase().contains(&query))
-                        .unwrap_or(false)
+                Self::settings_keybind_bundle_label(spec.name)
+                    .to_lowercase()
+                    .contains(&query)
             })
             .collect()
     }
@@ -75447,6 +75442,38 @@ version: "2.0.0"
         assert!(filtered_controls_texts.contains(&"@keybind.chat.name"));
         assert!(!filtered_controls_texts.contains(&"@keybind.move_x.name"));
 
+        launcher.apply_menu_input_events(
+            surface,
+            &[DesktopInputTickEvent::Key {
+                key_code: "Delete".into(),
+                pressed: true,
+            }],
+        );
+        assert!(launcher.settings_keybind_search.is_empty());
+        launcher.apply_menu_input_events(surface, &[DesktopInputTickEvent::Text("general".into())]);
+        assert_eq!(launcher.settings_keybind_search, "general");
+        assert!(
+            launcher.settings_route_lines().contains(&format!(
+                "child dialog: KeybindDialog binds:{total_keybinds} filtered:0 offset:0 search:general"
+            )),
+            "Java KeybindDialog search only compares the displayed keybind label, not the category name"
+        );
+        let category_filtered_frame = launcher.menu_graphics_frame_for_surface(5, viewport);
+        let category_filtered_texts = category_filtered_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("category-filtered controls child dialog frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!category_filtered_texts.contains(&"@category.general.name"));
+        assert!(!category_filtered_texts.contains(&"@keybind.move_x.name"));
         launcher.apply_menu_input_events(
             surface,
             &[DesktopInputTickEvent::Key {

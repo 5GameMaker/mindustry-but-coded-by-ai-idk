@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **85.8%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **85.9%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,25 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：LoadDialog loading 提升为全屏 LoadingFragment 遮罩
+## 最新闭环：KeybindDialog 搜索过滤收紧到显示名
+
+- 当前总体迁移完成度：约 **85.9%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java`：
+  - Java `rebuildBinds()` 搜索只比较 `keybind.<name>.name` 的显示文本；
+  - Rust `settings_keybind_filtered_specs()` 现在去掉 `trim()`、内部 `spec.name` 匹配与 `category` 匹配，仅按 `settings_keybind_bundle_label(spec.name)` 过滤；
+  - 回归测试用 `general` 锁定：分类名不再触发 `@category.general.name` / `@keybind.move_x.name` 显示。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop settings --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 下一步建议继续前端：
+  1. Controls `Reset All` 继续从固定 footer 语义收口为 ScrollPane 内容末尾行；
+  2. JoinDialog 连接中/重连中补 Java `loadfrag.show("@connecting")` / `@reconnecting` 同款遮罩与取消按钮；
+  3. 版本不匹配从 status bar/top info 收口成更像 Java `ui.showInfo(...)` 的 modal。
+
+## 上一闭环：LoadDialog loading 提升为全屏 LoadingFragment 遮罩
 
 - 当前总体迁移完成度：约 **85.8%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/core/UI.java`、`core/src/mindustry/ui/fragments/LoadingFragment.java` 与 `core/src/mindustry/ui/dialogs/LoadDialog.java`：

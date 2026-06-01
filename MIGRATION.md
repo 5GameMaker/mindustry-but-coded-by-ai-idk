@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 727. KeybindDialog 搜索过滤收紧到显示名
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.9%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `KeybindDialog.rebuildBinds()` 的过滤条件只比较 `Core.bundle.get("keybind." + keybind.name + ".name", keybind.name).toLowerCase().contains(search.getText().toLowerCase())`；
+  - 原版搜索不会因为分类名 `general/command/blocks/view/multiplayer` 命中，也不会额外走 Rust-only 的 category 匹配分支。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `settings_keybind_filtered_specs()` 去掉 `trim()`、内部 `spec.name` 匹配和 `spec.category` 匹配；
+    - 过滤仅基于 `settings_keybind_bundle_label(spec.name)` 的小写文本；
+    - 扩展 Controls 回归测试，输入 `general` 时不再显示 general 分类和 `move_x` 行，锁定 Java 只按显示名过滤的语义。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop settings --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Reset All 位置语义仍需继续从固定底部按钮收口到 Java ScrollPane 内容末尾行；
+  - JoinDialog `@connecting/@reconnecting` loadfrag 与版本不匹配 modal 仍需继续前端收口；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 726. LoadDialog loading 提升为全屏 LoadingFragment 遮罩
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
