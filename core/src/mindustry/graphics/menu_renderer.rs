@@ -29,6 +29,7 @@ pub const MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE: f32 = 30.0;
 pub const MENU_BUTTON_ICON_LAYER_OFFSET: f32 = 0.01;
 pub const MENU_BUTTON_LABEL_LAYER_OFFSET: f32 = 0.02;
 pub const MENU_DESKTOP_BACKGROUND_LAYER: f32 = 100.95;
+pub const MENU_MAX_NATIVE_COLOR_SPAN_TILES: usize = 4;
 pub const MENU_MOBILE_BUTTON_ICON_OFFSET_Y: f32 = 17.0;
 pub const MENU_MOBILE_BUTTON_LABEL_OFFSET_Y: f32 = -25.0;
 pub const MENU_MOBILE_BUTTON_ICON_TEXT_SIZE: f32 = 42.0;
@@ -1219,23 +1220,33 @@ impl MenuRenderCommand {
     ) -> Vec<RenderCommand> {
         match self {
             Self::DrawCache { label, .. } => {
-                let mut commands = Vec::with_capacity(world.tiles.len() * 2);
+                let include_tile_sprites = transform.is_none();
+                let mut commands = Vec::with_capacity(world.width * world.height / 2 + 64);
                 match label {
                     "floor+overlay" => {
+                        menu_push_horizontal_tile_color_spans(
+                            &mut commands,
+                            world,
+                            tile_size,
+                            transform,
+                            -0.2,
+                            |tile| tile.floor.menu_color(),
+                        );
                         for tile in &world.tiles {
                             let rect =
                                 menu_transform_rect(menu_tile_rect(tile, tile_size), transform);
-                            if let Some(color) = tile.floor.menu_color() {
-                                commands.push(RenderCommand::fill_rect(rect, color, -0.2));
-                            }
-                            if let Some(sprite) = tile.floor.sprite_name() {
-                                commands.push(RenderCommand::draw_sprite(
-                                    sprite,
-                                    rect,
-                                    [1.0, 1.0, 1.0, 1.0],
-                                    0.0,
-                                    -0.1,
-                                ));
+                            if include_tile_sprites {
+                                if let Some(sprite) =
+                                    menu_block_variant_sprite_name(tile.floor, tile)
+                                {
+                                    commands.push(RenderCommand::draw_sprite(
+                                        sprite,
+                                        rect,
+                                        [1.0, 1.0, 1.0, 1.0],
+                                        0.0,
+                                        -0.1,
+                                    ));
+                                }
                             }
                             if let Some(color) = tile.ore.menu_color() {
                                 commands.push(RenderCommand::fill_rect(
@@ -1247,32 +1258,44 @@ impl MenuRenderCommand {
                                     0.1,
                                 ));
                             }
-                            if let Some(sprite) = tile.ore.sprite_name() {
-                                commands.push(RenderCommand::draw_sprite(
-                                    sprite,
-                                    rect,
-                                    [1.0, 1.0, 1.0, 1.0],
-                                    0.0,
-                                    0.15,
-                                ));
+                            if include_tile_sprites {
+                                if let Some(sprite) = menu_block_variant_sprite_name(tile.ore, tile)
+                                {
+                                    commands.push(RenderCommand::draw_sprite(
+                                        sprite,
+                                        rect,
+                                        [1.0, 1.0, 1.0, 1.0],
+                                        0.0,
+                                        0.15,
+                                    ));
+                                }
                             }
                         }
                     }
                     "wall" => {
-                        for tile in &world.tiles {
-                            let rect =
-                                menu_transform_rect(menu_tile_rect(tile, tile_size), transform);
-                            if let Some(color) = tile.wall.menu_color() {
-                                commands.push(RenderCommand::fill_rect(rect, color, 1.0));
-                            }
-                            if let Some(sprite) = tile.wall.sprite_name() {
-                                commands.push(RenderCommand::draw_sprite(
-                                    sprite,
-                                    rect,
-                                    [1.0, 1.0, 1.0, 1.0],
-                                    0.0,
-                                    1.05,
-                                ));
+                        menu_push_horizontal_tile_color_spans(
+                            &mut commands,
+                            world,
+                            tile_size,
+                            transform,
+                            1.0,
+                            |tile| tile.wall.menu_color(),
+                        );
+                        if include_tile_sprites {
+                            for tile in &world.tiles {
+                                let rect =
+                                    menu_transform_rect(menu_tile_rect(tile, tile_size), transform);
+                                if let Some(sprite) =
+                                    menu_block_variant_sprite_name(tile.wall, tile)
+                                {
+                                    commands.push(RenderCommand::draw_sprite(
+                                        sprite,
+                                        rect,
+                                        [1.0, 1.0, 1.0, 1.0],
+                                        0.0,
+                                        1.05,
+                                    ));
+                                }
                             }
                         }
                     }
@@ -1286,29 +1309,19 @@ impl MenuRenderCommand {
                 width,
                 height,
             } => {
-                let mut commands = Vec::with_capacity(world.tiles.len());
+                let mut commands = Vec::with_capacity(world.width * world.height / 4 + 16);
                 let texture_rect = menu_shadow_texture_rect(x, y, width, height);
-                for tile in &world.tiles {
-                    if tile.wall != MenuBlockKind::Air {
-                        let tile_rect = menu_tile_rect(tile, tile_size);
-                        commands.push(RenderCommand::fill_rect(
-                            menu_transform_rect(
-                                RenderRect::new(
-                                    texture_rect.x + tile_rect.x,
-                                    texture_rect.y + tile_rect.y,
-                                    tile_rect.width,
-                                    tile_rect.height,
-                                ),
-                                transform,
-                            ),
-                            [0.0, 0.0, 0.0, MENU_SHADOW_TEXTURE_ALPHA],
-                            MENU_SHADOW_TEXTURE_LAYER,
-                        ));
-                    }
-                }
+                menu_push_shadow_tile_spans(
+                    &mut commands,
+                    world,
+                    tile_size,
+                    transform,
+                    texture_rect,
+                );
                 commands
             }
             Self::DrawFlyer(flyer) => {
+                let include_sprite_fallbacks = transform.is_none();
                 let center = menu_transform_point(RenderPoint::new(flyer.x, flyer.y), transform);
                 let size_scale = transform.map_or(1.0, |transform| transform.scaling);
                 let body_size = flyer_draw_size(flyer.unit_name);
@@ -1320,30 +1333,34 @@ impl MenuRenderCommand {
                     body_size * 1.15 * size_scale,
                 );
 
-                vec![
-                    RenderCommand::draw_sprite(
+                let mut commands = Vec::with_capacity(3);
+                if include_sprite_fallbacks {
+                    commands.push(RenderCommand::draw_sprite(
                         "circle-shadow",
                         shadow_rect,
                         [1.0, 1.0, 1.0, 1.0],
                         0.0,
                         1.5,
-                    ),
-                    RenderCommand::draw_triangle(
-                        center,
-                        body_size * 0.72 * size_scale,
-                        body_size * 0.98 * size_scale,
-                        flyer.rotation,
-                        [0.45, 0.62, 0.72, 0.42],
-                        1.95,
-                    ),
-                    RenderCommand::draw_sprite(
+                    ));
+                }
+                commands.push(RenderCommand::draw_triangle(
+                    center,
+                    body_size * 0.72 * size_scale,
+                    body_size * 0.98 * size_scale,
+                    flyer.rotation,
+                    [0.45, 0.62, 0.72, 0.42],
+                    1.95,
+                ));
+                if include_sprite_fallbacks {
+                    commands.push(RenderCommand::draw_sprite(
                         flyer.unit_name,
                         body_rect,
                         [1.0, 1.0, 1.0, 1.0],
                         flyer.rotation,
                         2.0,
-                    ),
-                ]
+                    ));
+                }
+                commands
             }
             Self::DrawDarkness {
                 alpha,
@@ -1356,6 +1373,58 @@ impl MenuRenderCommand {
             )],
         }
     }
+}
+fn menu_render_command_visible_in_viewport(
+    command: &RenderCommand,
+    viewport: RenderViewport,
+) -> bool {
+    let viewport_rect = viewport.as_rect().inflate(64.0);
+    match command {
+        RenderCommand::FillRect { rect, .. }
+        | RenderCommand::StrokeRect { rect, .. }
+        | RenderCommand::DrawSprite { rect, .. } => rect.intersects(viewport_rect),
+        RenderCommand::DrawCircle { center, radius, .. } => {
+            RenderRect::from_center(*center, radius.max(0.0) * 2.0, radius.max(0.0) * 2.0)
+                .intersects(viewport_rect)
+        }
+        RenderCommand::DrawLine {
+            from, to, stroke, ..
+        } => {
+            let left = from.x.min(to.x) - stroke.max(0.0);
+            let bottom = from.y.min(to.y) - stroke.max(0.0);
+            let right = from.x.max(to.x) + stroke.max(0.0);
+            let top = from.y.max(to.y) + stroke.max(0.0);
+            RenderRect::new(left, bottom, right - left, top - bottom).intersects(viewport_rect)
+        }
+        RenderCommand::DrawPolygon { center, radius, .. }
+        | RenderCommand::DrawTriangle {
+            center,
+            width: radius,
+            ..
+        } => RenderRect::from_center(*center, radius.max(0.0) * 2.0, radius.max(0.0) * 2.0)
+            .intersects(viewport_rect),
+        RenderCommand::DrawPixel { x, y, .. } => {
+            viewport_rect.contains_point(RenderPoint::new(*x as f32, *y as f32))
+        }
+        RenderCommand::DrawText { position, .. } => viewport_rect.contains_point(*position),
+        RenderCommand::Clear { .. }
+        | RenderCommand::SetBlend { .. }
+        | RenderCommand::SetClip { .. }
+        | RenderCommand::ClearClip
+        | RenderCommand::Custom { .. } => true,
+    }
+}
+
+fn menu_extend_visible_render_commands(
+    pass: &mut RenderPass,
+    commands: impl IntoIterator<Item = RenderCommand>,
+    viewport: RenderViewport,
+) {
+    pass.extend(
+        commands
+            .into_iter()
+            .filter(|command| menu_render_command_visible_in_viewport(command, viewport)),
+    );
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1396,11 +1465,11 @@ impl MenuFramePlan {
             self.scaling,
         );
         for command in &self.commands {
-            pass.extend(command.to_render_commands_with_transform(
-                &self.world,
-                self.tile_size,
-                transform,
-            ));
+            menu_extend_visible_render_commands(
+                &mut pass,
+                command.to_render_commands_with_transform(&self.world, self.tile_size, transform),
+                viewport,
+            );
         }
         pass.extend(self.ui.to_render_commands());
         Some(pass)
@@ -1438,11 +1507,11 @@ impl MenuFramePlan {
             scaling,
         );
         for command in commands {
-            pass.extend(command.into_render_commands_with_transform(
-                &world,
-                tile_size,
-                Some(transform),
-            ));
+            menu_extend_visible_render_commands(
+                &mut pass,
+                command.into_render_commands_with_transform(&world, tile_size, Some(transform)),
+                viewport,
+            );
         }
         pass.extend(ui.to_render_commands());
         Some(pass)
@@ -2066,6 +2135,174 @@ fn menu_tile_inset_rect(tile: &MenuTile, tile_size: f32, inset_ratio: f32) -> Re
     )
 }
 
+fn menu_variant_index(tile: &MenuTile, variants: usize) -> usize {
+    if variants <= 1 {
+        return 1;
+    }
+    ((tile.x as usize).wrapping_mul(31) ^ (tile.y as usize).wrapping_mul(17)) % variants + 1
+}
+
+fn menu_numbered_sprite(prefix: &str, tile: &MenuTile, variants: usize) -> String {
+    format!("{prefix}{}", menu_variant_index(tile, variants))
+}
+
+fn menu_block_variant_sprite_name(block: MenuBlockKind, tile: &MenuTile) -> Option<String> {
+    let sprite = match block {
+        MenuBlockKind::Air => return None,
+        MenuBlockKind::Sand => menu_numbered_sprite("sand-floor", tile, 3),
+        MenuBlockKind::SandWall => menu_numbered_sprite("sand-wall", tile, 2),
+        MenuBlockKind::Shale => menu_numbered_sprite("shale", tile, 3),
+        MenuBlockKind::ShaleWall => menu_numbered_sprite("shale-wall", tile, 2),
+        MenuBlockKind::Ice => menu_numbered_sprite("ice-snow", tile, 3),
+        MenuBlockKind::IceWall => menu_numbered_sprite("ice-wall", tile, 2),
+        MenuBlockKind::Moss => menu_numbered_sprite("moss", tile, 3),
+        MenuBlockKind::SporePine => "spore-pine".to_string(),
+        MenuBlockKind::Dirt => menu_numbered_sprite("dirt", tile, 3),
+        MenuBlockKind::DirtWall => menu_numbered_sprite("dirt-wall", tile, 2),
+        MenuBlockKind::Dacite => menu_numbered_sprite("dacite", tile, 3),
+        MenuBlockKind::DaciteWall => menu_numbered_sprite("dacite-wall", tile, 2),
+        MenuBlockKind::Basalt => menu_numbered_sprite("basalt", tile, 3),
+        MenuBlockKind::DuneWall => menu_numbered_sprite("dune-wall", tile, 2),
+        MenuBlockKind::Stone => menu_numbered_sprite("stone", tile, 3),
+        MenuBlockKind::StoneWall => menu_numbered_sprite("stone-wall", tile, 2),
+        MenuBlockKind::SporeWall => menu_numbered_sprite("spore-wall", tile, 2),
+        MenuBlockKind::Salt => "salt".to_string(),
+        MenuBlockKind::CopperOre => menu_numbered_sprite("ore-copper", tile, 3),
+        MenuBlockKind::LeadOre => menu_numbered_sprite("ore-lead", tile, 3),
+        MenuBlockKind::ScrapOre => menu_numbered_sprite("ore-scrap", tile, 3),
+        MenuBlockKind::CoalOre => menu_numbered_sprite("ore-coal", tile, 3),
+        MenuBlockKind::TitaniumOre => menu_numbered_sprite("ore-titanium", tile, 3),
+        MenuBlockKind::ThoriumOre => menu_numbered_sprite("ore-thorium", tile, 3),
+        MenuBlockKind::Hotrock => menu_numbered_sprite("hotrock", tile, 3),
+        MenuBlockKind::Magmarock => menu_numbered_sprite("magmarock", tile, 3),
+        MenuBlockKind::DarkPanel3 => "dark-panel-3".to_string(),
+        MenuBlockKind::DarkPanel4 => "dark-panel-4".to_string(),
+        MenuBlockKind::DarkMetal => menu_numbered_sprite("dark-metal", tile, 2),
+        MenuBlockKind::SporeMoss => menu_numbered_sprite("spore-moss", tile, 3),
+    };
+    Some(sprite)
+}
+
+fn menu_tile_at(world: &MenuWorldPlan, x: usize, y: usize) -> Option<&MenuTile> {
+    let index = x.saturating_mul(world.height).saturating_add(y);
+    if let Some(tile) = world.tiles.get(index) {
+        if tile.x as usize == x && tile.y as usize == y {
+            return Some(tile);
+        }
+    }
+    world
+        .tiles
+        .iter()
+        .find(|tile| tile.x as usize == x && tile.y as usize == y)
+}
+
+fn menu_push_horizontal_tile_color_spans<F>(
+    commands: &mut Vec<RenderCommand>,
+    world: &MenuWorldPlan,
+    tile_size: f32,
+    transform: Option<MenuScreenTransform>,
+    layer: f32,
+    mut color_for_tile: F,
+) where
+    F: FnMut(&MenuTile) -> Option<[f32; 4]>,
+{
+    for y in 0..world.height {
+        let mut span_start: Option<usize> = None;
+        let mut span_color: Option<[f32; 4]> = None;
+
+        for x in 0..=world.width {
+            let next_color = if x < world.width {
+                menu_tile_at(world, x, y).and_then(|tile| color_for_tile(tile))
+            } else {
+                None
+            };
+
+            if next_color == span_color
+                && span_start.map_or(true, |start| {
+                    x.saturating_sub(start) < MENU_MAX_NATIVE_COLOR_SPAN_TILES
+                })
+            {
+                continue;
+            }
+
+            if let (Some(start), Some(color)) = (span_start, span_color) {
+                let rect = RenderRect::new(
+                    start as f32 * tile_size,
+                    y as f32 * tile_size,
+                    (x - start) as f32 * tile_size,
+                    tile_size,
+                );
+                commands.push(RenderCommand::fill_rect(
+                    menu_transform_rect(rect, transform),
+                    color,
+                    layer,
+                ));
+            }
+
+            span_start = next_color.map(|_| x);
+            span_color = next_color;
+        }
+    }
+}
+
+fn menu_push_shadow_tile_spans(
+    commands: &mut Vec<RenderCommand>,
+    world: &MenuWorldPlan,
+    tile_size: f32,
+    transform: Option<MenuScreenTransform>,
+    texture_rect: RenderRect,
+) {
+    for y in 0..world.height {
+        let mut span_start: Option<usize> = None;
+
+        for x in 0..=world.width {
+            let has_wall = if x < world.width {
+                menu_tile_at(world, x, y)
+                    .map(|tile| tile.wall != MenuBlockKind::Air)
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if has_wall {
+                if let Some(start) = span_start {
+                    if x.saturating_sub(start) >= MENU_MAX_NATIVE_COLOR_SPAN_TILES {
+                        let rect = RenderRect::new(
+                            texture_rect.x + start as f32 * tile_size,
+                            texture_rect.y + y as f32 * tile_size,
+                            (x - start) as f32 * tile_size,
+                            tile_size,
+                        );
+                        commands.push(RenderCommand::fill_rect(
+                            menu_transform_rect(rect, transform),
+                            [0.0, 0.0, 0.0, MENU_SHADOW_TEXTURE_ALPHA],
+                            MENU_SHADOW_TEXTURE_LAYER,
+                        ));
+                        span_start = Some(x);
+                    }
+                } else {
+                    span_start = Some(x);
+                }
+                continue;
+            }
+
+            if let Some(start) = span_start.take() {
+                let rect = RenderRect::new(
+                    texture_rect.x + start as f32 * tile_size,
+                    texture_rect.y + y as f32 * tile_size,
+                    (x - start) as f32 * tile_size,
+                    tile_size,
+                );
+                commands.push(RenderCommand::fill_rect(
+                    menu_transform_rect(rect, transform),
+                    [0.0, 0.0, 0.0, MENU_SHADOW_TEXTURE_ALPHA],
+                    MENU_SHADOW_TEXTURE_LAYER,
+                ));
+            }
+        }
+    }
+}
+
 fn flyer_draw_size(unit_name: &str) -> f32 {
     match unit_name {
         "horizon" | "zenith" => 18.0,
@@ -2199,6 +2436,11 @@ fn menu_desktop_ui_plan(
     let start_y = ((input.graphics_height - total_height) * 0.5).max(0.0);
     let left_x = (input.graphics_width / 10.0).max(0.0);
     let submenu_x = left_x + button_width;
+    let main_button_y = |index: usize| {
+        start_y
+            + main_button_count.saturating_sub(1).saturating_sub(index) as f32
+                * (button_height + gap)
+    };
     let selected_root_index = match submenu_root {
         MenuButtonRole::Custom(root) => main_role_count + root as usize,
         _ => main_roles
@@ -2206,23 +2448,17 @@ fn menu_desktop_ui_plan(
             .position(|role| *role == submenu_root)
             .unwrap_or(0),
     };
-    let selected_root_top_y = start_y + selected_root_index as f32 * (button_height + gap);
-    let submenu_start_y = (selected_root_top_y
-        - input.scene_margin_top.max(0.0)
-        - input.scene_margin_bottom.max(0.0))
-    .max(0.0);
+    let selected_root_y = main_button_y(selected_root_index);
+    let submenu_start_y =
+        (selected_root_y + input.scene_margin_top.max(0.0) + input.scene_margin_bottom.max(0.0))
+            .max(0.0);
 
     let mut buttons =
         Vec::with_capacity(main_button_count + submenu_roles.len() + custom_submenu_buttons.len());
     for (index, role) in main_roles.iter().copied().enumerate() {
         buttons.push(menu_button_plan(
             role,
-            RenderRect::new(
-                left_x,
-                start_y + index as f32 * (button_height + gap),
-                button_width,
-                button_height,
-            ),
+            RenderRect::new(left_x, main_button_y(index), button_width, button_height),
             active_root == Some(role),
         ));
     }
@@ -2232,12 +2468,7 @@ fn menu_desktop_ui_plan(
         buttons.push(menu_custom_button_plan(
             custom_index,
             custom,
-            RenderRect::new(
-                left_x,
-                start_y + index as f32 * (button_height + gap),
-                button_width,
-                button_height,
-            ),
+            RenderRect::new(left_x, main_button_y(index), button_width, button_height),
             active_root == Some(role),
         ));
     }
@@ -2246,7 +2477,7 @@ fn menu_desktop_ui_plan(
         MenuButtonRole::Quit,
         RenderRect::new(
             left_x,
-            start_y + quit_index as f32 * (button_height + gap),
+            main_button_y(quit_index),
             button_width,
             button_height,
         ),
@@ -2257,7 +2488,7 @@ fn menu_desktop_ui_plan(
             role,
             RenderRect::new(
                 submenu_x,
-                submenu_start_y + index as f32 * (button_height + gap),
+                submenu_start_y - index as f32 * (button_height + gap),
                 button_width,
                 button_height,
             ),
@@ -2272,7 +2503,7 @@ fn menu_desktop_ui_plan(
                 custom,
                 RenderRect::new(
                     submenu_x,
-                    submenu_start_y + index as f32 * (button_height + gap),
+                    submenu_start_y - index as f32 * (button_height + gap),
                     button_width,
                     button_height,
                 ),
@@ -2786,6 +3017,38 @@ mod tests {
     }
 
     #[test]
+    fn menu_flyer_screen_transform_uses_native_silhouette_without_missing_sprite_blocks() {
+        let flyer = FlyerPlan {
+            x: 24.0,
+            y: 32.0,
+            rotation: 45.0,
+            unit_name: "mono",
+        };
+        let commands = MenuRenderCommand::DrawFlyer(flyer).to_render_commands_with_transform(
+            &MenuWorldPlan {
+                width: 1,
+                height: 1,
+                seed: 1,
+                tiles: Vec::new(),
+                cache_floor_id: 1,
+                cache_wall_id: 2,
+            },
+            MENU_TILE_SIZE,
+            MenuScreenTransform::new(0.0, 0.0, 1.0),
+        );
+
+        assert!(commands
+            .iter()
+            .any(|command| matches!(command, RenderCommand::DrawTriangle { .. })));
+        assert!(
+            commands
+                .iter()
+                .all(|command| !matches!(command, RenderCommand::DrawSprite { .. })),
+            "native menu screen path should not show magenta missing-texture blocks for flyers"
+        );
+    }
+
+    #[test]
     fn menu_cache_render_commands_emit_real_tile_sprite_symbols_with_color_fallbacks() {
         let world = MenuWorldPlan {
             width: 1,
@@ -2814,12 +3077,12 @@ mod tests {
         assert!(floor.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, layer, .. }
-                if symbol == "sand" && (*layer + 0.1).abs() < f32::EPSILON
+                if symbol == "sand-floor1" && (*layer + 0.1).abs() < f32::EPSILON
         )));
         assert!(floor.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, layer, .. }
-                if symbol == "ore-copper" && (*layer - 0.15).abs() < f32::EPSILON
+                if symbol == "ore-copper1" && (*layer - 0.15).abs() < f32::EPSILON
         )));
 
         let wall = MenuRenderCommand::DrawCache {
@@ -2830,8 +3093,146 @@ mod tests {
         assert!(wall.iter().any(|command| matches!(
             command,
             RenderCommand::DrawSprite { symbol, layer, .. }
-                if symbol == "sand-wall" && (*layer - 1.05).abs() < f32::EPSILON
+                if symbol == "sand-wall1" && (*layer - 1.05).abs() < f32::EPSILON
         )));
+    }
+
+    #[test]
+    fn menu_cache_screen_transform_batches_static_tile_color_spans() {
+        let world = MenuWorldPlan {
+            width: 3,
+            height: 1,
+            seed: 1,
+            tiles: vec![
+                MenuTile {
+                    x: 0,
+                    y: 0,
+                    floor: MenuBlockKind::Sand,
+                    wall: MenuBlockKind::SandWall,
+                    ore: MenuBlockKind::Air,
+                },
+                MenuTile {
+                    x: 1,
+                    y: 0,
+                    floor: MenuBlockKind::Sand,
+                    wall: MenuBlockKind::SandWall,
+                    ore: MenuBlockKind::Air,
+                },
+                MenuTile {
+                    x: 2,
+                    y: 0,
+                    floor: MenuBlockKind::Sand,
+                    wall: MenuBlockKind::Air,
+                    ore: MenuBlockKind::Air,
+                },
+            ],
+            cache_floor_id: 1,
+            cache_wall_id: 2,
+        };
+        let transform = MenuScreenTransform::new(0.0, 0.0, 1.0);
+
+        let floor = MenuRenderCommand::DrawCache {
+            cache_id: 1,
+            label: "floor+overlay",
+        }
+        .to_render_commands_with_transform(&world, MENU_TILE_SIZE, transform);
+        let floor_fills = floor
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    RenderCommand::FillRect { layer, .. } if (*layer + 0.2).abs() < f32::EPSILON
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(floor_fills.len(), 1);
+        assert!(matches!(
+            floor_fills[0],
+            RenderCommand::FillRect { rect, .. }
+                if *rect == RenderRect::new(0.0, 0.0, MENU_TILE_SIZE * 3.0, MENU_TILE_SIZE)
+        ));
+        assert!(
+            floor
+                .iter()
+                .all(|command| !matches!(command, RenderCommand::DrawSprite { .. })),
+            "screen render path should not allocate tile sprites until native ordering can preserve UI over the menu world"
+        );
+
+        let wall = MenuRenderCommand::DrawCache {
+            cache_id: 2,
+            label: "wall",
+        }
+        .to_render_commands_with_transform(&world, MENU_TILE_SIZE, transform);
+        let wall_fills = wall
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    RenderCommand::FillRect { layer, .. } if (*layer - 1.0).abs() < f32::EPSILON
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(wall_fills.len(), 1);
+        assert!(matches!(
+            wall_fills[0],
+            RenderCommand::FillRect { rect, .. }
+                if *rect == RenderRect::new(0.0, 0.0, MENU_TILE_SIZE * 2.0, MENU_TILE_SIZE)
+        ));
+    }
+
+    #[test]
+    fn menu_shadow_texture_batches_adjacent_wall_tiles_for_native_screen_path() {
+        let world = MenuWorldPlan {
+            width: 3,
+            height: 1,
+            seed: 1,
+            tiles: vec![
+                MenuTile {
+                    x: 0,
+                    y: 0,
+                    floor: MenuBlockKind::Sand,
+                    wall: MenuBlockKind::SandWall,
+                    ore: MenuBlockKind::Air,
+                },
+                MenuTile {
+                    x: 1,
+                    y: 0,
+                    floor: MenuBlockKind::Sand,
+                    wall: MenuBlockKind::SandWall,
+                    ore: MenuBlockKind::Air,
+                },
+                MenuTile {
+                    x: 2,
+                    y: 0,
+                    floor: MenuBlockKind::Sand,
+                    wall: MenuBlockKind::Air,
+                    ore: MenuBlockKind::Air,
+                },
+            ],
+            cache_floor_id: 1,
+            cache_wall_id: 2,
+        };
+
+        let commands = MenuRenderCommand::DrawShadowTexture {
+            x: 12.0,
+            y: 4.0,
+            width: 24.0,
+            height: -8.0,
+        }
+        .to_render_commands_with_transform(
+            &world,
+            MENU_TILE_SIZE,
+            MenuScreenTransform::new(0.0, 0.0, 1.0),
+        );
+
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            commands[0],
+            RenderCommand::FillRect { rect, color, layer }
+                if rect == RenderRect::new(0.0, 0.0, MENU_TILE_SIZE * 2.0, MENU_TILE_SIZE)
+                    && color == [0.0, 0.0, 0.0, MENU_SHADOW_TEXTURE_ALPHA]
+                    && (layer - MENU_SHADOW_TEXTURE_LAYER).abs() < f32::EPSILON
+        ));
     }
 
     #[test]
@@ -3008,9 +3409,9 @@ mod tests {
             .find(|button| button.role == MenuButtonRole::Schematics)
             .expect("database submenu should include SCHEMATICS");
 
-        assert_eq!(play.rect, RenderRect::new(128.0, 150.0, 230.0, 70.0));
-        assert_eq!(database.rect, RenderRect::new(128.0, 220.0, 230.0, 70.0));
-        assert_eq!(schematics.rect, RenderRect::new(358.0, 220.0, 230.0, 70.0));
+        assert_eq!(play.rect, RenderRect::new(128.0, 500.0, 230.0, 70.0));
+        assert_eq!(database.rect, RenderRect::new(128.0, 430.0, 230.0, 70.0));
+        assert_eq!(schematics.rect, RenderRect::new(358.0, 430.0, 230.0, 70.0));
         assert!(database.selected);
         assert_eq!(
             plan.ui
@@ -3019,6 +3420,123 @@ mod tests {
                 .filter(|button| button.submenu)
                 .count(),
             3
+        );
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_orders_root_buttons_top_to_bottom_like_java_table() {
+        let mut state = MenuRendererState::new(
+            MenuRendererConfig::new(false, 11).with_desktop_workshop_enabled(true),
+        );
+
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        });
+
+        assert_eq!(
+            plan.ui
+                .buttons
+                .iter()
+                .map(|button| button.role)
+                .collect::<Vec<_>>(),
+            vec![
+                MenuButtonRole::Play,
+                MenuButtonRole::Database,
+                MenuButtonRole::Editor,
+                MenuButtonRole::Workshop,
+                MenuButtonRole::Mods,
+                MenuButtonRole::Settings,
+                MenuButtonRole::Quit,
+            ]
+        );
+
+        let y_positions = plan
+            .ui
+            .buttons
+            .iter()
+            .map(|button| button.rect.y)
+            .collect::<Vec<_>>();
+        assert!(y_positions.windows(2).all(|pair| pair[0] > pair[1]));
+        assert!(plan.ui.buttons.iter().all(|button| button.rect.x == 128.0
+            && button.rect.width == MENU_DESKTOP_BUTTON_WIDTH
+            && button.rect.height == MENU_DESKTOP_BUTTON_HEIGHT));
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_orders_database_submenu_down_from_the_root_anchor_like_java() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        assert!(state.select_desktop_root(MenuButtonRole::Database));
+
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        });
+
+        assert_eq!(
+            plan.ui
+                .buttons
+                .iter()
+                .map(|button| button.role)
+                .collect::<Vec<_>>(),
+            vec![
+                MenuButtonRole::Play,
+                MenuButtonRole::Database,
+                MenuButtonRole::Editor,
+                MenuButtonRole::Mods,
+                MenuButtonRole::Settings,
+                MenuButtonRole::Quit,
+                MenuButtonRole::Schematics,
+                MenuButtonRole::ContentDatabase,
+                MenuButtonRole::About,
+            ]
+        );
+
+        let database = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Database)
+            .expect("desktop menu should include DATABASE root");
+        let schematics = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::Schematics)
+            .expect("database submenu should include SCHEMATICS");
+        let content_database = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::ContentDatabase)
+            .expect("database submenu should include CORE DATABASE");
+        let about = plan
+            .ui
+            .buttons
+            .iter()
+            .find(|button| button.role == MenuButtonRole::About)
+            .expect("database submenu should include ABOUT");
+
+        assert_eq!(
+            schematics.rect.x,
+            database.rect.x + MENU_DESKTOP_BUTTON_WIDTH
+        );
+        assert_eq!(schematics.rect.y, database.rect.y);
+        assert_eq!(
+            content_database.rect.y,
+            database.rect.y - MENU_DESKTOP_BUTTON_HEIGHT
+        );
+        assert_eq!(
+            about.rect.y,
+            database.rect.y - MENU_DESKTOP_BUTTON_HEIGHT * 2.0
         );
     }
 
@@ -3044,10 +3562,10 @@ mod tests {
             .find(|button| button.role == MenuButtonRole::Schematics)
             .expect("database submenu should include SCHEMATICS");
 
-        assert_eq!(database.rect.y, 220.0);
+        assert_eq!(database.rect.y, 430.0);
         assert_eq!(
-            schematics.rect.y, 205.0,
-            "Java submenu spacer subtracts Core.scene.marginTop and marginBottom from the root top anchor"
+            schematics.rect.y, 445.0,
+            "Java submenu spacer subtracts Core.scene.marginTop and marginBottom from stage space, which moves the submenu row by the combined margins"
         );
     }
 
@@ -3115,6 +3633,73 @@ mod tests {
                 plan.ui.submenu_alpha,
             )
         }));
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_emits_black6_panels_before_button_draws_like_java_layering() {
+        let mut state = MenuRendererState::new(MenuRendererConfig::new(false, 11));
+        assert!(state.select_desktop_root(MenuButtonRole::Database));
+
+        let plan = state.render_plan(MenuFrameInput {
+            graphics_width: 1280.0,
+            graphics_height: 720.0,
+            scene_margin_top: 0.0,
+            scene_margin_bottom: 0.0,
+            scl4: 4.0,
+            delta: 1.0 / 60.0,
+        });
+        let commands = plan.ui.to_render_commands();
+
+        fn is_black6_panel_command(
+            command: &RenderCommand,
+            rect: RenderRect,
+            alpha_scale: f32,
+        ) -> bool {
+            match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: sprite_rect,
+                    tint,
+                    layer,
+                    ..
+                } => {
+                    symbol == "whiteui"
+                        && *sprite_rect == rect
+                        && (tint[3] - UiDrawableTint::Black6.rgba()[3] * alpha_scale).abs() < 0.0001
+                        && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+                }
+                RenderCommand::FillRect {
+                    rect: fill_rect,
+                    color,
+                    layer,
+                } => {
+                    *fill_rect == rect
+                        && color[0] == 0.0
+                        && color[1] == 0.0
+                        && color[2] == 0.0
+                        && (color[3] - UiDrawableTint::Black6.rgba()[3] * alpha_scale).abs()
+                            < 0.0001
+                        && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+                }
+                _ => false,
+            }
+        }
+
+        assert!(commands.len() >= 2);
+        assert!(is_black6_panel_command(
+            &commands[0],
+            RenderRect::new(128.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+            1.0,
+        ));
+        assert!(is_black6_panel_command(
+            &commands[1],
+            RenderRect::new(358.0, 0.0, MENU_DESKTOP_BUTTON_WIDTH, 720.0),
+            plan.ui.submenu_alpha,
+        ));
+        assert!(commands.iter().skip(2).any(|command| matches!(
+            command,
+            RenderCommand::DrawText { text, .. } if text == "Play"
+        )));
     }
 
     #[test]
@@ -3856,7 +4441,7 @@ mod tests {
             .find(|button| button.role == MenuButtonRole::Mods)
             .expect("desktop menu should still expose mods after workshop");
         assert_eq!(workshop.label, "Workshop");
-        assert!(workshop.rect.y < mods.rect.y);
+        assert!(workshop.rect.y > mods.rect.y);
     }
 
     #[test]
@@ -3916,7 +4501,7 @@ mod tests {
             .expect("desktop menu should still expose quit after custom buttons");
         assert_eq!(custom.label, "SERVER BROWSER");
         assert_eq!(custom.icon_name.as_deref(), Some("add"));
-        assert!(custom.rect.y < quit.rect.y);
+        assert!(custom.rect.y > quit.rect.y);
         assert_eq!(
             state.custom_button_action_id(MenuButtonRole::Custom(0)),
             Some("server-browser")

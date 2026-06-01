@@ -832,6 +832,16 @@ fn desktop_native_window_icon_candidate_paths() -> Vec<std::path::PathBuf> {
     if let Some(path) = std::env::var_os("MINDUSTRY_ASSET_ROOT") {
         roots.push(std::path::PathBuf::from(path));
     }
+    if let Ok(current_dir) = std::env::current_dir() {
+        roots.push(current_dir.join("assets"));
+        roots.push(current_dir.join("core").join("assets"));
+    }
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            roots.push(exe_dir.join("assets"));
+            roots.push(exe_dir.join("core").join("assets"));
+        }
+    }
     roots.push(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -842,9 +852,6 @@ fn desktop_native_window_icon_candidate_paths() -> Vec<std::path::PathBuf> {
     roots.push(std::path::PathBuf::from(
         "D:/MDT/mindustry-upstream-v157.4/core/assets",
     ));
-    if let Ok(current_dir) = std::env::current_dir() {
-        roots.push(current_dir.join("core").join("assets"));
-    }
     desktop_native_window_icon_candidate_paths_from_roots(roots)
 }
 
@@ -949,6 +956,9 @@ fn desktop_native_opengl_startup_diagnostic(
 #[cfg(feature = "opengl-native-runtime")]
 fn desktop_native_opengl_shader_asset_root_resolution(
 ) -> DesktopNativeOpenGlShaderAssetRootResolution {
+    static RESOLUTION: std::sync::OnceLock<DesktopNativeOpenGlShaderAssetRootResolution> =
+        std::sync::OnceLock::new();
+    RESOLUTION.get_or_init(|| {
     if let Some(path) = std::env::var_os("MINDUSTRY_ASSET_ROOT") {
         let path = std::path::PathBuf::from(path);
         let shaders_dir_exists = path.join("shaders").is_dir();
@@ -970,15 +980,11 @@ fn desktop_native_opengl_shader_asset_root_resolution(
         .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")));
     let repo_assets = repo_root.join("core").join("assets");
     let reference_assets = std::path::PathBuf::from("D:/MDT/mindustry-upstream-v157.4/core/assets");
-    let current_dir_assets = std::env::current_dir()
-        .ok()
-        .map(|current_dir| current_dir.join("core").join("assets"));
 
-    let mut candidates = vec![(repo_assets, "repository"), (reference_assets, "reference")];
-    if let Some(current_dir_assets) = current_dir_assets {
-        candidates.push((current_dir_assets, "current-dir"));
-    }
+    let mut candidates = Vec::new();
     if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push((current_dir.join("assets"), "current-dir"));
+        candidates.push((current_dir.join("core").join("assets"), "current-dir"));
         for ancestor in current_dir.ancestors().take(5) {
             desktop_native_push_shader_asset_root_candidates_near(
                 &mut candidates,
@@ -989,6 +995,8 @@ fn desktop_native_opengl_shader_asset_root_resolution(
     }
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(exe_dir) = current_exe.parent() {
+            candidates.push((exe_dir.join("assets"), "current-exe"));
+            candidates.push((exe_dir.join("core").join("assets"), "current-exe"));
             for ancestor in exe_dir.ancestors().take(6) {
                 desktop_native_push_shader_asset_root_candidates_near(
                     &mut candidates,
@@ -998,6 +1006,8 @@ fn desktop_native_opengl_shader_asset_root_resolution(
             }
         }
     }
+    candidates.push((repo_assets, "repository"));
+    candidates.push((reference_assets, "reference"));
     desktop_native_push_shader_asset_root_candidates_near(
         &mut candidates,
         repo_root,
@@ -1009,6 +1019,7 @@ fn desktop_native_opengl_shader_asset_root_resolution(
         candidates,
         std::path::PathBuf::from("core/assets"),
     )
+    }).clone()
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -2053,7 +2064,7 @@ impl DesktopNativeOpenGlDriver<'_> {
         match pixel_source.load_rgba8888_pixels() {
             Ok(pixels) => pixels.pixels,
             Err(error) => {
-                self.native_errors.push(format!(
+                desktop_native_trace_summary(format!(
                     "failed to load native OpenGL texture pixel source; using checker fallback: {error:?}"
                 ));
                 desktop_native_placeholder_rgba8888_pixels(fallback_width, fallback_height)

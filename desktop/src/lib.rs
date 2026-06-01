@@ -4401,6 +4401,88 @@ fn desktop_unit_weapon_sprite_virtual_source_paths(content_loader: &ContentLoade
         .collect()
 }
 
+fn desktop_menu_environment_sprite_virtual_source_paths() -> impl Iterator<Item = String> {
+    const MENU_ENVIRONMENT_SPRITES: &[&str] = &[
+        "sand-floor1",
+        "sand-floor2",
+        "sand-floor3",
+        "sand-wall1",
+        "sand-wall2",
+        "shale1",
+        "shale2",
+        "shale3",
+        "shale-wall1",
+        "shale-wall2",
+        "ice-snow1",
+        "ice-snow2",
+        "ice-snow3",
+        "ice-wall1",
+        "ice-wall2",
+        "moss1",
+        "moss2",
+        "moss3",
+        "spore-pine",
+        "dirt1",
+        "dirt2",
+        "dirt3",
+        "dirt-wall1",
+        "dirt-wall2",
+        "dacite1",
+        "dacite2",
+        "dacite3",
+        "dacite-wall1",
+        "dacite-wall2",
+        "basalt1",
+        "basalt2",
+        "basalt3",
+        "dune-wall1",
+        "dune-wall2",
+        "stone1",
+        "stone2",
+        "stone3",
+        "stone-wall1",
+        "stone-wall2",
+        "spore-wall1",
+        "spore-wall2",
+        "salt",
+        "ore-copper1",
+        "ore-copper2",
+        "ore-copper3",
+        "ore-lead1",
+        "ore-lead2",
+        "ore-lead3",
+        "ore-scrap1",
+        "ore-scrap2",
+        "ore-scrap3",
+        "ore-coal1",
+        "ore-coal2",
+        "ore-coal3",
+        "ore-titanium1",
+        "ore-titanium2",
+        "ore-titanium3",
+        "ore-thorium1",
+        "ore-thorium2",
+        "ore-thorium3",
+        "hotrock1",
+        "hotrock2",
+        "hotrock3",
+        "magmarock1",
+        "magmarock2",
+        "magmarock3",
+        "dark-panel-3",
+        "dark-panel-4",
+        "dark-metal1",
+        "dark-metal2",
+        "spore-moss1",
+        "spore-moss2",
+        "spore-moss3",
+    ];
+
+    MENU_ENVIRONMENT_SPRITES
+        .iter()
+        .map(|name| format!("sprites/blocks/environment/{name}.png"))
+}
+
 fn desktop_weapon_region_symbol(weapon: &Weapon) -> String {
     weapon
         .region
@@ -6686,17 +6768,31 @@ impl DesktopGraphicsOpenGlBackendTextureUploadPixelSource {
                 })
             }
             Self::AtlasPage {
+                page_type,
                 page_source_path,
                 width,
                 height,
-                ..
             } => {
-                let image = png_rgba8888_from_path(page_source_path).map_err(|error| {
-                    DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::PngDecode {
-                        source_path: page_source_path.clone(),
-                        error,
+                let image = match png_rgba8888_from_path(page_source_path) {
+                    Ok(image) => image,
+                    Err(PngRgba8888DecodeError::Io)
+                        if page_source_path == page_type.atlas_source_path() =>
+                    {
+                        return Ok(DesktopGraphicsOpenGlBackendTextureUploadPixelBytes {
+                            width: *width,
+                            height: *height,
+                            pixels: opengl_backend_atlas_page_placeholder_pixels(*width, *height),
+                        });
                     }
-                })?;
+                    Err(error) => {
+                        return Err(
+                            DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::PngDecode {
+                                source_path: page_source_path.clone(),
+                                error,
+                            },
+                        );
+                    }
+                };
                 if image.width != *width || image.height != *height {
                     return Err(
                         DesktopGraphicsOpenGlBackendTextureUploadPixelLoadError::SizeMismatch {
@@ -6859,6 +6955,10 @@ fn opengl_backend_font_glyph_atlas_placeholder_pixels(width: u32, height: u32) -
         }
     }
     pixels
+}
+
+fn opengl_backend_atlas_page_placeholder_pixels(width: u32, height: u32) -> Vec<u8> {
+    vec![255; width.saturating_mul(height).saturating_mul(4) as usize]
 }
 
 impl DesktopGraphicsOpenGlBackendResolvedTextureUpload {
@@ -7133,23 +7233,87 @@ fn desktop_dedup_path_list(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 fn desktop_default_asset_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Ok(current_dir) = std::env::current_dir() {
-        for ancestor in current_dir.ancestors().take(5) {
-            desktop_push_asset_root_candidates_near(&mut roots, ancestor);
-        }
-    }
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(exe_dir) = current_exe.parent() {
-            for ancestor in exe_dir.ancestors().take(6) {
-                desktop_push_asset_root_candidates_near(&mut roots, ancestor);
+    static DEFAULT_ASSET_ROOTS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    DEFAULT_ASSET_ROOTS
+        .get_or_init(|| {
+            let mut roots = Vec::new();
+            if let Ok(current_dir) = std::env::current_dir() {
+                for ancestor in current_dir.ancestors().take(5) {
+                    desktop_push_asset_root_candidates_near(&mut roots, ancestor);
+                }
             }
+            if let Ok(current_exe) = std::env::current_exe() {
+                if let Some(exe_dir) = current_exe.parent() {
+                    for ancestor in exe_dir.ancestors().take(6) {
+                        desktop_push_asset_root_candidates_near(&mut roots, ancestor);
+                    }
+                }
+            }
+            roots.push(PathBuf::from(
+                "D:/MDT/mindustry-upstream-v157.4/core/assets",
+            ));
+            desktop_dedup_path_list(roots)
+        })
+        .clone()
+}
+
+fn desktop_sprite_raw_root_index_cache(
+) -> &'static Mutex<BTreeMap<String, BTreeMap<String, Vec<PathBuf>>>> {
+    static CACHE: OnceLock<Mutex<BTreeMap<String, BTreeMap<String, Vec<PathBuf>>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn desktop_build_sprite_raw_root_index(raw_root: &Path) -> BTreeMap<String, Vec<PathBuf>> {
+    let mut index: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    let mut pending = vec![raw_root.to_path_buf()];
+
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let Some(file_name) = path.file_name() else {
+                continue;
+            };
+            index
+                .entry(file_name.to_string_lossy().to_ascii_lowercase())
+                .or_default()
+                .push(path);
         }
     }
-    roots.push(PathBuf::from(
-        "D:/MDT/mindustry-upstream-v157.4/core/assets",
-    ));
-    desktop_dedup_path_list(roots)
+
+    for paths in index.values_mut() {
+        paths.sort_by_key(|path| desktop_normalized_path_string(path));
+    }
+
+    index
+}
+
+fn desktop_sprite_raw_root_index(raw_root: &Path) -> BTreeMap<String, Vec<PathBuf>> {
+    let cache_key = desktop_normalized_path_string(raw_root);
+    if let Ok(cache) = desktop_sprite_raw_root_index_cache().lock() {
+        if let Some(index) = cache.get(&cache_key) {
+            return index.clone();
+        }
+    }
+
+    let index = desktop_build_sprite_raw_root_index(raw_root);
+    if let Ok(mut cache) = desktop_sprite_raw_root_index_cache().lock() {
+        cache.insert(cache_key, index.clone());
+    }
+    index
 }
 
 fn desktop_existing_sprite_source_path_from_asset_root(
@@ -7217,27 +7381,14 @@ fn desktop_find_sprite_source_path_by_filename(
     raw_root: &Path,
     normalized_source_path: &str,
 ) -> Option<PathBuf> {
-    let source_file_name = Path::new(normalized_source_path).file_name()?.to_owned();
-    let mut pending = vec![raw_root.to_path_buf()];
+    let source_file_name = Path::new(normalized_source_path)
+        .file_name()?
+        .to_string_lossy()
+        .to_ascii_lowercase();
     let mut best: Option<(usize, String, PathBuf)> = None;
 
-    while let Some(directory) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if file_type.is_dir() {
-                pending.push(path);
-                continue;
-            }
-            if !file_type.is_file() || path.file_name() != Some(source_file_name.as_os_str()) {
-                continue;
-            }
-
+    if let Some(candidates) = desktop_sprite_raw_root_index(raw_root).get(&source_file_name) {
+        for path in candidates {
             let score = desktop_sprite_source_lookup_score(raw_root, &path, normalized_source_path);
             let normalized_candidate = desktop_normalized_path_string(&path);
             let replace_best = best
@@ -7248,7 +7399,7 @@ fn desktop_find_sprite_source_path_by_filename(
                 })
                 .unwrap_or(true);
             if replace_best {
-                best = Some((score, normalized_candidate, path));
+                best = Some((score, normalized_candidate, path.to_path_buf()));
             }
         }
     }
@@ -14741,6 +14892,7 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         self.sprite_texture_resource_table
             .register_binding(&binding);
         self.refresh_sprite_texture_upload_plans();
+        self.refresh_sprite_mesh_plans();
     }
 }
 
@@ -17278,6 +17430,7 @@ fn default_desktop_texture_atlas(
                     .map(str::to_string),
             )
             .chain(upstream_ui_skin_sprite_source_paths().map(str::to_string))
+            .chain(desktop_menu_environment_sprite_virtual_source_paths())
             .chain(content_icon_candidate_virtual_source_paths(content_loader))
             .into_iter()
             .chain(
@@ -21440,12 +21593,6 @@ impl DesktopLauncher {
         plan: &MenuFramePlan,
         viewport: RenderViewport,
     ) -> RenderPass {
-        if let Some(mut pass) = plan.to_render_pass() {
-            pass.kind = RenderPassKind::Custom("menu-fast".to_string());
-            pass.order = pass.kind.default_order();
-            return pass;
-        }
-
         let camera = self.default_render_camera_for_viewport(viewport);
         let width = viewport.width.max(1.0);
         let height = viewport.height.max(1.0);
@@ -21462,6 +21609,7 @@ impl DesktopLauncher {
             ],
         ));
         pass.push(RenderCommand::clear([0.018, 0.024, 0.036, 1.0]));
+        pass.extend(self.menu_background_layer_commands(viewport));
         pass.extend(plan.ui.to_render_commands());
         pass
     }
@@ -23257,6 +23405,7 @@ impl DesktopLauncher {
         self.player_locale = locale.clone();
         self.settings_overrides.insert("locale".into(), locale);
         self.last_settings_language_restart_message = Some("@language.restart".into());
+        self.last_menu_info_message = Some("@language.restart".into());
         true
     }
 
@@ -23751,7 +23900,7 @@ impl DesktopLauncher {
         enabled: bool,
         style_name: &'static str,
     ) {
-        let label = label.into();
+        let label = self.localize_bundle_markup_text(label.into());
         let hovered = enabled
             && self
                 .last_menu_cursor
@@ -24108,7 +24257,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.172,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@confirm",
+            self.localize_bundle_markup_text("@confirm"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 42.0),
             [0.96, 0.98, 1.0, 1.0],
             15.0,
@@ -33650,7 +33799,7 @@ impl DesktopLauncher {
             ));
         }
         pass.push(RenderCommand::draw_text_styled(
-            "@name",
+            self.localize_bundle_markup_text("@name"),
             RenderPoint::new(name.x + 14.0, name.center().y),
             [0.72, 0.82, 0.90, 1.0],
             11.0,
@@ -33703,7 +33852,7 @@ impl DesktopLauncher {
                 true,
             );
             pass.push(RenderCommand::draw_text_styled(
-                "@steam.friendsonly.tooltip",
+                self.localize_bundle_markup_text("@steam.friendsonly.tooltip"),
                 RenderPoint::new(friends.right() + 12.0, friends.center().y),
                 [0.56, 0.66, 0.74, 1.0],
                 8.5,
@@ -33715,7 +33864,7 @@ impl DesktopLauncher {
             ));
         }
         pass.push(RenderCommand::draw_text_styled(
-            "@server.port",
+            self.localize_bundle_markup_text("@server.port"),
             RenderPoint::new(port.x + 14.0, port.center().y),
             [0.72, 0.82, 0.90, 1.0],
             11.0,
@@ -33859,7 +34008,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.081,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "@host.info",
+                self.localize_bundle_markup_text("@host.info"),
                 dialog.center(),
                 [0.86, 0.94, 1.0, 1.0],
                 12.0,
@@ -38093,7 +38242,7 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::draw_text_styled(
             if self.load_game_search.is_empty() {
-                "@save.search".to_string()
+                self.localize_bundle_markup_text("@save.search")
             } else {
                 self.load_game_search.clone()
             },
@@ -38685,7 +38834,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.072,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@save",
+            self.localize_bundle_markup_text("@save"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
             [0.94, 0.98, 1.0, 1.0],
             14.0,
@@ -38697,7 +38846,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.073,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@save.newslot",
+            self.localize_bundle_markup_text("@save.newslot"),
             RenderPoint::new(field.x - 12.0, field.center().y),
             [0.82, 0.90, 0.96, 1.0],
             11.0,
@@ -41803,6 +41952,7 @@ impl DesktopLauncher {
         let Some(message) = self.last_menu_info_message.as_ref() else {
             return;
         };
+        let message = self.localize_bundle_markup_text(message);
         let panel_width = (viewport.width * 0.42).clamp(260.0, 520.0);
         let panel = RenderRect::new(
             viewport.x + (viewport.width - panel_width) * 0.5,
@@ -41824,7 +41974,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.07,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            message.clone(),
+            message,
             panel.center(),
             [0.86, 0.94, 1.0, 1.0],
             16.0,
@@ -41883,6 +42033,9 @@ impl DesktopLauncher {
 
     fn push_menu_boot_diagnostics(&self, pass: &mut RenderPass, viewport: RenderViewport) {
         if std::env::var_os("MINDUSTRY_DESKTOP_HIDE_BOOT_DIAGNOSTICS").is_some() {
+            return;
+        }
+        if !cfg!(test) && std::env::var_os("MINDUSTRY_DESKTOP_SHOW_BOOT_DIAGNOSTICS").is_none() {
             return;
         }
         let lines = self.menu_boot_diagnostic_lines();
@@ -42337,7 +42490,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.162,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            title,
+            self.localize_bundle_markup_text(title),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
             [0.94, 0.98, 1.0, 1.0],
             14.0,
@@ -42360,7 +42513,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.164,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            body,
+            self.localize_bundle_markup_text(&body),
             RenderPoint::new(dialog.center().x, dialog.center().y + 4.0),
             [0.78, 0.86, 0.92, 1.0],
             11.0,
@@ -60243,12 +60396,12 @@ version: "2.0.0"
 
         assert!(texts.contains(&"PausedDialog"));
         assert!(texts.contains(&"upstream: PausedDialog"));
-        assert!(texts.contains(&"@back"));
-        assert!(texts.contains(&"@settings"));
-        assert!(texts.contains(&"@savegame"));
-        assert!(texts.contains(&"@loadgame"));
-        assert!(texts.contains(&"@hostserver"));
-        assert!(texts.contains(&"@quit"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@back").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@settings").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@savegame").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@loadgame").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@hostserver").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@quit").as_str()));
 
         let panel = DesktopLauncher::pause_overlay_panel_for_viewport(viewport);
         let save_center = DesktopLauncher::pause_overlay_button_rect_for_panel(panel, 2).center();
@@ -60283,8 +60436,8 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(route_texts.contains(&"@savegame"));
-        assert!(route_texts.contains(&"@save.new"));
+        assert!(route_texts.contains(&launcher.localize_bundle_markup_text("@savegame").as_str()));
+        assert!(route_texts.contains(&launcher.localize_bundle_markup_text("@save.new").as_str()));
         assert!(route_texts.contains(&"upstream: SaveDialog"));
     }
 
@@ -60328,8 +60481,8 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(net_texts.contains(&"@loadgame"));
-        assert!(net_texts.contains(&"@hostserver"));
+        assert!(net_texts.contains(&launcher.localize_bundle_markup_text("@loadgame").as_str()));
+        assert!(net_texts.contains(&launcher.localize_bundle_markup_text("@hostserver").as_str()));
 
         launcher.net_client.state().lock().unwrap().connected = false;
         launcher.game_state.rules.editor = true;
@@ -60347,10 +60500,18 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(editor_texts.contains(&"@hostserver.mobile"));
-        assert!(editor_texts.contains(&"@editor.worldprocessors"));
-        assert!(!editor_texts.contains(&"@savegame"));
-        assert!(!editor_texts.contains(&"@loadgame"));
+        assert!(editor_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@hostserver.mobile")
+                .as_str()
+        ));
+        assert!(editor_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@editor.worldprocessors")
+                .as_str()
+        ));
+        assert!(!editor_texts.contains(&launcher.localize_bundle_markup_text("@savegame").as_str()));
+        assert!(!editor_texts.contains(&launcher.localize_bundle_markup_text("@loadgame").as_str()));
         launcher.apply_menu_input_events(
             surface,
             &[
@@ -60433,10 +60594,10 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@objective"));
-        assert!(texts.contains(&"@abandon"));
-        assert!(!texts.contains(&"@savegame"));
-        assert!(!texts.contains(&"@loadgame"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@objective").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@abandon").as_str()));
+        assert!(!texts.contains(&launcher.localize_bundle_markup_text("@savegame").as_str()));
+        assert!(!texts.contains(&launcher.localize_bundle_markup_text("@loadgame").as_str()));
 
         launcher.apply_menu_input_events(
             surface,
@@ -60533,11 +60694,15 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(confirm_texts.contains(&"@confirm"));
+        assert!(confirm_texts.contains(&launcher.localize_bundle_markup_text("@confirm").as_str()));
         assert!(confirm_texts.contains(&"PausedDialog.showQuitConfirm"));
-        assert!(confirm_texts.contains(&"@quit.confirm"));
-        assert!(confirm_texts.contains(&"@cancel"));
-        assert!(confirm_texts.contains(&"@ok"));
+        assert!(confirm_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@quit.confirm")
+                .as_str()
+        ));
+        assert!(confirm_texts.contains(&launcher.localize_bundle_markup_text("@cancel").as_str()));
+        assert!(confirm_texts.contains(&launcher.localize_bundle_markup_text("@ok").as_str()));
 
         let dialog = DesktopLauncher::pause_overlay_modal_rect_for_panel(panel);
         let cancel = DesktopLauncher::pause_overlay_modal_cancel_rect(dialog).center();
@@ -60630,14 +60795,18 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@hostserver"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@hostserver").as_str()));
         assert!(texts.contains(&"upstream: HostDialog"));
-        assert!(texts.contains(&"@name"));
-        assert!(texts.contains(&"@server.port"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@name").as_str()));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@server.port")
+                .as_str()
+        ));
         assert!(!texts.contains(&"@steam.friendsonly"));
         assert!(texts.contains(&"?"));
-        assert!(texts.contains(&"@host.info"));
-        assert!(texts.contains(&"@host"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@host.info").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@host").as_str()));
         launcher
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::CloseHostInfo);
         assert!(!launcher.host_info_dialog_open);
@@ -61101,8 +61270,8 @@ version: "2.0.0"
                 &[
                     "button: @mods.guide Icon.link",
                     "button: @mod.import Icon.add",
-                    "empty: @mods.none",
-                    "hint: @mod.import / @mods.browser",
+                    "empty: [lightgray]No mods found!",
+                    "hint: Import Mod / Mod Browser",
                     "browser: BaseDialog @mods.browser",
                 ],
             ),
@@ -63058,7 +63227,7 @@ version: "2.0.0"
                 .as_str()
         ));
         assert!(texts.contains(&launcher.localize_bundle_markup_text("@none").as_str()));
-        assert!(texts.contains(&"@back"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@back").as_str()));
         assert!(!texts
             .iter()
             .any(|text| text.starts_with("pane: schematic grid")));
@@ -64979,6 +65148,9 @@ version: "2.0.0"
         assert!(launcher.texture_atlas.lookup("button.9").is_ok());
         assert!(launcher.texture_atlas.lookup("button-down.9").is_ok());
         assert!(launcher.texture_atlas.lookup("whiteui").is_ok());
+        assert!(launcher.texture_atlas.lookup("sand-floor1").is_ok());
+        assert!(launcher.texture_atlas.lookup("shale-wall1").is_ok());
+        assert!(launcher.texture_atlas.lookup("ore-copper1").is_ok());
 
         let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
         assert!(launcher
@@ -66712,7 +66884,11 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(becheck_texts.contains(&super::MENU_BECHECK_NO_UPDATES_MESSAGE));
+        assert!(becheck_texts.contains(
+            &launcher
+                .localize_bundle_markup_text(super::MENU_BECHECK_NO_UPDATES_MESSAGE)
+                .as_str()
+        ));
         assert_eq!(launcher.last_menu_action, None);
     }
 
@@ -66838,8 +67014,16 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@save.search"));
-        assert!(texts.contains(&"@save.import"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@save.search")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@save.import")
+                .as_str()
+        ));
         assert!(texts.contains(&"@loading"));
         assert!(texts.iter().any(|text| text == &"@loading: @load | slot 2"));
         assert!(texts.contains(&"[accent]New Map"));
@@ -67148,8 +67332,8 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(rename_texts.contains(&"@save.rename"));
-        assert!(rename_texts.contains(&"@ok"));
-        assert!(rename_texts.contains(&"@cancel"));
+        assert!(rename_texts.contains(&launcher.localize_bundle_markup_text("@ok").as_str()));
+        assert!(rename_texts.contains(&launcher.localize_bundle_markup_text("@cancel").as_str()));
         launcher
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::LoadGameRenameOk);
         let rename = launcher
@@ -67365,19 +67549,23 @@ version: "2.0.0"
             .collect::<Vec<_>>();
 
         assert!(
-            texts.contains(&"@savegame"),
-            "upstream SaveDialog should title the route @savegame"
+            texts.contains(&launcher.localize_bundle_markup_text("@savegame").as_str()),
+            "upstream SaveDialog should title the route with localized @savegame"
         );
         assert!(
-            texts.contains(&"@save.new"),
-            "upstream SaveDialog should expose the new-save button"
+            texts.contains(&launcher.localize_bundle_markup_text("@save.new").as_str()),
+            "upstream SaveDialog should expose the localized new-save button"
         );
         assert!(
-            texts.contains(&"@save.newslot"),
-            "upstream SaveDialog should label the new-save text input with @save.newslot"
+            texts.contains(
+                &launcher
+                    .localize_bundle_markup_text("@save.newslot")
+                    .as_str()
+            ),
+            "upstream SaveDialog should label the new-save text input with localized @save.newslot"
         );
-        assert!(texts.contains(&"@cancel"));
-        assert!(texts.contains(&"@ok"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@cancel").as_str()));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@ok").as_str()));
 
         let cancel = DesktopLauncher::load_game_rename_button_rect(dialog, 0).center();
         assert_eq!(
@@ -67816,8 +68004,8 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(delete_texts.contains(&"@confirm"));
         assert!(delete_texts.contains(&"@save.delete.confirm | Map 2"));
-        assert!(delete_texts.contains(&"@cancel"));
-        assert!(delete_texts.contains(&"@ok"));
+        assert!(delete_texts.contains(&launcher.localize_bundle_markup_text("@cancel").as_str()));
+        assert!(delete_texts.contains(&launcher.localize_bundle_markup_text("@ok").as_str()));
         let delete_dialog = DesktopLauncher::load_game_delete_dialog_rect_for_panel(panel);
         let cancel = DesktopLauncher::load_game_rename_button_rect(delete_dialog, 0).center();
         assert_eq!(
@@ -68158,7 +68346,7 @@ version: "2.0.0"
             .any(|symbol| *symbol == language_scroll_knob.as_str()));
         assert!(!language_texts
             .contains(&"LanguageDialog placeholder: locale list and bundle reload later"));
-        assert!(language_texts.contains(&"@back"));
+        assert!(language_texts.contains(&"Back"));
         let route_lines = launcher.settings_route_lines();
         assert!(
             route_lines.contains(&format!(
@@ -68243,6 +68431,10 @@ version: "2.0.0"
             launcher.last_settings_language_restart_message.as_deref(),
             Some("@language.restart")
         );
+        assert_eq!(
+            launcher.last_menu_info_message.as_deref(),
+            Some("@language.restart")
+        );
         let language_restart_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
         let language_restart_texts = language_restart_frame
             .bundle
@@ -68261,6 +68453,11 @@ version: "2.0.0"
             !language_restart_texts.contains(&"@language.restart"),
             "Java LanguageDialog sends restart notice through ui.showInfo instead of drawing it inside the language list"
         );
+        assert!(language_restart_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@language.restart")
+                .as_str()
+        ));
         assert_eq!(
             launcher.take_settings_language_restart_message().as_deref(),
             Some("@language.restart")
@@ -69043,14 +69240,14 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(confirm_texts.contains(&"@confirm"));
+        assert!(confirm_texts.contains(&launcher.localize_bundle_markup_text("@confirm").as_str()));
         assert!(confirm_texts.contains(
             &launcher
                 .settings_data_confirm_message(super::DesktopSettingsAction::ClearPlanetResearch)
                 .as_str()
         ));
-        assert!(confirm_texts.contains(&"@cancel"));
-        assert!(confirm_texts.contains(&"@ok"));
+        assert!(confirm_texts.contains(&launcher.localize_bundle_markup_text("@cancel").as_str()));
+        assert!(confirm_texts.contains(&launcher.localize_bundle_markup_text("@ok").as_str()));
         assert_eq!(
             launcher.settings_data_confirm_message(super::DesktopSettingsAction::ClearAllData),
             launcher.format_bundle_text("settings.clearall.confirm", &[])
@@ -69540,7 +69737,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(labels.contains(&"@back"));
+        assert!(labels.contains(&"Back"));
         for entry in super::SETTINGS_MENU_ENTRIES {
             assert!(labels.contains(&launcher.localize_bundle_markup_text(entry.label).as_str()));
             let glyph = super::desktop_ui_icon_glyph_or_label(entry.icon, entry.icon);
@@ -69631,7 +69828,7 @@ version: "2.0.0"
                 .localize_bundle_markup_text("@settings.reset")
                 .as_str()
         ));
-        assert!(labels.contains(&"@back"));
+        assert!(labels.contains(&"Back"));
         assert!(!labels.contains(&"button: reset-to-defaults"));
         assert!(!labels.contains(&"button: back"));
         let button_rects = commands
@@ -73924,7 +74121,7 @@ version: "2.0.0"
     }
 
     #[test]
-    fn desktop_launcher_fast_menu_path_reuses_real_menu_plan_without_placeholder_panel() {
+    fn desktop_launcher_fast_menu_path_uses_lightweight_background_without_placeholder_panel() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let viewport = RenderViewport::new(0.0, 0.0, 640.0, 360.0);
         let input = DesktopLauncher::default_menu_frame_input_for_viewport(viewport);
@@ -73943,8 +74140,8 @@ version: "2.0.0"
                 command,
                 RenderCommand::FillRect { rect, color, layer }
                     if *rect == RenderRect::new(0.0, 0.0, 640.0, 360.0)
-                        && *color == [0.0, 0.0, 0.0, super::MENU_DARKNESS]
-                        && (*layer - super::MENU_DARKNESS_LAYER).abs() < f32::EPSILON
+                        && *color == [0.010, 0.015, 0.030, 1.0]
+                        && (*layer + 120.0).abs() < f32::EPSILON
             )
         }));
         assert!(!pass.commands.iter().any(|command| {

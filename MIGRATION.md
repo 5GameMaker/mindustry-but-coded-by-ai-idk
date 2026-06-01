@@ -10,6 +10,8 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
+- 当前短期优先级：先做客户端启动速度优化和主菜单 UI 还原；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
+- 当前 fast synthetic background 只是过渡方案，最终必须接入 cached/batched 的原版 `MenuRenderer`。
 
 本文档用于约束后续 AI/开发者持续迁移，目标是防止漏迁移、跑偏目录、把工程做成孤立模块，或忘记最终要交付的是可整合、可联机、可游玩的 Rust 版 Mindustry/MDT。
 
