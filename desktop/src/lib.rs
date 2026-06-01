@@ -3479,6 +3479,7 @@ pub enum DesktopMenuRouteShellAction {
     ConfirmJoinAddServer,
     OpenJoinInfo,
     CloseJoinInfo,
+    CloseJoinVersionMismatch,
     RefreshJoinServers,
     MoveJoinServerCardUp(usize),
     MoveJoinServerCardDown(usize),
@@ -17786,6 +17787,7 @@ pub struct DesktopLauncher {
     pub join_add_server_focused: bool,
     pub join_add_server_edit_index: Option<usize>,
     pub join_info_dialog_open: bool,
+    pub join_version_mismatch_dialog_message: Option<String>,
     pub join_delete_dialog_index: Option<usize>,
     pub join_server_disclaimer_accepted: bool,
     pub join_server_disclaimer_pending_target: Option<DesktopConnectTarget>,
@@ -18948,6 +18950,7 @@ impl DesktopLauncher {
             join_add_server_focused: false,
             join_add_server_edit_index: None,
             join_info_dialog_open: false,
+            join_version_mismatch_dialog_message: None,
             join_delete_dialog_index: None,
             join_server_disclaimer_accepted: false,
             join_server_disclaimer_pending_target: None,
@@ -29631,7 +29634,13 @@ impl DesktopLauncher {
         {
             self.connect_target = Some(target);
             self.connect_error = Some(message.clone());
-            self.last_menu_info_message = Some(message);
+            self.join_version_mismatch_dialog_message = Some(message);
+            self.join_add_dialog_open = false;
+            self.join_add_server_focused = false;
+            self.join_add_server_edit_index = None;
+            self.join_info_dialog_open = false;
+            self.join_delete_dialog_index = None;
+            self.join_search_focused = false;
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "server version mismatch",
@@ -29720,6 +29729,17 @@ impl DesktopLauncher {
     fn join_info_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
         let width = (panel.width * 0.66).clamp(380.0, 620.0);
         let height = 190.0;
+        RenderRect::new(
+            panel.center().x - width * 0.5,
+            panel.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn join_version_mismatch_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
+        let width = (panel.width * 0.70).clamp(420.0, 660.0);
+        let height = 220.0;
         RenderRect::new(
             panel.center().x - width * 0.5,
             panel.center().y - height * 0.5,
@@ -32824,6 +32844,13 @@ impl DesktopLauncher {
     ) -> Option<DesktopMenuRouteShellAction> {
         let panel = Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::Join);
         let point = RenderPoint::new(x, y);
+        if self.join_version_mismatch_dialog_message.is_some() {
+            let dialog = Self::join_version_mismatch_dialog_rect_for_panel(panel);
+            if Self::join_add_dialog_button_rect(dialog, 1).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CloseJoinVersionMismatch);
+            }
+            return None;
+        }
         if self.join_server_disclaimer_pending_target.is_some() {
             let dialog = Self::join_server_disclaimer_dialog_rect_for_panel(panel);
             if Self::join_add_dialog_button_rect(dialog, 0).contains_point(point) {
@@ -34697,6 +34724,7 @@ impl DesktopLauncher {
                 self.join_add_server_focused = false;
                 self.join_add_server_edit_index = None;
                 self.join_info_dialog_open = false;
+                self.join_version_mismatch_dialog_message = None;
                 self.join_delete_dialog_index = None;
                 self.join_search_focused = false;
                 self.database_search_focused = false;
@@ -34834,6 +34862,7 @@ impl DesktopLauncher {
                 self.join_add_server_focused = true;
                 self.join_search_focused = false;
                 self.connect_error = None;
+                self.join_version_mismatch_dialog_message = None;
             }
             DesktopMenuRouteShellAction::CloseJoinAddServer => {
                 self.join_add_dialog_open = false;
@@ -34877,6 +34906,7 @@ impl DesktopLauncher {
                     );
                     self.connect_target = Some(target);
                     self.connect_error = None;
+                    self.join_version_mismatch_dialog_message = None;
                     self.join_add_dialog_open = false;
                     self.join_add_server_focused = false;
                     self.join_add_server_edit_index = None;
@@ -34894,10 +34924,15 @@ impl DesktopLauncher {
                 self.join_add_dialog_open = false;
                 self.join_add_server_focused = false;
                 self.join_delete_dialog_index = None;
+                self.join_version_mismatch_dialog_message = None;
                 self.join_search_focused = false;
             }
             DesktopMenuRouteShellAction::CloseJoinInfo => {
                 self.join_info_dialog_open = false;
+            }
+            DesktopMenuRouteShellAction::CloseJoinVersionMismatch => {
+                self.join_version_mismatch_dialog_message = None;
+                self.connect_error = None;
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
@@ -34949,6 +34984,7 @@ impl DesktopLauncher {
                     self.join_add_server_focused = false;
                     self.join_add_server_edit_index = None;
                     self.join_info_dialog_open = false;
+                    self.join_version_mismatch_dialog_message = None;
                 }
             }
             DesktopMenuRouteShellAction::ConfirmDeleteJoinServerCard => {
@@ -35046,6 +35082,7 @@ impl DesktopLauncher {
                     self.join_add_dialog_open = false;
                     self.join_info_dialog_open = false;
                     self.join_delete_dialog_index = None;
+                    self.join_version_mismatch_dialog_message = None;
                     return;
                 }
                 self.connect_target = Some(target.clone());
@@ -37108,6 +37145,63 @@ impl DesktopLauncher {
         );
     }
 
+    fn push_join_version_mismatch_dialog(&self, pass: &mut RenderPass, panel: RenderRect) {
+        let Some(message) = self.join_version_mismatch_dialog_message.as_ref() else {
+            return;
+        };
+        let dialog = Self::join_version_mismatch_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.52],
+            Layer::END_PIXELED + 0.110,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.111,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.90, 0.42, 0.38, 0.96],
+            2.0,
+            Layer::END_PIXELED + 0.112,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@info.title"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
+            [1.0, 0.92, 0.88, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.113,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            message.clone(),
+            RenderPoint::new(dialog.x + 30.0, dialog.center().y + 22.0),
+            [0.90, 0.92, 0.94, 1.0],
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Start)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_wrap_width(dialog.width - 60.0)
+                .with_markup(true)
+                .with_integer_position(true),
+            Layer::END_PIXELED + 0.114,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::join_add_dialog_button_rect(dialog, 1),
+            self.localize_bundle_markup_text("@ok"),
+            Some("ok"),
+            Layer::END_PIXELED + 0.115,
+        );
+    }
+
     fn push_host_route_page(&self, pass: &mut RenderPass, panel: RenderRect) {
         self.push_settings_text_button(
             pass,
@@ -37941,6 +38035,7 @@ impl DesktopLauncher {
                 self.push_join_delete_dialog(pass, panel);
                 self.push_join_server_disclaimer_dialog(pass, panel);
                 self.push_join_info_dialog(pass, panel);
+                self.push_join_version_mismatch_dialog(pass, panel);
                 return;
             }
             pass.push(RenderCommand::draw_text_styled(
@@ -38227,6 +38322,7 @@ impl DesktopLauncher {
         self.push_join_delete_dialog(pass, panel);
         self.push_join_server_disclaimer_dialog(pass, panel);
         self.push_join_info_dialog(pass, panel);
+        self.push_join_version_mismatch_dialog(pass, panel);
     }
 
     fn join_route_hover_tooltip_text(&self, panel: RenderRect) -> Option<String> {
@@ -44684,6 +44780,12 @@ impl DesktopLauncher {
                 }
                 if self.join_info_dialog_open {
                     lines.extend(["dialog: @join.info".into(), "button: @ok".into()]);
+                }
+                if let Some(message) = self.join_version_mismatch_dialog_message.as_ref() {
+                    lines.extend([
+                        format!("dialog: @info.title @server.versions message={message}"),
+                        "button: @ok".into(),
+                    ]);
                 }
                 if let Some(index) = self.join_delete_dialog_index {
                     lines.extend([
@@ -78000,6 +78102,8 @@ version: "2.0.0"
             "--connect".into(),
             "127.0.0.1:6567".into(),
         ]);
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
         launcher.dispatch_menu_action(MenuButtonRole::Join);
         assert_eq!(
             launcher.active_menu_route,
@@ -78427,6 +78531,8 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_join_route_hides_info_button_on_steam_or_mobile_like_java() {
         let mut steam_launcher = DesktopLauncher::new(Vec::new());
+        steam_launcher.settings_locale = "en".into();
+        steam_launcher.player_locale = "en".into();
         steam_launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         steam_launcher.set_setting_override("platform", "steam", "true");
         let steam_lines =
@@ -78472,6 +78578,8 @@ version: "2.0.0"
         assert!(!steam_texts.contains(&"?"));
 
         let mut mobile_launcher = DesktopLauncher::new(Vec::new());
+        mobile_launcher.settings_locale = "en".into();
+        mobile_launcher.player_locale = "en".into();
         mobile_launcher.menu_renderer_state.config.mobile = true;
         mobile_launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         let mobile_surface = DesktopSurfaceSize::new(540, 960);
@@ -78590,6 +78698,8 @@ version: "2.0.0"
     fn desktop_launcher_join_route_saved_refresh_states_drive_server_cards_like_java() {
         let port = super::DEFAULT_MINDUSTRY_PORT;
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
         launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         launcher.join_saved_servers = vec![
             super::DesktopConnectTarget {
@@ -78674,6 +78784,8 @@ version: "2.0.0"
     fn desktop_launcher_join_route_saved_refresh_states_follow_reorder_delete_and_poll() {
         let port = super::DEFAULT_MINDUSTRY_PORT;
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
         launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         launcher.join_saved_servers = vec![
             super::DesktopConnectTarget {
@@ -78771,6 +78883,8 @@ version: "2.0.0"
     fn desktop_launcher_join_route_polls_local_discovery_hosts_like_java_refresh_local() {
         let port = super::DEFAULT_MINDUSTRY_PORT;
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
         launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         let (tx, rx) = std::sync::mpsc::channel();
         launcher.join_local_discovering = true;
@@ -78900,14 +79014,47 @@ version: "2.0.0"
                 port,
             })
         );
-        let error = launcher
-            .connect_error
+        let modal = launcher
+            .join_version_mismatch_dialog_message
             .clone()
-            .expect("version mismatch should block before socket connect");
-        assert!(error.contains("Outdated server"));
-        assert!(error.contains(&format!("Your version:[accent] {current_version}")));
-        assert!(error.contains(&format!("Server version:[accent] {}", current_version - 1)));
-        assert_eq!(launcher.last_menu_info_message, Some(error));
+            .expect("version mismatch should open the Java showInfo-style modal");
+        assert_eq!(launcher.connect_error, Some(modal.clone()));
+        assert!(modal.contains(&current_version.to_string()));
+        assert!(modal.contains(&(current_version - 1).to_string()));
+        assert_eq!(launcher.last_menu_info_message, None);
+        assert!(launcher
+            .active_menu_route_shell_lines(super::DesktopMenuRoute::Join)
+            .iter()
+            .any(|line| line.starts_with("dialog: @info.title @server.versions")));
+        {
+            let state = launcher.net_client.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.connection_attempts, 0);
+            assert!(!state.connecting);
+        }
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let dialog = DesktopLauncher::join_version_mismatch_dialog_rect_for_panel(panel);
+        let ok = DesktopLauncher::join_add_dialog_button_rect(dialog, 1).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, ok.x, ok.y),
+            Some(super::DesktopMenuRouteShellAction::CloseJoinVersionMismatch)
+        );
+        let add = DesktopLauncher::join_route_add_button_rect_for_panel(panel).center();
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(surface, add.x, add.y),
+            None
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseJoinVersionMismatch,
+        );
+        assert_eq!(launcher.join_version_mismatch_dialog_message, None);
+        assert_eq!(launcher.connect_error, None);
     }
 
     #[test]
@@ -79021,6 +79168,8 @@ version: "2.0.0"
     fn desktop_launcher_join_route_persists_section_collapse_state_like_java() {
         let port = super::DEFAULT_MINDUSTRY_PORT;
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
         launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         launcher
             .join_local_hosts
@@ -79244,6 +79393,8 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_join_route_tracks_community_groups_like_java_server_group() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
         launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
         let mut group = super::DesktopJoinCommunityGroup::new(
             "Official",

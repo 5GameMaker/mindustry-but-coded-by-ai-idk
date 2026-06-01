@@ -17,6 +17,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 729. JoinDialog 版本不匹配改为 showInfo 风格 modal
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **86.1%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `JoinDialog.safeConnect(...)` 在客户端/服务器版本不一致时不进入连接，直接 `ui.showInfo(...)`；
+  - 文案由 `server.kicked.clientOutdated/serverOutdated` 与 `server.versions` 组成；
+  - showInfo modal 会阻断底层 JoinDialog 输入，用户确认后才回到底层页面。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `join_version_mismatch_dialog_message` 状态和 `CloseJoinVersionMismatch` route action；
+    - `safe_connect_to_target(...)` 命中版本不匹配时清理其它 Join 子弹窗/焦点，打开专用 modal，不再写入通用 `last_menu_info_message`；
+    - 新增 `push_join_version_mismatch_dialog(...)`，绘制 `@info.title` + 版本不匹配消息 + `@ok`，并在 hit-test 中优先阻断底层 Join 按钮；
+    - Join route 回归测试改为断言 modal 语义、OK 关闭与连接流程未启动；同时把 locale 依赖的 Join 文本测试固定到 `en`，避免系统默认中文导致英文断言失败。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_blocks_version_mismatch_like_java_safe_connect --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop join_route --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - JoinDialog `@connecting/@reconnecting` LoadingFragment、取消按钮与 back/escape 取消还需继续接入；
+  - 连接失败/超时还需对齐 Java 的 `loadfrag.hide()` 后错误 modal 层级；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 728. KeybindDialog Reset All 纳入滚动内容末尾
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
