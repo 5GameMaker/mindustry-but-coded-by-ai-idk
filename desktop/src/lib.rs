@@ -44435,19 +44435,24 @@ impl DesktopLauncher {
         pass.push(RenderCommand::clear_clip());
         let total_rows = ABOUT_CONTRIBUTORS.chunks(3).count();
         if visible_rows < total_rows {
-            pass.push(RenderCommand::draw_text_styled(
-                format!(
-                    "scroll: {} more contributor rows",
-                    total_rows - visible_rows
-                ),
-                RenderPoint::new(dialog.center().x, dialog.y + 64.0),
-                [0.54, 0.64, 0.72, 1.0],
-                10.0,
-                0.0,
-                RenderTextStyle::new(RenderTextAlign::Center)
-                    .with_vertical_align(RenderTextVerticalAlign::Center)
-                    .with_integer_position(true),
+            let track = RenderRect::new(dialog.right() - 14.0, bottom, 4.0, top - bottom);
+            let visible_ratio = (visible_rows as f32 / total_rows as f32).clamp(0.05, 1.0);
+            let thumb_height = (track.height * visible_ratio).max(18.0);
+            let thumb = RenderRect::new(
+                track.x,
+                track.y + track.height - thumb_height,
+                track.width,
+                thumb_height,
+            );
+            pass.push(RenderCommand::fill_rect(
+                track,
+                [0.10, 0.14, 0.18, 0.64],
                 layer + 0.008,
+            ));
+            pass.push(RenderCommand::fill_rect(
+                thumb,
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.86],
+                layer + 0.009,
             ));
         }
         self.push_settings_text_button(
@@ -44455,7 +44460,7 @@ impl DesktopLauncher {
             Self::about_credits_dialog_close_rect(dialog),
             self.localize_bundle_markup_text("@back"),
             Some("left"),
-            layer + 0.009,
+            layer + 0.010,
         );
     }
 
@@ -73600,6 +73605,10 @@ version: "2.0.0"
         let contributors_line = launcher.localize_bundle_markup_text("@contributors");
         assert!(credit_texts.contains(&contributors_line.as_str()));
         assert!(credit_texts.contains(&launcher.localize_bundle_markup_text("@back").as_str()));
+        assert!(
+            !credit_texts.iter().any(|text| text.starts_with("scroll:")),
+            "Java Credits dialog uses a ScrollPane, not a Rust-only textual overflow marker"
+        );
         assert!(credit_texts
             .iter()
             .any(|text| text.contains("redloong9527 | Prosta4okua | Felix Corvus")));
