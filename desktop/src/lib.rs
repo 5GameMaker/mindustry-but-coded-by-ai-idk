@@ -32787,7 +32787,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.088,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@info.title",
+            self.localize_bundle_markup_text("@info.title"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 28.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -32824,7 +32824,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.092,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            format!("content: {} / {}", content_type.wire_name(), name),
+            format!("{} / {}", content_type.wire_name(), name),
             RenderPoint::new(icon.right() + 12.0, dialog.y + dialog.height - 96.0),
             [0.66, 0.76, 0.84, 1.0],
             11.0,
@@ -32849,7 +32849,7 @@ impl DesktopLauncher {
                 Layer::END_PIXELED + 0.092,
             ));
             pass.push(RenderCommand::draw_text_styled(
-                "@database.patched",
+                self.localize_bundle_markup_text("@database.patched"),
                 RenderPoint::new(icon.right() + 36.0, dialog.y + dialog.height - 122.0),
                 [0.72, 0.82, 0.90, 1.0],
                 10.5,
@@ -32878,7 +32878,7 @@ impl DesktopLauncher {
         let mut y = clip.y + clip.height - 18.0;
         if let Some(description) = description {
             pass.push(RenderCommand::draw_text_styled(
-                "@category.purpose",
+                self.localize_bundle_markup_text("@category.purpose"),
                 RenderPoint::new(clip.x + 14.0, y),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
                 12.0,
@@ -32906,7 +32906,7 @@ impl DesktopLauncher {
         }
         if !stats.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
-                "@category.general",
+                self.localize_bundle_markup_text("@category.general"),
                 RenderPoint::new(clip.x + 14.0, y),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
                 12.0,
@@ -32970,7 +32970,7 @@ impl DesktopLauncher {
             self.push_settings_text_button_with_style(
                 pass,
                 button,
-                "@viewfields",
+                self.localize_bundle_markup_text("@viewfields"),
                 Some("link"),
                 Layer::END_PIXELED + 0.0937,
                 "grayt",
@@ -63281,14 +63281,20 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(detail_texts.contains(&"@info.title"));
+        assert!(
+            detail_texts.contains(&launcher.localize_bundle_markup_text("@info.title").as_str())
+        );
         assert!(detail_texts.contains(&"[accent]copper"));
-        assert!(detail_texts.contains(&"content: item / copper"));
-        assert!(detail_texts.contains(&"@database.patched"));
+        assert!(detail_texts.contains(&"item / copper"));
+        assert!(detail_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@database.patched")
+                .as_str()
+        ));
         assert!(detail_texts.contains(&"@stat.id"));
         assert!(detail_texts.contains(&"0"));
         assert!(
-            detail_texts.contains(&"@viewfields"),
+            detail_texts.contains(&launcher.localize_bundle_markup_text("@viewfields").as_str()),
             "Java ContentInfoDialog shows the @viewfields button when console mode is enabled"
         );
         assert!(detail_commands

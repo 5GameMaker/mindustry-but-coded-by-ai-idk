@@ -62,6 +62,11 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("schematic.icontag", "Icon Tag"),
     ("editor.import", "Import..."),
     ("editor.export", "Export..."),
+    ("database.patched", "Modified by data patches."),
+    ("viewfields", "View Content Fields"),
+    ("info.title", "Info"),
+    ("category.purpose", "Purpose"),
+    ("category.general", "General"),
     ("host.invalid", "[scarlet]Can't connect to host."),
     ("server.waiting", "Waiting for server"),
     ("warning", "Warning!"),
@@ -170,6 +175,11 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("schematic.icontag", "图标标签"),
     ("editor.import", "导入"),
     ("editor.export", "导出"),
+    ("database.patched", "已被数据包修改。"),
+    ("viewfields", "查看内容字段"),
+    ("info.title", "详情"),
+    ("category.purpose", "用途"),
+    ("category.general", "基础"),
     ("host.invalid", "[scarlet]无法连接到服务器。"),
     ("server.waiting", "等待服务器"),
     ("warning", "警告！"),
@@ -266,6 +276,11 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("schematic.icontag", "圖像標籤"),
     ("editor.import", "匯入……"),
     ("editor.export", "匯出……"),
+    ("database.patched", "Modified by data patches."),
+    ("viewfields", "View Content Fields"),
+    ("info.title", "資訊"),
+    ("category.purpose", "用途"),
+    ("category.general", "一般"),
     ("host.invalid", "[scarlet]無法連線至伺服器。"),
     ("server.waiting", "等待伺服器"),
     ("warning", "警告。"),
@@ -493,6 +508,10 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "schematic.import"),
             Some("导入蓝图")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "info.title"),
+            Some("详情")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh-TW", "joingame"),

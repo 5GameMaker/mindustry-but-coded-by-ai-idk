@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 680. Database ContentInfoDialog 详情文案接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.3%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是降低 Database 内容详情弹窗中的 raw key 与调试式标题观感。
+- Java 对照依据：
+  - `ContentInfoDialog` 标题使用 `@info.title`；
+  - patch 提示使用 `@database.patched`；
+  - 描述/用途区标题使用 `@category.purpose`；
+  - stat 区标题使用 `@category.general`；
+  - console/debug 字段按钮使用 `@viewfields`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 `info.title`、`database.patched`、`category.purpose`、`category.general`、`viewfields` 的 EN/简中/繁中 fallback；
+  - `desktop/src/lib.rs`
+    - `push_database_content_info_dialog(...)` 中上述可见标题/按钮按 `settings_locale` 解析；
+    - 将详情弹窗副标题从 `content: item / copper` 收紧为 `item / copper`，减少 debug-shell 观感；
+    - 同步更新 Database route 回归测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop database --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - Database category/tag headers、content stats、ContentInfoDialog 结构仍未完全 Java Scene2D 化；
+  - 仍需继续对照 `DatabaseDialog` / `ContentInfoDialog` 细化排序、滚动、stat value 和 unlock/visibility 行为；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 679. Schematics 主路由与导入导出弹窗文案接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
