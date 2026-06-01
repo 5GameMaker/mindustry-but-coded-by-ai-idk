@@ -34506,7 +34506,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.072,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            title.into(),
+            self.localize_bundle_markup_text(title.into()),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -34531,7 +34531,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_modal_option_button_rect(dialog, index),
-            label,
+            self.localize_bundle_markup_text(label),
             Some(icon),
             Layer::END_PIXELED + 0.078 + index as f32 * 0.001,
         );
@@ -36947,7 +36947,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematics_import_button_rect_for_panel(panel),
-            "@schematic.import",
+            self.localize_bundle_markup_text("@schematic.import"),
             Some("download"),
             Layer::END_PIXELED + 0.025,
         );
@@ -36974,7 +36974,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.031,
         ));
         let search_text = if self.schematic_search.is_empty() {
-            "@schematic.search".to_string()
+            self.localize_bundle_markup_text("@schematic.search")
         } else {
             self.schematic_search.clone()
         };
@@ -36996,7 +36996,7 @@ impl DesktopLauncher {
 
         let tags = Self::schematics_tags_row_rect_for_panel(panel);
         pass.push(RenderCommand::draw_text_styled(
-            "@schematic.tags",
+            self.localize_bundle_markup_text("@schematic.tags"),
             RenderPoint::new(tags.x, tags.center().y),
             [0.72, 0.82, 0.9, 1.0],
             12.0,
@@ -37100,11 +37100,11 @@ impl DesktopLauncher {
         let filtered_indices = self.filtered_schematic_card_indices();
         if filtered_indices.is_empty() {
             pass.push(RenderCommand::draw_text_styled(
-                if self.schematic_filter_active() {
+                self.localize_bundle_markup_text(if self.schematic_filter_active() {
                     "@none.found"
                 } else {
                     "@none"
-                },
+                }),
                 grid.center(),
                 [0.70, 0.78, 0.84, 1.0],
                 13.0,
@@ -61464,10 +61464,22 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@schematic.import"));
-        assert!(texts.contains(&"@schematic.search"));
-        assert!(texts.contains(&"@schematic.tags"));
-        assert!(texts.contains(&"@none"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.import")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.search")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.tags")
+                .as_str()
+        ));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@none").as_str()));
         assert!(texts.contains(&"@back"));
         assert!(!texts
             .iter()
@@ -61831,7 +61843,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@none.found"));
+        assert!(texts.contains(&launcher.localize_bundle_markup_text("@none.found").as_str()));
         assert!(texts
             .iter()
             .any(|text| text.contains("search: missing | tags: power")));
@@ -62190,10 +62202,26 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@editor.import"));
-        assert!(texts.contains(&"@schematic.copy.import"));
-        assert!(texts.contains(&"@schematic.importfile"));
-        assert!(texts.contains(&"@schematic.browseworkshop"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@editor.import")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.copy.import")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.importfile")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.browseworkshop")
+                .as_str()
+        ));
         let dialog = DesktopLauncher::schematic_info_dialog_rect_for_panel(panel);
         let import_copy = DesktopLauncher::schematic_modal_option_button_rect(dialog, 0).center();
         assert_eq!(
@@ -62245,10 +62273,26 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@editor.export: Core Starter"));
-        assert!(texts.contains(&"@schematic.shareworkshop"));
-        assert!(texts.contains(&"@schematic.copy"));
-        assert!(texts.contains(&"@schematic.exportfile"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@editor.export: Core Starter")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.shareworkshop")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.copy")
+                .as_str()
+        ));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.exportfile")
+                .as_str()
+        ));
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::CloseSchematicModal,
         );
@@ -62332,7 +62376,11 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@schematic.edittags"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@schematic.edittags")
+                .as_str()
+        ));
         assert!(texts.contains(&"core | 1"));
         assert!(texts.contains(&"power | 1"));
         assert!(texts.contains(&"@schematic.texttag"));

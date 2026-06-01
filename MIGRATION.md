@@ -15,6 +15,31 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 679. Schematics 主路由与导入导出弹窗文案接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.2%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少 Schematics 页面与导入/导出/编辑弹窗最显眼的 raw `@schematic.*` 文案。
+- Java 对照依据：
+  - `SchematicsDialog` 使用 `@schematic.import`、`@schematic.search`、`@schematic.tags`、`@schematic.copy.import`、`@schematic.importfile`、`@schematic.browseworkshop`、`@schematic.shareworkshop`、`@schematic.copy`、`@schematic.exportfile`、`@schematic.edittags`；
+  - `bundle.properties` / 简中 / 繁中 bundle 提供上述 key 与 `editor.import/editor.export/none/none.found`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 Schematics/import/export/none 相关 key 的 EN/简中/繁中 fallback；
+  - `desktop/src/lib.rs`
+    - `push_schematics_route_page(...)` 中导入按钮、搜索 placeholder、tags 标题、empty 文案按 locale 解析；
+    - `push_schematic_modal_base(...)` 弹窗标题按 locale 解析；
+    - `push_schematic_modal_option_button(...)` 的导入/导出/复制/创意工坊选项按钮按 locale 解析；
+    - 同步更新 schematics 回归测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop schematics --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - Schematic tag 编辑内部的 add/text/icon tag 控件仍部分保持 raw key，后续应继续接入完整 tag dialog 专用壳；
+  - Schematics 卡片内容仍有调试/摘要式文本，需继续对照 Java `SchematicsDialog` 细化；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 678. Settings 参数化 bundle 格式化接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
