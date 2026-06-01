@@ -51,6 +51,7 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("server.delete", "Are you sure you want to delete this server?"),
     ("server.version", "[gray]v{0} {1}"),
     ("server.versions", "Your version:[accent] {0}[]\\nServer version:[accent] {1}[]"),
+    ("server.refreshing", "Refreshing server"),
     ("server.kicked.clientOutdated", "Outdated client! Update your game!"),
     ("server.kicked.serverOutdated", "Outdated server! Ask the host to update!"),
     ("joingame.ip", "Address:"),
@@ -307,6 +308,7 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("server.delete", "确定要删除这个服务器吗？"),
     ("server.version", "[gray]v{0} {1}"),
     ("server.versions", "你的版本：[accent] {0}[]\\n服务器版本：[accent] {1}[]"),
+    ("server.refreshing", "刷新服务器中…"),
     ("server.kicked.clientOutdated", "客户端版本过旧！请更新游戏！"),
     ("server.kicked.serverOutdated", "服务器版本过旧！请让房主更新！"),
     ("joingame.ip", "地址："),
@@ -536,6 +538,7 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("server.delete", "您確定要刪除這個伺服器嗎？"),
     ("server.version", "[gray]v{0} {1}"),
     ("server.versions", "你的版本：[accent] {0}[]\\n伺服器版本：[accent] {1}[]"),
+    ("server.refreshing", "伺服器重新整理中"),
     ("server.kicked.clientOutdated", "客戶端版本過舊！請更新遊戲！"),
     ("server.kicked.serverOutdated", "伺服器版本過舊！請讓房主更新！"),
     ("joingame.ip", "IP 位置："),
@@ -843,6 +846,7 @@ mod tests {
             ("about.button", "About"),
             ("maps", "Maps"),
             ("server.add", "Add Server"),
+            ("server.refreshing", "Refreshing server"),
             (
                 "server.kicked.clientOutdated",
                 "Outdated client! Update your game!",
@@ -923,6 +927,10 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "server.kicked.serverOutdated"),
             Some("服务器版本过旧！请让房主更新！")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "server.refreshing"),
+            Some("伺服器重新整理中")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "schematic.import"),
