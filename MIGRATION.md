@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 667. Native DPI/ScaleFactorChanged 事件接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.9%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是补齐 native 窗口 DPI/缩放变化事件，减少高 DPI/拖屏后 UI 尺寸与 framebuffer 不一致造成的黑屏或错位风险。
+- Java 对照依据：
+  - 原版桌面运行时由 Scene/graphics resize 与 UI scale 链路持续感知窗口缩放；
+  - Rust native runtime 需要把 winit `ScaleFactorChanged` 显式接入 frame loop 和 surface state。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopFrameLoopEvent` 新增 `ScaleFactorChanged(f32)`；
+    - `desktop_frame_loop_events_from_winit_window_event(...)` 映射 winit 0.30 `WindowEvent::ScaleFactorChanged`；
+    - `step_desktop_frame_loop(...)` 收到事件后更新 `loop_state.surface.scale_factor`；
+    - 新增 scale factor frame loop 与 winit helper 映射测试。
+  - `desktop/src/main.rs`
+    - native runtime 增加 `sync_surface_after_scale_factor_changed()`；
+    - `window_event(...)` 在 `ScaleFactorChanged` 后同步 resize native surface 并请求 redraw。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop scale_factor --lib`
+  - `cargo check -p mindustry-desktop --bin mindustry-desktop`
+- 仍未完成：
+  - 仍需继续增强 native OpenGL “命令合法但实际黑屏”的可见 fallback 与像素级 smoke；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 666. 主菜单 flatToggleMenut 文字皮肤对齐 Java
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

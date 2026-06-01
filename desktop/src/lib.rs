@@ -15951,6 +15951,15 @@ impl Default for DesktopNativeOpenGlRuntimeConfig {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
+fn desktop_frame_loop_events_from_winit_scale_factor_changed(
+    scale_factor: f64,
+) -> Vec<DesktopFrameLoopEvent> {
+    vec![DesktopFrameLoopEvent::ScaleFactorChanged(
+        scale_factor as f32,
+    )]
+}
+
+#[cfg(feature = "opengl-native-runtime")]
 pub fn desktop_frame_loop_events_from_winit_window_event(
     event: &winit::event::WindowEvent,
 ) -> Vec<DesktopFrameLoopEvent> {
@@ -15959,6 +15968,9 @@ pub fn desktop_frame_loop_events_from_winit_window_event(
         winit::event::WindowEvent::Resized(size) => vec![DesktopFrameLoopEvent::Resize(
             DesktopSurfaceSize::new(size.width, size.height),
         )],
+        winit::event::WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+            desktop_frame_loop_events_from_winit_scale_factor_changed(*scale_factor)
+        }
         winit::event::WindowEvent::RedrawRequested => vec![DesktopFrameLoopEvent::Tick],
         winit::event::WindowEvent::CursorMoved { position, .. } => {
             vec![DesktopFrameLoopEvent::Input(
@@ -16033,6 +16045,7 @@ pub enum DesktopInputTickEvent {
 pub enum DesktopFrameLoopEvent {
     Tick,
     Resize(DesktopSurfaceSize),
+    ScaleFactorChanged(f32),
     Input(DesktopInputTickEvent),
     CloseRequested,
 }
@@ -41557,6 +41570,9 @@ impl DesktopLauncher {
                     loop_state.surface.size = *size;
                     resized_to = Some(*size);
                 }
+                DesktopFrameLoopEvent::ScaleFactorChanged(scale_factor) => {
+                    loop_state.surface.scale_factor = *scale_factor;
+                }
                 DesktopFrameLoopEvent::Input(input) => input_events.push(input.clone()),
                 DesktopFrameLoopEvent::CloseRequested => close_requested = true,
             }
@@ -43853,6 +43869,30 @@ mod tests {
     }
 
     #[test]
+    fn desktop_frame_loop_applies_scale_factor_changed_events() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let mut frame_loop =
+            DesktopFrameLoopState::new(Default::default(), DesktopFramePacing::uncapped());
+        let mut graphics_renderer = HeadlessDesktopGraphicsRenderer::default();
+        let mut effect_renderer = HeadlessDesktopEffectRenderer::default();
+        let new_scale_factor = 1.75;
+
+        let result = launcher.step_desktop_frame_loop(
+            &mut frame_loop,
+            &[DesktopFrameLoopEvent::ScaleFactorChanged(new_scale_factor)],
+            &mut graphics_renderer,
+            &mut effect_renderer,
+        );
+
+        assert!(result.presented);
+        assert_eq!(result.frame_index, 0);
+        assert_eq!(result.surface.scale_factor, new_scale_factor);
+        assert_eq!(frame_loop.surface.scale_factor, new_scale_factor);
+        assert_eq!(frame_loop.surface.size, DesktopSurfaceSize::default());
+        assert_eq!(frame_loop.next_frame_index, 1);
+    }
+
+    #[test]
     fn desktop_frame_loop_paced_sleep_only_after_successful_present() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         let mut frame_loop = DesktopFrameLoopState::new(
@@ -43989,6 +44029,15 @@ mod tests {
         ]);
         assert_eq!(config.surface.size, DesktopSurfaceSize::new(640, 480));
         assert!(config.surface.maximized);
+    }
+
+    #[cfg(feature = "opengl-native-runtime")]
+    #[test]
+    fn desktop_native_opengl_maps_winit_scale_factor_to_desktop_frame_loop_event() {
+        assert_eq!(
+            super::desktop_frame_loop_events_from_winit_scale_factor_changed(1.5),
+            vec![DesktopFrameLoopEvent::ScaleFactorChanged(1.5)]
+        );
     }
 
     #[cfg(feature = "opengl-native-runtime")]
