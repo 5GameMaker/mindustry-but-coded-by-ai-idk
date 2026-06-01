@@ -24498,7 +24498,7 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::settings_back_button_rect_for_panel(panel),
-                    "@back",
+                    self.localize_bundle_markup_text_or("@back", "Back"),
                     Some("left"),
                     Layer::END_PIXELED + 0.082,
                 );
@@ -24507,7 +24507,7 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::settings_back_button_rect_for_panel(panel),
-                    "@back",
+                    self.localize_bundle_markup_text_or("@back", "Back"),
                     Some("left"),
                     Layer::END_PIXELED + 0.082,
                 );
@@ -24516,7 +24516,7 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::settings_back_button_rect_for_panel(panel),
-                    "@back",
+                    self.localize_bundle_markup_text_or("@back", "Back"),
                     Some("left"),
                     Layer::END_PIXELED + 0.082,
                 );
@@ -42321,6 +42321,16 @@ impl DesktopLauncher {
         {
             self.push_settings_data_page(pass, panel);
             self.push_settings_route_buttons(pass, panel);
+        } else if route == DesktopMenuRoute::Settings
+            && matches!(
+                self.settings_dialog_state.page,
+                DesktopSettingsPage::Game
+                    | DesktopSettingsPage::Graphics
+                    | DesktopSettingsPage::Sound
+            )
+        {
+            self.push_settings_route_controls(pass, panel);
+            self.push_settings_route_buttons(pass, panel);
         } else {
             for (index, line) in self.active_menu_route_shell_lines(route).iter().enumerate() {
                 if route == DesktopMenuRoute::Settings && line.starts_with("button:") {
@@ -42625,7 +42635,7 @@ impl DesktopLauncher {
                     0.045 + 0.075 * t0,
                     1.0,
                 ],
-                -119.0 + band as f32 * 0.0001,
+                -119.0,
             ));
         }
 
@@ -42642,7 +42652,7 @@ impl DesktopLauncher {
                 radius,
                 [0.62, 0.78, 0.92, 0.28 + twinkle * 0.34],
                 true,
-                -117.0 + index as f32 * 0.0001,
+                -117.0,
             ));
         }
 
@@ -42693,14 +42703,14 @@ impl DesktopLauncher {
                 RenderPoint::new(planet_center.x + half, planet_center.y + offset),
                 1.0,
                 [0.36, 0.74, 0.78, 0.10],
-                -108.0 + index as f32 * 0.0001,
+                -108.0,
             ));
             commands.push(RenderCommand::draw_line(
                 RenderPoint::new(planet_center.x + offset, planet_center.y - half),
                 RenderPoint::new(planet_center.x + offset, planet_center.y + half),
                 1.0,
                 [0.36, 0.74, 0.78, 0.07],
-                -107.0 + index as f32 * 0.0001,
+                -107.0,
             ));
         }
 
@@ -42717,7 +42727,7 @@ impl DesktopLauncher {
                 drift,
                 [0.78, 0.88, 0.92, 0.035 + index as f32 * 0.008],
                 false,
-                -106.0 + index as f32 * 0.0001,
+                -106.0,
             ));
         }
 
@@ -66175,13 +66185,28 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let sprites = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawSprite { symbol, .. } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
 
-        assert!(texts.contains(&"数据库"));
-        assert!(texts.contains(&"核心数据库"));
-        assert!(texts.contains(&"蓝图"));
+        assert!(texts.contains(&"数据库") || sprites.contains(&"menu-label-zh-database"));
+        assert!(
+            texts.contains(&"核心数据库") || sprites.contains(&"menu-label-zh-content-database")
+        );
+        assert!(texts.contains(&"蓝图") || sprites.contains(&"menu-label-zh-schematics"));
         assert!(
             !texts.contains(&"Core Database"),
-            "Java MenuFragment resolves @database through the active Core.bundle locale"
+            "Java MenuFragment resolves @database through the active Core.bundle locale; Rust may render the localized label as a prerendered menu sprite"
         );
     }
 
@@ -66628,6 +66653,36 @@ version: "2.0.0"
             .pixels
             .chunks_exact(4)
             .any(|rgba| rgba == [255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn desktop_launcher_synthetic_menu_background_uses_bucketed_layers_for_batching() {
+        let launcher = DesktopLauncher::new(Vec::new());
+        let commands =
+            launcher.menu_background_layer_commands(RenderViewport::new(0.0, 0.0, 1280.0, 720.0));
+
+        assert!(
+            commands.len() >= 70,
+            "synthetic menu fallback should still render the full animated background"
+        );
+
+        let mut synthetic_layer_keys = commands
+            .iter()
+            .filter_map(DesktopLauncher::render_command_layer)
+            .filter(|layer| (-130.0..=-80.0).contains(layer))
+            .map(|layer| (layer * 1000.0).round() as i32)
+            .collect::<Vec<_>>();
+        synthetic_layer_keys.sort_unstable();
+        synthetic_layer_keys.dedup();
+
+        assert_eq!(
+            synthetic_layer_keys,
+            vec![
+                -120000, -119000, -117000, -112000, -111000, -110000, -109000, -108000, -107000,
+                -106000, -90000,
+            ],
+            "menu background must keep heavy repeated primitives in stable layer buckets so the OpenGL backend can batch them"
+        );
     }
 
     #[test]
@@ -69198,7 +69253,8 @@ version: "2.0.0"
             .any(|symbol| *symbol == language_scroll_knob.as_str()));
         assert!(!language_texts
             .contains(&"LanguageDialog placeholder: locale list and bundle reload later"));
-        assert!(language_texts.contains(&"Back"));
+        let settings_back_label = launcher.localize_bundle_markup_text_or("@back", "Back");
+        assert!(language_texts.contains(&settings_back_label.as_str()));
         let route_lines = launcher.settings_route_lines();
         assert!(
             route_lines.contains(&format!(
@@ -70589,7 +70645,8 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(labels.contains(&"Back"));
+        let back_label = launcher.localize_bundle_markup_text_or("@back", "Back");
+        assert!(labels.contains(&back_label.as_str()));
         for entry in super::SETTINGS_MENU_ENTRIES {
             assert!(labels.contains(&launcher.localize_bundle_markup_text(entry.label).as_str()));
             let glyph = super::desktop_ui_icon_glyph_or_label(entry.icon, entry.icon);
@@ -70675,12 +70732,13 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let back_label = launcher.localize_bundle_markup_text_or("@back", "Back");
         assert!(labels.contains(
             &launcher
                 .localize_bundle_markup_text("@settings.reset")
                 .as_str()
         ));
-        assert!(labels.contains(&"Back"));
+        assert!(labels.contains(&back_label.as_str()));
         assert!(!labels.contains(&"button: reset-to-defaults"));
         assert!(!labels.contains(&"button: back"));
         let button_rects = commands
@@ -70828,6 +70886,15 @@ version: "2.0.0"
         assert!(texts.contains(&"@setting.playerlimit.name"));
         assert!(texts.contains(&"value: 60"));
         assert!(!texts.contains(&"off"));
+        assert!(
+            !texts.contains(&"settings page: game")
+                && !texts.contains(&"style: Tex.button / Styles.flatt")
+                && !texts
+                    .iter()
+                    .any(|text| text.starts_with("table: game settings:"))
+                && !texts.iter().any(|text| text.starts_with("critical:")),
+            "Settings child pages should render the Java SettingsTable controls instead of diagnostic route-line text"
+        );
 
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Graphics;
         let graphics_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
