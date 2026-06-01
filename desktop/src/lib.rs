@@ -32237,31 +32237,48 @@ impl DesktopLauncher {
                 let port = self.host_port_text.trim().parse::<u16>();
                 if name.is_empty() {
                     self.host_error = Some("@noname".into());
-                } else if port.is_err() || port.ok() == Some(0) {
+                } else if !matches!(port, Ok(port) if port != 0) {
                     self.host_error = Some("@server.invalidport".into());
                 } else {
-                    self.player.name = name.to_string();
-                    self.player.admin = true;
-                    self.settings_overrides
-                        .insert("name".into(), self.player.name.clone());
-                    self.settings_overrides
-                        .insert("port".into(), self.host_port_text.trim().to_string());
-                    self.set_setting_override(
-                        "game",
-                        "steampublichost",
-                        (!self.host_friends_only).to_string(),
-                    );
-                    self.host_error = None;
-                    self.host_name_focused = false;
-                    self.host_port_focused = false;
-                    self.host_color_picker_open = false;
-                    self.active_menu_route = None;
-                    self.last_menu_guard_message = Some(format!(
-                        "HostDialog.runHost {}:{} friendsOnly={}",
-                        self.player.name,
-                        self.host_port_text.trim(),
-                        self.host_friends_only
-                    ));
+                    let port = port.expect("valid host port should be available after validation");
+                    let host_result = {
+                        let mut net = self.net_client.net_mut();
+                        net.host(port)
+                    };
+                    match host_result {
+                        Ok(()) => {
+                            self.player.name = name.to_string();
+                            self.player.admin = true;
+                            self.settings_overrides
+                                .insert("name".into(), self.player.name.clone());
+                            self.settings_overrides
+                                .insert("port".into(), port.to_string());
+                            self.set_setting_override(
+                                "game",
+                                "steampublichost",
+                                (!self.host_friends_only).to_string(),
+                            );
+                            self.sync_runtime_state_from_game_state();
+                            self.runtime
+                                .set_network_context(GameRuntimeNetworkContext::server());
+                            self.host_error = None;
+                            self.host_name_focused = false;
+                            self.host_port_focused = false;
+                            self.host_color_picker_open = false;
+                            self.active_menu_route = None;
+                            self.last_menu_guard_message = Some(format!(
+                                "HostDialog.runHost {}:{} friendsOnly={}",
+                                self.player.name, port, self.host_friends_only
+                            ));
+                        }
+                        Err(error) => {
+                            self.host_error = Some(error.to_string());
+                            self.last_menu_guard_message = Some(format!(
+                                "HostDialog.runHost failed {}:{} {}",
+                                name, port, error
+                            ));
+                        }
+                    }
                 }
             }
             DesktopMenuRouteShellAction::OpenJoinAddServer => {
@@ -45561,8 +45578,10 @@ mod tests {
     };
     use mindustry_core::mindustry::{upstream_menu_version_color, upstream_menu_version_text};
     use std::collections::BTreeMap;
+    use std::io;
     use std::net::{TcpListener, UdpSocket};
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
+    use std::time::Duration;
 
     #[derive(Debug, Default)]
     struct RecordingPlatform {
@@ -45591,6 +45610,59 @@ mod tests {
             }
         }
         panic!("could not reserve a local TCP/UDP port pair");
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingHostProvider {
+        host_ports: Arc<Mutex<Vec<u16>>>,
+    }
+
+    impl NetProvider for RecordingHostProvider {
+        fn connect_client(
+            &mut self,
+            _ip: &str,
+            _port: u16,
+            _success: Box<dyn Fn() + Send + 'static>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn send_client(&mut self, _object: &PacketKind, _reliable: bool) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn disconnect_client(&mut self) {}
+
+        fn discover_servers(
+            &self,
+            _callback: mindustry_core::mindustry::net::HostCallback,
+            done: mindustry_core::mindustry::net::DoneCallback,
+        ) {
+            done();
+        }
+
+        fn ping_host(
+            &self,
+            _address: &str,
+            _port: u16,
+            _timeout: Duration,
+        ) -> io::Result<mindustry_core::mindustry::net::Host> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "recording host provider does not ping",
+            ))
+        }
+
+        fn host_server(&mut self, port: u16) -> io::Result<()> {
+            self.host_ports.lock().unwrap().push(port);
+            Ok(())
+        }
+
+        fn get_connections(&self) -> Vec<mindustry_core::mindustry::net::NetConnection> {
+            Vec::new()
+        }
+
+        fn close_server(&mut self) {}
     }
 
     fn sample_network_player_data(
@@ -61570,6 +61642,13 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_paused_world_overlay_opens_host_dialog_route() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        let host_ports = Arc::new(Mutex::new(Vec::new()));
+        launcher
+            .net_client
+            .net_mut()
+            .set_provider(Box::new(RecordingHostProvider {
+                host_ports: Arc::clone(&host_ports),
+            }));
         launcher.game_state.world.resize(16, 16);
         launcher.game_state.set(GameStateState::Paused);
         let initial_player_name = launcher.player.name.clone();
@@ -61697,10 +61776,10 @@ version: "2.0.0"
                     key_code: "Delete".into(),
                     pressed: true,
                 },
-                DesktopInputTickEvent::Text("7777abc".into()),
+                DesktopInputTickEvent::Text("17777abc".into()),
             ],
         );
-        assert_eq!(launcher.host_port_text, "7777");
+        assert_eq!(launcher.host_port_text, "17777");
 
         assert_eq!(
             launcher.active_menu_route_shell_action_at_surface_point(surface, info.x, info.y),
@@ -61720,10 +61799,17 @@ version: "2.0.0"
         assert_eq!(launcher.player.name, "Alice");
         assert!(launcher.player.admin);
         assert_eq!(launcher.active_menu_route, None);
+        assert_eq!(*host_ports.lock().unwrap(), vec![17777]);
+        assert!(launcher.net_client.net().lock().unwrap().server());
+        assert_eq!(
+            launcher.runtime.network_context,
+            GameRuntimeNetworkContext::server()
+        );
         assert!(launcher
             .last_menu_guard_message
             .as_deref()
-            .is_some_and(|message| message.contains("HostDialog.runHost Alice:7777")));
+            .is_some_and(|message| message.contains("HostDialog.runHost Alice:17777")));
+        launcher.net_client.net_mut().close_server();
     }
 
     #[test]
@@ -73028,12 +73114,14 @@ version: "2.0.0"
         assert!(!texts
             .iter()
             .any(|text| text.contains("127.0.0.1") && text.contains("Local Servers")));
+        let players_label =
+            launcher.format_bundle_text("players", &["[accent]2[lightgray]/[accent]8[lightgray]"]);
+        assert!(texts.iter().any(|text| text.contains(&players_label)));
+        let map_label = launcher.format_bundle_text("save.map", &["local map"]);
+        let mode_label = launcher.localize_bundle_markup_text("@mode.survival.name");
         assert!(texts
             .iter()
-            .any(|text| text.contains("2") && text.contains("8") && text.contains("players")));
-        assert!(texts
-            .iter()
-            .any(|text| text.contains("Map: local map") && text.contains("Survival")));
+            .any(|text| text.contains(&map_label) && text.contains(&mode_label)));
         assert!(texts.iter().any(|text| text.contains("42ms")));
         assert!(!texts.contains(&"tap to connect"));
 

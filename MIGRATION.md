@@ -17,6 +17,37 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 703. HostDialog 接入真实 Net::host 开服链路
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **83.4%**，仍未达到完整可玩；继续优先所有子菜单不只“可点”，还要接到真实 runtime/network/save/content 调用链。
+- Java 对照依据：
+  - `HostDialog.runHost()` 成功路径会调用 `net.host(port)`，随后玩家成为 admin 并进入 hosting 状态；
+  - Rust 之前 `HostRun` 只更新 UI 状态、玩家名、admin、设置项和 guard message，没有真正触发 server bind。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopMenuRouteShellAction::HostRun` 输入校验通过后先调用 `self.net_client.net_mut().host(port)`；
+    - 开服成功后再提交 `player.name/admin`、`settings_overrides["name"/"port"]`、`steampublichost`、关闭 Host route；
+    - 开服成功后同步当前 `game_state` 到 runtime，并把 `GameRuntimeNetworkContext` 设为 `server()`；
+    - 开服失败时保留 Host 对话框，写入 `host_error`，不再伪装成成功 guard message；
+    - 测试侧新增 `RecordingHostProvider`，不占真实端口即可证明 HostDialog 触发 `host_server(port)`。
+  - 顺带修正 Join local discovery 测试：断言玩家数与地图/模式文案时使用当前 bundle/localize 输出，避免原版本地化 UI 下只认英文字符串。
+  - `README.md`
+    - 迁移百分比更新为 `83.4%`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_paused_world_overlay_opens_host_dialog_route --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop host --lib -- --nocapture`
+- 并行只读审查结论已纳入后续优先级：
+  - Settings 下一最小闭环推荐做控制重绑取消，其次音频 live-effect，图形 live-effect 最重；
+  - Mods/Editor 下一最小可见闭环推荐先做 Editor New Map 弹窗，再做 Import Map；
+  - Save/Load 仍需真正 world save/load round-trip；
+  - Join 的社区服务器在线 feed 仍未接入。
+- 仍未完成：
+  - Host 仅完成 UI → `Net::host` → provider server flag/host_server 这条关键链路；Steam/public host、HostEvent、loadfrag、社区服务器刷新还未完整对齐 Java；
+  - Save/Load、Mods Browser、Editor New/Import、Settings live-effect、Java↔Rust 联机 smoke test 仍未完成；
+  - 未完成所有 Java 文件/目录逐项迁移，不能宣告最终目标完成。
+
 ## 702. Settings 子页面原版 UI 化与菜单背景合批层桶
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
