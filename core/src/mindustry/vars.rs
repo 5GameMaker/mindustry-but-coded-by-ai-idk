@@ -17,6 +17,7 @@ pub const BUILDING_RANGE: f32 = 220.0;
 pub const MINE_TRANSFER_RANGE: f32 = 220.0;
 pub const ITEM_TRANSFER_RANGE: f32 = 220.0;
 pub const LOGIC_ITEM_TRANSFER_RANGE: f32 = 45.0;
+pub const SERVER_CACHE_FILE_NAME: &str = "server_list.json";
 
 pub const SERVER_JSON_URLS: [&str; 2] = [
     "https://raw.githubusercontent.com/Anuken/MindustryServerList/master/servers_v8.json",
@@ -102,6 +103,10 @@ impl RuntimePaths {
             data_dir,
         }
     }
+
+    pub fn server_cache_file(&self) -> String {
+        format!("{}/{}", self.data_dir, SERVER_CACHE_FILE_NAME)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,5 +132,18 @@ impl AppContext {
         context.flags.mode = RuntimeMode::Server;
         context.flags.headless = true;
         context
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_paths_use_java_server_cache_filename() {
+        let paths = RuntimePaths::from_data_dir("data");
+
+        assert_eq!(SERVER_CACHE_FILE_NAME, "server_list.json");
+        assert_eq!(paths.server_cache_file(), "data/server_list.json");
     }
 }
