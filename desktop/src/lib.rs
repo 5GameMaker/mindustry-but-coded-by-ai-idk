@@ -212,8 +212,8 @@ const HOST_PALETTE_COLORS: [u32; 8] = [
 ];
 const MAP_LIST_SEARCH_BAR_HEIGHT: f32 = 34.0;
 const MAP_LIST_FILTER_BUTTON_SIZE: f32 = 40.0;
-const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 190.0;
-const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 44.0;
+const MAP_LIST_ACTION_BUTTON_WIDTH: f32 = 210.0;
+const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 64.0;
 const MAP_LIST_CARD_WIDTH: f32 = 200.0;
 const MAP_LIST_CARD_HEIGHT: f32 = 264.0;
 const MAP_LIST_CARD_GAP: f32 = 10.0;
@@ -28158,7 +28158,7 @@ impl DesktopLauncher {
 
     fn map_list_search_rect_for_panel(panel: RenderRect, route: DesktopMenuRoute) -> RenderRect {
         let action_offset = if route == DesktopMenuRoute::Editor {
-            MAP_LIST_ACTION_BUTTON_HEIGHT + 12.0
+            MAP_LIST_ACTION_BUTTON_HEIGHT - 8.0
         } else {
             0.0
         };
@@ -28295,15 +28295,20 @@ impl DesktopLauncher {
         )
     }
 
-    fn map_list_card_type_label(map: &MapDescriptor) -> &'static str {
+    fn map_list_card_type_label(map: &MapDescriptor) -> String {
         if map.workshop {
-            "@workshop"
+            "@workshop".to_string()
         } else if map.custom {
-            "@custom"
-        } else if map.mod_name.is_some() {
-            "@mods"
+            "@custom".to_string()
+        } else if let Some(mod_name) = map
+            .mod_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|mod_name| !mod_name.is_empty())
+        {
+            schematic_text_snippet(mod_name, 24)
         } else {
-            "@builtin"
+            "@builtin".to_string()
         }
     }
 
@@ -28333,7 +28338,7 @@ impl DesktopLauncher {
             } else {
                 description
             },
-            type_label: Self::map_list_card_type_label(map).to_string(),
+            type_label: Self::map_list_card_type_label(map),
             status: Self::map_list_card_status_summary(map),
         }
     }
@@ -28616,7 +28621,10 @@ impl DesktopLauncher {
     }
 
     fn map_list_planet_filter_candidates(&self) -> Vec<(String, String)> {
-        let mut candidates = vec![("sun".to_string(), "@rules.anyenv".to_string())];
+        let mut candidates = vec![(
+            "sun".to_string(),
+            self.localize_bundle_markup_text("@rules.anyenv"),
+        )];
         candidates.extend(
             self.content_loader
                 .catalog()
@@ -28975,7 +28983,7 @@ impl DesktopLauncher {
             dialog.x + 24.0 + index as f32 * (width + 8.0),
             dialog.y + 72.0,
             width,
-            44.0,
+            54.0,
         )
     }
 
@@ -33287,7 +33295,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::route_back_button_rect_for_panel(panel),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.024,
         );
@@ -35978,7 +35986,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::route_back_button_rect_for_panel(panel),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.024,
         );
@@ -35987,14 +35995,14 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::map_list_action_button_rect_for_panel(panel, 0),
-                "@editor.newmap",
+                self.localize_bundle_markup_text("@editor.newmap"),
                 Some("add"),
                 Layer::END_PIXELED + 0.025,
             );
             self.push_settings_text_button(
                 pass,
                 Self::map_list_action_button_rect_for_panel(panel, 1),
-                "@editor.importmap",
+                self.localize_bundle_markup_text("@editor.importmap"),
                 Some("upload"),
                 Layer::END_PIXELED + 0.026,
             );
@@ -36023,7 +36031,7 @@ impl DesktopLauncher {
         ));
         pass.push(RenderCommand::draw_text_styled(
             if self.map_list_search.is_empty() {
-                "@editor.search".to_string()
+                self.localize_bundle_markup_text("@editor.search")
             } else {
                 self.map_list_search.clone()
             },
@@ -36081,7 +36089,7 @@ impl DesktopLauncher {
         if filtered_indices.is_empty() {
             let (empty_text, empty_hint) = self.map_list_empty_state_texts();
             pass.push(RenderCommand::draw_text_styled(
-                empty_text,
+                self.localize_bundle_markup_text(empty_text),
                 pane.center(),
                 [0.70, 0.78, 0.84, 1.0],
                 13.0,
@@ -36093,7 +36101,7 @@ impl DesktopLauncher {
             ));
             if let Some(empty_hint) = empty_hint {
                 pass.push(RenderCommand::draw_text_styled(
-                    empty_hint,
+                    self.localize_bundle_markup_text(empty_hint),
                     RenderPoint::new(pane.center().x, pane.center().y + 22.0),
                     [0.54, 0.64, 0.72, 1.0],
                     10.0,
@@ -36184,7 +36192,7 @@ impl DesktopLauncher {
                 ));
                 if matches!(route, DesktopMenuRoute::Editor) {
                     pass.push(RenderCommand::draw_text_styled(
-                        Self::map_list_card_type_label(map),
+                        self.localize_bundle_markup_text(Self::map_list_card_type_label(map)),
                         RenderPoint::new(card.center().x, card.y + 17.0),
                         [0.62, 0.68, 0.72, 1.0],
                         9.0,
@@ -36282,7 +36290,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.061,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@level.mode",
+            self.localize_bundle_markup_text("@level.mode"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 70.0),
             [0.80, 0.90, 0.96, 1.0],
             12.0,
@@ -36304,7 +36312,7 @@ impl DesktopLauncher {
             self.push_map_list_filter_toggle(
                 pass,
                 Self::map_play_mode_button_rect(dialog, index),
-                format!("@mode.{}.name", mode.wire_name()),
+                self.localize_bundle_markup_text(format!("@mode.{}.name", mode.wire_name())),
                 self.map_play_selected_mode == mode,
                 mode.valid(map),
                 Layer::END_PIXELED + 0.063 + index as f32 * 0.001,
@@ -36345,7 +36353,7 @@ impl DesktopLauncher {
         pass.push(RenderCommand::draw_text_styled(
             format!(
                 "{}  {}x{}",
-                Self::map_list_card_type_label(map),
+                self.localize_bundle_markup_text(Self::map_list_card_type_label(map)),
                 map.width,
                 map.height
             ),
@@ -36359,8 +36367,9 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.070,
         ));
         if Gamemode::Survival.valid(map) {
+            let high_score = self.map_play_high_score(map).to_string();
             pass.push(RenderCommand::draw_text_styled(
-                format!("@level.highscore: {}", self.map_play_high_score(map)),
+                self.format_bundle_text("level.highscore", &[high_score.as_str()]),
                 RenderPoint::new(dialog.center().x, preview.y - 22.0),
                 [0.78, 0.88, 0.96, 1.0],
                 10.0,
@@ -36374,21 +36383,21 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::map_card_dialog_close_rect(dialog),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.071,
         );
         self.push_settings_text_button(
             pass,
             Self::map_play_primary_button_rect(dialog),
-            "@play",
+            self.localize_bundle_markup_text("@play"),
             Some("play"),
             Layer::END_PIXELED + 0.072,
         );
         self.push_settings_text_button(
             pass,
             Self::map_play_customize_button_rect(dialog),
-            "@customize",
+            self.localize_bundle_markup_text("@customize"),
             Some("settings"),
             Layer::END_PIXELED + 0.073,
         );
@@ -36443,7 +36452,12 @@ impl DesktopLauncher {
 
     fn push_map_play_mode_help_dialog(&self, pass: &mut RenderPass, dialog: RenderRect) {
         let layer = Layer::END_PIXELED + 0.090;
-        let child = self.push_map_play_child_dialog_shell(pass, dialog, "@mode.help.title", layer);
+        let child = self.push_map_play_child_dialog_shell(
+            pass,
+            dialog,
+            self.localize_bundle_markup_text("@mode.help.title"),
+            layer,
+        );
         let scrollpane = Self::map_play_help_scrollpane_rect(child);
         let clip = Self::map_play_help_scrollpane_clip_rect(scrollpane);
         pass.push(RenderCommand::draw_sprite(
@@ -36462,11 +36476,11 @@ impl DesktopLauncher {
         pass.push(RenderCommand::set_clip(clip));
         for (index, mode) in Self::map_play_dialog_modes().into_iter().enumerate() {
             pass.push(RenderCommand::draw_text_styled(
-                format!(
+                self.localize_bundle_markup_text(format!(
                     "[accent]@mode.{}.name[]: [lightgray]@mode.{}.description",
                     mode.wire_name(),
                     mode.wire_name()
-                ),
+                )),
                 RenderPoint::new(clip.x, clip.y + clip.height - 4.0 - index as f32 * 54.0),
                 [0.82, 0.91, 0.98, 1.0],
                 11.0,
@@ -36483,7 +36497,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::map_play_help_dialog_ok_rect(child),
-            "@ok",
+            self.localize_bundle_markup_text("@ok"),
             None,
             layer + 0.020,
         );
@@ -36496,25 +36510,46 @@ impl DesktopLauncher {
         map: &MapDescriptor,
     ) {
         let layer = Layer::END_PIXELED + 0.090;
-        let child = self.push_map_play_child_dialog_shell(pass, dialog, "CustomRulesDialog", layer);
+        let child = self.push_map_play_child_dialog_shell(
+            pass,
+            dialog,
+            self.localize_bundle_markup_text("@customize"),
+            layer,
+        );
         let rules = self
             .map_play_rules
             .clone()
             .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
         for (index, line) in [
-            "@customize".to_string(),
+            self.localize_bundle_markup_text("@customize"),
             format!(
-                "@level.mode: @mode.{}.name",
-                self.map_play_selected_mode.wire_name()
+                "{} {}",
+                self.localize_bundle_markup_text("@level.mode"),
+                self.localize_bundle_markup_text(format!(
+                    "@mode.{}.name",
+                    self.map_play_selected_mode.wire_name()
+                ))
             ),
             format!(
                 "map.applyRules({})",
                 self.map_play_selected_mode.wire_name()
             ),
-            format!("rules.waves: {}", rules.waves),
-            format!("rules.attackMode: {}", rules.attack_mode),
+            format!(
+                "{}: {}",
+                self.localize_bundle_markup_text("@rules.waves"),
+                rules.waves
+            ),
+            format!(
+                "{}: {}",
+                self.localize_bundle_markup_text("@rules.attack"),
+                rules.attack_mode
+            ),
             format!("rules.pvp: {}", rules.pvp),
-            format!("rules.infiniteResources: {}", rules.infinite_resources),
+            format!(
+                "{}: {}",
+                self.localize_bundle_markup_text("@rules.infiniteresources"),
+                rules.infinite_resources
+            ),
             format!("rules source: {}", map.plain_name()),
         ]
         .into_iter()
@@ -36538,7 +36573,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::map_play_child_dialog_close_rect(child),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             layer + 0.020,
         );
@@ -36551,7 +36586,7 @@ impl DesktopLauncher {
         map: &MapDescriptor,
     ) {
         pass.push(RenderCommand::draw_text_styled(
-            "@editor.mapinfo",
+            self.localize_bundle_markup_text("@editor.mapinfo"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
             [0.94, 0.98, 1.0, 1.0],
             17.0,
@@ -36588,11 +36623,20 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.064,
         ));
         let mut fields = vec![
-            ("@editor.mapname", map.plain_name()),
-            ("@editor.author", map.plain_author()),
+            (
+                self.localize_bundle_markup_text("@editor.mapname"),
+                map.plain_name(),
+            ),
+            (
+                self.localize_bundle_markup_text("@editor.author"),
+                map.plain_author(),
+            ),
         ];
         if !map.plain_description().trim().is_empty() {
-            fields.push(("@editor.description", map.plain_description()));
+            fields.push((
+                self.localize_bundle_markup_text("@editor.description"),
+                map.plain_description(),
+            ));
         }
         for (index, (label, value)) in fields.into_iter().enumerate() {
             let y = desc.y + desc.height - 22.0 - index as f32 * 32.0;
@@ -36623,7 +36667,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::map_editor_action_button_rect(dialog, 0),
-            "@editor.openin",
+            self.localize_bundle_markup_text("@editor.openin"),
             Some("export"),
             Layer::END_PIXELED + 0.072,
         );
@@ -36632,9 +36676,9 @@ impl DesktopLauncher {
             pass,
             Self::map_editor_action_button_rect(dialog, 1),
             if map.workshop {
-                "@view.workshop"
+                self.localize_bundle_markup_text("@view.workshop")
             } else {
-                "@delete"
+                self.localize_bundle_markup_text("@delete")
             },
             Some(if map.workshop { "link" } else { "trash" }),
             Layer::END_PIXELED + 0.073,
@@ -36643,7 +36687,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::map_card_dialog_close_rect(dialog),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.074,
         );
@@ -36713,7 +36757,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.072,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@editor.filters",
+            self.localize_bundle_markup_text("@editor.filters"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -36726,7 +36770,7 @@ impl DesktopLauncher {
         ));
         let group_specs = [
             (
-                "@editor.filters.mode",
+                self.localize_bundle_markup_text("@editor.filters.mode"),
                 RenderRect::new(
                     dialog.x + 24.0,
                     dialog.y + dialog.height - 126.0,
@@ -36735,7 +36779,7 @@ impl DesktopLauncher {
                 ),
             ),
             (
-                "@editor.filters.priorities",
+                self.localize_bundle_markup_text("@editor.filters.priorities"),
                 RenderRect::new(
                     dialog.x + 24.0,
                     dialog.y + dialog.height - 192.0,
@@ -36744,7 +36788,7 @@ impl DesktopLauncher {
                 ),
             ),
             (
-                "@editor.filters.type",
+                self.localize_bundle_markup_text("@editor.filters.type"),
                 RenderRect::new(
                     dialog.x + 24.0,
                     dialog.y + dialog.height - 266.0,
@@ -36753,7 +36797,7 @@ impl DesktopLauncher {
                 ),
             ),
             (
-                "@editor.filters.search",
+                self.localize_bundle_markup_text("@editor.filters.search"),
                 RenderRect::new(
                     dialog.x + 24.0,
                     dialog.y + dialog.height - 340.0,
@@ -36791,7 +36835,7 @@ impl DesktopLauncher {
             self.push_map_list_filter_toggle(
                 pass,
                 Self::map_list_filter_mode_rect(dialog, index),
-                format!("@mode.{}.name", mode.wire_name()),
+                self.localize_bundle_markup_text(format!("@mode.{}.name", mode.wire_name())),
                 self.map_list_filter_modes.contains(&mode),
                 true,
                 Layer::END_PIXELED + 0.082 + index as f32 * 0.001,
@@ -36799,12 +36843,12 @@ impl DesktopLauncher {
         }
         for (index, (label, checked, enabled)) in [
             (
-                "@editor.filters.prioritizecustom",
+                self.localize_bundle_markup_text("@editor.filters.prioritizecustom"),
                 self.map_list_filter_show_custom && self.map_list_filter_prioritize_custom,
                 self.map_list_filter_show_custom,
             ),
             (
-                "@editor.filters.prioritizemod",
+                self.localize_bundle_markup_text("@editor.filters.prioritizemod"),
                 self.map_list_filter_show_modded && self.map_list_filter_prioritize_modded,
                 self.map_list_filter_show_modded,
             ),
@@ -36822,9 +36866,18 @@ impl DesktopLauncher {
             );
         }
         for (index, (label, checked)) in [
-            ("@custom", self.map_list_filter_show_custom),
-            ("@builtin", self.map_list_filter_show_builtin),
-            ("@modded", self.map_list_filter_show_modded),
+            (
+                self.localize_bundle_markup_text("@custom"),
+                self.map_list_filter_show_custom,
+            ),
+            (
+                self.localize_bundle_markup_text("@builtin"),
+                self.map_list_filter_show_builtin,
+            ),
+            (
+                self.localize_bundle_markup_text("@modded"),
+                self.map_list_filter_show_modded,
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -36839,13 +36892,16 @@ impl DesktopLauncher {
             );
         }
         for (index, (label, checked)) in [
-            ("@editor.filters.author", self.map_list_filter_search_author),
             (
-                "@editor.filters.description",
+                self.localize_bundle_markup_text("@editor.filters.author"),
+                self.map_list_filter_search_author,
+            ),
+            (
+                self.localize_bundle_markup_text("@editor.filters.description"),
                 self.map_list_filter_search_description,
             ),
             (
-                "@editor.filters.modname",
+                self.localize_bundle_markup_text("@editor.filters.modname"),
                 self.map_list_filter_search_mod_name,
             ),
         ]
@@ -36862,21 +36918,22 @@ impl DesktopLauncher {
             );
         }
         let planet_summary = if self.map_list_filter_planets.is_empty() {
-            "@rules.anyenv".to_string()
+            self.localize_bundle_markup_text("@rules.anyenv")
         } else {
             self.map_list_filter_planets.join(", ")
         };
+        let planet_label = self.localize_bundle_markup_text("@editor.filters.planetselect");
         self.push_settings_text_button(
             pass,
             Self::map_list_filter_planet_button_rect(dialog),
-            format!("@editor.filters.planetselect: {planet_summary}"),
+            format!("{planet_label}: {planet_summary}"),
             Some("planet"),
             Layer::END_PIXELED + 0.100,
         );
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.103,
         );
@@ -36906,7 +36963,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.108,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@editor.filters.planetselect",
+            self.localize_bundle_markup_text("@editor.filters.planetselect"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 32.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -36940,7 +36997,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.120,
         );
@@ -60259,7 +60316,7 @@ version: "2.0.0"
             (
                 MenuButtonRole::Editor,
                 super::DesktopMenuRoute::Editor,
-                &["@editor.newmap", "@editor.importmap"][..],
+                &["New Map", "Import Map"][..],
             ),
         ] {
             let mut launcher = DesktopLauncher::new(Vec::new());
@@ -60292,9 +60349,10 @@ version: "2.0.0"
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            assert!(texts.contains(&"@editor.search"));
-            assert!(texts.contains(&"@maps.none"));
-            assert!(texts.contains(&"@back"));
+            assert!(texts.contains(&"Search maps..."));
+            assert!(texts.contains(&"[lightgray]No maps found!"));
+            assert!(texts.contains(&"Back"));
+            assert!(!texts.iter().any(|text| text.starts_with('@')));
             assert!(!texts
                 .iter()
                 .any(|text| text.starts_with("dialog: MapListDialog")));
@@ -60395,8 +60453,8 @@ version: "2.0.0"
                     assert!(!texts.contains(&"@workshop"));
                 }
                 super::DesktopMenuRoute::Editor => {
-                    assert!(texts.contains(&"@builtin"));
-                    assert!(texts.contains(&"@workshop"));
+                    assert!(texts.contains(&"Built-In"));
+                    assert!(texts.contains(&"Workshop"));
                 }
                 _ => unreachable!(),
             }
@@ -60469,23 +60527,25 @@ version: "2.0.0"
                 super::DesktopMenuRoute::CustomGame => {
                     assert_eq!(launcher.map_play_dialog_index, Some(0));
                     assert_eq!(launcher.editor_map_info_dialog_index, None);
-                    assert!(dialog_texts.contains(&"@level.mode"));
-                    assert!(dialog_texts.contains(&"@mode.survival.name"));
-                    assert!(dialog_texts.contains(&"@customize"));
-                    assert!(dialog_texts.contains(&"@play"));
+                    assert!(dialog_texts.contains(&"Gamemode:"));
+                    assert!(dialog_texts.contains(&"Survival"));
+                    assert!(dialog_texts.contains(&"Customize Rules"));
+                    assert!(dialog_texts.contains(&"Play"));
+                    assert!(!dialog_texts.iter().any(|text| text.starts_with('@')));
                 }
                 super::DesktopMenuRoute::Editor => {
                     assert_eq!(launcher.editor_map_info_dialog_index, Some(0));
                     assert_eq!(launcher.map_play_dialog_index, None);
-                    assert!(dialog_texts.contains(&"@editor.mapinfo"));
-                    assert!(dialog_texts.contains(&"@editor.mapname"));
-                    assert!(dialog_texts.contains(&"@editor.author"));
-                    assert!(dialog_texts.contains(&"@editor.description"));
+                    assert!(dialog_texts.contains(&"Map Info"));
+                    assert!(dialog_texts.contains(&"Map Name:"));
+                    assert!(dialog_texts.contains(&"Author:"));
+                    assert!(dialog_texts.contains(&"Description:"));
                     assert!(!dialog_texts.contains(&"size"));
                     assert!(!dialog_texts.contains(&"300x300"));
                     assert!(!dialog_texts.contains(&"source"));
-                    assert!(dialog_texts.contains(&"@editor.openin"));
-                    assert!(dialog_texts.contains(&"@delete"));
+                    assert!(dialog_texts.contains(&"Open In Editor"));
+                    assert!(dialog_texts.contains(&"Delete"));
+                    assert!(!dialog_texts.iter().any(|text| text.starts_with('@')));
                 }
                 _ => unreachable!(),
             }
@@ -60811,7 +60871,7 @@ version: "2.0.0"
                 matches!(
                     command,
                     RenderCommand::DrawText { text, color, .. }
-                        if text == "@delete" && color[3] < 0.9
+                        if text == "Delete" && color[3] < 0.9
                 )
             });
         assert!(disabled_delete_text);
@@ -60832,7 +60892,7 @@ version: "2.0.0"
         assert!(!dialog_texts.contains(&"size"));
         assert!(!dialog_texts.contains(&"160x160"));
         assert!(!dialog_texts.contains(&"source"));
-        assert!(dialog_texts.contains(&"@builtin"));
+        assert!(!dialog_texts.contains(&"@builtin"));
     }
 
     #[test]
@@ -60875,7 +60935,7 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"?"));
-        assert!(texts.contains(&"@level.highscore: 42"));
+        assert!(texts.contains(&"High Score: [accent]42"));
         assert!(
             !texts.iter().any(|text| text.contains("hiscore")),
             "Java MapPlayDialog displays the numeric Core.settings score, not the settings key"
@@ -60973,14 +61033,15 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(help_texts.contains(&"@mode.help.title"));
-        assert!(help_texts.contains(&"@ok"));
+        assert!(help_texts.contains(&"Description of modes"));
+        assert!(help_texts.contains(&"OK"));
         assert!(help_texts
             .iter()
-            .any(|text| text.contains("@mode.survival.description")));
+            .any(|text| text.contains("The normal mode")));
         assert!(help_texts
             .iter()
-            .any(|text| text.contains("@mode.pvp.description")));
+            .any(|text| text.contains("Fight against other players locally")));
+        assert!(!help_texts.iter().any(|text| text.contains("@mode.")));
         let help_has_clip = help_frame
             .bundle
             .render_frame
@@ -61035,11 +61096,11 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(customize_texts.contains(&"CustomRulesDialog"));
-        assert!(customize_texts.contains(&"@customize"));
+        assert!(!customize_texts.contains(&"CustomRulesDialog"));
+        assert!(customize_texts.contains(&"Customize Rules"));
         assert!(customize_texts.contains(&"map.applyRules(survival)"));
-        assert!(customize_texts.contains(&"rules.waves: true"));
-        assert!(customize_texts.contains(&"rules.attackMode: false"));
+        assert!(customize_texts.contains(&"Waves: true"));
+        assert!(customize_texts.contains(&"Attack Mode: false"));
     }
 
     #[test]
@@ -61153,7 +61214,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(empty_texts.contains(&"@none.found: missing"));
+        assert!(empty_texts.contains(&"[lightgray]<none found>: missing"));
 
         let search = DesktopLauncher::map_list_search_rect_for_panel(
             panel,
@@ -61209,22 +61270,23 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(filter_texts.contains(&"@editor.filters"));
-        assert!(filter_texts.contains(&"@editor.filters.mode"));
-        assert!(filter_texts.contains(&"@mode.survival.name"));
-        assert!(filter_texts.contains(&"@mode.attack.name"));
-        assert!(filter_texts.contains(&"@editor.filters.priorities"));
-        assert!(filter_texts.contains(&"@editor.filters.prioritizecustom"));
-        assert!(filter_texts.contains(&"@editor.filters.prioritizemod"));
-        assert!(filter_texts.contains(&"@editor.filters.type"));
-        assert!(filter_texts.contains(&"@custom"));
-        assert!(filter_texts.contains(&"@builtin"));
-        assert!(filter_texts.contains(&"@modded"));
-        assert!(filter_texts.contains(&"@editor.filters.search"));
-        assert!(filter_texts.contains(&"@editor.filters.author"));
-        assert!(filter_texts.contains(&"@editor.filters.description"));
-        assert!(filter_texts.contains(&"@editor.filters.modname"));
-        assert!(filter_texts.contains(&"@editor.filters.planetselect: @rules.anyenv"));
+        assert!(filter_texts.contains(&"Filter Maps"));
+        assert!(filter_texts.contains(&"Gamemodes:"));
+        assert!(filter_texts.contains(&"Survival"));
+        assert!(filter_texts.contains(&"Attack"));
+        assert!(filter_texts.contains(&"Priorities:"));
+        assert!(filter_texts.contains(&"Custom Priority"));
+        assert!(filter_texts.contains(&"Mod Priority"));
+        assert!(filter_texts.contains(&"Map Type:"));
+        assert!(filter_texts.contains(&"Custom"));
+        assert!(filter_texts.contains(&"Built-In"));
+        assert!(filter_texts.contains(&"Modded"));
+        assert!(filter_texts.contains(&"Search In:"));
+        assert!(filter_texts.contains(&"Author"));
+        assert!(filter_texts.contains(&"Description"));
+        assert!(filter_texts.contains(&"Mod Name"));
+        assert!(filter_texts.contains(&"Planet Selection: <Any>"));
+        assert!(!filter_texts.iter().any(|text| text.starts_with('@')));
 
         let back = DesktopLauncher::route_back_button_rect_for_panel(custom_panel).center();
         assert_eq!(
@@ -61474,8 +61536,8 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@editor.filters.planetselect"));
-        assert!(texts.contains(&"@rules.anyenv"));
+        assert!(texts.contains(&"Planet Selection"));
+        assert!(texts.contains(&"<Any>"));
         assert!(texts.contains(&"erekir"));
         assert!(texts.contains(&"serpulo"));
 

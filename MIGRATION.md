@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 687. MapList/EditorMapsDialog 与 MapPlay 子弹窗文案接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.1%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少 MapList/EditorMapsDialog/MapPlayDialog 中的 raw `@editor.*`、`@mode.*`、`@rules.*` 与英文 `CustomRulesDialog` 类名壳。
+- Java 对照依据：
+  - `MapListDialog` / `EditorMapsDialog` / `MapPlayDialog` 这些入口应显示 bundle 文案和用户态地图类型，不应把 bundle key 直接画到 UI；
+  - `EditorMapsDialog` 顶部新建/导入按钮应接近 Java `210f x 64f`，地图信息按钮高应接近 Java `54f`；
+  - mod 地图类型标签应优先显示 mod 名称，而不是泛化的 `@mods`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 MapList/EditorMapsDialog/MapPlay 相关 EN/简中/繁中 fallback key：`editor.mapinfo`、`editor.mapname`、`editor.openin`、`custom`、`builtin`、`modded`、`customize`、`view.workshop`、`level.mode`、`level.highscore`、`mode.*`、`rules.*` 等；
+  - `desktop/src/lib.rs`
+    - 地图列表返回/搜索/新建/导入、空状态、卡片类型、过滤弹窗、行星过滤弹窗改为 locale 输出；
+    - `MapPlayDialog` 的模式标题、模式按钮、最高分、help 弹窗、customize 子弹窗标题和规则摘要改为 locale 输出；
+    - `EditorMapsDialog` 地图信息标题/字段/按钮改为 locale 输出；
+    - 编辑器动作按钮改为 `210x64`，地图信息动作按钮高改为 `54`，并修正搜索框 offset，避免按钮变高后编辑器地图卡片被挤出可见区域；
+    - mod 地图卡片类型标签显示具体 mod 名称，减少 raw/占位式标签。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop map --lib`
+- 仍未完成：
+  - `CustomRulesDialog` 仍只是规则摘要，还未迁移完整 Java 规则编辑器分类、开关、数值输入与保存链路；
+  - MapList 过滤弹窗按钮形态仍未完全按 Java icon toggle/tooltip 体系重做；
+  - 地图缩略图与 EditorMapsDialog 预览尺寸仍需继续向 Java 桌面 `300f` / 竖屏 `160f` 策略收敛；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 686. TechTree 选择与节点信息文案接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
