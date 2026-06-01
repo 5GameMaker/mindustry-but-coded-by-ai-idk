@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前总体迁移完成度：约 **85.6%**，仍未达到完整可玩。
+- 当前总体迁移完成度：约 **85.7%**，仍未达到完整可玩。
 - 下方历史记录里的旧百分比只作历史留存；当前进度以本文件顶部、`README.md` 与 `MIGRATION.md` 最新条目为准。
 - 当前短期优先级：原版 UI/前端还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:/MDT/mindustry-upstream-v157.4` 中可直接沿用的原项目 assets、布局、文案、图标和字体，避免重复造轮子。
@@ -27,7 +27,24 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 - 只推送分支：`main`
 - Cargo 完整路径：`C:/Users/yuyu/.cargo/bin/cargo.exe`
 
-## 最新闭环：KeybindDialog Reset All 高度对齐
+## 最新闭环：Join 连接中状态栏只认真实 connecting
+
+- 当前总体迁移完成度：约 **85.7%**，仍未达到完整可玩。
+- 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/JoinDialog.java`：
+  - Java 只有实际进入 `connect()` 流程才显示 `@connecting`；
+  - Rust `desktop_ui_status_bar_model()` 现在只在 `net_client.state().connecting == true` 时显示 `connecting`；
+  - 单独保留 `connect_target` 不再误判成连接中，`connect_error` 仍优先覆盖状态栏。
+- 验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_status_bar_requires_real_connecting_state --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_connected_client_ui_status_pass --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib -- --test-threads=1 --nocapture`
+- 下一步建议继续前端：
+  1. JoinDialog 连接中/重连中补 Java `loadfrag` 同款遮罩与取消按钮；
+  2. 版本不匹配从 status bar/top info 收口成更像 Java `ui.showInfo(...)` 的 modal；
+  3. LoadDialog loading 罩层继续向 Java `ui.loadAnd(...)` 的全屏退场/黑屏过渡靠拢。
+
+## 上一闭环：KeybindDialog Reset All 高度对齐
 
 - 当前总体迁移完成度：约 **85.6%**，仍未达到完整可玩。
 - 本轮对照 `D:/MDT/mindustry-upstream-v157.4/core/src/mindustry/ui/dialogs/KeybindDialog.java`：

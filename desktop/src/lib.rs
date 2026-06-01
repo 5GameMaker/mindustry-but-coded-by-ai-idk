@@ -19755,12 +19755,12 @@ impl DesktopLauncher {
 
     fn desktop_ui_status_bar_model(&self) -> Option<(String, f32, u32)> {
         let connect_error = self.connect_error.as_deref();
-        let connected = {
+        let (connected, connecting) = {
             let state = self.net_client.state();
             let state = state.lock().unwrap();
-            state.connected
+            (state.connected, state.connecting)
         };
-        if !connected && connect_error.is_none() && self.connect_target.is_none() {
+        if !connected && connect_error.is_none() && !connecting {
             return None;
         }
 
@@ -19768,7 +19768,7 @@ impl DesktopLauncher {
             return Some((format!("connect error: {error}"), 0.0, 0xff55_55ff));
         }
 
-        if !connected {
+        if connecting {
             return Some(("connecting".to_string(), 0.1, 0xffd3_7fff));
         }
 
@@ -51361,6 +51361,16 @@ mod tests {
         assert_eq!(
             launcher.desktop_ui_status_bar_model(),
             Some(("connecting".to_string(), 0.1, 0xffd3_7fff))
+        );
+
+        launcher.connect_error = Some("@server.invalidaddress".into());
+        assert_eq!(
+            launcher.desktop_ui_status_bar_model(),
+            Some((
+                "connect error: @server.invalidaddress".to_string(),
+                0.0,
+                0xff55_55ff
+            ))
         );
     }
 

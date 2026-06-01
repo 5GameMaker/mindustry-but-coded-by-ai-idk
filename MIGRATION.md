@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 725. Join 连接中状态栏只认真实 connecting
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.7%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `JoinDialog.connect()` 在实际连接流程中显示 `@connecting`，仅保存目标并不等价于正在连接；
+  - 版本不匹配/免责声明等阻断态不应被错误渲染成连接中状态。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `desktop_ui_status_bar_model()` 同时读取 `state.connected/state.connecting`；
+    - 仅当真实 `state.connecting` 为 true 时显示 `connecting`；
+    - 单独设置 `connect_target` 不再误触发连接中状态栏；
+    - 新增回归测试覆盖 connect target、真实 connecting 与 connect error 优先级。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_status_bar_requires_real_connecting_state --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_graphics_frame_includes_connected_client_ui_status_pass --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route_connect_button_uses_connect_target_helper --lib -- --test-threads=1 --nocapture`
+- 仍未完成：
+  - JoinDialog 仍需继续补 Java `loadfrag.show("@connecting")` / `@reconnecting` 同款遮罩与取消按钮；
+  - 版本不匹配仍需从顶部提示逐步收口到更像 Java `ui.showInfo(...)` 的 modal；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 724. KeybindDialog Reset All 高度对齐
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
