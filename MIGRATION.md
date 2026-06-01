@@ -15,6 +15,30 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 686. TechTree 选择与节点信息文案接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.9%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是减少 TechTree/ResearchDialog 中最显眼的 raw `@techtree.select`、`@locked`、`@completed`、`@complete` 与返回按钮文案。
+- Java 对照依据：
+  - `bundle.properties` / 简中 / 繁中提供 `techtree.select`、`locked`、`completed`、`complete`；
+  - ResearchDialog/TechTree 选择弹窗应显示用户态标题，而不是 raw key。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 补 `techtree.select`、`locked`、`completed`、`complete` 的 EN/简中/繁中 fallback；
+  - `desktop/src/lib.rs`
+    - TechTree 路由返回按钮、选择按钮、选择弹窗标题/返回按钮按 locale 输出；
+    - 节点详情面板的 locked/completed/complete 与 `@none` 组合文本走 `localize_bundle_markup_text(...)`；
+    - 同步更新 techtree 回归测试，不再锁定 raw key。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop techtree --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - TechTree 仍缺 Java ResearchDialog 的完整研究交互、解锁动画和资源扣减链路；
+  - requirements/objectives 标题仍是过渡壳，需要继续 Scene2D 化；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 685. Schematics 信息/标签/编辑弹窗文案接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

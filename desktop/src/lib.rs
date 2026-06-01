@@ -35324,7 +35324,7 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.072,
         ));
         pass.push(RenderCommand::draw_text_styled(
-            "@techtree.select",
+            self.localize_bundle_markup_text("@techtree.select"),
             RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 34.0),
             [0.94, 0.98, 1.0, 1.0],
             15.0,
@@ -35361,7 +35361,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::schematic_info_button_rect(dialog, 0),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.083,
         );
@@ -35724,7 +35724,7 @@ impl DesktopLauncher {
                         [0.82, 0.90, 0.96, 1.0]
                     };
                     pass.push(RenderCommand::draw_text_styled(
-                        line,
+                        self.localize_bundle_markup_text(line),
                         RenderPoint::new(info.x + 12.0, y),
                         color,
                         if index == 1 { 11.0 } else { 9.0 },
@@ -35800,14 +35800,14 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::route_back_button_rect_for_panel(panel),
-            "@back",
+            self.localize_bundle_markup_text("@back"),
             Some("left"),
             Layer::END_PIXELED + 0.024,
         );
 
         let Some((root_name, tree, root)) = self.tech_tree_route_root() else {
             pass.push(RenderCommand::draw_text_styled(
-                "@none",
+                self.localize_bundle_markup_text("@none"),
                 RenderPoint::new(panel.center().x, panel.center().y),
                 [0.70, 0.78, 0.84, 1.0],
                 13.0,
@@ -35859,7 +35859,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::tech_tree_select_rect_for_panel(panel),
-            "@techtree.select",
+            self.localize_bundle_markup_text("@techtree.select"),
             Some("downOpen"),
             Layer::END_PIXELED + 0.025,
         );
@@ -59995,8 +59995,8 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.contains(&"@back"));
-        assert!(texts.contains(&"@techtree.select"));
+        assert!(texts.contains(&"Back"));
+        assert!(texts.contains(&"Tech Tree Selection"));
         assert!(texts.contains(&"@globalitems"));
         assert!(texts.contains(&"1.5k"));
         assert!(texts.contains(&"250"));
@@ -60052,7 +60052,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(select_texts.contains(&"@techtree.select"));
+        assert!(select_texts.contains(&"Tech Tree Selection"));
         if launcher.tech_tree_route_root_candidates().len() > 1 {
             let dialog = DesktopLauncher::tech_tree_select_dialog_rect_for_panel(panel);
             let erekir = DesktopLauncher::tech_tree_select_root_button_rect(dialog, 1).center();
@@ -60080,7 +60080,7 @@ version: "2.0.0"
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            assert!(erekir_texts.contains(&"@techtree.select"));
+            assert!(erekir_texts.contains(&"Tech Tree Selection"));
         }
     }
 
@@ -60146,9 +60146,9 @@ version: "2.0.0"
         assert!(texts
             .iter()
             .any(|text| text.eq_ignore_ascii_case("conveyor")));
-        assert!(texts.contains(&"@locked"));
-        assert!(texts.contains(&"requirements: @none"));
-        assert!(texts.contains(&"objectives: @none"));
+        assert!(texts.contains(&"Locked"));
+        assert!(texts.contains(&"requirements: <none>"));
+        assert!(texts.contains(&"objectives: <none>"));
     }
 
     #[test]
