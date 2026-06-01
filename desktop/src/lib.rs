@@ -113,6 +113,8 @@ use mindustry_core::mindustry::ui::{
     BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole,
     UpstreamUiIconGlyph, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_UI_ICON_GLYPHS,
 };
+#[cfg(test)]
+use mindustry_core::mindustry::vars::SERVER_CACHE_FILE_NAME;
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
     draw_block_dispatch_icons, DrawBlockParticleBlendMode, DrawBlockParticleRenderKind,
@@ -16639,6 +16641,9 @@ pub struct DesktopLauncher {
     pub join_local_discovery_finished: bool,
     pub join_local_discovery_receiver: Option<Arc<Mutex<mpsc::Receiver<Option<Host>>>>>,
     pub join_community_groups: Vec<DesktopJoinCommunityGroup>,
+    pub join_community_cache_loaded: bool,
+    pub join_community_feed_fetched: bool,
+    pub join_community_cache_error: Option<String>,
     pub join_saved_servers: Vec<DesktopConnectTarget>,
     pub join_saved_server_refresh_states: Vec<DesktopJoinSavedServerRefreshState>,
     pub join_saved_server_refresh_receiver:
@@ -17553,6 +17558,9 @@ impl DesktopLauncher {
             join_local_discovery_finished: false,
             join_local_discovery_receiver: None,
             join_community_groups: Vec::new(),
+            join_community_cache_loaded: false,
+            join_community_feed_fetched: false,
+            join_community_cache_error: None,
             join_saved_servers,
             join_saved_server_refresh_states: Vec::new(),
             join_saved_server_refresh_receiver: None,
@@ -21741,6 +21749,8 @@ impl DesktopLauncher {
                 self.join_info_dialog_open = false;
                 self.join_delete_dialog_index = None;
                 self.join_server_disclaimer_pending_target = None;
+                self.join_server_disclaimer_pending_version = None;
+                self.ensure_join_community_server_cache_loaded();
                 self.refresh_join_local_hosts();
             } else if route == DesktopMenuRoute::Schematics {
                 self.load_schematic_tags_from_settings();
@@ -27831,6 +27841,59 @@ impl DesktopLauncher {
             .is_none_or(|value| matches!(value.as_str(), "true" | "1"))
     }
 
+    fn join_community_cache_file_path(&self) -> PathBuf {
+        PathBuf::from(self.client.context.paths.server_cache_file())
+    }
+
+    fn ensure_join_community_server_cache_loaded(&mut self) {
+        if self.join_community_cache_loaded || !self.join_community_servers_enabled() {
+            return;
+        }
+        if let Err(error) = self.load_join_community_server_cache() {
+            self.join_community_cache_error = Some(error.to_string());
+        }
+    }
+
+    pub fn load_join_community_server_cache(&mut self) -> io::Result<usize> {
+        if !self.join_community_servers_enabled() {
+            return Ok(0);
+        }
+        let path = self.join_community_cache_file_path();
+        if !path.exists() {
+            self.join_community_cache_error = None;
+            return Ok(0);
+        }
+        self.join_community_cache_loaded = true;
+        let value = fs::read_to_string(path)?;
+        let count = self.load_join_community_groups_from_server_json(&value);
+        if count > 0 {
+            self.join_community_cache_error = None;
+        }
+        Ok(count)
+    }
+
+    pub fn apply_join_community_feed_json(&mut self, value: &str) -> io::Result<usize> {
+        if !self.join_community_servers_enabled() {
+            return Ok(0);
+        }
+        let groups = join_community_groups_from_server_json(value);
+        if groups.is_empty() {
+            return Ok(0);
+        }
+        let count = groups.len();
+        self.join_community_groups = groups;
+        self.join_community_cache_loaded = true;
+        self.join_community_feed_fetched = true;
+        self.join_community_cache_error = None;
+
+        let path = self.join_community_cache_file_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, value)?;
+        Ok(count)
+    }
+
     pub fn set_join_community_group_hidden(&mut self, index: usize, hidden: bool) -> bool {
         let Some(group) = self.join_community_groups.get(index) else {
             return false;
@@ -31510,6 +31573,7 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::RefreshJoinServers => {
                 self.join_refresh_requests = self.join_refresh_requests.saturating_add(1);
+                self.ensure_join_community_server_cache_loaded();
                 self.refresh_join_local_hosts();
                 self.refresh_join_saved_servers();
             }
@@ -39656,6 +39720,15 @@ impl DesktopLauncher {
                             if self.join_show_hidden { "on" } else { "off" }
                         ),
                     ]);
+                    lines.push(format!(
+                        "community-cache: loaded:{} fetched:{} path:{}",
+                        self.join_community_cache_loaded,
+                        self.join_community_feed_fetched,
+                        self.join_community_cache_file_path().display()
+                    ));
+                    if let Some(error) = self.join_community_cache_error.as_ref() {
+                        lines.push(format!("community-cache-error: {error}"));
+                    }
                     lines.push(format!(
                         "section-state: @servers.global collapsed:{}",
                         self.join_route_section_collapsed(DesktopJoinSection::Global)
@@ -72039,6 +72112,161 @@ version: "2.0.0"
         assert!(lines
             .iter()
             .any(|line| line.contains("community[2]: Alpha")));
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_loads_community_server_cache_like_java() {
+        let root = temp_desktop_path("join-community-cache-load");
+        std::fs::create_dir_all(&root).expect("community cache fixture dir should be writable");
+        let cache_path = root.join(super::SERVER_CACHE_FILE_NAME);
+        let json = r#"[{"name":"Cached","address":"cached.example:6567","prioritized":true}]"#;
+        std::fs::write(&cache_path, json).expect("community cache fixture should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.dispatch_menu_action(MenuButtonRole::Join);
+
+        assert!(launcher.join_community_cache_loaded);
+        assert!(!launcher.join_community_feed_fetched);
+        assert_eq!(launcher.join_community_cache_error, None);
+        assert_eq!(launcher.join_community_groups.len(), 1);
+        assert_eq!(launcher.join_community_groups[0].name, "Cached");
+        assert_eq!(
+            launcher.join_community_groups[0].addresses,
+            vec!["cached.example:6567"]
+        );
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(lines.contains(&"section: @servers.global groups: 1".to_string()));
+        assert!(lines.iter().any(|line| {
+            line.starts_with("community-cache: loaded:true fetched:false path:")
+                && line.contains("server_list.json")
+        }));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("community[0]: Cached")));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_community_cache_missing_or_bad_does_not_clear_groups() {
+        let missing_root = temp_desktop_path("join-community-cache-missing");
+        let mut missing_launcher = DesktopLauncher::new(Vec::new());
+        missing_launcher.client.context.paths.data_dir = missing_root.display().to_string();
+        missing_launcher
+            .join_community_groups
+            .push(super::DesktopJoinCommunityGroup::new(
+                "Existing",
+                vec!["existing.example:6567".into()],
+                false,
+            ));
+
+        assert_eq!(
+            missing_launcher.load_join_community_server_cache().unwrap(),
+            0
+        );
+        assert!(!missing_launcher.join_community_cache_loaded);
+        assert_eq!(missing_launcher.join_community_cache_error, None);
+        assert_eq!(missing_launcher.join_community_groups.len(), 1);
+        assert_eq!(missing_launcher.join_community_groups[0].name, "Existing");
+        std::fs::create_dir_all(&missing_root)
+            .expect("missing cache retry fixture dir should be writable");
+        std::fs::write(
+            missing_root.join(super::SERVER_CACHE_FILE_NAME),
+            r#"[{"name":"Later","address":"later.example:6567"}]"#,
+        )
+        .expect("missing cache retry fixture should write");
+        assert_eq!(
+            missing_launcher.load_join_community_server_cache().unwrap(),
+            1
+        );
+        assert!(missing_launcher.join_community_cache_loaded);
+        assert_eq!(missing_launcher.join_community_groups[0].name, "Later");
+
+        let bad_root = temp_desktop_path("join-community-cache-bad");
+        std::fs::create_dir_all(&bad_root).expect("bad cache fixture dir should be writable");
+        std::fs::write(bad_root.join(super::SERVER_CACHE_FILE_NAME), "{not-json")
+            .expect("bad community cache fixture should write");
+
+        let mut bad_launcher = DesktopLauncher::new(Vec::new());
+        bad_launcher.client.context.paths.data_dir = bad_root.display().to_string();
+        bad_launcher
+            .join_community_groups
+            .push(super::DesktopJoinCommunityGroup::new(
+                "Existing",
+                vec!["existing.example:6567".into()],
+                false,
+            ));
+
+        assert_eq!(bad_launcher.load_join_community_server_cache().unwrap(), 0);
+        assert!(bad_launcher.join_community_cache_loaded);
+        assert_eq!(bad_launcher.join_community_cache_error, None);
+        assert_eq!(bad_launcher.join_community_groups.len(), 1);
+        assert_eq!(bad_launcher.join_community_groups[0].name, "Existing");
+
+        std::fs::remove_dir_all(missing_root).ok();
+        std::fs::remove_dir_all(bad_root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_apply_community_feed_json_writes_server_cache() {
+        let root = temp_desktop_path("join-community-cache-write");
+        let json = r#"[
+            {"name":"FeedA","address":"feed-a.example:6567"},
+            {"name":"FeedB","addresses":["feed-b.example:6567","feed-b-alt.example"]}
+        ]"#;
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+
+        assert_eq!(launcher.apply_join_community_feed_json(json).unwrap(), 2);
+        assert!(launcher.join_community_cache_loaded);
+        assert!(launcher.join_community_feed_fetched);
+        assert_eq!(launcher.join_community_cache_error, None);
+        assert_eq!(launcher.join_community_groups.len(), 2);
+        assert_eq!(
+            std::fs::read_to_string(root.join(super::SERVER_CACHE_FILE_NAME)).unwrap(),
+            json
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_skips_community_cache_when_setting_disabled() {
+        let root = temp_desktop_path("join-community-cache-disabled");
+        std::fs::create_dir_all(&root).expect("disabled cache fixture dir should be writable");
+        std::fs::write(
+            root.join(super::SERVER_CACHE_FILE_NAME),
+            r#"[{"name":"Hidden","address":"hidden.example:6567"}]"#,
+        )
+        .expect("disabled community cache fixture should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.set_setting_override("game", "communityservers", "false");
+        launcher.dispatch_menu_action(MenuButtonRole::Join);
+
+        assert!(!launcher.join_community_cache_loaded);
+        assert!(launcher.join_community_groups.is_empty());
+        assert_eq!(
+            launcher
+                .apply_join_community_feed_json(r#"[{"name":"Feed","address":"feed.example"}]"#)
+                .unwrap(),
+            0
+        );
+        assert!(launcher.join_community_groups.is_empty());
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(!lines
+            .iter()
+            .any(|line| line.starts_with("community-cache:")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.starts_with("section: @servers.global")));
+
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
