@@ -17,6 +17,26 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 723. LoadDialog 缺失预览回退为原版 nomap
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.5%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `LoadDialog.rebuild()` 使用 `Core.atlas.find("nomap")` 作为缺失预览默认图；
+  - 原版不会在预览图中央显示内部纹理 key 或槽位调试文本。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 缺失存档预览时只渲染 `nomap` drawable，不再叠加 `save_slot_<index>` 文本；
+    - 更新 LoadDialog 回归测试，锁定缺失预览仍使用 `nomap`，且不会暴露内部 preview texture key。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_load_game_route_lists_save_slots_and_records_slot_click --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop load_game --lib -- --nocapture`
+- 仍未完成：
+  - LoadDialog loading 视觉仍需继续向 Java `ui.loadAnd(...)` 的全屏退场/黑屏过渡靠拢；
+  - 真实完整 `SaveIO.load(file, context)` 世界/实体恢复仍需继续迁移到底层 runtime；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 722. SettingsMenuDialog mobile 条件可见性
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

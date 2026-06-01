@@ -42774,17 +42774,6 @@ impl DesktopLauncher {
                     0.0,
                     Layer::END_PIXELED + 0.032 + visible_index as f32 * 0.0001,
                 ));
-                pass.push(RenderCommand::draw_text_styled(
-                    Self::load_game_slot_preview_symbol(slot),
-                    preview.center(),
-                    [0.95, 0.98, 1.0, 1.0],
-                    7.0,
-                    0.0,
-                    RenderTextStyle::new(RenderTextAlign::Center)
-                        .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true),
-                    Layer::END_PIXELED + 0.0325 + visible_index as f32 * 0.0001,
-                ));
             }
             pass.push(RenderCommand::stroke_rect(
                 preview,
@@ -73271,6 +73260,15 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let nomap_symbol = DesktopLauncher::settings_drawable_symbol("nomap");
+        assert!(
+            symbols.contains(&nomap_symbol.as_str()),
+            "Java LoadDialog uses Core.atlas.find(\"nomap\") as the only missing-preview placeholder"
+        );
+        assert!(
+            !texts.iter().any(|text| text.starts_with("save_slot_")),
+            "Java LoadDialog does not print internal preview texture keys over missing previews"
+        );
         assert!(
             symbols.contains(&"save_slot_2"),
             "Java LoadDialog slot.previewTexture() should surface as the slot preview sprite"
@@ -74229,11 +74227,11 @@ version: "2.0.0"
                 }
                 _ => false,
             }),
-            "missing previews should render a slot-specific nomap thumbnail"
+            "missing previews should render Java's Core.atlas.find(\"nomap\") thumbnail"
         );
         assert!(
-            texts.contains(&preview_label.as_str()),
-            "missing previews should expose the stable slot preview label"
+            !texts.contains(&preview_label.as_str()),
+            "Java LoadDialog does not expose internal preview texture keys on missing previews"
         );
         assert!(
             !commands.iter().any(|command| match command {
