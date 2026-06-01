@@ -17656,6 +17656,8 @@ pub struct DesktopLauncher {
     pub menu_frame_delta_seconds: f32,
     pub about_route_page: DesktopAboutRoutePage,
     pub about_filter_banned_links: bool,
+    pub about_links_scroll_offset: usize,
+    pub about_credits_scroll_offset: usize,
     pub map_list_filter_dialog_open: bool,
     pub map_list_cards: Vec<MapDescriptor>,
     pub map_list_search: String,
@@ -18824,6 +18826,8 @@ impl DesktopLauncher {
             menu_frame_delta_seconds: 1.0 / 60.0,
             about_route_page: DesktopAboutRoutePage::Links,
             about_filter_banned_links: false,
+            about_links_scroll_offset: 0,
+            about_credits_scroll_offset: 0,
             map_list_filter_dialog_open: false,
             map_list_cards: Vec::new(),
             map_list_search: String::new(),
@@ -23208,6 +23212,8 @@ impl DesktopLauncher {
                 ));
             } else if route == DesktopMenuRoute::About {
                 self.about_route_page = DesktopAboutRoutePage::Links;
+                self.about_links_scroll_offset = 0;
+                self.about_credits_scroll_offset = 0;
             } else if matches!(
                 route,
                 DesktopMenuRoute::LoadGame | DesktopMenuRoute::SaveGame
@@ -23326,6 +23332,8 @@ impl DesktopLauncher {
             DesktopMenuChromeAction::InfoOpenAbout => {
                 self.active_menu_route = Some(DesktopMenuRoute::About);
                 self.about_route_page = DesktopAboutRoutePage::Links;
+                self.about_links_scroll_offset = 0;
+                self.about_credits_scroll_offset = 0;
                 self.last_menu_route_shell_action = None;
                 self.last_menu_chrome_action = Some(DesktopMenuChromeAction::InfoOpenAbout);
             }
@@ -28998,11 +29006,7 @@ impl DesktopLauncher {
     fn about_link_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let outer_pad = 22.0;
         let gap = 5.0;
-        let card_height = if panel.height > panel.width {
-            90.0
-        } else {
-            80.0
-        };
+        let card_height = Self::about_link_card_height_for_panel(panel);
         let card_width = (panel.width - outer_pad * 2.0).min(600.0).max(160.0);
         let top = panel.y + panel.height - 98.0;
         RenderRect::new(
@@ -29013,12 +29017,37 @@ impl DesktopLauncher {
         )
     }
 
+    fn about_link_card_height_for_panel(panel: RenderRect) -> f32 {
+        if panel.height > panel.width {
+            90.0
+        } else {
+            80.0
+        }
+    }
+
     fn about_links_clip_rect_for_panel(panel: RenderRect) -> RenderRect {
         RenderRect::new(
             panel.x + 18.0,
             panel.y + 62.0,
             panel.width - 36.0,
             panel.height - 146.0,
+        )
+    }
+
+    fn about_links_visible_capacity_for_panel(panel: RenderRect) -> usize {
+        let clip = Self::about_links_clip_rect_for_panel(panel);
+        let row_height = Self::about_link_card_height_for_panel(panel) + 5.0;
+        ((clip.height + 5.0) / row_height).floor().max(1.0) as usize
+    }
+
+    fn max_about_links_scroll_offset_for_counts(link_count: usize, visible_rows: usize) -> usize {
+        link_count.saturating_sub(visible_rows.max(1))
+    }
+
+    fn max_about_links_scroll_offset_for_panel(&self, panel: RenderRect) -> usize {
+        Self::max_about_links_scroll_offset_for_counts(
+            self.visible_about_links().len(),
+            Self::about_links_visible_capacity_for_panel(panel),
         )
     }
 
@@ -29040,6 +29069,20 @@ impl DesktopLauncher {
             dialog.width.min(200.0),
             44.0,
         )
+    }
+
+    fn about_credits_visible_row_capacity_for_dialog(dialog: RenderRect) -> usize {
+        let row_height = 15.0;
+        let top = dialog.y + dialog.height - 120.0;
+        let bottom = dialog.y + 70.0;
+        ((top - bottom) / row_height).floor().max(1.0) as usize
+    }
+
+    fn max_about_credits_scroll_offset_for_dialog(dialog: RenderRect) -> usize {
+        ABOUT_CONTRIBUTORS
+            .chunks(3)
+            .count()
+            .saturating_sub(Self::about_credits_visible_row_capacity_for_dialog(dialog))
     }
 
     fn active_menu_route_shell_primary_rect_for_viewport(
@@ -34864,13 +34907,71 @@ impl DesktopLauncher {
         if !Self::about_links_clip_rect_for_panel(panel).contains_point(point) {
             return None;
         }
-        for (index, link) in self.visible_about_links().into_iter().enumerate() {
-            let rect = Self::about_link_card_rect_for_panel(panel, index);
+        let links = self.visible_about_links();
+        let max_scroll = Self::max_about_links_scroll_offset_for_counts(
+            links.len(),
+            Self::about_links_visible_capacity_for_panel(panel),
+        );
+        let scroll_offset = self.about_links_scroll_offset.min(max_scroll);
+        for (visible_index, link) in links.into_iter().skip(scroll_offset).enumerate() {
+            let rect = Self::about_link_card_rect_for_panel(panel, visible_index);
             if rect.contains_point(point) {
                 return Some(link.name);
             }
         }
         None
+    }
+
+    fn about_scroll_step(delta_y: f32) -> isize {
+        let rows = delta_y.abs().ceil().max(1.0) as isize;
+        if delta_y < 0.0 {
+            rows
+        } else if delta_y > 0.0 {
+            -rows
+        } else {
+            0
+        }
+    }
+
+    fn apply_about_scroll_delta(&mut self, surface_size: DesktopSurfaceSize, delta_y: f32) -> bool {
+        if self.active_menu_route != Some(DesktopMenuRoute::About) {
+            return false;
+        }
+        let Some(cursor) = self.last_menu_cursor else {
+            return false;
+        };
+        let viewport = self.default_render_viewport_for_surface(surface_size);
+        let panel =
+            Self::active_menu_route_shell_panel_for_route(viewport, DesktopMenuRoute::About);
+        let step = Self::about_scroll_step(delta_y);
+        if step == 0 {
+            return false;
+        }
+        if self.about_route_page == DesktopAboutRoutePage::Credits {
+            let dialog = Self::about_credits_dialog_rect_for_panel(panel);
+            if !dialog.contains_point(cursor) {
+                return false;
+            }
+            let max = Self::max_about_credits_scroll_offset_for_dialog(dialog);
+            if max == 0 {
+                return false;
+            }
+            let current = self.about_credits_scroll_offset.min(max);
+            self.about_credits_scroll_offset =
+                (current as isize + step).clamp(0, max as isize) as usize;
+            return true;
+        }
+
+        if !Self::about_links_clip_rect_for_panel(panel).contains_point(cursor) {
+            return false;
+        }
+        let max = self.max_about_links_scroll_offset_for_panel(panel);
+        if max == 0 {
+            return false;
+        }
+        let current = self.about_links_scroll_offset.min(max);
+        self.about_links_scroll_offset = (current as isize + step).clamp(0, max as isize) as usize;
+        true
     }
 
     fn launch_campaign_smoke_world_from_menu(&mut self) -> GameRuntimePlayableSmokeReport {
@@ -36552,9 +36653,11 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::ShowAboutCredits => {
                 self.about_route_page = DesktopAboutRoutePage::Credits;
+                self.about_credits_scroll_offset = 0;
             }
             DesktopMenuRouteShellAction::ShowAboutLinks => {
                 self.about_route_page = DesktopAboutRoutePage::Links;
+                self.about_credits_scroll_offset = 0;
             }
             DesktopMenuRouteShellAction::OpenDiscordLink => {
                 self.dispatch_about_link_action("discord");
@@ -44213,14 +44316,40 @@ impl DesktopLauncher {
     }
 
     fn push_about_links_page(&self, pass: &mut RenderPass, panel: RenderRect) {
-        pass.push(RenderCommand::set_clip(
-            Self::about_links_clip_rect_for_panel(panel),
-        ));
-        for (index, link) in self.visible_about_links().into_iter().enumerate() {
-            let rect = Self::about_link_card_rect_for_panel(panel, index);
-            self.push_about_link_card(pass, rect, link, index);
+        let clip = Self::about_links_clip_rect_for_panel(panel);
+        let links = self.visible_about_links();
+        let visible_rows = Self::about_links_visible_capacity_for_panel(panel);
+        let max_scroll = Self::max_about_links_scroll_offset_for_counts(links.len(), visible_rows);
+        let scroll_offset = self.about_links_scroll_offset.min(max_scroll);
+        pass.push(RenderCommand::set_clip(clip));
+        for (visible_index, link) in links.into_iter().skip(scroll_offset).enumerate() {
+            let rect = Self::about_link_card_rect_for_panel(panel, visible_index);
+            self.push_about_link_card(pass, rect, link, visible_index);
         }
         pass.push(RenderCommand::clear_clip());
+        if max_scroll > 0 {
+            let track = RenderRect::new(clip.right() - 5.0, clip.y, 4.0, clip.height);
+            let visible_ratio =
+                (visible_rows as f32 / (visible_rows + max_scroll) as f32).clamp(0.05, 1.0);
+            let thumb_height = (track.height * visible_ratio).max(18.0);
+            let progress = scroll_offset as f32 / max_scroll as f32;
+            let thumb = RenderRect::new(
+                track.x,
+                track.y + track.height - thumb_height - (track.height - thumb_height) * progress,
+                track.width,
+                thumb_height,
+            );
+            pass.push(RenderCommand::fill_rect(
+                track,
+                [0.10, 0.14, 0.18, 0.64],
+                Layer::END_PIXELED + 0.088,
+            ));
+            pass.push(RenderCommand::fill_rect(
+                thumb,
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.86],
+                Layer::END_PIXELED + 0.089,
+            ));
+        }
     }
 
     fn push_about_link_card(
@@ -44412,14 +44541,16 @@ impl DesktopLauncher {
         let row_height = 15.0;
         let top = dialog.y + dialog.height - 120.0;
         let bottom = dialog.y + 70.0;
-        let visible_rows = ((top - bottom) / row_height).max(0.0) as usize;
+        let visible_rows = Self::about_credits_visible_row_capacity_for_dialog(dialog);
+        let max_scroll = Self::max_about_credits_scroll_offset_for_dialog(dialog);
+        let scroll_offset = self.about_credits_scroll_offset.min(max_scroll);
         pass.push(RenderCommand::set_clip(RenderRect::new(
             dialog.x + 18.0,
             bottom,
             dialog.width - 36.0,
             (top - bottom + 8.0).max(1.0),
         )));
-        for (row, chunk) in ABOUT_CONTRIBUTORS.chunks(3).enumerate() {
+        for (row, chunk) in ABOUT_CONTRIBUTORS.chunks(3).skip(scroll_offset).enumerate() {
             pass.push(RenderCommand::draw_text_styled(
                 chunk.join(" | "),
                 RenderPoint::new(dialog.x + 24.0, top - row as f32 * row_height),
@@ -44438,9 +44569,14 @@ impl DesktopLauncher {
             let track = RenderRect::new(dialog.right() - 14.0, bottom, 4.0, top - bottom);
             let visible_ratio = (visible_rows as f32 / total_rows as f32).clamp(0.05, 1.0);
             let thumb_height = (track.height * visible_ratio).max(18.0);
+            let progress = if max_scroll == 0 {
+                0.0
+            } else {
+                scroll_offset as f32 / max_scroll as f32
+            };
             let thumb = RenderRect::new(
                 track.x,
-                track.y + track.height - thumb_height,
+                track.y + track.height - thumb_height - (track.height - thumb_height) * progress,
                 track.width,
                 thumb_height,
             );
@@ -45173,6 +45309,9 @@ impl DesktopLauncher {
                         continue;
                     }
                     if self.apply_database_scroll_delta(surface_size, *delta_y) {
+                        continue;
+                    }
+                    if self.apply_about_scroll_delta(surface_size, *delta_y) {
                         continue;
                     }
                     if self.apply_map_list_scroll_delta(surface_size, *delta_y) {
@@ -49363,6 +49502,8 @@ impl DesktopLauncher {
         self.menu_frame_delta_seconds = 1.0 / 60.0;
         self.about_route_page = DesktopAboutRoutePage::Links;
         self.about_filter_banned_links = false;
+        self.about_links_scroll_offset = 0;
+        self.about_credits_scroll_offset = 0;
         self.settings_dialog_state = DesktopSettingsDialogState::default();
         self.last_settings_action = None;
         self.last_settings_hovered_control = None;
@@ -73686,6 +73827,85 @@ version: "2.0.0"
                     if text == &launcher.localize_bundle_markup_text("@link.discord.description")
             )
         }));
+    }
+
+    #[test]
+    fn desktop_launcher_about_route_scrolls_links_and_credits_like_scrollpane() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        let surface = DesktopSurfaceSize::new(540, 960);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        launcher.dispatch_menu_action(MenuButtonRole::About);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::About,
+        );
+        let clip = DesktopLauncher::about_links_clip_rect_for_panel(panel);
+        assert!(
+            launcher.max_about_links_scroll_offset_for_panel(panel) > 0,
+            "fixture should contain more About links than the visible ScrollPane"
+        );
+
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: clip.center().x,
+                    y: clip.center().y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert_eq!(launcher.about_links_scroll_offset, 1);
+        let first_visible = DesktopLauncher::about_link_card_rect_for_panel(panel, 0).center();
+        assert_eq!(
+            launcher.about_link_name_at_surface_point(surface, first_visible.x, first_visible.y),
+            Some("changelog")
+        );
+
+        launcher
+            .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::ShowAboutCredits);
+        let dialog = DesktopLauncher::about_credits_dialog_rect_for_panel(panel);
+        assert!(
+            DesktopLauncher::max_about_credits_scroll_offset_for_dialog(dialog) > 0,
+            "fixture should contain more contributor rows than the visible Credits ScrollPane"
+        );
+        launcher.apply_menu_input_events(
+            surface,
+            &[
+                DesktopInputTickEvent::CursorMoved {
+                    x: dialog.center().x,
+                    y: dialog.center().y,
+                },
+                DesktopInputTickEvent::Scroll {
+                    delta_x: 0.0,
+                    delta_y: -1.0,
+                },
+            ],
+        );
+        assert_eq!(launcher.about_credits_scroll_offset, 1);
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("menu frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!texts
+            .iter()
+            .any(|text| text.contains("redloong9527 | Prosta4okua | Felix Corvus")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Vanguard | Timmeey86 | Epowerj")));
     }
 
     #[test]
