@@ -202,6 +202,10 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("rules.anyenv", "<Any>"),
     ("mode.help.title", "Description of modes"),
     ("mode.custom", "Custom Rules"),
+    ("waves.edit", "Edit..."),
+    ("waves.copy", "Copy to Clipboard"),
+    ("waves.load", "Load from Clipboard"),
+    ("rules.invaliddata", "Invalid clipboard data."),
     ("mode.survival.name", "Survival"),
     (
         "mode.survival.description",
@@ -587,6 +591,10 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("rules.anyenv", "< 任意 >"),
     ("mode.help.title", "游戏模式说明"),
     ("mode.custom", "自定义模式"),
+    ("waves.edit", "编辑"),
+    ("waves.copy", "复制到剪贴板"),
+    ("waves.load", "从剪贴板读取"),
+    ("rules.invaliddata", "剪贴板数据无效。"),
     ("mode.survival.name", "生存"),
     (
         "mode.survival.description",
@@ -948,6 +956,10 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("rules.anyenv", "<任意>"),
     ("mode.help.title", "模式說明"),
     ("mode.custom", "自訂規則"),
+    ("waves.edit", "編輯……"),
+    ("waves.copy", "複製到剪貼簿"),
+    ("waves.load", "從剪貼簿載入"),
+    ("rules.invaliddata", "無效的剪貼板數據"),
     ("mode.survival.name", "生存"),
     (
         "mode.survival.description",
@@ -1278,6 +1290,19 @@ mod tests {
         ] {
             assert_eq!(upstream_bundle_en_value(key), Some(expected));
         }
+        assert_eq!(upstream_bundle_en_value("waves.edit"), Some("Edit..."));
+        assert_eq!(
+            upstream_bundle_en_value("waves.copy"),
+            Some("Copy to Clipboard")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("waves.load"),
+            Some("Load from Clipboard")
+        );
+        assert_eq!(
+            upstream_bundle_en_value("rules.invaliddata"),
+            Some("Invalid clipboard data.")
+        );
         assert_eq!(upstream_bundle_en_value("missing.menu.key"), None);
     }
 
@@ -1359,6 +1384,22 @@ mod tests {
             Some("导出数据")
         );
         assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "waves.edit"),
+            Some("编辑")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "waves.copy"),
+            Some("复制到剪贴板")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "waves.load"),
+            Some("从剪贴板读取")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "rules.invaliddata"),
+            Some("剪贴板数据无效。")
+        );
+        assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "keybind.chat.name"),
             Some("聊天")
         );
@@ -1389,6 +1430,22 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "settings"),
             Some("設定")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "waves.edit"),
+            Some("編輯……")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "waves.copy"),
+            Some("複製到剪貼簿")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "waves.load"),
+            Some("從剪貼簿載入")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_TW", "rules.invaliddata"),
+            Some("無效的剪貼板數據")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_TW", "server.invalidaddress"),

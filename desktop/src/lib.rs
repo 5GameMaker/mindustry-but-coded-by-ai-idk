@@ -844,6 +844,11 @@ pub enum DesktopMapCardActionKind {
     Customize,
     ShowModeHelp,
     ToggleCustomRule(DesktopCustomRulesToggle),
+    OpenCustomRulesEdit,
+    CloseCustomRulesEdit,
+    CopyCustomRules,
+    LoadCustomRules,
+    ResetCustomRules,
     OpenInEditor,
     Delete,
     ViewWorkshop,
@@ -17114,7 +17119,10 @@ pub struct DesktopLauncher {
     pub map_play_selected_mode: Gamemode,
     pub map_play_mode_help_dialog_open: bool,
     pub map_play_customize_dialog_open: bool,
+    pub map_play_rules_edit_dialog_open: bool,
     pub map_play_rules: Option<Rules>,
+    pub last_map_play_rules_clipboard_text: Option<String>,
+    pub map_play_rules_error: Option<String>,
     pub map_play_playtesting: bool,
     pub last_map_card_action: Option<DesktopMapCardAction>,
     pub editor_new_map_dialog_open: bool,
@@ -18268,7 +18276,10 @@ impl DesktopLauncher {
             map_play_selected_mode: Gamemode::Survival,
             map_play_mode_help_dialog_open: false,
             map_play_customize_dialog_open: false,
+            map_play_rules_edit_dialog_open: false,
             map_play_rules: None,
+            last_map_play_rules_clipboard_text: None,
+            map_play_rules_error: None,
             map_play_playtesting: false,
             last_map_card_action: None,
             editor_new_map_dialog_open: false,
@@ -30090,6 +30101,37 @@ impl DesktopLauncher {
         )
     }
 
+    fn map_play_customize_edit_button_rect(child: RenderRect, index: usize) -> RenderRect {
+        RenderRect::new(
+            child.right() - 32.0 - 132.0,
+            child.y + 64.0 + index as f32 * 38.0,
+            132.0,
+            32.0,
+        )
+    }
+
+    fn map_play_rules_edit_dialog_rect(child: RenderRect) -> RenderRect {
+        let width = (child.width - 96.0).clamp(360.0, 460.0);
+        let height = 250.0;
+        RenderRect::new(
+            child.center().x - width * 0.5,
+            child.center().y - height * 0.5,
+            width,
+            height,
+        )
+    }
+
+    fn map_play_rules_edit_button_rect(dialog: RenderRect, index: usize) -> RenderRect {
+        let height = 38.0;
+        let gap = 10.0;
+        RenderRect::new(
+            dialog.center().x - 150.0,
+            dialog.y + dialog.height - 72.0 - index as f32 * (height + gap),
+            300.0,
+            height,
+        )
+    }
+
     fn map_play_customize_toggle_rects(
         content: RenderRect,
     ) -> Vec<(DesktopCustomRulesToggle, RenderRect)> {
@@ -30127,6 +30169,93 @@ impl DesktopLauncher {
             toggle.toggle(&mut rules);
             self.map_play_rules = Some(rules);
         }
+    }
+
+    fn map_play_rules_clipboard_json(rules: &Rules) -> String {
+        let mode_name = rules.mode_name.as_deref().unwrap_or("custom");
+        format!(
+            concat!(
+                "{{",
+                "\"waves\":{},",
+                "\"waveSending\":{},",
+                "\"waveTimer\":{},",
+                "\"infiniteResources\":{},",
+                "\"schematicsAllowed\":{},",
+                "\"attackMode\":{},",
+                "\"pvp\":{},",
+                "\"coreCapture\":{},",
+                "\"modeName\":\"{}\"",
+                "}}"
+            ),
+            rules.waves,
+            rules.wave_sending,
+            rules.wave_timer,
+            rules.infinite_resources,
+            rules.schematics_allowed,
+            rules.attack_mode,
+            rules.pvp,
+            rules.core_capture,
+            mode_name.replace('"', "\\\"")
+        )
+    }
+
+    fn copy_map_play_rules_to_clipboard_with_platform<P: Platform>(
+        &mut self,
+        index: usize,
+        platform: &mut P,
+    ) -> Option<String> {
+        let map = self.map_list_cards.get(index)?;
+        let rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
+        let json = Self::map_play_rules_clipboard_json(&rules);
+        platform.set_clipboard_text(&json);
+        self.last_map_play_rules_clipboard_text = Some(json.clone());
+        self.map_play_rules_error = None;
+        Some(json)
+    }
+
+    fn load_map_play_rules_from_clipboard_with_platform<P: Platform>(
+        &mut self,
+        index: usize,
+        platform: &mut P,
+    ) -> Result<(), String> {
+        let map = self
+            .map_list_cards
+            .get(index)
+            .ok_or_else(|| "@rules.invaliddata".to_string())?;
+        let text = platform
+            .get_clipboard_text()
+            .or_else(|| self.last_map_play_rules_clipboard_text.clone())
+            .ok_or_else(|| "@rules.invaliddata".to_string())?;
+        let mut rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
+        match rules.apply_json_str(&text) {
+            Ok(()) => {
+                self.map_play_rules = Some(rules);
+                self.map_play_rules_error = None;
+                Ok(())
+            }
+            Err(_) => {
+                self.map_play_rules_error = Some("@rules.invaliddata".to_string());
+                Err("@rules.invaliddata".to_string())
+            }
+        }
+    }
+
+    fn reset_map_play_rules_for_map(&mut self, index: usize) -> bool {
+        let Some(map) = self.map_list_cards.get(index) else {
+            return false;
+        };
+        self.map_play_rules = Some(Self::map_play_rules_for_mode(
+            map,
+            self.map_play_selected_mode,
+        ));
+        self.map_play_rules_error = None;
+        true
     }
 
     fn map_play_high_score(&self, map: &MapDescriptor) -> i32 {
@@ -31758,6 +31887,27 @@ impl DesktopLauncher {
                 let child = Self::map_play_child_dialog_rect(dialog);
                 if self.map_play_customize_dialog_open {
                     if let Some(index) = self.map_play_dialog_index {
+                        if self.map_play_rules_edit_dialog_open {
+                            let edit = Self::map_play_rules_edit_dialog_rect(child);
+                            for (button_index, kind) in [
+                                DesktopMapCardActionKind::CopyCustomRules,
+                                DesktopMapCardActionKind::LoadCustomRules,
+                                DesktopMapCardActionKind::ResetCustomRules,
+                                DesktopMapCardActionKind::CloseCustomRulesEdit,
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            {
+                                if Self::map_play_rules_edit_button_rect(edit, button_index)
+                                    .contains_point(point)
+                                {
+                                    return Some(DesktopMenuRouteShellAction::MapCard(
+                                        DesktopMapCardAction::new(index, kind),
+                                    ));
+                                }
+                            }
+                            return None;
+                        }
                         let content = Self::map_play_customize_content_rect(child);
                         let rules = self
                             .map_play_rules
@@ -31777,6 +31927,24 @@ impl DesktopLauncher {
                                     ),
                                 ));
                             }
+                        }
+                        if Self::map_play_customize_edit_button_rect(child, 0).contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::OpenCustomRulesEdit,
+                                ),
+                            ));
+                        }
+                        if Self::map_play_customize_edit_button_rect(child, 1).contains_point(point)
+                        {
+                            return Some(DesktopMenuRouteShellAction::MapCard(
+                                DesktopMapCardAction::new(
+                                    index,
+                                    DesktopMapCardActionKind::ResetCustomRules,
+                                ),
+                            ));
                         }
                     }
                 }
@@ -33371,13 +33539,17 @@ impl DesktopLauncher {
                             self.editor_map_info_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_rules_error = None;
                         }
                         DesktopMapCardActionKind::OpenEditorInfo => {
                             self.editor_map_info_dialog_index = Some(action.index);
                             self.map_play_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
                             self.map_play_rules = None;
+                            self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
                         }
                         DesktopMapCardActionKind::SelectPlayMode(mode) => {
@@ -33419,20 +33591,55 @@ impl DesktopLauncher {
                             self.editor_map_info_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
                             self.map_play_rules = None;
+                            self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
                             self.last_campaign_launch_report = Some(report);
                         }
                         DesktopMapCardActionKind::Customize => {
                             self.map_play_customize_dialog_open = true;
+                            self.map_play_rules_edit_dialog_open = false;
                             self.map_play_mode_help_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ShowModeHelp => {
                             self.map_play_mode_help_dialog_open = true;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
                         }
                         DesktopMapCardActionKind::ToggleCustomRule(toggle) => {
                             self.toggle_map_play_custom_rule(action.index, toggle);
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
+                        DesktopMapCardActionKind::OpenCustomRulesEdit => {
+                            self.map_play_rules_edit_dialog_open = true;
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                            self.map_play_rules_error = None;
+                        }
+                        DesktopMapCardActionKind::CloseCustomRulesEdit => {
+                            self.map_play_rules_edit_dialog_open = false;
+                            self.map_play_rules_error = None;
+                        }
+                        DesktopMapCardActionKind::CopyCustomRules => {
+                            let mut platform = DefaultPlatform;
+                            let _ = self.copy_map_play_rules_to_clipboard_with_platform(
+                                action.index,
+                                &mut platform,
+                            );
+                            self.map_play_rules_edit_dialog_open = true;
+                        }
+                        DesktopMapCardActionKind::LoadCustomRules => {
+                            let mut platform = DefaultPlatform;
+                            let _ = self.load_map_play_rules_from_clipboard_with_platform(
+                                action.index,
+                                &mut platform,
+                            );
+                            self.map_play_rules_edit_dialog_open = true;
+                        }
+                        DesktopMapCardActionKind::ResetCustomRules => {
+                            let _ = self.reset_map_play_rules_for_map(action.index);
                             self.map_play_customize_dialog_open = true;
                             self.map_play_mode_help_dialog_open = false;
                         }
@@ -33442,7 +33649,9 @@ impl DesktopLauncher {
                             self.map_play_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
                             self.map_play_rules = None;
+                            self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
                         }
                         DesktopMapCardActionKind::Delete => {
@@ -33468,7 +33677,9 @@ impl DesktopLauncher {
                             self.editor_map_info_dialog_index = None;
                             self.map_play_mode_help_dialog_open = false;
                             self.map_play_customize_dialog_open = false;
+                            self.map_play_rules_edit_dialog_open = false;
                             self.map_play_rules = None;
+                            self.map_play_rules_error = None;
                             self.map_play_playtesting = false;
                             self.map_list_scroll_offset = self
                                 .map_list_scroll_offset
@@ -33487,7 +33698,9 @@ impl DesktopLauncher {
                 self.editor_map_info_dialog_index = None;
                 self.map_play_mode_help_dialog_open = false;
                 self.map_play_customize_dialog_open = false;
+                self.map_play_rules_edit_dialog_open = false;
                 self.map_play_rules = None;
+                self.map_play_rules_error = None;
                 self.map_play_playtesting = false;
             }
             DesktopMenuRouteShellAction::CloseMapPlayHelp => {
@@ -33495,6 +33708,8 @@ impl DesktopLauncher {
             }
             DesktopMenuRouteShellAction::CloseMapPlayCustomize => {
                 self.map_play_customize_dialog_open = false;
+                self.map_play_rules_edit_dialog_open = false;
+                self.map_play_rules_error = None;
             }
             DesktopMenuRouteShellAction::NewEditorMap => {
                 self.editor_new_map_dialog_open = true;
@@ -38812,6 +39027,94 @@ impl DesktopLauncher {
             Some("left"),
             layer + 0.020,
         );
+        if self.map_play_rules_edit_dialog_open {
+            self.push_map_play_rules_edit_dialog(pass, child, &rules);
+        }
+    }
+
+    fn push_map_play_rules_edit_dialog(
+        &self,
+        pass: &mut RenderPass,
+        child: RenderRect,
+        rules: &Rules,
+    ) {
+        let layer = Layer::END_PIXELED + 0.140;
+        let dialog = Self::map_play_rules_edit_dialog_rect(child);
+        pass.push(RenderCommand::fill_rect(
+            child,
+            [0.0, 0.0, 0.0, 0.50],
+            layer,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            layer + 0.001,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.62, 0.82, 1.0, 0.96],
+            2.0,
+            layer + 0.002,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text("@waves.edit"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 26.0),
+            [0.94, 0.98, 1.0, 1.0],
+            15.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            layer + 0.004,
+        ));
+        let summary = format!(
+            "waves={} waveTimer={} attackMode={} pvp={}",
+            rules.waves, rules.wave_timer, rules.attack_mode, rules.pvp
+        );
+        pass.push(RenderCommand::draw_text_styled(
+            summary,
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 48.0),
+            [0.62, 0.74, 0.84, 1.0],
+            9.5,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true),
+            layer + 0.005,
+        ));
+        if let Some(error) = self.map_play_rules_error.as_ref() {
+            pass.push(RenderCommand::draw_text_styled(
+                self.localize_bundle_markup_text(error),
+                RenderPoint::new(dialog.center().x, dialog.y + 12.0),
+                [0.95, 0.58, 0.54, 1.0],
+                10.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true),
+                layer + 0.006,
+            ));
+        }
+        for (index, (label, icon)) in [
+            ("@waves.copy", Some("copy")),
+            ("@waves.load", Some("download")),
+            ("@settings.reset", Some("refresh")),
+            ("@back", Some("left")),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.push_settings_text_button(
+                pass,
+                Self::map_play_rules_edit_button_rect(dialog, index),
+                label,
+                icon,
+                layer + 0.020 + index as f32 * 0.001,
+            );
+        }
     }
 
     fn push_editor_map_info_dialog(
@@ -46605,6 +46908,7 @@ mod tests {
         open_result: bool,
         opened_uris: Vec<String>,
         clipboard_texts: Vec<String>,
+        clipboard_read: Option<String>,
     }
 
     impl Platform for RecordingPlatform {
@@ -46615,6 +46919,11 @@ mod tests {
 
         fn set_clipboard_text(&mut self, text: &str) {
             self.clipboard_texts.push(text.to_string());
+            self.clipboard_read = Some(text.to_string());
+        }
+
+        fn get_clipboard_text(&mut self) -> Option<String> {
+            self.clipboard_read.clone()
         }
     }
 
@@ -64540,6 +64849,133 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(toggled_texts.contains(&"✓ Attack Mode"));
+
+        let edit_center = DesktopLauncher::map_play_customize_edit_button_rect(child, 0).center();
+        let open_edit =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::OpenCustomRulesEdit,
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                edit_center.x,
+                edit_center.y
+            ),
+            Some(open_edit)
+        );
+        launcher.dispatch_menu_route_shell_action(open_edit);
+        assert!(launcher.map_play_rules_edit_dialog_open);
+
+        let edit_frame = launcher.menu_graphics_frame_for_surface(4, render_viewport);
+        let edit_texts = edit_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("custom rules edit dialog should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(edit_texts.contains(&"Edit..."));
+        assert!(edit_texts.contains(&"Copy to Clipboard"));
+        assert!(edit_texts.contains(&"Load from Clipboard"));
+        assert!(edit_texts.contains(&"Reset to Defaults"));
+
+        let edit_dialog = DesktopLauncher::map_play_rules_edit_dialog_rect(child);
+        let copy_center = DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 0).center();
+        let copy_action = super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::CopyCustomRules),
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                copy_center.x,
+                copy_center.y
+            ),
+            Some(copy_action)
+        );
+        launcher.dispatch_menu_route_shell_action(copy_action);
+        let copied_rules = launcher
+            .last_map_play_rules_clipboard_text
+            .clone()
+            .expect("copy should store the rules JSON clipboard payload");
+        assert!(copied_rules.contains("\"attackMode\":true"));
+
+        let reset_center =
+            DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 2).center();
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::ResetCustomRules),
+        ));
+        assert!(
+            !launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.attack_mode)
+                .unwrap_or(false),
+            "reset should restore the selected mode defaults before Load from Clipboard"
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                reset_center.x,
+                reset_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::ResetCustomRules
+                )
+            ))
+        );
+
+        let load_center = DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 1).center();
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(0, super::DesktopMapCardActionKind::LoadCustomRules),
+        ));
+        assert!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.attack_mode)
+                .unwrap_or(false),
+            "load should restore the copied custom rules JSON through the clipboard fallback"
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                load_center.x,
+                load_center.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::LoadCustomRules
+                )
+            ))
+        );
+
+        let close_center =
+            DesktopLauncher::map_play_rules_edit_button_rect(edit_dialog, 3).center();
+        let close_edit =
+            super::DesktopMenuRouteShellAction::MapCard(super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::CloseCustomRulesEdit,
+            ));
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                close_center.x,
+                close_center.y
+            ),
+            Some(close_edit)
+        );
+        launcher.dispatch_menu_route_shell_action(close_edit);
+        assert!(!launcher.map_play_rules_edit_dialog_open);
     }
 
     #[test]

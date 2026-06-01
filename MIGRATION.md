@@ -17,6 +17,39 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 707. CustomRulesDialog waves edit 二级弹层 copy/load/reset 可见闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **83.8%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，而不是只做主菜单或孤立模块。
+- Java 对照依据：
+  - `CustomRulesDialog` 里 `@edit -> @waves.edit` 会打开二级规则编辑入口；
+  - `@waves.copy` / `@waves.load` / reset 需要能实际读写规则数据，而不是仅渲染文字。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `MapPlayDialog -> @customize -> @edit` 现在会打开可见的二级弹层，展示 `@waves.edit`、`@waves.copy`、`@waves.load`、`@settings.reset` 和返回按钮；
+    - 二级弹层按钮坐标改为全部落在弹层内，解决最后一项按钮可能越界、不可点击的问题；
+    - `CopyCustomRules` 会把当前 `Rules` 序列化为 JSON 并写入平台剪贴板，同时记录 fallback payload；
+    - `LoadCustomRules` 会从平台剪贴板或上次复制 fallback 读取 JSON，调用 `Rules::apply_json_str` 回填到当前 custom rules；
+    - `ResetCustomRules` 会按当前地图与模式重新应用默认 rules；
+    - 测试补齐 `@edit -> @waves.edit -> copy/load/reset/back` 的可见文案、点击命中和规则 JSON 往返。
+  - `core/src/mindustry/core/platform.rs`
+    - `Platform` 增加 `get_clipboard_text()`，默认返回 `None`，保持现有平台实现兼容。
+  - `core/src/mindustry/game/rules.rs`
+    - `Rules::apply_json_str` 补入 `schematicsAllowed`、`coreCapture`，使 copy/load JSON 覆盖当前二级编辑使用的字段。
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 `waves.edit`、`waves.copy`、`waves.load`、`rules.invaliddata` 的英/简中/繁中 fallback 文案。
+  - `README.md`
+    - 迁移百分比更新为 `83.8%`。
+- 已验证：
+  - `cargo fmt -p mindustry-desktop`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_card_dialog_buttons_dispatch_play_and_editor_actions -- --nocapture`
+  - `cargo test -p mindustry-core ui --lib -- --nocapture`
+  - `cargo test -p mindustry-core rules --lib -- --nocapture`
+- 仍未完成：
+  - `CustomRulesDialog` 的数字输入、天气编辑、单位/方块 ban 列表、队伍规则等仍需继续按 Java Scene2D 行为迁移；
+  - `Open In Editor` 仍需从 route shell 推进到真实 `beginEditMap`/地图编辑器状态；
+  - 前端仍需继续审查所有子菜单视觉差异、资源路径、输入坐标与帧率表现，最终目标仍是接近原版的完整可游玩 Rust 版 MDT。
+
 ## 706. CustomRulesDialog toggle 交互与 Editor custom map 删除落盘闭环
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

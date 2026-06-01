@@ -238,6 +238,8 @@ struct RulesJsonPatch {
     pvp: Option<bool>,
     editor: Option<bool>,
     infinite_resources: Option<bool>,
+    schematics_allowed: Option<bool>,
+    core_capture: Option<bool>,
     wave_spacing: Option<f32>,
     default_team: Option<i32>,
     wave_team: Option<i32>,
@@ -272,6 +274,12 @@ impl RulesJsonPatch {
         }
         if let Some(value) = self.infinite_resources {
             rules.infinite_resources = value;
+        }
+        if let Some(value) = self.schematics_allowed {
+            rules.schematics_allowed = value;
+        }
+        if let Some(value) = self.core_capture {
+            rules.core_capture = value;
         }
         if let Some(value) = self.wave_spacing {
             rules.wave_spacing = value;
@@ -333,6 +341,8 @@ impl<'a> RulesJsonParser<'a> {
                 "infiniteResources" => {
                     patch.infinite_resources = self.parse_optional_bool()?;
                 }
+                "schematicsAllowed" => patch.schematics_allowed = self.parse_optional_bool()?,
+                "coreCapture" => patch.core_capture = self.parse_optional_bool()?,
                 "waveSpacing" => patch.wave_spacing = self.parse_optional_f32()?,
                 "defaultTeam" => patch.default_team = self.parse_optional_i32()?,
                 "waveTeam" => patch.wave_team = self.parse_optional_i32()?,

@@ -81,6 +81,10 @@ pub trait Platform {
 
     fn set_clipboard_text(&mut self, _text: &str) {}
 
+    fn get_clipboard_text(&mut self) -> Option<String> {
+        None
+    }
+
     fn get_net(&self) -> NetProviderKind {
         NetProviderKind::ArcNet
     }
