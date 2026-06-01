@@ -77,7 +77,7 @@ pub enum MenuImageButtonState {
 
 pub const MENU_FLAT_TOGGLE_MENU_STYLE: MenuFlatToggleMenuStyle = MenuFlatToggleMenuStyle {
     down_fill: [0.19, 0.38, 0.50, 0.92],
-    up_fill: [0.07, 0.11, 0.16, 0.88],
+    up_fill: [0.0, 0.0, 0.0, 0.0],
     checked_fill: [0.19, 0.38, 0.50, 0.92],
     over_fill: [0.270_588_25, 0.270_588_25, 0.270_588_25, 1.0],
     disabled_fill: [0.0, 0.0, 0.0, 1.0],
@@ -147,6 +147,12 @@ fn menu_flat_toggle_menu_drawable_for_state(
     menu_flat_toggle_menu_java_drawable_for_state(state).and_then(upstream_ui_drawable_alias)
 }
 
+fn menu_drawable_alias_is_visually_clear(drawable: &UiDrawableAlias) -> bool {
+    drawable.atlas_symbol == "clear"
+        || drawable.tint == UiDrawableTint::Transparent
+        || drawable.tint.rgba()[3] <= 0.0
+}
+
 fn menu_push_flat_toggle_menu_state_background(
     commands: &mut Vec<RenderCommand>,
     rect: RenderRect,
@@ -155,6 +161,9 @@ fn menu_push_flat_toggle_menu_state_background(
     alpha_scale: f32,
 ) {
     if let Some(drawable) = menu_flat_toggle_menu_drawable_for_state(state) {
+        if menu_drawable_alias_is_visually_clear(drawable) {
+            return;
+        }
         let tint = menu_color_with_alpha(drawable.tint.rgba(), alpha_scale);
         if drawable.tint != UiDrawableTint::Transparent && tint[3] > 0.0 {
             commands.push(RenderCommand::draw_sprite(
@@ -168,11 +177,10 @@ fn menu_push_flat_toggle_menu_state_background(
         return;
     }
 
-    commands.push(RenderCommand::fill_rect(
-        rect,
-        menu_color_with_alpha(style.fill_for(state), alpha_scale),
-        style.fill_layer,
-    ));
+    let fill = menu_color_with_alpha(style.fill_for(state), alpha_scale);
+    if fill[3] > 0.0 {
+        commands.push(RenderCommand::fill_rect(rect, fill, style.fill_layer));
+    }
     let drawable = style.drawable_for(state);
     if !drawable.is_empty() {
         commands.push(RenderCommand::draw_sprite(
@@ -3069,6 +3077,66 @@ mod tests {
     }
 
     #[test]
+    fn menu_ui_plan_desktop_up_buttons_leave_only_black6_panel_visible_like_java_clear_up() {
+        let rect = RenderRect::new(10.0, 20.0, 230.0, 70.0);
+        let plan = MenuUiPlan {
+            mobile: false,
+            submenu_alpha: 1.0,
+            buttons: vec![MenuButtonPlan {
+                role: MenuButtonRole::Mods,
+                label: "Mods".to_string(),
+                icon_name: None,
+                rect,
+                selected: false,
+                hovered: false,
+                pressed: false,
+                submenu: false,
+            }],
+        };
+
+        assert_eq!(
+            plan.buttons[0].flat_toggle_menu_state(),
+            MenuFlatToggleMenuState::Up
+        );
+
+        let commands = plan.to_render_commands();
+        assert!(
+            !commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect: sprite_rect,
+                    ..
+                } if symbol == "clear" && *sprite_rect == rect
+            )),
+            "Java Styles.flatToggleMenut uses clear for up state, so the Rust render plan should not emit a visible per-button up drawable"
+        );
+        assert!(
+            !commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::FillRect {
+                    rect: fill_rect,
+                    ..
+                } if *fill_rect == rect
+            )),
+            "desktop up buttons should visually inherit the surrounding black6 table background instead of drawing a debug-style individual fill"
+        );
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite {
+                symbol,
+                rect: panel_rect,
+                tint,
+                layer,
+                ..
+            } if symbol == "whiteui"
+                && *panel_rect == RenderRect::new(10.0, 0.0, 230.0, 110.0)
+                && (tint[3] - UiDrawableTint::Black6.rgba()[3]).abs() < 0.0001
+                && (*layer - MENU_DESKTOP_BACKGROUND_LAYER).abs() < f32::EPSILON
+        )));
+    }
+
+    #[test]
     fn menu_ui_plan_mobile_matches_upstream_portrait_grid_geometry() {
         let mut state = MenuRendererState::new(MenuRendererConfig::new(true, 9));
         let input = MenuFrameInput {
@@ -3239,11 +3307,15 @@ mod tests {
     }
 
     #[test]
-    fn menu_flat_toggle_menu_style_keeps_upstream_state_names_and_current_fallback_fills() {
+    fn menu_flat_toggle_menu_style_keeps_upstream_state_names_and_java_clear_up_fallback() {
         let style = MENU_FLAT_TOGGLE_MENU_STYLE;
 
         assert_eq!(style.down_fill, [0.19, 0.38, 0.50, 0.92]);
-        assert_eq!(style.up_fill, [0.07, 0.11, 0.16, 0.88]);
+        assert_eq!(
+            style.up_fill,
+            [0.0, 0.0, 0.0, 0.0],
+            "Java Styles.flatToggleMenut.up is clear; fallback rendering should leave the black6 table panel visible"
+        );
         assert_eq!(style.checked_fill, style.down_fill);
         assert_eq!(style.over_fill, UiDrawableTint::FlatOver.rgba());
         assert_eq!(style.disabled_fill, [0.0, 0.0, 0.0, 1.0]);

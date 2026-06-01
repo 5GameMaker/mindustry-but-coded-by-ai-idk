@@ -15,6 +15,40 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 698. 主菜单 clear-up、Join 安全连接与 native 黑屏诊断补强
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **81.3%**，仍未达到完整可玩；继续优先前端/UI 还原、黑屏风险闭环与 Java 联机语义。
+- Java 对照依据：
+  - `MenuFragment.java` + `Styles.flatToggleMenut`：desktop menu 默认 up drawable 是 `clear`，非 hover/pressed 的按钮不应画成独立调试块；
+  - `JoinDialog.safeConnect(...)`：带 `Host.version` 的 local/saved/community 连接必须先检查版本，不匹配时显示 `server.versions` 信息而不是直接连接；
+  - `DesktopLauncher.java` native 启动应尽量暴露资源/上下文问题，方便区分 GL 黑屏与资源缺失。
+- 本轮主改动：
+  - `core/src/mindustry/graphics/menu_renderer.rs`
+    - `flatToggleMenut` up fallback 改为透明，跳过 `clear`/透明 drawable 的 per-button 背景；
+    - 保留 hover/pressed/checked 的 `flatOver`/`flatDown` 视觉；
+    - 新增测试锁定 Java clear-up 语义。
+  - `desktop/src/lib.rs`
+    - Join local/saved/community server 卡片版本显示改为使用 `server.version` bundle 格式；
+    - local host 卡片补充描述行，更接近 Java `buildServer(host, ...)`；
+    - 新增 `safe_connect_to_target(...)`，local host、resolved saved server、community server（含免责声明确认后）均按 Java `safeConnect(...)` 做版本门禁；
+    - 补充 `server.versions` / outdated 文案覆盖英文、简中、繁中 bundle；
+    - 新增版本不匹配阻断测试，并同步 Join 渲染测试到本地化后的真实 UI 文案。
+  - `desktop/src/main.rs`
+    - native runtime 窗口标题/trace 增加 OpenGL context、shader root、`shaders/`、`fonts/`、window icon 状态；
+    - 字体资源缺失也纳入 fallback overlay 触发条件；
+    - fallback overlay 启用时会反映到窗口标题诊断。
+- 已验证：
+  - `rustfmt` 目标文件格式化通过；
+  - `cargo test -p mindustry-core menu_renderer -- --nocapture`
+  - `cargo test -p mindustry-core upstream_menu_bundle -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_join_route -- --nocapture`
+  - `cargo test -p mindustry-desktop native_opengl -- --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - 主菜单 submenu fade、Settings Scene2D widget 树、Mods viewcontent 内容网格、Join community feed/cache 仍需继续迁移；
+  - 还未达到完整可玩与 Java↔Rust 联机 smoke test 通过，不能宣告目标完成。
+
 ## 697. Menu pass 可见命令检查升级为运行时 fallback
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

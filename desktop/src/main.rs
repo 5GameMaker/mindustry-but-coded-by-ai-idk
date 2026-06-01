@@ -126,6 +126,7 @@ fn desktop_native_opengl_submit_diagnostic(
     invalid_draw_commands: usize,
     native_errors: &[String],
     shader_assets_available: bool,
+    font_assets_available: bool,
 ) -> Option<String> {
     let total_commands = driver_state.framebuffer_attachment_plans
         + driver_state.texture_upload_commands
@@ -140,6 +141,10 @@ fn desktop_native_opengl_submit_diagnostic(
 
     if !shader_assets_available {
         reasons.push("shader assets unavailable".to_string());
+    }
+
+    if !font_assets_available {
+        reasons.push("font assets unavailable".to_string());
     }
 
     if total_commands == 0 {
@@ -202,8 +207,12 @@ fn desktop_native_opengl_submit_needs_visible_fallback(
     invalid_draw_commands: usize,
     native_errors: &[String],
     shader_assets_available: bool,
+    font_assets_available: bool,
 ) -> bool {
     if !shader_assets_available {
+        return true;
+    }
+    if !font_assets_available {
         return true;
     }
     if !native_errors.is_empty() {
@@ -465,6 +474,7 @@ struct DesktopNativeOpenGlShaderAssetRootResolution {
     path: std::path::PathBuf,
     source: &'static str,
     shaders_dir_exists: bool,
+    fonts_dir_exists: bool,
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -474,8 +484,9 @@ fn desktop_native_opengl_shader_asset_root_resolution_from_candidates(
 ) -> DesktopNativeOpenGlShaderAssetRootResolution {
     for (candidate, source) in candidates {
         let shaders_dir_exists = candidate.join("shaders").is_dir();
+        let fonts_dir_exists = candidate.join("fonts").is_dir();
         desktop_native_trace(format!(
-            "shader_asset_root: candidate source={source} path={} shaders_dir_exists={shaders_dir_exists}",
+            "shader_asset_root: candidate source={source} path={} shaders_dir_exists={shaders_dir_exists} fonts_dir_exists={fonts_dir_exists}",
             candidate.display()
         ));
         if shaders_dir_exists {
@@ -483,19 +494,22 @@ fn desktop_native_opengl_shader_asset_root_resolution_from_candidates(
                 path: candidate,
                 source,
                 shaders_dir_exists,
+                fonts_dir_exists,
             };
         }
     }
 
     let shaders_dir_exists = fallback.join("shaders").is_dir();
+    let fonts_dir_exists = fallback.join("fonts").is_dir();
     desktop_native_trace(format!(
-        "shader_asset_root: fallback source=fallback path={} shaders_dir_exists={shaders_dir_exists}",
+        "shader_asset_root: fallback source=fallback path={} shaders_dir_exists={shaders_dir_exists} fonts_dir_exists={fonts_dir_exists}",
         fallback.display()
     ));
     DesktopNativeOpenGlShaderAssetRootResolution {
         path: fallback,
         source: "fallback",
         shaders_dir_exists,
+        fonts_dir_exists,
     }
 }
 
@@ -622,6 +636,7 @@ struct DesktopNativeOpenGlRuntime {
     shader_asset_root: std::path::PathBuf,
     shader_asset_root_source: &'static str,
     shader_asset_root_shaders_dir_exists: bool,
+    shader_asset_root_fonts_dir_exists: bool,
     base_window_title: String,
     current_window_title_diagnostic: Option<String>,
     current_program: Option<u32>,
@@ -853,18 +868,10 @@ fn desktop_native_window_icon_from_path(
 }
 
 #[cfg(feature = "opengl-native-runtime")]
-fn desktop_native_window_attributes_with_icon(
-    attributes: winit::window::WindowAttributes,
-) -> winit::window::WindowAttributes {
+fn desktop_native_window_icon_resolution() -> Option<std::path::PathBuf> {
     for path in desktop_native_window_icon_candidate_paths() {
         match desktop_native_window_icon_from_path(&path) {
-            Ok(icon) => {
-                desktop_native_trace_summary(format!(
-                    "runtime.new: window_icon path={}",
-                    path.display()
-                ));
-                return attributes.with_window_icon(Some(icon));
-            }
+            Ok(_) => return Some(path),
             Err(error) => {
                 desktop_native_trace(format!(
                     "runtime.new: window_icon candidate skipped: {error}"
@@ -872,7 +879,71 @@ fn desktop_native_window_attributes_with_icon(
             }
         }
     }
-    attributes
+    None
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_window_attributes_with_icon(
+    attributes: winit::window::WindowAttributes,
+) -> (winit::window::WindowAttributes, Option<std::path::PathBuf>) {
+    let icon_path = desktop_native_window_icon_resolution();
+    let attributes = if let Some(path) = icon_path.as_ref() {
+        match desktop_native_window_icon_from_path(path) {
+            Ok(icon) => {
+                desktop_native_trace_summary(format!(
+                    "runtime.new: window_icon path={}",
+                    path.display()
+                ));
+                attributes.with_window_icon(Some(icon))
+            }
+            Err(error) => {
+                desktop_native_trace(format!(
+                    "runtime.new: window_icon decode unexpectedly failed after resolution: {error}"
+                ));
+                attributes
+            }
+        }
+    } else {
+        attributes
+    };
+    (attributes, icon_path)
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_startup_diagnostic(
+    runtime: &DesktopNativeOpenGlRuntime,
+    window_icon_path: Option<&std::path::Path>,
+) -> Option<String> {
+    let mut reasons = Vec::new();
+
+    if !runtime.shader_asset_root_shaders_dir_exists {
+        reasons.push(format!(
+            "shader assets unavailable: {} (source={})",
+            runtime.shader_asset_root.display(),
+            runtime.shader_asset_root_source
+        ));
+    }
+
+    if !runtime.shader_asset_root_fonts_dir_exists {
+        reasons.push(format!(
+            "font assets unavailable: {} (source={})",
+            runtime.shader_asset_root.join("fonts").display(),
+            runtime.shader_asset_root_source
+        ));
+    }
+
+    if window_icon_path.is_none() {
+        reasons.push(format!(
+            "window icon unavailable: {}",
+            DESKTOP_NATIVE_WINDOW_ICON_SOURCE_PATH
+        ));
+    }
+
+    if reasons.is_empty() {
+        None
+    } else {
+        Some(reasons.join("; "))
+    }
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -881,14 +952,16 @@ fn desktop_native_opengl_shader_asset_root_resolution(
     if let Some(path) = std::env::var_os("MINDUSTRY_ASSET_ROOT") {
         let path = std::path::PathBuf::from(path);
         let shaders_dir_exists = path.join("shaders").is_dir();
+        let fonts_dir_exists = path.join("fonts").is_dir();
         desktop_native_trace(format!(
-            "shader_asset_root: environment override path={} shaders_dir_exists={shaders_dir_exists}",
+            "shader_asset_root: environment override path={} shaders_dir_exists={shaders_dir_exists} fonts_dir_exists={fonts_dir_exists}",
             path.display()
         ));
         return DesktopNativeOpenGlShaderAssetRootResolution {
             path,
             source: "environment override",
             shaders_dir_exists,
+            fonts_dir_exists,
         };
     }
 
@@ -1069,7 +1142,7 @@ impl DesktopNativeOpenGlRuntime {
         let template = ConfigTemplateBuilder::new();
         let antialias_enabled =
             desktop_native_antialias_enabled_from_args(std::env::args().collect::<Vec<_>>());
-        let window_attributes =
+        let (window_attributes, startup_icon_path) =
             desktop_native_window_attributes_with_icon(native_config.window_attributes());
         let (window, gl_config) = DisplayBuilder::new()
             .with_window_attributes(Some(window_attributes))
@@ -1165,11 +1238,24 @@ impl DesktopNativeOpenGlRuntime {
         }
 
         let shader_asset_root_resolution = desktop_native_opengl_shader_asset_root_resolution();
+        let selected_context_label = selected_context_candidate
+            .as_deref()
+            .unwrap_or("unknown OpenGL candidate");
+        let base_window_title = format!(
+            "{} [native runtime: {}]",
+            native_config.surface.title, selected_context_label
+        );
         desktop_native_trace_summary(format!(
-            "runtime.new: shader_asset_root path={} source={} shaders_dir_exists={}",
+            "runtime.new: native runtime entered context={} window_title={} shader_asset_root={} source={} shaders_dir_exists={} fonts_dir_exists={} window_icon={}",
+            selected_context_label,
+            base_window_title,
             shader_asset_root_resolution.path.display(),
             shader_asset_root_resolution.source,
-            shader_asset_root_resolution.shaders_dir_exists
+            shader_asset_root_resolution.shaders_dir_exists,
+            shader_asset_root_resolution.fonts_dir_exists,
+            startup_icon_path
+                .as_ref()
+                .map_or("missing".to_string(), |path| path.display().to_string())
         ));
 
         let mut runtime = Self {
@@ -1195,23 +1281,17 @@ impl DesktopNativeOpenGlRuntime {
             shader_asset_root: shader_asset_root_resolution.path,
             shader_asset_root_source: shader_asset_root_resolution.source,
             shader_asset_root_shaders_dir_exists: shader_asset_root_resolution.shaders_dir_exists,
-            base_window_title: native_config.surface.title.clone(),
+            shader_asset_root_fonts_dir_exists: shader_asset_root_resolution.fonts_dir_exists,
+            base_window_title,
             current_window_title_diagnostic: None,
             current_program: None,
             current_vertex_array: None,
             native_errors: Vec::new(),
         };
         runtime.update_window_title_diagnostic(None);
-        desktop_native_trace_summary(format!(
-            "runtime.new: window_title={}",
-            runtime.base_window_title
-        ));
-        if !runtime.shader_asset_root_shaders_dir_exists {
-            let diagnostic = format!(
-                "shader assets unavailable: {} (source={})",
-                runtime.shader_asset_root.display(),
-                runtime.shader_asset_root_source
-            );
+        if let Some(diagnostic) =
+            desktop_native_opengl_startup_diagnostic(&runtime, startup_icon_path.as_deref())
+        {
             runtime.update_window_title_diagnostic(Some(diagnostic.clone()));
             desktop_native_trace_summary(format!("runtime.new: diagnosis={diagnostic}"));
         }
@@ -2958,12 +3038,14 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
                 }
             }
         }
-        if desktop_native_opengl_submit_needs_visible_fallback(
+        let needs_visible_fallback = desktop_native_opengl_submit_needs_visible_fallback(
             &driver_state,
             invalid_draw_commands,
             frame_native_errors,
             self.shader_asset_root_shaders_dir_exists,
-        ) {
+            self.shader_asset_root_fonts_dir_exists,
+        );
+        if needs_visible_fallback {
             desktop_native_trace_summary("runtime.submit: drawing native visible fallback overlay");
             self.draw_visible_fallback_overlay();
         }
@@ -2972,7 +3054,14 @@ impl mindustry_desktop::DesktopGraphicsOpenGlBackendRuntime for DesktopNativeOpe
             invalid_draw_commands,
             frame_native_errors,
             self.shader_asset_root_shaders_dir_exists,
+            self.shader_asset_root_fonts_dir_exists,
         );
+        let diagnostic = match diagnostic {
+            Some(diagnostic) if needs_visible_fallback => {
+                Some(format!("{diagnostic}; fallback overlay enabled"))
+            }
+            other => other,
+        };
         if let Some(diagnostic) = diagnostic {
             desktop_native_trace_summary(format!("runtime.submit: diagnosis={diagnostic}"));
             self.update_window_title_diagnostic(Some(diagnostic));
@@ -3176,6 +3265,7 @@ mod tests {
         );
         let root = std::env::temp_dir().join(unique);
         std::fs::create_dir_all(root.join("shaders")).expect("should create temporary shader root");
+        std::fs::create_dir_all(root.join("fonts")).expect("should create temporary font root");
         root
     }
 
@@ -3457,6 +3547,7 @@ mod tests {
                 "failed to compile native OpenGL shader source: boom",
             )],
             true,
+            true,
         )
         .expect("empty frame with shader failure should yield a diagnostic");
 
@@ -3471,7 +3562,7 @@ mod tests {
             draw_commands: 2,
             ..Default::default()
         };
-        let diagnostic = desktop_native_opengl_submit_diagnostic(&driver_state, 2, &[], true)
+        let diagnostic = desktop_native_opengl_submit_diagnostic(&driver_state, 2, &[], true, true)
             .expect("skipped draw commands should yield a diagnostic");
 
         assert!(diagnostic.contains("no valid draw commands"));
@@ -3486,6 +3577,7 @@ mod tests {
             0,
             &[],
             true,
+            true,
         ));
 
         let invalid = mindustry_desktop::DesktopGraphicsOpenGlBackendDriverExecutionState {
@@ -3497,11 +3589,13 @@ mod tests {
             3,
             &[],
             true,
+            true,
         ));
         assert!(!desktop_native_opengl_submit_needs_visible_fallback(
             &invalid,
             1,
             &[],
+            true,
             true,
         ));
         assert!(desktop_native_opengl_submit_needs_visible_fallback(
@@ -3509,17 +3603,30 @@ mod tests {
             1,
             &["shader program link failed".into()],
             true,
+            true,
         ));
         assert!(desktop_native_opengl_submit_needs_visible_fallback(
             &invalid,
             1,
             &[],
             false,
+            true,
+        ));
+        assert!(desktop_native_opengl_submit_needs_visible_fallback(
+            &invalid,
+            1,
+            &[],
+            true,
+            false,
         ));
         let shader_asset_diagnostic =
-            desktop_native_opengl_submit_diagnostic(&invalid, 1, &[], false)
+            desktop_native_opengl_submit_diagnostic(&invalid, 1, &[], false, true)
                 .expect("missing shader assets should stay visible in native diagnostics");
         assert!(shader_asset_diagnostic.contains("shader assets unavailable"));
+        let font_asset_diagnostic =
+            desktop_native_opengl_submit_diagnostic(&invalid, 1, &[], true, false)
+                .expect("missing font assets should stay visible in native diagnostics");
+        assert!(font_asset_diagnostic.contains("font assets unavailable"));
 
         let rects = desktop_native_visible_fallback_rects(
             mindustry_desktop::DesktopSurfaceSize::new(1280, 720),
@@ -3551,6 +3658,19 @@ mod tests {
                 .any(|rect| rect.height <= 6 && rect.width >= 150),
             "fallback should expose version or diagnostic text lines"
         );
+    }
+
+    #[test]
+    fn native_opengl_shader_asset_root_tracks_fonts_directory() {
+        let root = unique_temp_shader_asset_root("fonts-directory");
+        let resolution = desktop_native_opengl_shader_asset_root_resolution_from_candidates(
+            vec![(root.clone(), "test")],
+            std::env::temp_dir().join("mindustry-desktop-shader-root-fonts-fallback"),
+        );
+
+        assert_eq!(resolution.path, root);
+        assert!(resolution.shaders_dir_exists);
+        assert!(resolution.fonts_dir_exists);
     }
 
     #[test]

@@ -13,7 +13,7 @@ use mindustry_core::mindustry::core::game_runtime::{
 };
 use mindustry_core::mindustry::core::net_client::{
     ClientBlockSnapshotMirror, ClientHiddenSnapshotMirror, ClientTileStorageMirror,
-    ClientUnitItemMirror, ClientUnitPayloadMirror,
+    ClientUnitItemMirror, ClientUnitPayloadMirror, DEFAULT_CLIENT_VERSION,
 };
 use mindustry_core::mindustry::core::{
     content_loader::ContentLoader, ClientConnectConfig, DefaultPlatform, FileChooserRequest,
@@ -16625,6 +16625,7 @@ pub struct DesktopLauncher {
     pub join_delete_dialog_index: Option<usize>,
     pub join_server_disclaimer_accepted: bool,
     pub join_server_disclaimer_pending_target: Option<DesktopConnectTarget>,
+    pub join_server_disclaimer_pending_version: Option<i32>,
     pub join_local_hosts: Vec<Host>,
     pub join_local_discovering: bool,
     pub join_local_discovery_finished: bool,
@@ -17537,6 +17538,7 @@ impl DesktopLauncher {
             join_delete_dialog_index: None,
             join_server_disclaimer_accepted: false,
             join_server_disclaimer_pending_target: None,
+            join_server_disclaimer_pending_version: None,
             join_local_hosts: Vec::new(),
             join_local_discovering: false,
             join_local_discovery_finished: false,
@@ -27870,6 +27872,59 @@ impl DesktopLauncher {
             .and_then(|address| parse_host_port(address))
     }
 
+    fn join_community_group_connect_version(group: &DesktopJoinCommunityGroup) -> Option<i32> {
+        group.hosts.first().map(|host| host.version)
+    }
+
+    fn join_server_version_mismatch_message(&self, server_version: i32) -> Option<String> {
+        if server_version == DEFAULT_CLIENT_VERSION
+            || DEFAULT_CLIENT_VERSION == -1
+            || server_version == -1
+        {
+            return None;
+        }
+
+        let reason_key = if server_version > DEFAULT_CLIENT_VERSION {
+            "server.kicked.clientOutdated"
+        } else {
+            "server.kicked.serverOutdated"
+        };
+        let reason = upstream_menu_bundle_value_for_locale(&self.settings_locale, reason_key)
+            .unwrap_or(if server_version > DEFAULT_CLIENT_VERSION {
+                "Outdated client! Update your game!"
+            } else {
+                "Outdated server! Ask the host to update!"
+            });
+        let client_version = DEFAULT_CLIENT_VERSION.to_string();
+        let server_version = server_version.to_string();
+        Some(format!(
+            "[scarlet]{reason}\n[]{}",
+            self.format_bundle_text(
+                "server.versions",
+                &[client_version.as_str(), server_version.as_str()]
+            )
+        ))
+    }
+
+    fn safe_connect_to_target(
+        &mut self,
+        target: DesktopConnectTarget,
+        server_version: Option<i32>,
+    ) -> io::Result<()> {
+        if let Some(message) =
+            server_version.and_then(|version| self.join_server_version_mismatch_message(version))
+        {
+            self.connect_target = Some(target);
+            self.connect_error = Some(message.clone());
+            self.last_menu_info_message = Some(message);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "server version mismatch",
+            ));
+        }
+        self.connect_to_target(target)
+    }
+
     fn delete_join_saved_server_at(&mut self, index: usize) -> bool {
         if index >= self.join_saved_servers.len() {
             return false;
@@ -31516,16 +31571,18 @@ impl DesktopLauncher {
                     port,
                 };
                 self.connect_target = Some(target.clone());
-                let _ = self.connect_to_target(target);
+                let _ = self.safe_connect_to_target(target, Some(host.version));
             }
             DesktopMenuRouteShellAction::ConnectJoinServerCard(index) => {
                 let Some(mut target) = self.join_saved_servers.get(index).cloned() else {
                     self.connect_error = Some("missing connect target".into());
                     return;
                 };
+                let mut server_version = None;
                 if let Some(DesktopJoinSavedServerRefreshState::Resolved(host)) =
                     self.join_saved_server_refresh_states.get(index)
                 {
+                    server_version = Some(host.version);
                     if let Ok(port) = u16::try_from(host.port) {
                         if !host.address.trim().is_empty() {
                             target = DesktopConnectTarget {
@@ -31536,7 +31593,7 @@ impl DesktopLauncher {
                     }
                 }
                 self.connect_target = Some(target.clone());
-                let _ = self.connect_to_target(target);
+                let _ = self.safe_connect_to_target(target, server_version);
             }
             DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(index) => {
                 if let Some(group) = self.join_community_groups.get(index) {
@@ -31582,27 +31639,34 @@ impl DesktopLauncher {
                 };
                 if !self.join_server_disclaimer_effective_accepted() {
                     self.join_server_disclaimer_pending_target = Some(target);
+                    self.join_server_disclaimer_pending_version =
+                        Self::join_community_group_connect_version(group);
                     self.join_add_dialog_open = false;
                     self.join_info_dialog_open = false;
                     self.join_delete_dialog_index = None;
                     return;
                 }
                 self.connect_target = Some(target.clone());
-                let _ = self.connect_to_target(target);
+                let _ = self.safe_connect_to_target(
+                    target,
+                    Self::join_community_group_connect_version(group),
+                );
             }
             DesktopMenuRouteShellAction::ConfirmJoinServerDisclaimer => {
                 let Some(target) = self.join_server_disclaimer_pending_target.take() else {
                     return;
                 };
+                let version = self.join_server_disclaimer_pending_version.take();
                 self.join_server_disclaimer_accepted = true;
                 self.settings_overrides
                     .insert(JOIN_SERVER_DISCLAIMER_SETTINGS_KEY.into(), "true".into());
                 self.connect_target = Some(target.clone());
-                let _ = self.connect_to_target(target);
+                let _ = self.safe_connect_to_target(target, version);
             }
             DesktopMenuRouteShellAction::CancelJoinServerDisclaimer => {
                 self.join_server_disclaimer_accepted = false;
                 self.join_server_disclaimer_pending_target = None;
+                self.join_server_disclaimer_pending_version = None;
                 self.settings_overrides
                     .insert(JOIN_SERVER_DISCLAIMER_SETTINGS_KEY.into(), "false".into());
             }
@@ -33789,8 +33853,13 @@ impl DesktopLauncher {
                 ],
                 layer + 0.002,
             ));
+            let version_number = host.version.to_string();
+            let version = self.format_bundle_text(
+                "server.version",
+                &[version_number.as_str(), host.version_type.as_str()],
+            );
             pass.push(RenderCommand::draw_text_styled(
-                format!("{}   v{}", host.name, host.version),
+                format!("{}   {}", host.name, version),
                 RenderPoint::new(card.x + 14.0, header.center().y),
                 [0.94, 0.99, 1.0, 1.0],
                 12.0,
@@ -33817,7 +33886,14 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 layer + 0.003,
             ));
+            let description = host
+                .description
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("@server.description");
             for (index, line) in [
+                format!("@server.description: {}", description),
                 format!("players: {}/{}", host.players, host.player_limit),
                 format!(
                     "save.map: {} / {}",
@@ -33835,7 +33911,7 @@ impl DesktopLauncher {
                     self.localize_bundle_markup_text(line),
                     RenderPoint::new(
                         card.x + 14.0,
-                        card.y + card.height - 82.0 - index as f32 * 18.0,
+                        card.y + card.height - 76.0 - index as f32 * 16.0,
                     ),
                     [0.74, 0.84, 0.90, 1.0],
                     10.0,
@@ -33933,7 +34009,11 @@ impl DesktopLauncher {
                     layer + 0.002,
                 ));
                 pass.push(RenderCommand::draw_text_styled(
-                    format!("{}   v{}", snapshot.address, snapshot.version),
+                    format!(
+                        "{}   {}",
+                        snapshot.address,
+                        self.format_bundle_text("server.version", &[snapshot.version.as_str(), ""])
+                    ),
                     RenderPoint::new(card.x + 14.0, header.center().y),
                     [0.90, 0.96, 1.0, 1.0],
                     12.0,
@@ -34286,13 +34366,13 @@ impl DesktopLauncher {
                     }
 
                     if let Some(host) = host {
-                        let version = if host.version_type.is_empty() {
-                            host.version.to_string()
-                        } else {
-                            format!("{} {}", host.version, host.version_type)
-                        };
+                        let version_number = host.version.to_string();
+                        let version = self.format_bundle_text(
+                            "server.version",
+                            &[version_number.as_str(), host.version_type.as_str()],
+                        );
                         pass.push(RenderCommand::draw_text_styled(
-                            format!("{}   v{}", host.name, version),
+                            format!("{}   {}", host.name, version),
                             RenderPoint::new(card.x + 12.0, header.y - 14.0),
                             [0.92, 0.98, 1.0, if hidden { 0.68 } else { 1.0 }],
                             11.0,
@@ -70632,7 +70712,7 @@ version: "2.0.0"
             .any(|text| text.contains("example.org") && text.contains("v")));
         assert!(texts.contains(&"@server.refreshing"));
         assert!(texts.contains(&"players: 0"));
-        assert!(texts.contains(&"save.map: Unknown / @mode.survival.name"));
+        assert!(texts.contains(&"save.map: Unknown / Survival"));
         assert!(texts.contains(&"ping: --ms"));
         assert!(texts.contains(&"Search:"));
         assert!(texts.contains(&"@servers.showhidden"));
@@ -70767,7 +70847,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(steam_texts.contains(&"@servers.local.steam"));
+        assert!(steam_texts.contains(&"Open Games & Local Servers"));
         assert!(!steam_texts.contains(&"?"));
 
         let mut mobile_launcher = DesktopLauncher::new(Vec::new());
@@ -70955,12 +71035,12 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(texts.iter().any(|text| {
-            text.contains("cached.example") && text.contains("@server.version: 158")
-        }));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("cached.example") && text.contains("[gray]v158")));
         assert!(texts.contains(&"cached description"));
         assert!(texts.contains(&"players: 3/16"));
-        assert!(texts.contains(&"save.map: custom map / @mode.attack.name"));
+        assert!(texts.contains(&"save.map: custom map / Attack"));
         assert!(texts.contains(&"ping: 31ms"));
         assert!(texts.contains(&"@server.refreshing"));
         assert!(texts.contains(&"@host.invalid"));
@@ -71134,12 +71214,12 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(texts
             .iter()
-            .any(|text| text.contains("LAN host") && text.contains("@server.version: 158")));
+            .any(|text| text.contains("LAN host") && text.contains("[gray]v158")));
         assert!(texts
             .iter()
-            .any(|text| text.contains("127.0.0.1") && text.contains("@servers.local")));
+            .any(|text| text.contains("127.0.0.1") && text.contains("Local Servers")));
         assert!(texts.contains(&"players: 2/8"));
-        assert!(texts.contains(&"save.map: local map / @mode.survival.name"));
+        assert!(texts.contains(&"save.map: local map / Survival"));
         assert!(texts.contains(&"ping: 42ms"));
         assert!(!texts.contains(&"tap to connect"));
 
@@ -71153,6 +71233,51 @@ version: "2.0.0"
                 port,
             })
         );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_blocks_version_mismatch_like_java_safe_connect() {
+        let current_version = mindustry_core::mindustry::core::net_client::DEFAULT_CLIENT_VERSION;
+        let port = super::DEFAULT_MINDUSTRY_PORT;
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        launcher
+            .join_local_hosts
+            .push(mindustry_core::mindustry::net::Host::new(
+                18,
+                "Old LAN host",
+                "127.0.0.1",
+                port.into(),
+                "old map",
+                3,
+                1,
+                current_version - 1,
+                "official",
+                Gamemode::Survival,
+                8,
+                "old server",
+                Some("@mode.survival.name".into()),
+            ));
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::ConnectJoinLocalHost(0),
+        );
+
+        assert_eq!(
+            launcher.connect_target,
+            Some(super::DesktopConnectTarget {
+                host: "127.0.0.1".into(),
+                port,
+            })
+        );
+        let error = launcher
+            .connect_error
+            .clone()
+            .expect("version mismatch should block before socket connect");
+        assert!(error.contains("Outdated server"));
+        assert!(error.contains(&format!("Your version:[accent] {current_version}")));
+        assert!(error.contains(&format!("Server version:[accent] {}", current_version - 1)));
+        assert_eq!(launcher.last_menu_info_message, Some(error));
     }
 
     #[test]
@@ -71358,7 +71483,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(local_texts.contains(&"@servers.local"));
+        assert!(local_texts.contains(&"Local Servers"));
         assert!(!local_texts.iter().any(|text| text.contains("LAN host")));
 
         assert_eq!(
@@ -71399,7 +71524,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(remote_texts.contains(&"@servers.remote"));
+        assert!(remote_texts.contains(&"Remote Servers"));
         assert!(!remote_texts.iter().any(|text| text.contains("one.example")));
 
         assert_eq!(
@@ -71451,7 +71576,7 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(global_texts.contains(&"@servers.global"));
+        assert!(global_texts.contains(&"Community Servers"));
         assert!(!global_texts.contains(&"@servers.community"));
         assert!(!global_texts.contains(&"@servers.showhidden"));
         assert!(!global_texts.contains(&"Official"));
@@ -71521,8 +71646,9 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(texts.contains(&"Official"));
-        assert!(texts.iter().any(|text| text.contains("Community Host")
-            && text.contains("@server.version: 158 official")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Community Host") && text.contains("[gray]v158 official")));
         assert!(texts.contains(&"public survival server"));
         assert!(
             texts
@@ -71530,7 +71656,7 @@ version: "2.0.0"
                 .any(|text| text.contains("community.example:6567")
                     && text.contains("players: 12/24"))
         );
-        assert!(texts.contains(&"save.map: sector map / @mode.survival.name"));
+        assert!(texts.contains(&"save.map: sector map / Survival"));
 
         let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
             viewport,
@@ -71647,13 +71773,10 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(disclaimer_texts.contains(&"@warning"));
-        assert!(
-            disclaimer_texts
-                .iter()
-                .any(|text| text.contains("@servers.disclaimer")
-                    && text.contains("community.example"))
-        );
+        assert!(disclaimer_texts.contains(&"Warning!"));
+        assert!(disclaimer_texts
+            .iter()
+            .any(|text| text.contains("Community servers") && text.contains("community.example")));
         launcher.dispatch_menu_route_shell_action(
             super::DesktopMenuRouteShellAction::ConfirmJoinServerDisclaimer,
         );
