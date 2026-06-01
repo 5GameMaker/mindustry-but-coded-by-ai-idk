@@ -17,6 +17,35 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 706. CustomRulesDialog toggle 交互与 Editor custom map 删除落盘闭环
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **83.7%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，同时把可见按钮接入真实 runtime/disk 状态。
+- Java 对照依据：
+  - `CustomRulesDialog.setupMain()` 中 waves/resourcesbuilding/enemy 等分组里的 `check(...)` 是可点击并直接修改 `Rules` 字段的交互，不是只读摘要；
+  - `EditorMapsDialog.showMap(...)` 的 custom map 删除最终走 `maps.removeMap(map)`；
+  - `Maps.removeMap(Map map)` 会从 maps 列表移除并删除 `map.file`，刷新/重启后不应回弹。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopCustomRulesToggle`，把 `CustomRulesDialog` 规则摘要里的 `waves / waveSending / waveTimer / infiniteResources / schematicsAllowed / attackMode / pvp / coreCapture` 变成可点击 toggle；
+    - `MapPlayDialog -> @customize` 子弹窗现在会命中规则行，分发 `ToggleCustomRule(...)`，直接更新 `map_play_rules`，后续 `@play` 会使用已修改 rules；
+    - 规则行改为按钮式可见行，禁用态（如关闭 waves 后 wave timer/sending）降低透明度并不分发点击；
+    - Editor 的 custom map `Delete` 不再只删内存列表：现在会解析 `maps/custom/...` 到 `client.context.paths.map_dir` 并删除真实 `.msav` 文件，之后刷新/新 launcher 扫描不会把已删除地图带回来；
+    - 相关测试固定英文 locale，避免随系统默认中文 locale 导致英文断言漂移。
+  - `README.md`
+    - 迁移百分比更新为 `83.7%`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_delete_custom_map_removes_map_dir_file_and_refresh_stays_deleted --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop editor --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop map_play --lib -- --nocapture`
+  - `cargo build --release -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - `CustomRulesDialog` 仍未完整迁移 Java 的 `@edit -> @waves.edit -> copy/load/reset` 二级弹层、数字输入、天气编辑、单位/方块 ban 列表、队伍规则等；
+  - `Open In Editor` 仍需从 route shell 推进到真实 `beginEditMap`/地图编辑器状态；
+  - Save/Load 仍缺完整前端闭环、真实 snapshot load/save UI 遮罩/错误/预览链路；Java↔Rust 联机 smoke test 仍未完成。
+
 ## 705. Editor Import Map 接入 FileChooser、MapIO 解析与 custom map 列表刷新
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

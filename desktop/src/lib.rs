@@ -753,6 +753,89 @@ impl DesktopSchematicCardAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopCustomRulesToggle {
+    Waves,
+    WaveSending,
+    WaveTimer,
+    InfiniteResources,
+    SchematicsAllowed,
+    AttackMode,
+    Pvp,
+    CoreCapture,
+}
+
+impl DesktopCustomRulesToggle {
+    fn label_key(self) -> &'static str {
+        match self {
+            Self::Waves => "@rules.waves",
+            Self::WaveSending => "@rules.wavesending",
+            Self::WaveTimer => "@rules.wavetimer",
+            Self::InfiniteResources => "@rules.infiniteresources",
+            Self::SchematicsAllowed => "@rules.schematic",
+            Self::AttackMode => "@rules.attack",
+            Self::Pvp => "@mode.pvp.name",
+            Self::CoreCapture => "@rules.corecapture",
+        }
+    }
+
+    fn value(self, rules: &Rules) -> bool {
+        match self {
+            Self::Waves => rules.waves,
+            Self::WaveSending => rules.wave_sending,
+            Self::WaveTimer => rules.wave_timer,
+            Self::InfiniteResources => rules.infinite_resources,
+            Self::SchematicsAllowed => rules.schematics_allowed,
+            Self::AttackMode => rules.attack_mode,
+            Self::Pvp => rules.pvp,
+            Self::CoreCapture => rules.core_capture,
+        }
+    }
+
+    fn enabled(self, rules: &Rules) -> bool {
+        match self {
+            Self::WaveSending | Self::WaveTimer => rules.waves,
+            _ => true,
+        }
+    }
+
+    fn toggle(self, rules: &mut Rules) {
+        match self {
+            Self::Waves => rules.waves = !rules.waves,
+            Self::WaveSending => rules.wave_sending = !rules.wave_sending,
+            Self::WaveTimer => rules.wave_timer = !rules.wave_timer,
+            Self::InfiniteResources => rules.infinite_resources = !rules.infinite_resources,
+            Self::SchematicsAllowed => rules.schematics_allowed = !rules.schematics_allowed,
+            Self::AttackMode => rules.attack_mode = !rules.attack_mode,
+            Self::Pvp => rules.pvp = !rules.pvp,
+            Self::CoreCapture => rules.core_capture = !rules.core_capture,
+        }
+    }
+}
+
+const MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::Waves,
+    DesktopCustomRulesToggle::WaveSending,
+    DesktopCustomRulesToggle::WaveTimer,
+];
+const MAP_PLAY_CUSTOM_RULE_RESOURCE_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::InfiniteResources,
+    DesktopCustomRulesToggle::SchematicsAllowed,
+];
+const MAP_PLAY_CUSTOM_RULE_ENEMY_TOGGLES: &[DesktopCustomRulesToggle] = &[
+    DesktopCustomRulesToggle::AttackMode,
+    DesktopCustomRulesToggle::Pvp,
+    DesktopCustomRulesToggle::CoreCapture,
+];
+const MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS: &[(&str, &[DesktopCustomRulesToggle])] = &[
+    ("@rules.title.waves", MAP_PLAY_CUSTOM_RULE_WAVE_TOGGLES),
+    (
+        "@rules.title.resourcesbuilding",
+        MAP_PLAY_CUSTOM_RULE_RESOURCE_TOGGLES,
+    ),
+    ("@rules.title.enemy", MAP_PLAY_CUSTOM_RULE_ENEMY_TOGGLES),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopMapCardActionKind {
     OpenPlay,
     OpenEditorInfo,
@@ -760,6 +843,7 @@ pub enum DesktopMapCardActionKind {
     PlaySelected,
     Customize,
     ShowModeHelp,
+    ToggleCustomRule(DesktopCustomRulesToggle),
     OpenInEditor,
     Delete,
     ViewWorkshop,
@@ -29997,6 +30081,54 @@ impl DesktopLauncher {
         rules
     }
 
+    fn map_play_customize_content_rect(child: RenderRect) -> RenderRect {
+        RenderRect::new(
+            child.x + 28.0,
+            child.y + 62.0,
+            child.width - 56.0,
+            child.height - 156.0,
+        )
+    }
+
+    fn map_play_customize_toggle_rects(
+        content: RenderRect,
+    ) -> Vec<(DesktopCustomRulesToggle, RenderRect)> {
+        let mut y = content.y + content.height - 20.0;
+        let mut rects = Vec::new();
+        for (_, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
+            if y < content.y + 34.0 {
+                break;
+            }
+            y -= 36.0;
+            for toggle in *toggles {
+                if y < content.y + 18.0 {
+                    return rects;
+                }
+                rects.push((
+                    *toggle,
+                    RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0),
+                ));
+                y -= 24.0;
+            }
+            y -= 10.0;
+        }
+        rects
+    }
+
+    fn toggle_map_play_custom_rule(&mut self, index: usize, toggle: DesktopCustomRulesToggle) {
+        let Some(map) = self.map_list_cards.get(index) else {
+            return;
+        };
+        let mut rules = self
+            .map_play_rules
+            .clone()
+            .unwrap_or_else(|| Self::map_play_rules_for_mode(map, self.map_play_selected_mode));
+        if toggle.enabled(&rules) {
+            toggle.toggle(&mut rules);
+            self.map_play_rules = Some(rules);
+        }
+    }
+
     fn map_play_high_score(&self, map: &MapDescriptor) -> i32 {
         let key = map.high_score_key();
         self.settings_overrides
@@ -31624,6 +31756,30 @@ impl DesktopLauncher {
             let dialog = Self::map_card_dialog_rect_for_panel(panel);
             if self.map_play_mode_help_dialog_open || self.map_play_customize_dialog_open {
                 let child = Self::map_play_child_dialog_rect(dialog);
+                if self.map_play_customize_dialog_open {
+                    if let Some(index) = self.map_play_dialog_index {
+                        let content = Self::map_play_customize_content_rect(child);
+                        let rules = self
+                            .map_play_rules
+                            .clone()
+                            .or_else(|| {
+                                self.map_list_cards.get(index).map(|map| {
+                                    Self::map_play_rules_for_mode(map, self.map_play_selected_mode)
+                                })
+                            })
+                            .unwrap_or_default();
+                        for (toggle, rect) in Self::map_play_customize_toggle_rects(content) {
+                            if rect.contains_point(point) && toggle.enabled(&rules) {
+                                return Some(DesktopMenuRouteShellAction::MapCard(
+                                    DesktopMapCardAction::new(
+                                        index,
+                                        DesktopMapCardActionKind::ToggleCustomRule(toggle),
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
                 let close = if self.map_play_mode_help_dialog_open {
                     Self::map_play_help_dialog_ok_rect(child)
                 } else {
@@ -33275,6 +33431,11 @@ impl DesktopLauncher {
                             self.map_play_mode_help_dialog_open = true;
                             self.map_play_customize_dialog_open = false;
                         }
+                        DesktopMapCardActionKind::ToggleCustomRule(toggle) => {
+                            self.toggle_map_play_custom_rule(action.index, toggle);
+                            self.map_play_customize_dialog_open = true;
+                            self.map_play_mode_help_dialog_open = false;
+                        }
                         DesktopMapCardActionKind::OpenInEditor => {
                             self.active_menu_route = Some(DesktopMenuRoute::Editor);
                             self.editor_map_info_dialog_index = Some(action.index);
@@ -33285,6 +33446,23 @@ impl DesktopLauncher {
                             self.map_play_playtesting = false;
                         }
                         DesktopMapCardActionKind::Delete => {
+                            let deleted_file = self
+                                .map_list_cards
+                                .get(action.index)
+                                .filter(|map| map.custom)
+                                .and_then(|map| self.editor_custom_map_file_for_descriptor(map));
+                            if let Some(path) = deleted_file.as_ref() {
+                                match std::fs::remove_file(path) {
+                                    Ok(()) => {}
+                                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                                    Err(error) => {
+                                        self.editor_import_error = Some(format!(
+                                            "failed to delete map {}: {error}",
+                                            path.display()
+                                        ));
+                                    }
+                                }
+                            }
                             self.map_list_cards.remove(action.index);
                             self.map_play_dialog_index = None;
                             self.editor_map_info_dialog_index = None;
@@ -38478,12 +38656,7 @@ impl DesktopLauncher {
             layer + 0.005,
         ));
 
-        let content = RenderRect::new(
-            child.x + 28.0,
-            child.y + 62.0,
-            child.width - 56.0,
-            child.height - 156.0,
-        );
+        let content = Self::map_play_customize_content_rect(child);
         pass.push(RenderCommand::draw_sprite(
             Self::settings_drawable_symbol("button"),
             content,
@@ -38498,61 +38671,14 @@ impl DesktopLauncher {
             layer + 0.007,
         ));
 
-        let toggle_label = |key: &str, value: bool| {
-            format!(
-                "{} {}",
-                if value { "✓" } else { "□" },
-                self.localize_bundle_markup_text(key)
-            )
-        };
-        let categories = [
-            (
-                self.localize_bundle_markup_text("@rules.title.waves"),
-                vec![
-                    toggle_label("@rules.waves", rules.waves),
-                    toggle_label("@rules.wavetimer", rules.wave_timer),
-                ],
-            ),
-            (
-                self.localize_bundle_markup_text("@rules.title.resourcesbuilding"),
-                vec![
-                    toggle_label("@rules.infiniteresources", rules.infinite_resources),
-                    toggle_label("@rules.schematic", rules.schematics_allowed),
-                ],
-            ),
-            (
-                self.localize_bundle_markup_text("@rules.title.enemy"),
-                vec![
-                    toggle_label("@rules.attack", rules.attack_mode),
-                    format!(
-                        "{}: {}",
-                        self.localize_bundle_markup_text("@mode.pvp.name"),
-                        rules.pvp
-                    ),
-                ],
-            ),
-            (
-                self.localize_bundle_markup_text("@rules.title.planet"),
-                vec![
-                    format!(
-                        "{}: {}",
-                        self.localize_bundle_markup_text("@maps"),
-                        map.plain_name()
-                    ),
-                    format!("Planet: {}", rules.planet),
-                    format!("Environment: {}", rules.env),
-                ],
-            ),
-        ];
-
         let mut y = content.y + content.height - 20.0;
         let mut row_index = 0usize;
-        'categories: for (title, rows) in categories {
+        'categories: for (title_key, toggles) in MAP_PLAY_CUSTOM_RULE_TOGGLE_GROUPS {
             if y < content.y + 34.0 {
                 break;
             }
             pass.push(RenderCommand::draw_text_styled(
-                title,
+                self.localize_bundle_markup_text(*title_key),
                 RenderPoint::new(content.x + 14.0, y),
                 [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
                 11.0,
@@ -38571,14 +38697,37 @@ impl DesktopLauncher {
                 layer + 0.011 + row_index as f32 * 0.001,
             ));
             y -= 20.0;
-            for row in rows {
+            for toggle in *toggles {
                 if y < content.y + 18.0 {
                     break 'categories;
                 }
+                let enabled = toggle.enabled(&rules);
+                let value = toggle.value(&rules);
+                let row_rect =
+                    RenderRect::new(content.x + 16.0, y - 12.0, content.width - 32.0, 22.0);
+                pass.push(RenderCommand::draw_sprite(
+                    Self::settings_drawable_symbol("button"),
+                    row_rect,
+                    if enabled {
+                        [1.0, 1.0, 1.0, 0.32]
+                    } else {
+                        [1.0, 1.0, 1.0, 0.15]
+                    },
+                    0.0,
+                    layer + 0.0115 + row_index as f32 * 0.001,
+                ));
                 pass.push(RenderCommand::draw_text_styled(
-                    row,
+                    format!(
+                        "{} {}",
+                        if value { "✓" } else { "□" },
+                        self.localize_bundle_markup_text(toggle.label_key())
+                    ),
                     RenderPoint::new(content.x + 22.0, y),
-                    [0.82, 0.91, 0.98, 1.0],
+                    if enabled {
+                        [0.82, 0.91, 0.98, 1.0]
+                    } else {
+                        [0.52, 0.58, 0.64, 0.72]
+                    },
                     10.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Start)
@@ -38592,6 +38741,37 @@ impl DesktopLauncher {
                 row_index += 1;
             }
             y -= 10.0;
+        }
+        if y >= content.y + 18.0 {
+            for row in [
+                self.localize_bundle_markup_text("@rules.title.planet"),
+                format!(
+                    "{}: {}",
+                    self.localize_bundle_markup_text("@maps"),
+                    map.plain_name()
+                ),
+                format!("Planet: {}", rules.planet),
+                format!("Environment: {}", rules.env),
+            ] {
+                if y < content.y + 18.0 {
+                    break;
+                }
+                pass.push(RenderCommand::draw_text_styled(
+                    row,
+                    RenderPoint::new(content.x + 22.0, y),
+                    [0.62, 0.72, 0.80, 1.0],
+                    9.5,
+                    0.0,
+                    RenderTextStyle::new(RenderTextAlign::Start)
+                        .with_vertical_align(RenderTextVerticalAlign::Center)
+                        .with_markup(true)
+                        .with_wrap_width((content.width - 44.0).max(80.0))
+                        .with_integer_position(true),
+                    layer + 0.026 + row_index as f32 * 0.001,
+                ));
+                y -= 20.0;
+                row_index += 1;
+            }
         }
         for (index, line) in [
             self.localize_bundle_markup_text("@edit"),
@@ -64105,6 +64285,7 @@ version: "2.0.0"
 
         let viewport = DesktopSurfaceSize::new(1280, 720);
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher
             .settings_overrides
             .insert(high_score_key, "42".to_string());
@@ -64307,7 +64488,58 @@ version: "2.0.0"
         assert!(customize_texts.contains(&"Planet"));
         assert!(customize_texts.contains(&"✓ Waves"));
         assert!(customize_texts.contains(&"□ Attack Mode"));
-        assert!(customize_texts.contains(&"PvP: false"));
+        assert!(customize_texts.contains(&"□ PvP"));
+
+        let child = DesktopLauncher::map_play_child_dialog_rect(dialog);
+        let content = DesktopLauncher::map_play_customize_content_rect(child);
+        let attack_toggle = DesktopLauncher::map_play_customize_toggle_rects(content)
+            .into_iter()
+            .find(|(toggle, _)| *toggle == super::DesktopCustomRulesToggle::AttackMode)
+            .map(|(_, rect)| rect.center())
+            .expect("attack custom rule row should be visible");
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                viewport,
+                attack_toggle.x,
+                attack_toggle.y
+            ),
+            Some(super::DesktopMenuRouteShellAction::MapCard(
+                super::DesktopMapCardAction::new(
+                    0,
+                    super::DesktopMapCardActionKind::ToggleCustomRule(
+                        super::DesktopCustomRulesToggle::AttackMode
+                    )
+                )
+            ))
+        );
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(
+                0,
+                super::DesktopMapCardActionKind::ToggleCustomRule(
+                    super::DesktopCustomRulesToggle::AttackMode,
+                ),
+            ),
+        ));
+        assert!(launcher
+            .map_play_rules
+            .as_ref()
+            .map(|rules| rules.attack_mode)
+            .unwrap_or(false));
+        let toggled_frame = launcher.menu_graphics_frame_for_surface(3, render_viewport);
+        let toggled_texts = toggled_frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("custom rules dialog should rerender after toggle")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(toggled_texts.contains(&"✓ Attack Mode"));
     }
 
     #[test]
@@ -64871,6 +65103,58 @@ version: "2.0.0"
             launcher.editor_import_error.as_deref(),
             Some("@editor.import.exists")
         );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn desktop_launcher_editor_delete_custom_map_removes_map_dir_file_and_refresh_stays_deleted() {
+        let root = temp_desktop_path("editor-delete-custom-map");
+        let map_dir = root.join("maps");
+        std::fs::create_dir_all(&map_dir).expect("map fixture dir should be writable");
+
+        let mut tags = BTreeMap::new();
+        tags.insert("name".into(), "Delete Persisted".into());
+        tags.insert("width".into(), "64".into());
+        tags.insert("height".into(), "64".into());
+        let mut bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut bytes, LATEST_SAVE_VERSION, &tags)
+            .expect("map meta should encode");
+        let map_file = map_dir.join("delete-persisted.msav");
+        std::fs::write(&map_file, bytes).expect("custom map should write");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.client.context.paths.map_dir = map_dir.display().to_string();
+        launcher.refresh_map_list_cards_from_assets();
+        let index = launcher
+            .map_list_cards
+            .iter()
+            .position(|map| map.name() == "Delete Persisted" && map.custom)
+            .expect("custom map should be discovered from map_dir");
+
+        launcher.dispatch_menu_action(MenuButtonRole::Editor);
+        launcher.dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::MapCard(
+            super::DesktopMapCardAction::new(index, super::DesktopMapCardActionKind::Delete),
+        ));
+
+        assert!(
+            !map_file.exists(),
+            "Editor delete should remove the custom .msav file"
+        );
+        assert!(!launcher
+            .map_list_cards
+            .iter()
+            .any(|map| map.name() == "Delete Persisted"));
+
+        let mut fresh = DesktopLauncher::new(Vec::new());
+        fresh.client.context.paths.data_dir = root.display().to_string();
+        fresh.client.context.paths.map_dir = map_dir.display().to_string();
+        fresh.refresh_map_list_cards_from_assets();
+        assert!(!fresh
+            .map_list_cards
+            .iter()
+            .any(|map| map.name() == "Delete Persisted"));
 
         std::fs::remove_dir_all(root).ok();
     }
