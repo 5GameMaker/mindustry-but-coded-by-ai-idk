@@ -17,6 +17,38 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 705. Editor Import Map 接入 FileChooser、MapIO 解析与 custom map 列表刷新
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **83.6%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版，而不是只做主菜单或孤立模块。
+- Java 对照依据：
+  - `EditorMapsDialog` 的 `@editor.importmap` 会触发 `platform.showFileChooser(true, mapExtension, ...)`；
+  - `MapIO.isImage(file)` 拒绝图片，`MapIO.createMap(file, true)` 读取地图元数据；
+  - 内置同名地图不可覆盖，custom 同名地图需要覆盖确认；
+  - `Maps.load()` 会把 `customMapDirectory` 下的 `.msav` 纳入 custom maps。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `ImportEditorMap` 从只置位 `editor_import_map_dialog_open` 的假闭环改为真实 `FileChooserRequest` 流程，记录 `last_editor_import_request`，请求标题 `@editor.importmap`、扩展名 `msav`；
+    - 新增 `DesktopEditorMapImportResult` 与 overwrite pending 状态，导入成功后记录 source/destination/map name/replaced/status；
+    - 新增 `import_editor_map_file()` / `confirm_editor_import_overwrite()`：读取 `.msav` bytes、拒绝 PNG 图片、用 `read_deflated_map_info(..., true)` 解析地图信息、补齐缺失 name、复制到 `client.context.paths.map_dir`，再把 custom `MapDescriptor` 插入并刷新地图列表；
+    - 同名内置地图返回 `@editor.import.exists`，同名 custom 地图弹出 `@editor.overwrite.confirm` 风格确认，确认后移除旧 custom 记录并导入新文件；
+    - `refresh_map_list_cards_from_assets()` 现在除了 builtin asset roots，也扫描 `client.context.paths.map_dir`，使 Editor/CustomGame 能看到用户导入地图；
+    - Editor 导入错误/覆盖确认接入可见 modal、Cancel/Overwrite 命中和 Back/Esc 清理，避免继续停留在不可见 bool 状态。
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 `editor.errorimage`、`editor.errornot`、`editor.errorname`、`editor.import.exists`、`editor.overwrite.confirm` 的英/简中/繁中文案，降低 raw key 外露。
+  - `README.md`
+    - 迁移百分比更新为 `83.6%`。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_list_route_controls_dispatch_actions --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_editor_import_map_reads_msav_rejects_images_and_refreshes_custom_maps --lib -- --nocapture`
+  - `cargo test -p mindustry-desktop editor --lib -- --nocapture`
+  - `cargo test -p mindustry-core ui --lib -- --nocapture`
+  - `cargo build --release -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - Editor Import Map 已具备 chooser 请求、解析、图片拒绝、custom map dir 导入、同名冲突与列表刷新闭环，但还没有完整 Java `ui.editor.show()` 地图编辑器视图、preview 生成、真实地图保存与编辑器工具链；
+  - 后续继续前端优先：所有子菜单必须继续减少 raw key/调试壳、接近原版 Scene2D 结构，并持续接入 runtime/render/backend 主链路，不能退化为相互独立模块。
+
 ## 704. Editor New Map 接入原版 showTextInput 弹窗与 MapMakeEvent 钩子
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

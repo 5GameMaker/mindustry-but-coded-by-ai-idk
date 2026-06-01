@@ -80,12 +80,12 @@ use mindustry_core::mindustry::input::input_handler::{
 };
 use mindustry_core::mindustry::io::versions::read_legacy_servers;
 use mindustry_core::mindustry::io::{
-    backup_file_for_path, collect_valid_save_slot_records, read_bullet_sync, read_decal_sync,
-    read_deflated_map_info, read_deflated_save_meta, read_deflated_save_meta_with_backup,
-    read_effect_state_sync, read_fire_sync, read_puddle_sync, read_unit_sync,
-    read_weather_state_sync, read_world_label_sync, write_deflated_save_meta_prefix,
-    ContentHeaderSnapshot, LegacyTeamBlocks, SaveSlotRecord, TeamId, TypeValue, Vec2,
-    LATEST_SAVE_VERSION,
+    backup_file_for_path, collect_valid_save_slot_records, is_map_image_bytes, read_bullet_sync,
+    read_decal_sync, read_deflated_map_info, read_deflated_save_meta,
+    read_deflated_save_meta_with_backup, read_effect_state_sync, read_fire_sync, read_puddle_sync,
+    read_unit_sync, read_weather_state_sync, read_world_label_sync,
+    write_deflated_save_meta_prefix, ContentHeaderSnapshot, LegacyTeamBlocks, SaveSlotRecord,
+    TeamId, TypeValue, Vec2, LATEST_SAVE_VERSION,
 };
 use mindustry_core::mindustry::maps::MapDescriptor;
 use mindustry_core::mindustry::modsys::{
@@ -2890,6 +2890,8 @@ pub enum DesktopMenuRouteShellAction {
     ConfirmEditorNewMap,
     CancelEditorNewMap,
     ImportEditorMap,
+    ConfirmEditorImportOverwrite,
+    CancelEditorImportOverwrite,
     OpenTechTreeSelect,
     CloseTechTreeSelect,
     SelectTechTreeRoot(usize),
@@ -3109,6 +3111,22 @@ pub struct DesktopLoadGameExportResult {
     pub map_name: Option<String>,
     pub timestamp: i64,
     pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopEditorMapImportResult {
+    pub source: String,
+    pub destination: String,
+    pub map_name: String,
+    pub replaced: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopEditorMapImportOverwrite {
+    pub source: String,
+    pub map_name: String,
+    pub existing_file: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17021,6 +17039,10 @@ pub struct DesktopLauncher {
     pub editor_new_map_error: Option<String>,
     pub last_editor_new_map_name: Option<String>,
     pub editor_import_map_dialog_open: bool,
+    pub last_editor_import_request: Option<FileChooserRequest>,
+    pub last_editor_import_result: Option<DesktopEditorMapImportResult>,
+    pub editor_import_error: Option<String>,
+    pub editor_import_overwrite_pending: Option<DesktopEditorMapImportOverwrite>,
     pub tech_tree_selected_root: Option<String>,
     pub tech_tree_select_dialog_open: bool,
     pub tech_tree_selected_node: Option<TechNodeId>,
@@ -18171,6 +18193,10 @@ impl DesktopLauncher {
             editor_new_map_error: None,
             last_editor_new_map_name: None,
             editor_import_map_dialog_open: false,
+            last_editor_import_request: None,
+            last_editor_import_result: None,
+            editor_import_error: None,
+            editor_import_overwrite_pending: None,
             tech_tree_selected_root: None,
             tech_tree_select_dialog_open: false,
             tech_tree_selected_node: None,
@@ -22276,6 +22302,15 @@ impl DesktopLauncher {
                 Some(DesktopMenuRouteShellAction::SaveGameOverwriteCancel);
             return true;
         }
+        if self.active_menu_route == Some(DesktopMenuRoute::Editor)
+            && (self.editor_import_overwrite_pending.is_some()
+                || self.editor_import_error.is_some())
+        {
+            self.clear_editor_import_map_dialog();
+            self.last_menu_route_shell_action =
+                Some(DesktopMenuRouteShellAction::CancelEditorImportOverwrite);
+            return true;
+        }
         if let Some(route) = self.active_menu_route.take() {
             if route == DesktopMenuRoute::Campaign {
                 self.campaign_planet_dialog = None;
@@ -22292,7 +22327,7 @@ impl DesktopLauncher {
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.clear_editor_new_map_dialog();
-            self.editor_import_map_dialog_open = false;
+            self.clear_editor_import_map_dialog();
             self.load_game_search_focused = false;
             self.last_database_content_opened = None;
             self.load_game_pending_load = None;
@@ -22348,7 +22383,7 @@ impl DesktopLauncher {
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.clear_editor_new_map_dialog();
-            self.editor_import_map_dialog_open = false;
+            self.clear_editor_import_map_dialog();
             self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -22378,7 +22413,7 @@ impl DesktopLauncher {
                 self.map_list_planet_filter_dialog_open = false;
                 self.map_list_search_focused = false;
                 self.clear_editor_new_map_dialog();
-                self.editor_import_map_dialog_open = false;
+                self.clear_editor_import_map_dialog();
                 self.load_game_search_focused = false;
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
@@ -22421,7 +22456,7 @@ impl DesktopLauncher {
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.clear_editor_new_map_dialog();
-            self.editor_import_map_dialog_open = false;
+            self.clear_editor_import_map_dialog();
             self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -22443,7 +22478,7 @@ impl DesktopLauncher {
             self.map_list_planet_filter_dialog_open = false;
             self.map_list_search_focused = false;
             self.clear_editor_new_map_dialog();
-            self.editor_import_map_dialog_open = false;
+            self.clear_editor_import_map_dialog();
             self.database_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -22533,7 +22568,7 @@ impl DesktopLauncher {
             self.tech_tree_selected_node = None;
             self.map_list_search_focused = false;
             self.clear_editor_new_map_dialog();
-            self.editor_import_map_dialog_open = false;
+            self.clear_editor_import_map_dialog();
             self.load_game_search_focused = false;
             self.map_play_dialog_index = None;
             self.editor_map_info_dialog_index = None;
@@ -29789,6 +29824,8 @@ impl DesktopLauncher {
             || self.map_play_dialog_index.is_some()
             || self.editor_map_info_dialog_index.is_some()
             || self.editor_new_map_dialog_open
+            || self.editor_import_overwrite_pending.is_some()
+            || self.editor_import_error.is_some()
         {
             return false;
         }
@@ -30022,6 +30059,10 @@ impl DesktopLauncher {
         if cards.is_empty() {
             cards = Self::fallback_builtin_map_cards();
         }
+        cards.extend(self.load_custom_map_cards_from_configured_dir());
+        let mut seen_files = BTreeSet::new();
+        cards.retain(|map| seen_files.insert(map.file.clone()));
+        cards.sort_by_key(|map| map.plain_name());
         self.merge_map_preview_textures(&cards);
         self.map_list_cards = cards;
         self.map_list_cards.len()
@@ -30069,6 +30110,12 @@ impl DesktopLauncher {
         self.editor_new_map_error = None;
     }
 
+    fn clear_editor_import_map_dialog(&mut self) {
+        self.editor_import_map_dialog_open = false;
+        self.editor_import_error = None;
+        self.editor_import_overwrite_pending = None;
+    }
+
     fn commit_editor_new_map(&mut self) -> bool {
         if !self.editor_new_map_dialog_open {
             return false;
@@ -30114,6 +30161,245 @@ impl DesktopLauncher {
         self.map_list_search_focused = false;
         self.last_menu_info_message = Some(format!("MapMakeEvent: {name}"));
         true
+    }
+
+    fn dispatch_editor_import_map_with_platform<P: Platform>(
+        &mut self,
+        platform: &mut P,
+    ) -> FileChooserRequest {
+        self.clear_editor_new_map_dialog();
+        self.editor_import_map_dialog_open = true;
+        self.editor_import_error = None;
+        self.editor_import_overwrite_pending = None;
+        self.map_list_search_focused = false;
+        let request = platform.show_file_chooser(true, "@editor.importmap", "msav");
+        self.last_editor_import_request = Some(request.clone());
+        request
+    }
+
+    fn editor_import_map_name_from_tags(tags: &BTreeMap<String, String>) -> Option<String> {
+        tags.get("name")
+            .or_else(|| tags.get("mapname"))
+            .map(|name| name.trim())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    }
+
+    fn next_unknown_editor_import_name(&self) -> String {
+        let mut index = 1usize;
+        loop {
+            let name = format!("unknown{index}");
+            if !self
+                .map_list_cards
+                .iter()
+                .any(|map| map.name().eq_ignore_ascii_case(&name))
+            {
+                return name;
+            }
+            index += 1;
+        }
+    }
+
+    fn editor_import_source_file_name(source: &Path, map_name: &str) -> String {
+        let file_name = source
+            .file_name()
+            .and_then(|file_name| file_name.to_str())
+            .filter(|file_name| !file_name.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}.msav", Self::editor_new_map_file_slug(map_name)));
+        if file_name
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.eq_ignore_ascii_case("msav"))
+            .unwrap_or(false)
+        {
+            file_name
+        } else {
+            format!("{file_name}.msav")
+        }
+    }
+
+    fn editor_map_dir(&self) -> PathBuf {
+        PathBuf::from(&self.client.context.paths.map_dir)
+    }
+
+    fn next_editor_map_import_destination(&self, source: &Path, map_name: &str) -> PathBuf {
+        let map_dir = self.editor_map_dir();
+        let file_name = Self::editor_import_source_file_name(source, map_name);
+        let candidate = map_dir.join(&file_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        let path = Path::new(&file_name);
+        let stem = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.trim().is_empty())
+            .unwrap_or("map");
+        let extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("msav");
+        let mut index = 1usize;
+        loop {
+            let candidate = map_dir.join(format!("{stem}-{index}.{extension}"));
+            if !candidate.exists() {
+                return candidate;
+            }
+            index += 1;
+        }
+    }
+
+    fn editor_custom_map_file_for_descriptor(&self, map: &MapDescriptor) -> Option<PathBuf> {
+        let relative = map.file.strip_prefix("maps/custom/")?;
+        Some(self.editor_map_dir().join(relative))
+    }
+
+    fn map_list_custom_conflict_for_name(&self, name: &str) -> Option<(usize, &MapDescriptor)> {
+        self.map_list_cards
+            .iter()
+            .enumerate()
+            .find(|(_, map)| map.custom && map.name().eq_ignore_ascii_case(name))
+    }
+
+    fn map_list_builtin_conflicts_name(&self, name: &str) -> bool {
+        self.map_list_cards
+            .iter()
+            .any(|map| !map.custom && map.name().eq_ignore_ascii_case(name))
+    }
+
+    fn import_editor_map_file(
+        &mut self,
+        source: impl AsRef<Path>,
+    ) -> Result<DesktopEditorMapImportResult, String> {
+        self.finish_import_editor_map_file(source.as_ref(), None)
+    }
+
+    fn confirm_editor_import_overwrite(&mut self) -> Result<DesktopEditorMapImportResult, String> {
+        let pending = self
+            .editor_import_overwrite_pending
+            .clone()
+            .ok_or_else(|| "@editor.overwrite.confirm".to_string())?;
+        self.finish_import_editor_map_file(Path::new(&pending.source), Some(pending.existing_file))
+    }
+
+    fn finish_import_editor_map_file(
+        &mut self,
+        source: &Path,
+        overwrite_existing_file: Option<String>,
+    ) -> Result<DesktopEditorMapImportResult, String> {
+        let bytes = std::fs::read(source).map_err(|error| {
+            let message = format!("failed to read imported map {}: {error}", source.display());
+            self.editor_import_error = Some(message.clone());
+            message
+        })?;
+        if is_map_image_bytes(&bytes) {
+            let message = "@editor.errorimage".to_string();
+            self.editor_import_error = Some(message.clone());
+            self.editor_import_map_dialog_open = true;
+            return Err(message);
+        }
+        let mut info = read_deflated_map_info(bytes.as_slice(), true).map_err(|_| {
+            let message = "@editor.errornot".to_string();
+            self.editor_import_error = Some(message.clone());
+            self.editor_import_map_dialog_open = true;
+            message
+        })?;
+        let map_name = Self::editor_import_map_name_from_tags(&info.tags)
+            .unwrap_or_else(|| self.next_unknown_editor_import_name());
+        info.tags.insert("name".to_string(), map_name.clone());
+
+        if self.map_list_builtin_conflicts_name(&map_name) {
+            let message = "@editor.import.exists".to_string();
+            self.editor_import_error = Some(message.clone());
+            self.editor_import_map_dialog_open = true;
+            return Err(message);
+        }
+
+        if overwrite_existing_file.is_none() {
+            if let Some((_, existing)) = self.map_list_custom_conflict_for_name(&map_name) {
+                let existing_file = existing.file.clone();
+                let message = "@editor.overwrite.confirm".to_string();
+                self.editor_import_error = Some(message.clone());
+                self.editor_import_overwrite_pending = Some(DesktopEditorMapImportOverwrite {
+                    source: source.display().to_string(),
+                    map_name,
+                    existing_file,
+                });
+                self.editor_import_map_dialog_open = true;
+                return Err(message);
+            }
+        }
+
+        let replaced = overwrite_existing_file;
+        let replaced_path = replaced.as_ref().and_then(|file| {
+            self.map_list_cards
+                .iter()
+                .find(|map| map.file == *file)
+                .and_then(|map| self.editor_custom_map_file_for_descriptor(map))
+        });
+        if let Some(path) = replaced_path.as_ref() {
+            if path != source {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        if let Some(file) = replaced.as_ref() {
+            self.map_list_cards.retain(|map| map.file != *file);
+        }
+
+        let destination = self.next_editor_map_import_destination(source, &map_name);
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                let message = format!(
+                    "failed to create imported map dir {}: {error}",
+                    parent.display()
+                );
+                self.editor_import_error = Some(message.clone());
+                message
+            })?;
+        }
+        std::fs::write(&destination, &bytes).map_err(|error| {
+            let message = format!(
+                "failed to import map {} -> {}: {error}",
+                source.display(),
+                destination.display()
+            );
+            self.editor_import_error = Some(message.clone());
+            message
+        })?;
+        let map_dir = self.editor_map_dir();
+        let relative = destination
+            .strip_prefix(&map_dir)
+            .unwrap_or(&destination)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let map = MapDescriptor::new(
+            format!("maps/custom/{relative}"),
+            info.width,
+            info.height,
+            info.tags,
+            true,
+            info.version,
+            info.build,
+        );
+        self.map_list_cards.push(map);
+        self.map_list_cards.sort_by_key(|map| map.plain_name());
+        let cards_for_preview = self.map_list_cards.clone();
+        self.merge_map_preview_textures(&cards_for_preview);
+        self.map_list_scroll_offset = 0;
+        self.editor_import_map_dialog_open = false;
+        self.editor_import_error = None;
+        self.editor_import_overwrite_pending = None;
+        self.map_list_search_focused = false;
+        let result = DesktopEditorMapImportResult {
+            source: source.display().to_string(),
+            destination: destination.display().to_string(),
+            map_name: map_name.clone(),
+            replaced,
+            status: "imported".to_string(),
+        };
+        self.last_editor_import_result = Some(result.clone());
+        self.last_menu_info_message = Some(format!("MapImportEvent: {map_name}"));
+        Ok(result)
     }
 
     fn map_preview_dir(&self) -> PathBuf {
@@ -30180,6 +30466,16 @@ impl DesktopLauncher {
         cards
     }
 
+    fn load_custom_map_cards_from_configured_dir(&self) -> Vec<MapDescriptor> {
+        let root = self.editor_map_dir();
+        let mut cards = Vec::new();
+        if root.is_dir() {
+            let _ = Self::collect_custom_map_cards_from_dir(&root, &root, &mut cards);
+        }
+        cards.sort_by_key(|map| map.plain_name());
+        cards
+    }
+
     fn map_asset_candidate_roots() -> Vec<PathBuf> {
         let mut roots = Vec::new();
         if let Some(value) = std::env::var_os("MINDUSTRY_MAPS_DIR") {
@@ -30213,11 +30509,35 @@ impl DesktopLauncher {
         dir: &Path,
         out: &mut Vec<MapDescriptor>,
     ) -> io::Result<()> {
+        Self::collect_map_cards_from_dir_with_custom(root, dir, out, false, "maps")
+    }
+
+    fn collect_custom_map_cards_from_dir(
+        root: &Path,
+        dir: &Path,
+        out: &mut Vec<MapDescriptor>,
+    ) -> io::Result<()> {
+        Self::collect_map_cards_from_dir_with_custom(root, dir, out, true, "maps/custom")
+    }
+
+    fn collect_map_cards_from_dir_with_custom(
+        root: &Path,
+        dir: &Path,
+        out: &mut Vec<MapDescriptor>,
+        custom: bool,
+        file_prefix: &str,
+    ) -> io::Result<()> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
-                Self::collect_map_cards_from_dir(root, &path, out)?;
+                Self::collect_map_cards_from_dir_with_custom(
+                    root,
+                    &path,
+                    out,
+                    custom,
+                    file_prefix,
+                )?;
                 continue;
             }
             if path
@@ -30225,7 +30545,12 @@ impl DesktopLauncher {
                 .and_then(|extension| extension.to_str())
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("msav"))
             {
-                if let Ok(card) = Self::map_descriptor_from_asset_file(root, &path) {
+                let card = if custom {
+                    Self::map_descriptor_from_file(root, &path, true, file_prefix)
+                } else {
+                    Self::map_descriptor_from_asset_file(root, &path)
+                };
+                if let Ok(card) = card {
                     out.push(card);
                 }
             }
@@ -30234,19 +30559,33 @@ impl DesktopLauncher {
     }
 
     fn map_descriptor_from_asset_file(root: &Path, path: &Path) -> io::Result<MapDescriptor> {
+        Self::map_descriptor_from_file(root, path, false, "maps")
+    }
+
+    fn map_descriptor_from_file(
+        root: &Path,
+        path: &Path,
+        custom: bool,
+        file_prefix: &str,
+    ) -> io::Result<MapDescriptor> {
         let file = fs::File::open(path)?;
-        let info = read_deflated_map_info(file, false)?;
+        let mut info = read_deflated_map_info(file, custom)?;
+        if custom {
+            if let Some(name) = Self::editor_import_map_name_from_tags(&info.tags) {
+                info.tags.insert("name".to_string(), name);
+            }
+        }
         let relative = path
             .strip_prefix(root)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
         Ok(MapDescriptor::new(
-            format!("maps/{relative}"),
+            format!("{file_prefix}/{relative}"),
             info.width,
             info.height,
             info.tags,
-            false,
+            custom,
             info.version,
             info.build,
         ))
@@ -31189,6 +31528,21 @@ impl DesktopLauncher {
                 && Self::editor_new_map_button_rect(dialog, 1).contains_point(point)
             {
                 return Some(DesktopMenuRouteShellAction::ConfirmEditorNewMap);
+            }
+            return None;
+        }
+        if route == DesktopMenuRoute::Editor
+            && (self.editor_import_overwrite_pending.is_some()
+                || self.editor_import_error.is_some())
+        {
+            let dialog = Self::editor_new_map_dialog_rect_for_panel(panel);
+            if Self::editor_new_map_button_rect(dialog, 0).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::CancelEditorImportOverwrite);
+            }
+            if self.editor_import_overwrite_pending.is_some()
+                && Self::editor_new_map_button_rect(dialog, 1).contains_point(point)
+            {
+                return Some(DesktopMenuRouteShellAction::ConfirmEditorImportOverwrite);
             }
             return None;
         }
@@ -32298,7 +32652,7 @@ impl DesktopLauncher {
                 self.map_play_dialog_index = None;
                 self.editor_map_info_dialog_index = None;
                 self.clear_editor_new_map_dialog();
-                self.editor_import_map_dialog_open = false;
+                self.clear_editor_import_map_dialog();
                 self.load_game_search_focused = false;
                 self.load_game_rename_dialog_slot = None;
                 self.load_game_pending_load = None;
@@ -32988,8 +33342,14 @@ impl DesktopLauncher {
                 self.clear_editor_new_map_dialog();
             }
             DesktopMenuRouteShellAction::ImportEditorMap => {
-                self.clear_editor_new_map_dialog();
-                self.editor_import_map_dialog_open = true;
+                let mut platform = DefaultPlatform;
+                let _ = self.dispatch_editor_import_map_with_platform(&mut platform);
+            }
+            DesktopMenuRouteShellAction::ConfirmEditorImportOverwrite => {
+                let _ = self.confirm_editor_import_overwrite();
+            }
+            DesktopMenuRouteShellAction::CancelEditorImportOverwrite => {
+                self.clear_editor_import_map_dialog();
             }
             DesktopMenuRouteShellAction::OpenTechTreeSelect => {
                 self.tech_tree_select_dialog_open = true;
@@ -37580,6 +37940,7 @@ impl DesktopLauncher {
         self.push_map_list_filter_dialog(pass, panel);
         self.push_map_list_planet_filter_dialog(pass, panel);
         self.push_editor_new_map_dialog(pass, panel, route);
+        self.push_editor_import_map_dialog(pass, panel, route);
     }
 
     fn push_editor_new_map_dialog(
@@ -37697,6 +38058,101 @@ impl DesktopLauncher {
             Layer::END_PIXELED + 0.098,
             !self.editor_new_map_name_text.is_empty(),
         );
+    }
+
+    fn push_editor_import_map_dialog(
+        &self,
+        pass: &mut RenderPass,
+        panel: RenderRect,
+        route: DesktopMenuRoute,
+    ) {
+        if route != DesktopMenuRoute::Editor
+            || (self.editor_import_overwrite_pending.is_none()
+                && self.editor_import_error.is_none())
+        {
+            return;
+        }
+        let dialog = Self::editor_new_map_dialog_rect_for_panel(panel);
+        pass.push(RenderCommand::fill_rect(
+            panel,
+            [0.0, 0.0, 0.0, 0.48],
+            Layer::END_PIXELED + 0.090,
+        ));
+        pass.push(RenderCommand::draw_sprite(
+            Self::settings_drawable_symbol("pane"),
+            dialog,
+            [1.0, 1.0, 1.0, 0.98],
+            0.0,
+            Layer::END_PIXELED + 0.091,
+        ));
+        pass.push(RenderCommand::stroke_rect(
+            dialog,
+            [0.52, 0.68, 0.82, 0.95],
+            2.0,
+            Layer::END_PIXELED + 0.092,
+        ));
+        pass.push(RenderCommand::draw_text_styled(
+            self.localize_bundle_markup_text_or("@editor.importmap", "Import Map"),
+            RenderPoint::new(dialog.center().x, dialog.y + dialog.height - 30.0),
+            [0.94, 0.98, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.093,
+        ));
+        let message = self
+            .editor_import_overwrite_pending
+            .as_ref()
+            .map(|pending| {
+                format!(
+                    "{}\n{}",
+                    self.localize_bundle_markup_text_or("@editor.overwrite.confirm", "Overwrite?"),
+                    pending.map_name
+                )
+            })
+            .or_else(|| {
+                self.editor_import_error
+                    .as_deref()
+                    .map(|error| self.localize_bundle_markup_text(error))
+            })
+            .unwrap_or_else(|| {
+                self.localize_bundle_markup_text_or("@editor.errornot", "Invalid map file.")
+            });
+        pass.push(RenderCommand::draw_text_styled(
+            message,
+            RenderPoint::new(dialog.center().x, dialog.center().y + 4.0),
+            if self.editor_import_overwrite_pending.is_some() {
+                [0.94, 0.82, 0.54, 1.0]
+            } else {
+                [1.0, 0.52, 0.48, 1.0]
+            },
+            11.0,
+            0.0,
+            RenderTextStyle::new(RenderTextAlign::Center)
+                .with_vertical_align(RenderTextVerticalAlign::Center)
+                .with_integer_position(true)
+                .with_outline(true),
+            Layer::END_PIXELED + 0.095,
+        ));
+        self.push_settings_text_button(
+            pass,
+            Self::editor_new_map_button_rect(dialog, 0),
+            self.localize_bundle_markup_text("@cancel"),
+            None,
+            Layer::END_PIXELED + 0.098,
+        );
+        if self.editor_import_overwrite_pending.is_some() {
+            self.push_settings_text_button(
+                pass,
+                Self::editor_new_map_button_rect(dialog, 1),
+                self.localize_bundle_markup_text_or("@overwrite", "Overwrite"),
+                None,
+                Layer::END_PIXELED + 0.098,
+            );
+        }
     }
 
     fn push_map_card_dialog(
@@ -41285,6 +41741,27 @@ impl DesktopLauncher {
                     .unwrap_or("none")
             ));
             lines.push("event: MapMakeEvent hook -> editor map tags/name".into());
+        }
+        if let Some(request) = self.last_editor_import_request.as_ref() {
+            lines.push(format!(
+                "file chooser: @editor.importmap open={} extension={}",
+                request.open, request.extension
+            ));
+        }
+        if let Some(error) = self.editor_import_error.as_deref() {
+            lines.push(format!("dialog: EditorMapsDialog.import error={error}"));
+        }
+        if let Some(pending) = self.editor_import_overwrite_pending.as_ref() {
+            lines.push(format!(
+                "dialog: @editor.overwrite.confirm map={} existing={}",
+                pending.map_name, pending.existing_file
+            ));
+        }
+        if let Some(result) = self.last_editor_import_result.as_ref() {
+            lines.push(format!(
+                "event: maps.importMap {} -> {}",
+                result.map_name, result.destination
+            ));
         }
         lines
     }
@@ -64269,6 +64746,133 @@ version: "2.0.0"
         editor
             .dispatch_menu_route_shell_action(super::DesktopMenuRouteShellAction::ImportEditorMap);
         assert!(editor.editor_import_map_dialog_open);
+        assert_eq!(
+            editor.last_editor_import_request,
+            Some(FileChooserRequest::new(true, "@editor.importmap", "msav"))
+        );
+        assert!(editor
+            .editor_maps_route_lines()
+            .iter()
+            .any(|line| line.contains("file chooser: @editor.importmap")));
+    }
+
+    #[test]
+    fn desktop_launcher_editor_import_map_reads_msav_rejects_images_and_refreshes_custom_maps() {
+        let root = temp_desktop_path("editor-import-map");
+        let map_dir = root.join("maps");
+        std::fs::create_dir_all(&map_dir).expect("map fixture dir should be writable");
+        let source_dir = root.join("incoming");
+        std::fs::create_dir_all(&source_dir).expect("incoming fixture dir should be writable");
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.client.context.paths.data_dir = root.display().to_string();
+        launcher.client.context.paths.map_dir = map_dir.display().to_string();
+        launcher.map_list_cards = Vec::new();
+
+        let image_source = source_dir.join("image.msav");
+        std::fs::write(&image_source, b"\x89PNG\r\n\x1a\nnot-a-map")
+            .expect("png decoy should write");
+        assert_eq!(
+            launcher.import_editor_map_file(&image_source),
+            Err("@editor.errorimage".into())
+        );
+        assert_eq!(
+            launcher.editor_import_error.as_deref(),
+            Some("@editor.errorimage")
+        );
+
+        let mut imported_tags = BTreeMap::new();
+        imported_tags.insert("name".into(), "Imported Arena".into());
+        imported_tags.insert("author".into(), "Rust".into());
+        imported_tags.insert("width".into(), "64".into());
+        imported_tags.insert("height".into(), "48".into());
+        imported_tags.insert("build".into(), "1574".into());
+        let mut imported_bytes = Vec::new();
+        write_deflated_save_meta_prefix(&mut imported_bytes, LATEST_SAVE_VERSION, &imported_tags)
+            .expect("map meta should encode");
+        let imported_source = source_dir.join("arena.msav");
+        std::fs::write(&imported_source, imported_bytes).expect("map source should write");
+
+        let imported = launcher
+            .import_editor_map_file(&imported_source)
+            .expect("valid map should import");
+        assert_eq!(imported.map_name, "Imported Arena");
+        assert!(imported.destination.ends_with("arena.msav"));
+        assert_eq!(launcher.last_editor_import_result, Some(imported.clone()));
+        assert!(launcher
+            .map_list_cards
+            .iter()
+            .any(|map| map.name() == "Imported Arena" && map.custom));
+        assert!(std::path::Path::new(&imported.destination).exists());
+
+        let mut fresh = DesktopLauncher::new(Vec::new());
+        fresh.client.context.paths.data_dir = root.display().to_string();
+        fresh.client.context.paths.map_dir = map_dir.display().to_string();
+        fresh.refresh_map_list_cards_from_assets();
+        assert!(fresh
+            .map_list_cards
+            .iter()
+            .any(|map| map.name() == "Imported Arena" && map.custom));
+
+        let conflict_source = source_dir.join("arena-copy.msav");
+        std::fs::copy(&imported_source, &conflict_source).expect("conflict source should copy");
+        assert_eq!(
+            launcher.import_editor_map_file(&conflict_source),
+            Err("@editor.overwrite.confirm".into())
+        );
+        assert!(launcher.editor_import_overwrite_pending.is_some());
+        let overwrite = launcher
+            .confirm_editor_import_overwrite()
+            .expect("overwrite confirmation should replace the custom map");
+        assert_eq!(overwrite.map_name, "Imported Arena");
+        assert_eq!(overwrite.status, "imported");
+        assert!(overwrite.replaced.is_some());
+        assert_eq!(
+            launcher
+                .map_list_cards
+                .iter()
+                .filter(|map| map.name() == "Imported Arena")
+                .count(),
+            1
+        );
+
+        let mut builtin_tags = BTreeMap::new();
+        builtin_tags.insert("name".into(), "Builtin Clash".into());
+        let builtin = MapDescriptor::new(
+            "maps/default/builtin-clash.msav",
+            100,
+            100,
+            builtin_tags,
+            false,
+            1,
+            1574,
+        );
+        launcher.map_list_cards = vec![builtin];
+        let mut builtin_source_tags = BTreeMap::new();
+        builtin_source_tags.insert("name".into(), "Builtin Clash".into());
+        builtin_source_tags.insert("width".into(), "32".into());
+        builtin_source_tags.insert("height".into(), "32".into());
+        let mut builtin_source_bytes = Vec::new();
+        write_deflated_save_meta_prefix(
+            &mut builtin_source_bytes,
+            LATEST_SAVE_VERSION,
+            &builtin_source_tags,
+        )
+        .expect("builtin conflict fixture should encode");
+        let builtin_source = source_dir.join("builtin-clash.msav");
+        std::fs::write(&builtin_source, builtin_source_bytes)
+            .expect("builtin conflict source should write");
+        assert_eq!(
+            launcher.import_editor_map_file(&builtin_source),
+            Err("@editor.import.exists".into())
+        );
+        assert_eq!(
+            launcher.editor_import_error.as_deref(),
+            Some("@editor.import.exists")
+        );
+
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
