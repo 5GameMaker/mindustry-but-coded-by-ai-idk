@@ -15,6 +15,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 661. Native OpenGL 上下文多版本回退
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.3%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是降低 Windows/Intel/老驱动环境下 native OpenGL 初始化失败或黑屏风险。
+- Java 对照依据：
+  - `desktop/src/mindustry/desktop/DesktopLauncher.java` 中非 Mac 默认按 `4.6,4.5,4.4,4.1,3.3,3.2,3.1,2.1,2.0` 尝试；
+  - macOS 按 `4.1,3.2,2.1,2.0` 尝试；
+  - `-gl <major>.<minor>`、`-coreGl`、`-compatibilityGl` 会影响显式 GL 版本/profile；
+  - Rust 之前只尝试 `3.3 core`，失败后才走一个无版本/无 profile 的弱 fallback。
+- 本轮主改动：
+  - `desktop/src/main.rs`
+    - 新增 `DesktopNativeOpenGlContextCandidate` / `DesktopNativeOpenGlContextProfile`；
+    - 新增 Java-like GL 版本候选生成与 `-gl` / `-coreGl` / `-compatibilityGl` 参数解析；
+    - native runtime 创建上下文时按候选列表逐个 `create_context`，成功即继续，失败记录候选 label 与错误；
+    - 全部失败时返回聚合错误，便于定位驱动/版本问题；
+    - `ApplicationHandler::resumed` 不再直接 `expect` 崩溃，初始化失败时记录 `runtime_init_error`、输出错误并退出 event loop。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop native_opengl_context_candidates --bin mindustry-desktop`
+  - `cargo test -p mindustry-desktop native_opengl --bin mindustry-desktop`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 还没有 Rust 版 `IntelGpuCheck`，Windows Intel 不能像 Java 一样预先只选 2.x；当前通过版本序列和 compatibility fallback 降低风险；
+  - `configs.max_by_key(|config| config.num_samples())` 仍可能在老驱动上选择过激 MSAA config，后续需要继续收敛；
+  - 真实窗口截图/用户机器黑屏复现仍需继续验证；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 660. Desktop 默认构建进入 native OpenGL 客户端
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

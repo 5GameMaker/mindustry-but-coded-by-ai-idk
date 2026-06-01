@@ -13,7 +13,7 @@ use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSur
 #[cfg(feature = "opengl-native-runtime")]
 use glutin_winit::{DisplayBuilder, GlWindow};
 #[cfg(feature = "opengl-native-runtime")]
-use raw_window_handle::HasWindowHandle;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 #[cfg(feature = "opengl-native-runtime")]
 use std::num::NonZeroU32;
 
@@ -545,6 +545,7 @@ struct DesktopNativeOpenGlApp<'a> {
     next_redraw_at: std::time::Instant,
     graphics_renderer:
         Option<mindustry_desktop::DesktopOpenGlBackendGraphicsRenderer<DesktopNativeOpenGlRuntime>>,
+    runtime_init_error: Option<String>,
     effect_renderer: mindustry_desktop::HeadlessDesktopEffectRenderer,
     pending_events: Vec<mindustry_desktop::DesktopFrameLoopEvent>,
 }
@@ -576,6 +577,163 @@ struct DesktopNativeOpenGlRuntime {
     current_program: Option<u32>,
     current_vertex_array: Option<u32>,
     native_errors: Vec<String>,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesktopNativeOpenGlContextProfile {
+    Core,
+    Compatibility,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl DesktopNativeOpenGlContextProfile {
+    fn to_glutin(self) -> GlProfile {
+        match self {
+            Self::Core => GlProfile::Core,
+            Self::Compatibility => GlProfile::Compatibility,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Core => "core",
+            Self::Compatibility => "compatibility",
+        }
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DesktopNativeOpenGlContextCandidate {
+    version: Option<(u8, u8)>,
+    profile: Option<DesktopNativeOpenGlContextProfile>,
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+impl DesktopNativeOpenGlContextCandidate {
+    const fn versioned(major: u8, minor: u8, profile: DesktopNativeOpenGlContextProfile) -> Self {
+        Self {
+            version: Some((major, minor)),
+            profile: Some(profile),
+        }
+    }
+
+    const fn generic() -> Self {
+        Self {
+            version: None,
+            profile: None,
+        }
+    }
+
+    fn label(self) -> String {
+        match (self.version, self.profile) {
+            (Some((major, minor)), Some(profile)) => {
+                format!("OpenGL {major}.{minor} {}", profile.label())
+            }
+            (Some((major, minor)), None) => format!("OpenGL {major}.{minor} default-profile"),
+            (None, Some(profile)) => format!("OpenGL default-version {}", profile.label()),
+            (None, None) => "OpenGL default-version default-profile".into(),
+        }
+    }
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_default_context_candidates() -> Vec<DesktopNativeOpenGlContextCandidate> {
+    let mut candidates = Vec::new();
+    if cfg!(target_os = "macos") {
+        for (major, minor) in [(4, 1), (3, 2)] {
+            candidates.push(DesktopNativeOpenGlContextCandidate::versioned(
+                major,
+                minor,
+                DesktopNativeOpenGlContextProfile::Core,
+            ));
+        }
+    } else {
+        for (major, minor) in [(4, 6), (4, 5), (4, 4), (4, 1), (3, 3), (3, 2), (3, 1)] {
+            candidates.push(DesktopNativeOpenGlContextCandidate::versioned(
+                major,
+                minor,
+                DesktopNativeOpenGlContextProfile::Core,
+            ));
+        }
+    }
+    for (major, minor) in [(2, 1), (2, 0)] {
+        candidates.push(DesktopNativeOpenGlContextCandidate::versioned(
+            major,
+            minor,
+            DesktopNativeOpenGlContextProfile::Compatibility,
+        ));
+    }
+    candidates.push(DesktopNativeOpenGlContextCandidate::generic());
+    candidates
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_parse_gl_version(value: &str) -> Option<(u8, u8)> {
+    let (major, minor) = value.split_once('.')?;
+    let major = major.parse::<u8>().ok()?;
+    let minor = minor.parse::<u8>().ok()?;
+    Some((major, minor))
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_opengl_context_candidates_from_args<I, S>(
+    args: I,
+) -> Vec<DesktopNativeOpenGlContextCandidate>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_string())
+        .collect::<Vec<_>>();
+    let mut explicit_gl = None;
+    let mut profile = DesktopNativeOpenGlContextProfile::Core;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-gl" | "--gl" => {
+                if let Some(value) = args.get(index + 1) {
+                    explicit_gl = desktop_native_parse_gl_version(value);
+                    index += 1;
+                }
+            }
+            "-coreGl" | "--coreGl" => {
+                profile = DesktopNativeOpenGlContextProfile::Core;
+            }
+            "-compatibilityGl" | "--compatibilityGl" => {
+                profile = DesktopNativeOpenGlContextProfile::Compatibility;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+
+    if let Some((major, minor)) = explicit_gl {
+        return vec![
+            DesktopNativeOpenGlContextCandidate::versioned(major, minor, profile),
+            DesktopNativeOpenGlContextCandidate::generic(),
+        ];
+    }
+
+    desktop_native_opengl_default_context_candidates()
+}
+
+#[cfg(feature = "opengl-native-runtime")]
+fn desktop_native_context_attributes_for_candidate(
+    candidate: DesktopNativeOpenGlContextCandidate,
+    raw_window_handle: RawWindowHandle,
+) -> glutin::context::ContextAttributes {
+    let mut builder = ContextAttributesBuilder::new();
+    if let Some(profile) = candidate.profile {
+        builder = builder.with_profile(profile.to_glutin());
+    }
+    if let Some((major, minor)) = candidate.version {
+        builder = builder.with_context_api(ContextApi::OpenGl(Some(Version::new(major, minor))));
+    }
+    builder.build(Some(raw_window_handle))
 }
 
 #[cfg(feature = "opengl-native-runtime")]
@@ -760,20 +918,44 @@ impl DesktopNativeOpenGlRuntime {
             .window_handle()
             .map_err(|error| format!("failed to read raw window handle: {error}"))?
             .as_raw();
-        let context_attributes = ContextAttributesBuilder::new()
-            .with_profile(GlProfile::Core)
-            .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
-            .build(Some(raw_window_handle));
-        let fallback_context_attributes =
-            ContextAttributesBuilder::new().build(Some(raw_window_handle));
         let gl_display = gl_config.display();
-        let not_current_context =
-            unsafe { gl_display.create_context(&gl_config, &context_attributes) }
-                .or_else(|_| unsafe {
-                    gl_display.create_context(&gl_config, &fallback_context_attributes)
-                })
-                .map_err(|error| format!("failed to create native OpenGL context: {error}"))?;
-        desktop_native_trace("runtime.new: context created");
+        let mut context_attempt_errors = Vec::new();
+        let mut selected_context_candidate = None;
+        let mut not_current_context = None;
+        for candidate in
+            desktop_native_opengl_context_candidates_from_args(std::env::args().collect::<Vec<_>>())
+        {
+            let label = candidate.label();
+            let attributes =
+                desktop_native_context_attributes_for_candidate(candidate, raw_window_handle);
+            match unsafe { gl_display.create_context(&gl_config, &attributes) } {
+                Ok(context) => {
+                    desktop_native_trace_summary(format!("runtime.new: context selected={label}"));
+                    selected_context_candidate = Some(label);
+                    not_current_context = Some(context);
+                    break;
+                }
+                Err(error) => {
+                    desktop_native_trace(format!(
+                        "runtime.new: context candidate failed {label}: {error}"
+                    ));
+                    context_attempt_errors.push(format!("{label}: {error}"));
+                }
+            }
+        }
+        let not_current_context = not_current_context.ok_or_else(|| {
+            format!(
+                "failed to create native OpenGL context after {} attempts: {}",
+                context_attempt_errors.len(),
+                context_attempt_errors.join(" | ")
+            )
+        })?;
+        desktop_native_trace(format!(
+            "runtime.new: context created via {}",
+            selected_context_candidate
+                .as_deref()
+                .unwrap_or("unknown OpenGL candidate")
+        ));
         let surface_attributes = window
             .build_surface_attributes(SurfaceAttributesBuilder::<WindowSurface>::new())
             .map_err(|error| {
@@ -2643,6 +2825,7 @@ impl<'a> DesktopNativeOpenGlApp<'a> {
             frame_loop,
             next_redraw_at: std::time::Instant::now(),
             graphics_renderer: None,
+            runtime_init_error: None,
             effect_renderer: mindustry_desktop::HeadlessDesktopEffectRenderer::default(),
             pending_events: Vec::new(),
         }
@@ -2692,8 +2875,16 @@ impl winit::application::ApplicationHandler for DesktopNativeOpenGlApp<'_> {
         }
 
         desktop_native_trace("app.resumed: begin");
-        let runtime = DesktopNativeOpenGlRuntime::new(event_loop, &self.native_config)
-            .expect("failed to initialize native OpenGL desktop runtime");
+        let runtime = match DesktopNativeOpenGlRuntime::new(event_loop, &self.native_config) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("failed to initialize native OpenGL desktop runtime: {error}");
+                desktop_native_trace_summary(format!("app.resumed: runtime init failed: {error}"));
+                self.runtime_init_error = Some(error);
+                event_loop.exit();
+                return;
+            }
+        };
         let window_id = runtime.window.id();
         let size = runtime.window_surface_size();
         self.pending_events
@@ -2815,7 +3006,109 @@ mod tests {
         assert_eq!(app.frame_loop.next_frame_index, 0);
         assert!(app.window_id.is_none());
         assert!(app.graphics_renderer.is_none());
+        assert!(app.runtime_init_error.is_none());
         assert!(app.pending_events.is_empty());
+    }
+
+    #[test]
+    fn native_opengl_context_candidates_follow_upstream_version_fallback_order() {
+        let candidates = desktop_native_opengl_context_candidates_from_args(["mindustry-desktop"]);
+
+        if cfg!(target_os = "macos") {
+            assert_eq!(
+                candidates.first().copied(),
+                Some(DesktopNativeOpenGlContextCandidate::versioned(
+                    4,
+                    1,
+                    DesktopNativeOpenGlContextProfile::Core
+                ))
+            );
+            assert!(
+                candidates.contains(&DesktopNativeOpenGlContextCandidate::versioned(
+                    3,
+                    2,
+                    DesktopNativeOpenGlContextProfile::Core
+                ))
+            );
+        } else {
+            assert_eq!(
+                candidates.first().copied(),
+                Some(DesktopNativeOpenGlContextCandidate::versioned(
+                    4,
+                    6,
+                    DesktopNativeOpenGlContextProfile::Core
+                ))
+            );
+            assert!(
+                candidates.contains(&DesktopNativeOpenGlContextCandidate::versioned(
+                    3,
+                    3,
+                    DesktopNativeOpenGlContextProfile::Core
+                ))
+            );
+        }
+        assert!(
+            candidates.contains(&DesktopNativeOpenGlContextCandidate::versioned(
+                2,
+                1,
+                DesktopNativeOpenGlContextProfile::Compatibility
+            ))
+        );
+        assert!(
+            candidates.contains(&DesktopNativeOpenGlContextCandidate::versioned(
+                2,
+                0,
+                DesktopNativeOpenGlContextProfile::Compatibility
+            ))
+        );
+        assert_eq!(
+            candidates.last().copied(),
+            Some(DesktopNativeOpenGlContextCandidate::generic())
+        );
+    }
+
+    #[test]
+    fn native_opengl_context_candidates_honor_java_like_gl_profile_args() {
+        assert_eq!(
+            desktop_native_parse_gl_version("3.2"),
+            Some((3, 2)),
+            "Java -gl expects <major>.<minor>"
+        );
+        assert_eq!(desktop_native_parse_gl_version("bad"), None);
+
+        let explicit = desktop_native_opengl_context_candidates_from_args([
+            "mindustry-desktop",
+            "-compatibilityGl",
+            "-gl",
+            "2.1",
+        ]);
+        assert_eq!(
+            explicit,
+            vec![
+                DesktopNativeOpenGlContextCandidate::versioned(
+                    2,
+                    1,
+                    DesktopNativeOpenGlContextProfile::Compatibility
+                ),
+                DesktopNativeOpenGlContextCandidate::generic()
+            ]
+        );
+
+        let core = desktop_native_opengl_context_candidates_from_args([
+            "mindustry-desktop",
+            "-compatibilityGl",
+            "-coreGl",
+            "-gl",
+            "3.3",
+        ]);
+        assert_eq!(
+            core.first().copied(),
+            Some(DesktopNativeOpenGlContextCandidate::versioned(
+                3,
+                3,
+                DesktopNativeOpenGlContextProfile::Core
+            ))
+        );
     }
 
     #[test]
