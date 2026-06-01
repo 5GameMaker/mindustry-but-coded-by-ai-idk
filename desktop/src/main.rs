@@ -18,7 +18,8 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::num::NonZeroU32;
 
 fn main() {
-    let mut launcher = mindustry_desktop::run(std::env::args().collect());
+    let args = std::env::args().collect::<Vec<_>>();
+    let mut launcher = mindustry_desktop::run(args.clone());
     if let Some(error) = &launcher.connect_error {
         eprintln!(
             "{} failed_to_connect={}",
@@ -35,7 +36,7 @@ fn main() {
         desktop_graphics_backend_label(),
     );
 
-    run_desktop_frame_loop(&mut launcher);
+    run_desktop_frame_loop(&mut launcher, args);
 }
 
 #[cfg(not(feature = "opengl-backend"))]
@@ -490,7 +491,7 @@ fn desktop_native_opengl_shader_asset_root_resolution_from_candidates(
 }
 
 #[cfg(not(feature = "opengl-backend"))]
-fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
+fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher, _args: Vec<String>) {
     let mut effect_renderer = mindustry_desktop::HeadlessDesktopEffectRenderer::default();
     let mut graphics_renderer = mindustry_desktop::HeadlessDesktopGraphicsRenderer::default();
     let mut frame_loop = mindustry_desktop::DesktopFrameLoopState::default();
@@ -507,7 +508,7 @@ fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
 }
 
 #[cfg(all(feature = "opengl-backend", not(feature = "opengl-native-runtime")))]
-fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
+fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher, _args: Vec<String>) {
     let opengl_runtime = mindustry_desktop::DesktopGraphicsNullOpenGlBackendRuntime::default();
     let mut effect_renderer = mindustry_desktop::HeadlessDesktopEffectRenderer::default();
     let mut graphics_renderer =
@@ -526,10 +527,10 @@ fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
 }
 
 #[cfg(feature = "opengl-native-runtime")]
-fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher) {
+fn run_desktop_frame_loop(launcher: &mut mindustry_desktop::DesktopLauncher, args: Vec<String>) {
     let event_loop = winit::event_loop::EventLoop::new()
         .expect("failed to create winit event loop for native OpenGL runtime");
-    let native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::default();
+    let native_config = mindustry_desktop::DesktopNativeOpenGlRuntimeConfig::from_args(args);
     let mut app = DesktopNativeOpenGlApp::new(launcher, native_config);
     event_loop
         .run_app(&mut app)
@@ -3018,6 +3019,7 @@ mod tests {
                 size: mindustry_desktop::DesktopSurfaceSize::new(960, 540),
                 scale_factor: 1.0,
                 resizable: true,
+                maximized: false,
                 visible: false,
             },
         );

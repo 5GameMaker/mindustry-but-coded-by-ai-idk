@@ -15844,8 +15844,8 @@ fn desktop_surface_dimension_from_viewport(value: f32) -> u32 {
 impl Default for DesktopSurfaceSize {
     fn default() -> Self {
         Self {
-            width: 1280,
-            height: 720,
+            width: 900,
+            height: 700,
         }
     }
 }
@@ -15856,6 +15856,7 @@ pub struct DesktopSurfaceConfig {
     pub size: DesktopSurfaceSize,
     pub scale_factor: f32,
     pub resizable: bool,
+    pub maximized: bool,
     pub visible: bool,
 }
 
@@ -15866,6 +15867,7 @@ impl Default for DesktopSurfaceConfig {
             size: DesktopSurfaceSize::default(),
             scale_factor: 1.0,
             resizable: true,
+            maximized: true,
             visible: true,
         }
     }
@@ -15887,6 +15889,47 @@ impl DesktopNativeOpenGlRuntimeConfig {
         }
     }
 
+    pub fn from_args<I, S>(args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut config = Self::default();
+        let args = args
+            .into_iter()
+            .map(|arg| arg.as_ref().to_string())
+            .collect::<Vec<_>>();
+        let mut index = 0;
+        while index < args.len() {
+            match args[index].as_str() {
+                "-width" | "--width" => {
+                    if let Some(value) = args.get(index + 1).and_then(|value| value.parse().ok()) {
+                        config.surface.size.width = value;
+                        index += 1;
+                    }
+                }
+                "-height" | "--height" => {
+                    if let Some(value) = args.get(index + 1).and_then(|value| value.parse().ok()) {
+                        config.surface.size.height = value;
+                        index += 1;
+                    }
+                }
+                "-maximized" | "--maximized" => {
+                    if let Some(value) = args.get(index + 1) {
+                        config.surface.maximized = matches!(
+                            value.to_ascii_lowercase().as_str(),
+                            "true" | "1" | "yes" | "on"
+                        );
+                        index += 1;
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        config
+    }
+
     pub fn window_attributes(&self) -> winit::window::WindowAttributes {
         winit::window::Window::default_attributes()
             .with_title(self.surface.title.clone())
@@ -15895,6 +15938,7 @@ impl DesktopNativeOpenGlRuntimeConfig {
                 self.surface.size.height as f64,
             ))
             .with_resizable(self.surface.resizable)
+            .with_maximized(self.surface.maximized)
             .with_visible(self.surface.visible)
     }
 }
@@ -43861,9 +43905,10 @@ mod tests {
         let config = DesktopSurfaceConfig::default();
 
         assert_eq!(config.title, "Mindustry");
-        assert_eq!(config.size, DesktopSurfaceSize::new(1280, 720));
+        assert_eq!(config.size, DesktopSurfaceSize::new(900, 700));
         assert_eq!(config.scale_factor, 1.0);
         assert!(config.resizable);
+        assert!(config.maximized);
         assert!(config.visible);
     }
 
@@ -43875,6 +43920,7 @@ mod tests {
             size: DesktopSurfaceSize::new(1024, 576),
             scale_factor: 1.0,
             resizable: false,
+            maximized: false,
             visible: false,
         };
 
@@ -43883,6 +43929,7 @@ mod tests {
 
         assert_eq!(attrs.title, "Rust Mindustry Native");
         assert!(!attrs.resizable);
+        assert!(!attrs.maximized);
         assert!(!attrs.visible);
         match attrs.inner_size {
             Some(winit::dpi::Size::Logical(size)) => {
@@ -43891,6 +43938,36 @@ mod tests {
             }
             other => panic!("native runtime should carry logical window size, got {other:?}"),
         }
+    }
+
+    #[cfg(feature = "opengl-native-runtime")]
+    #[test]
+    fn desktop_native_opengl_runtime_config_parses_java_window_args() {
+        let config = super::DesktopNativeOpenGlRuntimeConfig::from_args([
+            "mindustry-desktop",
+            "-width",
+            "1024",
+            "-height",
+            "768",
+            "-maximized",
+            "false",
+        ]);
+
+        assert_eq!(config.surface.size, DesktopSurfaceSize::new(1024, 768));
+        assert!(!config.surface.maximized);
+        assert_eq!(config.surface.title, "Mindustry");
+
+        let config = super::DesktopNativeOpenGlRuntimeConfig::from_args([
+            "mindustry-desktop",
+            "--width",
+            "640",
+            "--height",
+            "480",
+            "--maximized",
+            "true",
+        ]);
+        assert_eq!(config.surface.size, DesktopSurfaceSize::new(640, 480));
+        assert!(config.surface.maximized);
     }
 
     #[cfg(feature = "opengl-native-runtime")]

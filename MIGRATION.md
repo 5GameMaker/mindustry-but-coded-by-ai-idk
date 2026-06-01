@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 663. Desktop 窗口默认契约与 CLI 覆盖对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **77.5%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是让 Rust 桌面窗口启动契约更接近 Java `DesktopLauncher`。
+- Java 对照依据：
+  - `DesktopLauncher.java` 默认 `title = "Mindustry"`、`maximized = true`、`width = 900`、`height = 700`；
+  - CLI 支持 `-width`、`-height`、`-maximized` 覆盖启动窗口参数。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `DesktopSurfaceSize::default()` 从 `1280x720` 改为 Java 默认 `900x700`；
+    - `DesktopSurfaceConfig` 新增 `maximized` 字段，默认 `true`；
+    - `DesktopNativeOpenGlRuntimeConfig::window_attributes()` 投影 `with_maximized(...)`；
+    - 新增 `DesktopNativeOpenGlRuntimeConfig::from_args(...)` 解析 `-width/-height/-maximized` 和双横线别名；
+  - `desktop/src/main.rs`
+    - `main()` 保留原始 args，native frame loop 使用 `DesktopNativeOpenGlRuntimeConfig::from_args(args)`，让窗口参数真实影响 winit 窗口。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_surface_config --lib`
+  - `cargo test -p mindustry-desktop desktop_native_opengl_runtime_config --lib`
+  - `cargo test -p mindustry-desktop native_opengl_app_initializes_frame_loop_from_native_surface_config --bin mindustry-desktop`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - Java `setWindowIcon(FileType.internal, "icons/icon_64.png")` 的窗口图标还未接入；
+  - `scale_factor` 仍是 Rust-only 字段，后续需确认是否应接入 DPI/scene scale 路径；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 662. Native OpenGL MSAA config 选择对齐 Java antialias 开关
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
