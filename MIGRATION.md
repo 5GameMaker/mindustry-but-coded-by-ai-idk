@@ -17,6 +17,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 720. MapListDialog 过滤器设置持久化
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **85.1%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - 原版 `MapListDialog` 通过 `Core.settings` 持久化 `editorshowbuiltinmaps/editorshowcustommaps/editorshowmoddedmaps`、搜索范围、优先级与 `editorfilterplanets`；
+  - 模式过滤属于运行期临时状态，不写入 settings。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 为 MapList 过滤器接入 Java 同名 settings key；
+    - 打开 `CustomGame/Editor` 路由时从 settings 恢复类型/搜索范围/优先级/星球过滤；
+    - 每次 `MapListFilter` 动作后写回 settings；
+    - 保持 mode filter 临时化，不跨 launcher 重建；
+    - 补回归测试覆盖 Java settings key、星球 JSON、跨 launcher 恢复与可见地图过滤结果。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop map_list -- --nocapture`
+  - `git diff --check`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - MapList/MapPlay 仍需继续做视觉细节、极端状态与原版交互对齐；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 719. CustomRulesDialog Allow Editing Rules 接入
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

@@ -222,6 +222,15 @@ const MAP_LIST_ACTION_BUTTON_HEIGHT: f32 = 64.0;
 const MAP_LIST_CARD_WIDTH: f32 = 200.0;
 const MAP_LIST_CARD_HEIGHT: f32 = 264.0;
 const MAP_LIST_CARD_GAP: f32 = 10.0;
+const MAP_LIST_SETTING_SHOW_BUILTIN: &str = "editorshowbuiltinmaps";
+const MAP_LIST_SETTING_SHOW_CUSTOM: &str = "editorshowcustommaps";
+const MAP_LIST_SETTING_SHOW_MODDED: &str = "editorshowmoddedmaps";
+const MAP_LIST_SETTING_SEARCH_AUTHOR: &str = "editorsearchauthor";
+const MAP_LIST_SETTING_SEARCH_DESCRIPTION: &str = "editorsearchdescription";
+const MAP_LIST_SETTING_SEARCH_MOD_NAME: &str = "editorsearchmodname";
+const MAP_LIST_SETTING_PRIORITIZE_CUSTOM: &str = "editorprioritizecustom";
+const MAP_LIST_SETTING_PRIORITIZE_MODDED: &str = "editorprioritizemodded";
+const MAP_LIST_SETTING_FILTER_PLANETS: &str = "editorfilterplanets";
 const ROUTE_BACK_BUTTON_WIDTH: f32 = 210.0;
 const ROUTE_BACK_BUTTON_HEIGHT: f32 = 64.0;
 const PAUSE_OVERLAY_PANEL_WIDTH: f32 = 304.0;
@@ -23186,6 +23195,7 @@ impl DesktopLauncher {
                 route,
                 DesktopMenuRoute::CustomGame | DesktopMenuRoute::Editor
             ) {
+                self.load_map_list_filter_state_from_settings();
                 self.map_list_search.clear();
                 self.map_list_search_focused = true;
                 self.map_list_scroll_offset = 0;
@@ -30318,6 +30328,93 @@ impl DesktopLauncher {
                     .contains(query))
     }
 
+    fn map_list_settings_bool(&self, key: &str, default: bool) -> bool {
+        self.settings_overrides
+            .get(key)
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "true" | "1" | "yes" | "on"
+                )
+            })
+            .unwrap_or(default)
+    }
+
+    fn load_map_list_filter_state_from_settings(&mut self) -> usize {
+        self.map_list_filter_show_builtin =
+            self.map_list_settings_bool(MAP_LIST_SETTING_SHOW_BUILTIN, true);
+        self.map_list_filter_show_custom =
+            self.map_list_settings_bool(MAP_LIST_SETTING_SHOW_CUSTOM, true);
+        self.map_list_filter_show_modded =
+            self.map_list_settings_bool(MAP_LIST_SETTING_SHOW_MODDED, true);
+        self.map_list_filter_search_author =
+            self.map_list_settings_bool(MAP_LIST_SETTING_SEARCH_AUTHOR, false);
+        self.map_list_filter_search_description =
+            self.map_list_settings_bool(MAP_LIST_SETTING_SEARCH_DESCRIPTION, false);
+        self.map_list_filter_search_mod_name =
+            self.map_list_settings_bool(MAP_LIST_SETTING_SEARCH_MOD_NAME, false);
+        self.map_list_filter_prioritize_custom = self.map_list_filter_show_custom
+            && self.map_list_settings_bool(MAP_LIST_SETTING_PRIORITIZE_CUSTOM, false);
+        self.map_list_filter_prioritize_modded = self.map_list_filter_show_modded
+            && !self.map_list_filter_prioritize_custom
+            && self.map_list_settings_bool(MAP_LIST_SETTING_PRIORITIZE_MODDED, false);
+
+        let known_planets = self
+            .map_list_planet_filter_candidates()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<BTreeSet<_>>();
+        self.map_list_filter_planets = self
+            .settings_overrides
+            .get(MAP_LIST_SETTING_FILTER_PLANETS)
+            .map(|value| schematic_tags_from_json(value))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|planet| known_planets.contains(planet))
+            .collect();
+
+        self.map_list_filter_planets.len()
+    }
+
+    fn persist_map_list_filter_state_to_settings(&mut self) {
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_SHOW_BUILTIN.into(),
+            self.map_list_filter_show_builtin.to_string(),
+        );
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_SHOW_CUSTOM.into(),
+            self.map_list_filter_show_custom.to_string(),
+        );
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_SHOW_MODDED.into(),
+            self.map_list_filter_show_modded.to_string(),
+        );
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_SEARCH_AUTHOR.into(),
+            self.map_list_filter_search_author.to_string(),
+        );
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_SEARCH_DESCRIPTION.into(),
+            self.map_list_filter_search_description.to_string(),
+        );
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_SEARCH_MOD_NAME.into(),
+            self.map_list_filter_search_mod_name.to_string(),
+        );
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_PRIORITIZE_CUSTOM.into(),
+            self.map_list_filter_prioritize_custom.to_string(),
+        );
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_PRIORITIZE_MODDED.into(),
+            self.map_list_filter_prioritize_modded.to_string(),
+        );
+        self.settings_overrides.insert(
+            MAP_LIST_SETTING_FILTER_PLANETS.into(),
+            schematic_tags_to_json(&self.map_list_filter_planets),
+        );
+    }
+
     fn compare_map_list_cards(
         &self,
         left: &MapDescriptor,
@@ -30419,6 +30516,7 @@ impl DesktopLauncher {
             }
         }
         self.map_list_scroll_offset = 0;
+        self.persist_map_list_filter_state_to_settings();
     }
 
     fn map_list_visible_row_capacity_for_pane(pane: RenderRect) -> usize {
@@ -68017,6 +68115,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_map_list_search_and_scroll_filter_visible_cards() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.map_list_cards = (0..18)
             .map(|index| {
                 let mut tags = BTreeMap::new();
@@ -68733,6 +68832,129 @@ version: "2.0.0"
     }
 
     #[test]
+    fn desktop_launcher_map_list_filter_state_round_trips_through_java_settings_keys() {
+        fn map_card(
+            name: &str,
+            author: &str,
+            custom: bool,
+            mod_name: Option<&str>,
+            planet: &str,
+        ) -> MapDescriptor {
+            let mut tags = BTreeMap::new();
+            tags.insert("name".to_string(), name.to_string());
+            tags.insert("author".to_string(), author.to_string());
+            tags.insert("rules".to_string(), format!("{{\"planet\":\"{planet}\"}}"));
+            let mut map =
+                MapDescriptor::new(format!("maps/{name}.msav"), 128, 128, tags, custom, 1, 158);
+            map.spawns = 1;
+            map.teams = vec![1, 2];
+            map.mod_name = mod_name.map(str::to_string);
+            map
+        }
+
+        fn visible_names(launcher: &DesktopLauncher) -> Vec<String> {
+            launcher
+                .filtered_map_card_indices()
+                .into_iter()
+                .map(|index| launcher.map_list_cards[index].plain_name())
+                .collect()
+        }
+
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.map_list_cards = vec![
+            map_card("Alpha Builtin", "Vanilla", false, None, "serpulo"),
+            map_card("Zulu Custom", "Mapper", true, None, "erekir"),
+            map_card(
+                "Beta Modded",
+                "Modder",
+                false,
+                Some("Example Mod"),
+                "erekir",
+            ),
+        ];
+        launcher.dispatch_menu_action(MenuButtonRole::CustomGame);
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleShowBuiltin,
+            ),
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleSearchAuthor,
+            ),
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePrioritizeCustom,
+            ),
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::TogglePlanet(1),
+            ),
+        );
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::MapListFilter(
+                super::DesktopMapListFilterAction::ToggleMode(Gamemode::Survival),
+            ),
+        );
+
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::MAP_LIST_SETTING_SHOW_BUILTIN)
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::MAP_LIST_SETTING_SEARCH_AUTHOR)
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::MAP_LIST_SETTING_PRIORITIZE_CUSTOM)
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            launcher
+                .settings_overrides
+                .get(super::MAP_LIST_SETTING_FILTER_PLANETS)
+                .map(String::as_str),
+            Some("[\"erekir\"]")
+        );
+
+        let persisted = launcher.settings_overrides.clone();
+        let mut fresh = DesktopLauncher::new(Vec::new());
+        fresh.settings_overrides = persisted;
+        fresh.map_list_cards = launcher.map_list_cards.clone();
+        fresh.dispatch_menu_action(MenuButtonRole::CustomGame);
+
+        assert!(!fresh.map_list_filter_show_builtin);
+        assert!(fresh.map_list_filter_show_custom);
+        assert!(fresh.map_list_filter_show_modded);
+        assert!(fresh.map_list_filter_search_author);
+        assert!(fresh.map_list_filter_prioritize_custom);
+        assert_eq!(fresh.map_list_filter_planets, vec!["erekir".to_string()]);
+        assert!(
+            fresh.map_list_filter_modes.is_empty(),
+            "Java MapListDialog persists type/search/priority/planet settings, but not temporary mode filters"
+        );
+
+        fresh.map_list_search = "mapper".into();
+        assert_eq!(visible_names(&fresh), vec!["Zulu Custom".to_string()]);
+        fresh.map_list_search.clear();
+        assert_eq!(
+            visible_names(&fresh),
+            vec!["Zulu Custom".to_string(), "Beta Modded".to_string()]
+        );
+    }
+
+    #[test]
     fn desktop_launcher_map_list_planet_filter_dialog_filters_maps_by_rules_planet() {
         fn map_card(name: &str, planet: &str) -> MapDescriptor {
             let mut tags = BTreeMap::new();
@@ -68760,6 +68982,7 @@ version: "2.0.0"
 
         let surface = DesktopSurfaceSize::new(1280, 720);
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.map_list_cards = vec![
             map_card("Serpulo Arena", "serpulo"),
             map_card("Erekir Arena", "erekir"),
