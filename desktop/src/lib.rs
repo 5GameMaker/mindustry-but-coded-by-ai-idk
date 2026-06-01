@@ -107,11 +107,11 @@ use mindustry_core::mindustry::ui::upstream_ui_skin_sprite_source_paths;
 use mindustry_core::mindustry::ui::{
     parse_upstream_icon_properties, upstream_check_box_style_skin, upstream_font_assets,
     upstream_font_source_paths, upstream_image_button_style_skin,
-    upstream_menu_bundle_value_for_locale, upstream_scroll_pane_style_skin,
-    upstream_slider_style_skin, upstream_text_button_style_skin, upstream_text_field_style_skin,
-    upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, Bar, BarDrawCommand, BarDrawPlan,
-    BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole, UpstreamUiIconGlyph,
-    UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_UI_ICON_GLYPHS,
+    upstream_menu_bundle_format_for_locale, upstream_menu_bundle_value_for_locale,
+    upstream_scroll_pane_style_skin, upstream_slider_style_skin, upstream_text_button_style_skin,
+    upstream_text_field_style_skin, upstream_ui_drawable_alias, upstream_ui_icon_glyph_string, Bar,
+    BarDrawCommand, BarDrawPlan, BarLayout, BarTextDraw, UpstreamContentIcon, UpstreamFontRole,
+    UpstreamUiIconGlyph, UPSTREAM_ICONS_PROPERTIES_SOURCE_PATH, UPSTREAM_UI_ICON_GLYPHS,
 };
 use mindustry_core::mindustry::vars::{AppContext, MAX_PLAYER_PREVIEW_PLANS};
 use mindustry_core::mindustry::world::draw::{
@@ -18770,6 +18770,19 @@ impl DesktopLauncher {
         localized
     }
 
+    fn format_bundle_text(&self, key: &str, args: &[&str]) -> String {
+        upstream_menu_bundle_format_for_locale(&self.settings_locale, key, args)
+            .or_else(|| upstream_menu_bundle_format_for_locale("en", key, args))
+            .unwrap_or_else(|| {
+                let mut text = format!("@{key}");
+                if !args.is_empty() {
+                    text.push_str(": ");
+                    text.push_str(&args.join(", "));
+                }
+                text
+            })
+    }
+
     fn block_renderer_world_snapshot(
         &self,
         visible_tiles: &[TileCoord],
@@ -23825,9 +23838,9 @@ impl DesktopLauncher {
         self.push_settings_text_button_with_style(
             pass,
             Self::settings_planet_data_button_rect(dialog, 0),
-            format!(
-                "@settings.planetselect: {}",
-                self.settings_selected_planet_label()
+            self.format_bundle_text(
+                "settings.planetselect",
+                &[self.settings_selected_planet_label().as_str()],
             ),
             Some("planet"),
             Layer::END_PIXELED + 0.101,
@@ -24760,19 +24773,25 @@ impl DesktopLauncher {
 
     fn settings_data_confirm_message(&self, action: DesktopSettingsAction) -> String {
         match action {
-            DesktopSettingsAction::ClearAllData => "@settings.clearall.confirm".into(),
-            DesktopSettingsAction::ClearSaves => "@settings.clearsaves.confirm".into(),
-            DesktopSettingsAction::ClearResearch => "@settings.clearresearch.confirm".into(),
-            DesktopSettingsAction::ClearCampaignSaves => {
-                "@settings.clearcampaignsaves.confirm".into()
+            DesktopSettingsAction::ClearAllData => {
+                self.format_bundle_text("settings.clearall.confirm", &[])
             }
-            DesktopSettingsAction::ClearPlanetResearch => format!(
-                "@settings.clearplanetresearch.confirm: {}",
-                self.settings_selected_planet_label()
+            DesktopSettingsAction::ClearSaves => {
+                self.format_bundle_text("settings.clearsaves.confirm", &[])
+            }
+            DesktopSettingsAction::ClearResearch => {
+                self.format_bundle_text("settings.clearresearch.confirm", &[])
+            }
+            DesktopSettingsAction::ClearCampaignSaves => {
+                self.format_bundle_text("settings.clearcampaignsaves.confirm", &[])
+            }
+            DesktopSettingsAction::ClearPlanetResearch => self.format_bundle_text(
+                "settings.clearplanetresearch.confirm",
+                &[self.settings_selected_planet_label().as_str()],
             ),
-            DesktopSettingsAction::ClearPlanetCampaignSaves => format!(
-                "@settings.clearplanetcampaignsaves.confirm: {}",
-                self.settings_selected_planet_label()
+            DesktopSettingsAction::ClearPlanetCampaignSaves => self.format_bundle_text(
+                "settings.clearplanetcampaignsaves.confirm",
+                &[self.settings_selected_planet_label().as_str()],
             ),
             _ => "@confirm".into(),
         }
@@ -67179,7 +67198,14 @@ version: "2.0.0"
                 .localize_bundle_markup_text("@settings.data")
                 .as_str()
         ));
-        assert!(planet_texts.contains(&"@settings.planetselect: serpulo"));
+        assert!(planet_texts.contains(
+            &launcher
+                .format_bundle_text(
+                    "settings.planetselect",
+                    &[launcher.settings_selected_planet_label().as_str()]
+                )
+                .as_str()
+        ));
         assert!(
             !planet_texts.contains(&"planet: serpulo"),
             "Java PlanetDataDialog keeps the selected planet inside the planet select button"
@@ -67325,12 +67351,16 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(confirm_texts.contains(&"@confirm"));
-        assert!(confirm_texts.contains(&"@settings.clearplanetresearch.confirm: erekir"));
+        assert!(confirm_texts.contains(
+            &launcher
+                .settings_data_confirm_message(super::DesktopSettingsAction::ClearPlanetResearch)
+                .as_str()
+        ));
         assert!(confirm_texts.contains(&"@cancel"));
         assert!(confirm_texts.contains(&"@ok"));
         assert_eq!(
             launcher.settings_data_confirm_message(super::DesktopSettingsAction::ClearAllData),
-            "@settings.clearall.confirm"
+            launcher.format_bundle_text("settings.clearall.confirm", &[])
         );
         let confirm_dialog = DesktopLauncher::settings_data_confirm_dialog_rect(settings_panel);
         let confirm_ok_center =

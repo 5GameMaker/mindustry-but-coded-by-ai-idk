@@ -15,6 +15,34 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 678. Settings 参数化 bundle 格式化接入
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.1%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是避免 Settings 中 `{0}` 参数文案继续裸显或被错误地拼成伪本地化。
+- Java 对照依据：
+  - `settings.planetselect = Planet: {0}`；
+  - `settings.clearplanetresearch.confirm = Are you sure you want to clear {0}'s research?`；
+  - `settings.clearplanetcampaignsaves.confirm = Are you sure you want to clear {0}'s campaign saves?`；
+  - 简中/繁中 bundle 也提供对应 `{0}` 格式化文本。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 新增 `upstream_menu_bundle_format_for_locale(locale, key, args)`，先以最小 `{0}`/`{1}` 替换支持 Java bundle 参数格式；
+    - 补 Settings planet-select 与 confirm 文案的 EN/简中/繁中 fallback；
+  - `desktop/src/lib.rs`
+    - 新增 `DesktopLauncher::format_bundle_text(...)`；
+    - `push_settings_planet_data_dialog_content(...)` 的 planet select 按格式化 bundle 输出；
+    - `settings_data_confirm_message(...)` 的 clear-all、clear-saves、clear-research、clear-campaign、clear-planet-research、clear-planet-campaign-save 文案改为按 locale/参数格式化；
+    - 同步更新 Settings 结构化回归测试。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - 这仍是增量 bundle fallback，不是完整 `Core.bundle` 文件加载器；
+  - Settings 子页还有部分非 `@settings.*` 的 category/keybind/raw debug 文案需要继续 Scene2D 化；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 677. Settings 数据/键位按钮文案继续接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

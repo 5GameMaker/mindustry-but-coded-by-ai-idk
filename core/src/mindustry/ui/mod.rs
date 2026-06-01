@@ -76,6 +76,28 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
         "settings.clearplanetcampaignsaves",
         "Clear Planet Campaign Saves",
     ),
+    ("settings.planetselect", "Planet: {0}"),
+    ("settings.clearall.confirm", "[scarlet]WARNING![]\nThis will clear all data, including saves, maps, unlocks and keybinds.\nOnce you press 'ok' the game will wipe all data and automatically exit."),
+    (
+        "settings.clearsaves.confirm",
+        "Are you sure you want to clear all your saves?",
+    ),
+    (
+        "settings.clearresearch.confirm",
+        "Are you sure you want to clear all of your campaign research?",
+    ),
+    (
+        "settings.clearcampaignsaves.confirm",
+        "Are you sure you want to clear all of your campaign saves?",
+    ),
+    (
+        "settings.clearplanetresearch.confirm",
+        "Are you sure you want to clear {0}'s research?",
+    ),
+    (
+        "settings.clearplanetcampaignsaves.confirm",
+        "Are you sure you want to clear {0}'s campaign saves?",
+    ),
     ("quit", "Quit"),
 ];
 
@@ -142,6 +164,19 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("settings.clearcampaignsaves", "清除战役进度"),
     ("settings.clearplanetresearch", "清除星球研究进度"),
     ("settings.clearplanetcampaignsaves", "清除星球战役进度"),
+    ("settings.planetselect", "星球: {0}"),
+    ("settings.clearall.confirm", "[scarlet]警告！[]\n这将清除所有数据，包括存档、地图、解锁内容和键位绑定。\n一旦点击“确定”，游戏将清除所有数据并自动退出。"),
+    ("settings.clearsaves.confirm", "确认要清除所有存档吗？"),
+    ("settings.clearresearch.confirm", "确认要清除战役研究进度吗？"),
+    ("settings.clearcampaignsaves.confirm", "确认要清除所有战役进度吗？"),
+    (
+        "settings.clearplanetresearch.confirm",
+        "确认要清除{0}的研究进度吗？",
+    ),
+    (
+        "settings.clearplanetcampaignsaves.confirm",
+        "确认要清除{0}的战役进度吗？",
+    ),
     ("quit", "退出"),
 ];
 
@@ -211,6 +246,25 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
         "settings.clearplanetcampaignsaves",
         "清除行星戰役紀錄",
     ),
+    ("settings.planetselect", "行星: {0}"),
+    ("settings.clearall.confirm", "[scarlet]警告！[]\n這會清除所有資料，包括存檔、地圖、解鎖項目和快捷鍵綁定。\n按「確定」後，遊戲將刪除所有資料並自動結束。"),
+    (
+        "settings.clearsaves.confirm",
+        "您確定您想要清除所有存檔嗎？",
+    ),
+    ("settings.clearresearch.confirm", "您確定要清除所有研究？"),
+    (
+        "settings.clearcampaignsaves.confirm",
+        "您確定要清除所有戰役紀錄？",
+    ),
+    (
+        "settings.clearplanetresearch.confirm",
+        "您確定要清除{0}的研究？",
+    ),
+    (
+        "settings.clearplanetcampaignsaves.confirm",
+        "您確定要清除{0}的戰役紀錄？",
+    ),
     ("quit", "退出"),
 ];
 
@@ -248,6 +302,18 @@ pub fn upstream_menu_bundle_entries_for_locale(
 pub fn upstream_menu_bundle_value_for_locale(locale: &str, key: &str) -> Option<&'static str> {
     upstream_bundle_value_from_entries(upstream_menu_bundle_entries_for_locale(locale), key)
         .or_else(|| upstream_bundle_en_value(key))
+}
+
+pub fn upstream_menu_bundle_format_for_locale(
+    locale: &str,
+    key: &str,
+    args: &[&str],
+) -> Option<String> {
+    let mut value = upstream_menu_bundle_value_for_locale(locale, key)?.to_string();
+    for (index, arg) in args.iter().enumerate() {
+        value = value.replace(&format!("{{{index}}}"), arg);
+    }
+    Some(value)
 }
 
 pub use bar::{
@@ -358,6 +424,20 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "settings.clearresearch"),
             Some("清除研究进度")
+        );
+        assert_eq!(
+            upstream_menu_bundle_format_for_locale("zh_CN", "settings.planetselect", &["Serpulo"])
+                .as_deref(),
+            Some("星球: Serpulo")
+        );
+        assert_eq!(
+            upstream_menu_bundle_format_for_locale(
+                "en",
+                "settings.clearplanetresearch.confirm",
+                &["Erekir"]
+            )
+            .as_deref(),
+            Some("Are you sure you want to clear Erekir's research?")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh-TW", "joingame"),
