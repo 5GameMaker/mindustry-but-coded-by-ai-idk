@@ -25001,6 +25001,51 @@ impl DesktopLauncher {
             .and_then(|value| value.parse::<i32>().ok())
     }
 
+    fn settings_java_float_label(value: f32) -> String {
+        let mut text = format!("{value:.2}");
+        while text.ends_with('0') && !text.ends_with(".0") {
+            text.pop();
+        }
+        text
+    }
+
+    fn settings_slider_display_value(&self, spec: &DesktopSettingsPrefSpec, value: i32) -> String {
+        match (spec.table, spec.key) {
+            ("game", "saveinterval") => {
+                let value_text = value.to_string();
+                self.format_bundle_text("setting.seconds", &[value_text.as_str()])
+            }
+            ("game", "playerlimit") => value.to_string(),
+            ("graphics", "uiEdgePadding") => format!("{value}px"),
+            ("graphics", "screenshake") => {
+                format!("{}x", Self::settings_java_float_label(value as f32 / 4.0))
+            }
+            ("graphics", "bloomintensity") => {
+                format!("{}%", (value as f32 / 4.0 * 100.0) as i32)
+            }
+            ("graphics", "bloomblur") => format!("{value}x"),
+            ("graphics", "fpscap") => {
+                if value > 240 {
+                    self.localize_bundle_markup_text("@setting.fpscap.none")
+                } else {
+                    let value_text = value.to_string();
+                    self.format_bundle_text("setting.fpscap.text", &[value_text.as_str()])
+                }
+            }
+            ("graphics", "uiscale")
+            | ("graphics", "chatopacity")
+            | ("graphics", "lasersopacity")
+            | ("graphics", "unitlaseropacity")
+            | ("graphics", "bridgeopacity")
+            | ("graphics", "maxmagnificationmultiplierpercent")
+            | ("graphics", "minmagnificationmultiplierpercent")
+            | ("sound", "musicvol")
+            | ("sound", "sfxvol")
+            | ("sound", "ambientvol") => format!("{value}%"),
+            _ => value.to_string(),
+        }
+    }
+
     fn settings_pref_widget_clip_rect_for_panel(panel: RenderRect) -> RenderRect {
         let bottom_reserved =
             SETTINGS_BACK_BUTTON_HEIGHT + SETTINGS_RESET_BUTTON_HEIGHT + 30.0 + 16.0;
@@ -26094,7 +26139,7 @@ impl DesktopLauncher {
                         Layer::END_PIXELED + 0.034,
                     ));
                     pass.push(RenderCommand::draw_text_styled(
-                        format!("value: {value}"),
+                        self.settings_slider_display_value(spec, value),
                         RenderPoint::new(content.right(), row.y + row.height * 0.5),
                         [0.72, 0.84, 0.9, 1.0],
                         11.0,
@@ -78046,6 +78091,7 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.dispatch_menu_action(MenuButtonRole::Settings);
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
         launcher.set_setting_override("game", "communityservers", "false");
@@ -78161,7 +78207,8 @@ version: "2.0.0"
         assert!(texts.contains(&"@setting.saveinterval.name"));
         assert!(texts.contains(&"@setting.communityservers.name"));
         assert!(texts.contains(&"@setting.playerlimit.name"));
-        assert!(texts.contains(&"value: 60"));
+        assert!(texts.contains(&"60 seconds"));
+        assert!(!texts.iter().any(|text| text.starts_with("value: ")));
         assert!(!texts.contains(&"off"));
         assert!(
             !texts.contains(&"settings page: game")
@@ -78174,6 +78221,7 @@ version: "2.0.0"
         );
 
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Graphics;
+        launcher.set_setting_override("graphics", "fpscap", "245");
         let graphics_frame = launcher.menu_graphics_frame_for_surface(1, viewport);
         let graphics_texts = graphics_frame
             .bundle
@@ -78190,6 +78238,15 @@ version: "2.0.0"
             .collect::<Vec<_>>();
         assert!(graphics_texts.contains(&"@setting.fullscreen.name"));
         assert!(graphics_texts.contains(&"@setting.macnotch.name"));
+        assert!(graphics_texts.contains(&"0px"));
+        assert!(graphics_texts.contains(&"100%"));
+        assert!(graphics_texts.contains(&"1.0x"));
+        assert!(graphics_texts.contains(&"150%"));
+        assert!(graphics_texts.contains(&"2x"));
+        assert!(graphics_texts.contains(&"None"));
+        assert!(!graphics_texts
+            .iter()
+            .any(|text| text.starts_with("value: ")));
 
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Sound;
         let sound_frame = launcher.menu_graphics_frame_for_surface(2, viewport);
@@ -78207,12 +78264,14 @@ version: "2.0.0"
             })
             .collect::<Vec<_>>();
         assert!(sound_texts.contains(&"@setting.musicvol.name"));
-        assert!(sound_texts.contains(&"value: 100"));
+        assert!(sound_texts.contains(&"100%"));
+        assert!(!sound_texts.iter().any(|text| text.starts_with("value: ")));
     }
 
     #[test]
     fn desktop_launcher_settings_slider_layout_uses_upstream_stack_margins() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
         launcher.dispatch_menu_action(MenuButtonRole::Settings);
         launcher.settings_dialog_state.page = super::DesktopSettingsPage::Game;
 
@@ -78276,7 +78335,7 @@ version: "2.0.0"
         let save_value_position = commands
             .iter()
             .find_map(|command| match command {
-                RenderCommand::DrawText { text, position, .. } if text == "value: 60" => {
+                RenderCommand::DrawText { text, position, .. } if text == "60 seconds" => {
                     Some(*position)
                 }
                 _ => None,

@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 738. Settings slider 数值显示对齐 Java formatter
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **87.4%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `SettingsMenuDialog.addSettings()` 为每个 `sliderPref(...)` 传入语义 formatter；
+  - 原版不会显示 Rust 临时文案 `value: N`；
+  - `saveinterval` 使用 `setting.seconds`，音量/透明度/缩放等使用 `%`，`screenshake`/`bloomblur` 使用 `x`，`fpscap > 240` 显示 `setting.fpscap.none`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - 新增 Settings slider 显示 formatter，按 setting key 输出 Java 风格的秒、百分比、倍数、像素、FPS 与 None 文案；
+    - `push_settings_route_controls(...)` 不再渲染 `value: N`；
+    - 扩展 Settings 回归，覆盖 `60 seconds`、`100%`、`1.0x`、`150%`、`2x`、`0px`、`None`，并断言不再出现 `value:` 前缀。
+  - `core/src/mindustry/ui/mod.rs`
+    - 补齐 `setting.seconds`、`setting.fpscap.name`、`setting.fpscap.none`、`setting.fpscap.text` 的英文、简中、繁中 bundle 条目，避免本地化回退为占位文本。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_pages_render_upstream_check_and_slider_widgets --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_slider_layout_uses_upstream_stack_margins --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop settings --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - Settings 仍需继续补齐 Java Scene2D 的真实文本光标、完整 Data 动作矩阵、Controls reset all 滚动尾部布局和更多即时副作用；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 737. ModsDialog 主页面搜索过滤对齐原版
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
