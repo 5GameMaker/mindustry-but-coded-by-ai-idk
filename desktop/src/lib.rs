@@ -17794,6 +17794,7 @@ pub struct DesktopLauncher {
     pub join_info_dialog_open: bool,
     pub join_version_mismatch_dialog_message: Option<String>,
     pub join_connection_error_dialog_message: Option<String>,
+    pub join_last_timeout_disconnects_seen: u64,
     pub join_delete_dialog_index: Option<usize>,
     pub join_server_disclaimer_accepted: bool,
     pub join_server_disclaimer_pending_target: Option<DesktopConnectTarget>,
@@ -18958,6 +18959,7 @@ impl DesktopLauncher {
             join_info_dialog_open: false,
             join_version_mismatch_dialog_message: None,
             join_connection_error_dialog_message: None,
+            join_last_timeout_disconnects_seen: 0,
             join_delete_dialog_index: None,
             join_server_disclaimer_accepted: false,
             join_server_disclaimer_pending_target: None,
@@ -19269,6 +19271,7 @@ impl DesktopLauncher {
         }
         self.client.update();
         self.net_client.update();
+        self.sync_join_connection_error_dialog_from_net_state();
         self.poll_join_local_discovery();
         self.poll_join_saved_server_refreshes();
         self.sync_loaded_world_data();
@@ -29864,6 +29867,82 @@ impl DesktopLauncher {
         )
     }
 
+    fn clear_join_connection_error_sources(&mut self) {
+        let state = self.net_client.state();
+        let mut state = state.lock().unwrap();
+        state.last_connect_packet_error = None;
+        state.last_connect_confirm_error = None;
+        state.last_world_data_error = None;
+        self.join_last_timeout_disconnects_seen = state.timeout_disconnects;
+    }
+
+    fn pending_join_connection_error_from_net_state(&self) -> Option<(String, bool, u64)> {
+        let state = self.net_client.state();
+        let state = state.lock().unwrap();
+        let timeout_disconnects = state.timeout_disconnects;
+        if let Some(error) = state.last_connect_packet_error.as_ref() {
+            return Some((
+                format!(
+                    "{}\n{}",
+                    self.localize_bundle_markup_text("@disconnect.error"),
+                    error
+                ),
+                true,
+                timeout_disconnects,
+            ));
+        }
+        if let Some(error) = state.last_connect_confirm_error.as_ref() {
+            return Some((
+                format!(
+                    "{}\n{}",
+                    self.localize_bundle_markup_text("@disconnect.error"),
+                    error
+                ),
+                true,
+                timeout_disconnects,
+            ));
+        }
+        if let Some(error) = state.last_world_data_error.as_ref() {
+            return Some((
+                format!(
+                    "{}\n{}",
+                    self.localize_bundle_markup_text("@disconnect.data"),
+                    error
+                ),
+                true,
+                timeout_disconnects,
+            ));
+        }
+        if timeout_disconnects > self.join_last_timeout_disconnects_seen {
+            return Some((
+                self.localize_bundle_markup_text("@disconnect.timeout"),
+                false,
+                timeout_disconnects,
+            ));
+        }
+        None
+    }
+
+    fn sync_join_connection_error_dialog_from_net_state(&mut self) {
+        if self.active_menu_route != Some(DesktopMenuRoute::Join)
+            || self.join_connection_error_dialog_message.is_some()
+            || self.join_version_mismatch_dialog_message.is_some()
+        {
+            return;
+        }
+        let Some((message, should_disconnect, timeout_disconnects)) =
+            self.pending_join_connection_error_from_net_state()
+        else {
+            return;
+        };
+        if should_disconnect {
+            self.net_client.disconnect_quietly();
+        }
+        self.join_last_timeout_disconnects_seen = timeout_disconnects;
+        self.connect_error = Some(message.clone());
+        self.join_connection_error_dialog_message = Some(message);
+    }
+
     fn join_route_server_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
         let columns = Self::join_route_server_card_columns_for_panel(panel);
         let row = index / columns;
@@ -35025,6 +35104,7 @@ impl DesktopLauncher {
             DesktopMenuRouteShellAction::CloseJoinConnectionError => {
                 self.join_connection_error_dialog_message = None;
                 self.connect_error = None;
+                self.clear_join_connection_error_sources();
             }
             DesktopMenuRouteShellAction::CancelJoinConnect => {
                 self.net_client.disconnect_quietly();
@@ -79503,6 +79583,60 @@ version: "2.0.0"
         assert_eq!(
             launcher.active_menu_route,
             Some(super::DesktopMenuRoute::Join)
+        );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_async_net_errors_open_error_modal() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.connecting = true;
+            state.last_connect_packet_error = Some("send failed".into());
+        }
+
+        launcher.update();
+
+        let modal = launcher
+            .join_connection_error_dialog_message
+            .clone()
+            .expect("async connect packet error should open modal");
+        assert!(modal.contains("Connection error."));
+        assert!(modal.contains("send failed"));
+        assert_eq!(launcher.connect_error, Some(modal));
+        {
+            let state = launcher.net_client.state();
+            let state = state.lock().unwrap();
+            assert!(!state.connecting);
+        }
+
+        launcher.dispatch_menu_route_shell_action(
+            super::DesktopMenuRouteShellAction::CloseJoinConnectionError,
+        );
+        assert_eq!(launcher.join_connection_error_dialog_message, None);
+        {
+            let state = launcher.net_client.state();
+            let state = state.lock().unwrap();
+            assert_eq!(state.last_connect_packet_error, None);
+        }
+
+        {
+            let state = launcher.net_client.state();
+            let mut state = state.lock().unwrap();
+            state.timeout_disconnects = state.timeout_disconnects.saturating_add(1);
+        }
+        launcher.update();
+        let timeout_modal = launcher
+            .join_connection_error_dialog_message
+            .clone()
+            .expect("timeout disconnect should open modal");
+        assert_eq!(
+            timeout_modal,
+            launcher.localize_bundle_markup_text("@disconnect.timeout")
         );
     }
 
