@@ -15,6 +15,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 654. JoinDialog 多列槽位与 communityservers 开关对齐
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **76.6%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是把 JoinDialog 本地/保存服务器可见布局从窄单列推进到更贴近 Java `targetWidth()/columns()` 的多列卡片槽位，并让 `communityservers=false` 时按原版隐藏 global/community 区域。
+- Java 对照依据：
+  - `JoinDialog.targetWidth()` 返回最多 550f，`columns()` 根据屏幕宽度在 1..4 列之间切换；
+  - `JoinDialog.setup()` 通过 `ScrollPane + section(...)` 将 local/remote/global 分区加入同一 hosts 表，并在分区标题后绘制 accent 分隔线；
+  - `JoinDialog.setup()` 只有在 `Core.settings.getBool("communityservers", true)` 时才添加 `@servers.global` 区域。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - Join route 面板宽度上限扩大，新增 `join_route_server_card_columns_for_panel(...)` 与 `join_route_server_card_visible_slots_for_panel(...)`，按 panel 宽度计算 1..4 列、2 行可见卡片槽；
+    - local host 与 saved server 共用同一槽位序列，local 先占槽，saved server 从后续槽位继续排布，1280x720 下可见 2 列/4 槽，命中顺序保持 local → saved；
+    - `join_route_server_card_rect_for_panel(...)` 改为网格坐标，hit-test、action button、search/global 区域均改用 panel-aware slot capacity；
+    - local/remote 分区标题补 accent 分隔线与展开图标视觉，community 搜索框补 zoom 图标，减少静态调试壳感；
+    - 新增 `join_community_servers_enabled()`，在 `communityservers=false` 时 route lines、渲染与 search/show-hidden/community hit-test 均不暴露 global/community 区域。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop join_route --lib`
+  - `cargo test -p mindustry-desktop menu_frame --lib`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+- 仍未完成：
+  - JoinDialog 仍缺 Java `ScrollPane + Collapser + collapsed-*` 的完整滚动/折叠/持久化行为；
+  - saved server 仍缺 Java `refreshServer(...)` 的逐卡 `pingHost` 独立刷新与 `lastHost` 回填；
+  - community 远端 fetch/cache、逐 host 真实刷新、`safeConnect(..., version)` 版本门禁仍待迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 653. JoinDialog server card 文案去调试化
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

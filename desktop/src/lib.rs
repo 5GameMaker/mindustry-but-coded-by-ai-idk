@@ -169,8 +169,11 @@ const SETTINGS_KEYBIND_RESET_WIDTH: f32 = 126.0;
 const SETTINGS_KEYBIND_VISIBLE_ROWS: usize = 9;
 const JOIN_SERVER_CARD_HEIGHT: f32 = 132.0;
 const JOIN_SERVER_CARD_GAP: f32 = 10.0;
-const JOIN_SAVED_SERVER_VISIBLE_CARDS: usize = 2;
-const JOIN_LOCAL_HOST_VISIBLE_CARDS: usize = 1;
+const JOIN_SERVER_CARD_COLUMN_GAP: f32 = 8.0;
+const JOIN_SERVER_CARD_TARGET_WIDTH: f32 = 520.0;
+const JOIN_SERVER_CARD_VISIBLE_ROWS: usize = 2;
+const JOIN_SERVER_CARD_MAX_COLUMNS: usize = 4;
+const JOIN_LOCAL_HOST_VISIBLE_CARDS: usize = 2;
 const JOIN_COMMUNITY_GROUP_VISIBLE_CARDS: usize = 3;
 const JOIN_COMMUNITY_GROUP_CARD_HEIGHT: f32 = 88.0;
 const JOIN_COMMUNITY_GROUP_CARD_GAP: f32 = 8.0;
@@ -26561,8 +26564,11 @@ impl DesktopLauncher {
             );
         }
         if route == DesktopMenuRoute::Join {
-            let panel_width = (viewport.width * 0.74).clamp(460.0, 860.0);
-            let panel_height = (viewport.height - 110.0).clamp(520.0, 720.0);
+            let available_width = (viewport.width - 96.0).max(460.0);
+            let panel_width = (viewport.width * 0.92)
+                .clamp(520.0, 1740.0)
+                .min(available_width);
+            let panel_height = (viewport.height - 82.0).clamp(540.0, 760.0);
             return RenderRect::new(
                 viewport.x + viewport.width - panel_width - 48.0,
                 viewport.y + (viewport.height - panel_height) * 0.5,
@@ -27044,10 +27050,20 @@ impl DesktopLauncher {
         RenderRect::new(add.right() + 12.0, add.y, 58.0, add.height)
     }
 
+    fn join_route_server_card_columns_for_panel(panel: RenderRect) -> usize {
+        let content_width = (panel.width - 72.0).max(1.0);
+        ((content_width / JOIN_SERVER_CARD_TARGET_WIDTH).floor() as usize)
+            .clamp(1, JOIN_SERVER_CARD_MAX_COLUMNS)
+    }
+
+    fn join_route_server_card_visible_slots_for_panel(panel: RenderRect) -> usize {
+        Self::join_route_server_card_columns_for_panel(panel) * JOIN_SERVER_CARD_VISIBLE_ROWS
+    }
+
     fn join_route_search_rect_for_panel(panel: RenderRect) -> RenderRect {
         let card = Self::join_route_server_card_rect_for_panel(
             panel,
-            JOIN_SAVED_SERVER_VISIBLE_CARDS.saturating_sub(1),
+            Self::join_route_server_card_visible_slots_for_panel(panel).saturating_sub(1),
         );
         let global_y = card.y - 30.0;
         let search_y = global_y - 42.0;
@@ -27241,6 +27257,11 @@ impl DesktopLauncher {
                 .is_some_and(|value| matches!(value.as_str(), "true" | "1"))
     }
 
+    fn join_community_servers_enabled(&self) -> bool {
+        self.setting_effective_value("game", "communityservers")
+            .is_none_or(|value| matches!(value.as_str(), "true" | "1"))
+    }
+
     pub fn set_join_community_group_hidden(&mut self, index: usize, hidden: bool) -> bool {
         let Some(group) = self.join_community_groups.get(index) else {
             return false;
@@ -27425,26 +27446,34 @@ impl DesktopLauncher {
     }
 
     fn join_route_server_card_rect_for_panel(panel: RenderRect, index: usize) -> RenderRect {
+        let columns = Self::join_route_server_card_columns_for_panel(panel);
+        let row = index / columns;
+        let column = index % columns;
+        let content_width = (panel.width - 72.0).max(1.0);
+        let card_width = (content_width
+            - JOIN_SERVER_CARD_COLUMN_GAP * (columns.saturating_sub(1)) as f32)
+            / columns as f32;
         let top = panel.y + panel.height
             - 204.0
-            - index as f32 * (JOIN_SERVER_CARD_HEIGHT + JOIN_SERVER_CARD_GAP);
+            - row as f32 * (JOIN_SERVER_CARD_HEIGHT + JOIN_SERVER_CARD_GAP);
         RenderRect::new(
-            panel.x + 36.0,
+            panel.x + 36.0 + column as f32 * (card_width + JOIN_SERVER_CARD_COLUMN_GAP),
             top - JOIN_SERVER_CARD_HEIGHT,
-            panel.width - 72.0,
+            card_width,
             JOIN_SERVER_CARD_HEIGHT,
         )
     }
 
-    fn join_route_visible_local_host_count(&self) -> usize {
+    fn join_route_visible_local_host_count_for_panel(&self, panel: RenderRect) -> usize {
         self.join_local_hosts
             .len()
             .min(JOIN_LOCAL_HOST_VISIBLE_CARDS)
-            .min(JOIN_SAVED_SERVER_VISIBLE_CARDS)
+            .min(Self::join_route_server_card_visible_slots_for_panel(panel))
     }
 
-    fn join_route_visible_saved_server_card_capacity(&self) -> usize {
-        JOIN_SAVED_SERVER_VISIBLE_CARDS.saturating_sub(self.join_route_visible_local_host_count())
+    fn join_route_visible_saved_server_card_capacity_for_panel(&self, panel: RenderRect) -> usize {
+        Self::join_route_server_card_visible_slots_for_panel(panel)
+            .saturating_sub(self.join_route_visible_local_host_count_for_panel(panel))
     }
 
     fn join_route_server_card_action_button_rect(
@@ -27465,8 +27494,8 @@ impl DesktopLauncher {
         panel: RenderRect,
         point: RenderPoint,
     ) -> Option<usize> {
-        let local_count = self.join_route_visible_local_host_count();
-        let saved_capacity = self.join_route_visible_saved_server_card_capacity();
+        let local_count = self.join_route_visible_local_host_count_for_panel(panel);
+        let saved_capacity = self.join_route_visible_saved_server_card_capacity_for_panel(panel);
         self.join_saved_server_snapshots()
             .into_iter()
             .enumerate()
@@ -29315,38 +29344,46 @@ impl DesktopLauncher {
         if Self::join_route_refresh_button_rect_for_panel(panel).contains_point(point) {
             return Some(DesktopMenuRouteShellAction::RefreshJoinServers);
         }
-        if Self::join_route_search_rect_for_panel(panel).contains_point(point) {
-            return Some(DesktopMenuRouteShellAction::FocusJoinSearch);
-        }
-        if Self::join_route_show_hidden_button_rect_for_panel(panel).contains_point(point) {
-            return Some(DesktopMenuRouteShellAction::ToggleJoinShowHidden);
-        }
-        for (visible_index, (group_index, _)) in self
-            .visible_join_community_groups()
-            .into_iter()
-            .take(JOIN_COMMUNITY_GROUP_VISIBLE_CARDS)
-            .enumerate()
-        {
-            let row = Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
-            if !row.contains_point(point) {
-                continue;
+        if self.join_community_servers_enabled() {
+            if Self::join_route_search_rect_for_panel(panel).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::FocusJoinSearch);
             }
-            for button_index in 0..3 {
-                if Self::join_route_community_group_action_button_rect(row, button_index)
-                    .contains_point(point)
-                {
-                    return Some(match button_index {
-                        0 => DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(group_index),
-                        1 => DesktopMenuRouteShellAction::ToggleJoinCommunityHidden(group_index),
-                        _ => DesktopMenuRouteShellAction::AddJoinCommunityGroupToSaved(group_index),
-                    });
+            if Self::join_route_show_hidden_button_rect_for_panel(panel).contains_point(point) {
+                return Some(DesktopMenuRouteShellAction::ToggleJoinShowHidden);
+            }
+            for (visible_index, (group_index, _)) in self
+                .visible_join_community_groups()
+                .into_iter()
+                .take(JOIN_COMMUNITY_GROUP_VISIBLE_CARDS)
+                .enumerate()
+            {
+                let row = Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
+                if !row.contains_point(point) {
+                    continue;
                 }
+                for button_index in 0..3 {
+                    if Self::join_route_community_group_action_button_rect(row, button_index)
+                        .contains_point(point)
+                    {
+                        return Some(match button_index {
+                            0 => DesktopMenuRouteShellAction::ToggleJoinCommunityFavorite(
+                                group_index,
+                            ),
+                            1 => {
+                                DesktopMenuRouteShellAction::ToggleJoinCommunityHidden(group_index)
+                            }
+                            _ => DesktopMenuRouteShellAction::AddJoinCommunityGroupToSaved(
+                                group_index,
+                            ),
+                        });
+                    }
+                }
+                return Some(DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(
+                    group_index,
+                ));
             }
-            return Some(DesktopMenuRouteShellAction::ConnectJoinCommunityGroup(
-                group_index,
-            ));
         }
-        for local_index in 0..self.join_route_visible_local_host_count() {
+        for local_index in 0..self.join_route_visible_local_host_count_for_panel(panel) {
             let rect = Self::join_route_server_card_rect_for_panel(panel, local_index);
             if rect.contains_point(point) {
                 return Some(DesktopMenuRouteShellAction::ConnectJoinLocalHost(
@@ -29355,13 +29392,13 @@ impl DesktopLauncher {
             }
         }
         if let Some(card_index) = self.join_route_server_card_index_at_point(panel, point) {
-            let local_count = self.join_route_visible_local_host_count();
+            let local_count = self.join_route_visible_local_host_count_for_panel(panel);
             let visible_saved_index = self
                 .join_saved_server_snapshots()
                 .into_iter()
                 .enumerate()
                 .filter(|(_, snapshot)| snapshot.matches_query(&self.join_search))
-                .take(self.join_route_visible_saved_server_card_capacity())
+                .take(self.join_route_visible_saved_server_card_capacity_for_panel(panel))
                 .position(|(index, _)| index == card_index)
                 .unwrap_or(0);
             let card = Self::join_route_server_card_rect_for_panel(
@@ -33021,6 +33058,30 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.031 + index as f32 * 0.001,
             ));
+            let divider_start = RenderPoint::new(panel.x + 148.0, y - 1.0);
+            let divider_end = RenderPoint::new(panel.x + panel.width - 76.0, y - 1.0);
+            if divider_end.x > divider_start.x {
+                pass.push(RenderCommand::draw_line(
+                    divider_start,
+                    divider_end,
+                    3.0,
+                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.72],
+                    Layer::END_PIXELED + 0.0315 + index as f32 * 0.001,
+                ));
+            }
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label("upOpen", "^"),
+                RenderPoint::new(panel.x + panel.width - 48.0, y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 0.92],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.032 + index as f32 * 0.001,
+            ));
         }
 
         let search_rect = Self::join_route_search_rect_for_panel(panel);
@@ -33029,7 +33090,7 @@ impl DesktopLauncher {
             .join_local_hosts
             .iter()
             .enumerate()
-            .take(self.join_route_visible_local_host_count())
+            .take(self.join_route_visible_local_host_count_for_panel(panel))
             .collect::<Vec<_>>();
         for (visible_index, (_, host)) in visible_local_hosts.iter().enumerate() {
             let card = Self::join_route_server_card_rect_for_panel(panel, visible_index);
@@ -33112,7 +33173,8 @@ impl DesktopLauncher {
 
         let saved_snapshots = self.join_saved_server_snapshots();
         let local_card_count = visible_local_hosts.len();
-        let saved_card_capacity = self.join_route_visible_saved_server_card_capacity();
+        let saved_card_capacity =
+            self.join_route_visible_saved_server_card_capacity_for_panel(panel);
         let visible_saved = saved_snapshots
             .iter()
             .enumerate()
@@ -33301,80 +33363,70 @@ impl DesktopLauncher {
             ));
         }
 
-        let global_card = Self::join_route_server_card_rect_for_panel(
-            panel,
-            JOIN_SAVED_SERVER_VISIBLE_CARDS.saturating_sub(1),
-        );
-        let global_y = global_card.y - 30.0;
-        pass.push(RenderCommand::draw_text_styled(
-            "@servers.global",
-            RenderPoint::new(panel.x + 36.0, global_y),
-            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
-            Layer::END_PIXELED + 0.036,
-        ));
-        pass.push(RenderCommand::draw_text_styled(
-            "@servers.community",
-            RenderPoint::new(panel.x + 36.0, global_y - 18.0),
-            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
-            12.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true)
-                .with_outline(true),
-            Layer::END_PIXELED + 0.0365,
-        ));
-        let search = search_rect;
-        pass.push(RenderCommand::draw_sprite(
-            Self::settings_text_button_symbol("grayt", false, false),
-            search,
-            [
-                1.0,
-                1.0,
-                1.0,
-                if self.join_search_focused { 0.90 } else { 0.72 },
-            ],
-            0.0,
-            Layer::END_PIXELED + 0.036,
-        ));
-        pass.push(RenderCommand::draw_text_styled(
-            if self.join_search.is_empty() {
-                "@search".into()
-            } else {
-                self.join_search.clone()
-            },
-            RenderPoint::new(search.x + 34.0, search.center().y),
-            [0.60, 0.70, 0.78, 1.0],
-            10.0,
-            0.0,
-            RenderTextStyle::new(RenderTextAlign::Start)
-                .with_vertical_align(RenderTextVerticalAlign::Center)
-                .with_integer_position(true),
-            Layer::END_PIXELED + 0.037,
-        ));
-        self.push_settings_text_button(
-            pass,
-            show_hidden_rect,
-            "@servers.showhidden",
-            Some(if self.join_show_hidden {
-                "eyeSmall"
-            } else {
-                "eyeOffSmall"
-            }),
-            Layer::END_PIXELED + 0.036,
-        );
-        let visible_community_groups = self.visible_join_community_groups();
-        if visible_community_groups.is_empty() {
+        if self.join_community_servers_enabled() {
+            let global_card = Self::join_route_server_card_rect_for_panel(
+                panel,
+                Self::join_route_server_card_visible_slots_for_panel(panel).saturating_sub(1),
+            );
+            let global_y = global_card.y - 30.0;
             pass.push(RenderCommand::draw_text_styled(
-                "@hosts.none",
-                RenderPoint::new(panel.x + 36.0, search.y - 22.0),
-                [0.58, 0.68, 0.76, 1.0],
+                "@servers.global",
+                RenderPoint::new(panel.x + 36.0, global_y),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.036,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                "@servers.community",
+                RenderPoint::new(panel.x + 36.0, global_y - 18.0),
+                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0],
+                12.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Start)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.0365,
+            ));
+            let search = search_rect;
+            pass.push(RenderCommand::draw_sprite(
+                Self::settings_text_button_symbol("grayt", false, false),
+                search,
+                [
+                    1.0,
+                    1.0,
+                    1.0,
+                    if self.join_search_focused { 0.90 } else { 0.72 },
+                ],
+                0.0,
+                Layer::END_PIXELED + 0.036,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                desktop_ui_icon_glyph_or_label("zoom", "search"),
+                RenderPoint::new(search.x + 18.0, search.center().y),
+                [0.70, 0.82, 0.90, 1.0],
+                13.0,
+                0.0,
+                RenderTextStyle::new(RenderTextAlign::Center)
+                    .with_font(RenderFontId::Icon)
+                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                    .with_integer_position(true)
+                    .with_outline(true),
+                Layer::END_PIXELED + 0.037,
+            ));
+            pass.push(RenderCommand::draw_text_styled(
+                if self.join_search.is_empty() {
+                    "@search".into()
+                } else {
+                    self.join_search.clone()
+                },
+                RenderPoint::new(search.x + 34.0, search.center().y),
+                [0.60, 0.70, 0.78, 1.0],
                 10.0,
                 0.0,
                 RenderTextStyle::new(RenderTextAlign::Start)
@@ -33382,128 +33434,93 @@ impl DesktopLauncher {
                     .with_integer_position(true),
                 Layer::END_PIXELED + 0.037,
             ));
-        } else {
-            for (visible_index, (group_index, group)) in visible_community_groups
-                .into_iter()
-                .take(JOIN_COMMUNITY_GROUP_VISIBLE_CARDS)
-                .enumerate()
-            {
-                let favorite = self.join_community_group_favorite(group);
-                let hidden = self.join_community_group_hidden(group);
-                let card =
-                    Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
-                let layer = Layer::END_PIXELED + 0.037 + visible_index as f32 * 0.006;
-                let header = RenderRect::new(card.x, card.y + card.height - 32.0, card.width, 32.0);
-                let group_color = if group.prioritized || favorite {
-                    [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+            self.push_settings_text_button(
+                pass,
+                show_hidden_rect,
+                "@servers.showhidden",
+                Some(if self.join_show_hidden {
+                    "eyeSmall"
                 } else {
-                    [0.78, 0.82, 0.86, 1.0]
-                };
-                let host = group.hosts.first();
-                let target = Self::join_community_group_connect_target(group);
-                let address = host
-                    .map(|host| format!("{}:{}", host.address, host.port))
-                    .or_else(|| target.as_ref().map(desktop_connect_target_display_ip))
-                    .or_else(|| group.addresses.first().cloned())
-                    .unwrap_or_else(|| "@unknown".into());
-
-                pass.push(RenderCommand::draw_sprite(
-                    Self::settings_drawable_symbol("pane"),
-                    card,
-                    [1.0, 1.0, 1.0, if hidden { 0.62 } else { 0.90 }],
-                    0.0,
-                    layer,
-                ));
-                pass.push(RenderCommand::stroke_rect(
-                    card,
-                    [
-                        group_color[0],
-                        group_color[1],
-                        group_color[2],
-                        if hidden { 0.46 } else { 0.86 },
-                    ],
-                    if favorite { 2.0 } else { 1.0 },
-                    layer + 0.001,
-                ));
-                pass.push(RenderCommand::fill_rect(
-                    header,
-                    [
-                        group_color[0] * 0.34,
-                        group_color[1] * 0.34,
-                        group_color[2] * 0.34,
-                        if hidden { 0.26 } else { 0.42 },
-                    ],
-                    layer + 0.002,
-                ));
+                    "eyeOffSmall"
+                }),
+                Layer::END_PIXELED + 0.036,
+            );
+            let visible_community_groups = self.visible_join_community_groups();
+            if visible_community_groups.is_empty() {
                 pass.push(RenderCommand::draw_text_styled(
-                    if group.name.trim().is_empty() {
-                        format!("community[{group_index}]")
-                    } else {
-                        group.name.clone()
-                    },
-                    RenderPoint::new(header.x + 12.0, header.center().y),
-                    group_color,
-                    12.0,
+                    "@hosts.none",
+                    RenderPoint::new(panel.x + 36.0, search.y - 22.0),
+                    [0.58, 0.68, 0.76, 1.0],
+                    10.0,
                     0.0,
                     RenderTextStyle::new(RenderTextAlign::Start)
                         .with_vertical_align(RenderTextVerticalAlign::Center)
-                        .with_integer_position(true)
-                        .with_outline(true),
-                    layer + 0.003,
+                        .with_integer_position(true),
+                    Layer::END_PIXELED + 0.037,
                 ));
-                for (button_index, (icon, color)) in [
-                    (
-                        "star",
-                        if favorite {
-                            [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
-                        } else {
-                            [0.76, 0.80, 0.84, 1.0]
-                        },
-                    ),
-                    (
-                        if hidden { "eyeOffSmall" } else { "eyeSmall" },
-                        [0.78, 0.86, 0.92, 1.0],
-                    ),
-                    ("add", [0.86, 0.94, 1.0, 1.0]),
-                ]
-                .into_iter()
-                .enumerate()
+            } else {
+                for (visible_index, (group_index, group)) in visible_community_groups
+                    .into_iter()
+                    .take(JOIN_COMMUNITY_GROUP_VISIBLE_CARDS)
+                    .enumerate()
                 {
-                    let button =
-                        Self::join_route_community_group_action_button_rect(card, button_index);
-                    pass.push(RenderCommand::draw_sprite(
-                        Self::settings_image_button_symbol("defaulti", false, false),
-                        button,
-                        [1.0, 1.0, 1.0, if hidden { 0.54 } else { 0.88 }],
-                        0.0,
-                        layer + 0.004 + button_index as f32 * 0.0001,
-                    ));
-                    pass.push(RenderCommand::draw_text_styled(
-                        desktop_ui_icon_glyph_or_label(icon, icon),
-                        button.center(),
-                        color,
-                        14.0,
-                        0.0,
-                        RenderTextStyle::new(RenderTextAlign::Center)
-                            .with_font(RenderFontId::Icon)
-                            .with_vertical_align(RenderTextVerticalAlign::Center)
-                            .with_integer_position(true)
-                            .with_outline(true),
-                        layer + 0.005 + button_index as f32 * 0.0001,
-                    ));
-                }
-
-                if let Some(host) = host {
-                    let version = if host.version_type.is_empty() {
-                        host.version.to_string()
+                    let favorite = self.join_community_group_favorite(group);
+                    let hidden = self.join_community_group_hidden(group);
+                    let card =
+                        Self::join_route_community_group_row_rect_for_panel(panel, visible_index);
+                    let layer = Layer::END_PIXELED + 0.037 + visible_index as f32 * 0.006;
+                    let header =
+                        RenderRect::new(card.x, card.y + card.height - 32.0, card.width, 32.0);
+                    let group_color = if group.prioritized || favorite {
+                        [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
                     } else {
-                        format!("{} {}", host.version, host.version_type)
+                        [0.78, 0.82, 0.86, 1.0]
                     };
+                    let host = group.hosts.first();
+                    let target = Self::join_community_group_connect_target(group);
+                    let address = host
+                        .map(|host| format!("{}:{}", host.address, host.port))
+                        .or_else(|| target.as_ref().map(desktop_connect_target_display_ip))
+                        .or_else(|| group.addresses.first().cloned())
+                        .unwrap_or_else(|| "@unknown".into());
+
+                    pass.push(RenderCommand::draw_sprite(
+                        Self::settings_drawable_symbol("pane"),
+                        card,
+                        [1.0, 1.0, 1.0, if hidden { 0.62 } else { 0.90 }],
+                        0.0,
+                        layer,
+                    ));
+                    pass.push(RenderCommand::stroke_rect(
+                        card,
+                        [
+                            group_color[0],
+                            group_color[1],
+                            group_color[2],
+                            if hidden { 0.46 } else { 0.86 },
+                        ],
+                        if favorite { 2.0 } else { 1.0 },
+                        layer + 0.001,
+                    ));
+                    pass.push(RenderCommand::fill_rect(
+                        header,
+                        [
+                            group_color[0] * 0.34,
+                            group_color[1] * 0.34,
+                            group_color[2] * 0.34,
+                            if hidden { 0.26 } else { 0.42 },
+                        ],
+                        layer + 0.002,
+                    ));
                     pass.push(RenderCommand::draw_text_styled(
-                        format!("{}   @server.version: {}", host.name, version),
-                        RenderPoint::new(card.x + 12.0, header.y - 14.0),
-                        [0.92, 0.98, 1.0, if hidden { 0.68 } else { 1.0 }],
-                        11.0,
+                        if group.name.trim().is_empty() {
+                            format!("community[{group_index}]")
+                        } else {
+                            group.name.clone()
+                        },
+                        RenderPoint::new(header.x + 12.0, header.center().y),
+                        group_color,
+                        12.0,
                         0.0,
                         RenderTextStyle::new(RenderTextAlign::Start)
                             .with_vertical_align(RenderTextVerticalAlign::Center)
@@ -33511,17 +33528,136 @@ impl DesktopLauncher {
                             .with_outline(true),
                         layer + 0.003,
                     ));
-                    let description = host
-                        .description
-                        .lines()
-                        .take(2)
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    if !description.trim().is_empty() {
+                    for (button_index, (icon, color)) in [
+                        (
+                            "star",
+                            if favorite {
+                                [Pal::ACCENT.r, Pal::ACCENT.g, Pal::ACCENT.b, 1.0]
+                            } else {
+                                [0.76, 0.80, 0.84, 1.0]
+                            },
+                        ),
+                        (
+                            if hidden { "eyeOffSmall" } else { "eyeSmall" },
+                            [0.78, 0.86, 0.92, 1.0],
+                        ),
+                        ("add", [0.86, 0.94, 1.0, 1.0]),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let button =
+                            Self::join_route_community_group_action_button_rect(card, button_index);
+                        pass.push(RenderCommand::draw_sprite(
+                            Self::settings_image_button_symbol("defaulti", false, false),
+                            button,
+                            [1.0, 1.0, 1.0, if hidden { 0.54 } else { 0.88 }],
+                            0.0,
+                            layer + 0.004 + button_index as f32 * 0.0001,
+                        ));
                         pass.push(RenderCommand::draw_text_styled(
-                            description,
-                            RenderPoint::new(card.x + 12.0, header.y - 32.0),
-                            [0.62, 0.72, 0.80, if hidden { 0.58 } else { 1.0 }],
+                            desktop_ui_icon_glyph_or_label(icon, icon),
+                            button.center(),
+                            color,
+                            14.0,
+                            0.0,
+                            RenderTextStyle::new(RenderTextAlign::Center)
+                                .with_font(RenderFontId::Icon)
+                                .with_vertical_align(RenderTextVerticalAlign::Center)
+                                .with_integer_position(true)
+                                .with_outline(true),
+                            layer + 0.005 + button_index as f32 * 0.0001,
+                        ));
+                    }
+
+                    if let Some(host) = host {
+                        let version = if host.version_type.is_empty() {
+                            host.version.to_string()
+                        } else {
+                            format!("{} {}", host.version, host.version_type)
+                        };
+                        pass.push(RenderCommand::draw_text_styled(
+                            format!("{}   @server.version: {}", host.name, version),
+                            RenderPoint::new(card.x + 12.0, header.y - 14.0),
+                            [0.92, 0.98, 1.0, if hidden { 0.68 } else { 1.0 }],
+                            11.0,
+                            0.0,
+                            RenderTextStyle::new(RenderTextAlign::Start)
+                                .with_vertical_align(RenderTextVerticalAlign::Center)
+                                .with_integer_position(true)
+                                .with_outline(true),
+                            layer + 0.003,
+                        ));
+                        let description = host
+                            .description
+                            .lines()
+                            .take(2)
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        if !description.trim().is_empty() {
+                            pass.push(RenderCommand::draw_text_styled(
+                                description,
+                                RenderPoint::new(card.x + 12.0, header.y - 32.0),
+                                [0.62, 0.72, 0.80, if hidden { 0.58 } else { 1.0 }],
+                                9.5,
+                                0.0,
+                                RenderTextStyle::new(RenderTextAlign::Start)
+                                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                                    .with_integer_position(true),
+                                layer + 0.003,
+                            ));
+                        }
+                        for (index, line) in [
+                            format!(
+                                "{}  players: {}/{}",
+                                address, host.players, host.player_limit
+                            ),
+                            format!(
+                                "save.map: {} / {}",
+                                host.mapname,
+                                host.mode_name.as_deref().unwrap_or("@unknown")
+                            ),
+                            format!(
+                                "{} {}ms",
+                                desktop_ui_icon_glyph_or_label("chartBar", "ping"),
+                                host.ping
+                            ),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            pass.push(RenderCommand::draw_text_styled(
+                                line,
+                                RenderPoint::new(
+                                    card.x + 12.0,
+                                    card.y + 14.0 + (2 - index) as f32 * 14.0,
+                                ),
+                                [0.72, 0.82, 0.88, if hidden { 0.58 } else { 1.0 }],
+                                9.0,
+                                0.0,
+                                RenderTextStyle::new(RenderTextAlign::Start)
+                                    .with_vertical_align(RenderTextVerticalAlign::Center)
+                                    .with_integer_position(true),
+                                layer + 0.003 + index as f32 * 0.0001,
+                            ));
+                        }
+                    } else {
+                        pass.push(RenderCommand::draw_text_styled(
+                            address,
+                            RenderPoint::new(card.x + 12.0, card.center().y - 8.0),
+                            [0.78, 0.88, 0.94, if hidden { 0.62 } else { 1.0 }],
+                            11.0,
+                            0.0,
+                            RenderTextStyle::new(RenderTextAlign::Start)
+                                .with_vertical_align(RenderTextVerticalAlign::Center)
+                                .with_integer_position(true)
+                                .with_outline(true),
+                            layer + 0.003,
+                        ));
+                        pass.push(RenderCommand::draw_text_styled(
+                            "@server.waiting",
+                            RenderPoint::new(card.x + 12.0, card.center().y - 30.0),
+                            [0.58, 0.68, 0.76, if hidden { 0.54 } else { 1.0 }],
                             9.5,
                             0.0,
                             RenderTextStyle::new(RenderTextAlign::Start)
@@ -33530,64 +33666,6 @@ impl DesktopLauncher {
                             layer + 0.003,
                         ));
                     }
-                    for (index, line) in [
-                        format!(
-                            "{}  players: {}/{}",
-                            address, host.players, host.player_limit
-                        ),
-                        format!(
-                            "save.map: {} / {}",
-                            host.mapname,
-                            host.mode_name.as_deref().unwrap_or("@unknown")
-                        ),
-                        format!(
-                            "{} {}ms",
-                            desktop_ui_icon_glyph_or_label("chartBar", "ping"),
-                            host.ping
-                        ),
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    {
-                        pass.push(RenderCommand::draw_text_styled(
-                            line,
-                            RenderPoint::new(
-                                card.x + 12.0,
-                                card.y + 14.0 + (2 - index) as f32 * 14.0,
-                            ),
-                            [0.72, 0.82, 0.88, if hidden { 0.58 } else { 1.0 }],
-                            9.0,
-                            0.0,
-                            RenderTextStyle::new(RenderTextAlign::Start)
-                                .with_vertical_align(RenderTextVerticalAlign::Center)
-                                .with_integer_position(true),
-                            layer + 0.003 + index as f32 * 0.0001,
-                        ));
-                    }
-                } else {
-                    pass.push(RenderCommand::draw_text_styled(
-                        address,
-                        RenderPoint::new(card.x + 12.0, card.center().y - 8.0),
-                        [0.78, 0.88, 0.94, if hidden { 0.62 } else { 1.0 }],
-                        11.0,
-                        0.0,
-                        RenderTextStyle::new(RenderTextAlign::Start)
-                            .with_vertical_align(RenderTextVerticalAlign::Center)
-                            .with_integer_position(true)
-                            .with_outline(true),
-                        layer + 0.003,
-                    ));
-                    pass.push(RenderCommand::draw_text_styled(
-                        "@server.waiting",
-                        RenderPoint::new(card.x + 12.0, card.center().y - 30.0),
-                        [0.58, 0.68, 0.76, if hidden { 0.54 } else { 1.0 }],
-                        9.5,
-                        0.0,
-                        RenderTextStyle::new(RenderTextAlign::Start)
-                            .with_vertical_align(RenderTextVerticalAlign::Center)
-                            .with_integer_position(true),
-                        layer + 0.003,
-                    ));
                 }
             }
         }
@@ -38279,7 +38357,12 @@ impl DesktopLauncher {
                 ]
             }
             DesktopMenuRoute::Join => {
-                let visible_community_groups = self.visible_join_community_groups();
+                let community_servers_enabled = self.join_community_servers_enabled();
+                let visible_community_groups = if community_servers_enabled {
+                    self.visible_join_community_groups()
+                } else {
+                    Vec::new()
+                };
                 let mut lines = vec![
                     format!(
                         "section: @servers.local hosts: {} state:{}",
@@ -38296,23 +38379,27 @@ impl DesktopLauncher {
                         "section: @servers.remote favorites: {}",
                         self.join_saved_servers.len()
                     ),
-                    format!(
-                        "section: @servers.global groups: {}",
-                        visible_community_groups.len()
-                    ),
-                    format!(
-                        "section: @servers.community search:{} hidden:{}",
-                        if self.join_search.trim().is_empty() {
-                            "@search"
-                        } else {
-                            self.join_search.as_str()
-                        },
-                        if self.join_show_hidden { "on" } else { "off" }
-                    ),
                     "button: @server.add".into(),
                     "button: ? @join.info".into(),
                     "button: @refresh".into(),
                 ];
+                if community_servers_enabled {
+                    lines.extend([
+                        format!(
+                            "section: @servers.global groups: {}",
+                            visible_community_groups.len()
+                        ),
+                        format!(
+                            "section: @servers.community search:{} hidden:{}",
+                            if self.join_search.trim().is_empty() {
+                                "@search"
+                            } else {
+                                self.join_search.as_str()
+                            },
+                            if self.join_show_hidden { "on" } else { "off" }
+                        ),
+                    ]);
+                }
                 for (index, host) in self.join_local_hosts.iter().enumerate() {
                     lines.extend([
                         format!(
@@ -68778,6 +68865,113 @@ version: "2.0.0"
     }
 
     #[test]
+    fn desktop_launcher_join_route_uses_java_like_grid_slots_for_local_and_saved_servers() {
+        let port = super::DEFAULT_MINDUSTRY_PORT;
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        launcher
+            .join_local_hosts
+            .push(mindustry_core::mindustry::net::Host::new(
+                18,
+                "LAN host",
+                "127.0.0.1",
+                port.into(),
+                "local map",
+                3,
+                2,
+                158,
+                "official",
+                Gamemode::Survival,
+                8,
+                "local description",
+                Some("@mode.survival.name".into()),
+            ));
+        launcher.join_saved_servers = vec![
+            super::DesktopConnectTarget {
+                host: "one.example".into(),
+                port,
+            },
+            super::DesktopConnectTarget {
+                host: "two.example".into(),
+                port,
+            },
+            super::DesktopConnectTarget {
+                host: "three.example".into(),
+                port,
+            },
+        ];
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        assert_eq!(
+            DesktopLauncher::join_route_server_card_columns_for_panel(panel),
+            2
+        );
+        assert_eq!(
+            DesktopLauncher::join_route_server_card_visible_slots_for_panel(panel),
+            4
+        );
+
+        let local = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 0);
+        let saved0 = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 1);
+        let saved1 = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 2);
+        let saved2 = DesktopLauncher::join_route_server_card_rect_for_panel(panel, 3);
+        assert!(local.x < saved0.x);
+        assert!((local.y - saved0.y).abs() < 0.01);
+        assert!((local.x - saved1.x).abs() < 0.01);
+        assert!(saved1.y < local.y);
+        assert!((saved1.y - saved2.y).abs() < 0.01);
+
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                local.center().x,
+                local.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ConnectJoinLocalHost(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                saved0.center().x,
+                saved0.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ConnectJoinServerCard(0))
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                saved2.center().x,
+                saved2.center().y
+            ),
+            Some(super::DesktopMenuRouteShellAction::ConnectJoinServerCard(2))
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join grid frame should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(|text| text.contains("LAN host")));
+        assert!(texts.iter().any(|text| text.contains("one.example")));
+        assert!(texts.iter().any(|text| text.contains("two.example")));
+        assert!(texts.iter().any(|text| text.contains("three.example")));
+    }
+
+    #[test]
     fn desktop_launcher_join_route_tracks_community_groups_like_java_server_group() {
         let mut launcher = DesktopLauncher::new(Vec::new());
         launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
@@ -69009,6 +69203,73 @@ version: "2.0.0"
                 port: 6567,
             })
         );
+    }
+
+    #[test]
+    fn desktop_launcher_join_route_honors_communityservers_setting_like_java() {
+        let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.active_menu_route = Some(super::DesktopMenuRoute::Join);
+        launcher.set_setting_override("game", "communityservers", "false");
+        launcher
+            .join_community_groups
+            .push(super::DesktopJoinCommunityGroup::new(
+                "Official",
+                vec!["community.example:6567".into()],
+                true,
+            ));
+
+        let lines = launcher.active_menu_route_shell_lines(super::DesktopMenuRoute::Join);
+        assert!(!lines
+            .iter()
+            .any(|line| line.starts_with("section: @servers.global")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.starts_with("section: @servers.community")));
+        assert!(!lines.iter().any(|line| line.starts_with("community[")));
+
+        let surface = DesktopSurfaceSize::new(1280, 720);
+        let viewport = launcher.default_render_viewport_for_surface(surface);
+        let panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            viewport,
+            super::DesktopMenuRoute::Join,
+        );
+        let search = DesktopLauncher::join_route_search_rect_for_panel(panel);
+        let show_hidden = DesktopLauncher::join_route_show_hidden_button_rect_for_panel(panel);
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                search.center().x,
+                search.center().y
+            ),
+            None
+        );
+        assert_eq!(
+            launcher.active_menu_route_shell_action_at_surface_point(
+                surface,
+                show_hidden.center().x,
+                show_hidden.center().y
+            ),
+            None
+        );
+
+        let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
+        let texts = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("join frame with community disabled should contain render frame")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .filter_map(|command| match command {
+                RenderCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!texts.contains(&"@servers.global"));
+        assert!(!texts.contains(&"@servers.community"));
+        assert!(!texts.contains(&"@servers.showhidden"));
+        assert!(!texts.iter().any(|text| text.contains("community.example")));
     }
 
     #[test]
