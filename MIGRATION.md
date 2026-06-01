@@ -15,6 +15,29 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 689. EditorMapsDialog 地图信息预览尺寸对齐 Java
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **80.3%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是把 `EditorMapsDialog.showMap(...)` 的地图信息预览从 `168x168` 占位尺寸推进到 Java 的横屏/竖屏 mapsize 语义。
+- Java 对照依据：
+  - `EditorMapsDialog.showMap(Map map)` 使用 `Core.graphics.isPortrait() ? 160f : 300f`；
+  - 地图预览 stack 与右侧 `Styles.black` 信息区都使用 `mapsize`；
+  - `@editor.openin` 和 delete/workshop 按钮高度为 `54f`。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `map_card_dialog_rect_for_panel(...)` 放宽地图卡片弹窗宽度，让横屏地图信息页能容纳 Java 风格双 `300f` 区块；
+    - 新增 `map_editor_preview_size_for_panel(...)`、`map_editor_preview_size_for_dialog(...)`、`map_editor_preview_rect(...)`；
+    - `push_editor_map_info_dialog(...)` 接收 route panel，根据横屏/竖屏分别使用 `300` / `160` 预览尺寸；
+    - 右侧信息区改为与预览同宽同高，继续保持按钮高度 `54`；
+    - 测试锁定横屏 `300x300`、竖屏 `160x160` 与实际 `whiteui` 预览绘制。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop editor_map_info --lib`
+- 仍未完成：
+  - 地图预览目前仍多为占位/atlas fallback，真实 `.msav` preview 纹理接入仍需继续迁移；
+  - `EditorMapsDialog` 的删除确认、真实编辑器打开和 workshop 平台动作仍需继续完整闭环；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 688. CustomRulesDialog 从调试摘要推进到规则分类面板
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。

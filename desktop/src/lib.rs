@@ -28830,7 +28830,12 @@ impl DesktopLauncher {
     }
 
     fn map_card_dialog_rect_for_panel(panel: RenderRect) -> RenderRect {
-        let width = (panel.width - 80.0).clamp(380.0, 560.0);
+        let width_basis = if panel.width >= 520.0 {
+            panel.width + 200.0
+        } else {
+            panel.width - 40.0
+        };
+        let width = width_basis.clamp(380.0, 720.0);
         let height = (panel.height + 30.0).clamp(420.0, 620.0);
         RenderRect::new(
             panel.center().x - width * 0.5,
@@ -28984,6 +28989,31 @@ impl DesktopLauncher {
             dialog.y + 72.0,
             width,
             54.0,
+        )
+    }
+
+    fn map_editor_preview_size_for_panel(panel: RenderRect) -> f32 {
+        if panel.height > panel.width {
+            160.0
+        } else {
+            300.0
+        }
+    }
+
+    fn map_editor_preview_size_for_dialog(dialog: RenderRect, panel: RenderRect) -> f32 {
+        let desired: f32 = Self::map_editor_preview_size_for_panel(panel);
+        let max_by_width = ((dialog.width - 88.0) * 0.5).max(160.0);
+        let max_by_height = (dialog.height - 190.0).max(160.0);
+        desired.min(max_by_width).min(max_by_height)
+    }
+
+    fn map_editor_preview_rect(dialog: RenderRect, panel: RenderRect) -> RenderRect {
+        let size = Self::map_editor_preview_size_for_dialog(dialog, panel);
+        RenderRect::new(
+            dialog.x + 28.0,
+            dialog.y + dialog.height - 88.0 - size,
+            size,
+            size,
         )
     }
 
@@ -36272,7 +36302,7 @@ impl DesktopLauncher {
         if play_dialog {
             self.push_map_play_dialog(pass, dialog, map);
         } else {
-            self.push_editor_map_info_dialog(pass, dialog, map);
+            self.push_editor_map_info_dialog(pass, panel, dialog, map);
         }
     }
 
@@ -36711,6 +36741,7 @@ impl DesktopLauncher {
     fn push_editor_map_info_dialog(
         &self,
         pass: &mut RenderPass,
+        panel: RenderRect,
         dialog: RenderRect,
         map: &MapDescriptor,
     ) {
@@ -36726,7 +36757,7 @@ impl DesktopLauncher {
                 .with_outline(true),
             Layer::END_PIXELED + 0.061,
         ));
-        let preview = RenderRect::new(dialog.x + 28.0, dialog.y + 106.0, 168.0, 168.0);
+        let preview = Self::map_editor_preview_rect(dialog, panel);
         pass.push(RenderCommand::draw_sprite(
             "whiteui",
             preview,
@@ -36743,7 +36774,7 @@ impl DesktopLauncher {
         let desc = RenderRect::new(
             preview.right() + 16.0,
             preview.y,
-            dialog.right() - preview.right() - 44.0,
+            preview.width,
             preview.height,
         );
         pass.push(RenderCommand::fill_rect(
@@ -60988,6 +61019,41 @@ version: "2.0.0"
         );
 
         let frame = launcher.menu_graphics_frame_for_surface(0, render_viewport);
+        let commands = frame
+            .bundle
+            .render_frame
+            .as_ref()
+            .expect("editor map info should render")
+            .passes
+            .iter()
+            .flat_map(|pass| pass.commands.iter())
+            .collect::<Vec<_>>();
+        let preview = DesktopLauncher::map_editor_preview_rect(dialog, panel);
+        assert_eq!(preview.width, 300.0);
+        assert_eq!(preview.height, 300.0);
+        let portrait_surface = DesktopSurfaceSize::new(720, 1280);
+        let portrait_viewport = launcher.default_render_viewport_for_surface(portrait_surface);
+        let portrait_panel = DesktopLauncher::active_menu_route_shell_panel_for_route(
+            portrait_viewport,
+            super::DesktopMenuRoute::Editor,
+        );
+        let portrait_dialog = DesktopLauncher::map_card_dialog_rect_for_panel(portrait_panel);
+        let portrait_preview =
+            DesktopLauncher::map_editor_preview_rect(portrait_dialog, portrait_panel);
+        assert_eq!(portrait_preview.width, 160.0);
+        assert_eq!(portrait_preview.height, 160.0);
+        assert_eq!(
+            DesktopLauncher::map_editor_action_button_rect(dialog, 0).height,
+            54.0
+        );
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, rect, .. }
+                    if symbol == "whiteui" && *rect == preview
+            )),
+            "EditorMapsDialog.showMap should render the Java-like 300f desktop preview"
+        );
         let disabled_delete_text = frame
             .bundle
             .render_frame
