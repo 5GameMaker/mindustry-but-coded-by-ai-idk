@@ -23677,7 +23677,7 @@ impl DesktopLauncher {
                 self.push_settings_text_button(
                     pass,
                     Self::settings_reset_button_rect_for_panel(panel),
-                    "@settings.reset",
+                    self.localize_bundle_markup_text("@settings.reset"),
                     None,
                     Layer::END_PIXELED + 0.072,
                 );
@@ -23740,7 +23740,7 @@ impl DesktopLauncher {
             self.push_settings_text_button_with_style(
                 pass,
                 Self::settings_data_action_button_rect_for_panel(panel, index),
-                action.label,
+                self.localize_bundle_markup_text(action.label),
                 Some(action.icon),
                 Layer::END_PIXELED + 0.030 + index as f32 * 0.0001,
                 "flatt",
@@ -23836,7 +23836,7 @@ impl DesktopLauncher {
         self.push_settings_text_button_with_style(
             pass,
             Self::settings_planet_data_button_rect(dialog, 1),
-            "@settings.clearplanetresearch",
+            self.localize_bundle_markup_text("@settings.clearplanetresearch"),
             Some("trash"),
             Layer::END_PIXELED + 0.111,
             "flatt",
@@ -23844,7 +23844,7 @@ impl DesktopLauncher {
         self.push_settings_text_button_with_style(
             pass,
             Self::settings_planet_data_button_rect(dialog, 2),
-            "@settings.clearplanetcampaignsaves",
+            self.localize_bundle_markup_text("@settings.clearplanetcampaignsaves"),
             Some("trash"),
             Layer::END_PIXELED + 0.112,
             "flatt",
@@ -24176,14 +24176,14 @@ impl DesktopLauncher {
             self.push_settings_text_button(
                 pass,
                 Self::settings_keybind_rebind_button_rect(dialog, index),
-                "@settings.rebind",
+                self.localize_bundle_markup_text("@settings.rebind"),
                 None,
                 Layer::END_PIXELED + 0.110 + index as f32 * 0.0001,
             );
             self.push_settings_text_button(
                 pass,
                 Self::settings_keybind_reset_button_rect(dialog, index),
-                "@settings.resetKey",
+                self.localize_bundle_markup_text("@settings.resetKey"),
                 None,
                 Layer::END_PIXELED + 0.111 + index as f32 * 0.0001,
             );
@@ -24191,7 +24191,7 @@ impl DesktopLauncher {
         self.push_settings_text_button(
             pass,
             Self::settings_keybind_reset_all_rect(dialog),
-            "@settings.reset",
+            self.localize_bundle_markup_text("@settings.reset"),
             Some("refresh"),
             Layer::END_PIXELED + 0.129,
         );
@@ -66706,8 +66706,16 @@ version: "2.0.0"
         assert!(controls_texts.contains(&"@category.general.name"));
         assert!(controls_texts.contains(&"@keybind.move_x.name"));
         assert!(controls_texts.contains(&"A / D"));
-        assert!(controls_texts.contains(&"@settings.rebind"));
-        assert!(controls_texts.contains(&"@settings.resetKey"));
+        assert!(controls_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.rebind")
+                .as_str()
+        ));
+        assert!(controls_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.resetKey")
+                .as_str()
+        ));
         assert!(
             !controls_texts.contains(&"ControlsDialog placeholder: keybind rows and reset later")
         );
@@ -67176,8 +67184,16 @@ version: "2.0.0"
             !planet_texts.contains(&"planet: serpulo"),
             "Java PlanetDataDialog keeps the selected planet inside the planet select button"
         );
-        assert!(planet_texts.contains(&"@settings.clearplanetresearch"));
-        assert!(planet_texts.contains(&"@settings.clearplanetcampaignsaves"));
+        assert!(planet_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.clearplanetresearch")
+                .as_str()
+        ));
+        assert!(planet_texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.clearplanetcampaignsaves")
+                .as_str()
+        ));
         let planet_button_symbol =
             DesktopLauncher::settings_text_button_symbol("flatt", false, false);
         let planet_select_button =
@@ -67444,7 +67460,11 @@ version: "2.0.0"
             !texts.contains(&"planet: erekir"),
             "Java dataDialog itself is a data-action button table; selected planet is shown inside PlanetDataDialog"
         );
-        assert!(texts.contains(&"@settings.cleardata"));
+        assert!(texts.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.cleardata")
+                .as_str()
+        ));
         assert!(texts.contains(&"@data.export"));
         assert!(
             !texts.contains(&"settings page: data"),
@@ -67870,7 +67890,11 @@ version: "2.0.0"
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(labels.contains(&"@settings.reset"));
+        assert!(labels.contains(
+            &launcher
+                .localize_bundle_markup_text("@settings.reset")
+                .as_str()
+        ));
         assert!(labels.contains(&"@back"));
         assert!(!labels.contains(&"button: reset-to-defaults"));
         assert!(!labels.contains(&"button: back"));

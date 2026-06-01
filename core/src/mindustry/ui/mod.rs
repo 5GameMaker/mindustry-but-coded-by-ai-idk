@@ -64,6 +64,18 @@ pub const UPSTREAM_MENU_BUNDLE_ENTRIES: &[(&str, &str)] = &[
     ("settings.controls", "Controls"),
     ("settings.data", "Game Data"),
     ("settings.reset", "Reset to Defaults"),
+    ("settings.rebind", "Rebind"),
+    ("settings.resetKey", "Reset"),
+    ("settings.cleardata", "Clear Game Data..."),
+    ("settings.clearplanetdata", "Clear Planet Data"),
+    ("settings.clearsaves", "Clear Saves"),
+    ("settings.clearresearch", "Clear Research"),
+    ("settings.clearcampaignsaves", "Clear Campaign Saves"),
+    ("settings.clearplanetresearch", "Clear Planet Research"),
+    (
+        "settings.clearplanetcampaignsaves",
+        "Clear Planet Campaign Saves",
+    ),
     ("quit", "Quit"),
 ];
 
@@ -121,6 +133,15 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_CN_ENTRIES: &[(&str, &str)] = &[
     ("settings.controls", "控制"),
     ("settings.data", "数据"),
     ("settings.reset", "全部恢复默认"),
+    ("settings.rebind", "重新绑定"),
+    ("settings.resetKey", "恢复默认"),
+    ("settings.cleardata", "清除游戏数据"),
+    ("settings.clearplanetdata", "清除星球数据"),
+    ("settings.clearsaves", "清除存档"),
+    ("settings.clearresearch", "清除研究进度"),
+    ("settings.clearcampaignsaves", "清除战役进度"),
+    ("settings.clearplanetresearch", "清除星球研究进度"),
+    ("settings.clearplanetcampaignsaves", "清除星球战役进度"),
     ("quit", "退出"),
 ];
 
@@ -178,6 +199,18 @@ pub const UPSTREAM_MENU_BUNDLE_ZH_TW_ENTRIES: &[(&str, &str)] = &[
     ("settings.controls", "控制"),
     ("settings.data", "遊戲資料"),
     ("settings.reset", "重設為預設設定"),
+    ("settings.rebind", "重新綁定"),
+    ("settings.resetKey", "重設按鍵"),
+    ("settings.cleardata", "清除遊戲資料……"),
+    ("settings.clearplanetdata", "清除行星資料"),
+    ("settings.clearsaves", "清除存檔"),
+    ("settings.clearresearch", "清除研究"),
+    ("settings.clearcampaignsaves", "清除戰役紀錄"),
+    ("settings.clearplanetresearch", "清除行星研究"),
+    (
+        "settings.clearplanetcampaignsaves",
+        "清除行星戰役紀錄",
+    ),
     ("quit", "退出"),
 ];
 
@@ -321,6 +354,10 @@ mod tests {
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh_CN", "settings.language"),
             Some("语言")
+        );
+        assert_eq!(
+            upstream_menu_bundle_value_for_locale("zh_CN", "settings.clearresearch"),
+            Some("清除研究进度")
         );
         assert_eq!(
             upstream_menu_bundle_value_for_locale("zh-TW", "joingame"),

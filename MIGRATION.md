@@ -15,6 +15,33 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 677. Settings 数据/键位按钮文案继续接入 bundle locale
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **79.0%**，仍未达到完整可玩；继续优先前端/UI，当前闭环目标是把 Settings 数据页、星球数据页和键位页中最常见的按钮 raw key 改为 locale 文案。
+- Java 对照依据：
+  - `bundle.properties` / `bundle_zh_CN.properties` / `bundle_zh_TW.properties` 中 `settings.cleardata`、`settings.clearplanetdata`、`settings.clearsaves`、`settings.clearresearch`、`settings.clearcampaignsaves`、`settings.clearplanetresearch`、`settings.clearplanetcampaignsaves`；
+  - 键位页按钮使用 `settings.rebind`、`settings.resetKey`、`settings.reset`。
+- 本轮主改动：
+  - `core/src/mindustry/ui/mod.rs`
+    - 扩展 Settings data/keybind 相关 bundle fallback 的 EN/简中/繁中值；
+  - `desktop/src/lib.rs`
+    - `push_settings_data_page(...)` 的数据动作按钮按 locale 解析；
+    - `push_settings_planet_data_dialog_content(...)` 的清除星球研究/战役按钮按 locale 解析；
+    - `push_settings_keybind_dialog_content(...)` 的 rebind/reset/reset-all 按钮按 locale 解析；
+    - `push_settings_route_buttons(...)` 中 reset-to-defaults 按钮按 locale 解析；
+    - 同步更新 Settings 回归测试，避免继续锁定 raw `@settings.*` 文本。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-core upstream_menu_bundle --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_route_uses_structured_settings_menu_dialog_shell --lib`
+  - `cargo test -p mindustry-desktop desktop_launcher_settings_child_pages_render_reset_and_back_buttons --lib`
+  - `cargo check -p mindustry-desktop`
+- 仍未完成：
+  - Settings 的 planet-select 与 confirm 文案仍缺 `{0}` 参数格式化路径，暂不直接套通用 `@key` 替换，避免出现 `Planet: {0}: serpulo` 一类伪本地化；
+  - 完整 Scene2D SettingsMenuDialog 专用壳、完整 bundle 加载与格式化仍需继续迁移；
+  - 未达到完整可玩，不能宣告目标完成。
+
 ## 676. SettingsMenuDialog 主菜单与子弹窗标题接入 bundle locale
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
