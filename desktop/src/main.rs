@@ -2366,6 +2366,11 @@ impl DesktopNativeOpenGlDriver<'_> {
             } => {
                 if let Some(program) = self.existing_program(*program_handle) {
                     unsafe {
+                        if self.program_shaders.get(program_handle).copied()
+                            == Some(mindustry_core::mindustry::graphics::ShaderId::Mesh)
+                        {
+                            desktop_native_bind_builtin_mesh_attributes(self.gl, program);
+                        }
                         self.gl.link_program(program);
                         if !self.gl.get_program_link_status(program) {
                             self.native_errors.push(format!(

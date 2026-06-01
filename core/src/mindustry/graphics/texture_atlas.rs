@@ -1,6 +1,10 @@
 use super::multi_packer::{MultiPackerPlan, PackPlan, PagePlan, PageSpec, PageType, RegionRequest};
 use flate2::read::ZlibDecoder;
-use std::{fs::File, io::Read, path::Path};
+use std::{
+    fs::File,
+    io::{self, Cursor, Read},
+    path::Path,
+};
 
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
 const PNG_HEADER_LEN: usize = 24;
@@ -334,6 +338,60 @@ pub fn png_dimensions_from_path(path: impl AsRef<Path>) -> Option<(u32, u32)> {
     png_dimensions_from_reader(&mut file)
 }
 
+pub fn sprite_atlas_page_source_paths_from_path(path: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    let bytes = std::fs::read(path)?;
+    sprite_atlas_page_source_paths_from_bytes(&bytes)
+}
+
+pub fn sprite_atlas_page_source_paths_from_bytes(bytes: &[u8]) -> io::Result<Vec<String>> {
+    let mut cursor = Cursor::new(bytes);
+    let mut header = [0u8; 5];
+    cursor.read_exact(&mut header)?;
+    if &header != b"AATLS" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid AATLS header",
+        ));
+    }
+
+    let _version = read_u8(&mut cursor)?;
+    let mut pages = Vec::new();
+
+    while (cursor.position() as usize) < bytes.len() {
+        let _page_marker = read_u8(&mut cursor)?;
+        let image = read_java_utf(&mut cursor)?;
+        pages.push(image);
+
+        let _page_width = read_i16_be(&mut cursor)?;
+        let _page_height = read_i16_be(&mut cursor)?;
+        let _min_filter = read_u8(&mut cursor)?;
+        let _mag_filter = read_u8(&mut cursor)?;
+        let _wrap_x = read_u8(&mut cursor)?;
+        let _wrap_y = read_u8(&mut cursor)?;
+        let rect_count = read_i32_be(&mut cursor)?.max(0) as usize;
+
+        for _ in 0..rect_count {
+            let _name = read_java_utf(&mut cursor)?;
+            let _x = read_i16_be(&mut cursor)?;
+            let _y = read_i16_be(&mut cursor)?;
+            let _width = read_i16_be(&mut cursor)?;
+            let _height = read_i16_be(&mut cursor)?;
+
+            if read_bool(&mut cursor)? {
+                skip_i16s(&mut cursor, 4)?;
+            }
+            if read_bool(&mut cursor)? {
+                skip_i16s(&mut cursor, 4)?;
+            }
+            if read_bool(&mut cursor)? {
+                skip_i16s(&mut cursor, 4)?;
+            }
+        }
+    }
+
+    Ok(pages)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PngRgba8888Image {
     pub width: u32,
@@ -348,6 +406,7 @@ pub enum PngRgba8888DecodeError {
     InvalidChunk,
     MissingIhdr,
     MissingImageData,
+    MissingPalette,
     DimensionOverflow,
     UnsupportedBitDepth(u8),
     UnsupportedColorType(u8),
@@ -370,6 +429,11 @@ struct PngRgba8888Header {
     interlace: u8,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PngRgba8888Palette {
+    entries: Vec<[u8; 4]>,
+}
+
 pub fn png_rgba8888_from_path(
     path: impl AsRef<Path>,
 ) -> Result<PngRgba8888Image, PngRgba8888DecodeError> {
@@ -388,19 +452,60 @@ pub fn png_rgba8888_from_reader(
 }
 
 pub fn png_rgba8888_from_bytes(bytes: &[u8]) -> Result<PngRgba8888Image, PngRgba8888DecodeError> {
-    let (header, idat) = parse_png_rgba8888_chunks(bytes)?;
-    decode_png_rgba8888_idat(header, &idat)
+    let (header, idat, palette) = parse_png_rgba8888_chunks(bytes)?;
+    decode_png_rgba8888_idat(header, &idat, palette.as_ref())
+}
+
+fn read_u8(cursor: &mut Cursor<&[u8]>) -> io::Result<u8> {
+    let mut buf = [0u8; 1];
+    cursor.read_exact(&mut buf)?;
+    Ok(buf[0])
+}
+
+fn read_bool(cursor: &mut Cursor<&[u8]>) -> io::Result<bool> {
+    Ok(read_u8(cursor)? != 0)
+}
+
+fn read_i16_be(cursor: &mut Cursor<&[u8]>) -> io::Result<i16> {
+    let mut buf = [0u8; 2];
+    cursor.read_exact(&mut buf)?;
+    Ok(i16::from_be_bytes(buf))
+}
+
+fn read_i32_be(cursor: &mut Cursor<&[u8]>) -> io::Result<i32> {
+    let mut buf = [0u8; 4];
+    cursor.read_exact(&mut buf)?;
+    Ok(i32::from_be_bytes(buf))
+}
+
+fn read_java_utf(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
+    let mut len_buf = [0u8; 2];
+    cursor.read_exact(&mut len_buf)?;
+    let len = u16::from_be_bytes(len_buf) as usize;
+    let mut buf = vec![0u8; len];
+    cursor.read_exact(&mut buf)?;
+    String::from_utf8(buf).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid utf-8"))
+}
+
+fn skip_i16s(cursor: &mut Cursor<&[u8]>, count: usize) -> io::Result<()> {
+    let mut buf = [0u8; 2];
+    for _ in 0..count {
+        cursor.read_exact(&mut buf)?;
+    }
+    Ok(())
 }
 
 fn parse_png_rgba8888_chunks(
     bytes: &[u8],
-) -> Result<(PngRgba8888Header, Vec<u8>), PngRgba8888DecodeError> {
+) -> Result<(PngRgba8888Header, Vec<u8>, Option<PngRgba8888Palette>), PngRgba8888DecodeError> {
     if bytes.len() < PNG_SIGNATURE.len() || bytes[..PNG_SIGNATURE.len()] != PNG_SIGNATURE {
         return Err(PngRgba8888DecodeError::InvalidSignature);
     }
 
     let mut cursor = PNG_SIGNATURE.len();
     let mut header = None;
+    let mut palette: Option<PngRgba8888Palette> = None;
+    let mut transparency = Vec::new();
     let mut idat = Vec::new();
     let mut seen_iend = false;
 
@@ -428,6 +533,8 @@ fn parse_png_rgba8888_chunks(
 
         match chunk_type {
             b"IHDR" => header = Some(parse_png_rgba8888_ihdr(data)?),
+            b"PLTE" => palette = Some(parse_png_rgba8888_palette(data)?),
+            b"tRNS" => transparency = data.to_vec(),
             b"IDAT" => idat.extend_from_slice(data),
             b"IEND" => {
                 seen_iend = true;
@@ -445,7 +552,13 @@ fn parse_png_rgba8888_chunks(
     if idat.is_empty() {
         return Err(PngRgba8888DecodeError::MissingImageData);
     }
-    Ok((header, idat))
+    if let Some(palette) = palette.as_mut() {
+        apply_png_rgba8888_palette_transparency(palette, &transparency);
+    }
+    if header.color_type == 3 && palette.is_none() {
+        return Err(PngRgba8888DecodeError::MissingPalette);
+    }
+    Ok((header, idat, palette))
 }
 
 fn parse_png_rgba8888_ihdr(data: &[u8]) -> Result<PngRgba8888Header, PngRgba8888DecodeError> {
@@ -480,6 +593,25 @@ fn parse_png_rgba8888_ihdr(data: &[u8]) -> Result<PngRgba8888Header, PngRgba8888
     Ok(header)
 }
 
+fn parse_png_rgba8888_palette(data: &[u8]) -> Result<PngRgba8888Palette, PngRgba8888DecodeError> {
+    if data.is_empty() || data.len() % 3 != 0 || data.len() / 3 > 256 {
+        return Err(PngRgba8888DecodeError::InvalidChunk);
+    }
+    let entries = data
+        .chunks_exact(3)
+        .map(|rgb| [rgb[0], rgb[1], rgb[2], 0xff])
+        .collect();
+    Ok(PngRgba8888Palette { entries })
+}
+
+fn apply_png_rgba8888_palette_transparency(palette: &mut PngRgba8888Palette, transparency: &[u8]) {
+    for (index, alpha) in transparency.iter().copied().enumerate() {
+        if let Some(entry) = palette.entries.get_mut(index) {
+            entry[3] = alpha;
+        }
+    }
+}
+
 fn validate_png_rgba8888_header(header: PngRgba8888Header) -> Result<(), PngRgba8888DecodeError> {
     if header.bit_depth != 8 {
         return Err(PngRgba8888DecodeError::UnsupportedBitDepth(
@@ -487,7 +619,7 @@ fn validate_png_rgba8888_header(header: PngRgba8888Header) -> Result<(), PngRgba
         ));
     }
     match header.color_type {
-        0 | 2 | 4 | 6 => {}
+        0 | 2 | 3 | 4 | 6 => {}
         other => return Err(PngRgba8888DecodeError::UnsupportedColorType(other)),
     }
     if header.compression != 0 {
@@ -511,6 +643,7 @@ fn validate_png_rgba8888_header(header: PngRgba8888Header) -> Result<(), PngRgba
 fn decode_png_rgba8888_idat(
     header: PngRgba8888Header,
     idat: &[u8],
+    palette: Option<&PngRgba8888Palette>,
 ) -> Result<PngRgba8888Image, PngRgba8888DecodeError> {
     let mut zlib = ZlibDecoder::new(idat);
     let mut inflated = Vec::new();
@@ -553,7 +686,7 @@ fn decode_png_rgba8888_idat(
             .ok_or(PngRgba8888DecodeError::InvalidScanline)?;
         cursor += row_len;
         reverse_png_filter(filter, row, &previous, bytes_per_pixel, &mut current)?;
-        append_png_rgba8888_row(header.color_type, &current, &mut pixels)?;
+        append_png_rgba8888_row(header.color_type, &current, palette, &mut pixels)?;
         previous.copy_from_slice(&current);
     }
 
@@ -568,6 +701,7 @@ fn png_rgba8888_source_bytes_per_pixel(color_type: u8) -> Result<usize, PngRgba8
     match color_type {
         0 => Ok(1),
         2 => Ok(3),
+        3 => Ok(1),
         4 => Ok(2),
         6 => Ok(4),
         other => Err(PngRgba8888DecodeError::UnsupportedColorType(other)),
@@ -630,6 +764,7 @@ fn paeth_predictor(left: u8, up: u8, up_left: u8) -> u8 {
 fn append_png_rgba8888_row(
     color_type: u8,
     row: &[u8],
+    palette: Option<&PngRgba8888Palette>,
     pixels: &mut Vec<u8>,
 ) -> Result<(), PngRgba8888DecodeError> {
     match color_type {
@@ -641,6 +776,16 @@ fn append_png_rgba8888_row(
         2 => {
             for rgb in row.chunks_exact(3) {
                 pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0xff]);
+            }
+        }
+        3 => {
+            let palette = palette.ok_or(PngRgba8888DecodeError::MissingPalette)?;
+            for index in row {
+                let entry = palette
+                    .entries
+                    .get(*index as usize)
+                    .ok_or(PngRgba8888DecodeError::InvalidScanline)?;
+                pixels.extend_from_slice(entry);
             }
         }
         4 => {
@@ -1501,6 +1646,54 @@ mod tests {
         assert_eq!(PageType::Environment.atlas_source_path(), "sprites2.png");
         assert_eq!(PageType::Ui.atlas_source_path(), "sprites3.png");
         assert_eq!(PageType::Rubble.atlas_source_path(), "sprites4.png");
+    }
+
+    #[test]
+    fn texture_atlas_packed_atlas_pages_include_fallback_sprites_5_to_8() {
+        let sprites_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/sprites");
+        let root_atlas =
+            sprite_atlas_page_source_paths_from_path(sprites_dir.join("sprites.aatls"))
+                .expect("root sprites.aatls should parse");
+        let fallback_atlas = sprite_atlas_page_source_paths_from_path(
+            sprites_dir.join("fallback").join("sprites.aatls"),
+        )
+        .expect("fallback sprites.aatls should parse");
+
+        assert_eq!(
+            root_atlas,
+            vec![
+                "sprites.png".to_string(),
+                "sprites2.png".to_string(),
+                "sprites3.png".to_string(),
+                "sprites4.png".to_string(),
+            ]
+        );
+
+        assert_eq!(
+            fallback_atlas,
+            vec![
+                "sprites.png".to_string(),
+                "sprites2.png".to_string(),
+                "sprites3.png".to_string(),
+                "sprites4.png".to_string(),
+                "sprites5.png".to_string(),
+                "sprites6.png".to_string(),
+                "sprites7.png".to_string(),
+                "sprites8.png".to_string(),
+            ]
+        );
+
+        for name in [
+            "sprites5.png",
+            "sprites6.png",
+            "sprites7.png",
+            "sprites8.png",
+        ] {
+            assert!(
+                sprites_dir.join(name).exists(),
+                "{name} should exist in core/assets/sprites"
+            );
+        }
     }
 
     #[test]

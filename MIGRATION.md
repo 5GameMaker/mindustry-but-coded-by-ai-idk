@@ -10,7 +10,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ```
 
 - `README.md` 的迁移进度只维护百分比，不写详细代码进度；当前百分比会随闭环推进小幅调整。
-- 当前短期优先级：先做客户端启动速度优化和主菜单 UI 还原；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
+- 当前短期优先级：原版 UI 还原优先，资源直接复用上游，黑/白屏修复优先；资源层优先复用 `D:/MDT/mindustry-upstream-v157.4` 里可直接沿用的原项目资源（如 assets、布局、文案、图标、字体），避免重复造轮子。
 - 当前 fast synthetic background 只是过渡方案，最终必须接入 cached/batched 的原版 `MenuRenderer`。
 
 本文档用于约束后续 AI/开发者持续迁移，目标是防止漏迁移、跑偏目录、把工程做成孤立模块，或忘记最终要交付的是可整合、可联机、可游玩的 Rust 版 Mindustry/MDT。
@@ -20,7 +20,7 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 ## 699. Mods View Content 推进为可点击内容网格
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
-- 本轮总体进度更新：约 **81.4%**，仍未达到完整可玩；继续优先前端/UI 还原。
+- 本轮总体进度更新：约 **81.4%**，仍未达到完整可玩；继续优先原版 UI 还原、资源复用和 OpenGL 菜单显示修复。
 - Java 对照依据：
   - `ModsDialog.showMod(...)` 的 `@mods.viewcontent` 是独立内容查看弹窗，并应展示可点内容项，而不是只显示一组文本状态。
 - 本轮主改动：

@@ -7,7 +7,7 @@
 - 迁移基线：`D:\MDT\mindustry-upstream-v157.4`（目录名不变，当前实际参考 tag 为 `v158.1 / 05b2ecd`）
 - Rust 工作区：`D:\MDT\rust-mindustry`。
 - 禁止使用废案目录：`D:\MDT\mindustry-rust`。
-- 当前短期优先级：先提升客户端启动速度，再继续主菜单首屏 UI 还原。
+- 当前短期优先级：原版 UI 还原优先，资源直接复用上游，黑/白屏修复优先；启动速度优化暂时后置。
 - 资源策略：优先复用 `D:\MDT\mindustry-upstream-v157.4` 中可直接沿用的原项目资源、布局、文案、图标和字体，减少重复制作。
 - 迁移目标是整体化、可运行、可游玩的 Rust 版 MDT/Mindustry；过渡 helper/plan 必须继续接入 runtime/render/backend 主链路。
 - UI 必须按 `D:\MDT\mindustry-upstream-v157.4` 原版结构/布局/交互完整还原，不能只做亮屏壳或独立模块。
@@ -16,7 +16,7 @@
 
 ## 迁移进度
 
-- 当前总体完成度：约 **82.4%**。
+- 当前总体完成度：约 **82.7%**。
 
 ## 作者的话
 

@@ -26,6 +26,7 @@ pub const MENU_DESKTOP_BUTTON_MARGIN_LEFT: f32 = 11.0;
 pub const MENU_DESKTOP_BUTTON_ICON_X: f32 = 30.0;
 pub const MENU_DESKTOP_BUTTON_LABEL_GAP: f32 = 23.0;
 pub const MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE: f32 = 30.0;
+pub const MENU_DESKTOP_BUTTON_ICON_SPRITE_SCALE: f32 = 1.12;
 pub const MENU_BUTTON_ICON_LAYER_OFFSET: f32 = 0.01;
 pub const MENU_BUTTON_LABEL_LAYER_OFFSET: f32 = 0.02;
 pub const MENU_DESKTOP_BACKGROUND_LAYER: f32 = 100.95;
@@ -33,6 +34,210 @@ pub const MENU_MAX_NATIVE_COLOR_SPAN_TILES: usize = 4;
 pub const MENU_MOBILE_BUTTON_ICON_OFFSET_Y: f32 = 17.0;
 pub const MENU_MOBILE_BUTTON_LABEL_OFFSET_Y: f32 = -25.0;
 pub const MENU_MOBILE_BUTTON_ICON_TEXT_SIZE: f32 = 42.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MenuLabelSprite {
+    symbol: &'static str,
+    width: f32,
+    height: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MenuIconSprite {
+    symbol: &'static str,
+}
+
+fn menu_icon_sprite_for_name(icon_name: &str) -> Option<MenuIconSprite> {
+    match icon_name {
+        "play" => Some(MenuIconSprite {
+            symbol: "menu-icon-play",
+        }),
+        "add" | "host" => Some(MenuIconSprite {
+            symbol: "menu-icon-add",
+        }),
+        "rightOpenOut" => Some(MenuIconSprite {
+            symbol: "menu-icon-rightOpenOut",
+        }),
+        "terrain" | "map" => Some(MenuIconSprite {
+            symbol: "menu-icon-terrain",
+        }),
+        "download" => Some(MenuIconSprite {
+            symbol: "menu-icon-download",
+        }),
+        "menu" | "list" => Some(MenuIconSprite {
+            symbol: "menu-icon-menu",
+        }),
+        "paste" | "copy" => Some(MenuIconSprite {
+            symbol: "menu-icon-paste",
+        }),
+        "book" | "bookOpen" => Some(MenuIconSprite {
+            symbol: "menu-icon-book",
+        }),
+        "info" => Some(MenuIconSprite {
+            symbol: "menu-icon-info",
+        }),
+        "tree" => Some(MenuIconSprite {
+            symbol: "menu-icon-tree",
+        }),
+        "steam" => Some(MenuIconSprite {
+            symbol: "menu-icon-steam",
+        }),
+        "settings" => Some(MenuIconSprite {
+            symbol: "menu-icon-settings",
+        }),
+        "exit" => Some(MenuIconSprite {
+            symbol: "menu-icon-exit",
+        }),
+        _ => None,
+    }
+}
+
+fn menu_icon_sprite_rect(center: RenderPoint, size: f32, mobile: bool) -> RenderRect {
+    let sprite_size = if mobile {
+        size
+    } else {
+        size * MENU_DESKTOP_BUTTON_ICON_SPRITE_SCALE
+    };
+    RenderRect::new(
+        (center.x - sprite_size * 0.5).round(),
+        (center.y - sprite_size * 0.5).round(),
+        sprite_size,
+        sprite_size,
+    )
+}
+
+fn menu_label_sprite_for_text(label: &str) -> Option<MenuLabelSprite> {
+    match label {
+        "开始游戏" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-play",
+            width: 88.0,
+            height: 35.0,
+        }),
+        "数据库" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-database",
+            width: 67.0,
+            height: 35.0,
+        }),
+        "地图编辑器" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-editor",
+            width: 109.0,
+            height: 35.0,
+        }),
+        "模组" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-mods",
+            width: 46.0,
+            height: 35.0,
+        }),
+        "设置" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-settings",
+            width: 46.0,
+            height: 35.0,
+        }),
+        "退出" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-quit",
+            width: 46.0,
+            height: 35.0,
+        }),
+        "战役模式" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-campaign",
+            width: 88.0,
+            height: 35.0,
+        }),
+        "加入游戏" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-join",
+            width: 88.0,
+            height: 35.0,
+        }),
+        "自定义游戏" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-custom",
+            width: 109.0,
+            height: 35.0,
+        }),
+        "载入游戏" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-load",
+            width: 88.0,
+            height: 35.0,
+        }),
+        "蓝图" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-schematics",
+            width: 46.0,
+            height: 35.0,
+        }),
+        "核心数据库" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-content-database",
+            width: 109.0,
+            height: 35.0,
+        }),
+        "关于" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-about",
+            width: 46.0,
+            height: 35.0,
+        }),
+        "创意工坊" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-workshop",
+            width: 88.0,
+            height: 35.0,
+        }),
+        "科技树" => Some(MenuLabelSprite {
+            symbol: "menu-label-zh-tech-tree",
+            width: 67.0,
+            height: 35.0,
+        }),
+        _ => None,
+    }
+}
+
+fn menu_label_sprite_rect(
+    sprite: MenuLabelSprite,
+    point: RenderPoint,
+    style: RenderTextStyle,
+) -> RenderRect {
+    let x = match style.horizontal_align {
+        RenderTextAlign::Start => point.x,
+        RenderTextAlign::Center => point.x - sprite.width * 0.5,
+        RenderTextAlign::End => point.x - sprite.width,
+    };
+    let y = match style.vertical_align {
+        RenderTextVerticalAlign::Top => point.y - sprite.height,
+        RenderTextVerticalAlign::Center => point.y - sprite.height * 0.5,
+        RenderTextVerticalAlign::Bottom => point.y,
+        RenderTextVerticalAlign::Baseline => point.y - sprite.height * 0.78,
+    };
+
+    if style.integer_position {
+        RenderRect::new(x.floor(), y.floor(), sprite.width, sprite.height)
+    } else {
+        RenderRect::new(x, y, sprite.width, sprite.height)
+    }
+}
+
+fn menu_push_label_render_command(
+    commands: &mut Vec<RenderCommand>,
+    label: &str,
+    point: RenderPoint,
+    color: [f32; 4],
+    size: f32,
+    rotation: f32,
+    style: RenderTextStyle,
+    layer: f32,
+) {
+    if rotation.abs() <= f32::EPSILON {
+        if let Some(sprite) = menu_label_sprite_for_text(label) {
+            commands.push(RenderCommand::draw_sprite(
+                sprite.symbol,
+                menu_label_sprite_rect(sprite, point, style),
+                color,
+                0.0,
+                layer,
+            ));
+            return;
+        }
+    }
+
+    commands.push(RenderCommand::draw_text_styled(
+        label, point, color, size, rotation, style, layer,
+    ));
+}
 
 /// Native-safe approximation of Java `Styles.flatToggleMenut`.
 ///
@@ -845,6 +1050,7 @@ impl MenuUiPlan {
                     },
                     menu_color_with_alpha(style.text_color, alpha),
                     icon_layer,
+                    self.mobile,
                 );
             }
             let (label_point, label_style) = if self.mobile {
@@ -872,7 +1078,8 @@ impl MenuUiPlan {
             } else {
                 (button.rect.center(), style.text_style)
             };
-            commands.push(RenderCommand::draw_text_styled(
+            menu_push_label_render_command(
+                &mut commands,
                 button.label.as_str(),
                 label_point,
                 menu_color_with_alpha(style.text_color, alpha),
@@ -880,7 +1087,7 @@ impl MenuUiPlan {
                 0.0,
                 label_style,
                 label_layer,
-            ));
+            );
         }
         commands
     }
@@ -893,8 +1100,20 @@ fn menu_push_icon_render_commands(
     size: f32,
     color: [f32; 4],
     layer: f32,
+    mobile: bool,
 ) {
     let size = size.max(1.0);
+    if let Some(sprite) = menu_icon_sprite_for_name(icon_name) {
+        commands.push(RenderCommand::draw_sprite(
+            sprite.symbol,
+            menu_icon_sprite_rect(center, size, mobile),
+            color,
+            0.0,
+            layer,
+        ));
+        return;
+    }
+
     if let Some(glyph) = upstream_ui_icon_glyph_string(icon_name) {
         commands.push(RenderCommand::draw_text_styled(
             glyph,
@@ -1220,7 +1439,13 @@ impl MenuRenderCommand {
     ) -> Vec<RenderCommand> {
         match self {
             Self::DrawCache { label, .. } => {
-                let include_tile_sprites = transform.is_none();
+                // Java `MenuRenderer` draws the cached floor/overlay/wall batches with the
+                // world camera transform already applied.  The Rust bridge used to suppress
+                // texture-backed tile commands whenever a screen transform was present, which
+                // left the desktop menu with only coarse color spans.  Keep the spans as a
+                // fallback, but always emit the upstream atlas tile sprites so the menu backdrop
+                // visually matches the original generated map instead of a flat/noisy proxy.
+                let include_tile_sprites = true;
                 let mut commands = Vec::with_capacity(world.width * world.height / 2 + 64);
                 match label {
                     "floor+overlay" => {
@@ -1321,7 +1546,10 @@ impl MenuRenderCommand {
                 commands
             }
             Self::DrawFlyer(flyer) => {
-                let include_sprite_fallbacks = transform.is_none();
+                // Java `MenuRenderer.drawFlyers()` draws both the unit shadow and the unit
+                // sprite after the map caches are rendered.  Do not add native triangle
+                // silhouettes here: they are not present in upstream and make the menu look like a
+                // debug placeholder when the real unit atlas is available.
                 let center = menu_transform_point(RenderPoint::new(flyer.x, flyer.y), transform);
                 let size_scale = transform.map_or(1.0, |transform| transform.scaling);
                 let body_size = flyer_draw_size(flyer.unit_name);
@@ -1333,33 +1561,21 @@ impl MenuRenderCommand {
                     body_size * 1.15 * size_scale,
                 );
 
-                let mut commands = Vec::with_capacity(3);
-                if include_sprite_fallbacks {
-                    commands.push(RenderCommand::draw_sprite(
-                        "circle-shadow",
-                        shadow_rect,
-                        [1.0, 1.0, 1.0, 1.0],
-                        0.0,
-                        1.5,
-                    ));
-                }
-                commands.push(RenderCommand::draw_triangle(
-                    center,
-                    body_size * 0.72 * size_scale,
-                    body_size * 0.98 * size_scale,
-                    flyer.rotation,
-                    [0.45, 0.62, 0.72, 0.42],
-                    1.95,
+                let mut commands = Vec::with_capacity(2);
+                commands.push(RenderCommand::draw_sprite(
+                    "circle-shadow",
+                    shadow_rect,
+                    [1.0, 1.0, 1.0, 1.0],
+                    0.0,
+                    1.5,
                 ));
-                if include_sprite_fallbacks {
-                    commands.push(RenderCommand::draw_sprite(
-                        flyer.unit_name,
-                        body_rect,
-                        [1.0, 1.0, 1.0, 1.0],
-                        flyer.rotation,
-                        2.0,
-                    ));
-                }
+                commands.push(RenderCommand::draw_sprite(
+                    flyer.unit_name,
+                    body_rect,
+                    [1.0, 1.0, 1.0, 1.0],
+                    flyer.rotation,
+                    2.0,
+                ));
                 commands
             }
             Self::DrawDarkness {
@@ -2906,6 +3122,53 @@ mod tests {
     }
 
     #[test]
+    fn transformed_menu_cache_still_emits_upstream_tile_sprites() {
+        let world = MenuWorldPlan {
+            width: 1,
+            height: 1,
+            seed: 1,
+            tiles: vec![MenuTile {
+                x: 0,
+                y: 0,
+                floor: MenuBlockKind::Sand,
+                wall: MenuBlockKind::SandWall,
+                ore: MenuBlockKind::CopperOre,
+            }],
+            cache_floor_id: 1,
+            cache_wall_id: 2,
+        };
+        let transform = MenuScreenTransform::new(0.0, 0.0, 2.0);
+
+        let floor_commands = MenuRenderCommand::DrawCache {
+            cache_id: 1,
+            label: "floor+overlay",
+        }
+        .into_render_commands_with_transform(&world, MENU_TILE_SIZE, Some(transform));
+        let wall_commands = MenuRenderCommand::DrawCache {
+            cache_id: 2,
+            label: "wall",
+        }
+        .into_render_commands_with_transform(&world, MENU_TILE_SIZE, Some(transform));
+
+        assert!(floor_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol.starts_with("sand-floor")
+                    && *rect == RenderRect::new(0.0, 0.0, 16.0, 16.0)
+        )));
+        assert!(floor_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. } if symbol.starts_with("ore-copper")
+        )));
+        assert!(wall_commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, rect, .. }
+                if symbol.starts_with("sand-wall")
+                    && *rect == RenderRect::new(0.0, 0.0, 16.0, 16.0)
+        )));
+    }
+
+    #[test]
     fn menu_shadow_texture_offsets_wall_tiles_like_java_shadow_buffer() {
         let world = MenuWorldPlan {
             width: 2,
@@ -2973,7 +3236,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_flyer_commands_include_native_silhouette_before_unit_sprite() {
+    fn menu_flyer_commands_match_java_shadow_then_unit_sprite_without_debug_silhouette() {
         let flyer = FlyerPlan {
             x: 24.0,
             y: 32.0,
@@ -2991,18 +3254,22 @@ mod tests {
             },
             MENU_TILE_SIZE,
         );
-        let silhouette_index = commands
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, RenderCommand::DrawTriangle { .. })),
+            "Java MenuRenderer.drawFlyers() does not draw a native triangle silhouette"
+        );
+        let shadow_index = commands
             .iter()
             .position(|command| {
                 matches!(
                     command,
-                    RenderCommand::DrawTriangle { center, rotation, layer, .. }
-                        if *center == RenderPoint::new(24.0, 32.0)
-                            && (*rotation - 45.0).abs() < f32::EPSILON
-                            && (*layer - 1.95).abs() < f32::EPSILON
+                    RenderCommand::DrawSprite { symbol, layer, .. }
+                        if symbol == "circle-shadow" && (*layer - 1.5).abs() < f32::EPSILON
                 )
             })
-            .expect("flyer should include a native triangle silhouette fallback");
+            .expect("flyer should draw the upstream unit shadow first");
         let sprite_index = commands
             .iter()
             .position(|command| {
@@ -3013,11 +3280,11 @@ mod tests {
                 )
             })
             .expect("flyer should still draw the upstream unit sprite");
-        assert!(silhouette_index < sprite_index);
+        assert!(shadow_index < sprite_index);
     }
 
     #[test]
-    fn menu_flyer_screen_transform_uses_native_silhouette_without_missing_sprite_blocks() {
+    fn menu_flyer_screen_transform_keeps_upstream_unit_sprite_like_java() {
         let flyer = FlyerPlan {
             x: 24.0,
             y: 32.0,
@@ -3041,10 +3308,12 @@ mod tests {
             .iter()
             .any(|command| matches!(command, RenderCommand::DrawTriangle { .. })));
         assert!(
-            commands
-                .iter()
-                .all(|command| !matches!(command, RenderCommand::DrawSprite { .. })),
-            "native menu screen path should not show magenta missing-texture blocks for flyers"
+            commands.iter().any(|command| matches!(
+                command,
+                RenderCommand::DrawSprite { symbol, layer, .. }
+                    if symbol == "mono" && (*layer - 2.0).abs() < f32::EPSILON
+            )),
+            "native menu screen path should draw the same upstream flyer unit sprite as Java"
         );
     }
 
@@ -4299,6 +4568,7 @@ mod tests {
                 MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE,
                 [1.0, 1.0, 1.0, 1.0],
                 MENU_FLAT_TOGGLE_MENU_STYLE.text_layer,
+                false,
             );
             assert!(
                 !commands.is_empty(),
@@ -4311,12 +4581,15 @@ mod tests {
                 )),
                 "icon {icon} must not regress to the placeholder question mark"
             );
+            let expected_symbol = menu_icon_sprite_for_name(icon)
+                .expect("menu icon should have an upstream sprite bridge")
+                .symbol;
             assert!(
                 commands.iter().any(|command| matches!(
                     command,
-                    RenderCommand::DrawText { style, .. } if style.font == RenderFontId::Icon
+                    RenderCommand::DrawSprite { symbol, .. } if symbol == expected_symbol
                 )),
-                "icon {icon} should be emitted through the upstream Icon font identity"
+                "icon {icon} should be emitted through the upstream Icon sprite bridge"
             );
         }
     }
@@ -4351,13 +4624,17 @@ mod tests {
             )
         }));
         assert!(commands.iter().any(|command| {
+            let icon_center = RenderPoint::new(
+                rect.center().x,
+                rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y,
+            );
+            let icon_rect =
+                menu_icon_sprite_rect(icon_center, MENU_MOBILE_BUTTON_ICON_TEXT_SIZE, true);
             matches!(
                 command,
-                RenderCommand::DrawText { text, position, style, layer, .. }
-                    if *text == upstream_ui_icon_glyph_string("rightOpenOut").unwrap()
-                        && style.font == RenderFontId::Icon
-                        && (position.x - rect.center().x).abs() < f32::EPSILON
-                        && (position.y - (rect.center().y + MENU_MOBILE_BUTTON_ICON_OFFSET_Y)).abs() < f32::EPSILON
+                RenderCommand::DrawSprite { symbol, rect: sprite_rect, layer, .. }
+                    if symbol == "menu-icon-rightOpenOut"
+                        && *sprite_rect == icon_rect
                         && (*layer
                             - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
                                 + MENU_BUTTON_ICON_LAYER_OFFSET))
@@ -4521,18 +4798,17 @@ mod tests {
             })
             .expect("desktop custom label should be rendered");
         assert!(render_commands.iter().any(|command| {
+            let icon_center = RenderPoint::new(
+                custom.rect.x + MENU_DESKTOP_BUTTON_MARGIN_LEFT + MENU_DESKTOP_BUTTON_ICON_X,
+                custom.rect.center().y,
+            );
+            let icon_rect =
+                menu_icon_sprite_rect(icon_center, MENU_DESKTOP_BUTTON_ICON_TEXT_SIZE, false);
             matches!(
                 command,
-                RenderCommand::DrawText { text, position, style, layer, .. }
-                    if *text == upstream_ui_icon_glyph_string("add").unwrap()
-                        && style.font == RenderFontId::Icon
-                        && (position.x
-                            - (custom.rect.x
-                                + MENU_DESKTOP_BUTTON_MARGIN_LEFT
-                            + MENU_DESKTOP_BUTTON_ICON_X))
-                            .abs()
-                            < f32::EPSILON
-                        && (position.y - custom.rect.center().y).abs() < f32::EPSILON
+                RenderCommand::DrawSprite { symbol, rect: sprite_rect, layer, .. }
+                    if symbol == "menu-icon-add"
+                        && *sprite_rect == icon_rect
                         && (*layer
                             - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer
                                 + MENU_BUTTON_ICON_LAYER_OFFSET))
@@ -4603,6 +4879,50 @@ mod tests {
                     if text == "[accent]SERVER[] BROWSER" && style.markup
             )
         }));
+    }
+
+    #[test]
+    fn menu_ui_plan_desktop_chinese_menu_labels_use_upstream_label_sprites() {
+        let rect = RenderRect::new(128.0, 325.0, 230.0, 70.0);
+        let plan = MenuUiPlan {
+            mobile: false,
+            submenu_alpha: 1.0,
+            buttons: vec![MenuButtonPlan {
+                role: MenuButtonRole::Play,
+                label: "开始游戏".to_string(),
+                icon_name: None,
+                rect,
+                selected: false,
+                hovered: false,
+                pressed: false,
+                submenu: false,
+            }],
+        };
+
+        let commands = plan.to_render_commands();
+        let label = commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::DrawSprite {
+                    symbol,
+                    rect,
+                    layer,
+                    ..
+                } if symbol == "menu-label-zh-play" => Some((rect, layer)),
+                _ => None,
+            })
+            .expect("localized Chinese menu label should be emitted as a prerendered sprite");
+
+        assert_eq!(label.0.width, 88.0);
+        assert_eq!(label.0.height, 35.0);
+        assert!(
+            (*label.1 - (MENU_FLAT_TOGGLE_MENU_STYLE.text_layer + MENU_BUTTON_LABEL_LAYER_OFFSET))
+                .abs()
+                < f32::EPSILON
+        );
+        assert!(!commands.iter().any(
+            |command| matches!(command, RenderCommand::DrawText { text, .. } if text == "开始游戏")
+        ));
     }
 
     #[test]

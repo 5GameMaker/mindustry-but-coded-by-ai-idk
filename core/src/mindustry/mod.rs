@@ -1,4 +1,4 @@
-﻿pub mod ai;
+pub mod ai;
 pub mod r#async;
 pub mod audio;
 pub mod client_launcher;
@@ -27,6 +27,7 @@ pub const UPSTREAM_VERSION_MODIFIER: &str = "release";
 pub const UPSTREAM_VERSION_BUILD: i32 = 158;
 pub const UPSTREAM_VERSION_REVISION: i32 = 1;
 pub const UPSTREAM_VERSION_COMMIT_HASH: &str = "unknown";
+pub const UPSTREAM_MENU_VERSION_TEXT_OVERRIDE: Option<&str> = Some("custom build");
 
 pub fn upstream_version_info() -> core::version::VersionInfo {
     core::version::VersionInfo {
@@ -43,11 +44,13 @@ pub fn upstream_version_info() -> core::version::VersionInfo {
 }
 
 pub fn upstream_menu_version_text() -> String {
-    upstream_version_info().combined()
+    UPSTREAM_MENU_VERSION_TEXT_OVERRIDE
+        .map(str::to_string)
+        .unwrap_or_else(|| upstream_version_info().combined())
 }
 
 pub fn upstream_menu_version_color() -> [f32; 4] {
-    if UPSTREAM_VERSION_BUILD == -1 {
+    if UPSTREAM_MENU_VERSION_TEXT_OVERRIDE == Some("custom build") || UPSTREAM_VERSION_BUILD == -1 {
         [0.988, 0.506, 0.251, 0.667]
     } else {
         [1.0, 1.0, 1.0, 0.729]
@@ -67,7 +70,7 @@ mod tests {
         assert_eq!(info.build, 158);
         assert_eq!(info.revision, 1);
         assert_eq!(info.build_string(), "158.1");
-        assert_eq!(upstream_menu_version_text(), "release build 158.1");
-        assert_eq!(upstream_menu_version_color(), [1.0, 1.0, 1.0, 0.729]);
+        assert_eq!(upstream_menu_version_text(), "custom build");
+        assert_eq!(upstream_menu_version_color(), [0.988, 0.506, 0.251, 0.667]);
     }
 }

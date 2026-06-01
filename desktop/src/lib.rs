@@ -61,8 +61,8 @@ use mindustry_core::mindustry::graphics::{
     MenuButtonRole, MenuFrameInput, MenuFramePlan, MenuRendererConfig, MenuRendererState,
     MinimapCamera, MinimapFogLayer, MinimapOverlayCommand, MinimapOverlayInput, MinimapOverlayPlan,
     MinimapRect, MinimapRendererState, MinimapTextureFramePlan, MinimapWorldSize,
-    OverlayRendererPlan, OverlayRendererState, PageType, Pal, PixelatorCamera, PixelatorFramePlan,
-    PixelatorInput, PixelatorState, PngRgba8888DecodeError, PngRgba8888Image,
+    OverlayRendererPlan, OverlayRendererState, PageSpec, PageType, Pal, PixelatorCamera,
+    PixelatorFramePlan, PixelatorInput, PixelatorState, PngRgba8888DecodeError, PngRgba8888Image,
     RenderBackendFlushBoundary, RenderBlendFactor, RenderBlendMode, RenderBridge, RenderCamera,
     RenderCommand, RenderEngineState, RenderFontId, RenderFramePlan, RenderPass, RenderPassKind,
     RenderPoint, RenderProperty, RenderRect, RenderResolveKind, RenderSize, RenderTarget,
@@ -70,7 +70,7 @@ use mindustry_core::mindustry::graphics::{
     RenderTextureSamplePlan, RenderUvRect, RenderViewport, ShaderApplyContext,
     ShaderApplyOperation, ShaderApplyPlan, ShaderCamera, ShaderCatalog, ShaderDispatchFrame,
     ShaderId, ShaderLoadPlan, ShaderLoadTask, ShaderParameters, ShaderReloadAction,
-    ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan,
+    ShaderReloadPlan, ShaderTextureRegion, ShaderViewport, TextureAtlasPlan, TextureAtlasRegion,
     TextureAtlasSpriteSourceDescriptor, TextureBinding, TileBounds, TileCoord, UniformValue,
     Viewport as FloorViewport,
 };
@@ -4483,6 +4483,52 @@ fn desktop_menu_environment_sprite_virtual_source_paths() -> impl Iterator<Item 
         .map(|name| format!("sprites/blocks/environment/{name}.png"))
 }
 
+fn desktop_menu_label_sprite_virtual_source_paths() -> impl Iterator<Item = String> {
+    const MENU_LABEL_SPRITES: &[&str] = &[
+        "menu-label-zh-play",
+        "menu-label-zh-database",
+        "menu-label-zh-editor",
+        "menu-label-zh-mods",
+        "menu-label-zh-settings",
+        "menu-label-zh-quit",
+        "menu-label-zh-campaign",
+        "menu-label-zh-join",
+        "menu-label-zh-custom",
+        "menu-label-zh-load",
+        "menu-label-zh-schematics",
+        "menu-label-zh-content-database",
+        "menu-label-zh-about",
+        "menu-label-zh-workshop",
+        "menu-label-zh-tech-tree",
+    ];
+
+    MENU_LABEL_SPRITES
+        .iter()
+        .map(|name| format!("sprites/ui/{name}.png"))
+}
+
+fn desktop_menu_icon_sprite_virtual_source_paths() -> impl Iterator<Item = String> {
+    const MENU_ICON_SPRITES: &[&str] = &[
+        "menu-icon-play",
+        "menu-icon-add",
+        "menu-icon-rightOpenOut",
+        "menu-icon-terrain",
+        "menu-icon-download",
+        "menu-icon-menu",
+        "menu-icon-paste",
+        "menu-icon-book",
+        "menu-icon-info",
+        "menu-icon-tree",
+        "menu-icon-steam",
+        "menu-icon-settings",
+        "menu-icon-exit",
+    ];
+
+    MENU_ICON_SPRITES
+        .iter()
+        .map(|name| format!("sprites/ui/{name}.png"))
+}
+
 fn desktop_weapon_region_symbol(weapon: &Weapon) -> String {
     weapon
         .region
@@ -7158,7 +7204,12 @@ impl DesktopGraphicsOpenGlBackendTextureResourceTable {
             .resources
             .entry(key)
             .or_insert_with(|| DesktopGraphicsOpenGlBackendTextureResource::from_binding(binding));
+        let previous_identity = resource.identity.clone();
         resource.identity = binding.texture_identity.clone();
+        if resource.identity.gl_handle.is_none() {
+            resource.identity.gl_handle = previous_identity.gl_handle;
+            resource.identity.generation = previous_identity.generation;
+        }
         resource.resource_kind = binding.texture_identity.resource_kind.clone();
         resource.page_type = binding.page_type;
         resource.page_source_path = binding.page_source_path.clone();
@@ -9829,6 +9880,8 @@ fn opengl_backend_sprite_mesh_batches_from_quads(
                 && batch.texture_identity == quad.texture_identity
                 && batch.page_source_path == quad.page_source_path
                 && batch.sampler == quad.sampler
+                && batch.min_layer.to_bits() == quad.layer.to_bits()
+                && batch.max_layer.to_bits() == quad.layer.to_bits()
         }) {
             batch.push_quad(quad);
         } else {
@@ -9959,6 +10012,80 @@ fn opengl_backend_circle_primitive_segment_count(radius: f32) -> usize {
         DESKTOP_GRAPHICS_OPENGL_CIRCLE_MIN_SEGMENTS,
         DESKTOP_GRAPHICS_OPENGL_CIRCLE_MAX_SEGMENTS,
     )
+}
+
+fn opengl_backend_cjk_placeholder_glyph_rows(character: char) -> Option<[u16; 7]> {
+    Some(match character {
+        '开' => [
+            0b1111111, 0b0010100, 0b0010100, 0b1111111, 0b0010100, 0b0010100, 0b0100100,
+        ],
+        '始' => [
+            0b1001000, 0b1111110, 0b0101010, 0b1001110, 0b0011010, 0b0101010, 0b1011110,
+        ],
+        '游' => [
+            0b1001110, 0b0010010, 0b1011111, 0b0010100, 0b1011110, 0b0010100, 0b1011100,
+        ],
+        '戏' => [
+            0b1110010, 0b0010010, 0b0101111, 0b0010100, 0b0101010, 0b1001010, 0b0110001,
+        ],
+        '数' => [
+            0b0101010, 0b1111111, 0b0101010, 0b1110110, 0b0101010, 0b1010100, 0b0101011,
+        ],
+        '据' => [
+            0b0101111, 0b1110001, 0b0101111, 0b0110100, 0b1101111, 0b0101001, 0b0101111,
+        ],
+        '库' => [
+            0b0010000, 0b1111111, 0b1001000, 0b1111110, 0b0010100, 0b1111111, 0b0010000,
+        ],
+        '地' => [
+            0b0100100, 0b0100101, 0b1111101, 0b0100111, 0b0100101, 0b0100101, 0b0110011,
+        ],
+        '图' => [
+            0b1111111, 0b1000001, 0b1011101, 0b1010101, 0b1011101, 0b1000001, 0b1111111,
+        ],
+        '编' => [
+            0b1001110, 0b0100010, 0b1111111, 0b0101010, 0b1011111, 0b0001010, 0b0001010,
+        ],
+        '辑' => [
+            0b1111011, 0b0011010, 0b1111011, 0b0011110, 0b1111011, 0b0011010, 0b0011010,
+        ],
+        '器' => [
+            0b1101011, 0b1101011, 0b0011100, 0b1111111, 0b0011100, 0b1101011, 0b1101011,
+        ],
+        '模' => [
+            0b0101110, 0b1110100, 0b0101111, 0b1110100, 0b0101111, 0b1010100, 0b0101011,
+        ],
+        '组' => [
+            0b1001110, 0b0101010, 0b1111110, 0b0101010, 0b1011010, 0b0001010, 0b0001111,
+        ],
+        '设' => [
+            0b1001110, 0b0000010, 0b1111110, 0b0010100, 0b0101010, 0b1001010, 0b0010001,
+        ],
+        '置' => [
+            0b1111111, 0b1010101, 0b1111111, 0b0010000, 0b0111110, 0b0010000, 0b1111111,
+        ],
+        '退' => [
+            0b1001110, 0b0010010, 0b1111110, 0b0010100, 0b0111110, 0b1010100, 0b0100011,
+        ],
+        '出' => [
+            0b0010000, 0b0010100, 0b1111111, 0b1010101, 0b1010101, 0b1111111, 0b1000001,
+        ],
+        _ => return None,
+    })
+}
+
+fn opengl_backend_placeholder_glyph_pattern(character: char) -> ([u16; 7], usize) {
+    if let Some(rows) = opengl_backend_cjk_placeholder_glyph_rows(character) {
+        return (rows, 7);
+    }
+    (
+        opengl_backend_placeholder_glyph_rows(character).map(u16::from),
+        DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_COLUMNS,
+    )
+}
+
+fn opengl_backend_placeholder_glyph_width(character: char) -> usize {
+    opengl_backend_placeholder_glyph_pattern(character).1
 }
 
 fn opengl_backend_placeholder_glyph_rows(character: char) -> [u8; 7] {
@@ -10141,7 +10268,7 @@ fn opengl_backend_placeholder_text_advance(character: char, pixel: f32) -> f32 {
     match character {
         ' ' => pixel * 3.0,
         '\t' => pixel * 6.0,
-        _ => pixel * 6.0,
+        _ => pixel * (opengl_backend_placeholder_glyph_width(character) as f32 + 1.0),
     }
 }
 
@@ -10258,9 +10385,26 @@ fn opengl_backend_icon_placeholder_quads(
             });
         }
         "settings" => {
+            for angle in (0..8).map(|index| index as f32 * 45.0) {
+                let radians = angle.to_radians();
+                let (cos, sin) = (radians.cos(), radians.sin());
+                push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                    from: RenderPoint::new(
+                        center.x + cos * size * 0.30,
+                        center.y + sin * size * 0.30,
+                    ),
+                    to: RenderPoint::new(
+                        center.x + cos * size * 0.48,
+                        center.y + sin * size * 0.48,
+                    ),
+                    stroke: stroke * 1.15,
+                    color,
+                    layer,
+                });
+            }
             push(DesktopGraphicsOpenGlBackendAdapterAction::DrawPolygon {
                 center,
-                radius: size * 0.46,
+                radius: size * 0.34,
                 sides: 8,
                 rotation: 22.5,
                 color,
@@ -10351,27 +10495,53 @@ fn opengl_backend_icon_placeholder_quads(
             });
         }
         "terrain" | "map" => {
-            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
-                center: RenderPoint::new(center.x - size * 0.18, center.y - size * 0.05),
-                width: size * 0.72,
-                length: size * 0.64,
-                rotation: 0.0,
+            let points = [
+                RenderPoint::new(center.x - size * 0.44, center.y - size * 0.18),
+                RenderPoint::new(center.x - size * 0.44, center.y + size * 0.20),
+                RenderPoint::new(center.x - size * 0.12, center.y + size * 0.46),
+                RenderPoint::new(center.x + size * 0.18, center.y + size * 0.24),
+                RenderPoint::new(center.x + size * 0.44, center.y + size * 0.34),
+                RenderPoint::new(center.x + size * 0.44, center.y - size * 0.34),
+                RenderPoint::new(center.x - size * 0.44, center.y - size * 0.34),
+            ];
+            for pair in points.windows(2) {
+                push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                    from: pair[0],
+                    to: pair[1],
+                    stroke,
+                    color,
+                    layer,
+                });
+            }
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                from: *points.last().unwrap_or(&center),
+                to: points[0],
+                stroke,
                 color,
                 layer,
             });
-            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawTriangle {
-                center: RenderPoint::new(center.x + size * 0.22, center.y - size * 0.12),
-                width: size * 0.56,
-                length: size * 0.50,
-                rotation: 0.0,
+            push(DesktopGraphicsOpenGlBackendAdapterAction::DrawCircle {
+                center: RenderPoint::new(center.x + size * 0.18, center.y - size * 0.08),
+                radius: size * 0.07,
                 color,
+                filled: true,
                 layer,
             });
         }
         "menu" | "list" => {
             for offset in [-0.26_f32, 0.0, 0.26] {
+                push(DesktopGraphicsOpenGlBackendAdapterAction::FillRect {
+                    rect: RenderRect::new(
+                        center.x - size * 0.42,
+                        center.y + size * offset - stroke * 0.5,
+                        stroke,
+                        stroke,
+                    ),
+                    color,
+                    layer,
+                });
                 push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
-                    from: RenderPoint::new(center.x - size * 0.38, center.y + size * offset),
+                    from: RenderPoint::new(center.x - size * 0.24, center.y + size * offset),
                     to: RenderPoint::new(center.x + size * 0.38, center.y + size * offset),
                     stroke,
                     color,
@@ -10398,6 +10568,15 @@ fn opengl_backend_icon_placeholder_quads(
                 color,
                 layer,
             });
+            for offset in [-0.18_f32, 0.0, 0.18] {
+                push(DesktopGraphicsOpenGlBackendAdapterAction::DrawLine {
+                    from: RenderPoint::new(center.x - size * 0.30, center.y + size * offset),
+                    to: RenderPoint::new(center.x + size * 0.30, center.y + size * offset),
+                    stroke: stroke * 0.65,
+                    color,
+                    layer,
+                });
+            }
         }
         "paste" | "copy" => {
             push(DesktopGraphicsOpenGlBackendAdapterAction::StrokeRect {
@@ -10676,11 +10855,10 @@ fn opengl_backend_text_placeholder_quads_without_outline(
                 }
             }
 
-            let rows = opengl_backend_placeholder_glyph_rows(character);
+            let (rows, columns) = opengl_backend_placeholder_glyph_pattern(character);
             for (row_index, row_bits) in rows.iter().enumerate() {
-                for column in 0..DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_COLUMNS {
-                    let mask =
-                        1u8 << (DESKTOP_GRAPHICS_OPENGL_PLACEHOLDER_TEXT_COLUMNS - 1 - column);
+                for column in 0..columns {
+                    let mask = 1u16 << (columns - 1 - column);
                     if row_bits & mask == 0 {
                         continue;
                     }
@@ -14453,6 +14631,7 @@ pub struct DesktopGraphicsOpenGlBackendExecutorState {
     pub shader_texture_handle_cache: DesktopGraphicsOpenGlBackendHandleCache,
     pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
     pub sprite_texture_upload_plans: Vec<DesktopGraphicsOpenGlBackendTextureUploadPlan>,
+    pub sprite_texture_upload_plans_dirty: bool,
     pub draw_commands: Vec<DesktopGraphicsOpenGlBackendDrawCommand>,
     pub last_action: Option<DesktopGraphicsOpenGlBackendAdapterAction>,
     pub action_count: usize,
@@ -14508,6 +14687,7 @@ impl Default for DesktopGraphicsOpenGlBackendExecutorState {
             sprite_texture_resource_table:
                 DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
             sprite_texture_upload_plans: Vec::new(),
+            sprite_texture_upload_plans_dirty: false,
             draw_commands: Vec::new(),
             last_action: None,
             action_count: 0,
@@ -14777,7 +14957,7 @@ impl DesktopGraphicsOpenGlBackendExecutor {
                     self.state
                         .sprite_texture_resource_table
                         .register_binding(&binding);
-                    self.state.refresh_sprite_texture_upload_plans();
+                    self.state.sprite_texture_upload_plans_dirty = true;
                     self.state.sprite_texture_bindings.push(binding);
                 } else {
                     self.state.missing_sprite_texture_bindings += 1;
@@ -14805,6 +14985,13 @@ impl DesktopGraphicsOpenGlBackendExecutor {
 impl DesktopGraphicsOpenGlBackendExecutorState {
     fn refresh_sprite_texture_upload_plans(&mut self) {
         self.sprite_texture_upload_plans = self.sprite_texture_resource_table.full_upload_plans();
+        self.sprite_texture_upload_plans_dirty = false;
+    }
+
+    fn refresh_sprite_texture_upload_plans_if_dirty(&mut self) {
+        if self.sprite_texture_upload_plans_dirty {
+            self.refresh_sprite_texture_upload_plans();
+        }
     }
 
     fn refresh_sprite_mesh_plans(&mut self) {
@@ -14891,8 +15078,7 @@ impl DesktopGraphicsOpenGlBackendExecutorState {
         let binding = opengl_backend_primitive_texture_binding("primitive");
         self.sprite_texture_resource_table
             .register_binding(&binding);
-        self.refresh_sprite_texture_upload_plans();
-        self.refresh_sprite_mesh_plans();
+        self.sprite_texture_upload_plans_dirty = true;
     }
 }
 
@@ -15078,6 +15264,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                 if !self.state.pass_active {
                     self.record_error("opengl backend ended a pass while no pass was active");
                 }
+                self.state.refresh_sprite_texture_upload_plans_if_dirty();
                 self.state.refresh_sprite_mesh_plans_if_dirty();
                 self.state.pass_active = false;
                 self.state.active_pass = None;
@@ -15095,6 +15282,7 @@ impl DesktopGraphicsOpenGlBackendStepSink for DesktopGraphicsOpenGlBackendExecut
                 if self.state.pass_active {
                     self.record_error("opengl backend resolved while a pass was active");
                 }
+                self.state.refresh_sprite_texture_upload_plans_if_dirty();
                 self.state.refresh_sprite_mesh_plans_if_dirty();
                 if let Some(attachment_plan) =
                     opengl_backend_framebuffer_attachment_plan_for_render_target(&target)
@@ -16531,6 +16719,10 @@ impl HeadlessDesktopGraphicsRenderer {
 pub struct DesktopOpenGlBackendGraphicsRenderer<R> {
     pub runtime: R,
     pub frames_rendered: usize,
+    pub sprite_texture_resource_table: DesktopGraphicsOpenGlBackendTextureResourceTable,
+    pub resolver_allocator: DesktopGraphicsOpenGlBackendHandleAllocator,
+    pub resolver_cache: DesktopGraphicsOpenGlBackendHandleCache,
+    pub resolver_location_cache: DesktopGraphicsOpenGlBackendLocationCache,
     pub last_stats: GraphicsFrameStats,
     pub last_opengl_backend_plan: DesktopGraphicsOpenGlBackendFramePlan,
     pub last_opengl_backend_execution_state: DesktopGraphicsOpenGlBackendExecutionState,
@@ -16546,6 +16738,11 @@ impl<R> DesktopOpenGlBackendGraphicsRenderer<R> {
         Self {
             runtime,
             frames_rendered: 0,
+            sprite_texture_resource_table:
+                DesktopGraphicsOpenGlBackendTextureResourceTable::default(),
+            resolver_allocator: DesktopGraphicsOpenGlBackendHandleAllocator::default(),
+            resolver_cache: DesktopGraphicsOpenGlBackendHandleCache::default(),
+            resolver_location_cache: DesktopGraphicsOpenGlBackendLocationCache::default(),
             last_stats: GraphicsFrameStats::default(),
             last_opengl_backend_plan: DesktopGraphicsOpenGlBackendFramePlan::default(),
             last_opengl_backend_execution_state:
@@ -16630,6 +16827,8 @@ where
             ));
         }
         let mut opengl_backend_step_sink = DesktopGraphicsOpenGlBackendExecutor::default();
+        opengl_backend_step_sink.state.sprite_texture_resource_table =
+            self.sprite_texture_resource_table.clone();
         opengl_backend_plan.drive_framebuffer_attachment_sink(&mut opengl_backend_step_sink);
         let opengl_backend_execution_state =
             opengl_backend_plan.drive_step_sink(&mut opengl_backend_step_sink);
@@ -16644,10 +16843,20 @@ where
             .sprite_texture_upload_plans
             .extend(opengl_backend_plan.texture_upload_plans.clone());
 
-        let mut resolving_executor =
-            DesktopGraphicsResolvingOpenGlBackendCommandExecutor::default();
+        let mut resolving_executor = DesktopGraphicsResolvingOpenGlBackendCommandExecutor {
+            allocator: self.resolver_allocator.clone(),
+            cache: self.resolver_cache.clone(),
+            location_cache: self.resolver_location_cache.clone(),
+            ..Default::default()
+        };
         let resolved_command_executor_state =
             opengl_backend_step_sink.drive_resolving_command_executor(&mut resolving_executor);
+        let mut next_sprite_texture_resource_table = opengl_backend_step_sink
+            .state
+            .sprite_texture_resource_table
+            .clone();
+        next_sprite_texture_resource_table
+            .apply_resolved_uploads(resolving_executor.resolved_texture_uploads.clone());
         if trace_renderer {
             desktop_runtime_trace(format!(
                 "opengl.renderer: resolved draw_commands={} shader_commands={}",
@@ -16659,6 +16868,10 @@ where
         self.runtime.present_frame();
 
         self.frames_rendered += 1;
+        self.sprite_texture_resource_table = next_sprite_texture_resource_table;
+        self.resolver_allocator = resolving_executor.allocator.clone();
+        self.resolver_cache = resolving_executor.cache.clone();
+        self.resolver_location_cache = resolving_executor.location_cache.clone();
         self.last_stats = stats.clone();
         self.last_opengl_backend_plan = opengl_backend_plan;
         self.last_opengl_backend_execution_state = opengl_backend_execution_state;
@@ -17415,11 +17628,236 @@ fn building_health_fraction(health: f32, max_health: f32) -> f32 {
     }
 }
 
+#[derive(Debug, Clone)]
+struct DesktopPackedAtlasRegion {
+    page_type: PageType,
+    page_source_path: String,
+    page_width: u32,
+    page_height: u32,
+    name: String,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    splits: Option<[i32; 4]>,
+    pads: Option<[i32; 4]>,
+}
+
+fn desktop_read_u8(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<u8> {
+    let mut value = [0u8; 1];
+    std::io::Read::read_exact(cursor, &mut value)?;
+    Ok(value[0])
+}
+
+fn desktop_read_bool(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<bool> {
+    Ok(desktop_read_u8(cursor)? != 0)
+}
+
+fn desktop_read_i16_be(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<i16> {
+    let mut value = [0u8; 2];
+    std::io::Read::read_exact(cursor, &mut value)?;
+    Ok(i16::from_be_bytes(value))
+}
+
+fn desktop_read_u16_be(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<u16> {
+    let mut value = [0u8; 2];
+    std::io::Read::read_exact(cursor, &mut value)?;
+    Ok(u16::from_be_bytes(value))
+}
+
+fn desktop_read_i32_be(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<i32> {
+    let mut value = [0u8; 4];
+    std::io::Read::read_exact(cursor, &mut value)?;
+    Ok(i32::from_be_bytes(value))
+}
+
+fn desktop_read_java_utf(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<String> {
+    let len = desktop_read_u16_be(cursor)? as usize;
+    let mut bytes = vec![0u8; len];
+    std::io::Read::read_exact(cursor, &mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn desktop_i16_atlas_dimension(value: i16) -> u32 {
+    u16::from_be_bytes(value.to_be_bytes()) as u32
+}
+
+fn desktop_page_type_from_packed_atlas_image(image: &str) -> Option<PageType> {
+    let name = Path::new(image)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(image)
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    match name.as_str() {
+        "sprites.png" => Some(PageType::Main),
+        "sprites2.png" => Some(PageType::Environment),
+        "sprites3.png" => Some(PageType::Ui),
+        "sprites4.png" => Some(PageType::Rubble),
+        _ => None,
+    }
+}
+
+fn desktop_parse_packed_atlas_regions(path: &Path) -> io::Result<Vec<DesktopPackedAtlasRegion>> {
+    let bytes = fs::read(path)?;
+    let mut cursor = std::io::Cursor::new(bytes.as_slice());
+    let mut header = [0u8; 5];
+    std::io::Read::read_exact(&mut cursor, &mut header)?;
+    if &header != b"AATLS" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid Arc binary texture atlas header",
+        ));
+    }
+
+    let _version = desktop_read_u8(&mut cursor)?;
+    let mut regions = Vec::new();
+    while (cursor.position() as usize) < bytes.len() {
+        let _page_marker = desktop_read_u8(&mut cursor)?;
+        let image = desktop_read_java_utf(&mut cursor)?;
+        let page_width = desktop_i16_atlas_dimension(desktop_read_i16_be(&mut cursor)?);
+        let page_height = desktop_i16_atlas_dimension(desktop_read_i16_be(&mut cursor)?);
+        let _min_filter = desktop_read_u8(&mut cursor)?;
+        let _mag_filter = desktop_read_u8(&mut cursor)?;
+        let _wrap_x = desktop_read_u8(&mut cursor)?;
+        let _wrap_y = desktop_read_u8(&mut cursor)?;
+        let rect_count = desktop_read_i32_be(&mut cursor)?.max(0) as usize;
+        let Some(page_type) = desktop_page_type_from_packed_atlas_image(&image) else {
+            for _ in 0..rect_count {
+                let _ = desktop_read_java_utf(&mut cursor)?;
+                for _ in 0..4 {
+                    let _ = desktop_read_i16_be(&mut cursor)?;
+                }
+                if desktop_read_bool(&mut cursor)? {
+                    for _ in 0..4 {
+                        let _ = desktop_read_i16_be(&mut cursor)?;
+                    }
+                }
+                if desktop_read_bool(&mut cursor)? {
+                    for _ in 0..4 {
+                        let _ = desktop_read_i16_be(&mut cursor)?;
+                    }
+                }
+                if desktop_read_bool(&mut cursor)? {
+                    for _ in 0..4 {
+                        let _ = desktop_read_i16_be(&mut cursor)?;
+                    }
+                }
+            }
+            continue;
+        };
+        let page_source_path = path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(&image)
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        for _ in 0..rect_count {
+            let name = desktop_read_java_utf(&mut cursor)?;
+            let x = desktop_i16_atlas_dimension(desktop_read_i16_be(&mut cursor)?);
+            let y = desktop_i16_atlas_dimension(desktop_read_i16_be(&mut cursor)?);
+            let width = desktop_i16_atlas_dimension(desktop_read_i16_be(&mut cursor)?);
+            let height = desktop_i16_atlas_dimension(desktop_read_i16_be(&mut cursor)?);
+
+            if desktop_read_bool(&mut cursor)? {
+                for _ in 0..4 {
+                    let _ = desktop_read_i16_be(&mut cursor)?;
+                }
+            }
+
+            let splits = if desktop_read_bool(&mut cursor)? {
+                Some([
+                    desktop_read_i16_be(&mut cursor)? as i32,
+                    desktop_read_i16_be(&mut cursor)? as i32,
+                    desktop_read_i16_be(&mut cursor)? as i32,
+                    desktop_read_i16_be(&mut cursor)? as i32,
+                ])
+            } else {
+                None
+            };
+
+            let pads = if desktop_read_bool(&mut cursor)? {
+                Some([
+                    desktop_read_i16_be(&mut cursor)? as i32,
+                    desktop_read_i16_be(&mut cursor)? as i32,
+                    desktop_read_i16_be(&mut cursor)? as i32,
+                    desktop_read_i16_be(&mut cursor)? as i32,
+                ])
+            } else {
+                None
+            };
+
+            regions.push(DesktopPackedAtlasRegion {
+                page_type,
+                page_source_path: page_source_path.clone(),
+                page_width,
+                page_height,
+                name,
+                x,
+                y,
+                width,
+                height,
+                splits,
+                pads,
+            });
+        }
+    }
+
+    Ok(regions)
+}
+
+fn desktop_should_preserve_direct_sprite_source_for_packed_region(source_path: &str) -> bool {
+    let normalized = source_path.trim().replace('\\', "/").to_ascii_lowercase();
+    normalized == "sprites/logo.png"
+        || normalized.contains("sprites/ui/")
+        || normalized.contains("sprites/blocks/environment/")
+}
+
+fn desktop_merge_packed_atlas_regions(atlas: &mut TextureAtlasPlan<bool>) {
+    let Some(atlas_path) = desktop_existing_asset_source_path("sprites/sprites.aatls") else {
+        return;
+    };
+    let Ok(regions) = desktop_parse_packed_atlas_regions(&atlas_path) else {
+        return;
+    };
+
+    for region in regions {
+        {
+            let page = atlas.page_mut(region.page_type);
+            page.source_path = region.page_source_path.clone();
+            page.spec = PageSpec::new(region.page_width.max(1), region.page_height.max(1), 2, true);
+        }
+        let page_type = region.page_type;
+        let region_name = region.name.clone();
+        let packed = TextureAtlasRegion::new(
+            page_type,
+            region_name.clone(),
+            "",
+            region.x,
+            region.y,
+            region.width.max(1),
+            region.height.max(1),
+            true,
+        )
+        .with_meta(region.splits, region.pads);
+        let previous = atlas.insert_or_replace_region(page_type, packed);
+        if let Some(previous) = previous {
+            if desktop_should_preserve_direct_sprite_source_for_packed_region(&previous.source_path)
+            {
+                if let Some(current) = atlas.page_mut(page_type).get_mut(&region_name) {
+                    current.source_path = previous.source_path;
+                }
+            }
+        }
+    }
+}
+
 fn default_desktop_texture_atlas(
     block_renderer_state: &BlockRendererState,
     content_loader: &ContentLoader,
 ) -> TextureAtlasPlan<bool> {
-    TextureAtlasPlan::from_virtual_source_paths(
+    let mut atlas = TextureAtlasPlan::from_virtual_source_paths(
         std::iter::once("sprites/logo.png".to_string())
             .chain(std::iter::once(
                 "sprites/schematic-background.png".to_string(),
@@ -17430,6 +17868,8 @@ fn default_desktop_texture_atlas(
                     .map(str::to_string),
             )
             .chain(upstream_ui_skin_sprite_source_paths().map(str::to_string))
+            .chain(desktop_menu_icon_sprite_virtual_source_paths())
+            .chain(desktop_menu_label_sprite_virtual_source_paths())
             .chain(desktop_menu_environment_sprite_virtual_source_paths())
             .chain(content_icon_candidate_virtual_source_paths(content_loader))
             .into_iter()
@@ -17456,7 +17896,9 @@ fn default_desktop_texture_atlas(
                 content_loader,
             ))
             .chain(desktop_weather_virtual_source_paths(content_loader).into_iter()),
-    )
+    );
+    desktop_merge_packed_atlas_regions(&mut atlas);
+    atlas
 }
 
 fn desktop_default_menu_seed() -> u64 {
@@ -17583,6 +18025,7 @@ impl DesktopLauncher {
         let texture_atlas = default_desktop_texture_atlas(&block_renderer_state, &content_loader);
         let font_asset_sources = default_desktop_font_asset_source_traces();
         let content_icon_glyph_registry = default_desktop_content_icon_glyph_registry();
+        let default_locale = Self::settings_closest_locale_code("default");
         let mut ui_status_bar = Bar::new_clamped("client", 0x66cc_ffff, 0.0);
         ui_status_bar.outline(0x0000_00ff, 1.0);
         Self {
@@ -17696,8 +18139,8 @@ impl DesktopLauncher {
             settings_dialog_state: DesktopSettingsDialogState::default(),
             settings_child_dialog: None,
             settings_planet_chooser_open: false,
-            settings_locale: "en".into(),
-            player_locale: "en".into(),
+            settings_locale: default_locale.clone(),
+            player_locale: default_locale,
             settings_language_scroll_offset: 0,
             last_settings_language_restart_message: None,
             settings_keybind_overrides: BTreeMap::new(),
@@ -23366,10 +23809,21 @@ impl DesktopLauncher {
     fn settings_closest_locale_code(raw: &str) -> String {
         let raw = raw.trim();
         let normalized = if raw.is_empty() || raw == "default" {
-            std::env::var("LANG")
-                .ok()
-                .map(|lang| Self::settings_normalize_locale_code(&lang))
-                .unwrap_or_else(|| "en".into())
+            [
+                "MINDUSTRY_LOCALE",
+                "LANGUAGE",
+                "LC_ALL",
+                "LC_MESSAGES",
+                "LANG",
+            ]
+            .into_iter()
+            .find_map(|key| {
+                std::env::var(key)
+                    .ok()
+                    .map(|value| Self::settings_normalize_locale_code(&value))
+                    .filter(|value| !value.is_empty())
+            })
+            .unwrap_or_else(|| "zh_CN".into())
         } else {
             Self::settings_normalize_locale_code(raw)
         };
@@ -44924,12 +45378,14 @@ fn java_string_hash_code(value: &str) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        run, DesktopCameraShakeFrame, DesktopContentIconGlyphRegistry, DesktopEffectRenderStats,
-        DesktopFontAssetSourceTrace, DesktopFrameKind, DesktopFrameLoopEvent,
-        DesktopFrameLoopExitReason, DesktopFrameLoopState, DesktopFramePacing, DesktopFramePayload,
-        DesktopFrameSkipReason, DesktopGraphicsBlockParticleDrawCallKind,
-        DesktopGraphicsCommandExecutionTrace, DesktopGraphicsExecutionStepTrace,
-        DesktopGraphicsExecutionSummary, DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
+        desktop_menu_icon_sprite_virtual_source_paths,
+        desktop_menu_label_sprite_virtual_source_paths, run, DesktopCameraShakeFrame,
+        DesktopContentIconGlyphRegistry, DesktopEffectRenderStats, DesktopFontAssetSourceTrace,
+        DesktopFrameKind, DesktopFrameLoopEvent, DesktopFrameLoopExitReason, DesktopFrameLoopState,
+        DesktopFramePacing, DesktopFramePayload, DesktopFrameSkipReason,
+        DesktopGraphicsBlockParticleDrawCallKind, DesktopGraphicsCommandExecutionTrace,
+        DesktopGraphicsExecutionStepTrace, DesktopGraphicsExecutionSummary,
+        DesktopGraphicsExecutionTrace, DesktopGraphicsFrame,
         DesktopGraphicsLiveBackendDrawSpriteSink, DesktopGraphicsLiveBackendDrawSpriteTrace,
         DesktopGraphicsLiveBackendRenderCommandSink, DesktopGraphicsLiveBackendRenderCommandSource,
         DesktopGraphicsLiveBackendRenderCommandTrace,
@@ -44980,8 +45436,9 @@ mod tests {
         RenderTarget, RenderTextAlign, RenderTextStyle, RenderTextVerticalAlign,
         RenderTextureSampleFlip, RenderTextureSamplePlan, RenderUvRect, RenderViewport,
         ShaderApplyContext, ShaderApplyOperation, ShaderApplyPlan, ShaderCatalog,
-        ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureAtlasRegion, TextureBinding,
-        TileCoord, UniformBinding, UniformValue,
+        ShaderDispatchFrame, ShaderId, TextureAtlasPlan, TextureAtlasRegion,
+        TextureAtlasSpriteSourceDescriptor, TextureBinding, TileCoord, UniformBinding,
+        UniformValue,
     };
     use mindustry_core::mindustry::io::{
         write_deflated_save_meta_prefix, ContentHeaderEntry, ContentHeaderSnapshot,
@@ -45004,7 +45461,8 @@ mod tests {
         UnitTetherBlockSpawnedCallPacket,
     };
     use mindustry_core::mindustry::ui::{
-        upstream_font_assets, upstream_ui_icon_glyph_string, UpstreamFontRole,
+        upstream_font_assets, upstream_ui_icon_glyph_string, upstream_ui_skin_sprite_source_paths,
+        UpstreamFontRole,
     };
     use mindustry_core::mindustry::{
         entities::{
@@ -45560,6 +46018,23 @@ mod tests {
                 "menu background tile sprite `{symbol}` should resolve from the default atlas"
             );
         }
+        let sand_floor = launcher
+            .texture_atlas
+            .lookup("sand-floor1")
+            .expect("menu floor atlas symbol should resolve");
+        assert_eq!(
+            sand_floor.page_type,
+            PageType::Environment,
+            "menu background terrain sprites should resolve in the upstream environment page"
+        );
+        assert!(
+            sand_floor
+                .region
+                .source_path
+                .replace('\\', "/")
+                .contains("sprites/blocks/environment/sand-floor1.png"),
+            "native menu rendering should keep direct terrain sprite sources until atlas UV/upload parity is visually verified"
+        );
     }
 
     #[test]
@@ -52239,6 +52714,76 @@ mod tests {
     }
 
     #[test]
+    fn desktop_graphics_opengl_backend_batches_split_shared_texture_by_layer() {
+        let rect = RenderRect::new(8.0, 8.0, 16.0, 16.0);
+        let binding = super::DesktopGraphicsOpenGlBackendTextureBinding {
+            command_index: Some(9),
+            symbol: "shared-layer-router".into(),
+            texture_identity:
+                super::DesktopGraphicsOpenGlBackendTextureResourceIdentity::from_atlas_page(
+                    PageType::Main,
+                    "sprites.png",
+                ),
+            page_type: PageType::Main,
+            page_source_path: "sprites.png".into(),
+            page_width: 64,
+            page_height: 64,
+            sampler: DesktopGraphicsTextureSamplerTrace::Nearest,
+            uv: [0.0, 0.0, 0.25, 0.25],
+            region_width: 16,
+            region_height: 16,
+            nine_patch: None,
+        };
+        let low_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            &binding,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            rect,
+            rect.center_origin(),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            0.0,
+            Layer::BLOCK,
+        );
+        let high_quad = super::DesktopGraphicsOpenGlBackendSpriteQuad::from_draw_sprite(
+            &binding,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+            rect,
+            rect.center_origin(),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+            0.0,
+            Layer::EFFECT,
+        );
+
+        let batches = super::opengl_backend_sprite_mesh_batches_from_quads(&[high_quad, low_quad]);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].min_layer, Layer::EFFECT);
+        assert_eq!(batches[1].min_layer, Layer::BLOCK);
+
+        let mut location_cache = super::DesktopGraphicsOpenGlBackendLocationCache::default();
+        let buffer_plans =
+            super::opengl_backend_mesh_buffer_plans_from_batches(&batches, &mut location_cache);
+        let resource_plans =
+            super::opengl_backend_sprite_mesh_resource_plans_from_buffer_plans(&buffer_plans);
+        let draw_call_plans =
+            super::opengl_backend_sprite_draw_call_plans_from_batches(&batches, &resource_plans);
+
+        assert_eq!(
+            draw_call_plans
+                .iter()
+                .map(|plan| plan.batch_index)
+                .collect::<Vec<_>>(),
+            vec![1, 0]
+        );
+    }
+
+    #[test]
     fn desktop_graphics_opengl_backend_location_cache_reuses_shader_locations() {
         let mut cache = super::DesktopGraphicsOpenGlBackendLocationCache::default();
 
@@ -52293,14 +52838,14 @@ mod tests {
             RenderFramePlan::new(42, RenderSize::new(64.0, 64.0), camera, viewport);
         let mut pass = RenderPass::new(RenderPassKind::Block).with_target(RenderTarget::Screen);
         pass.push(RenderCommand::draw_sprite(
-            "router",
+            "atlas-test-router",
             RenderRect::new(8.0, 8.0, 16.0, 16.0),
             [1.0, 1.0, 1.0, 1.0],
             0.0,
             Layer::BLOCK,
         ));
         pass.push(RenderCommand::draw_sprite(
-            "router",
+            "atlas-test-router",
             RenderRect::new(24.0, 8.0, 16.0, 16.0),
             [1.0, 1.0, 1.0, 1.0],
             0.0,
@@ -52315,7 +52860,9 @@ mod tests {
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
             font_glyph_upload_plan: None,
-            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
+                "sprites/atlas-test-router.png",
+            ]),
         };
 
         let plan = DesktopGraphicsOpenGlBackendFramePlan::from_frame(&frame);
@@ -52946,7 +53493,7 @@ mod tests {
         pass.push(RenderCommand::clear([0.0, 0.0, 0.0, 1.0]));
         pass.push(RenderCommand::set_blend(RenderBlendMode::Additive));
         pass.push(RenderCommand::draw_sprite(
-            "router",
+            "atlas-test-router",
             RenderRect::new(8.0, 8.0, 16.0, 16.0),
             [1.0, 1.0, 1.0, 1.0],
             0.0,
@@ -52961,7 +53508,9 @@ mod tests {
             floor_chunk_batches: Vec::new(),
             minimap_texture_frame: None,
             font_glyph_upload_plan: None,
-            texture_atlas: TextureAtlasPlan::from_virtual_source_paths(["sprites/router.png"]),
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
+                "sprites/atlas-test-router.png",
+            ]),
         };
 
         let trace = DesktopGraphicsExecutionTrace::from_frame(&frame);
@@ -53009,11 +53558,11 @@ mod tests {
                 resolved_sprite: Some(sprite),
                 ..
             } => {
-                assert_eq!(sprite.symbol, "router");
+                assert_eq!(sprite.symbol, "atlas-test-router");
                 assert!(!sprite.missing);
                 assert_eq!(
                     sprite.region_source_path.as_deref(),
-                    Some("sprites/router.png")
+                    Some("sprites/atlas-test-router.png")
                 );
             }
             other => panic!("expected resolved draw sprite step, got {other:?}"),
@@ -53091,7 +53640,8 @@ mod tests {
                 symbol,
                 resolved_sprite: Some(sprite),
                 ..
-            } if symbol == "router" && sprite.region_source_path.as_deref() == Some("sprites/router.png")
+            } if symbol == "atlas-test-router"
+                && sprite.region_source_path.as_deref() == Some("sprites/atlas-test-router.png")
         ));
         assert_eq!(
             executor.state.last_action.as_ref(),
@@ -53099,7 +53649,10 @@ mod tests {
         );
         assert_eq!(executor.state.sprite_texture_bindings.len(), 1);
         assert_eq!(executor.state.missing_sprite_texture_bindings, 0);
-        assert_eq!(executor.state.sprite_texture_bindings[0].symbol, "router");
+        assert_eq!(
+            executor.state.sprite_texture_bindings[0].symbol,
+            "atlas-test-router"
+        );
         assert_eq!(
             executor.state.sprite_texture_bindings[0]
                 .texture_identity
@@ -53137,7 +53690,7 @@ mod tests {
         assert_eq!(texture_resource.identity.gl_handle, None);
         assert_eq!(texture_resource.bind_count, 1);
         assert_eq!(executor.state.sprite_quads.len(), 1);
-        assert_eq!(executor.state.sprite_quads[0].symbol, "router");
+        assert_eq!(executor.state.sprite_quads[0].symbol, "atlas-test-router");
         assert_eq!(
             executor.state.sprite_quads[0].target,
             Some(RenderTarget::Buffer("lighting-buffer".into()))
@@ -53391,7 +53944,7 @@ mod tests {
         assert!(matches!(
             &classifying_adapter.state.actions[2],
             super::DesktopGraphicsOpenGlBackendAdapterAction::DrawSprite { symbol, .. }
-                if symbol == "router"
+                if symbol == "atlas-test-router"
         ));
         assert_eq!(executor.state.actions, classifying_adapter.state.actions);
         let mut action_sink = super::DesktopGraphicsRecordingOpenGlBackendActionSink::default();
@@ -54794,7 +55347,7 @@ mod tests {
         ));
         executor.consume_opengl_backend_step(opengl_backend_test_step(
             0,
-            target,
+            target.clone(),
             DesktopGraphicsOpenGlBackendStepKind::Command {
                 kind: "DrawText",
                 command: RenderCommand::draw_text_styled(
@@ -54808,6 +55361,11 @@ mod tests {
                 ),
                 resolved_sprite: None,
             },
+        ));
+        executor.consume_opengl_backend_step(opengl_backend_test_step(
+            0,
+            target,
+            DesktopGraphicsOpenGlBackendStepKind::EndPass,
         ));
 
         assert_eq!(executor.state.draw_text_commands, 1);
@@ -54897,6 +55455,52 @@ mod tests {
         assert!(!question_quads.is_empty());
         assert_eq!(unknown_quads.len(), question_quads.len());
         assert!(unknown_quads
+            .iter()
+            .all(|quad| quad.symbol == "primitive:DrawText"));
+    }
+
+    #[test]
+    fn desktop_graphics_opengl_backend_draw_text_keeps_menu_chinese_glyphs() {
+        let (kai_rows, kai_columns) = super::opengl_backend_placeholder_glyph_pattern('开');
+        assert_eq!(kai_columns, 7);
+        assert_ne!(
+            kai_rows,
+            super::opengl_backend_placeholder_glyph_rows('?').map(u16::from)
+        );
+        assert!(super::opengl_backend_placeholder_text_advance('开', 2.0) > 12.0);
+
+        let chinese_quads = super::opengl_backend_text_placeholder_quads(
+            "开始游戏",
+            RenderPoint::new(0.0, 0.0),
+            [1.0, 1.0, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextAlign::Start,
+            RenderTextStyle::default(),
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+        let unknown_quads = super::opengl_backend_text_placeholder_quads(
+            "????",
+            RenderPoint::new(0.0, 0.0),
+            [1.0, 1.0, 1.0, 1.0],
+            14.0,
+            0.0,
+            RenderTextAlign::Start,
+            RenderTextStyle::default(),
+            Layer::OVERLAY_UI,
+            Some(RenderTarget::Screen),
+            super::opengl_backend_default_sprite_shader_program(),
+            super::DesktopGraphicsOpenGlBackendBlendState::default(),
+            None,
+        );
+
+        assert!(!chinese_quads.is_empty());
+        assert_ne!(chinese_quads.len(), unknown_quads.len());
+        assert!(chinese_quads
             .iter()
             .all(|quad| quad.symbol == "primitive:DrawText"));
     }
@@ -59898,6 +60502,91 @@ version: "2.0.0"
         assert_eq!(renderer.last_driver_state.framebuffer_attachment_plans, 1);
     }
 
+    #[cfg(feature = "opengl-backend")]
+    #[test]
+    fn desktop_opengl_backend_renderer_reuses_resolved_texture_handles_between_frames() {
+        fn texture_upload_bind_handles(
+            commands: &[super::DesktopGraphicsOpenGlBackendDriverCommand],
+        ) -> Vec<u32> {
+            commands
+                .iter()
+                .filter_map(|command| match command {
+                    super::DesktopGraphicsOpenGlBackendDriverCommand::TextureUpload(
+                        super::DesktopGraphicsOpenGlBackendTextureUploadCommand::BindTexture {
+                            texture_handle,
+                            ..
+                        },
+                    ) => Some(*texture_handle),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn draw_bind_texture_handles(
+            commands: &[super::DesktopGraphicsOpenGlBackendDriverCommand],
+        ) -> Vec<u32> {
+            commands
+                .iter()
+                .filter_map(|command| match command {
+                    super::DesktopGraphicsOpenGlBackendDriverCommand::Draw(
+                        super::DesktopGraphicsOpenGlBackendDrawCommand::BindTexture {
+                            texture_handle,
+                            ..
+                        },
+                    ) => Some(*texture_handle),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let viewport = RenderViewport::new(0.0, 0.0, 64.0, 64.0);
+        let camera = RenderCamera::new(RenderPoint::new(32.0, 32.0), viewport);
+        let mut render_frame =
+            RenderFramePlan::new(91, RenderSize::new(64.0, 64.0), camera, viewport);
+        let mut pass = RenderPass::new(RenderPassKind::Block).with_target(RenderTarget::Screen);
+        pass.push(RenderCommand::draw_sprite(
+            "atlas-test-router",
+            RenderRect::new(8.0, 8.0, 16.0, 16.0),
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            Layer::BLOCK,
+        ));
+        render_frame.push_pass(pass);
+
+        let mut bridge = RenderBridge::new();
+        bridge.set_render_frame(render_frame);
+        let frame = DesktopGraphicsFrame {
+            bundle: bridge.finish(),
+            floor_chunk_batches: Vec::new(),
+            minimap_texture_frame: None,
+            font_glyph_upload_plan: None,
+            texture_atlas: TextureAtlasPlan::from_virtual_source_paths([
+                "sprites/atlas-test-router.png",
+            ]),
+        };
+
+        let mut renderer = super::DesktopOpenGlBackendGraphicsRenderer::new(
+            super::DesktopGraphicsNullOpenGlBackendRuntime::default(),
+        );
+        renderer.render_graphics_frame(&frame);
+        let first_command_count = renderer.runtime.driver.commands.len();
+        let first_upload_handles =
+            texture_upload_bind_handles(&renderer.runtime.driver.commands[..first_command_count]);
+        let first_draw_handles =
+            draw_bind_texture_handles(&renderer.runtime.driver.commands[..first_command_count]);
+        assert_eq!(first_upload_handles, first_draw_handles);
+        assert_eq!(first_draw_handles, vec![1]);
+
+        renderer.render_graphics_frame(&frame);
+        let second_commands = &renderer.runtime.driver.commands[first_command_count..];
+        let second_upload_handles = texture_upload_bind_handles(second_commands);
+        let second_draw_handles = draw_bind_texture_handles(second_commands);
+
+        assert!(second_upload_handles.is_empty());
+        assert_eq!(renderer.last_driver_state.texture_upload_commands, 0);
+        assert_eq!(second_draw_handles, first_draw_handles);
+    }
+
     #[test]
     fn desktop_default_render_viewport_for_surface_falls_back_without_world() {
         let launcher = DesktopLauncher::new(Vec::new());
@@ -60267,20 +60956,41 @@ version: "2.0.0"
     }
 
     #[test]
-    fn desktop_launcher_menu_frame_inserts_planet_like_background_layers() {
+    fn desktop_launcher_menu_frame_draws_java_world_background_before_buttons() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.menu_renderer_state.flyer_count = 1;
+        launcher.menu_renderer_state.flyer_type = "mono";
         let surface = DesktopSurfaceSize::new(1280, 720);
         let viewport = launcher.default_render_viewport_for_surface(surface);
         let frame = launcher.menu_graphics_frame_for_surface(0, viewport);
-        let commands = frame
+        let render_frame = frame
             .bundle
             .render_frame
             .as_ref()
-            .expect("menu frame should contain render frame")
+            .expect("menu frame should contain render frame");
+        let menu_pass = render_frame
             .passes
             .iter()
-            .flat_map(|pass| pass.commands.iter())
-            .collect::<Vec<_>>();
+            .find(|pass| pass.kind == RenderPassKind::Custom("menu".to_string()))
+            .expect("menu frame should contain the Java menu pass");
+        let commands = menu_pass.commands.iter().collect::<Vec<_>>();
+
+        assert!(
+            DesktopLauncher::menu_pass_has_java_world_background(menu_pass),
+            "menu pass should include Java MenuRenderer floor/shadow/wall/flyer/darkness layers"
+        );
+        assert!(
+            !DesktopLauncher::menu_pass_has_synthetic_background(menu_pass),
+            "the old planet/space fallback must not replace the original map-like menu background"
+        );
+        assert!(commands.iter().all(|command| {
+            !matches!(
+                command,
+                RenderCommand::Custom { name, .. } if name == "menu-background-approximation"
+            )
+        }));
+
+        let commands = commands.into_iter().collect::<Vec<_>>();
 
         let clear_index = commands
             .iter()
@@ -60291,31 +61001,31 @@ version: "2.0.0"
             .position(|command| {
                 matches!(
                     command,
-                    RenderCommand::Custom { name, .. } if name == "menu-background-approximation"
+                    RenderCommand::FillRect { layer, .. } if *layer < 0.0
                 )
             })
-            .expect("menu pass should include a Java-like background marker");
+            .expect("menu pass should include Java MenuRenderer floor/background spans");
         let first_button_index = commands
             .iter()
             .position(|command| {
                 matches!(
                     command,
-                    RenderCommand::DrawText { text, .. } if text.eq_ignore_ascii_case("play")
+                    RenderCommand::DrawText { text, .. }
+                        if text.eq_ignore_ascii_case("play") || text == "开始游戏"
                 )
             })
             .expect("menu pass should still render menu buttons");
 
         assert!(clear_index < background_index);
         assert!(background_index < first_button_index);
-        assert!(commands
-            .iter()
-            .any(|command| { matches!(command, RenderCommand::DrawCircle { filled: true, .. }) }));
-        assert!(commands
-            .iter()
-            .any(|command| matches!(command, RenderCommand::DrawPolygon { .. })));
-        assert!(commands
-            .iter()
-            .any(|command| matches!(command, RenderCommand::DrawLine { .. })));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            RenderCommand::DrawSprite { symbol, .. }
+                if symbol.starts_with("sand")
+                    || symbol.starts_with("shale")
+                    || symbol.starts_with("stone")
+                    || symbol.starts_with("ore-")
+        )));
     }
 
     #[test]
@@ -65137,6 +65847,8 @@ version: "2.0.0"
     #[test]
     fn desktop_launcher_menu_renders_logo_and_version_overlay() {
         let mut launcher = DesktopLauncher::new(Vec::new());
+        launcher.settings_locale = "en".into();
+        launcher.player_locale = "en".into();
         assert!(launcher.texture_atlas.lookup("logo").is_ok());
         assert!(launcher.texture_atlas.lookup("serpulo").is_ok());
         assert!(launcher.texture_atlas.lookup("erekir").is_ok());
@@ -65151,6 +65863,45 @@ version: "2.0.0"
         assert!(launcher.texture_atlas.lookup("sand-floor1").is_ok());
         assert!(launcher.texture_atlas.lookup("shale-wall1").is_ok());
         assert!(launcher.texture_atlas.lookup("ore-copper1").is_ok());
+
+        for source_path in upstream_ui_skin_sprite_source_paths() {
+            let atlas_name =
+                TextureAtlasSpriteSourceDescriptor::from_source_path(source_path).atlas_name;
+            assert!(
+                launcher.texture_atlas.lookup(&atlas_name).is_ok(),
+                "default desktop atlas should include upstream UI skin sprite: {source_path}"
+            );
+        }
+
+        for source_path in desktop_menu_label_sprite_virtual_source_paths() {
+            let atlas_name =
+                TextureAtlasSpriteSourceDescriptor::from_virtual_source_path(source_path.as_str())
+                    .atlas_name;
+            let region = launcher
+                .texture_atlas
+                .lookup(&atlas_name)
+                .unwrap_or_else(|_| {
+                    panic!(
+                    "default desktop atlas should include Chinese menu label sprite: {source_path}"
+                )
+                });
+            assert_eq!(region.region.source_path, source_path.as_str());
+        }
+
+        for source_path in desktop_menu_icon_sprite_virtual_source_paths() {
+            let atlas_name =
+                TextureAtlasSpriteSourceDescriptor::from_virtual_source_path(source_path.as_str())
+                    .atlas_name;
+            let region = launcher
+                .texture_atlas
+                .lookup(&atlas_name)
+                .unwrap_or_else(|_| {
+                    panic!(
+                    "default desktop atlas should include upstream menu icon sprite: {source_path}"
+                )
+                });
+            assert_eq!(region.region.source_path, source_path.as_str());
+        }
 
         let viewport = RenderViewport::new(0.0, 0.0, 1280.0, 720.0);
         assert!(launcher
