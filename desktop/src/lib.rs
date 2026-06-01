@@ -31604,7 +31604,6 @@ impl DesktopLauncher {
                     base.name != "air" && base.build_visibility.statically_visible()
                 })
                 .map(|block| block.base().name.clone())
-                .take(10)
                 .collect(),
             DesktopBannedContentKind::Units => self
                 .content_loader
@@ -31612,7 +31611,6 @@ impl DesktopLauncher {
                 .iter()
                 .filter(|unit| !unit.is_hidden())
                 .map(|unit| unit.name().to_string())
-                .take(10)
                 .collect(),
         }
     }
@@ -33796,6 +33794,9 @@ impl DesktopLauncher {
                                     deselected_row += 1;
                                     row
                                 };
+                                if row_index >= 7 {
+                                    continue;
+                                }
                                 if Self::map_play_banned_content_item_rect(
                                     banned_dialog,
                                     selected,
@@ -69509,6 +69510,10 @@ version: "2.0.0"
         assert!(copied_rules.contains("\"hideBannedBlocks\":true"));
         assert!(copied_rules.contains("\"allowEditRules\":true"));
         assert!(copied_rules.contains("\"waveSpacing\":1200"));
+        assert!(copied_rules.contains("\"bannedBlocks\":["));
+        assert!(copied_rules.contains(&format!("\"{}\"", banned_candidate)));
+        assert!(copied_rules.contains("\"bannedUnits\":["));
+        assert!(copied_rules.contains(&format!("\"{}\"", banned_unit_candidate)));
         assert!(copied_rules.contains("\"weather\":[{"));
         assert!(copied_rules.contains(&format!("\"weather\":\"{}\"", weather_candidate)));
         assert!(copied_rules.contains("\"always\":true"));
@@ -69583,6 +69588,22 @@ version: "2.0.0"
                 .unwrap_or(false),
             "load should restore CustomRulesDialog allowEditRules from JSON"
         );
+        assert!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.banned_blocks.contains(&banned_candidate))
+                .unwrap_or(false),
+            "load should restore BannedContentDialog bannedBlocks from JSON"
+        );
+        assert!(
+            launcher
+                .map_play_rules
+                .as_ref()
+                .map(|rules| rules.banned_units.contains(&banned_unit_candidate))
+                .unwrap_or(false),
+            "load should restore BannedContentDialog bannedUnits from JSON"
+        );
         assert_eq!(
             launcher.map_play_rules.as_ref().map(|rules| {
                 let team = rules.teams.get_or_default(1);
@@ -69626,6 +69647,40 @@ version: "2.0.0"
         );
         launcher.dispatch_menu_route_shell_action(close_edit);
         assert!(!launcher.map_play_rules_edit_dialog_open);
+    }
+
+    #[test]
+    fn desktop_launcher_map_play_banned_content_candidates_are_not_truncated_like_java_dialog() {
+        let launcher = DesktopLauncher::new(Vec::new());
+        let block_candidates = launcher
+            .map_play_banned_content_candidate_names(super::DesktopBannedContentKind::Blocks);
+        let expected_blocks = launcher
+            .content_loader
+            .blocks()
+            .filter(|block| {
+                let base = block.base();
+                base.name != "air" && base.build_visibility.statically_visible()
+            })
+            .count();
+        assert_eq!(block_candidates.len(), expected_blocks);
+        assert!(
+            block_candidates.len() > 10,
+            "BannedContentDialog should use the full visible block candidate set, not a 10-item preview"
+        );
+
+        let unit_candidates = launcher
+            .map_play_banned_content_candidate_names(super::DesktopBannedContentKind::Units);
+        let expected_units = launcher
+            .content_loader
+            .units()
+            .iter()
+            .filter(|unit| !unit.is_hidden())
+            .count();
+        assert_eq!(unit_candidates.len(), expected_units);
+        assert!(
+            unit_candidates.len() > 10,
+            "BannedContentDialog should use the full visible unit candidate set, not a 10-item preview"
+        );
     }
 
     #[test]

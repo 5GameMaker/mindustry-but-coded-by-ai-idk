@@ -17,6 +17,32 @@ CONTEXT_BOOTSTRAP_GIT_BRANCH=main
 
 > **压缩上下文后先读这一行：当前唯一 Rust 工作路径是 `D:\MDT\rust-mindustry`（等价命令路径 `D:/MDT/rust-mindustry`）。不要重新搜索、不要改用 `D:\MDT\mindustry-rust`，后者是废案。**
 
+## 739. BannedContentDialog 候选集取消 10 项截断
+
+- 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
+- 本轮总体进度更新：约 **87.5%**，仍未达到完整可玩；继续优先前端/UI 与所有子菜单接近原版。
+- Java 对照依据：
+  - `CustomRulesDialog` 里的 `bannedBlocks/bannedUnits` 都使用 Java `BannedContentDialog<T>`；
+  - 原版候选来自完整 content 列表，units 过滤条件为 `!u.isHidden()`，不是只展示前 10 项；
+  - 复制/加载自定义规则时 `bannedBlocks/bannedUnits` 应完整进入 Rules JSON。
+- 本轮主改动：
+  - `desktop/src/lib.rs`
+    - `map_play_banned_content_candidate_names(...)` 去掉 blocks/units 的 `take(10)` 截断；
+    - BannedContent hit-test 与渲染保持一致，跳过当前简化 UI 中 7 行以外的不可见项，避免点击不可见候选；
+    - Custom Rules 复制/加载回归显式断言 `bannedBlocks/bannedUnits` 写入并恢复；
+    - 新增候选完整性测试，确认 block/unit 候选数量等于 content loader 的完整可见集合且大于 10。
+- 已验证：
+  - `cargo fmt --all`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_banned_content_candidates_are_not_truncated_like_java_dialog --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop desktop_launcher_map_play_dialog_opens_help_customize_and_highscore --lib -- --test-threads=1 --nocapture`
+  - `cargo test -p mindustry-desktop map_play --lib -- --test-threads=1 --nocapture`
+  - `cargo check -p mindustry-desktop --features opengl-native-runtime`
+  - `git diff --check`
+- 仍未完成：
+  - BannedContentDialog 仍未完全复刻 Java 的搜索框、blocks 分类过滤、`@addall` 批量操作与滚动列表；
+  - 当前 UI 仍只显示前 7 行，后续应接入 ScrollPane 式列表而不是仅扩大候选数据源；
+  - 前端整体仍未达到完整可玩，不能宣告目标完成。
+
 ## 738. Settings slider 数值显示对齐 Java formatter
 
 - 固定路径：Rust 仓库 `D:/MDT/rust-mindustry`；Java 参考 `D:/MDT/mindustry-upstream-v157.4`（当前参考基线 `v158.1 / 05b2ecd`）；废案 `D:/MDT/mindustry-rust` 禁止使用；遇到乱码优先 UTF-8。
